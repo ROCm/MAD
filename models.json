@@ -1,0 +1,32 @@
+[
+  {
+    "name": "pyt_huggingface_gpt2",
+    "url": "https://github.com/huggingface/transformers",
+    "dockerfile": "docker/pyt_huggingface",
+    "scripts": "scripts/huggingface_gpt2/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "fp16",
+    "tags": [
+      "pyt",
+      "fp16",
+      "gpt2"
+    ],
+    "args": ""
+  },
+  {
+    "name": "pyt_huggingface_bert",
+    "url": "https://github.com/huggingface/transformers",
+    "dockerfile": "docker/pyt_huggingface",
+    "scripts": "scripts/huggingface_bert/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "bert"
+    ],
+    "args": ""
+  }
+]
