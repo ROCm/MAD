@@ -28,5 +28,133 @@
       "bert"
     ],
     "args": ""
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo meta-llama/Meta-Llama-3.1-8B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo meta-llama/Meta-Llama-3.1-70B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-405b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo meta-llama/Meta-Llama-3.1-405B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_llama-2-7b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo meta-llama/Llama-2-7b-chat-hf --test_option latency,throughput --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_mistral-7b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo mistralai/Mistral-7B-Instruct-v0.3 --test_option latency,throughput --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_qwen2-7b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo Qwen/Qwen2-7B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_jais-13b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo core42/jais-13b-chat --test_option latency,throughput --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "pyt_vllm_jais-30b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "args":
+     "--model_repo core42/jais-30b-chat-v3 --test_option latency,throughput --num_gpu 1 --datatype float16"
   }
 ]

@@ -105,7 +105,7 @@ from utils import get_dockerfile_gpu_suffix, get_dockerfile_linux_suffix, load_m
 from utils import get_env_docker_args, get_mount_docker_args, get_cpu_docker_args, get_gpu_docker_args
 from utils import get_system_gpus, get_system_gpu_arch, get_gpu_vendor, get_host_name, get_host_os
 from utils import get_base_docker, get_base_docker_sha
-from utils import get_perf_metric
+from utils import get_perf_metric, update_dict
 from utils import Console, Docker, Timeout, RunDetails
 from version import __version__
 from logger import get_logger
@@ -250,7 +250,7 @@ def main() -> bool:
         logger.info(f"Selected model: {model}")
 
         # Parse the model dictionary
-        model_url = model["url"]
+        model_url = model["url"] if "url" in model else None
         model_dockerfile_prefix = model["dockerfile"]
         model_dockerfile = f"./{model_dockerfile_prefix}{dockerfile_linux_suffix}{dockerfile_gpu_suffix}.Dockerfile"
         model_scripts = model["scripts"]
@@ -331,6 +331,12 @@ def main() -> bool:
             "MAD_SYSTEM_NGPUS": get_system_gpus(),
             "MAD_SYSTEM_GPU_ARCHITECTURE": get_system_gpu_arch()
         }
+        mad_secrets = {}
+        for key in os.environ:
+            if "MAD_SECRETS" in key:
+                mad_secrets[key] = os.environ[key]
+        if mad_secrets:
+            update_dict(run_envs, mad_secrets)
         docker_opts += get_env_docker_args(run_envs)
 
         docker_opts += get_gpu_docker_args()
@@ -368,16 +374,22 @@ def main() -> bool:
                 raise ValueError("Unknown GPU type")
 
             # Clean up the previous model
-            model_dir = model_url.split("/")[-1]
+            model_dir = 'run_directory'
+            if model_url:
+                model_dir = model_url.split("/")[-1]
             docker.sh(f"rm -rf {model_dir}")
 
             # Clone the model repository
-            docker.sh(f"git clone {model_url}")
+            if model_url:
+                docker.sh(f"git clone {model_url}")
+            else:
+                docker.sh(f"mkdir {model_dir}")
 
             # Update the submodules
             docker.sh(f"git config --global --add safe.directory /myworkspace/{model_dir}")
             docker.sh(f"git config --global --add safe.directory /myworkspace")
-            docker.sh(f"cd {model_dir} && git submodule update --init --recursive")
+            if model_url:
+                docker.sh(f"cd {model_dir} && git submodule update --init --recursive")
 
             # Check the model directory
             docker.sh(f"ls -la /myworkspace/{model_dir}")

@@ -65,6 +65,7 @@ import typing
 import subprocess
 import signal
 import re
+import collections.abc
 
 from logger import get_logger
 logger = get_logger("MAD")
@@ -736,9 +737,9 @@ def get_gpu_docker_args() -> str:
     gpu_args = ""
     # Use all GPUs for docker run command.
     if gpu_vendor == "NVIDIA":
-        gpu_args = f"--gpus all"
+        gpu_args = f"--gpus all --shm-size 16g"
     elif gpu_vendor == "AMD":
-        gpu_args = f"--device=/dev/kfd --device=/dev/dri"
+        gpu_args = f"--device=/dev/kfd --device=/dev/dri --shm-size 16g"
     else:
         gpu_args = ""
 
@@ -946,3 +947,13 @@ def get_perf_metric(log_file: str) -> typing.Tuple[str, str]:
         metric = re.search(metric_regex, log_content).group(1)
     
     return perf, metric
+
+def update_dict(d, u):
+    """ Updates existing dictionary
+    """
+    for k, v in u.items():
+        if isinstance(v, collections.abc.Mapping):
+            d[k] = update_dict(d.get(k, {}), v)
+        else:
+            d[k] = v
+    return d
