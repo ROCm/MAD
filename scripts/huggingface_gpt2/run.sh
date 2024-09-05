@@ -61,6 +61,9 @@ do
 done
 
 MAD_RUNTIME_NGPUS=${MAD_SYSTEM_NGPUS}
+# Add model-caching to resolve the hf multi processing error
+huggingface-cli download gpt2
+
 torchrun --nproc_per_node="$MAD_RUNTIME_NGPUS" $HF_PATH/examples/pytorch/language-modeling/run_clm.py --output_dir output \
 	--model_name_or_path gpt2 \
 	--dataset_name wikitext \

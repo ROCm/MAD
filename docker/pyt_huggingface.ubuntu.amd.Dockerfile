@@ -36,7 +36,7 @@ WORKDIR $WORKSPACE_DIR
 RUN pip3 install -U numpy
 RUN pip3 install -U scipy
 # Install huggingface transformers
-RUN cd /workspace && git clone https://github.com/huggingface/transformers transformers &&\
+RUN cd /workspace && git clone https://github.com/ROCm/transformers transformers &&\
     cd transformers &&\
     git show --oneline -s && \
     pip install -e .
