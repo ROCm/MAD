@@ -31,7 +31,7 @@ and logs the performance metrics.
 
 The script takes the following arguments:
     --model_name: The model name to run the application.
-    --timeout: Timeout for the application running model in seconds, default timeout of 7200 (2 hours).
+    --timeout: Timeout for the application running model in seconds, default timeout of 14400 (4 hours).
     --live_output: Prints output in real-time directly on STDOUT.
     --clean_docker_cache: Rebuild docker image without using cache.
     --keep_alive: Keep the container alive after the application finishes running.
@@ -116,7 +116,7 @@ def get_args() -> argparse.Namespace:
 
     Input arguments:
         --model_name: The model name to run the application.
-        --timeout: Timeout for the application running model in seconds, default timeout of 7200 (2 hours).
+        --timeout: Timeout for the application running model in seconds, default timeout of 14400 (4 hours).
         --live_output: Prints output in real-time directly on STDOUT.
         --clean_docker_cache: Rebuild docker image without using cache.
         --keep_alive: Keep the container alive after the application finishes running.
@@ -134,8 +134,8 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=int,
-        help="Timeout for the application running model in seconds, default timeout of 7200 (2 hours).",
-        default=7200,
+        help="Timeout for the application running model in seconds, default timeout of 14400 (4 hours).",
+        default=14400,
     )
     parser.add_argument(
         "--live_output",
