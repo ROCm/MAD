@@ -41,6 +41,9 @@ RUN cd /workspace && git clone https://github.com/ROCm/transformers transformers
     git show --oneline -s && \
     pip install -e .
 
+# Intentionally skip torchaudio, else it force upgrades torch as well
+RUN sed -i 's$torchaudio$$g' /workspace/transformers/examples/pytorch/_tests_requirements.txt
+
 # Install dependencies
 RUN cd /workspace/transformers/examples/pytorch && pip3 install -r _tests_requirements.txt
 RUN pip3 install --no-cache-dir GPUtil azureml azureml-core tokenizers ninja cerberus sympy sacremoses sacrebleu==1.5.1 sentencepiece scipy scikit-learn
