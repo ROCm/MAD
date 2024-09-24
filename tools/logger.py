@@ -55,6 +55,10 @@ def get_logger(
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
+
+    if logger.hasHandlers():
+        logger.handlers.clear()
+        
     # Create a formatter
     # formatter = logging.Formatter(
     #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

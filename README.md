@@ -20,22 +20,22 @@ pip3 install -r requirements.txt
 With tools/run_models.py script, all models in models.json can be run locally on a docker host, to collect performance results.
 
 ```
-usage: tools/run_models.py [-h] [--model_name MODEL_NAME] [--timeout TIMEOUT] [--live_output] [--clean_docker_cache] [--keep_alive] [--keep_model_dir] [-o OUTPUT] [--log_level LOG_LEVEL]
+usage: tools/run_models.py [-h] [--tags TAGS] [--timeout TIMEOUT] [--live-output] [--clean-docker-cache] [--keep-alive] [--keep-model-dir] [-o OUTPUT] [--log-level LOG_LEVEL]
 
 Run the application of MAD, Model Automation and Dashboarding v1.0.0.
 
 options:
   -h, --help            show this help message and exit
-  --model_name MODEL_NAME
-                        Model name to run the application.
+  --tags TAGS
+                        Tags to run model (can be multiple).
   --timeout TIMEOUT     Timeout for the application running model in seconds, default timeout of 7200 (2 hours).
-  --live_output         Prints output in real-time directly on STDOUT.
-  --clean_docker_cache  Rebuild docker image without using cache.
-  --keep_alive          Keep the container alive after the application finishes running.
-  --keep_model_dir      Keep the model directory after the application finishes running.
+  --live-output         Prints output in real-time directly on STDOUT.
+  --clean-docker-cache  Rebuild docker image without using cache.
+  --keep-alive          Keep the container alive after the application finishes running.
+  --keep-model-dir      Keep the model directory after the application finishes running.
   -o OUTPUT, --output OUTPUT
                         Output file for the result.
-  --log_level LOG_LEVEL
+  --log-level LOG_LEVEL
                         Log level for the logger.
 ```
 
