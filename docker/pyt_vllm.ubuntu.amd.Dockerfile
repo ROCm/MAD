@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.9_vllm_7c5fd50
+ARG BASE_DOCKER=rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
 FROM $BASE_DOCKER
 
 USER root

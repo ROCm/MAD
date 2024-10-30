@@ -41,8 +41,9 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo meta-llama/Meta-Llama-3.1-8B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo meta-llama/Meta-Llama-3.1-8B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_llama-3.1-70b",
@@ -57,8 +58,9 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo meta-llama/Meta-Llama-3.1-70B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16"
+     "--model_repo meta-llama/Meta-Llama-3.1-70B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_llama-3.1-405b",
@@ -73,8 +75,9 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo meta-llama/Meta-Llama-3.1-405B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16"
+     "--model_repo meta-llama/Meta-Llama-3.1-405B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_llama-2-7b",
@@ -89,8 +92,60 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo meta-llama/Llama-2-7b-chat-hf --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo meta-llama/Llama-2-7b-chat-hf --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo meta-llama/Llama-2-70b-chat-hf --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_mixtral-8x7b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo mistralai/Mixtral-8x7B-Instruct-v0.1 --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_mixtral-8x22b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo mistralai/Mixtral-8x22B-Instruct-v0.1 --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_mistral-7b",
@@ -105,8 +160,9 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo mistralai/Mistral-7B-Instruct-v0.3 --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo mistralai/Mistral-7B-Instruct-v0.3 --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_qwen2-7b",
@@ -121,8 +177,26 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo Qwen/Qwen2-7B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo Qwen/Qwen2-7B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_qwen2-72b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo Qwen/Qwen2-72B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_jais-13b",
@@ -137,8 +211,9 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo core42/jais-13b-chat --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo core42/jais-13b-chat --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
   },
   {
     "name": "pyt_vllm_jais-30b",
@@ -153,7 +228,93 @@
       "pyt",
       "vllm"
     ],
+    "timeout": 28800,
     "args":
-     "--model_repo core42/jais-30b-chat-v3 --test_option latency,throughput --num_gpu 1 --datatype float16"
+     "--model_repo core42/jais-30b-chat-v3 --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-8b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo amd/Meta-Llama-3.1-8B-Instruct-FP8-KV --test_option latency,throughput --num_gpu 1 --datatype float8 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-70b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo amd/Meta-Llama-3.1-70B-Instruct-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-405b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo amd/Meta-Llama-3.1-405B-Instruct-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_mixtral-8x7b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
+  },
+  {
+    "name": "pyt_vllm_mixtral-8x22b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
   }
 ]

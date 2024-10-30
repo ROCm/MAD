@@ -13,9 +13,9 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
--   ✅ ROCm™ 6.2
--   ✅ vLLM 0.4.3
--   ✅ PyTorch 2.4 
+-   ✅ ROCm™ 6.2.1
+-   ✅ vLLM 0.6.4
+-   ✅ PyTorch 2.5.0
 -   ✅ Tuning files (.csv format)
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
@@ -37,7 +37,7 @@ Users have two choices to reproduce the benchmark results.
 
 To optimize performance, disable automatic NUMA balancing. Otherwise, the GPU
 might hang until the periodic balancing is finalized. For further
-details, refer to the [AMD Instinct MI300X system optimization](https://rocmdocs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing) guide.
+details, refer to the [AMD Instinct MI300X system optimization](https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing) guide.
 
 ```sh
 # disable automatic NUMA balancing
@@ -52,7 +52,7 @@ cat /proc/sys/kernel/numa_balancing
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.9_vllm_7c5fd50
+docker pull rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
 ```
 
 ### MAD-integrated benchmarking
@@ -78,21 +78,30 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-
 ~/MAD/reports_float16/
 ```
 
-Although the following eight models are pre-configured to collect latency and throughput performance data, users can also change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
+Although the following models are pre-configured to collect latency and throughput performance data,
+users can also change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
 
 #### Available models
 
-| model_name              |
-| ----------------------- |
-| pyt_vllm_llama-3.1-8b   |
-| pyt_vllm_llama-3.1-70b  |
-| pyt_vllm_llama-3.1-405b |
-| pyt_vllm_llama-2-7b     |
-| pyt_vllm_mistral-7b     |
-| pyt_vllm_qwen2-7b       |
-| pyt_vllm_jais-13b       |
-| pyt_vllm_jais-30b       |
-
+| model_name                  |
+| --------------------------- |
+| pyt_vllm_llama-3.1-8b       |
+| pyt_vllm_llama-3.1-70b      |
+| pyt_vllm_llama-3.1-405b     |
+| pyt_vllm_llama-2-7b         |
+| pyt_vllm_llama-2-70b        |
+| pyt_vllm_mixtral-8x7b       |
+| pyt_vllm_mixtral-8x22b      |
+| pyt_vllm_mistral-7b         |
+| pyt_vllm_qwen2-7b           |
+| pyt_vllm_qwen2-72b          |
+| pyt_vllm_jais-13b           |
+| pyt_vllm_jais-30b           |
+| pyt_vllm_llama-3.1-8b_fp8   |
+| pyt_vllm_llama-3.1-70b_fp8  |
+| pyt_vllm_llama-3.1-405b_fp8 |
+| pyt_vllm_mixtral-8x7b_fp8   |
+| pyt_vllm_mixtral-8x22b_fp8  |
 
 ### Standalone benchmarking
 -----------------------------
@@ -100,8 +109,8 @@ Although the following eight models are pre-configured to collect latency and th
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.9_vllm_7c5fd50
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video -p 8080:8080 --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name unified_docker_vllm rocm/vllm:rocm6.2_mi300_ubuntu22.04_py3.9_vllm_7c5fd50
+docker pull rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 128G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name vllm_v0.6.4 rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -111,25 +120,23 @@ git clone https://github.com/ROCm/MAD
 cd MAD/scripts/vllm
 ```
 
-#### Multiprocessing distributed executor
-
-To optimize vLLM performance, add the multiprocessing API server argument `--distributed-executor-backend mp`.
-
 #### Command
 
 ```sh
 ./vllm_benchmark_report.sh -s $test_option -m $model_repo -g $num_gpu -d $datatype
 ```
 
--   Note: The input sequence length, output sequence length, and tensor parallel (TP) are already configured. You don't need to specify them with this script.
+>[!NOTE]
+>The input sequence length, output sequence length, and tensor parallel (TP) are already configured. You don't need to specify them with this script.
 
--   Note: If you encounter this error, pass your access-authorized Hugging Face token to the gated models.
-```sh
-OSError: You are trying to access a gated repo.
-
-# pass your HF_TOKEN
-export HF_TOKEN=$your_personal_hf_token
-```
+>[!NOTE]
+>If you encounter this error, pass your access-authorized Hugging Face token to the gated models.
+>```sh
+>OSError: You are trying to access a gated repo.
+>
+># pass your HF_TOKEN
+>export HF_TOKEN=$your_personal_hf_token
+>```
 
 #### Variables
 
@@ -139,51 +146,67 @@ export HF_TOKEN=$your_personal_hf_token
 |              | throughput                              | Measure token generation throughput              |
 |              | all                                     | Measure both throughput and latency              |
 | $model_repo  | meta-llama/Meta-Llama-3.1-8B-Instruct   | Llama 3.1 8B                                     |
-|              | meta-llama/Meta-Llama-3.1-70B-Instruct  | Llama 3.1 70B                                    |
+| (float16)    | meta-llama/Meta-Llama-3.1-70B-Instruct  | Llama 3.1 70B                                    |
 |              | meta-llama/Meta-Llama-3.1-405B-Instruct | Llama 3.1 405B                                   |
 |              | meta-llama/Llama-2-7b-chat-hf           | Llama 2 7B                                       |
+|              | meta-llama/Llama-2-70b-chat-hf          | Llama 2 70B                                      |
+|              | mistralai/Mixtral-8x7B-Instruct-v0.1    | Mixtral 8x7B                                     |
+|              | mistralai/Mixtral-8x22B-Instruct-v0.1   | Mixtral 8x22B                                    |
 |              | mistralai/Mistral-7B-Instruct-v0.3      | Mistral 7B                                       |
 |              | Qwen/Qwen2-7B-Instruct                  | Qwen2 7B                                         |
+|              | Qwen/Qwen2-72B-Instruct                 | Qwen2 72B                                        |
 |              | core42/jais-13b-chat                    | JAIS 13B                                         |
 |              | core42/jais-30b-chat-v3                 | JAIS 30B                                         |
-| $num_gpu     | 1 or 8                                  | Number of GPUs.                                  |
-| $datatype    | float16                                 |                                                  |
-                                                              
+| $model_repo  | amd/Meta-Llama-3.1-8B-Instruct-FP8-KV   | Llama 3.1 8B                                     |
+| (float8)     | amd/Meta-Llama-3.1-70B-Instruct-FP8-KV  | Llama 3.1 70B                                    |
+|              | amd/Meta-Llama-3.1-405B-Instruct-FP8-KV | Llama 3.1 405B                                   |
+|              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | Mixtral 8x7B                                     |
+|              | amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV  | Mixtral 8x22B                                    |
+| $num_gpu     | 1 or 8                                  | Number of GPUs                                   |
+| $datatype    | float16, float8                         | Data type                                        |
 
 #### Run the benchmark tests on the MI300X accelerator 🏃
 
 Here are some examples and the test results:
 
--   Benchmark example - latency
- 
-Use this command to benchmark the latency of the Llama 3.1 8B model on one GPU with the float16 data type.
+- Benchmark example - latency
 
-```sh
-./vllm_benchmark_report.sh -s latency -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
-```
+  Use this command to benchmark the latency of the Llama 3.1 8B model on one GPU with the float16 and float8 data type.
 
-You can find the latency report at *./reports_float16/ Meta-Llama-3.1-8B-Instruct_latency_report.csv*.
+  ```sh
+  ./vllm_benchmark_report.sh -s latency -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
+  ./vllm_benchmark_report.sh -s latency -m amd/Meta-Llama-3.1-8B-Instruct-FP8-KV -g 1 -d float8
+  ```
 
--   Benchmark example - throughput
+  The latency reports are available at:
 
-Use this command to benchmark the throughput of the Llama 3.1 8B model on one GPU with the fp16 data type.
+  - `./reports_float16/summary/Meta-Llama-3.1-8B-Instruct_latency_report.csv`
+  - `./reports_float8/summary/Meta-Llama-3.1-8B-Instruct-FP8-KV_latency_report.csv`
 
-```sh
-./vllm_benchmark_report.sh -s throughput -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
-```
+- Benchmark example - throughput
 
-You can find the throughput report at *./reports_float16/ Meta-Llama-3.1-8B-Instruct_throughput_report.csv*.
+  Use this command to benchmark the throughput of the Llama 3.1 8B model on one GPU with the float16 and float8 data type.
 
--   throughput\_tot = requests \* (**input lengths + output lengths**) / elapsed\_time
+  ```sh
+  ./vllm_benchmark_report.sh -s throughput -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
+  ./vllm_benchmark_report.sh -s throughput -m amd/Meta-Llama-3.1-8B-Instruct-FP8-KV -g 1 -d float8
+  ```
 
--   throughput\_gen = requests \* **output lengths** / elapsed\_time
+  The throughput reports are available at:
+
+  - `./reports_float16/summary/Meta-Llama-3.1-8B-Instruct_throughput_report.csv`
+  - `./reports_float8/summary/Meta-Llama-3.1-8B-Instruct-FP8-KV_throughput_report.csv`
+
+>[!NOTE]
+>Throughput is calculated as:
+>-   `throughput_tot = requests * (input lengths + output lengths) / elapsed_time`
+>-   `throughput_gen = requests * output lengths / elapsed_time`
 
 ## References 🔎
 ----------
 
 For an overview of the optional performance features of vLLM with
-ROCm software, see
-<https://github.com/ROCm/vllm/blob/main/ROCm_performance.md>.
+ROCm software, see [ROCm performance](https://github.com/ROCm/vllm/blob/main/ROCm_performance.md).
 
 To learn more about the options for latency and throughput
 benchmark scripts, see
@@ -198,7 +221,7 @@ To learn how to optimize inference on LLMs, see the
 For a list of other ready-made Docker images for ROCm, see the 
 [ROCm Docker image support matrix](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/docker-image-support-matrix.html).
 
-## Licensing Information ⚠️
+## Licensing information ⚠️
 ---------------------
 
 Your use of this application is subject to the terms of the applicable
@@ -253,3 +276,26 @@ and other countries.    
 
 All other trademarks and copyrights are property of their respective
 owners and are only mentioned for informative purposes.   
+
+
+## Changelog
+----------
+This release note summarizes notable changes since the previous docker release (September 4, 2024).
+
+-   The ROCm software version number was incremented from 6.2.0 to 6.2.1.
+
+-   The vLLM version number was incremented from 0.4.3 to 0.6.4.
+
+-   The PyTorch version number was incremented from 2.4.0 to 2.5.0.
+
+-   The float16 data type benchmark test was updated to include the following models: Llama 2 70B, Mixtral 8x7B, Mixtral 8X22B, and Qwen2 72B.
+
+-   float8 date type is available.
+
+-   The float8 data type benchmark test was added to include the following models: Llama 3.1 8B, Llama 3.1 70B, Llama 3.1 405B, Mixtral 8x7B, and Mixtral 8X22B.
+
+
+
+## Support 
+----------
+You can report bugs through our GitHub [issue tracker](https://github.com/ROCm/MAD/issues).

@@ -27,8 +27,8 @@
 set -ex
 
 if [[ "$MAD_SYSTEM_GPU_ARCHITECTURE" != *"gfx94"* ]]; then 
-	echo "Unsuported GPU arch detected, please use supported MI300X GPUs \n"
-	exit 1
+    echo "Unsuported GPU arch detected, please use supported MI300X GPUs \n"
+    exit 1
 fi
 
 export HF_TOKEN=$MAD_SECRETS_HFTOKEN
@@ -55,6 +55,11 @@ while [[ "$#" -gt 0 ]]; do
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
+    case $1 in
+        --tunableop) TUNABLEOP="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
 done
 
 TEST_OPTION_SP=""
@@ -69,12 +74,18 @@ do
   DTYPE_SP="$DTYPE_SP $i"
 done
 
+if [[ "$TUNABLEOP" == "on" ]]; then 
+    echo "turning on pytorch turnableop"
+    export PYTORCH_TUNABLEOP_ENABLED=1
+fi
+
 export HF_HUB_CACHE="/myworkspace"
 
 echo "=hyper params start="
 echo $MODEL_NAME
 echo $TEST_OPTION_SP
 echo $DTYPE_SP
+echo $PYTORCH_TUNABLEOP_ENABLED
 echo "=hyper params end="
 
 for scenario in $TEST_OPTION_SP; do
