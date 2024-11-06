@@ -235,7 +235,13 @@ def run_model(
     model_scripts = model["scripts"]
     model_tags = model["tags"]
     model_args = model["args"]
-    training_precision = model["training_precision"]
+    if "training_precision" in model:
+        training_precision = model["training_precision"]
+    else:
+        training_precision = ""
+    if "timeout" in model and timeout == 14400:
+        timeout = model["timeout"]
+        logger.info(f"Timeout: {timeout} seconds")
 
     # Log the model details
     logger.info(f"Model name: {model_name}")
