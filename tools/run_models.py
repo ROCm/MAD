@@ -108,6 +108,7 @@ from utils import get_env_docker_args, get_mount_docker_args, get_cpu_docker_arg
 from utils import get_system_gpus, get_system_gpu_arch, get_gpu_vendor, get_host_name, get_host_os
 from utils import get_base_docker, get_base_docker_sha
 from utils import get_perf_metric, update_dict
+from utils import update_perf_csv
 from utils import Console, Docker, Timeout, RunDetails
 from version import __version__
 from logger import get_logger
@@ -221,10 +222,11 @@ def run_model(
     run_details = RunDetails()
 
     # Store the data for the run details
-    run_details.host_name = get_host_name()
+    run_details.machine_name = get_host_name()
     run_details.host_os = get_host_os()
-    run_details.sys_gpu_arch = get_system_gpu_arch()
-    run_details.sys_n_gpus = get_system_gpus()    
+    run_details.gpu_architecture = get_system_gpu_arch()
+    run_details.n_gpus = get_system_gpus()    
+    run_details.pipeline = os.environ.get('pipeline')
 
     # Parse the model dictionary
     model_url = model["url"] if "url" in model else None
@@ -253,11 +255,11 @@ def run_model(
     model_docker_container = f"container_ci-{model_name}"
 
     # Store the data for the run details
-    run_details.model_name = model_name
-    run_details.model_tags = model_tags
-    run_details.model_args = model_args
-    run_details.model_dockerfile = model_dockerfile
-    run_details.model_docker_image = model_docker_image
+    run_details.model = model_name
+    run_details.tags = model_tags
+    run_details.args = model_args
+    run_details.docker_file = model_dockerfile
+    run_details.docker_image = model_docker_image
     run_details.training_precision = training_precision
 
     # Build the Docker image
@@ -285,8 +287,8 @@ def run_model(
     logger.info(f"Base Docker SHA: {base_docker_sha}")
 
     # Store the data for the run details
-    run_details.model_base_docker = get_base_docker(model_dockerfile)
-    run_details.model_docker_sha = get_base_docker_sha(model_docker_image)
+    run_details.base_docker = get_base_docker(model_dockerfile)
+    run_details.docker_sha = get_base_docker_sha(model_docker_image)
     run_details.build_duration = build_duration
 
     # Run the Docker container
@@ -362,8 +364,13 @@ def run_model(
             docker.sh(f"mkdir -p {model_dir}")
 
         # Update the submodules
-        docker.sh(f"git config --global --add safe.directory /myworkspace/{model_dir}")
         docker.sh(f"git config --global --add safe.directory /myworkspace")
+        docker.sh(f"git config --global --add safe.directory /myworkspace/{model_dir}")
+
+        # echo git commit
+        run_details.git_commit = docker.sh(f"cd {model_dir} && git rev-parse HEAD")
+        logger.info(f"MODEL GIT COMMIT is {run_details.git_commit}")
+        
         if model_url:
             docker.sh(f"cd {model_dir} && git submodule update --init --recursive")
 
@@ -400,6 +407,12 @@ def run_model(
             status = 'SUCCESS'
         except Exception as e:
             logger.error(f"Failed to run the model: {e}")
+            status = 'FAILURE'
+            run_details.status = status
+            # Generate the report of exception
+            run_details.generate_json("perf_entry.json")
+            update_perf_csv(exception_result="perf_entry.json", perf_csv=output)
+            # Clean up the instance of docker
             del docker
             sys.exit(1)
         
@@ -422,24 +435,50 @@ def run_model(
 
     # Store the data for the run details
     run_details.status = status
+    logger.info(f"Status: {status}")
 
-    logger.info(
-        f"Successfully built and ran the Docker container: {model_docker_container}"
-    )
-
-    # Parse the performance metrics for single result case
-    try:
-        run_details.performance, run_details.metric = get_perf_metric(log_file)
-        # Log the performance metrics
-        run_details.print_perf_metric()
-    except Exception as e:
-        logger.error(f"Failed to parse the performance metrics: {e}")
-
-    run_details.status = 'SUCCESS' if run_details.performance else 'FAILURE'      
+    if status == 'SUCCESS':
+        logger.info(f"Model {model_name} ran successfully at container {model_docker_container}.")
+    else:
+        logger.error(f"Model {model_name} failed to run at container {model_docker_container}.")
 
     # Write the run details to the output file
     try:
-        run_details.generate_report(output)
+        if run_details.status == 'SUCCESS':
+            # Check if we are looking for a single result or multiple.
+            multiple_results = model['multiple_results'] if 'multiple_results' in model and model["multiple_results"] else None
+
+            # Get performance metric from log
+            if multiple_results:
+                # Parse the performance metrics for multiple results case
+                logger.info(f"Multiple results: {multiple_results}")
+                run_details.performance = multiple_results
+                run_details.generate_json("common_info.json", multiple_results=True)
+                update_perf_csv(
+                    multiple_results=model["multiple_results"], 
+                    perf_csv=output, 
+                    model_name=run_details.model, 
+                    common_info="common_info.json"
+                )
+            else:
+                # Parse the performance metrics for single result case
+                try:
+                    # Get the performance metrics
+                    run_details.performance, run_details.metric = get_perf_metric(log_file)
+                    # Log the performance metrics
+                    run_details.print_perf_metric()
+                    run_details.generate_json("perf_entry.json")
+                    # Update the performance metrics to the CSV file
+                    logger.info(f"Single result: {run_details.performance} {run_details.metric}")
+                    update_perf_csv(single_result="perf_entry.json", perf_csv=output)
+                except Exception as e:
+                    logger.error(f"Failed to parse the performance metrics: {e}")
+                    run_details.performance = None
+                    run_details.metric = None
+        else:
+            run_details.generate_json("perf_entry.json")
+            update_perf_csv(exception_result="perf_entry.json", perf_csv=output)
+        
     except Exception as e:
         logger.error(f"Failed to write the run details to the output file: {e}")
 
@@ -484,7 +523,11 @@ def main() -> bool:
     for model_info in models:
         if [x for x in user_tags["tags"] if x in model_info["tags"] or x == model_info["name"] ]:
             print("Selected MODEL, " + model_info["name"] + " :", model_info)
-            return_status &= run_model(model_info, args, console)
+            try:
+                return_status &= run_model(model_info, args, console)
+            except Exception as e:
+                print(f"Failed to run the model: {e}")
+                return_status = False
 
     return return_status
 

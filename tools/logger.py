@@ -60,18 +60,18 @@ def get_logger(
         logger.handlers.clear()
         
     # Create a formatter
-    # formatter = logging.Formatter(
-    #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    # )
     formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(message)s"
-    )    
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    formatter_file = logging.Formatter(
+        "%(message)s"
+    )
 
     # Create a file handler if log_file is specified
     if log_file:
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
+        file_handler.setFormatter(formatter_file)
         logger.addHandler(file_handler)
 
     # Create a console handler

@@ -37,6 +37,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Meta-Llama-3.1-8B-Instruct.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -54,6 +55,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Meta-Llama-3.1-70B-Instruct.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -71,6 +73,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Meta-Llama-3.1-405B-Instruct.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -88,6 +91,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Llama-2-7b-chat-hf.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -156,6 +160,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Mistral-7B-Instruct-v0.3.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -173,6 +178,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Qwen2-7B-Instruct.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -207,6 +213,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_jais-13b-chat.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -224,6 +231,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_jais-30b-chat-v3.csv",
     "tags": [
       "pyt",
       "vllm"
@@ -315,6 +323,19 @@
     ],
     "timeout": 28800,
     "args":
-     "--model_repo amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
+    "--model_repo amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop on"
+  },
+  {
+    "name": "dummy_multi",
+    "dockerfile": "docker/dummy",
+    "scripts": "scripts/dummy/run_multi.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "dummies"
+    ],
+    "args": "",
+    "multiple_results": "perf_dummy.csv"
   }
 ]

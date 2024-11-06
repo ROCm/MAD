@@ -93,5 +93,3 @@ for scenario in $TEST_OPTION_SP; do
         ./vllm_benchmark_report.sh -s $scenario -m $MODEL_NAME -g $N_GPUS -d $dtype
     done
 done
-
-echo "performance: 1 pass"

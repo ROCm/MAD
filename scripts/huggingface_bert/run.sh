@@ -60,7 +60,7 @@ torchrun $HF_PATH/examples/pytorch/language-modeling/run_mlm.py \
     2>&1 | tee log.txt
 
 # output performance metric
-performance=$(cat log.txt | grep -Eo "train_samples_per_second':[^,]+" | sed "s/train_samples_per_second': //g")
+performance=$(cat log.txt | grep -Eo "train_samples_per_second':[^,]+" | sed "s/train_samples_per_second': //g" | head -n 1)
 
 # unset printing trace to not confuse Jenkinsfile 
 set +x
