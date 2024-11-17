@@ -650,7 +650,7 @@ def get_system_gpus() -> int:
     if gpu_vendor == "NVIDIA":
         number_gpus = int(
             subprocess.check_output(
-                "nvidia-smi --query-gpu=count --format=csv,noheader", shell=True
+                "nvidia-smi --query-gpu=count --format=csv,noheader | head -n 1", shell=True
             )
         )
     elif gpu_vendor == "AMD":
