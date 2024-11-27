@@ -541,6 +541,13 @@ class RunDetails:
 # Utility functions
 # ==================================================================================================
 
+from typing import List
+
+def subprocess_run(cmd: List[str]):
+    import subprocess
+
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
 
 def get_gpu_vendor() -> str:
     """Get the GPU vendor.
@@ -551,12 +558,22 @@ def get_gpu_vendor() -> str:
     Raises:
         Exception: If the GPU vendor is not NVIDIA or AMD.
     """
-    if os.path.exists("/usr/bin/nvidia-smi"):
-        gpu_vendor = "NVIDIA"
-    elif os.path.exists("/opt/rocm/bin/rocm-smi"):
-        gpu_vendor = "AMD"
+    # checks both command not installed, and installed but not working
+    ERRORS = (FileNotFoundError, subprocess.CalledProcessError)
+
+    try:
+        _ = subprocess_run(["/usr/bin/nvidia-smi"])
+
+    except ERRORS as e1:
+        try:
+            _ = subprocess_run(["/opt/rocm/bin/rocm-smi"])
+
+        except ERRORS as e2:
+            raise Exception("Unsupported GPU: Neither AMD nor NVIDIA")
+        else:
+            gpu_vendor = "AMD"
     else:
-        raise Exception(f"Unsupported GPU vendor: {gpu_vendor}")
+        gpu_vendor = "NVIDIA"
 
     logger.debug(f"GPU vendor: {gpu_vendor}")
     return gpu_vendor
