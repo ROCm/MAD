@@ -56,7 +56,7 @@ export NCCL_MIN_NCHANNELS=112
 export VLLM_FP8_PADDING=1
 
 if [ $tp -eq 1 ]; then
-    DIST_BE=" --enforce-eager "
+    DIST_BE=" "
 else
     DIST_BE=" --distributed-executor-backend mp "
 fi
