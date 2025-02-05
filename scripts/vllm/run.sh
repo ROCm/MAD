@@ -77,6 +77,9 @@ done
 if [[ "$TUNABLEOP" == "on" ]]; then 
     echo "turning on pytorch turnableop"
     export PYTORCH_TUNABLEOP_ENABLED=1
+else
+    echo "turning off pytorch turnableop"
+    export PYTORCH_TUNABLEOP_ENABLED=0
 fi
 
 export HF_HUB_CACHE="/myworkspace"
