@@ -422,7 +422,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo amd/Mistral-7B-v0.1-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop off"
+    "--model_repo amd/Mistral-7B-v0.1-FP8-KV --test_option latency,throughput --num_gpu 1 --datatype float8 --tunableop off"
   },
   {
     "name": "pyt_vllm_dbrx_fp8",
