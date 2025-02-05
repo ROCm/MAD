@@ -34,8 +34,8 @@ def parse_throughput_csv(file_path):
     # Combine the columns of model, tp, batch_size, input_len, output_len, and dtype to a new column named 'model'
     df_new['model'] = df['model'] + '_' + df['tp'].astype(str) + '_' + df['requests'].astype(str) + '_' + df['input_len'].astype(str) + '_' + df['output_len'].astype(str) + '_' + df['dtype']
     
-    # Put the column of 'throughput_tot (tok/sec)' to a new column named 'performance'
-    df_new['performance'] = df['throughput_tot (tok/sec)']
+    # Put the column of 'throughput_gen (tok/sec)' to a new column named 'performance'
+    df_new['performance'] = df['throughput_gen (tok/sec)']
     
     # Add a new column named 'metric' and set the value to 'samples/sec'
     df_new['metric'] = 'tok/sec'
