@@ -13,10 +13,9 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
--   ✅ ROCm™ 6.2.1
--   ✅ vLLM 0.6.4
--   ✅ PyTorch 2.5.0
--   ✅ Tuning files (.csv format)
+-   ✅ ROCm™ 6.3.1
+-   ✅ vLLM 0.6.6
+-   ✅ PyTorch 2.7.0 (2.7.0a0+git3a58512)
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
@@ -52,7 +51,7 @@ cat /proc/sys/kernel/numa_balancing
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
+docker pull rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
 ```
 
 ### MAD-integrated benchmarking
@@ -83,34 +82,42 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 
 #### Available models
 
-| model_name                  |
-| --------------------------- |
-| pyt_vllm_llama-3.1-8b       |
-| pyt_vllm_llama-3.1-70b      |
-| pyt_vllm_llama-3.1-405b     |
-| pyt_vllm_llama-2-7b         |
-| pyt_vllm_llama-2-70b        |
-| pyt_vllm_mixtral-8x7b       |
-| pyt_vllm_mixtral-8x22b      |
-| pyt_vllm_mistral-7b         |
-| pyt_vllm_qwen2-7b           |
-| pyt_vllm_qwen2-72b          |
-| pyt_vllm_jais-13b           |
-| pyt_vllm_jais-30b           |
-| pyt_vllm_llama-3.1-8b_fp8   |
-| pyt_vllm_llama-3.1-70b_fp8  |
-| pyt_vllm_llama-3.1-405b_fp8 |
-| pyt_vllm_mixtral-8x7b_fp8   |
-| pyt_vllm_mixtral-8x22b_fp8  |
+| model_name                              |
+| --------------------------------------- |
+| pyt_vllm_llama-3.1-8b                  |
+| pyt_vllm_llama-3.1-70b                 |
+| pyt_vllm_llama-3.1-405b                |
+| pyt_vllm_llama-3.2-11b-vision-instruct |
+| pyt_vllm_llama-2-7b                    |
+| pyt_vllm_llama-2-70b                   |
+| pyt_vllm_mixtral-8x7b                  |
+| pyt_vllm_mixtral-8x22b                 |
+| pyt_vllm_mistral-7b                    |
+| pyt_vllm_qwen2-7b                      |
+| pyt_vllm_qwen2-72b                     |
+| pyt_vllm_jais-13b                      |
+| pyt_vllm_jais-30b                      |
+| pyt_vllm_dbrx-instruct                 |
+| pyt_vllm_gemma-2-27b                   |
+| pyt_vllm_c4ai-command-r-plus-08-2024   |
+| pyt_vllm_deepseek-moe-16b-chat         |
+| pyt_vllm_llama-3.1-70b_fp8             |
+| pyt_vllm_llama-3.1-405b_fp8            |
+| pyt_vllm_mixtral-8x7b_fp8              |
+| pyt_vllm_mixtral-8x22b_fp8             |
+| pyt_vllm_mistral-7b_fp8                |
+| pyt_vllm_dbrx_fp8                      |
+| pyt_vllm_command-r-plus_fp8            |
 
-### Standalone benchmarking
+
+### Standalone benchmarking              
 -----------------------------
 
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 128G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name vllm_v0.6.4 rocm/vllm:rocm6.2_mi300_ubuntu20.04_py3.9_vllm_0.6.4
+docker pull rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -145,23 +152,30 @@ cd MAD/scripts/vllm
 | $test_option | latency                                 | Measure decoding token latency                   |
 |              | throughput                              | Measure token generation throughput              |
 |              | all                                     | Measure both throughput and latency              |
-| $model_repo  | meta-llama/Meta-Llama-3.1-8B-Instruct   | Llama 3.1 8B                                     |
-| (float16)    | meta-llama/Meta-Llama-3.1-70B-Instruct  | Llama 3.1 70B                                    |
-|              | meta-llama/Meta-Llama-3.1-405B-Instruct | Llama 3.1 405B                                   |
-|              | meta-llama/Llama-2-7b-chat-hf           | Llama 2 7B                                       |
-|              | meta-llama/Llama-2-70b-chat-hf          | Llama 2 70B                                      |
-|              | mistralai/Mixtral-8x7B-Instruct-v0.1    | Mixtral 8x7B                                     |
-|              | mistralai/Mixtral-8x22B-Instruct-v0.1   | Mixtral 8x22B                                    |
-|              | mistralai/Mistral-7B-Instruct-v0.3      | Mistral 7B                                       |
-|              | Qwen/Qwen2-7B-Instruct                  | Qwen2 7B                                         |
-|              | Qwen/Qwen2-72B-Instruct                 | Qwen2 72B                                        |
-|              | core42/jais-13b-chat                    | JAIS 13B                                         |
-|              | core42/jais-30b-chat-v3                 | JAIS 30B                                         |
-| $model_repo  | amd/Meta-Llama-3.1-8B-Instruct-FP8-KV   | Llama 3.1 8B                                     |
-| (float8)     | amd/Meta-Llama-3.1-70B-Instruct-FP8-KV  | Llama 3.1 70B                                    |
-|              | amd/Meta-Llama-3.1-405B-Instruct-FP8-KV | Llama 3.1 405B                                   |
-|              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | Mixtral 8x7B                                     |
-|              | amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV  | Mixtral 8x22B                                    |
+| $model_repo  | meta-llama/Llama-3.1-8B-Instruct   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
+| (float16)    | meta-llama/Llama-3.1-70B-Instruct  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                            |
+|              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |
+|              | meta-llama/Llama-3.2-11B-Vision-Instruct| [Llama 3.2 11B Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision-Instruct)                     |
+|              | meta-llama/Llama-2-7b-chat-hf           | [Llama 2 7B](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)                                |
+|              | meta-llama/Llama-2-70b-chat-hf          | [Llama 2 70B](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)                               |
+|              | mistralai/Mixtral-8x7B-Instruct-v0.1    | [Mixtral MoE 8x7B](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1)                         |
+|              | mistralai/Mixtral-8x22B-Instruct-v0.1   | [Mixtral MoE 8x22B](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1)                        |
+|              | mistralai/Mistral-7B-Instruct-v0.3      | [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)                           |
+|              | Qwen/Qwen2-7B-Instruct                  | [Qwen2 7B](https://huggingface.co/Qwen/Qwen2-7B-Instruct)                                       |
+|              | Qwen/Qwen2-72B-Instruct                 | [Qwen2 72B](https://huggingface.co/Qwen/Qwen2-72B-Instruct)                                      |
+|              | core42/jais-13b-chat                    | [JAIS 13B](https://huggingface.co/core42/jais-13b-chat)                                         |
+|              | core42/jais-30b-chat-v3                 | [JAIS 30B](https://huggingface.co/core42/jais-30b-chat-v3)                                      |
+|              | databricks/dbrx-instruct                | [DBRX Instruct](https://huggingface.co/databricks/dbrx-instruct)                                     |
+|              | google/gemma-2-27b                      | [Gemma 2 27B](https://huggingface.co/google/gemma-2-27b)                                           |
+|              | CohereForAI/c4ai-command-r-plus-08-2024 | [C4AI Command R+ 08-2024](https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024)                      |
+|              | deepseek-ai/deepseek-moe-16b-chat       | [DeepSeek MoE 16B](https://huggingface.co/deepseek-ai/deepseek-moe-16b-chat)                            |
+| $model_repo  | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
+| (float8)     | amd/Llama-3.1-405B-Instruct-FP8-KV | [Llama 3.1 405B](https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)                           |
+|              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | [Mixtral MoE 8x7B](https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV)                        |
+|              | amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV  | [Mixtral MoE 8x22B](https://huggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV)                       |
+|              | amd/Mistral-7B-v0.1-FP8-KV              | [Mistral 7B](https://huggingface.co/amd/Mistral-7B-v0.1-FP8-KV)                                   |
+|              | amd/dbrx-instruct-FP8-KV                | [DBRX Instruct](https://huggingface.co/amd/dbrx-instruct-FP8-KV)                                     |
+|              | amd/c4ai-command-r-plus-FP8-KV          | [C4AI Command R+ 08-2024](https://huggingface.co/amd/c4ai-command-r-plus-FP8-KV)                               |
 | $num_gpu     | 1 or 8                                  | Number of GPUs                                   |
 | $datatype    | float16, float8                         | Data type                                        |
 
@@ -171,31 +185,31 @@ Here are some examples and the test results:
 
 - Benchmark example - latency
 
-  Use this command to benchmark the latency of the Llama 3.1 8B model on one GPU with the float16 and float8 data type.
+  Use this command to benchmark the latency of the Llama 3.1 70B model on 8 GPUs with the float16 and float8 data type.
 
   ```sh
-  ./vllm_benchmark_report.sh -s latency -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
-  ./vllm_benchmark_report.sh -s latency -m amd/Meta-Llama-3.1-8B-Instruct-FP8-KV -g 1 -d float8
+  ./vllm_benchmark_report.sh -s latency -m meta-llama/Llama-3.1-70B-Instruct -g 8 -d float16
+  ./vllm_benchmark_report.sh -s latency -m amd/Llama-3.1-70B-Instruct-FP8-KV -g 8 -d float8
   ```
 
   The latency reports are available at:
 
-  - `./reports_float16/summary/Meta-Llama-3.1-8B-Instruct_latency_report.csv`
-  - `./reports_float8/summary/Meta-Llama-3.1-8B-Instruct-FP8-KV_latency_report.csv`
+  - `./reports_float16/summary/Llama-3.1-70B-Instruct_latency_report.csv`
+  - `./reports_float8/summary/Llama-3.1-70B-Instruct-FP8-KV_latency_report.csv`
 
 - Benchmark example - throughput
 
-  Use this command to benchmark the throughput of the Llama 3.1 8B model on one GPU with the float16 and float8 data type.
+  Use this command to benchmark the throughput of the Llama 3.1 70B model on one GPU with the float16 and float8 data type.
 
   ```sh
-  ./vllm_benchmark_report.sh -s throughput -m meta-llama/Meta-Llama-3.1-8B-Instruct -g 1 -d float16
-  ./vllm_benchmark_report.sh -s throughput -m amd/Meta-Llama-3.1-8B-Instruct-FP8-KV -g 1 -d float8
+  ./vllm_benchmark_report.sh -s throughput -m meta-llama/Llama-3.1-70B-Instruct -g 8 -d float16
+  ./vllm_benchmark_report.sh -s throughput -m amd/Llama-3.1-70B-Instruct-FP8-KV -g 8 -d float8
   ```
 
   The throughput reports are available at:
 
-  - `./reports_float16/summary/Meta-Llama-3.1-8B-Instruct_throughput_report.csv`
-  - `./reports_float8/summary/Meta-Llama-3.1-8B-Instruct-FP8-KV_throughput_report.csv`
+  - `./reports_float16/summary/Llama-3.1-70B-Instruct_throughput_report.csv`
+  - `./reports_float8/summary/Llama-3.1-70B-Instruct-FP8-KV_throughput_report.csv`
 
 >[!NOTE]
 >Throughput is calculated as:
@@ -280,21 +294,21 @@ owners and are only mentioned for informative purposes.   
 
 ## Changelog
 ----------
-This release note summarizes notable changes since the previous docker release (September 4, 2024).
+This release note summarizes notable changes since the previous docker release (October 31, 2024).
 
--   The ROCm software version number was incremented from 6.2.0 to 6.2.1.
+-   The ROCm software version number was incremented from 6.2.1 to 6.3.1.
 
--   The vLLM version number was incremented from 0.4.3 to 0.6.4.
+-   The vLLM version number was incremented from 0.6.4 to 0.6.6.
 
--   The PyTorch version number was incremented from 2.4.0 to 2.5.0.
+-   The PyTorch version number was incremented from 2.5.0 to 2.7.0. (2.7.0a0+git3a58512)
 
--   The float16 data type benchmark test was updated to include the following models: Llama 2 70B, Mixtral 8x7B, Mixtral 8X22B, and Qwen2 72B.
+-   Improved fp8 throughput performance
 
--   float8 date type is available.
+-   The float16 data type benchmark test was updated to include the following models: 
+Llama 3.2 11B Vision, DBRX Instruct, Gemma 2 27B, C4AI Command R+ 08-2024, DeepSeek MoE 16B
 
--   The float8 data type benchmark test was added to include the following models: Llama 3.1 8B, Llama 3.1 70B, Llama 3.1 405B, Mixtral 8x7B, and Mixtral 8X22B.
-
-
+-   The float8 data type benchmark test was added to include the following models: 
+Mistral 7B, DBRX Instruct, C4AI Command R+ 08-202
 
 ## Support 
 ----------

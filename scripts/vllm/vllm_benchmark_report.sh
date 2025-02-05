@@ -44,18 +44,19 @@ do
         d) datatype=${OPTARG};;
     esac
 done
-echo "MODEL: $model ";
 
 # args
 model_org_name=(${model//// })
 model_name=${model_org_name[1]}
 tp=$numgpu
 
-# perf env setting
+# perf configuration
 export VLLM_USE_TRITON_FLASH_ATTN=0
+export NCCL_MIN_NCHANNELS=112
+export VLLM_FP8_PADDING=1
 
 if [ $tp -eq 1 ]; then
-    DIST_BE=" --enforce-eager "
+    DIST_BE=" "
 else
     DIST_BE=" --distributed-executor-backend mp "
 fi
@@ -68,17 +69,18 @@ fi
 
 OPTION_LATENCY_P=" --gpu-memory-utilization 0.9 --enforce-eager "
 OPTION_LATENCY_D=" --gpu-memory-utilization 0.9 "
-OPTION_THROUGHPUT=" --gpu-memory-utilization 0.9 --num-scheduler-steps 1 "
 
 # latency conditions
 Bat="1 2 4 8 16 32 64 128 256"
 InLatency="128 2048"
-OutLatency="128"
+OutLatency="1 128"
 
 # throughput conditions
-Req_In_Out=("30000:128:128" "3000:2048:128" "3000:128:2048" "1500:2048:2048")
+In_Out=("128:128" "2048:128" "128:2048" "2048:2048")
 
-report_dir="reports_${datatype}"
+tag="vllm_rocm6.3.1"
+
+report_dir="reports_${datatype}_${tag}"
 report_summary_dir="${report_dir}/summary"
 tool_latency="/app/vllm/benchmarks/benchmark_latency.py"
 tool_throughput="/app/vllm/benchmarks/benchmark_throughput.py"
@@ -92,45 +94,62 @@ mkdir -p $report_summary_dir
 if [ "$scenario" == "latency" ] || [ "$scenario" == "all" ]; then
     echo "[INFO] LATENCY"
     mode="latency"
-    out=1
-    for inp in $InLatency;
-    do
-        for bat in $Bat;
-        do
-            outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
-            outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-            echo $model $mode $bat $tp $inp $out
-            python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_LATENCY_P
-            python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
-        done
-    done
     for out in $OutLatency;
     do
-    inp=1
-        for bat in $Bat;
-        do
-            outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
-            outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-            echo $model $mode $bat $tp $inp $out
-            python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_LATENCY_D
-            python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
-        done
+	for inp in $InLatency;
+	do
+	    for bat in $Bat;
+	    do
+		outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
+		outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+		echo $model $mode $bat $tp $inp $out
+		python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_LATENCY_D
+		python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
+	    done
+	done
     done
 fi
 
 if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
     echo "[INFO] THROUGHPUT"
     mode="throughput"
-    for req_in_out in ${Req_In_Out[@]}
+    for in_out in ${In_Out[@]}
     do
-        req=$(echo $req_in_out | awk -F':' '{ print $1 }')
-        inp=$(echo $req_in_out | awk -F':' '{ print $2 }')
-        out=$(echo $req_in_out | awk -F':' '{ print $3 }')
-        outjson=${report_dir}/${model_name}_${mode}_req${req}_in${inp}_out${out}_${datatype}.json
-        outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-        echo $model $mode $req $tp $inp $out
-        python3 $tool_throughput --model $model --num-prompts $req -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_THROUGHPUT
-        python3 $tool_report --mode $mode --model $model_name --num-prompts $req --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
+        inp=$(echo $in_out | awk -F':' '{ print $1 }')
+        out=$(echo $in_out | awk -F':' '{ print $2 }')
+
+        # throughput config
+        while IFS="," read -r model_cfg input_len output_len num_prompts max_num_seqs max_seq_len_to_capture max_num_batched_tokens	max_model_len gpu_memory_utilization num_scheduler_steps enable_chunked_prefill
+        do
+	    model_cfg_org_name=(${model_cfg//// })
+	    model_cfg_name=${model_cfg_org_name[1]}
+            if [ "$model_name" == "$model_cfg_name" ]; then
+                if [ "$input_len" == "$inp" ] && [ "$output_len" == "$out" ];then
+		    outjson=${report_dir}/${model_name}_${mode}_req${num_prompts}_in${inp}_out${out}_${datatype}.json
+		    outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+		    if [ "$max_seq_len_to_capture" == "NA" ]; then
+			OPTION_THROUGHPUT=" --num-prompts $num_prompts \
+			    --max-num-seqs            $max_num_seqs            \
+			    --gpu-memory-utilization  $gpu_memory_utilization  \
+			    --num-scheduler-steps     $num_scheduler_steps     \
+			    --enable-chunked-prefill $enable_chunked_prefill "
+			else
+			OPTION_THROUGHPUT=" --num-prompts $num_prompts \
+			    --max-num-seqs            $max_num_seqs            \
+			    --max-seq-len-to-capture  $max_seq_len_to_capture  \
+			    --max-num-batched-tokens  $max_num_batched_tokens  \
+			    --max-model-len           $max_model_len           \
+			    --gpu-memory-utilization  $gpu_memory_utilization  \
+			    --num-scheduler-steps     $num_scheduler_steps     \
+			    --enable-chunked-prefill $enable_chunked_prefill "
+		    fi
+		    echo "[RUNNING] MODEL :" $model $mode $num_prompts $tp $inp $out
+		    echo "[RUNNING] MODEL with OPTION: " $OPTION_THROUGHPUT
+		    python3 $tool_throughput --model $model -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_THROUGHPUT
+		    python3 $tool_report --mode $mode --model $model_name --num-prompts $num_prompts --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
+		fi
+            fi
+        done < <(tail -n +2 config.csv)
     done
 fi
 
