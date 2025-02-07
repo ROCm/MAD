@@ -67,8 +67,7 @@ elif [[ $datatype == "float8" ]]; then
     DTYPE=" --dtype float16 --quantization fp8 --kv-cache-dtype fp8 " 
 fi
 
-OPTION_LATENCY_P=" --gpu-memory-utilization 0.9 --enforce-eager "
-OPTION_LATENCY_D=" --gpu-memory-utilization 0.9 "
+OPTION_LATENCY=" --gpu-memory-utilization 0.9 "
 
 # latency conditions
 Bat="1 2 4 8 16 32 64 128 256"
@@ -96,17 +95,22 @@ if [ "$scenario" == "latency" ] || [ "$scenario" == "all" ]; then
     mode="latency"
     for out in $OutLatency;
     do
-	for inp in $InLatency;
-	do
-	    for bat in $Bat;
-	    do
-		outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
-		outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-		echo $model $mode $bat $tp $inp $out
-		python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_LATENCY_D
-		python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
-	    done
-	done
+        for inp in $InLatency;
+        do
+            for bat in $Bat;
+            do
+                if [ "$out" == "1" ]; then
+                    NO_CUDA_GRAPH=" --enforce-eager "
+                else
+                    NO_CUDA_GRAPH=" "
+                fi
+                outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
+                outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+                echo $model $mode $bat $tp $inp $out
+                python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_LATENCY $NO_CUDA_GRAPH
+                python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
+            done
+        done
     done
 fi
 
