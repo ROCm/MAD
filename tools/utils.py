@@ -871,7 +871,7 @@ def get_mount_docker_args(
     if mount_data_paths:
         for mount_data_path in mount_data_paths:
             mount_args += (
-                f"-v {mount_data_path['host_path']}:{mount_data_path['container_path']}"
+                f" -v {mount_data_path['host_path']}:{mount_data_path['container_path']}"
             )
             if (
                 "read_write" in mount_data_path
