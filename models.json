@@ -461,6 +461,54 @@
     "--model_repo amd/c4ai-command-r-plus-FP8-KV --test_option latency,throughput --num_gpu 8 --datatype float8 --tunableop off"
   },
   {
+    "name": "pyt_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/pytorch_train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_train_llama-3.1-8b"
+  },
+  {
+    "name": "pyt_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/pytorch_train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_train_llama-3.1-70b"
+  },
+  {
+    "name": "pyt_train_flux",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/pytorch_train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_train_flux"
+  },
+  {
     "name": "dummy_multi",
     "dockerfile": "docker/dummy",
     "scripts": "scripts/dummy/run_multi.sh",
