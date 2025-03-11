@@ -14,8 +14,9 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.3.1
--   ✅ vLLM 0.6.6
--   ✅ PyTorch 2.7.0 (2.7.0a0+git3a58512)
+-   ✅ vLLM 0.7.3
+-   ✅ PyTorch 2.7.0 (dev nightly)
+-   ✅ HipblasLT 0.13
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
@@ -46,12 +47,16 @@ cat /proc/sys/kernel/numa_balancing
 0
 ```
 
+### Advanced features and Known issues 🚨
+
+For the experimental features and known issues of the ROCm optimization efforts on vLLM, please refer to this developer's guide at [ROCm vllm](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md) guide.
+
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
+docker pull rocm/vllm:instinct_main
 ```
 
 ### MAD-integrated benchmarking
@@ -116,8 +121,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
+docker pull rocm/vllm:instinct_main
+
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:instinct_main
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -296,19 +302,12 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release (October 31, 2024).
 
--   The ROCm software version number was incremented from 6.2.1 to 6.3.1.
+-   The vLLM version number was incremented from 0.6.6 to 0.7.3.
 
--   The vLLM version number was incremented from 0.6.4 to 0.6.6.
-
--   The PyTorch version number was incremented from 2.5.0 to 2.7.0. (2.7.0a0+git3a58512)
-
--   Improved fp8 throughput performance
-
--   The float16 data type benchmark test was updated to include the following models: 
-Llama 3.2 11B Vision, DBRX Instruct, Gemma 2 27B, C4AI Command R+ 08-2024, DeepSeek MoE 16B
+-   Improved fp8 throughput performance with HipblasLT 0.13
 
 -   The float8 data type benchmark test was added to include the following models: 
-Mistral 7B, DBRX Instruct, C4AI Command R+ 08-202
+Llama 3.1 8B Instruct
 
 ## Support 
 ----------
