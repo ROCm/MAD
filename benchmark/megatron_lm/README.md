@@ -41,7 +41,7 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * DeepSeek-V2-lite
 
 ## System validation steps
-If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://advanced-micro-devices-rocm-internal--303.com.readthedocs.build/en/303/how-to/rocm-for-ai/training/prerequisite-system-validation.html#train-a-model-system-validation) to set up your system before starting training.
+If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html) to set up your system before starting training.
 
 ### Disable NUMA auto-balancing
 Generally, application performance can benefit from disabling NUMA auto-balancing. However, it might be detrimental to performance with certain types of workloads.

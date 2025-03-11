@@ -42,6 +42,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullOptimStateDic
 from transformer_engine.pytorch import fp8_autocast
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 import torch.nn.functional as F
+import torch.optim as optim
 
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
 import accelerate
@@ -53,8 +54,8 @@ from model import ModelConfig, FP8Llama, FP8TransformerBlock
 
 
 
-def load_model(max_seq_len):
-    model_config = ModelConfig(max_seq_len=max_seq_len)
+def load_model(config):
+    model_config = ModelConfig(**config)
     model = FP8Llama(**asdict(model_config)) 
     return model_config, model
 
@@ -71,9 +72,13 @@ class DummyIndexDataset(IterableDataset):
             yield x, y
 
 def train(args):
+    
+    # Load the configuration file
+    with open(args.config) as f:
+        config = json.load(f)
 
     # Setup random seed
-    accelerate.utils.set_seed(args.seed)
+    accelerate.utils.set_seed(config['training']['seed'])
     
     # Initialize Accelerator with FSDP
     fsdp_plugin = FullyShardedDataParallelPlugin(
@@ -85,37 +90,40 @@ def train(args):
         fsdp_plugin = fsdp_plugin,
     )
     world_size = accelerator.num_processes
-    local_rank = accelerator.process_index
-    
+    global_rank = accelerator.process_index
+    local_rank = accelerator.local_process_index
+
     # Setup the logger
     if accelerator.is_main_process:
-        log_file = f"llama_seq{args.max_seq_len}_bs{args.batch_size}.log"
-        logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logging.basicConfig(filename=args.log_file, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         logger = logging.getLogger()
     else:
         logger = None 
 
     # Initialize the model
-    model_config, model = load_model(args.max_seq_len)
-    model_config.calculate_token_flops()
+    model_config, model = load_model(config['model'])
+    model_config.calculate_llama_token_flops()
     model.train()
     
     # Initialize the optimizer and scheduler
-    optimizer = torch.optim.AdamW(model.parameters(), fused=True)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda t: 1.0)
+    optimizer_class = getattr(optim, config['optimizer']['type'])
+    optimizer = optimizer_class(model.parameters(), **config['optimizer']['params'])
+    scheduler_class = getattr(optim.lr_scheduler, config['scheduler']['type'])
+    scheduler = scheduler_class(optimizer, **config['scheduler']['params'])
 
     # Calculate the memory and flops
     pre_mem_use = torch.cuda.memory_allocated(device=f"cuda:{local_rank}") * 1e-6
-    flops_per_iter = model_config.flops_per_token * (args.batch_size * args.max_seq_len)
+    tokens_per_batch = config['training']['batch_size'] * config['model']['max_seq_len']
+    flops_per_iter = model_config.flops_per_token * tokens_per_batch
     if accelerator.is_main_process:
         print(f"GPU memory use = {pre_mem_use:.2f}MB")
         print(f"TFLOP per iteration: {flops_per_iter/1e12:.2f}")
     
     # Generate dataloader
-    dataset = DummyIndexDataset(args.max_seq_len, model_config.vocab_size)
+    dataset = DummyIndexDataset(config['model']['max_seq_len'], config['model']['vocab_size'])
     data_loader = DataLoader(
         dataset, 
-        batch_size=args.batch_size,
+        batch_size=config['training']['batch_size'],
         num_workers=world_size, 
         pin_memory=True, 
         shuffle=False
@@ -125,10 +133,7 @@ def train(args):
     data_loader_iter = iter(data_loader)
     
     total_time = 0.0
-    progress_bar = tqdm(range(args.total_steps), disable=not accelerator.is_main_process)
-    
-    fp8_format = Format.HYBRID
-    fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo='max')
+    progress_bar = tqdm(range(config['training']['total_steps']), disable=not accelerator.is_main_process)
 
     last_time = time.time()
     
@@ -136,14 +141,13 @@ def train(args):
 
         input, labels = next(data_loader_iter)
         
-        with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-            logits = model(input, is_first_microbatch=step % args.grad_acc_steps == 0)
-            loss = F.cross_entropy(logits.flatten(0, 1), labels.flatten())
-            loss /= args.grad_acc_steps
+        logits = model(input, is_first_microbatch=step % config['training']['grad_acc_steps'] == 0)
+        loss = F.cross_entropy(logits.flatten(0, 1), labels.flatten())
+        loss /= config['training']['grad_acc_steps']
 
         accelerator.backward(loss)
 
-        if accelerator.sync_gradients and (step + 1) % args.grad_acc_steps == 0:
+        if accelerator.sync_gradients and (step + 1) % config['training']['grad_acc_steps'] == 0:
             model.clip_grad_norm_(1.0)
             optimizer.step()
             scheduler.step()
@@ -152,15 +156,15 @@ def train(args):
         if accelerator.is_main_process:
             current_time = time.time()
             iteration_time = current_time-last_time
-            token_per_sec = (args.batch_size * args.max_seq_len)/iteration_time
+            token_per_sec = tokens_per_batch/iteration_time
             
-            if step < args.total_steps // 2:
+            if step < config['training']['total_steps'] // 2:
                 msg = "[Warmup] "
             else:
                 msg = "[Test] "
                 total_time += iteration_time
             
-            msg += f"Step: {step}/{args.total_steps}; "
+            msg += f"Step: {step}/{config['training']['total_steps']}; "
             msg += f"TFLOP/s: {flops_per_iter/iteration_time/1e12:.2f}; "
             msg += f"iter time: {iteration_time:.2f}; "
             msg += f"tokens/s: {token_per_sec:.2f}"
@@ -171,16 +175,16 @@ def train(args):
             last_time = current_time
 
     if accelerator.is_main_process:
-        avg_iter_time = total_time / (args.total_steps // 2)
+        avg_iter_time = total_time / (config['training']['total_steps'] // 2)
         peak_memory = torch.cuda.max_memory_allocated(device=f"cuda:{local_rank}") * 1e-6
 
-        accelerator.print(f"Avg token per second: {(args.batch_size * args.max_seq_len)/avg_iter_time:.2f}")
+        accelerator.print(f"Avg token per second: {tokens_per_batch/avg_iter_time:.2f}")
         accelerator.print(f"Avg iter time: {avg_iter_time:.4f}")
         accelerator.print(f"TFLOP per iteration: {flops_per_iter/1e12:.2f}")
         accelerator.print(f"Avg TFLOP/s: {flops_per_iter/avg_iter_time/1e12:.2f}")
         accelerator.print(f"Peak memory use = {peak_memory:.2f}MB")
 
-        logger.info(f"Avg token per second: {(args.batch_size * args.max_seq_len)/avg_iter_time:.2f}")
+        logger.info(f"Avg token per second: {tokens_per_batch/avg_iter_time:.2f}")
         logger.info(f"Avg iter time: {avg_iter_time:.4f}")
         logger.info(f"TFLOP per iteration: {flops_per_iter/1e12:.2f}")
         logger.info(f"Avg TFLOP/s: {flops_per_iter/avg_iter_time/1e12:.2f}")
@@ -192,11 +196,8 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--seed', type=int, default=1024, help="Seed")
-    parser.add_argument('--max_seq_len', type=int, default=4096, help="Max sequence length to Llama")
-    parser.add_argument('--total_steps', type=int, default=128, help="Number of steps for the analysis")
-    parser.add_argument('--batch_size', type=int, default=4, help="Batch size")
-    parser.add_argument('--grad_acc_steps', type=int, default=8, help="Number of steps for gradient accumulation")
+    parser.add_argument('--config', type=str, help="Configuration file of the model and exp")
+    parser.add_argument('--log_file', type=str, help="Output log file")
     args = parser.parse_args()
     train(args)
 

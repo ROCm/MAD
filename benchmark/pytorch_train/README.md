@@ -49,13 +49,14 @@ Use the following instructions to set up the environment, configure the script t
 
 ### Download the Docker image and required packages
 Use the following command to pull the Docker image from the Docker hub
+
 ```
-docker pull rocm/pytorch-training:v25.3
+docker pull rocm/pytorch-training:v25.4
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.3
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.4
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -126,6 +127,7 @@ Options and available models
 | $training_mode    | pretrain       | Benchmark pretraining                  |
 |                   | finetune_fw    | Full weight finetuning, only support example of Llama 3.1 70B with BF16 |
 |                  | finetune_lora  | LoRA finetuning, only support example of Llama 3.1 70B with BF16 |
+|                  | HF_finetune_lora| LoRA finetuning with Huggingface PEFT                |
 | $datatype        | FP8 or BF16    | Currently, only Llama 3.1 8B example supports FP8 precision |
 | $model_repo       | Llama-3.1-8B   | [Llama 3.1 8B](https://github.com/meta-llama/llama3)            |
 |                  | Llama-3.1-70B  | [Llama 3.1 70B](https://github.com/meta-llama/llama3)            |
@@ -135,10 +137,20 @@ Options and available models
 #### Finetuning
 
 
-To start the finetuning benchmark, use the following command. It will run the benchmarking example of Llama 2 70B with wiki-text dataset using AMD branch of [torchtune](https://github.com/AMD-AIG-AIMA/torchtune)
+To start the finetuning benchmark, use the following command. 
+
+##### Torchtune
+Following example will run the benchmarking example of Llama 3.1 70B with wiki-text dataset using AMD branch of [torchtune](https://github.com/AMD-AIG-AIMA/torchtune)
 
 ```
 ./pytorch_benchmark_report.sh -t {finetune_fw, finetune_lora} -p BF16 -m Llama-3.1-70B
+```
+
+##### Huggingface PEFT
+Following example will run the benchmarking example of Llama 2 70B with wiki-text dataset using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
+
+```
+./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
 ```
 
 ### Benchmarking examples
@@ -166,4 +178,8 @@ Example 4: Torchtune full weight finetuning with Llama 3.1 70B
 Example 5: Torchtune LoRA finetuning with Llama 3.1 70B
 ```
 ./pytorch_benchmark_report.sh -t finetune_lora -p BF16 -m Llama-3.1-70B
+```
+Example 6: Huggingface PEFT LoRA finetuning with Llama 2 70B
+```
+./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
 ```
