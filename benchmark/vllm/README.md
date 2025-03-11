@@ -49,7 +49,7 @@ cat /proc/sys/kernel/numa_balancing
 
 ### Advanced features and Known issues 🚨
 
-For the experimental features and known issues of the ROCm optimization efforts on vLLM, please refer to this developer's guide at [ROCm vllm](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md) guide.
+For the experimental features and known issues of the ROCm optimization efforts on vLLM, please refer to this developer's guide at [ROCm vllm](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
 ### Download the Docker image 🐳
 
