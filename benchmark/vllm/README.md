@@ -16,7 +16,7 @@ accelerator. It includes:
 -   ✅ ROCm™ 6.3.1
 -   ✅ vLLM 0.7.3
 -   ✅ PyTorch 2.7.0 (dev nightly)
--   ✅ HipblasLT 0.13
+-   ✅ hipBLASLt 0.13
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
