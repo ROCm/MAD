@@ -147,7 +147,7 @@ Following example will run the benchmarking example of Llama 3.1 70B with wiki-t
 ```
 
 ##### Huggingface PEFT
-Following example will run the benchmarking example of Llama 2 70B with wiki-text dataset using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
+Following example will run the benchmarking example of Llama 2 70B with [UltraChat_200k](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k) dataset using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
 
 ```
 ./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
