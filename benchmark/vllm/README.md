@@ -284,7 +284,7 @@ Standard Terms and Conditions of Sale.
 
 ### Notices and attribution
 
-© 2024 Advanced Micro Devices, Inc. All rights reserved. AMD, the AMD
+© 2025 Advanced Micro Devices, Inc. All rights reserved. AMD, the AMD
 Arrow logo, Instinct, Radeon Instinct, ROCm, and combinations thereof
 are trademarks of Advanced Micro Devices, Inc.
 
@@ -300,7 +300,7 @@ owners and are only mentioned for informative purposes.   
 
 ## Changelog
 ----------
-This release note summarizes notable changes since the previous docker release (October 31, 2024).
+This release note summarizes notable changes since the previous docker release.
 
 -   The vLLM version number was incremented from 0.6.6 to 0.7.3.
 
