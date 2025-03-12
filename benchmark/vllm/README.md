@@ -47,7 +47,7 @@ cat /proc/sys/kernel/numa_balancing
 0
 ```
 
-### Advanced features and Known issues 🚨
+### Advanced features and known issues 🚨
 
 For the experimental features and known issues of the ROCm optimization efforts on vLLM, please refer to this developer's guide at [ROCm vllm](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
