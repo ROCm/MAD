@@ -335,6 +335,24 @@
      "--model_repo deepseek-ai/deepseek-moe-16b-chat --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
   },
   {
+    "name": "pyt_vllm_llama-3.1-8b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-8B-Instruct-FP8-KV.csv",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/Llama-3.1-8B-Instruct-FP8-KV --test_option latency,throughput --num_gpu 1 --datatype float8 --tunableop off"
+  },
+  {
     "name": "pyt_vllm_llama-3.1-70b_fp8",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
