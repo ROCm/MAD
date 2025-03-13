@@ -134,6 +134,13 @@ Options and available models
 |                  | Flux           | [Flux.1 Dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) |
 | $sequence_length  | Sequence length for language model | Between 2048 and 8192 (default 8192) |
 
+>[!NOTE]
+>Occasionally, downloading the flux dataset may fail. In the event of this error, manually download the flux dataset from Hugging Face [black-forest-labs/FLUX.1-dev · Hugging Face](https://huggingface.co/black-forest-labs/FLUX.1-dev). Once downloaded, save it to '/workspace/FluxBenchmark' to ensure that the test script can access and utilize the dataset appropriately.
+
+```
+raise ReadTimeoutError(urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='huggingface.co', port=443): Read timed out. (read timeout=10)
+```
+
 #### Finetuning
 
 
