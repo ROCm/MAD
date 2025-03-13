@@ -106,6 +106,7 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_vllm_gemma-2-27b                   |
 | pyt_vllm_c4ai-command-r-plus-08-2024   |
 | pyt_vllm_deepseek-moe-16b-chat         |
+| pyt_vllm_llama-3.1-8b_fp8              |
 | pyt_vllm_llama-3.1-70b_fp8             |
 | pyt_vllm_llama-3.1-405b_fp8            |
 | pyt_vllm_mixtral-8x7b_fp8              |
@@ -175,6 +176,7 @@ cd MAD/scripts/vllm
 |              | google/gemma-2-27b                      | [Gemma 2 27B](https://huggingface.co/google/gemma-2-27b)                                           |
 |              | CohereForAI/c4ai-command-r-plus-08-2024 | [C4AI Command R+ 08-2024](https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024)                      |
 |              | deepseek-ai/deepseek-moe-16b-chat       | [DeepSeek MoE 16B](https://huggingface.co/deepseek-ai/deepseek-moe-16b-chat)                            |
+| $model_repo  | amd/Llama-3.1-8B-Instruct-FP8-KV   | [Llama 3.1 8B](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV)                            |
 | $model_repo  | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
 | (float8)     | amd/Llama-3.1-405B-Instruct-FP8-KV | [Llama 3.1 405B](https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)                           |
 |              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | [Mixtral MoE 8x7B](https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV)                        |
