@@ -1,0 +1,37 @@
+MODEL_DIR="${MODEL_DIR:-./models/Llama-2-70b-chat-hf}"
+accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
+--seed 100 \
+--model_name_or_path $MODEL_DIR \
+--dataset_name "HuggingFaceH4/ultrachat_200k" \
+--chat_template_format "chatml" \
+--add_special_tokens False \
+--append_concat_token False \
+--splits "train_sft,test_sft" \
+--max_seq_len 3072 \
+--num_train_epochs 1 \
+--logging_steps 5 \
+--log_level "info" \
+--logging_strategy "steps" \
+--evaluation_strategy "epoch" \
+--save_strategy "epoch" \
+--bf16 True \
+--packing True \
+--learning_rate 1e-4 \
+--lr_scheduler_type "cosine" \
+--weight_decay 1e-4 \
+--warmup_ratio 0.0 \
+--max_grad_norm 1.0 \
+--output_dir "llama2-70b-sft-lora-fsdp" \
+--per_device_train_batch_size 16 \
+--per_device_eval_batch_size 16 \
+--gradient_accumulation_steps 4 \
+--gradient_checkpointing True \
+--use_reentrant False \
+--dataset_text_field "content" \
+--use_flash_attn True \
+--use_peft_lora True \
+--lora_r 8 \
+--lora_alpha 16 \
+--lora_dropout 0.1 \
+--lora_target_modules "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj" \
+--use_4bit_quantization False

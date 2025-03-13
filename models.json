@@ -487,6 +487,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-8B.csv",
     "tags": [
       "pyt"
     ],
@@ -503,6 +504,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-70B.csv",
     "tags": [
       "pyt"
     ],
@@ -519,6 +521,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Flux.csv",
     "tags": [
       "pyt"
     ],
