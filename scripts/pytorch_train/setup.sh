@@ -29,12 +29,12 @@ BUILD="false"
 # Parse named arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -m) MODEL_NAME="$2"; shift ;;
+        --model_repo) MODEL_NAME="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
     case $1 in
-        -b) BUILD="$2"; shift ;;
+        --build) BUILD="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -45,41 +45,49 @@ echo "Build status: $BUILD"
 
 export HF_HOME=/workspace/huggingface
 
-echo "Setup script starting in directory $(pwd)"
-
-if [ "$MODEL_NAME" == "Llama-3.1-70B" ]; then
-  echo "Building torchtune dependencies for $MODEL_NAME"
-  TORCHTUNE_DIR="$(pwd)/torchtune"
-  echo "Torchtune directory path: $TORCHTUNE_DIR"
+if [ "$MODEL_NAME" == "pyt_train_llama-3.1-70b" ]; then
+  if [ "$BUILD" == "true" ]; then
+    echo "Building torchtune dependencies for $MODEL_NAME"
+    TORCHTUNE_DIR="/workspace/torchtune"
+    cp -r "torchtune/wikitext_finetune.sh" ${TORCHTUNE_DIR}
+    cp -r "torchtune/wikitext_lora_finetune.sh" ${TORCHTUNE_DIR}
+    cp -r "torchtune/llama_3_1_70b_full_finetune_recipe.yaml" ${TORCHTUNE_DIR}
+    cp -r "torchtune/llama_3_1_70b_lora_finetune_recipe.yaml" ${TORCHTUNE_DIR}
+    cp -r "torchtune/dataset.py" ${TORCHTUNE_DIR}
+  elif [ "$BUILD" == "false" ]; then
+    TORCHTUNE_DIR="$(pwd)/torchtune"
+  fi
   cd $TORCHTUNE_DIR
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
           --local-dir ./models/Llama-3.1-70B-Instruct \
           --exclude 'original/*.pth'
+  cd $TORCHTUNE_DIR
   python dataset.py
-  ls $TORCHTUNE_DIR
 
   # Dependency for peft
-  HF_PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
-  echo "PEFT directory path: $HF_PEFT_DIR"
-  cd $HF_PEFT_DIR
-  # huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-  # huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
-  #         --local-dir ./models/Llama-3.1-70B-Instruct \
-  #         --exclude 'original/*.pth'
-  ls $HF_PEFT_DIR
+  if [ "$BUILD" == "true" ]; then
+    PEFT_DIR="/workspace/HF_PEFT_FSDP"
+  elif [ "$BUILD" == "false" ]; then
+    PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
+  fi
+  cd $PEFT_DIR
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+  huggingface-cli download meta-llama/Llama-2-70b-chat-hf \
+	  --local-dir ./models/Llama-2-70b-chat-hf \
+	  --exclude 'original/*.pth'
 
 fi
 
 # Dependency for Llama 3.1 (torchtitan)
-if [[ "$MODEL_NAME" == "Llama-3.1-8B" || "$MODEL_NAME" == "Llama-3.1-70B" ]]; then
+if [[ "$MODEL_NAME" == "pyt_train_llama-3.1-8b" || "$MODEL_NAME" == "pyt_train_llama-3.1-70b" ]]; then
   echo "Building Llama 3.1 dependencies for $MODEL_NAME"
   cd /workspace/torchtitan
   pip install -r requirements.txt
 fi
 
 # Dependency for Flux
-if [ "$MODEL_NAME" == "Flux" ]; then
+if [ "$MODEL_NAME" == "pyt_train_flux" ]; then
   echo "Building Flux dependencies for $MODEL_NAME"
   cd /workspace/FluxBenchmark
   pip3 install --no-cache-dir --upgrade pip packaging

@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2024 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,57 +30,61 @@ export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 # Parse named arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -m) MODEL_REPO="$2"; shift ;;
+        --model_repo) MODEL_REPO="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
 
 echo "=hyper params start="
+echo $SETUP
 echo $MODEL_REPO
 #echo $TRAINING_MODE
 #echo $DATATYPE
 #echo $SEQUENCE_LENGTH
 echo "=hyper params end="
 
-# Run pytorch setup script
-bash ./pytorch_benchmark_setup.sh
+# Convert from MAD repo names to Pytorch training docker script names
+if [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
+  model="Llama-3.1-8B"
+elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
+  model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
+  model="Flux"
+fi
 
-# Set script parameters
+# Run pytorch setup script
+bash ./pytorch_benchmark_setup.sh -m $model -b true
+
 datatypes=("BF16" "FP8")
 sequence_lengths=("8192" "4096" "2048")
+tasks=("pretrain")
 
-# Function to run the benchmark for each combination
-run_benchmark() {
-  local model=$1
-  local datatypes=$2
-  local sequence_lengths=$3
-  local tasks=("pretrain")
+# Add tasks based on the model
+if [[ "$model" == "Llama-3.1-70B" ]]; then
+  tasks=("HF_finetune_lora" "finetune_fw" "finetune_lora" "pretrain")
+  #tasks+=("finetune_fw" "finetune_lora" "HF_finetune_lora")
+fi
 
-  # Add tasks based on the model
-  if [[ "$model" == "pyt_train_llama-3.1-70b" && "$datatype" == "BF16" ]]; then
-    tasks+=("finetune_fw" "finetune_lora")
-  fi
+# Flux does not require datatype or sequence length
+if [[ "$model" == "Flux" ]]; then
+  datatypes=("BF16")
+  sequence_lengths=("8192")
+  tasks=("pretrain")  # Flux only runs pretrain
+fi
 
-  # Flux does not require datatype or sequence length
-  if [[ "$model" == "pyt_train_flux" ]]; then
-    datatype=""
-    sequence_length=""
-    tasks=("pretrain")  # Flux only runs pretrain
-  fi
-
-  #echo "Tasks: ${tasks[@]}"
-  # Loop through tasks
-  for task in "${tasks[@]}"; do
-    echo "Running: $task - $model - $datatype - $sequence_length"
-    #./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
-  done
-}
-
+echo "Model: $model"
 # Loop through all combinations
-for datatype in "${datatypes[@]}"; do
-  for sequence_length in "${sequence_lengths[@]}"; do
-    run_benchmark $MODEL_NAME $datatype $sequence_length
+for task in "${tasks[@]}"; do
+  if [[ "$task" == "finetune_fw" || "$task" == "finetune_lora" || "$task" == "HF_finetune_lora" ]]; then
+    datatypes=("BF16")
+    sequence_lengths=("8192")
+  fi
+  for datatype in "${datatypes[@]}"; do
+    for sequence_length in "${sequence_lengths[@]}"; do
+      echo "Running: $task - $model - $datatype - $sequence_length"
+      ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
+    done
   done
 done
 
