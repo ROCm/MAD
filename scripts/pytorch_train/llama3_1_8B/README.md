@@ -1,32 +1,42 @@
 # Training
 This code is used for benchmarking Pytorch based pre-training on a synthesized dataset for a single node
 
-Need to install `accelerate` library
-```
-pip install accelerate
-```
-
 Listed below are some example run commands for the model benchmarked in this repository using FSDP sharding strategy.
 
-## Run commands for Llama3.1-8B training with 4k sequence length
+## Single-node Llama3.1-8B training with 8k sequence length
 ### MI300
 ### FP8 Precision
 ```
-accelerate launch --config_file fsdp_fp8.yaml ./train_llama.py --max_seq_len=4096 --batch_size=4
+bash run_multigpu.sh
 ```
 
-## Run commands for Llama3.1-8B training with 8k sequence length
+## Multi-node Llama3.1-8B training with 8k sequence length
 ### MI300
 ### FP8 Precision
-```
-accelerate launch --config_file fsdp_fp8.yaml ./train_llama.py --max_seq_len=8192 --batch_size=2
-```
-# Reference Performance
-(with wrapping, no torch.compile)
-| Models  | Batch size | Sequence length | Avg TFLOP/s | Avg tokens/s | Peak Memory (GB) |
-| -------|  -------    | ----------      |    -------  | ----------   | ----------  |
-| Llama 3.1 8B |  4 | 4096 | 670.24 | 13021.85 | 128.99 |
-| Llama 3.1 8B |  5 | 4096 | 679.78 | 13207.11 | 153.03 |
-| Llama 3.1 8B |  6 | 4096 | 697.18 | 13545.23 | 177.10 |
-| Llama 3.1 8B |  2 | 8192 | 665.35 | 11488.88 | 129.12 |
-| Llama 3.1 8B |  3 | 8192 | 711.90 | 12557.27 | 177.24 |
+
+1. Run the following command (outside the container) to find the active network interface on your system.
+    ```
+    ip a
+    ```
+2. Take two nodes (`NODE0` and `NODE1`) as example. Launch the Docker container on each node.
+   ```
+   docker run -it --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband \
+      --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
+      -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128G --name training_env rocm/pytorch-training:v25.4 tail -f /dev/null
+   ```
+   Use these commands if you exit the megatron_training_env container and need to return to it.
+   ```
+   docker start training_env
+   docker exec -it training_env bash
+   ```
+3. Run the training script on both nodes.
+   - On the master node, run:
+     ```
+     NNODES=2 GPUS_ON_NODE=8 HEAD_NODE_IP=NODE0_IP bash run_multinode.sh
+     ```
+   - On the worker node, run:
+     ```
+     NNODES=2 GPUS_ON_NODE=8 HEAD_NODE_IP=NODE0_IP bash run_multinode.sh
+     ```
+
+We also provide an example using slurm cluster in `run_multinode_slurm.sh`

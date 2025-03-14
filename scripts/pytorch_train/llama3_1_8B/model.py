@@ -43,7 +43,7 @@ class ModelConfig:
     eps: float = 1e-05
     hidden_dim: int = 14336
 
-    def calculate_token_flops(self):
+    def calculate_llama_token_flops(self):
         """Calculate training TFLOP per token"""
         head_dim = self.embedding_dim // self.num_heads
 
