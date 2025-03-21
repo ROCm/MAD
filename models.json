@@ -530,6 +530,96 @@
      "--model_repo pyt_train_flux"
   },
   {
+    "name": "pyt_megatron_lm_train_llama-2-7b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-2-7b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-2-70b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-8B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-3.1-8b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-3.1-70b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_deepseek-v2-lite-16b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-V2-lite.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "deepseek-v2-lite"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
+  },
+  {
     "name": "dummy_multi",
     "dockerfile": "docker/dummy",
     "scripts": "scripts/dummy/run_multi.sh",
