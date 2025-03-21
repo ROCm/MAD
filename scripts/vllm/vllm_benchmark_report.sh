@@ -50,6 +50,11 @@ model_org_name=(${model//// })
 model_name=${model_org_name[1]}
 tp=$numgpu
 
+# Use local data if present
+if [ -n $MAD_DATAHOME ]; then
+    model=$MAD_DATAHOME
+fi
+
 # perf configuration
 export VLLM_USE_TRITON_FLASH_ATTN=0
 export NCCL_MIN_NCHANNELS=112
