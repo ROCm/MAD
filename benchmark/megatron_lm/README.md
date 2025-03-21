@@ -69,13 +69,13 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.3
+   docker pull rocm/megatron-lm:v25.4
    ```
 
 2. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.3
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.4
    ```
 
 3. **Execute the training_env container (optional if no already in the container)**
@@ -84,7 +84,7 @@ Use the following instructions to set up the environment, configure the script t
     docker exec -it megatron_training_env bash
    ```
 
-The docker container hosts verified Megatron-LM repository, which is available in [megatron release branch](https://github.com/ROCm/Megatron-LM/tree/megatron_release_v25.3).
+The docker container hosts verified commit `fd6f0d1` from [Megatron-LM repository](https://github.com/ROCm/Megatron-LM/tree/rocm_dev).
 
 ---
 
@@ -93,7 +93,7 @@ Use `train_llama3.sh` for Llama3/3.1 models and `train_llama2.sh` for Llama2 mod
 
 ### 2.1 Network Interface
 Update the network interface in the script to match your system’s network interface.
-To find your network interface, run (out of the container):
+To find your network interface, run (out of container):
 ```bash
 ip a
 ```
@@ -107,7 +107,7 @@ export GLOO_SOCKET_IFNAME=ens50f0np0
 You can use either mock data or real data for training.
 
 - **Mock Data:**
-  Use `MOCK_DATA` variable to toggle between mock and real data. The default value is 1.
+  Use `MOCK_DATA` variable to toggle between mock and real data. Default value is 1.
   ```bash
   MOCK_DATA=1
   ```
@@ -115,30 +115,37 @@ You can use either mock data or real data for training.
   Update the `DATA_PATH` to the location where your dataset is stored:
   ```bash
   MOCK_DATA=0
-  DATA_PATH=${DATA_PATH:-"/data/bookcorpus_text_sentence"}  # Change to where your dataset is stored
+  DATA_PATH="/data/bookcorpus_text_sentence" # Change to where your dataset is stored
   ```
+- **Downloading the dataset:**
+  Set argument `DATASET` to the dataset you would like to use. Currently, two datasets are supported `DATASET=wiki` and `DATASET=bookcorpus`. Use the following command to download the dataset:
+  ```bash
+  DATASET=wiki bash examples/llama/prepare_dataset.sh #for wiki-en dataset
+  DATASET=bookcorpus bash examples/llama/prepare_dataset.sh #for bookcorpus dataset
 
 ### 2.3 Tokenizer
-Tokenization is the process of converting raw text into tokens that can be processed by the model. For Llama models, this typically involves sub-word tokenization, where words are broken down into smaller units based on a fixed vocabulary. The tokenizer is trained along with the model on a large corpus of text, and it learns a fixed vocabulary that can represent a wide range of text from different domains. This allows Llama models to handle a variety of input sequences, including unseen words or domain-specific terms.
+You can assign the path of existing tokenizer to the command line argument `TOKENIZER_MODEL`. If tokenizer is not found, it will be downloaded to the default tokenizer model path: `${DATA_DIR}/tokenizer_llamaN` (N=2 or 3).
 
 - **For Llama2 Training:**
-  To train any of the Llama2 models that this Docker image supports, use the `Llama2Tokenizer`.
+  Uses either the `Llama2Tokenizer` or `HuggingFaceTokenizer`(default).
 
 - **For Llama3 Training:**
-  To train any of Llama 3 and Llama 3.1 models that this Docker image supports, use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
+  Use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
   ```bash
   TOKENIZER_MODEL=meta-llama/Llama-3.1-8B  # For Llama3
   ```
 
+  Otherwise, if you do not have Llama3.1 tokenizer locally, you need to set your personal HuggingFace access token `HF_TOKEN` in the script to download the tokenizer. To set the `HF_TOKEN` for Llama3.1 model, you first need to apply access to Llama3.1 model via this [link](https://huggingface.co/meta-llama/Llama-3.1-8B). After you are authorized, you are able to set your personal HuggingFace access token `HF_TOKEN` in your personal setting page and update the following variable in the script.
+
 ### 2.4 Multi-node Training
-If you're running multi-node training, update the following environment variables on each node. They can also be passed as command line arguments.
+If you're running multi-node training, update the following environment variables on each node.They can also be passed as command line arguments.
 
 - **Master Address:**
   Change `localhost` to the master node's hostname:
   ```bash
   MASTER_ADDR="${MASTER_ADDR:-localhost}"
   ```
-
+  
 - **Number of Nodes:**
   Set the number of nodes you want to train on (e.g., 2, 4, 8):
   ```bash
@@ -158,19 +165,59 @@ If you're running multi-node training, update the following environment variable
   ```
 
  - **Network Drivers Inside Docker:**
-   For multi-node runs, make sure the correct network drivers are installed on the nodes. If inside a docker, either install the drivers inside the docker container or pass the network drivers from the host while creating the Docker container.
+   For multi-node runs, make sure correct network drivers are installed on the nodes. If inside a docker, either install the drivers inside the docker container or pass the network drivers from the host while creating docker container.
 
+   ```bash
+   # specify which RDMA interfaces to use for communication
+   export NCCL_IB_HCA=rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7
+   ```
+
+---
 
 ## 3. How to Run
 
 ### 3.1 Single Node Training
 To run the training on a single node, go to Megatron-LM folder, use the following command:
+
+- **Llama3.1-8B FP8:**
 ```bash
-TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8  bash examples/llama/train_llama3.sh
+TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
 ```
 
+- **Llama3.1-8B BF16:**
+```bash
+TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=8 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
+```
+
+- **Llama2-7B FP8:**
+```bash
+TEE_OUTPUT=1 MBS=4 BS=256 TP=1 TE_FP8=1 SEQ_LENGTH=4096 MODEL_SIZE=7 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
+```
+
+- **Llama2-7B BF16:**
+```bash
+TEE_OUTPUT=1 MBS=4 BS=256 TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=7 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
+```
+
+To run the training with `FSDP-v2` enabled, simply add `FSDP=1` argument, for example, use the following command:
+
+- **Llama3-70B BF16:**
+```bash
+TEE_OUTPUT=1 MBS=3 BS=24 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=8192 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
+```
+
+- **Llama2-70B BF16:**
+```bash
+TEE_OUTPUT=1 MBS=7 BS=56 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=4096 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
+```
+
+**Note:** 
+   - It is suggested to use `TP=1` when FSDP is enabled, for higher throughput. And FSDP-v2 is not supported with pipeline parallelism, expert parallelism, MCore's distributed optimizer, gradient accumulation fusion and fp16.
+   - Currently, FSDP is only compatible with BF16 precision 
+
+
 ### 3.2 Multi-node Training
-To run training on multiple nodes, launch the Docker container on each node. For example, follow these steps for 2 Node run with Node0 as the master node :
+To run training on multiple nodes, launch the Docker container on each node. Example, follow these steps for 2 Node run with Node0 as master node :
 
 - **On the Master Node0:**
   ```bash
@@ -185,25 +232,30 @@ To run training on multiple nodes, launch the Docker container on each node. For
 
 ## 4. Key Variables to Pay Attention To
 
-- **TE_FP8:**
-  `0` for BP16 (default), `1` for FP8-GEMMS.
+- **TE_FP8:**  
+  `0` for B16 (default), `1` for FP8.
 
-- **GEMM_TUNING:**
+- **GEMM_TUNING:**  
   `1` to enable GEMM tuning, which boosts performance by using the best GEMM kernels.
 
-- **USE_FLASH_ATTN:**
+- **USE_FLASH_ATTN:**  
   `1` to enable Flash Attention.
 
-- **ENABLE_PROFILING:**
+- **FSDP:**  
+  `1` to enable torch fsdp-v2. 
+  
+  Note that if FSDP is enabled, `--use-distributed-optimizer`, `--overlap-param-gather`, `--sequence-parallel` will be automatically set off. 
+
+- **ENABLE_PROFILING:**  
   `1` to enable PyTorch profiling for performance analysis.
 
-- **transformer-impl:**
+- **transformer-impl:**  
   `transformer_engine` to use the Transformer Engine (TE). Set to `local` if you want to disable TE.
 
-- **MODEL_SIZE:**
+- **MODEL_SIZE:**  
   Set to `7B` or `70B` for Llama2, or `8B` or `70B` for Llama3/3.1.
 
-- **TOTAL_ITERS:** 
+- **TOTAL_ITERS:**  
   Set the total number of iterations (default: 10).
 
 - **MOCK_DATA:**
@@ -218,11 +270,12 @@ To run training on multiple nodes, launch the Docker container on each node. For
 - **TP:**
   Tensor parallel (1, 2, 4, 8)
 
+  Note `TP` is disabled with `FSDP`.
+
 - **SEQ_LENGTH**:
   Sequence Length
 
----
-
+--- 
 That's it! You've now set up the environment and configured the necessary settings for training Llama2 or Llama3 models.
 
 # DeepSeek-V2-lite Training Procedure
@@ -232,13 +285,13 @@ That's it! You've now set up the environment and configured the necessary settin
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.3
+   docker pull rocm/megatron-lm:v25.4
    ```
 
 2. **Launch Docker Container**
    Start the Docker container:  
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.3
+   docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.4
    ```
    
    The docker container hosts verified Megatron-LM repository, which is available in [megatron release branch](https://github.com/ROCm/Megatron-LM/tree/megatron_release_v25.3).
@@ -285,7 +338,7 @@ DeepSeek-V2 uses `DeepSeekV2Tokenizer`
 To run the training on a single node, go to Megatron-LM folder, use the following command:
 ```bash
 cd /workspace/Megatron-LM
-GEMM_TUNING=1 PR=bf16 MBS=4 AC=none bash examples/deepseek_v2/train_deepseekv2.sh
+GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh
 ```
 
 ## 5. Key Variables to Pay Attention To
@@ -296,7 +349,7 @@ GEMM_TUNING=1 PR=bf16 MBS=4 AC=none bash examples/deepseek_v2/train_deepseekv2.s
 - **GEMM_TUNING:**
   `1` to enable GEMM tuning, which boosts performance by using the best GEMM kernels.
 
-- **TRAIN_ITERS:**  
+- **TRAIN_ITERS:**
   Set the total number of iterations.
 
 - **MOCK_DATA:**
@@ -308,4 +361,11 @@ GEMM_TUNING=1 PR=bf16 MBS=4 AC=none bash examples/deepseek_v2/train_deepseekv2.s
 - **GBS:**
   Global Batch size
 
-That's it! You'are now ready to train DeepSeek-V2-lite model.
+- **SEQ_LEN:**
+  Sequence length
+
+- **AC:**
+  Activation Checkpointing (`none`, `sel` , `full`). Default:`sel` (Selective). 
+---
+
+That's it! You'are now ready to train DeepSeek-v2-lite model.
