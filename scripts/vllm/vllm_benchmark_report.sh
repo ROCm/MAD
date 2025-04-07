@@ -52,6 +52,7 @@ tp=$numgpu
 
 # Use local data if present
 if [ -n $MAD_DATAHOME ]; then
+    echo "Using data from MAD_DATAHOME"
     model=$MAD_DATAHOME
 fi
 
