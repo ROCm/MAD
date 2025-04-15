@@ -83,12 +83,14 @@ if args.mode == "pretrain":
             {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU'},
             {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU'}
         ]
-elif (args.mode == "finetune_fw" or args.mode == "finetune_lora") and (args.model == "Llama-3.1-70B"):
-    unmasked_tokens_per_s_per_gpu = find_match(input_file, "Unmasked tokens/s/gpu:")
-    #time_per_step = find_match(":")
+elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-3.3-70B"):
+    max_memory_alloc = find_match(input_file, "Max memory alloc:")
+    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu:")
+    unmasked_tokens_per_s_per_gpu = find_match(input_file, "Unmasked tokens/s/gpu: ")
     data = [
-        {'model': args.model, 'performance': unmasked_tokens_per_s_per_gpu, 'metric': 'unmasked_tokens_per_s_per_gpu'}
-        #{'model': args.model, 'performance': time_per_step, 'metric': 'time_per_step'}
+        {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc'},
+        {'model': args.model, 'performance': unmasked_tokens_per_s_per_gpu, 'metric': 'unmasked_tokens_per_s_per_gpu'},
+        {'model': args.model, 'performance': avg_tokens_per_s_per_gpu, 'metric': 'avg_tokens_per_s_per_gpu'}
     ]
 elif (args.mode == "HF_finetune_lora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-2-70B"):
     train_samples_per_s = find_match(input_file, "'train_samples_per_second':")

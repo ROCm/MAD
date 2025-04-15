@@ -4,23 +4,25 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.3` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.5` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.3.0              |
+| ROCm               | 6.3.4              |
 | Python            | 3.10               |
 | PyTorch           | 2.7.0a0+git637433   |
-| Transformer Engine | 1.11               |
+| Transformer Engine | 1.12.0.dev0+25a33da |
 | Flash Attention   | 3.0.0               |
-| hipBLASLt         | git258a2162         |
-| Triton            | 3.1                 |
+| hipBLASLt         | git53b53bf         |
+| Triton            | 3.2.0                 |
 
 ## Models
 Examples of the following models are pre-optimized for performance on the AMD Instinct MI300X and MI325X accelerator.
+* Llama2-70B
 * Llama3.1-8B
 * Llama3.1-70B
 * FLUX.1-dev
+* Llama3.3-70B
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -47,16 +49,58 @@ See [Disable NUMA auto-balancing](https://rocm.docs.amd.com/en/latest/how-to/sys
 This container should not be expected to provide generalized performance across all training workloads. Users should expect the container perform in the model configurations described below, but other configurations and run conditions are not validated by AMD. 
 Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X and MI325X accelerators with the Docker image.
 
+Use the following instructions to reproduce the benchmark results on an
+MI300X accelerator with a prebuilt Pytorch Docker image.
+
+Users have two choices to reproduce the benchmark results.
+
+-   [MAD-integrated benchmarking](#mad-integrated-benchmarking)
+-   [Standalone benchmarking](#standalone-benchmarking)
+
+### MAD-integrated benchmarking
+
+Clone the ROCm Model Automation and Dashboarding (MAD) repository to a local directory and install the required packages on the host machine.
+
+```sh
+git clone https://github.com/ROCm/MAD
+cd MAD
+pip install -r requirements.txt
+```
+
+Use this command to run a performance benchmark test of the Llama 3.1 8B model on one GPU with float16 data type in the host machine. 
+
+```sh
+export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
+python3 tools/run_models.py --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+```
+
+ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama-3.1-8b`. The latency and throughput reports of the model are collected in the following path:
+
+```sh
+~/MAD/perf.csv
+```
+
+#### Available models
+
+| model_name                              |
+| --------------------------------------- |
+| pyt_train_llama-3.1-8b                  |
+| pyt_train_llama-3.1-70b                 |
+| pyt_train_flux                          |
+| pyt_train_llama-3.3-70b                 |
+
+### Standalone benchmarking
+
 ### Download the Docker image and required packages
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/pytorch-training:v25.4
+docker pull rocm/pytorch-training:v25.5
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.4
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.5
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -125,12 +169,15 @@ Options and available models
 |Name               | Options        | Description                                      |
 |--------------------|---------------|--------------------------------------------------|
 | $training_mode    | pretrain       | Benchmark pretraining                  |
-|                   | finetune_fw    | Full weight finetuning, only support example of Llama 3.1 70B with BF16 |
-|                  | finetune_lora  | LoRA finetuning, only support example of Llama 3.1 70B with BF16 |
+|                   | finetune_fw    | Full weight finetuning, only support example of Llama 3.1 70B and Llama 3.3 70B with BF16 |
+|                  | finetune_lora  | LoRA finetuning, only support example of Llama 3.1 70B and Llama 3.3 70B with BF16 |
+|                  | finetune_qlora  | qLoRA finetuning, only support example of Llama 3.3 70B with BF16 |
 |                  | HF_finetune_lora| LoRA finetuning with Huggingface PEFT                |
 | $datatype        | FP8 or BF16    | Currently, only Llama 3.1 8B example supports FP8 precision |
-| $model_repo       | Llama-3.1-8B   | [Llama 3.1 8B](https://github.com/meta-llama/llama3)            |
+| $model_repo       | Llama-2-70B   | [Llama 2 70B](https://github.com/meta-llama/llama-models/tree/main/models/llama2)            |
+|                  | Llama-3.1-8B  | [Llama 3.1 8B](https://github.com/meta-llama/llama3)            |
 |                  | Llama-3.1-70B  | [Llama 3.1 70B](https://github.com/meta-llama/llama3)            |
+|                  | Llama-3.3-70B | [Llama 3.3 70B](https://github.com/meta-llama/llama3)      |
 |                  | Flux           | [Flux.1 Dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) |
 | $sequence_length  | Sequence length for language model | Between 2048 and 8192 (default 8192) |
 
@@ -154,7 +201,7 @@ Following example will run the benchmarking example of Llama 3.1 70B with wiki-t
 ```
 
 ##### Huggingface PEFT
-Following example will run the benchmarking example of Llama 2 70B with [UltraChat_200k](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k) dataset using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
+Following example will run the benchmarking example of Llama 2 70B with wiki-text dataset using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
 
 ```
 ./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
@@ -182,11 +229,28 @@ Example 4: Torchtune full weight finetuning with Llama 3.1 70B
 ```
 ./pytorch_benchmark_report.sh -t finetune_fw -p BF16 -m Llama-3.1-70B
 ```
+
 Example 5: Torchtune LoRA finetuning with Llama 3.1 70B
 ```
 ./pytorch_benchmark_report.sh -t finetune_lora -p BF16 -m Llama-3.1-70B
 ```
-Example 6: Huggingface PEFT LoRA finetuning with Llama 2 70B
+
+Example 6: Torchtune full weight finetuning with Llama 3.3 70B
+```
+./pytorch_benchmark_report.sh -t finetune_fw -p BF16 -m Llama-3.3-70B
+```
+
+Example 7: Torchtune LoRA finetuning with Llama 3.3 70B
+```
+./pytorch_benchmark_report.sh -t finetune_lora -p BF16 -m Llama-3.3-70B
+```
+
+Example 8: Torchtune qLoRA finetuning with Llama 3.3 70B
+```
+./pytorch_benchmark_report.sh -t HF_finetune_qlora -p BF16 -m Llama-3.3-70B
+```
+
+Example 9: Huggingface PEFT LoRA finetuning with Llama 2 70B
 ```
 ./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
 ```

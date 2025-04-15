@@ -22,7 +22,7 @@ bash run_multigpu.sh
    ```
    docker run -it --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband \
       --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
-      -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128G --name training_env rocm/pytorch-training:v25.4 tail -f /dev/null
+      -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128G --name training_env rocm/pytorch-training:v25.5 tail -f /dev/null
    ```
    Use these commands if you exit the megatron_training_env container and need to return to it.
    ```

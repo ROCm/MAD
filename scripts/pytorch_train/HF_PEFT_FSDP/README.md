@@ -7,9 +7,9 @@ This README provides instructions for fine-tuning a model using the LoRA (Low-Ra
 ### Environment Setup
 
 ```bash
-docker pull rocm/pytorch-training:v25.4
+docker pull rocm/pytorch-training:v25.5
 
-docker run --rm -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME/.ssh:/root/.ssh -v /shared/amdgpu/home/kailash_gogineni_qle:/shared/amdgpu/home/kailash_gogineni_qle --name YOUR_NAME rocm/pytorch-training:v25.4
+docker run --rm -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME/.ssh:/root/.ssh -v /shared/amdgpu/home/kailash_gogineni_qle:/shared/amdgpu/home/kailash_gogineni_qle --name YOUR_NAME rocm/pytorch-training:v25.5
 
 cd HF_PEFT_FSDP
 
