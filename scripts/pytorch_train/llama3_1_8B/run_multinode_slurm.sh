@@ -27,13 +27,13 @@ srun bash -c 'docker stop $(docker ps -a -q)'
 
 # Build and launch the Docker container
 srun bash -c '
-    docker pull docker.io/rocm/pytorch-training:v25.4
+    docker pull docker.io/rocm/pytorch-training:v25.5
     docker rm training_env
     docker images
     ibdev2netdev
     docker run -d --network host --device /dev/dri --device /dev/kfd --device /dev/infiniband \
       --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
-      -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128G --name training_env docker.io/rocm/pytorch-training:v25.4 tail -f /dev/null
+      -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128G --name training_env docker.io/rocm/pytorch-training:v25.5 tail -f /dev/null
 '
 
 srun bash -c '
