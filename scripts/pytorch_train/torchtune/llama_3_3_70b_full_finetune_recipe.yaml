@@ -1,0 +1,104 @@
+# REQUIREMENTS:
+# torch>=2.5
+# torchtune
+# torchao
+#
+# Tested on 8xMI300X 192GB
+#
+# BASED ON:
+# https://github.com/meta-llama/Meta-Llama-3.3-70B-Instruct/blob/main/llama3_1/70B_full.yaml
+
+
+# Tokenizer
+tokenizer:
+  _component_: torchtune.models.llama3.llama3_tokenizer
+  path: /workspace/huggingface/Meta-Llama-3.3-70B-Instruct/original/tokenizer.model
+  max_seq_len: null
+
+# Dataset
+dataset:
+  _component_: torchtune.datasets.text_completion_dataset
+  source: json
+  data_files: /workspace/MAD/scripts/pytorch_train/torchtune/wikitext_train.json
+  column: input
+  split: train
+seed: null
+shuffle: False
+
+# Model Arguments
+model:
+  _component_: torchtune.models.llama3_3.llama3_3_70b
+
+checkpointer:
+  _component_: torchtune.training.FullModelHFCheckpointer
+  checkpoint_dir: /workspace/huggingface/Meta-Llama-3.3-70B-Instruct/
+  checkpoint_files: [
+    model-00001-of-00030.safetensors,
+    model-00002-of-00030.safetensors,
+    model-00003-of-00030.safetensors,
+    model-00004-of-00030.safetensors,
+    model-00005-of-00030.safetensors,
+    model-00006-of-00030.safetensors,
+    model-00007-of-00030.safetensors,
+    model-00008-of-00030.safetensors,
+    model-00009-of-00030.safetensors,
+    model-00010-of-00030.safetensors,
+    model-00011-of-00030.safetensors,
+    model-00012-of-00030.safetensors,
+    model-00013-of-00030.safetensors,
+    model-00014-of-00030.safetensors,
+    model-00015-of-00030.safetensors,
+    model-00016-of-00030.safetensors,
+    model-00017-of-00030.safetensors,
+    model-00018-of-00030.safetensors,
+    model-00019-of-00030.safetensors,
+    model-00020-of-00030.safetensors,
+    model-00021-of-00030.safetensors,
+    model-00022-of-00030.safetensors,
+    model-00023-of-00030.safetensors,
+    model-00024-of-00030.safetensors,
+    model-00025-of-00030.safetensors,
+    model-00026-of-00030.safetensors,
+    model-00027-of-00030.safetensors,
+    model-00028-of-00030.safetensors,
+    model-00029-of-00030.safetensors,
+    model-00030-of-00030.safetensors,
+  ]
+  recipe_checkpoint: null
+  output_dir: /tmp/torchtune/Meta-Llama-3.3-70B-Instruct/
+  model_type: LLAMA3
+resume_from_checkpoint: False
+
+# Fine-tuning arguments
+batch_size: 64
+epochs: 3
+
+optimizer:
+  _component_: torch.optim.AdamW
+  lr: 2e-5
+  fused: True
+
+loss:
+  _component_: torchtune.modules.loss.CEWithChunkedOutputLoss
+max_steps_per_epoch: null
+gradient_accumulation_steps: 1
+
+# Training env
+device: cuda
+
+# Memory management
+enable_activation_checkpointing: True
+custom_sharded_layers: ['tok_embeddings', 'output']
+fsdp_cpu_offload: True
+compile: True
+
+# Precision
+dtype: bf16
+
+# Logging
+metric_logger:
+  _component_: torchtune.training.metric_logging.DiskLogger
+  log_dir: ${output_dir}
+output_dir: /workspace/70b-wikitext-full-logs
+log_every_n_steps: 1
+log_peak_memory_stats: False
