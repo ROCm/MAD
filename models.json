@@ -648,5 +648,19 @@
     ],
     "args": "",
     "multiple_results": "perf_dummy.csv"
+  },
+  {
+    "name": "pyt_clip_inference",
+    "dockerfile": "docker/pyt_clip_inference",
+    "scripts": "scripts/pyt_clip_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "clip",
+      "inference"
+    ],
+    "args": "--tunableop off"
   }
 ]
