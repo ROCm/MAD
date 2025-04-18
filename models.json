@@ -227,42 +227,6 @@
      "--model_repo Qwen/Qwen2-72B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop off"
   },
   {
-    "name": "pyt_vllm_jais-13b",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "data": "huggingface",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_jais-13b-chat.csv",
-    "tags": [
-      "pyt",
-      "vllm"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo core42/jais-13b-chat --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
-  },
-  {
-    "name": "pyt_vllm_jais-30b",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "data": "huggingface",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_jais-30b-chat-v3.csv",
-    "tags": [
-      "pyt",
-      "vllm"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo core42/jais-30b-chat-v3 --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
-  },
-  {
     "name": "pyt_vllm_dbrx-instruct",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
