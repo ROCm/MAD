@@ -601,19 +601,6 @@
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
   },
   {
-    "name": "dummy_multi",
-    "dockerfile": "docker/dummy",
-    "scripts": "scripts/dummy/run_multi.sh",
-    "n_gpus": "1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "tags": [
-      "dummies"
-    ],
-    "args": "",
-    "multiple_results": "perf_dummy.csv"
-  },
-  {
     "name": "pyt_chai1_inference",
     "dockerfile": "docker/pyt_chai1_inference",
     "scripts": "scripts/pyt_chai1_inference/run.sh",
@@ -627,5 +614,31 @@
     "timeout": 28800,
     "args": "",
     "multiple_results": "perf_pyt_chai1_inference.csv"
+  },
+  {
+    "name": "pyt_clip_inference",
+    "dockerfile": "docker/pyt_clip_inference",
+    "scripts": "scripts/pyt_clip_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "inference"
+    ],
+    "args": "--tunableop off"
+  },
+  {
+    "name": "dummy_multi",
+    "dockerfile": "docker/dummy",
+    "scripts": "scripts/dummy/run_multi.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "dummies"
+    ],
+    "args": "",
+    "multiple_results": "perf_dummy.csv"
   }
 ]
