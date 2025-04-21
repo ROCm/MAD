@@ -38,8 +38,16 @@ cat /proc/sys/kernel/numa_balancing
 
 The following command pulls the Docker image from Docker Hub.
 
+For Chai-1 model:
+
 ```sh
 docker pull rocm/pytorch:rocm6.2.3_ubuntu22.04_py3.10_pytorch_release_2.3.0_triton_llvm_reg_issue​:latest
+```
+
+For CLIP model:
+
+```sh
+docker pull rocm/pytorch​:latest
 ```
 
 ### MAD-integrated benchmarking
@@ -66,6 +74,20 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_infer
 | model_name                  |
 | --------------------------- |
 | pyt_chai1_inference|
+| pyt_clip_inference (ViT-B-32, laion2b_s34b_b79k)|
+
+### Enable Tunable Operator ⚙️
+
+To collect performance data using PyTorch’s Tunable Operators feature, include the `--tunableop on` argument in your run.
+
+By default, the `pyt_clip_inference` model already includes `--tunableop off` in its configuration. To customize the behavior, edit the `models.json`, find `pyt_clip_inference` config and modify the `args` field to `--tunableop on` accordingly.
+
+ This triggers a two-pass run: a warm-up followed by a performance-collection run, generating a `gemm_result_<dataset>.csv` file for analysis.
+
+```sh
+python3 tools/run_models.py --tags pyt_clip_inference --keep-model-dir --live-output --timeout 28800
+```
+
 
 
 ## References 🔎
