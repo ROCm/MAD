@@ -100,6 +100,7 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_vllm_mistral-7b                    |
 | pyt_vllm_qwen2-7b                      |
 | pyt_vllm_qwen2-72b                     |
+| pyt_vllm_qwq-32b                       |
 | pyt_vllm_dbrx-instruct                 |
 | pyt_vllm_gemma-2-27b                   |
 | pyt_vllm_c4ai-command-r-plus-08-2024   |
@@ -168,6 +169,7 @@ cd MAD/scripts/vllm
 |              | mistralai/Mistral-7B-Instruct-v0.3      | [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)                           |
 |              | Qwen/Qwen2-7B-Instruct                  | [Qwen2 7B](https://huggingface.co/Qwen/Qwen2-7B-Instruct)                                       |
 |              | Qwen/Qwen2-72B-Instruct                 | [Qwen2 72B](https://huggingface.co/Qwen/Qwen2-72B-Instruct)                                      |
+|              | Qwen/QwQ-32B                            | [QwQ 32B](https://huggingface.co/Qwen/QwQ-32B)                                                      |
 |              | databricks/dbrx-instruct                | [DBRX Instruct](https://huggingface.co/databricks/dbrx-instruct)                                     |
 |              | google/gemma-2-27b                      | [Gemma 2 27B](https://huggingface.co/google/gemma-2-27b)                                           |
 |              | CohereForAI/c4ai-command-r-plus-08-2024 | [C4AI Command R+ 08-2024](https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024)                      |
