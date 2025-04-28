@@ -601,6 +601,114 @@
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
   },
   {
+    "name": "jax_maxtext_train_llama-2-7b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-7B.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-7b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-70B.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-70b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-8B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.1-8b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-70B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.1-70b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.3-70b"
+  },
+  {
+    "name": "jax_maxtext_train_deepseek-v3-lite",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-V3-lite.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_deepseek-v3-lite"
+  },
+  {
     "name": "pyt_chai1_inference",
     "dockerfile": "docker/pyt_chai1_inference",
     "scripts": "scripts/pyt_chai1_inference/run.sh",

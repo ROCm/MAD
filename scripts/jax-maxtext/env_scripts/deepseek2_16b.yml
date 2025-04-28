@@ -1,0 +1,62 @@
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+#################################################################################
+
+base_config: "base.yml"
+run_name: "deepseek2_16b_1node"
+base_output_directory: "./"
+hardware: "gpu"
+steps: 50
+model_name: "deepseek2-16b"
+enable_checkpointing: False
+attention: "dot_product"
+log_period: 100
+#inter-node parallelism strategy
+dcn_data_parallelism: -1
+dcn_fsdp_parallelism: 1
+#intra-node parallelism strategy
+ici_fsdp_parallelism: 1
+ici_data_parallelism: 1
+ici_expert_parallelism: -1
+remat_policy: "minimal_flash"
+use_iota_embed: True
+scan_layers: True
+async_checkpointing: False
+logits_dot_in_fp32: False
+profiler: ""
+dtype: "bfloat16"
+quantization: ""
+quantize_kvcache: False
+kv_quant_axis: "heads_and_dkv"
+kv_quant_dtype: "int8"
+weight_dtype: bfloat16
+checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
+max_target_length: 4096
+dataset_type: "synthetic"
+per_device_batch_size: 8
+megablox: False
+capacity_factor: 1.25
+sparse_matmul: False
+sharding_tolerance: 0.05
