@@ -8,11 +8,11 @@ AMD provides a ready-to-use Docker image for AMD Instinct MI300X GPUs containing
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.3              |
-| Jax            | 0.4.31               |
-| Python            | 3.10               |
-| Transformer Engine | 1.12.0.dev0+f81a3eb     |
-| hipBLASLt         | 0.13.0-78ec8622         |
+| ROCm               | 6.3.4              |
+| Jax            | 0.4.35               |
+| Python            | 3.10.12               |
+| Transformer Engine | 1.12.0.dev0+b8b92dc     |
+| hipBLASLt         | 0.13.0-ae9c477a         |
 
 
 ## Supported features and models
@@ -29,6 +29,7 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Llama 2 70B
 * Llama 3/3.1 8B
 * Llama 3/3.1 70B
+* Llama 3.3 70B
 * DeepSeek-V2-lite (16B) 
 
 Note: Some models, such as Llama 3, require an external license agreement through a third party (for example, Meta).
@@ -94,12 +95,12 @@ Set the following env variables. You can again check the multinode examples on h
 
 1.	Use the following command to pull the Docker image from Docker Hub.
 ```
-docker pull rocm/jax-training:maxtext-v25.4
+docker pull rocm/jax-training:maxtext-v25.5
 ```
 
 2.	Launch the Docker container.
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged    -v  $HOME/.ssh:/root/.ssh  --shm-size 128G --name maxtext_training rocm/jax-training:maxtext-v25.4
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged    -v  $HOME/.ssh:/root/.ssh  --shm-size 128G --name maxtext_training rocm/jax-training:maxtext-v25.5
 ```
 
 
@@ -116,7 +117,7 @@ wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/g
 
 Run the benchmark for single node traininig
 ```
-IMAGE="rocm/jax-training:maxtext-v25.4" bash ./llama2_7b.sh
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./llama2_7b.sh
 ```
 2.	**Single-node training with Llama 2 70B model**\
 Download the benchmarking script:
@@ -126,7 +127,7 @@ wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/g
 
 Run the benchmark for single node traininig
 ```
-IMAGE="rocm/jax-training:maxtext-v25.4" bash ./llama2_70b.sh
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./llama2_70b.sh
 ```
 3.	**Single-node training with Llama 3 8B model**\
 Download the benchmarking script:
@@ -136,7 +137,7 @@ wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/g
 
 Run the benchmark for single node traininig
 ```
-IMAGE="rocm/jax-training:maxtext-v25.4" bash ./llama3_8b.sh
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./llama3_8b.sh
 ```
 4.	**Single-node training with Llama 3 70B model**\
 Download the benchmarking script:
@@ -146,17 +147,28 @@ wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/g
 
 Run the benchmark for single node traininig
 ```
-IMAGE="rocm/jax-training:maxtext-v25.4" bash ./llama3_70b.sh
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./llama3_70b.sh
 ```
 
-5.	**Single-node training with DeepSeek2 16B model**\
+5.	**Single-node training with Llama 3.3 70B model**\
+Download the benchmarking script:
+```
+wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/gpu-rocm/llama3.3_70b.sh
+```
+
+Run the benchmark for single node traininig
+```
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./llama3.3_70b.sh
+```
+
+6.	**Single-node training with DeepSeek2 16B model**\
 Download the benchmarking script:
 ```
 wget https://raw.githubusercontent.com/ROCm/maxtext/refs/heads/main/benchmarks/gpu-rocm/deepseek_v2_16b.sh
 ```
 Run the benchmark for single node traininig
 ```
-IMAGE="rocm/jax-training:maxtext-v25.4" bash ./deepseek_v2_16b.sh
+IMAGE="rocm/jax-training:maxtext-v25.5" bash ./deepseek_v2_16b.sh
 ```
 
 Note: \

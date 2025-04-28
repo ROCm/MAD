@@ -1,0 +1,69 @@
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+#################################################################################
+
+base_config: "base.yml"
+run_name: "llama3.3_70b_training"
+hardware: "gpu"
+steps: 30
+model_name: "llama3.3-70b"
+enable_checkpointing: False
+attention: "cudnn_flash_te"
+dcn_data_parallelism: -1
+dcn_fsdp_parallelism: 1
+dcn_pipeline_parallelism: 1
+dcn_tensor_parallelism: 1
+dcn_sequence_parallelism: 1
+ici_fsdp_parallelism: 8
+ici_data_parallelism: 1
+ici_sequence_parallelism: 1
+ici_tensor_parallelism: 1
+ici_pipeline_parallelism: 1
+ 
+remat_policy: 'full'
+optimizer_memory_host_offload: False
+param_scan_axis: 1
+ 
+use_iota_embed: True
+scan_layers: True
+
+profiler: ""
+
+async_checkpointing: False
+logits_dot_in_fp32: False
+megablox: False
+dtype: "bfloat16"
+quantization: ""
+quantize_kvcache: False
+kv_quant_axis: "heads_and_dkv"
+kv_quant_dtype: "int8"
+weight_dtype: bfloat16
+checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
+per_device_batch_size: 7
+max_target_length: 8192
+hf_path: "parquet" 
+hf_train_files: "/hf_cache/hub/datasets--legacy-datasets--c4/snapshots/5abe0d085aa23dd9db2a6c1e86cfce4e4db6f0c3/en/partial-train/000*.parquet"
+dataset_type: "hf"
+tokenizer_path: "meta-llama/Llama-3.3-70B-Instruct"
