@@ -99,6 +99,7 @@
   {
     "name": "pyt_vllm_llama-2-7b",
     "url": "",
+    "data": "llama-2-7b-chat-hf",
     "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
@@ -116,6 +117,7 @@
   {
     "name": "pyt_vllm_llama-2-70b",
     "url": "",
+    "data": "llama-2-70b-chat-hf",
     "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
