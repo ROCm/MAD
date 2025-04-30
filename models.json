@@ -750,6 +750,23 @@
     "multiple_results": "perf_dummy.csv"
   },
   {
+    "name": "pyt_mpt30b_training",
+    "dockerfile": "docker/pyt_mpt30b_training",
+    "scripts": "scripts/pyt_mpt30b_training/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "training",
+      "pyt",
+      "mosaic",
+      "composer"
+    ],
+    "timeout": -1,
+    "args": 
+    "--model_repo mosaicml/mpt-30b --test_option throughput --tunableop off"
+  },
+  {
     "name": "pyt_vllm_qwq-32b",
     "data": "huggingface",
     "dockerfile": "docker/pyt_vllm",
