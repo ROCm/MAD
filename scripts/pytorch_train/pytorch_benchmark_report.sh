@@ -45,8 +45,8 @@ BUILD="false"
 usage() {
     echo "Usage: $0 -t <training_mode> -m <model_repo> -p <datatype> -s <sequence_length>"
     echo "\nOptions:"
-    echo "  -t <training_mode>   Training mode (pretrain, finetune_fw, finetune_lora, HF_finetune_lora)"
-    echo "  -m <model_repo>      Model repository (Llama-3.1-8B, Llama-3.1-70B, Flux)"
+    echo "  -t <training_mode>   Training mode (pretrain, finetune_fw, finetune_lora, finetune_qlora, HF_finetune_lora)"
+    echo "  -m <model_repo>      Model repository (Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux)"
     echo "  -p <datatype>        Precision type (FP8 or BF16)"
     echo "  -s <sequence_length> Sequence length (between 2048 and 8192)"
     echo "  -n <num_gpus>        Number of GPUs (1 or 8)"
@@ -93,9 +93,9 @@ if ! [[ "$SEQUENCE_LENGTH" =~ ^[0-9]+$ ]] || (( SEQUENCE_LENGTH < 2048 || SEQUEN
 fi
 
 # Training mode validation
-if [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" ]]; then
-    if [[ "$MODEL_REPO" != "Llama-3.1-70B" || "$DATATYPE" != "BF16" ]]; then
-        echo "Error: finetune_fw and finetune_lora are only supported for Llama_3.1_70B with BF16."
+if [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
+	if [[ ! ("$MODEL_REPO" == "Llama-3.1-70B" || "$MODEL_REPO" == "Llama-3.3-70B") || "$DATATYPE" != "BF16" ]]; then
+        echo "Error: finetuning options are only supported for Llama_3.X_70B with BF16."
         exit 1
     fi
 fi
@@ -139,7 +139,6 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       bash run_multigpu.sh |& tee $TRAIN_LOG	
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	      --input $TRAIN_LOG --output $PERF_LOG
-      rm $TRAIN_LOG
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
@@ -149,7 +148,6 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       bash run_llama_train.sh |& tee $TRAIN_LOG
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	      --input $TRAIN_LOG --output $PERF_LOG 
-      rm $TRAIN_LOG
     fi
 
     if [ "$MODEL_REPO" == "Flux" ]; then
@@ -160,50 +158,78 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	      --input $TRAIN_LOG --output $PERF_LOG 
-      rm $TRAIN_LOG
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
     echo "[INFO]Executing full-weight finetuning benchmark..."
     TORCHTUNE_DIR="$(pwd)/torchtune"
-    echo "[INFO] LLAMA 3.1 70B"
     echo "[INFO] Benchmarking"
     cd $TORCHTUNE_DIR
-    MODEL_DIR=./models/Llama-3.1-70B-Instruct COMPILE=True \
-		CPU_OFFLOAD=False PACKED=False SEQ_LEN=null \
-		ACTIVATION_CHECKPOINTING=True TUNE_ENV=True \
-		MBS=64 GAS=1 EPOCHS=1 SEED=42 VALIDATE=True \
-		MAX_STEPS=30 bash wikitext_finetune.sh |& tee $TRAIN_LOG
-
+    if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then 
+        echo "[INFO] LLAMA 3.1 70B"
+        MODEL_DIR=./models/Llama-3.1-70B-Instruct COMPILE=True \
+            CPU_OFFLOAD=False PACKED=False SEQ_LEN=null \
+            ACTIVATION_CHECKPOINTING=True TUNE_ENV=True \
+            MBS=64 GAS=1 EPOCHS=1 SEED=42 VALIDATE=True \
+            MAX_STEPS=30 bash wikitext_finetune.sh |& tee $TRAIN_LOG
+    elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
+        echo "[INFO] LLAMA 3.3 70B"
+        MODEL_DIR=./models/Llama-3.3-70B-Instruct COMPILE=True \
+	    PACKED=False SEQ_LEN=null CPU_OFFLOAD=False \
+	    ACTIVATION_CHECKPOINTING=True MBS=64 GAS=1 \
+	    EPOCHS=1 SEED=42 MAX_STEPS=20 \
+	    bash run_llama_3_3_full_wiki.sh |& tee $TRAIN_LOG
+    fi 
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	    --input $TRAIN_LOG --output $PERF_LOG 
-    rm $TRAIN_LOG
     
 elif [[ "$TRAINING_MODE" == "finetune_lora" ]]; then
     echo "Executing LoRA finetuning benchmark..."
     TORCHTUNE_DIR="$(pwd)/torchtune"
-    echo "[INFO] LLAMA 3.1 70B"
     echo "[INFO] Benchmarking"
     cd $TORCHTUNE_DIR
-    MODEL_DIR=./models/Llama-3.1-70B-Instruct COMPILE=True \
-		CPU_OFFLOAD=False PACKED=False SEQ_LEN=null \
-		ACTIVATION_CHECKPOINTING=True TUNE_ENV=True \
-		MBS=64 GAS=1 EPOCHS=1 SEED=42 VALIDATE=True \
-		MAX_STEPS=30 bash wikitext_lora_finetune.sh |& tee $TRAIN_LOG
+    if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then 
+        echo "[INFO] LLAMA 3.1 70B"
+        MODEL_DIR=./models/Llama-3.1-70B-Instruct COMPILE=True \
+            CPU_OFFLOAD=False PACKED=False SEQ_LEN=null \
+            ACTIVATION_CHECKPOINTING=True TUNE_ENV=True \
+            MBS=64 GAS=1 EPOCHS=1 SEED=42 VALIDATE=True \
+            MAX_STEPS=30 bash wikitext_lora_finetune.sh |& tee $TRAIN_LOG
+    elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
+        echo "[INFO] LLAMA 3.3 70B"
+	MODEL_DIR=./models/Llama-3.3-70B-Instruct COMPILE=True \
+	    PACKED=False SEQ_LEN=null CPU_OFFLOAD=False \
+	    ACTIVATION_CHECKPOINTING=True MBS=64 GAS=1 \
+	    EPOCHS=1 SEED=42 MAX_STEPS=20 \
+	    bash run_llama_3_3_LoRA_wiki.sh |& tee $TRAIN_LOG
+    fi
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	    --input $TRAIN_LOG --output $PERF_LOG 
-    rm $TRAIN_LOG
+
+elif [[ "$TRAINING_MODE" == "finetune_qlora" ]]; then
+    echo "Executing qLoRA finetuning benchmark..."
+    TORCHTUNE_DIR="$(pwd)/torchtune"
+    echo "[INFO] Benchmarking"
+    echo "[INFO] LLAMA 3.3 70B"
+    cd $TORCHTUNE_DIR
+    MODEL_DIR=./models/Llama-3.3-70B-Instruct COMPILE=True 
+        PACKED=False SEQ_LEN=null CPU_OFFLOAD=False \
+	ACTIVATION_CHECKPOINTING=True MBS=64 GAS=1 \
+	EPOCHS=1 SEED=42 MAX_STEPS=20 \
+	bash run_llama_3_3_qLoRA_wiki.sh |& tee $TRAIN_LOG
+    python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	    --input $TRAIN_LOG --output $PERF_LOG 
 
 elif [[ "$TRAINING_MODE" == "HF_finetune_lora" ]]; then
     echo "Executing Huggingface LoRA finetuning library..."
     HF_PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
-    echo "[INFO] Llama-2-70b-chat-hf Finetuning with Ultrachat dataset using Huggingface library"
+    echo "[INFO] Llama-2-70b Finetuning with wikitext dataset using Huggingface library"
     echo "[INFO] Benchmarking"
     cd $HF_PEFT_DIR
     bash run_peft_fsdp_NV_version.sh |& tee $TRAIN_LOG
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	    --input $TRAIN_LOG --output $PERF_LOG 
-    rm $TRAIN_LOG
+        
 else
     echo "Error: Unsupported training mode."
     exit 1

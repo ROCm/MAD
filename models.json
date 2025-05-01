@@ -218,40 +218,6 @@
      "--model_repo Qwen/Qwen2-72B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop off"
   },
   {
-    "name": "pyt_vllm_jais-13b",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_jais-13b-chat.csv",
-    "tags": [
-      "pyt",
-      "vllm"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo core42/jais-13b-chat --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
-  },
-  {
-    "name": "pyt_vllm_jais-30b",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_jais-30b-chat-v3.csv",
-    "tags": [
-      "pyt",
-      "vllm"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo core42/jais-30b-chat-v3 --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
-  },
-  {
     "name": "pyt_vllm_dbrx-instruct",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
@@ -504,6 +470,23 @@
      "--model_repo pyt_train_flux"
   },
   {
+    "name": "pyt_train_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/pytorch_train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B.csv",
+    "tags": [
+      "pyt"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_train_llama-3.3-70b"
+  },
+  {
     "name": "pyt_megatron_lm_train_llama-2-7b",
     "url": "",
     "dockerfile": "docker/megatron_train",
@@ -594,6 +577,142 @@
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
   },
   {
+    "name": "jax_maxtext_train_llama-2-7b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-7B.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-7b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-2-70B.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-70b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-8B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.1-8b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-70B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.1-70b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.3-70b"
+  },
+  {
+    "name": "jax_maxtext_train_deepseek-v3-lite",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-V3-lite.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_deepseek-v3-lite"
+  },
+  {
+    "name": "pyt_chai1_inference",
+    "dockerfile": "docker/pyt_chai1_inference",
+    "scripts": "scripts/pyt_chai1_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "inference",
+      "pyt"
+    ],
+    "timeout": 28800,
+    "args": "",
+    "multiple_results": "perf_pyt_chai1_inference.csv"
+  },
+  {
+    "name": "pyt_clip_inference",
+    "dockerfile": "docker/pyt_clip_inference",
+    "scripts": "scripts/pyt_clip_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "inference"
+    ],
+    "args": "--tunableop off"
+  },
+  {
     "name": "dummy_multi",
     "dockerfile": "docker/dummy",
     "scripts": "scripts/dummy/run_multi.sh",
@@ -605,5 +724,22 @@
     ],
     "args": "",
     "multiple_results": "perf_dummy.csv"
+  },
+  {
+    "name": "pyt_vllm_qwq-32b",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_QwQ-32B.csv",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/QwQ-32B --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop off"
   }
 ]

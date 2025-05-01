@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,8 @@
 # SOFTWARE.
 #
 #################################################################################
-
 import pandas as pd
+import numpy as np
 import argparse
 import csv
 import re
@@ -51,51 +51,24 @@ output_file = args.output
 print("Input file path: ", input_file)
 print("Output file path: ", output_file)
 
-def find_match(file, search_string):
+def find_match(file, search_string, num_iters):
     with open(file, 'r') as file:
         content = file.read()
     pattern = fr"{re.escape(search_string)}\s*(\d+\.\d+|\d+)"
     matches = re.findall(pattern, content)
-    # Only save last match
-    match = matches[-1]
-    return match
+    perf_nums = [float(num) for num in matches][-num_iters]
+    avg = np.average(perf_nums)
+    return str("{:.2f}".format(avg))
 
-if args.mode == "pretrain":
-    if args.model == "Llama-3.1-8B":
-        tok_per_s_per_gpu = find_match(input_file, "Avg token per second:")
-        TFLOPS_per_gpu = find_match(input_file, "Avg TFLOP/s:")
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
-        ]
-    elif args.model == "Llama-3.1-70B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:")
-        TFLOPS_per_gpu = find_match(input_file, "tflops:")
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
-        ]
-    elif args.model == "Flux":
-        df = pd.read_csv(input_file)
-        FPS_per_GPU = df.iloc[-1]['avg_fps']
-        TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
-        data = [
-            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU'},
-            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU'}
-        ]
-elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-3.3-70B"):
-    max_memory_alloc = find_match(input_file, "Max memory alloc:")
-    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu:")
-    unmasked_tokens_per_s_per_gpu = find_match(input_file, "Unmasked tokens/s/gpu: ")
+if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
+        args.model == "Llama-3.3-70B" or \
+        args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
+        args.model == "DeepSeek-V3-lite":
+    tok_per_s_per_gpu = find_match(input_file, "Tokens/s/device:", 10)
+    TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/device:", 10)
     data = [
-        {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc'},
-        {'model': args.model, 'performance': unmasked_tokens_per_s_per_gpu, 'metric': 'unmasked_tokens_per_s_per_gpu'},
-        {'model': args.model, 'performance': avg_tokens_per_s_per_gpu, 'metric': 'avg_tokens_per_s_per_gpu'}
-    ]
-elif (args.mode == "HF_finetune_lora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-2-70B"):
-    train_samples_per_s = find_match(input_file, "'train_samples_per_second':")
-    data = [
-        {'model': args.model, 'performance': train_samples_per_s, 'metric': 'train_samples_per_s'}
+        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
+        {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
     ]
 
 with open(output_file, mode='w', newline='') as file:
@@ -105,4 +78,3 @@ with open(output_file, mode='w', newline='') as file:
     writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")
-    

@@ -37,7 +37,6 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 echo "=hyper params start="
-echo $SETUP
 echo $MODEL_REPO
 #echo $TRAINING_MODE
 #echo $DATATYPE
@@ -49,6 +48,8 @@ if [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
+  model="Llama-3.3-70B"
 elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
   model="Flux"
 fi
@@ -63,7 +64,11 @@ tasks=("pretrain")
 # Add tasks based on the model
 if [[ "$model" == "Llama-3.1-70B" ]]; then
   tasks=("HF_finetune_lora" "finetune_fw" "finetune_lora" "pretrain")
-  #tasks+=("finetune_fw" "finetune_lora" "HF_finetune_lora")
+fi
+
+# Add tasks based on the model
+if [[ "$model" == "Llama-3.3-70B" ]]; then
+  tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
 fi
 
 # Flux does not require datatype or sequence length
@@ -76,7 +81,7 @@ fi
 echo "Model: $model"
 # Loop through all combinations
 for task in "${tasks[@]}"; do
-  if [[ "$task" == "finetune_fw" || "$task" == "finetune_lora" || "$task" == "HF_finetune_lora" ]]; then
+  if [[ "$task" == "finetune_fw" || "$task" == "finetune_lora" || "$task" == "finetune_qlora" || "$task" == "HF_finetune_lora" ]]; then
     datatypes=("BF16")
     sequence_lengths=("8192")
   fi

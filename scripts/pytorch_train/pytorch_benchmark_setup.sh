@@ -41,7 +41,6 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 echo "Model repo: $MODEL_NAME"
-echo "Build status: $BUILD"
 
 export HF_HOME=/workspace/huggingface
 
@@ -57,18 +56,18 @@ if [ "$MODEL_NAME" == "Llama-3.1-70B" ]; then
           --local-dir ./models/Llama-3.1-70B-Instruct \
           --exclude 'original/*.pth'
   python dataset.py
-  ls $TORCHTUNE_DIR
+fi
 
-  # Dependency for peft
-  HF_PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
-  echo "PEFT directory path: $HF_PEFT_DIR"
-  cd $HF_PEFT_DIR
-  # huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-  # huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
-  #         --local-dir ./models/Llama-3.1-70B-Instruct \
-  #         --exclude 'original/*.pth'
-  ls $HF_PEFT_DIR
-
+if [ "$MODEL_NAME" == "Llama-3.3-70B" ]; then
+  echo "Building torchtune dependencies for $MODEL_NAME"
+  TORCHTUNE_DIR="$(pwd)/torchtune"
+  echo "Torchtune directory path: $TORCHTUNE_DIR"
+  cd $TORCHTUNE_DIR
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+  huggingface-cli download meta-llama/Llama-3.3-70B-Instruct \
+          --local-dir ./models/Llama-3.3-70B-Instruct \
+          --exclude 'original/*.pth'
+  python dataset.py
 fi
 
 # Dependency for Llama 3.1 (torchtitan)
@@ -89,9 +88,36 @@ if [ "$MODEL_NAME" == "Flux" ]; then
   export HIP_FORCE_DEV_KERNARG=1
   export TORCH_NCCL_HIGH_PRIORITY=0
   export GPU_MAX_HW_QUEUES=8
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   make download_assets
-  if [ $? -ne 0 ]; then
-      # Except block (handle the error)
-      make download assets # additional command to resolve huggingface download issue
-  fi
+fi
+
+if [[ -z "$MODEL_NAME" ]]; then
+  echo "Building dependencies for all models"
+  TORCHTUNE_DIR="$(pwd)/torchtune"
+  cd $TORCHTUNE_DIR
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+  huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
+          --local-dir ./models/Llama-3.1-70B-Instruct \
+          --exclude 'original/*.pth'
+
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+  huggingface-cli download meta-llama/Llama-3.3-70B-Instruct \
+          --local-dir ./models/Llama-3.3-70B-Instruct \
+          --exclude 'original/*.pth'
+  python dataset.py
+
+  cd /workspace/torchtitan
+  pip install -r requirements.txt
+
+  cd /workspace/FluxBenchmark
+  pip3 install --no-cache-dir --upgrade pip packaging
+  pip3 install --no-cache-dir -r requirements.txt
+  export ROCBLAS_USE_HIPBLASLT=1
+  export DISABLE_ADDMM_CUDA_LT=0
+  export HIP_FORCE_DEV_KERNARG=1
+  export TORCH_NCCL_HIGH_PRIORITY=0
+  export GPU_MAX_HW_QUEUES=8
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+  make download_assets
 fi

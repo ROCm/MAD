@@ -1,4 +1,9 @@
-# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+#!/bin/bash
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,13 +24,33 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-training:v25.5
-FROM $BASE_DOCKER
 
-USER root
-ENV WORKSPACE_DIR=/workspace
-RUN mkdir -p $WORKSPACE_DIR
-WORKDIR $WORKSPACE_DIR
+export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 
-# record configuration for posterity
-RUN pip3 list
+# Parse named arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+    	--model_repo) MODEL_REPO="$2"; shift ;;
+    	*) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
+echo "Model repo: $MODEL_REPO"
+
+if [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-8b" ]]; then
+  model="Llama-3.1-8B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-70b" ]]; then
+  model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.3-70b" ]]; then
+  model="Llama-3.3-70B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-7b" ]]; then
+  model="Llama-2-7B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-70b" ]]; then
+  model="Llama-2-70B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_deepseek-v3-lite" ]]; then
+  model="DeepSeek-V3-lite"
+fi
+
+./jax-maxtext_benchmark_setup.sh -m $model
+./jax-maxtext_benchmark_report.sh -m $model
