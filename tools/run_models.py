@@ -314,6 +314,7 @@ def run_model(
         "MAD_MODEL_NAME": model_name,
         "MAD_GPU_VENDOR": get_gpu_vendor(),
         "MAD_SYSTEM_NGPUS": get_system_gpus(),
+        "MAD_RUNTIME_NGPUS": os.environ.get("MAD_RUNTIME_NGPUS"),
         "MAD_SYSTEM_GPU_ARCHITECTURE": get_system_gpu_arch()
     }
     mad_secrets = {}
