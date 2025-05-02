@@ -53,7 +53,7 @@ By default, the `pyt_mpt30b_training` model already includes `--tunableop off` i
 
 ### Dockerfile Contents
 The Dockerfile is built with the following guidelines:
-- **Public Base Docker Image:** Utilizes an open base image : rocm/vllm:rocm6.3.1_mi300_ubuntu22.04_py3.12_vllm_0.6.6
+- **Public Base Docker Image:** Utilizes an open base image : rocm/pytorch-training:v25.5
 - **Public GitHub Repositories:** Integrates code from public sources (e.g., the flash-attetion and llm-foundry repository).
 - **Publicly Accessible Packages/Utilities:** All dependencies are installed from public registries.
 
