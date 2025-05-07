@@ -119,3 +119,24 @@ elif args.mode == "throughput":
                 writer.writerow(model_details)
             except csv.Error as e:
                 sys.exit('file {}: {}'.format(args.input_json, e))
+
+elif args.mode == "accuracy":
+    with open(args.input_json, newline='') as inpf:
+        header_write = 0 if os.path.exists(args.output_csv) else 1
+        with open(args.output_csv,'a+',newline='') as outf:
+            writer = csv.writer(outf, delimiter=',')
+            if header_write:
+                writer.writerow(['model', 'ppl', 'tp', 'dtype']) if header_write else None
+
+            # workaround to vllm's dirty json output from multi-gpu cases
+            dirty_json = inpf.read()
+            dirty_list = dirty_json.replace(",","").replace(":","").replace("\"","").split()
+            ppl = float(extract_val(dirty_list, "ppl"))
+            try:
+                model_details = args.model                            ,\
+                                str(ppl) ,\
+                                args.tp                               ,\
+                                args.dtype
+                writer.writerow(model_details)
+            except csv.Error as e:
+                sys.exit('file {}: {}'.format(args.input_json, e))

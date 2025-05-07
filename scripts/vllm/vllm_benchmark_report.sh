@@ -83,6 +83,7 @@ report_dir="reports_${datatype}_${tag}"
 report_summary_dir="${report_dir}/summary"
 tool_latency="/app/vllm/benchmarks/benchmark_latency.py"
 tool_throughput="/app/vllm/benchmarks/benchmark_throughput.py"
+tool_accuracy="/app/vllm/benchmarks/P3L.py"
 tool_report="vllm_benchmark_report.py"
 n_warm=3
 n_itr=5
@@ -156,11 +157,24 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
         done < <(tail -n +2 config.csv)
     done
 fi
+# model_name
+# tp
+if [ "$scenario" == "accuracy" ] || [ "$scenario" == "all" ]; then
+    echo "[INFO] ACCURACY(P3L)"
+    mode="accuracy"
+    outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+    outjson=${report_dir}/${model_name}_${mode}_${datatype}.json
+
+    python3 $tool_accuracy --model $model --tensor-parallel-size $tp --output-json $outjson
+    python3 $tool_report --mode $mode --model $model_name --tp $tp --input-json $outjson --output-csv $outcsv --dtype $datatype
+
+fi
 
 echo "Generate report of multiple results"
 tool_parser="parse_csv.py"
 latency_summary_csv=${report_summary_dir}/${model_name}_latency_report.csv
 throughput_summary_csv=${report_summary_dir}/${model_name}_throughput_report.csv
-python3 $tool_parser --file_latency $latency_summary_csv --file_throughput $throughput_summary_csv
+accuracy_summary_csv=${report_summary_dir}/${model_name}_accuracy_report.csv
+python3 $tool_parser --file_latency $latency_summary_csv --file_throughput $throughput_summary_csv --file_accuracy $accuracy_summary_csv
 
 mv perf_${model_name}.csv ../
