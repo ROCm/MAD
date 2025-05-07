@@ -60,7 +60,7 @@ RUN apt update && apt install -y \
 
 # add sshpass, sshfs for downloading from mlse-nas
 RUN apt-get install -y sshpass sshfs
-RUN apt-get install -y netcat
+RUN apt-get install -y netcat-traditional
 
 # add locale en_US.UTF-8
 RUN apt-get install -y locales
