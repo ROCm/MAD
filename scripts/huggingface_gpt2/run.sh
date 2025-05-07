@@ -60,7 +60,6 @@ do
         esac
 done
 
-MAD_RUNTIME_NGPUS=${MAD_SYSTEM_NGPUS}
 # Add model-caching to resolve the hf multi processing error
 huggingface-cli download gpt2
 
