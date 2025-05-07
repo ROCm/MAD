@@ -32,9 +32,6 @@ ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 
-# numpy is reinstalled because of pandas compatibility issues, remove the lines below once base image moves to numpy>1.20.3
-RUN pip3 install -U numpy
-RUN pip3 install -U scipy
 # Install huggingface transformers
 RUN cd /workspace && git clone https://github.com/ROCm/transformers transformers &&\
     cd transformers &&\
