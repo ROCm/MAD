@@ -25,7 +25,8 @@
 | ------------ | --------------------------------------- | ------------------------------------------------ |
 | $test_option | latency                                 | Measure decoding token latency                   |
 |              | throughput                              | Measure token generation throughput              |
-|              | all                                     | Measure both throughput and latency              |
+|              | serving                                 | Measure online serving throughput                |
+|              | all                                     | Measure all                                      |
 | $model_repo  | meta-llama/Llama-3.1-8B-Instruct   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
 | (float16)    | meta-llama/Llama-3.1-70B-Instruct  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                            |
 |              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |
@@ -89,3 +90,17 @@ Here are some examples and the test results:
 >Throughput is calculated as:
 >-   `throughput_tot = requests * (input lengths + output lengths) / elapsed_time`
 >-   `throughput_gen = requests * output lengths / elapsed_time`
+
+- Benchmark example - serving
+
+  Use this command to benchmark the online serving throughput of the Llama 3.1 70B model on 8 GPUs with the float16 and float8 data type.
+
+  ```sh
+  ./vllm_benchmark_report.sh -s serving -m meta-llama/Llama-3.1-70B-Instruct -g 8 -d float16
+  ./vllm_benchmark_report.sh -s serving -m amd/Llama-3.1-70B-Instruct-FP8-KV -g 8 -d float8
+  ```
+
+  The serving reports are available at:
+
+  - `./reports_float16/summary/Llama-3.1-70B-Instruct_serving_report.csv`
+  - `./reports_float8/summary/Llama-3.1-70B-Instruct-FP8-KV_serving_report.csv`

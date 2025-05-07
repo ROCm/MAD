@@ -37,25 +37,9 @@ export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model_repo) MODEL_NAME="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
         --test_option) TEST_OPTION="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
         --num_gpu) N_GPUS="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
         --datatype) DTYPE="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
         --tunableop) TUNABLEOP="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac

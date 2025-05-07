@@ -31,7 +31,7 @@ import os
 parser = argparse.ArgumentParser(description='Convert vllm csv output format to DLM csv output format')
 parser.add_argument("--mode",
                         type=str,
-                        help="latency or throughput")
+                        help="latency or throughput or serving")
 parser.add_argument("--model",
                         type=str,
                         help="model name")
@@ -43,13 +43,16 @@ parser.add_argument("--batch-size",
                         help="batch size")
 parser.add_argument("--num-prompts",
                         type=str,
-                        help="input requests")
+                        help="num prompts")
 parser.add_argument("--input-len",
                         type=str,
                         help="input seq length")
 parser.add_argument("--output-len",
                         type=str,
                         help="output seq length")
+parser.add_argument("--max-concurrency",
+                        type=str,
+                        help="max concurrency (serving only)")
 parser.add_argument("--dtype",
                         type=str,
                         help="data_type")
@@ -72,7 +75,7 @@ if args.mode == "latency":
         with open(args.output_csv,'a+',newline='') as outf:
             writer = csv.writer(outf, delimiter=',')
             if header_write:
-                writer.writerow(['model', 'latency (ms)', 'latency_per_tkn (ms)','tp', 'batch_size', 'input_len', 'output_len', 'dtype']) if header_write else None
+                writer.writerow(['model', 'mode', 'tp', 'input_len', 'output_len', 'dtype', 'batch_size', 'latency (ms)', 'latency_per_tkn (ms)']) if header_write else None
             
             # workaround to vllm's dirty json output from multi-gpu cases
             dirty_json = inpf.read()
@@ -81,13 +84,14 @@ if args.mode == "latency":
             try:
                 latency_per_tkn = str(avg_latency / int(args.output_len) * 1000)
                 model_details = args.model                       ,\
-                                str(avg_latency * 1000),\
-                                latency_per_tkn                  ,\
+                                args.mode                        ,\
                                 args.tp                          ,\
-                                args.batch_size                  ,\
                                 args.input_len                   ,\
                                 args.output_len                  ,\
-                                args.dtype
+                                args.dtype                       ,\
+                                args.batch_size                  ,\
+                                str(avg_latency * 1000)          ,\
+                                latency_per_tkn
                 writer.writerow(model_details)
             except csv.Error as e:
                 sys.exit('file {}: {}'.format(args.input_json, e))
@@ -98,7 +102,7 @@ elif args.mode == "throughput":
         with open(args.output_csv,'a+',newline='') as outf:
             writer = csv.writer(outf, delimiter=',')
             if header_write:
-                writer.writerow(['model', 'throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'tp', 'requests', 'input_len', 'output_len', 'dtype']) if header_write else None
+                writer.writerow(['model', 'mode', 'tp', 'input_len', 'output_len', 'dtype', 'num_prompts', 'throughput_tot (tok/sec)', 'throughput_gen (tok/sec)']) if header_write else None
 
             # workaround to vllm's dirty json output from multi-gpu cases
             dirty_json = inpf.read()
@@ -108,14 +112,52 @@ elif args.mode == "throughput":
 
             try:
                 gen_throughput = str(int(int(args.num_prompts) * int(args.output_len) / elapsed_time))
-                model_details = args.model                            ,\
-                                str(int(tokens_per_second)) ,\
-                                gen_throughput                        ,\
-                                args.tp                               ,\
-                                args.num_prompts                      ,\
-                                args.input_len                        ,\
-                                args.output_len                       ,\
-                                args.dtype
+                model_details = args.model                       ,\
+                                args.mode                        ,\
+                                args.tp                          ,\
+                                args.input_len                   ,\
+                                args.output_len                  ,\
+                                args.dtype                       ,\
+                                args.num_prompts                 ,\
+                                str(int(tokens_per_second))      ,\
+                                gen_throughput
+                writer.writerow(model_details)
+            except csv.Error as e:
+                sys.exit('file {}: {}'.format(args.input_json, e))
+
+elif args.mode == "serving":
+    with open(args.input_json, newline='') as inpf:
+        header_write = 0 if os.path.exists(args.output_csv) else 1
+        with open(args.output_csv,'a+',newline='') as outf:
+            writer = csv.writer(outf, delimiter=',')
+            if header_write:
+                writer.writerow(['model', 'mode', 'tp', 'input_len', 'output_len', 'dtype', 'num_prompts', 'max_concurrency', 'throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'median_ttft (ms)', 'median_tpot (ms)', 'median_itl (ms)', 'median_e2el (ms)']) if header_write else None
+
+            # workaround to vllm's dirty json output from multi-gpu cases
+            dirty_json = inpf.read()
+            dirty_list = dirty_json.replace(",","").replace(":","").replace("\"","").split()
+            throughput_tot = float(extract_val(dirty_list, "total_token_throughput"))
+            throughput_gen = float(extract_val(dirty_list, "output_throughput"))
+            median_ttft = float(extract_val(dirty_list, "median_ttft_ms"))
+            median_tpot = float(extract_val(dirty_list, "median_tpot_ms"))
+            median_itl = float(extract_val(dirty_list, "median_itl_ms"))
+            median_e2el = float(extract_val(dirty_list, "median_e2el_ms"))
+
+            try:
+                model_details = args.model                       ,\
+                                args.mode                        ,\
+                                args.tp                          ,\
+                                args.input_len                   ,\
+                                args.output_len                  ,\
+                                args.dtype                       ,\
+                                args.num_prompts                 ,\
+                                args.max_concurrency             ,\
+                                str(int(throughput_tot))         ,\
+                                str(int(throughput_gen))         ,\
+                                str(median_ttft)                 ,\
+                                str(median_tpot)                 ,\
+                                str(median_itl)                  ,\
+                                str(median_e2el)
                 writer.writerow(model_details)
             except csv.Error as e:
                 sys.exit('file {}: {}'.format(args.input_json, e))
