@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2024 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,9 +32,6 @@ ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 
-# numpy is reinstalled because of pandas compatibility issues, remove the lines below once base image moves to numpy>1.20.3
-RUN pip3 install -U numpy
-RUN pip3 install -U scipy
 # Install huggingface transformers
 RUN cd /workspace && git clone https://github.com/ROCm/transformers transformers &&\
     cd transformers &&\
@@ -60,7 +57,7 @@ RUN apt update && apt install -y \
 
 # add sshpass, sshfs for downloading from mlse-nas
 RUN apt-get install -y sshpass sshfs
-RUN apt-get install -y netcat
+RUN apt-get install -y netcat-traditional
 
 # add locale en_US.UTF-8
 RUN apt-get install -y locales
