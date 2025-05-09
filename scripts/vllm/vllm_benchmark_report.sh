@@ -77,12 +77,19 @@ OutLatency="1 128"
 # throughput conditions
 In_Out=("128:128" "2048:128" "128:2048" "2048:2048")
 
+# serving conditions
+NumPrompts="252"
+MaxConcurrency="128"
+InServing="128 2048"
+OutServing="128 2048"
+
 tag="vllm_rocm6.3.1"
 
 report_dir="reports_${datatype}_${tag}"
 report_summary_dir="${report_dir}/summary"
 tool_latency="/app/vllm/benchmarks/benchmark_latency.py"
 tool_throughput="/app/vllm/benchmarks/benchmark_throughput.py"
+tool_serving="/app/vllm/benchmarks/benchmark_serving.py"
 tool_report="vllm_benchmark_report.py"
 n_warm=3
 n_itr=5
@@ -128,39 +135,71 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
 	    model_cfg_org_name=(${model_cfg//// })
 	    model_cfg_name=${model_cfg_org_name[1]}
             if [ "$model_name" == "$model_cfg_name" ]; then
-                if [ "$input_len" == "$inp" ] && [ "$output_len" == "$out" ];then
-		    outjson=${report_dir}/${model_name}_${mode}_req${num_prompts}_in${inp}_out${out}_${datatype}.json
-		    outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-		    if [ "$max_seq_len_to_capture" == "NA" ]; then
-			OPTION_THROUGHPUT=" --num-prompts $num_prompts \
-			    --max-num-seqs            $max_num_seqs            \
-			    --gpu-memory-utilization  $gpu_memory_utilization  \
-			    --num-scheduler-steps     $num_scheduler_steps     \
-			    --enable-chunked-prefill $enable_chunked_prefill "
-			else
-			OPTION_THROUGHPUT=" --num-prompts $num_prompts \
-			    --max-num-seqs            $max_num_seqs            \
-			    --max-seq-len-to-capture  $max_seq_len_to_capture  \
-			    --max-num-batched-tokens  $max_num_batched_tokens  \
-			    --max-model-len           $max_model_len           \
-			    --gpu-memory-utilization  $gpu_memory_utilization  \
-			    --num-scheduler-steps     $num_scheduler_steps     \
-			    --enable-chunked-prefill $enable_chunked_prefill "
-		    fi
-		    echo "[RUNNING] MODEL :" $model $mode $num_prompts $tp $inp $out
-		    echo "[RUNNING] MODEL with OPTION: " $OPTION_THROUGHPUT
-		    python3 $tool_throughput --model $model -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_THROUGHPUT
-		    python3 $tool_report --mode $mode --model $model_name --num-prompts $num_prompts --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
-		fi
+                if [ "$input_len" == "$inp" ] && [ "$output_len" == "$out" ]; then
+                    outjson=${report_dir}/${model_name}_${mode}_req${num_prompts}_in${inp}_out${out}_${datatype}.json
+                    outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+                    if [ "$max_seq_len_to_capture" == "NA" ]; then
+                        OPTION_THROUGHPUT=" --num-prompts $num_prompts \
+                            --max-num-seqs            $max_num_seqs            \
+                            --gpu-memory-utilization  $gpu_memory_utilization  \
+                            --num-scheduler-steps     $num_scheduler_steps     \
+                            --enable-chunked-prefill $enable_chunked_prefill "
+                    else
+                        OPTION_THROUGHPUT=" --num-prompts $num_prompts \
+                            --max-num-seqs            $max_num_seqs            \
+                            --max-seq-len-to-capture  $max_seq_len_to_capture  \
+                            --max-num-batched-tokens  $max_num_batched_tokens  \
+                            --max-model-len           $max_model_len           \
+                            --gpu-memory-utilization  $gpu_memory_utilization  \
+                            --num-scheduler-steps     $num_scheduler_steps     \
+                            --enable-chunked-prefill $enable_chunked_prefill "
+                    fi
+                    echo "[RUNNING] MODEL :" $model $mode $num_prompts $tp $inp $out
+                    echo "[RUNNING] MODEL with OPTION: " $OPTION_THROUGHPUT
+                    python3 $tool_throughput --model $model -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $OPTION_THROUGHPUT
+                    python3 $tool_report --mode $mode --model $model_name --num-prompts $num_prompts --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
+                fi
             fi
         done < <(tail -n +2 config.csv)
     done
+fi
+
+if [ "$scenario" == "serving" ] || [ "$scenario" == "all" ]; then
+    echo "[INFO] SERVING"
+    mode="serving"
+    # start server and send it to background using {command} &
+    vllm serve $model --swap-space 16 --disable-log-requests --trust-remote-code --dtype $datatype -tp $tp $DIST_BE 1>&1 2>&2 &
+    # get the server pid
+    server_pid=$!
+    echo "vllm server pid: $server_pid"
+    # wait for the server to start
+    until curl http://localhost:8000/v1/models > /dev/null; do sleep 5; done
+    # run serving benchmark
+    for np in $NumPrompts;
+    do
+        for inp in $InServing;
+        do
+            for out in $OutServing;
+            do
+                for mc in $MaxConcurrency;
+                do
+                    outjson=${report_dir}/${model_name}_${mode}_req${np}_in${inp}_out${out}_mc${mc}_${datatype}.json
+                    outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
+                    python3 $tool_serving --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --random-input-len $inp --random-output-len $out --num-prompts $np --max-concurrency $mc --save-result --result-filename $outjson
+                    python3 $tool_report --mode $mode --model $model_name --num-prompts $np --tp $tp --input-len $inp --output-len $out --max-concurrency $mc --input-json $outjson --output-csv $outcsv --dtype $datatype
+                done
+            done
+        done
+    done
+    # stop server
+    kill $server_pid && wait $server_pid
 fi
 
 echo "Generate report of multiple results"
 tool_parser="parse_csv.py"
 latency_summary_csv=${report_summary_dir}/${model_name}_latency_report.csv
 throughput_summary_csv=${report_summary_dir}/${model_name}_throughput_report.csv
-python3 $tool_parser --file_latency $latency_summary_csv --file_throughput $throughput_summary_csv
+serving_summary_csv=${report_summary_dir}/${model_name}_serving_report.csv
+python3 $tool_parser --file_latency $latency_summary_csv --file_throughput $throughput_summary_csv --file_serving $serving_summary_csv
 
 mv perf_${model_name}.csv ../
