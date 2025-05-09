@@ -44,7 +44,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-3.1-8B-Instruct --test_option latency,throughput --num_gpu 1 --datatype float16 --tunableop off"
+     "--model_repo meta-llama/Llama-3.1-8B-Instruct --test_option latency,throughput,serving --num_gpu 1 --datatype float16 --tunableop off"
   },
   {
     "name": "pyt_vllm_llama-3.1-70b",
@@ -62,7 +62,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-3.1-70B-Instruct --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop off"
+     "--model_repo meta-llama/Llama-3.1-70B-Instruct --test_option latency,throughput,serving --num_gpu 8 --datatype float16 --tunableop off"
   },
   {
     "name": "pyt_vllm_llama-3.1-405b",
