@@ -25,6 +25,19 @@
 #################################################################################
 
 #!/bin/bash
+
+# Inject patched CLIP-benchmark metrics
+
+PATCH_DIR="$(dirname "${BASH_SOURCE[0]}")"
+TARGET_DIR="/workspace/CLIP_benchmark/clip_benchmark/metrics"
+
+mkdir -p "${TARGET_DIR}"
+cp -f "${PATCH_DIR}/zeroshot_retrieval.py"      "${TARGET_DIR}/zeroshot_retrieval.py"
+cp -f "${PATCH_DIR}/zeroshot_classification.py" "${TARGET_DIR}/zeroshot_classification.py"
+
+# (optional) confirm for debugging
+echo "[run.sh] Patched metrics copied to ${TARGET_DIR}"
+
 set -ex 
 
 export GPU_MAX_HW_QUEUES=4
