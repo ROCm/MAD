@@ -57,9 +57,3 @@ RUN git clone https://github.com/LAION-AI/CLIP_benchmark.git CLIP_benchmark &&\
     cd CLIP_benchmark &&\
     pip install -e . &&\
     cd ..
-
-# Replace the original zeroshot_retrieval.py with this version
-COPY pyt_clip_inference/zeroshot_retrieval.py CLIP_benchmark/clip_benchmark/metrics/zeroshot_retrieval.py
-
-# Replace the original zeroshot_classification.py with this version
-COPY pyt_clip_inference/zeroshot_classification.py CLIP_benchmark/clip_benchmark/metrics/zeroshot_classification.py
