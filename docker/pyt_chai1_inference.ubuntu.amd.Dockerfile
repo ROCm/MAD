@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch:rocm6.2.3_ubuntu22.04_py3.10_pytorch_release_2.3.0_triton_llvm_reg_issue
+ARG BASE_DOCKER=rocm/pytorch:latest
 FROM $BASE_DOCKER
 USER root
 ENV WORKSPACE_DIR=/workspace
@@ -46,14 +46,11 @@ RUN pip3 install -U scipy
 RUN pip install pip-tools
 
 # ROCm gpg key
-RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
 RUN apt update && apt install -y \
     unzip \
     jq
 
-# add sshpass, sshfs for downloading from mlse-nas
-RUN apt-get install -y sshpass sshfs
-RUN apt-get install -y netcat
 
 # add locale en_US.UTF-8
 RUN apt-get install -y locales
