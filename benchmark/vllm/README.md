@@ -14,9 +14,9 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.3.1
--   ✅ vLLM 0.8.3
--   ✅ PyTorch 2.7.0 (dev nightly)
--   ✅ hipBLASLt 0.13
+-   ✅ vLLM 0.8.5
+-   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
+-   ✅ hipBLASLt 0.15
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
@@ -56,7 +56,7 @@ For the experimental features and known issues concerning ROCm optimization effo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:instinct_main
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 ```
 
 ### MAD-integrated benchmarking
@@ -121,9 +121,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:instinct_main
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:instinct_main
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -302,12 +302,10 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
--   The vLLM version number was incremented from 0.7.3 to 0.8.3.
+-   The vLLM version number was incremented from 0.8.3 to 0.8.5.
 
--   Improved fp8 throughput performance with HipblasLT 0.13
+-   HipblasLT version updated to 0.15
 
--   The float8 data type benchmark test was added to include the following models: 
-Llama 3.1 8B Instruct
 
 ## Support 
 ----------

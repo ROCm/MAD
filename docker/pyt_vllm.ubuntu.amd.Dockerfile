@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2024 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/vllm:instinct_main
+ARG BASE_DOCKER=rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 FROM $BASE_DOCKER
 
 USER root
