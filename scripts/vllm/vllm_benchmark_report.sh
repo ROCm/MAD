@@ -185,7 +185,7 @@ if [ "$scenario" == "serving" ] || [ "$scenario" == "all" ]; then
                 do
                     outjson=${report_dir}/${model_name}_${mode}_req${np}_in${inp}_out${out}_mc${mc}_${datatype}.json
                     outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
-                    python3 $tool_serving --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --random-input-len $inp --random-output-len $out --num-prompts $np --max-concurrency $mc --save-result --result-filename $outjson
+                    python3 $tool_serving --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --random-input-len $inp --random-output-len $out --num-prompts $np --max-concurrency $mc --ignore-eos --save-result --result-filename $outjson
                     python3 $tool_report --mode $mode --model $model_name --num-prompts $np --tp $tp --input-len $inp --output-len $out --max-concurrency $mc --input-json $outjson --output-csv $outcsv --dtype $datatype
                 done
             done
