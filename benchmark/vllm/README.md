@@ -56,7 +56,7 @@ For the experimental features and known issues concerning ROCm optimization effo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:latest
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 ```
 
 ### MAD-integrated benchmarking
@@ -121,9 +121,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:latest
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:latest
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
