@@ -51,6 +51,17 @@ cat /proc/sys/kernel/numa_balancing
 
 For the experimental features and known issues concerning ROCm optimization efforts on vLLM, see the developer's guide at [ROCm/vLLM](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
+To change the the latency batch size, input sequence length (ISL), and output sequence length (OSL), you can modify at [vllm benchark script](../../scripts/vllm/vllm_benchmark_report.sh#L73)
+
+-   Default batch size: 1, 2, 4, 8, 16, 32, 64, 128, 256
+-   Default ISL: 128, 2048
+-   Default OSL: 1, 128
+
+Throughput input sequence length (ISL) and output sequence length (OSL) can be changed at [vllm benchark script](../../scripts/vllm/vllm_benchmark_report.sh#L78)
+*
+
+-   Default ISL/OSL: 128:128, 2048:128, 128:2048, 2048:2048
+
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
