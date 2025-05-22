@@ -27,6 +27,7 @@
 import pandas as pd
 import argparse
 import csv
+import os
 import re
 
 # parse arguments
@@ -61,7 +62,9 @@ def find_match(file, search_string):
     return match
 
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
-        args.model == "Llama-2-7B" or args.model == "Llama-2-70B":
+        args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
+        args.model == "DeepSeek-V3-proxy" or args.model == "Llama-3.3-70B" or \
+        args.model == "Mixtral-8x7B" or args.model == "Mixtral-8x22B-proxy":
     tok_per_s_per_gpu = find_match(input_file, "tokens/GPU/s:")
     TFLOPS_per_gpu = find_match(input_file, "throughput per GPU:")
     data = [
@@ -74,10 +77,15 @@ elif args.model == "DeepSeek-V2-lite":
         {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
     ]
 
-with open(output_file, mode='w', newline='') as file:
+if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
+    mode = 'w'  # Write if file doesn't exist or is empty
+else:
+    mode = 'a'  # Append if file exists and is not empty
+with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
     writer = csv.DictWriter(file, fieldnames=['model','performance','metric'])
-    writer.writeheader()
+    if mode == 'w':
+        writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")

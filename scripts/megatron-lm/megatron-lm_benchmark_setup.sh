@@ -1,4 +1,4 @@
-# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+#!/bin/bash
 ###############################################################################
 #
 # MIT License
@@ -24,13 +24,30 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/megatron-lm:v25.5_py312
-FROM $BASE_DOCKER
+export HF_HOME=/workspace/huggingface
 
-USER root
-ENV WORKSPACE_DIR=/workspace
-RUN mkdir -p $WORKSPACE_DIR
-WORKDIR $WORKSPACE_DIR
+# Parse named arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -m) MODEL_NAME="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
 
-# record configuration for posterity
-RUN pip3 list
+echo "[INFO] Setup script starting in directory $(pwd)"
+
+if [ "$MODEL_NAME" == "Mixtral-8x7B" ]; then
+    mkdir -p /tokenizer
+    cd /tokenizer
+    # download tokenizer.model from https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/blob/main/tokenizer.model
+    wget --header="Authorization: Bearer $HF_TOKEN" -O ./tokenizer.model https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/resolve/main/tokenizer.model
+    ls /tokenizer/tokenizer.model
+
+elif [ "$MODEL_NAME" == "Mixtral-8x22B-proxy" ]; then
+    mkdir -p /tokenizer
+    cd /tokenizer
+    # download tokenizer.model from https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/blob/main/tokenizer.model
+    wget --header="Authorization: Bearer $HF_TOKEN" -O ./tokenizer.model https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/resolve/main/tokenizer.model
+    ls /tokenizer/tokenizer.model
+fi

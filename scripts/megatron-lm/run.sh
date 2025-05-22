@@ -36,18 +36,30 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-echo "Model repo: $MODEL_REPO"
-
 if [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.3-70b" ]]; then
+  model="Llama-3.3-70B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-2-7b" ]]; then
   model="Llama-2-7B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-2-70b" ]]; then
   model="Llama-2-70B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_deepseek-v2-lite-16b" ]]; then
   model="DeepSeek-V2-lite"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_deepseek-v3-proxy" ]]; then
+  model="DeepSeek-V3-proxy"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_mixtral-8x7b" ]]; then
+  model="Mixtral-8x7B"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_mixtral-8x22b-proxy" ]]; then
+  model="Mixtral-8x22B-proxy"
+fi
+
+if [[ "$model" == "Mixtral-8x7B" || "$model" == "Mixtral-8x22B-proxy" ]]; then
+  # Run pytorch setup script
+  echo "Running setup script to download tokenizers"
+  bash ./megatron-lm_benchmark_setup.sh -m $model
 fi
 
 datatypes=("BF16")
@@ -55,7 +67,6 @@ if [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" ]]; then
   datatypes=("BF16" "FP8")
 fi
 
-echo "Model: $model"
 # Loop through all combinations
 for datatype in "${datatypes[@]}"; do
   echo "Running: $model - $datatype"
