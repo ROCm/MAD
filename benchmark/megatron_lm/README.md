@@ -8,13 +8,14 @@ For ease of use, AMD provides a ready-to-use Docker image for MI300X accelerator
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.3.0              |
-| Python            | 3.10               |
-| PyTorch           | 2.7.0a0+git637433   |
-| Transformer Engine | 1.11               |
+| ROCm               | 6.3.4              |
+| Python            | 3.10, 3.12          |
+| PyTorch           | 2.8.0a0+gite2f9759   |
+| Transformer Engine | 1.13.0+bb061ade      |
 | Flash Attention   | 3.0.0               |
-| hipBLASLt         | git258a2162         |
-| Triton            | 3.1                 |
+| hipBLASLt         | 0.13.0-4f1f8bf6         |
+| Triton            | 3.3.0                 |
+| RCCL              | 2.22.3.60400      |
 
 
 ## Supported features and models
@@ -37,8 +38,11 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Llama 2 7B
 * Llama 2 70B
 * Llama 3/3.1 8B
-* Llama 3/3.1 70B
+* Llama 3/3.1/3.3 70B
 * DeepSeek-V2-lite
+* DeepSeek-V3
+* Mixtral 8x7B
+* Mixtral 8x22B
 
 ## System validation steps
 If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html) to set up your system before starting training.
@@ -69,16 +73,18 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.4
+   docker pull rocm/megatron-lm:v25.5_py312
    ```
+   Alternatively, `rocm/megatron-lm:v25.5_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
-2. **Launch Docker Container**
+3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.4
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128GG --name megatron_training_env rocm/megatron-lm:v25.5_py312
    ```
+   Alternatively, `rocm/megatron-lm:v25.5_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
-3. **Execute the training_env container (optional if no already in the container)**
+5. **Execute the training_env container (optional if no already in the container)**
    ```bash
     docker start megatron_training_env
     docker exec -it megatron_training_env bash
@@ -112,30 +118,94 @@ You can use either mock data or real data for training.
   MOCK_DATA=1
   ```
 - **Real Data:**
-  Update the `DATA_PATH` to the location where your dataset is stored:
+  Set `MOCK_DATA` to `0` and update the `DATA_PATH` or `DATA_DIR` variable as described for each model below.
   ```bash
   MOCK_DATA=0
-  DATA_PATH="/data/bookcorpus_text_sentence" # Change to where your dataset is stored
   ```
-- **Downloading the dataset:**
-  Set argument `DATASET` to the dataset you would like to use. Currently, two datasets are supported `DATASET=wiki` and `DATASET=bookcorpus`. Use the following command to download the dataset:
+- **Downloading the dataset for Llama:**
+  Set argument `DATASET` to the dataset you would like to use. Currently, three datasets are supported `DATASET=wiki`, `DATASET=fineweb`, and `DATASET=bookcorpus`. Use the following command to download the dataset:
   ```bash
-  DATASET=wiki bash examples/llama/prepare_dataset.sh #for wiki-en dataset
-  DATASET=bookcorpus bash examples/llama/prepare_dataset.sh #for bookcorpus dataset
-
+  DATASET=wiki TOKENIZER_MODEL=NousResearch/Llama-2-7b-chat-hf bash examples/llama/prepare_dataset.sh #for wiki-en dataset
+  DATASET=bookcorpus TOKENIZER_MODEL=NousResearch/Llama-2-7b-chat-hf bash examples/llama/prepare_dataset.sh #for bookcorpus dataset
+  ```
+  where `TOKENIZER_MODEL` can be any accessible HuggingFace tokenizer. Remember to either pre-download the tokenizer or setup HuggingFace access otherwise when needed.
+  
+  Note: when training you need to set `DATA_PATH` to the specific file name prefix that is pointing to .bin or .idx file as shown below
+  ```bash
+  DATA_PATH="data/bookcorpus_text_sentence" # Change to where your dataset is stored.
+  ```
+- **Downloading the dataset for DeepSeekV2:**
+  ```bash
+  mkdir deepseek-datasets
+  cd deepseek-datasets
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/SlimPajama.json
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-train.json
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-valid.json
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/mmap_deepseekv2_datasets_text_document.bin
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/mmap_deepseekv2_datasets_text_document.idx
+  ```
+  Set `DATA_DIR` to `path-to/deepseek-datasets/` for training on real data.
+  
+- **Downloading the dataset for DeepSeekV3:**
+  ```bash
+  mkdir deepseek-datasets
+  cd deepseek-datasets
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/SlimPajama.json
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-train.json
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-valid.json
+  cd ..
+  bash tools/run_make_pretraining_dataset_megatron.sh deepseek-datasets/SlimPajama.json DeepSeekV3Tokenizer text deepseek-datasets deepseek-ai/DeepSeek-V3
+  ```
+  Set `DATA_DIR` to `path-to/deepseek-datasets/` for training on real data.
+  
+- **Downloading the dataset for Mixtral 8x7B and 8X22B:**
+  ```bash
+  mkdir -p mixtral-dataset
+  cd dataset
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/mistral-datasets/wudao_mistralbpe_content_document.bin
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/mistral-datasets/wudao_mistralbpe_content_document.idx
+  ```
+  Set `DATA_DIR` to `/path/to/mixtral-dataset` for training on real data.
+  
 ### 2.3 Tokenizer
-You can assign the path of existing tokenizer to the command line argument `TOKENIZER_MODEL`. If tokenizer is not found, it will be downloaded to the default tokenizer model path: `${DATA_DIR}/tokenizer_llamaN` (N=2 or 3).
+You can assign the path of existing tokenizer to the command line argument `TOKENIZER_MODEL`. If tokenizer is not found, it will be downloaded if publicly available. 
 
 - **For Llama2 Training:**
   Uses either the `Llama2Tokenizer` or `HuggingFaceTokenizer`(default).
 
-- **For Llama3 Training:**
+- **For Llama3.1 Training:**
   Use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
   ```bash
   TOKENIZER_MODEL=meta-llama/Llama-3.1-8B  # For Llama3
   ```
-
-  Otherwise, if you do not have Llama3.1 tokenizer locally, you need to set your personal HuggingFace access token `HF_TOKEN` in the script to download the tokenizer. To set the `HF_TOKEN` for Llama3.1 model, you first need to apply access to Llama3.1 model via this [link](https://huggingface.co/meta-llama/Llama-3.1-8B). After you are authorized, you are able to set your personal HuggingFace access token `HF_TOKEN` in your personal setting page and update the following variable in the script.
+- **For Llama3.3 Training:**
+  If you do not have Llama3.3 tokenizer locally, you need to use your personal HuggingFace access token `HF_TOKEN` to download the tokenizer via this [link](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct). After you are authorized, can use your personal HuggingFace access token `HF_TOKEN` to download tokenizer and set the variable `TOKENIZER_MODEL` to the tokenizer path.
+  ```bash
+  TOKENIZER_MODEL="meta-llama/Llama-3.3-70B-Instruct"
+  ```
+- **For DeepSeekV2-Lite:**
+  Use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
+  ```bash
+  TOKENIZER_MODEL=deepseek-ai/DeepSeek-V2-Lite  # For DeepSeekV2-Lite
+  ```
+- **For DeepSeekV3:**
+  Use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
+  ```bash
+  TOKENIZER_MODEL=deepseek-ai/DeepSeek-V3  # For DeepSeekV3
+  ```
+- **For Mixtral MoE:**
+  Download Mixtral Tokenizer
+  ```bash
+  mkdir tokenizer
+  cd tokenizer
+  export HF_TOKEN="hf_xxx" #set huggingface access token to be able to download tokenizer
+  wget --header="Authorization: Bearer $HF_TOKEN" -O ./tokenizer.model https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/resolve/main/tokenizer.model
+  cd ..
+  ```
+   Use the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
+  ```bash
+  TOKENIZER_MODEL=tokenizer/tokenizer.model
+  ```
 
 ### 2.4 Multi-node Training
 If you're running multi-node training, update the following environment variables on each node.They can also be passed as command line arguments.
@@ -178,7 +248,6 @@ If you're running multi-node training, update the following environment variable
 
 ### 3.1 Single Node Training
 To run the training on a single node, go to Megatron-LM folder, use the following command:
-
 - **Llama3.1-8B FP8:**
 ```bash
 TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
@@ -211,9 +280,46 @@ TEE_OUTPUT=1 MBS=3 BS=24 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=8192 MODEL_
 TEE_OUTPUT=1 MBS=7 BS=56 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=4096 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
 ```
 
+- **Llama3.3-70B BF16:**
+```bash
+TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh 
+```
 **Note:** 
    - It is suggested to use `TP=1` when FSDP is enabled, for higher throughput. And FSDP-v2 is not supported with pipeline parallelism, expert parallelism, MCore's distributed optimizer, gradient accumulation fusion and fp16.
-   - Currently, FSDP is only compatible with BF16 precision 
+   - Currently, FSDP is only compatible with BF16 precision
+
+Examples for MoE models with expert parallel:
+- **DeepSeekV2-Lite**
+```bash
+GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh
+```
+- **DeepSeekV3 3 layer proxy on Single Node**
+```bash
+FORCE_BANLANCE=true \
+RUN_ENV=cluster \
+MODEL_SIZE=671B \
+TRAIN_ITERS=50 \
+SEQ_LEN=4096 \
+NUM_LAYERS=3 \
+MICRO_BATCH_SIZE=1 GLOBAL_BATCH_SIZE=32 \
+PR=bf16 \
+TP=1 PP=1 ETP=1 EP=8 \
+GEMM_TUNING=1 \
+NVTE_CK_USES_BWD_V3=1 \
+USE_GROUPED_GEMM=true MOE_USE_LEGACY_GROUPED_GEMM=true \
+GPT_LAYER_IN_TE=true \
+bash examples/deepseek_v3/train_deepseekv3.sh
+```
+- **Mixtral 8x7B**
+```bash
+RECOMPUTE_NUM_LAYERS=0 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=none PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=4096 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x7B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
+```
+- **Mixtral 8x22B 4 layer proxy on Single Node**
+```bash
+RECOMPUTE_NUM_LAYERS=4 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=full NUM_LAYERS=4 PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
+```
+**Note:** 
+   - Mixtral 8x22B 4 layer proxy model has a known memory leak/ memory corruption issue. This does not impact the pre-training functionality or performance of the Mixtral 8x22B model.
 
 
 ### 3.2 Multi-node Training
@@ -227,6 +333,12 @@ To run training on multiple nodes, launch the Docker container on each node. Exa
 - **On the Worker Node1:**
   ```bash
   TEE_OUTPUT=1 MBS=2 BS=256 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8  MASTER_ADDR=IP_NODE0 NNODES=2 NODE_RANK=1 bash examples/llama/train_llama3.sh
+  ```
+- **DeepSeekV3 Multi-node Reference**
+
+  We provide an example scipt to enable training at scale under slurm environment. For example, to run the training on 16 nodes, one can use the following command
+  ```bash
+  sbatch examples/deepseek_v3/train_deepseek_v3_slurm.sh
   ```
 ---
 
@@ -267,105 +379,28 @@ To run training on multiple nodes, launch the Docker container on each node. Exa
 - **BS:**
   Global Batch size
 
-- **TP:**
+- **TP/TP_SIZE:**
   Tensor parallel (1, 2, 4, 8)
 
   Note `TP` is disabled with `FSDP`.
 
+- **EP/EP_SIZE:**
+  Expert parallel for MoE models
+  
 - **SEQ_LENGTH**:
   Sequence Length
-
---- 
-That's it! You've now set up the environment and configured the necessary settings for training Llama2 or Llama3 models.
-
-# DeepSeek-V2-lite Training Procedure
-
-## 1. Environment Setup
-
-1. **Download Docker Image**
-   Download the Docker image required for training:
-   ```bash
-   docker pull rocm/megatron-lm:v25.4
-   ```
-
-2. **Launch Docker Container**
-   Start the Docker container:  
-   ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name megatron_training_env rocm/megatron-lm:v25.4
-   ```
-   
-   The docker container hosts verified Megatron-LM repository, which is available in [megatron release branch](https://github.com/ROCm/Megatron-LM/tree/megatron_release_v25.3).
-
----
-
-## 2. Prepare Dataset
-Skip this step, if you already have the dataset or you can download deepseek dataset using the command.
-
-<pre>
-mkdir deepseek-datasets
-cd deepseek-datasets
-wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/SlimPajama.json
-wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-train.json
-wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/alpaca_zh-valid.json
-wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/mmap_deepseekv2_datasets_text_document.bin
-wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/deepseek-datasets/mmap_deepseekv2_datasets_text_document.idx
-</pre>
-
-## 3. Configurations in Script (`Megatron-LM/examples/deepseek_v2`)
-Use `train_deepseekv2.sh` script
-
-### 3.1 Dataset
-You can use either mock data or real data for training.
-
-- **Mock Data:**
-  Use `MOCK_DATA` variable to toggle between mock and real data. Default value is 1. 
-  ```bash
-  MOCK_DATA=1
-  ```
-- **Real Data:**
-  Update the `DATA_DIR` to the location where your dataset is stored:
-  ```bash
-  MOCK_DATA=0
-  DATA_DIR="/root/data/deepseek-datasets"  # Change to where your dataset is stored
-  ```
-
-### 3.2 Tokenizer
-DeepSeek-V2 uses `DeepSeekV2Tokenizer`
-
-## 4. How to Run
-
-### 4.1 Single Node Training
-To run the training on a single node, go to Megatron-LM folder, use the following command:
-```bash
-cd /workspace/Megatron-LM
-GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh
-```
-
-## 5. Key Variables to Pay Attention To
 
 - **PR:**
   Stands for precision for training. `bf16` for Bf16 (default), `fp8` for FP8 GEMMS.
 
-- **GEMM_TUNING:**
-  `1` to enable GEMM tuning, which boosts performance by using the best GEMM kernels.
-
-- **TRAIN_ITERS:**
-  Set the total number of iterations.
-
-- **MOCK_DATA:**
-  Use MOCK_DATA if set to 1, otherwise use the real data provided by user (DEFAULT: 1)
-
-- **MBS:**
-  Micro batch size
-
-- **GBS:**
-  Global Batch size
-
-- **SEQ_LEN:**
-  Sequence length
-
 - **AC:**
-  Activation Checkpointing (`none`, `sel` , `full`). Default:`sel` (Selective). 
----
+  Activation Checkpointing (`none`, `sel` , `full`). Default:`sel` (Selective).
 
-That's it! You'are now ready to train DeepSeek-v2-lite model.
+- **NUM_LAYERS:**
+  Using reduced number of layers as a proxy model
+
+- **RECOMPUTE_NUM_LAYERS:**
+  Number of layers used for checkpointing recompute
+
+--- 
+That's it! You've now set up the environment and configured the necessary settings for training Llama2, Llama3 or DeepSeek models.
