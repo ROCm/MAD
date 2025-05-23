@@ -782,5 +782,23 @@
     "timeout": -1,
     "args":
     "--model_repo Qwen/QwQ-32B --test_option latency,throughput --num_gpu 8 --datatype float16 --tunableop off"
+  },
+  {
+    "name": "pyt_vllm_phi-4",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_phi-4.csv",
+    "tags": [
+      "pyt",
+      "vllm"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo microsoft/phi-4 --test_option latency --num_gpu 1 --datatype float16 --tunableop off"
   }
 ]
