@@ -583,6 +583,24 @@
      "--model_repo pyt_megatron_lm_train_llama-3.1-70b"
   },
   {
+    "name": "pyt_megatron_lm_train_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-3.3-70b"
+  },
+  {
     "name": "pyt_megatron_lm_train_deepseek-v2-lite-16b",
     "url": "",
     "dockerfile": "docker/megatron_train",
@@ -599,6 +617,60 @@
     "timeout": -1,
     "args":
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_deepseek-v3-proxy",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-V3-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "deepseek-v3-proxy"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_deepseek-v3-proxy"
+  },
+  {
+    "name": "pyt_megatron_lm_train_mixtral-8x7b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Mixtral-8x7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "mixtral-8x7b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_mixtral-8x7b"
+  },
+  {
+    "name": "pyt_megatron_lm_train_mixtral-8x22b-proxy",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Mixtral-8x22B-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "mixtral-8x22b-proxy"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_mixtral-8x22b-proxy"
   },
   {
     "name": "jax_maxtext_train_llama-2-7b",
