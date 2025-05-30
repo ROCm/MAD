@@ -124,6 +124,7 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_vllm_mistral-7b_fp8                |
 | pyt_vllm_dbrx_fp8                      |
 | pyt_vllm_command-r-plus_fp8            |
+| pyt_vllm_phi-4                         |
 | pyt_vllm_falcon-180b                   |
 
 
@@ -186,6 +187,7 @@ cd MAD/scripts/vllm
 |              | google/gemma-2-27b                      | [Gemma 2 27B](https://huggingface.co/google/gemma-2-27b)                                           |
 |              | CohereForAI/c4ai-command-r-plus-08-2024 | [C4AI Command R+ 08-2024](https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024)                      |
 |              | deepseek-ai/deepseek-moe-16b-chat       | [DeepSeek MoE 16B](https://huggingface.co/deepseek-ai/deepseek-moe-16b-chat)                            |
+|              | microsoft/phi-4                         | [Phi-4](https://huggingface.co/microsoft/phi-4)                                                    |
 |              | tiiuae/falcon-180B                      | [Falcon-180b](https://huggingface.co/tiiuae/falcon-180B)                                           |
 | $model_repo  | amd/Llama-3.1-8B-Instruct-FP8-KV   | [Llama 3.1 8B](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV)                            |
 | (float8)     | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
