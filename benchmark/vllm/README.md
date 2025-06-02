@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.3.1
--   ✅ vLLM 0.8.5
+-   ✅ vLLM 0.8.5 (0.8.6.dev315+g91a560098.rocm631)
 -   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
 -   ✅ hipBLASLt 0.15
 
@@ -67,7 +67,7 @@ Throughput input sequence length (ISL) and output sequence length (OSL) can be c
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
 ```
 
 ### MAD-integrated benchmarking
@@ -134,9 +134,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
+docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.3.1_vllm_0.8.5_20250513
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -316,11 +316,6 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
-
--   The vLLM version number was incremented from 0.8.3 to 0.8.5.
-
--   HipblasLT version updated to 0.15
-
 
 ## Support 
 ----------
