@@ -130,7 +130,7 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
         out=$(echo $in_out | awk -F':' '{ print $2 }')
 
         # throughput config
-        while IFS="," read -r model_cfg input_len output_len num_prompts max_num_seqs max_seq_len_to_capture max_num_batched_tokens	max_model_len gpu_memory_utilization num_scheduler_steps enable_chunked_prefill
+        while IFS="," read -r model_cfg input_len output_len num_prompts max_num_seqs max_seq_len_to_capture max_num_batched_tokens	max_model_len gpu_memory_utilization num_scheduler_steps
         do
 	    model_cfg_org_name=(${model_cfg//// })
 	    model_cfg_name=${model_cfg_org_name[1]}
@@ -142,8 +142,7 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
                         OPTION_THROUGHPUT=" --num-prompts $num_prompts \
                             --max-num-seqs            $max_num_seqs            \
                             --gpu-memory-utilization  $gpu_memory_utilization  \
-                            --num-scheduler-steps     $num_scheduler_steps     \
-                            --enable-chunked-prefill $enable_chunked_prefill "
+                            --num-scheduler-steps     $num_scheduler_steps     "
                     else
                         OPTION_THROUGHPUT=" --num-prompts $num_prompts \
                             --max-num-seqs            $max_num_seqs            \
@@ -151,8 +150,7 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
                             --max-num-batched-tokens  $max_num_batched_tokens  \
                             --max-model-len           $max_model_len           \
                             --gpu-memory-utilization  $gpu_memory_utilization  \
-                            --num-scheduler-steps     $num_scheduler_steps     \
-                            --enable-chunked-prefill $enable_chunked_prefill "
+                            --num-scheduler-steps     $num_scheduler_steps     "
                     fi
                     echo "[RUNNING] MODEL :" $model $mode $num_prompts $tp $inp $out
                     echo "[RUNNING] MODEL with OPTION: " $OPTION_THROUGHPUT
