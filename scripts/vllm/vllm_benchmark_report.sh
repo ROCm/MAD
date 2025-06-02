@@ -87,8 +87,8 @@ tag="vllm_rocm6.3.1"
 
 report_dir="reports_${datatype}_${tag}"
 report_summary_dir="${report_dir}/summary"
-tool_latency="/app/vllm/benchmarks/benchmark_latency.py"
-tool_throughput="/app/vllm/benchmarks/benchmark_throughput.py"
+tool_latency="/app/vllm/benchmarks/profiling/benchmark_latency.py"
+tool_throughput="/app/vllm/benchmarks/profiling/benchmark_throughput.py"
 tool_serving="/app/vllm/benchmarks/benchmark_serving.py"
 tool_report="vllm_benchmark_report.py"
 n_warm=3

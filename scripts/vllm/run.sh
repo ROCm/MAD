@@ -59,10 +59,10 @@ do
 done
 
 if [[ "$TUNABLEOP" == "on" ]]; then 
-    echo "turning on pytorch turnableop"
+    echo "turning on pytorch tunableop"
     export PYTORCH_TUNABLEOP_ENABLED=1
 else
-    echo "turning off pytorch turnableop"
+    echo "turning off pytorch tunableop"
     export PYTORCH_TUNABLEOP_ENABLED=0
 fi
 
