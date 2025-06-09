@@ -43,6 +43,12 @@ The following command pulls the Docker image from Docker Hub.
 docker pull rocm/pytorch:latest
 ```
 
+For Mochi model:
+
+```sh
+docker pull rocm/pytorch​:latest
+```
+
 ### MAD-integrated benchmarking
 
 Clone the ROCm Model Automation and Dashboarding (MAD) repository to a local directory and install the required packages on the host machine.
@@ -66,6 +72,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_infer
 
 | model_name                  |
 | --------------------------- |
+| pyt_mochi_video_inference   |
 | pyt_chai1_inference|
 | pyt_clip_inference (ViT-B-32, laion2b_s34b_b79k)|
 

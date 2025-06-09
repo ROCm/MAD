@@ -1,0 +1,36 @@
+From 8b7713bf1b62ab664ae593d2ad9b261c52a817d3 Mon Sep 17 00:00:00 2001
+From: root <root@useocpm2m-386-002.amd.com>
+Date: Tue, 18 Mar 2025 20:10:52 +0000
+Subject: [PATCH] add the benchmark file and make it compatible with SDPA
+
+---
+ benchmark.py                                  | 108 ++++++++++++++++++
+ .../mochi_preview/dit/joint_model/utils.py    |   4 +-
+ 2 files changed, 111 insertions(+), 1 deletion(-)
+ create mode 100644 benchmark.py
+
+diff --git a/src/genmo/mochi_preview/dit/joint_model/utils.py b/src/genmo/mochi_preview/dit/joint_model/utils.py
+index bde2406..1176191 100644
+--- a/src/genmo/mochi_preview/dit/joint_model/utils.py
++++ b/src/genmo/mochi_preview/dit/joint_model/utils.py
+@@ -3,6 +3,7 @@ from typing import Optional, Tuple
+ import torch
+ import torch.nn as nn
+ import torch.nn.functional as F
++from torch.nn.attention import sdpa_kernel
+ 
+ 
+ def modulate(x, shift, scale):
+@@ -87,7 +88,8 @@ class AttentionPool(nn.Module):
+         q = q.unsqueeze(2)  # (B, H, 1, head_dim)
+ 
+         # Compute attention.
+-        x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0.0)  # (B, H, 1, head_dim)
++        with sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
++            x = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0.0)  # (B, H, 1, head_dim)
+ 
+         # Concatenate heads and run output.
+         x = x.squeeze(2).flatten(1, 2)  # (B, D = H * head_dim)
+-- 
+2.34.1
+
