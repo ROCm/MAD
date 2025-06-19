@@ -601,6 +601,19 @@
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
   },
   {
+    "name": "pyt_mochi_video_inference",
+    "dockerfile": "docker/pyt_mochi_inference",
+    "scripts": "scripts/mochi/run_mochi.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "inference"
+    ],
+    "args": "--model_repo genmo/mochi-1-preview --tunableop off"
+  },
+  {
     "name": "pyt_megatron_lm_train_deepseek-v3-proxy",
     "url": "",
     "dockerfile": "docker/megatron_train",
