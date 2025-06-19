@@ -68,7 +68,6 @@ Serving number of prompts, maximum number of concurrent requests, input sequence
 
 -   Default prompts: 252
 -   Default concurrency: 128
--   Default OSL: 128 2048
 -   Default ISL: 128 2048
 -   Default OSL: 128 2048
 
