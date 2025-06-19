@@ -83,7 +83,7 @@ Note: The configs can also be overriden at runtime by passing in the following a
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
 ```
 
 ### MAD-integrated benchmarking
