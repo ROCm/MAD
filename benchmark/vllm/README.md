@@ -150,9 +150,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
