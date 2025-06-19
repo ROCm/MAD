@@ -13,8 +13,8 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
--   ✅ ROCm™ 6.3.1
--   ✅ vLLM 0.8.5 (0.8.6.dev315+g91a560098.rocm631)
+-   ✅ ROCm™ 6.4.1
+-   ✅ vLLM 0.9.0.1 (0.9.0.2.dev108+g71faa1880.rocm641)
 -   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
 -   ✅ hipBLASLt 0.15
 
@@ -51,23 +51,40 @@ cat /proc/sys/kernel/numa_balancing
 
 For the experimental features and known issues concerning ROCm optimization efforts on vLLM, see the developer's guide at [ROCm/vLLM](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
-To change the the latency batch size, input sequence length (ISL), and output sequence length (OSL), you can modify at [vllm benchark script](../../scripts/vllm/vllm_benchmark_report.sh#L73)
+To change the the latency batch size, input sequence length (ISL), and output sequence length (OSL), you can modify at [vllm benchmark script](../../scripts/vllm/vllm_benchmark_report.sh#L96)
 
--   Default batch size: 1, 2, 4, 8, 16, 32, 64, 128, 256
--   Default ISL: 128, 2048
--   Default OSL: 1, 128
+-   Default batch size: 1 8 32 128
+-   Default ISL: 128 2048
+-   Default OSL: 128 2048
 
-Throughput input sequence length (ISL) and output sequence length (OSL) can be changed at [vllm benchark script](../../scripts/vllm/vllm_benchmark_report.sh#L78)
+Throughput input sequence length (ISL) and output sequence length (OSL) can be changed at [vllm benchmark script](../../scripts/vllm/vllm_benchmark_report.sh#L111) and other configs in the [config.csv](../../scripts/vllm/config.csv)
 *
 
--   Default ISL/OSL: 128:128, 2048:128, 128:2048, 2048:2048
+-   Default ISL: 128 2048
+-   Default OSL: 128 2048
+
+Serving number of prompts, maximum number of concurrent requests, input sequence length (ISL) and output sequence length (OSL) can be changed at [vllm benchmark script](../../scripts/vllm/vllm_benchmark_report.sh#L122)
+*
+
+-   Default prompts: 252
+-   Default concurrency: 128
+-   Default OSL: 128 2048
+-   Default ISL: 128 2048
+-   Default OSL: 128 2048
+
+Note: The configs can also be overriden at runtime by passing in the following args:
+-   -i or --input_len
+-   -o or --output_len
+-   -b or --batch_size
+-   -p or --num_prompts
+-   -mc or --max_concurrency
 
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
+docker pull rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
 ```
 
 ### MAD-integrated benchmarking
@@ -134,9 +151,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
+docker pull rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.3.1_vllm_0.8.5_20250521
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm-dev:nightly_0610_rc2_0610_rc2_20250605
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -173,8 +190,7 @@ cd MAD/scripts/vllm
 |              | all                                     | Measure both throughput and latency              |
 | $model_repo  | meta-llama/Llama-3.1-8B-Instruct   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
 | (float16)    | meta-llama/Llama-3.1-70B-Instruct  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                            |
-|              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |
-|              | meta-llama/Llama-3.2-11B-Vision-Instruct| [Llama 3.2 11B Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision-Instruct)                     |
+|              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |                 |
 |              | meta-llama/Llama-2-7b-chat-hf           | [Llama 2 7B](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)                                |
 |              | meta-llama/Llama-2-70b-chat-hf          | [Llama 2 70B](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)                               |
 |              | mistralai/Mixtral-8x7B-Instruct-v0.1    | [Mixtral MoE 8x7B](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1)                         |
@@ -316,6 +332,14 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+- Add flags for vLLM V1 and AITER (default off for this release)
+- Drop deprecated vars NCCL_MIN_NCHANNELS and VLLM_FP8_PADDING
+- Add option to override input_len, output_len, batch_size, num_prompts, max_concurrency
+- Fix online serving dtype to support float8 correctly
+- Remove support for Llama 3.1 11B vision model
+- Switch Gemma 2 27B to use bfloat16 instead
+- For V1 use VLLM_V1_USE_PREFILL_DECODE_ATTENTION with full graph capture
 
 ## Support 
 ----------
