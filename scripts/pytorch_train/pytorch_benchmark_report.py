@@ -25,8 +25,10 @@
 #################################################################################
 
 import pandas as pd
+import numpy as np
 import argparse
 import csv
+import os
 import re
 
 # parse arguments
@@ -43,6 +45,9 @@ parser.add_argument("--input",
 parser.add_argument("--output",
                         type=str,
                         help="path to output file")
+parser.add_argument("--precision",
+                        type=str,
+                        help="training precision")
 
 # read arguments
 args = parser.parse_args()
@@ -51,58 +56,88 @@ output_file = args.output
 print("Input file path: ", input_file)
 print("Output file path: ", output_file)
 
-def find_match(file, search_string):
+def find_match(file, search_string, search_range=None):
     with open(file, 'r') as file:
         content = file.read()
-    pattern = fr"{re.escape(search_string)}\s*(\d+\.\d+|\d+)"
+    print("Content ", content)
+    # Match numbers with commas or decimals
+    pattern = fr"{re.escape(search_string)}\s*(\d+\.\d+|\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?|\d+)"
     matches = re.findall(pattern, content)
+    print("Matches: ", matches)
+    data = [s.replace(",", "") for s in matches]
     # Only save last match
-    match = matches[-1]
-    return match
+    if search_range is not None:
+        data = np.array(data[search_range[0]:search_range[1]])
+        result = np.average(data.astype(float))
+    else:
+        result = data[-1]
+    print(f"{search_string} {result}")
+    return result
+
+finetune_models = ["Llama-2-70B", "Llama-2-13B", "Llama-2-7B", "Llama-3-70B", "Llama-3-8B", \
+            "Llama-3.1-405B", "Llama-3.1-70B", "Llama-3.1-8B", \
+            "Llama-3.2-3B", "Llama-3.2-1B", "Llama-3.2-vision-11B", "Llama-3.2-vision-90B", \
+            "Llama-3.3-70B", "Llama-4-scout-17B-16E"]
 
 if args.mode == "pretrain":
+
     if args.model == "Llama-3.1-8B":
-        tok_per_s_per_gpu = find_match(input_file, "Avg token per second:")
-        TFLOPS_per_gpu = find_match(input_file, "Avg TFLOP/s:")
+        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=(30, 40))
+        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=(30, 40))
         data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode}
         ]
     elif args.model == "Llama-3.1-70B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:")
-        TFLOPS_per_gpu = find_match(input_file, "tflops:")
+        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=(30, 40))
+        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=(30, 40))
         data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode}
         ]
     elif args.model == "Flux":
         df = pd.read_csv(input_file)
         FPS_per_GPU = df.iloc[-1]['avg_fps']
         TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
         data = [
-            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU'},
-            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU'}
+            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU', 'mode': args.mode},
+            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU', 'mode': args.mode}
         ]
-elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-3.3-70B"):
-    max_memory_alloc = find_match(input_file, "Max memory alloc:")
-    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu:")
-    unmasked_tokens_per_s_per_gpu = find_match(input_file, "Unmasked tokens/s/gpu: ")
+
+elif args.mode == "HF_pretrain":
+    if args.model == "Llama-3.1-8B":
+        tok_per_s_per_gpu = find_match(input_file, "Avg token per second:")
+        TFLOPS_per_gpu = find_match(input_file, "Avg TFLOP/s:")
+        data = [
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode}
+        ]
+
+elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model in finetune_models):
+    max_memory_alloc = find_match(input_file, "Max memory alloc (last half):")
+    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu (last half):")
+    
     data = [
-        {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc'},
-        {'model': args.model, 'performance': unmasked_tokens_per_s_per_gpu, 'metric': 'unmasked_tokens_per_s_per_gpu'},
-        {'model': args.model, 'performance': avg_tokens_per_s_per_gpu, 'metric': 'avg_tokens_per_s_per_gpu'}
+        {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc', 'mode': args.mode},
+        {'model': args.model, 'performance': avg_tokens_per_s_per_gpu, 'metric': 'avg_tokens_per_s_per_gpu', 'mode': args.mode},
     ]
+
 elif (args.mode == "HF_finetune_lora") and (args.model == "Llama-3.1-70B" or args.model == "Llama-2-70B"):
     train_samples_per_s = find_match(input_file, "'train_samples_per_second':")
     data = [
-        {'model': args.model, 'performance': train_samples_per_s, 'metric': 'train_samples_per_s'}
+        {'model': args.model, 'performance': train_samples_per_s, 'metric': 'train_samples_per_s', 'mode': args.mode}
     ]
 
-with open(output_file, mode='w', newline='') as file:
+if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
+    mode = 'w'  # Write if file doesn't exist or is empty
+else:
+    mode = 'a'  # Append if file exists and is not empty
+with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric'])
-    writer.writeheader()
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode'])
+    if mode == 'w':
+        writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")
     
