@@ -24,7 +24,6 @@
 # SOFTWARE.
 #
 #################################################################################
-BUILD="false"
 
 # Parse named arguments
 while [[ "$#" -gt 0 ]]; do
@@ -33,34 +32,49 @@ while [[ "$#" -gt 0 ]]; do
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
-    case $1 in
-        -b) BUILD="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
 done
 
 echo "Model repo: $MODEL_NAME"
-
-export HF_HOME=/workspace/huggingface
-
 echo "Setup script starting in directory $(pwd)"
 
-if [ "$MODEL_NAME" == "Llama-3.1-70B" ]; then
+export HF_HOME=/workspace/huggingface
+huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+
+if [[ "$MODEL_NAME" == "Llama-3.1-8B" ]]; then
+  echo "Building torchtitan dependencies for $MODEL_NAME"
+  TORCHTITAN_DIR="/workspace/torchtitan"
+  echo "Torchtitan directory path: $TORCHTITAN_DIR"
+  cd $TORCHTITAN_DIR
+  python scripts/download_tokenizer.py \
+    --repo_id meta-llama/Meta-Llama-3.1-8B \
+    --tokenizer_path "original" \
+    --hf_token=$HF_TOKEN 
+fi 
+
+if [[ "$MODEL_NAME" == "Llama-3.1-70B" ]]; then
+  echo "Building torchtitan dependencies for $MODEL_NAME"
+  TORCHTITAN_DIR="/workspace/torchtitan"
+  echo "Torchtitan directory path: $TORCHTITAN_DIR"
+  cd $TORCHTITAN_DIR
+  python scripts/download_tokenizer.py \
+      --repo_id meta-llama/Meta-Llama-3.1-70B \
+      --tokenizer_path "original" \
+      --hf_token=$HF_TOKEN 
+
   echo "Building torchtune dependencies for $MODEL_NAME"
-  TORCHTUNE_DIR="$(pwd)/torchtune"
+  TORCHTUNE_DIR="/workspace/torchtune"
   echo "Torchtune directory path: $TORCHTUNE_DIR"
   cd $TORCHTUNE_DIR
-  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
-          --local-dir ./models/Llama-3.1-70B-Instruct \
-          --exclude 'original/*.pth'
+    --local-dir ./models/Llama-3.1-70B-Instruct \
+    --exclude 'original/*.pth'
   python dataset.py
+  
 fi
 
-if [ "$MODEL_NAME" == "Llama-3.3-70B" ]; then
+if [[ "$MODEL_NAME" == "Llama-3.3-70B" ]]; then
   echo "Building torchtune dependencies for $MODEL_NAME"
-  TORCHTUNE_DIR="$(pwd)/torchtune"
+  TORCHTUNE_DIR="/workspace/torchtune"
   echo "Torchtune directory path: $TORCHTUNE_DIR"
   cd $TORCHTUNE_DIR
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
@@ -68,13 +82,6 @@ if [ "$MODEL_NAME" == "Llama-3.3-70B" ]; then
           --local-dir ./models/Llama-3.3-70B-Instruct \
           --exclude 'original/*.pth'
   python dataset.py
-fi
-
-# Dependency for Llama 3.1 (torchtitan)
-if [[ "$MODEL_NAME" == "Llama-3.1-8B" || "$MODEL_NAME" == "Llama-3.1-70B" ]]; then
-  echo "Building Llama 3.1 dependencies for $MODEL_NAME"
-  cd /workspace/torchtitan
-  pip install -r requirements.txt
 fi
 
 # Dependency for Flux
@@ -94,21 +101,31 @@ fi
 
 if [[ -z "$MODEL_NAME" ]]; then
   echo "Building dependencies for all models"
-  TORCHTUNE_DIR="$(pwd)/torchtune"
+  TORCHTITAN_DIR="/workspace/torchtitan"
+  cd $TORCHTITAN_DIR
+  python scripts/download_tokenizer.py \
+      --repo_id meta-llama/Meta-Llama-3.1-8B \
+      --tokenizer_path "original" \
+      --hf_token=$HF_TOKEN 
+
+  python scripts/download_tokenizer.py \
+      --repo_id meta-llama/Meta-Llama-3.1-70B \
+      --tokenizer_path "original" \
+      --hf_token=$HF_TOKEN 
+
+  TORCHTUNE_DIR="/workspace/torchtune"
   cd $TORCHTUNE_DIR
+  # Llama 3.1 70B 
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   huggingface-cli download meta-llama/Llama-3.1-70B-Instruct \
           --local-dir ./models/Llama-3.1-70B-Instruct \
           --exclude 'original/*.pth'
-
+  # Llama 3.3 70B 
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   huggingface-cli download meta-llama/Llama-3.3-70B-Instruct \
           --local-dir ./models/Llama-3.3-70B-Instruct \
           --exclude 'original/*.pth'
   python dataset.py
-
-  cd /workspace/torchtitan
-  pip install -r requirements.txt
 
   cd /workspace/FluxBenchmark
   pip3 install --no-cache-dir --upgrade pip packaging

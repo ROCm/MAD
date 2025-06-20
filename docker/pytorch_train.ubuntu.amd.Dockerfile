@@ -1,4 +1,9 @@
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-training:v25.5
+ARG BASE_DOCKER=rocm/pytorch-training:v25.6
 FROM $BASE_DOCKER
 
 USER root
