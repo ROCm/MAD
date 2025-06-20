@@ -1,4 +1,4 @@
-MODEL_DIR="${MODEL_DIR:-./models/Llama-2-70b-chat-hf}"
+MODEL_DIR="${MODEL_DIR:-meta-llama/Llama-2-70b-chat-hf}"
 accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --seed 100 \
 --model_name_or_path $MODEL_DIR \
@@ -9,7 +9,8 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --splits "train_sft,test_sft" \
 --max_seq_len 3072 \
 --num_train_epochs 1 \
---logging_steps 5 \
+--max_steps 5 \
+--logging_steps 1 \
 --log_level "info" \
 --logging_strategy "steps" \
 --evaluation_strategy "epoch" \
@@ -21,9 +22,9 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --weight_decay 1e-4 \
 --warmup_ratio 0.0 \
 --max_grad_norm 1.0 \
---output_dir "llama2-70b-sft-lora-fsdp" \
---per_device_train_batch_size 16 \
---per_device_eval_batch_size 16 \
+--output_dir "llama-70b-sft-lora-fsdp" \
+--per_device_train_batch_size 8 \
+--per_device_eval_batch_size 8 \
 --gradient_accumulation_steps 4 \
 --gradient_checkpointing True \
 --use_reentrant False \
@@ -34,4 +35,5 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --lora_alpha 16 \
 --lora_dropout 0.1 \
 --lora_target_modules "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj" \
---use_4bit_quantization False
+--use_4bit_quantization False \
+--evaluation_strategy no
