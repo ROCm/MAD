@@ -1164,7 +1164,7 @@ def handle_multiple_results(
     multiple_results_header = multiple_results_df.columns.tolist()
 
     # Check that the multiple results CSV has three columns
-    if len(multiple_results_header) != 3:
+    if len(multiple_results_header) < 3:
         raise RuntimeError(
             "Multiple Results CSV file must have three columns: model, performance, metric"
         )
