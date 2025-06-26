@@ -34,8 +34,6 @@ WORKDIR $WORKSPACE_DIR
 
 # Environment variables
 ENV HIP_FORCE_DEV_KERNARG=1
-ARG PYTORCH_ROCM_ARCH_ARG="gfx942"
-ENV PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH_ARG}
 ARG MAX_JOBS_ARG=192
 ENV MAX_JOBS=${MAX_JOBS_ARG}
 
@@ -77,7 +75,7 @@ RUN if [ "$BUILD_FA" = "1" ]; then \
     && cd flash-attention \
     && git checkout ${FA_BRANCH} \
     && git submodule update --init \
-    && GPU_ARCHS=${PYTORCH_ROCM_ARCH} python3 setup.py bdist_wheel --dist-dir=dist \
+    && GPU_ARCHS=${HIP_ARCHITECTURES} python3 setup.py bdist_wheel --dist-dir=dist \
     && pip install dist/*.whl \
     && python -c "import flash_attn; print(f'Flash Attention version == {flash_attn.__version__}')"; \
     fi
