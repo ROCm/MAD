@@ -255,7 +255,7 @@ def run_model(
     if args.clean_docker_cache:
         use_cache_str = "--no-cache"
 
-    build_args = ""
+    build_args = f"--build-arg MAD_SYSTEM_GPU_ARCHITECTURE='{get_system_gpu_arch()}'"
     docker_context = "./docker"
     model_docker_image = f"ci-{model_name}"
     model_docker_container = f"container_ci-{model_name}"
