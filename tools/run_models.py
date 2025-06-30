@@ -255,7 +255,18 @@ def run_model(
     if args.clean_docker_cache:
         use_cache_str = "--no-cache"
 
-    build_args = ""
+    # Set the Docker build arguments
+    docker_build_args = {"MAD_SYSTEM_GPU_ARCHITECTURE": get_system_gpu_arch()}
+    # Read and update MAD SECRETS env variable
+    mad_secrets = {}
+    for key in os.environ:
+        if "MAD_SECRETS" in key:
+            mad_secrets[key] = os.environ[key]
+    # Update the Docker build arguments with MAD SECRETS
+    if mad_secrets:
+        update_dict(docker_build_args, mad_secrets)
+
+    build_args = " ".join([f"--build-arg {key}='{value}'" for key, value in docker_build_args.items()])
     docker_context = "./docker"
     model_docker_image = f"ci-{model_name}"
     model_docker_container = f"container_ci-{model_name}"
