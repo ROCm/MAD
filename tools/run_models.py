@@ -267,7 +267,6 @@ def run_model(
         update_dict(docker_build_args, mad_secrets)
 
     build_args = " ".join([f"--build-arg {key}='{value}'" for key, value in docker_build_args.items()])
-
     docker_context = "./docker"
     model_docker_image = f"ci-{model_name}"
     model_docker_container = f"container_ci-{model_name}"
