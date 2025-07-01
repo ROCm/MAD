@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2024 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -255,7 +255,19 @@ def run_model(
     if args.clean_docker_cache:
         use_cache_str = "--no-cache"
 
-    build_args = f"--build-arg MAD_SYSTEM_GPU_ARCHITECTURE='{get_system_gpu_arch()}'"
+    # Set the Docker build arguments
+    docker_build_args = {"MAD_SYSTEM_GPU_ARCHITECTURE": get_system_gpu_arch()}
+    # Read and update MAD SECRETS env variable
+    mad_secrets = {}
+    for key in os.environ:
+        if "MAD_SECRETS" in key:
+            mad_secrets[key] = os.environ[key]
+    # Update the Docker build arguments with MAD SECRETS
+    if mad_secrets:
+        update_dict(docker_build_args, mad_secrets)
+
+    build_args = " ".join([f"--build-arg {key}='{value}'" for key, value in docker_build_args.items()])
+
     docker_context = "./docker"
     model_docker_image = f"ci-{model_name}"
     model_docker_container = f"container_ci-{model_name}"
