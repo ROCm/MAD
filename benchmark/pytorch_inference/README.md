@@ -75,6 +75,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_infer
 | pyt_mochi_video_inference   |
 | pyt_chai1_inference|
 | pyt_clip_inference (ViT-B-32, laion2b_s34b_b79k)|
+| pyt_wan2.1_inference (Wan2.1-T2V-14B)|
 
 ### Enable Tunable Operator ⚙️
 
@@ -87,8 +88,6 @@ By default, the `pyt_clip_inference` model already includes `--tunableop off` in
 ```sh
 python3 tools/run_models.py --tags pyt_clip_inference --keep-model-dir --live-output --timeout 28800
 ```
-
-
 
 ## References 🔎
 ----------
