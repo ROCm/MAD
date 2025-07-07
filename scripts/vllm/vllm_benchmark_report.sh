@@ -30,12 +30,6 @@
 #                           -m|--model $model
 #                           -g|--numgpu $numgpu
 #                           -d|--dtype $dtype
-#                           (optional overrides)
-#                           -i|--input_len $input_len
-#                           -o|--output_len $output_len
-#                           -b|--batch_size $batch_size
-#                           -p|--num_prompts $num_prompts
-#                           -mc|--max_concurrency $max_concurrency
 ## example:
 ## latency + throughput + serving
 #./vllm_benchmark_report.sh -s all -m meta-llama/Meta-Llama-3-8B -g 1 -d float16
@@ -53,11 +47,6 @@ while [[ "$#" -gt 0 ]]; do
         -m|--model) model="$2"; shift;;
         -g|--numgpu) numgpu="$2"; shift;;
         -d|--datatype) datatype="$2"; shift;;
-        -i|--input_len) input_len="$2"; shift;;
-        -o|--output_len) output_len="$2"; shift;;
-        -b|--batch_size) batch_size="$2"; shift;;
-        -p|--num_prompts) num_prompts="$2"; shift;;
-        -mc|--max_concurrency) max_concurrency="$2"; shift;;
         *) echo "Unknown parameter passed: $1"; exit 1;;
     esac
     shift
@@ -69,20 +58,18 @@ model_name=${model_org_name[1]}
 tp=$numgpu
 
 # perf configuration
-# Use CK Flash Attention
-export VLLM_USE_TRITON_FLASH_ATTN=0
-# For V1 use split attention with full cuda graph compilation
-if [[ $VLLM_USE_V1 == 1 ]]; then
-    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
-    VLLM_ARGS='--compilation-config {"full_cuda_graph":true}'
-else
+if [[ $VLLM_USE_V1 == 0 ]]; then
+    # Use CK Flash Attention
+    export VLLM_USE_TRITON_FLASH_ATTN=0
     VLLM_ARGS="--num-scheduler-steps 10"
-fi
-
-if [ $tp -eq 1 ]; then
-    DIST_BE=" "
 else
-    DIST_BE=" --distributed-executor-backend mp "
+    # For V1 use full cuda graph compilation
+    if [[ $scenario == "throughput" ]]; then
+        # rms_norm compile runs into OOM currently
+        VLLM_ARGS='--compilation-config {"full_cuda_graph":true,"custom_ops":["+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'
+    else
+        VLLM_ARGS='--compilation-config {"full_cuda_graph":true,"custom_ops":["+rms_norm","+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'
+    fi
 fi
 
 if [[ $datatype == "float16" ]]; then
@@ -90,7 +77,11 @@ if [[ $datatype == "float16" ]]; then
 elif [[ $datatype == "bfloat16" ]]; then
     DTYPE=" --dtype bfloat16 "
 elif [[ $datatype == "float8" ]]; then
-    DTYPE=" --dtype float16 --quantization fp8 --kv-cache-dtype fp8 " 
+    DTYPE=" --dtype float16 "
+    # Use FP8 kv cache for throughput
+    if [[ $scenario == "throughput" ]]; then
+        DTYPE=" ${DTYPE} --kv-cache-dtype fp8 "
+    fi
 fi
 
 GPU_UTIL=" --gpu-memory-utilization 0.9 "
@@ -99,27 +90,10 @@ GPU_UTIL=" --gpu-memory-utilization 0.9 "
 Bat="1 8 32 128"
 InLatency="128 2048"
 OutLatency="128 2048"
-# override
-if [ -n "$batch_size" ]; then
-    Bat=$batch_size
-fi
-if [ -n "$input_len" ]; then
-    InLatency=$input_len
-fi
-if [ -n "$output_len" ]; then
-    OutLatency=$output_len
-fi
 
 # throughput conditions
 InThroughput="128 2048"
 OutThroughput="128 2048"
-# override
-if [ -n "$input_len" ]; then
-    InThroughput=$input_len
-fi
-if [ -n "$output_len" ]; then
-    OutThroughput=$output_len
-fi
 
 # serving conditions
 NumPrompts="252"
@@ -144,8 +118,8 @@ tag="vllm_rocm6.4.1"
 
 report_dir="reports_${datatype}_${tag}"
 report_summary_dir="${report_dir}/summary"
-tool_latency="/app/vllm/benchmarks/profiling/benchmark_latency.py"
-tool_throughput="/app/vllm/benchmarks/profiling/benchmark_throughput.py"
+tool_latency="/app/vllm/benchmarks/benchmark_latency.py"
+tool_throughput="/app/vllm/benchmarks/benchmark_throughput.py"
 tool_serving="/app/vllm/benchmarks/benchmark_serving.py"
 tool_report="vllm_benchmark_report.py"
 n_warm=3
@@ -166,7 +140,7 @@ if [ "$scenario" == "latency" ] || [ "$scenario" == "all" ]; then
                 outjson=${report_dir}/${model_name}_${mode}_decoding_bs${bat}_in${inp}_out${out}_${datatype}.json
                 outcsv=${report_summary_dir}/${model_name}_${mode}_report.csv
                 echo $model $mode $bat $tp $inp $out
-                python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $GPU_UTIL $VLLM_ARGS
+                python3 $tool_latency --model $model --batch-size $bat -tp $tp --input-len $inp --output-len $out --num-iters-warmup $n_warm --num-iters $n_itr --trust-remote-code --output-json $outjson $DTYPE $GPU_UTIL $VLLM_ARGS
                 python3 $tool_report --mode $mode --model $model_name --batch-size $bat --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
             done
         done
@@ -181,7 +155,7 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
         for out in $OutThroughput;
         do
             # throughput config
-            while IFS="," read -r model_cfg input_len output_len num_prompts max_num_seqs max_seq_len_to_capture max_num_batched_tokens	max_model_len gpu_memory_utilization num_scheduler_steps
+            while IFS="," read -r model_cfg input_len output_len num_prompts max_num_seqs max_seq_len_to_capture max_num_batched_tokens	max_model_len
             do
                 model_cfg_org_name=(${model_cfg//// })
                 model_cfg_name=${model_cfg_org_name[1]}
@@ -201,7 +175,7 @@ if [ "$scenario" == "throughput" ] || [ "$scenario" == "all" ]; then
                         fi
                         echo "[RUNNING] MODEL :" $model $mode $num_prompts $tp $inp $out
                         echo "[RUNNING] MODEL with OPTION: " $OPTION_THROUGHPUT
-                        python3 $tool_throughput --model $model -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $DIST_BE $GPU_UTIL $OPTION_THROUGHPUT $VLLM_ARGS
+                        python3 $tool_throughput --model $model -tp $tp --input-len $inp --output-len $out --trust-remote-code --output-json $outjson $DTYPE $GPU_UTIL $OPTION_THROUGHPUT $VLLM_ARGS
                         python3 $tool_report --mode $mode --model $model_name --num-prompts $num_prompts --tp $tp --input-len $inp --output-len $out --input-json $outjson --output-csv $outcsv --dtype $datatype
                     fi
                 fi
@@ -214,7 +188,7 @@ if [ "$scenario" == "serving" ] || [ "$scenario" == "all" ]; then
     echo "[INFO] SERVING"
     mode="serving"
     # start server and send it to background using {command} &
-    vllm serve $model --swap-space 16 --disable-log-requests --trust-remote-code  -tp $tp $DTYPE $DIST_BE $GPU_UTIL $VLLM_ARGS 1>&1 2>&2 &
+    vllm serve $model --swap-space 16 --disable-log-requests --trust-remote-code  -tp $tp $DTYPE $GPU_UTIL $VLLM_ARGS 1>&1 2>&2 &
     # get the server pid
     server_pid=$!
     echo "vllm server pid: $server_pid"

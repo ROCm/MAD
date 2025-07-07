@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.4.1
--   ✅ vLLM 0.9.0.1 (0.9.0.2.dev108+g71faa1880.rocm641)
+-   ✅ vLLM 0.9.1 (0.9.2.dev206+gb335519f2.rocm641)
 -   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
 -   ✅ hipBLASLt 0.15
 
@@ -71,19 +71,12 @@ Serving number of prompts, maximum number of concurrent requests, input sequence
 -   Default ISL: 128 2048
 -   Default OSL: 128 2048
 
-Note: The configs can also be overriden at runtime by passing in the following args:
--   -i or --input_len
--   -o or --output_len
--   -b or --batch_size
--   -p or --num_prompts
--   -mc or --max_concurrency
-
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250620
 ```
 
 ### MAD-integrated benchmarking
@@ -150,9 +143,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250620
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.9.0.1_20250605
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.9.1_20250620
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -332,13 +325,13 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-- Add flags for vLLM V1 and AITER (default off for this release)
-- Drop deprecated vars NCCL_MIN_NCHANNELS and VLLM_FP8_PADDING
-- Add option to override input_len, output_len, batch_size, num_prompts, max_concurrency
-- Fix online serving dtype to support float8 correctly
-- Remove support for Llama 3.1 11B vision model
-- Switch Gemma 2 27B to use bfloat16 instead
-- For V1 use VLLM_V1_USE_PREFILL_DECODE_ATTENTION with full graph capture
+- Turn vLLM V1 on by default
+- Use FP8 KV cache for large batch throughput benchmarks only
+- Add override flags to enable/disable tunableop, vLLM V1, V1 split attention, and aiter;
+  use default environment variables in docker image if not overriden
+- Only set VLLM_USE_TRITON_FLASH_ATTN=0 i.e. use CK Flash Attention if using vLLM V0
+- Specify compilation config overrides: `{"full_cuda_graph":true,"custom_ops":["+rms_norm","+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'`
+- Note: Mistral 7B FP8 fails with `"full_cuda_graph":true`, please unset this config for this model
 
 ## Support 
 ----------
