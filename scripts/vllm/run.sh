@@ -41,9 +41,10 @@ while [[ "$#" -gt 0 ]]; do
         --test_option) TEST_OPTION="$2"; shift ;;
         --num_gpu) N_GPUS="$2"; shift ;;
         --datatype) DTYPE="$2"; shift ;;
-        --vllm_version) VLLM_VERSION="$2"; shift ;;
+        --tunableop) TUNABLEOP="$2"; shift ;;
+        --vllm_v1) VLLM_V1="$2"; shift ;;
+        --vllm_v1_split_attention) VLLM_V1_SPLIT_ATTENTION="$2"; shift ;;
         --aiter) AITER="$2"; shift ;;
-        *) BENCHMARK_ARGS="$BENCHMARK_ARGS $1" ;;
     esac
     shift
 done
@@ -62,25 +63,38 @@ done
 
 export HF_HUB_CACHE="/myworkspace"
 
+if [[ $TUNABLEOP == "on" ]]; then 
+    export PYTORCH_TUNABLEOP_ENABLED=1
+elif [[ $TUNABLEOP == "off" ]]; then
+    export PYTORCH_TUNABLEOP_ENABLED=0
+fi
+
+if [[ $VLLM_V1 == "on" ]]; then
+    export VLLM_USE_V1=1
+elif [[ $VLLM_V1 == "off" ]]; then
+    export VLLM_USE_V1=0
+fi
+
+if [[ $VLLM_V1_SPLIT_ATTENTION == "on" ]]; then
+    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
+elif [[ $VLLM_V1_SPLIT_ATTENTION == "off" ]]; then
+    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=0
+fi
+
+if [[ $AITER == "on" ]]; then
+    export VLLM_ROCM_USE_AITER=1
+elif [[ $AITER == "off" ]]; then
+    export VLLM_ROCM_USE_AITER=0
+fi
+
 echo "=hyper params start="
 echo $MODEL_NAME
 echo $TEST_OPTION_SP
 echo $DTYPE_SP
-echo $VLLM_VERSION
-echo $AITER
+echo $PYTORCH_TUNABLEOP_ENABLED
+echo $VLLM_USE_V1
+echo $VLLM_ROCM_USE_AITER
 echo "=hyper params end="
-
-if [ $VLLM_VERSION == "0" ]; then
-    export VLLM_USE_V1=0
-else
-    export VLLM_USE_V1=1
-fi
-
-if [ $AITER == "on" ]; then
-    export VLLM_ROCM_USE_AITER=1
-else
-    export VLLM_ROCM_USE_AITER=0
-fi
 
 for scenario in $TEST_OPTION_SP; do
     for dtype in $DTYPE_SP; do
