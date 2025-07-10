@@ -1027,6 +1027,24 @@
     "multiple_results": "perf_dummy.csv"
   },
   {
+    "name": "pyt_sglang_deepseek-r1-distill-qwen-32b",
+    "url": "",
+    "dockerfile": "docker/pyt_sglang",
+    "scripts": "scripts/sglang/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-R1-Distill-Qwen-32B.csv",
+    "tags": [
+      "pyt",
+      "sglang"
+    ],
+    "timeout": 28800,
+    "args":
+     "--model_repo deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --test_option latency --num_gpu 8 --datatype bfloat16 --dataset random --batch_size 1,8,32 --lat_input_output_len '128:128;128:1024;1024:128;1024:1024'"
+  },
+  {
     "name": "pyt_mpt30b_training",
     "dockerfile": "docker/pyt_mpt30b_training",
     "scripts": "scripts/pyt_mpt30b_training/run.sh",
