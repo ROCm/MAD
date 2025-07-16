@@ -45,6 +45,8 @@ while [[ "$#" -gt 0 ]]; do
         --vllm_v1) VLLM_V1="$2"; shift ;;
         --vllm_v1_split_attention) VLLM_V1_SPLIT_ATTENTION="$2"; shift ;;
         --aiter) AITER="$2"; shift ;;
+        --aiter_pa) AITER_PA="$2"; shift ;;
+        --aiter_mha) AITER_MHA="$2"; shift ;;
     esac
     shift
 done
@@ -87,13 +89,29 @@ elif [[ $AITER == "off" ]]; then
     export VLLM_ROCM_USE_AITER=0
 fi
 
+if [[ $AITER_PA == "on" ]]; then
+    export VLLM_ROCM_USE_AITER_PAGED_ATTN=1
+elif [[ $AITER_PA == "off" ]]; then
+    export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
+fi
+
+if [[ $AITER_MHA == "on" ]]; then
+    export VLLM_ROCM_USE_AITER_MHA=1
+elif [[ $AITER_MHA == "off" ]]; then
+    export VLLM_ROCM_USE_AITER_MHA=0
+fi
+
 echo "=hyper params start="
-echo $MODEL_NAME
-echo $TEST_OPTION_SP
-echo $DTYPE_SP
-echo $PYTORCH_TUNABLEOP_ENABLED
-echo $VLLM_USE_V1
-echo $VLLM_ROCM_USE_AITER
+echo "MODEL_NAME=$MODEL_NAME"
+echo "TEST_OPTION_SP=$TEST_OPTION_SP"
+echo "N_GPUS=$N_GPUS"
+echo "DTYPE_SP=$DTYPE_SP"
+echo "PYTORCH_TUNABLEOP_ENABLED=$PYTORCH_TUNABLEOP_ENABLED"
+echo "VLLM_USE_V1=$VLLM_USE_V1"
+echo "VLLM_V1_USE_PREFILL_DECODE_ATTENTION=$VLLM_V1_USE_PREFILL_DECODE_ATTENTION"
+echo "VLLM_ROCM_USE_AITER=$VLLM_ROCM_USE_AITER"
+echo "VLLM_ROCM_USE_AITER_PAGED_ATTN=$VLLM_ROCM_USE_AITER_PAGED_ATTN"
+echo "VLLM_ROCM_USE_AITER_MHA=$VLLM_ROCM_USE_AITER_MHA"
 echo "=hyper params end="
 
 for scenario in $TEST_OPTION_SP; do

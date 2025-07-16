@@ -76,7 +76,7 @@ Serving number of prompts, maximum number of concurrent requests, input sequence
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250702
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250715
 ```
 
 ### MAD-integrated benchmarking
@@ -143,9 +143,9 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250702
+docker pull rocm/vllm:rocm6.4.1_vllm_0.9.1_20250715
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.9.1_20250702
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.9.1_20250715
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
@@ -172,6 +172,9 @@ cd MAD/scripts/vllm
 ># pass your HF_TOKEN
 >export HF_TOKEN=$your_personal_hf_token
 >```
+
+>[!NOTE]
+>We currently recommend running with `VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1` for best performance.
 
 #### Variables
 
@@ -325,13 +328,14 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-- Turn vLLM V1 on by default
-- Use FP8 KV cache for large batch throughput benchmarks only
-- Add override flags to enable/disable tunableop, vLLM V1, V1 split attention, and aiter;
-  use default environment variables in docker image if not overriden
-- Only set VLLM_USE_TRITON_FLASH_ATTN=0 i.e. use CK Flash Attention if using vLLM V0
-- Specify compilation config overrides: `{"full_cuda_graph":true,"custom_ops":["+rms_norm","+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'`
-- Note: Mistral 7B FP8 fails with `"full_cuda_graph":true`, please unset this config for this model
+- Compilation config parameters e.g. `"full_cuda_graph: true"` on by default; no need to specify
+- Add override flags to enable AITER Multiheaded Attention and AITER Paged Attention
+- Fixed llama3.1 405b CAR issue (no longer need --disable-custom-all-reduce)
+- Fixed +rms_norm custom kernel issue
+- Added quick reduce (set VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=FP to enable. Supported modes are FP, INT8, INT6, INT4)
+- Mitigated the Command-R model GPU crash through a workaround until the driver issue is fixed
+- Disabled FP8 KV cache and rms_norm kernel compilation when using AITER
+- Disabled full graph compilation when using AITER MHA
 
 ## Support 
 ----------
