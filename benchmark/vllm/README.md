@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.4.1
--   ✅ vLLM 0.9.1 (0.9.2.dev206+gb335519f2.rocm641)
+-   ✅ vLLM 0.9.1 (0.9.2.dev364+gb432b7a28.rocm641)
 -   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
 -   ✅ hipBLASLt 0.15
 
