@@ -63,12 +63,13 @@ if [[ $VLLM_USE_V1 == 0 ]]; then
     export VLLM_USE_TRITON_FLASH_ATTN=0
     VLLM_ARGS="--num-scheduler-steps 10"
 else
-    # For V1 use full cuda graph compilation
-    if [[ $scenario == "throughput" ]]; then
-        # rms_norm compile runs into OOM currently
-        VLLM_ARGS='--compilation-config {"full_cuda_graph":true,"custom_ops":["+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'
-    else
-        VLLM_ARGS='--compilation-config {"full_cuda_graph":true,"custom_ops":["+rms_norm","+silu_and_mul"],"pass_config":{"enable_noop":true,"enable_fusion":true}}'
+    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
+        # AITER RMS norm does not work with inductor compile
+        export VLLM_ROCM_USE_AITER_RMSNORM=0
+        # AITER MHA is on by default but does not support full graph capture yet
+        if [[ $VLLM_ROCM_USE_AITER_MHA != 0 ]]; then
+            VLLM_ARGS='--compilation-config {"full_cuda_graph":false}'
+        fi
     fi
 fi
 
@@ -80,11 +81,18 @@ elif [[ $datatype == "float8" ]]; then
     DTYPE=" --dtype float16 "
     # Use FP8 kv cache for throughput
     if [[ $scenario == "throughput" ]]; then
-        DTYPE=" ${DTYPE} --kv-cache-dtype fp8 "
+        # AITER does not support FP8 KV cache yet
+        if [[ $VLLM_ROCM_USE_AITER != 1 ]]; then
+            DTYPE=" ${DTYPE} --kv-cache-dtype fp8 "
+        fi
     fi
 fi
 
 GPU_UTIL=" --gpu-memory-utilization 0.9 "
+# workaround until https://github.com/pytorch/pytorch/pull/157133 is available in docker image
+if [[ $model_name == "Llama-3.1-8B-Instruct-FP8-KV" ]]; then
+    GPU_UTIL=" --gpu-memory-utilization 0.85 "
+fi
 
 # latency conditions
 Bat="1 8 32 128"
