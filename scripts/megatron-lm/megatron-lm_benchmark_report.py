@@ -62,9 +62,11 @@ def find_match(file, search_string):
     return match
 
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
+        args.model == "Llama-3.1-70B-proxy" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
         args.model == "DeepSeek-V3-proxy" or args.model == "Llama-3.3-70B" or \
-        args.model == "Mixtral-8x7B" or args.model == "Mixtral-8x22B-proxy":
+        args.model == "Mixtral-8x7B" or args.model == "Mixtral-8x22B-proxy" or \
+        args.model == "Qwen2.5-7B" or args.model == "Qwen2.5-72B":
     tok_per_s_per_gpu = find_match(input_file, "tokens/GPU/s:")
     TFLOPS_per_gpu = find_match(input_file, "throughput per GPU:")
     data = [

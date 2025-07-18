@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/megatron-lm:v25.5_py312
+ARG BASE_DOCKER=rocm/megatron-lm:v25.6_py312
 FROM $BASE_DOCKER
 
 USER root

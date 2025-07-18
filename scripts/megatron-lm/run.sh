@@ -40,6 +40,8 @@ if [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.1-70b-proxy" ]]; then
+  model="Llama-3.1-70B-proxy"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-3.3-70b" ]]; then
   model="Llama-3.3-70B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-2-7b" ]]; then
@@ -54,6 +56,11 @@ elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_mixtral-8x7b" ]]; then
   model="Mixtral-8x7B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_mixtral-8x22b-proxy" ]]; then
   model="Mixtral-8x22B-proxy"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_qwen2.5-7b" ]]; then
+  model="Qwen2.5-7B"
+elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_qwen2.5-72b" ]]; then
+  model="Qwen2.5-72B"
+  
 fi
 
 if [[ "$model" == "Mixtral-8x7B" || "$model" == "Mixtral-8x22B-proxy" ]]; then
@@ -63,7 +70,7 @@ if [[ "$model" == "Mixtral-8x7B" || "$model" == "Mixtral-8x22B-proxy" ]]; then
 fi
 
 datatypes=("BF16")
-if [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" ]]; then
+if [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
   datatypes=("BF16" "FP8")
 fi
 

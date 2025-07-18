@@ -8,14 +8,14 @@ For ease of use, AMD provides a ready-to-use Docker image for MI300X accelerator
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.3.4              |
+| ROCm               | 6.4.1              |
 | Python            | 3.10, 3.12          |
-| PyTorch           | 2.8.0a0+gite2f9759   |
-| Transformer Engine | 1.13.0+bb061ade      |
+| PyTorch           | 2.8.0a0+git7d205b2   |
+| Transformer Engine | 2.1.0.dev0+8c4a512d      |
 | Flash Attention   | 3.0.0               |
-| hipBLASLt         | 0.13.0-4f1f8bf6         |
+| hipBLASLt         | 393e413        |
 | Triton            | 3.3.0                 |
-| RCCL              | 2.22.3.60400      |
+| RCCL              | 2.23.4.7a84c5d      |
 
 
 ## Supported features and models
@@ -43,6 +43,7 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * DeepSeek-V3
 * Mixtral 8x7B
 * Mixtral 8x22B
+* Qwen 2.5 7/72B
 
 ## System validation steps
 If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html) to set up your system before starting training.
@@ -73,16 +74,16 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.5_py312
+   docker pull rocm/megatron-lm:v25.6_py312
    ```
-   Alternatively, `rocm/megatron-lm:v25.5_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
+   Alternatively, `rocm/megatron-lm-training-private:v25.6_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128GG --name megatron_training_env rocm/megatron-lm:v25.5_py312
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128GG --name megatron_training_env rocm/megatron-lm:v25.6_py312
    ```
-   Alternatively, `rocm/megatron-lm:v25.5_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
+   Alternatively, `rocm/megatron-lm:v25.6_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
 5. **Execute the training_env container (optional if no already in the container)**
    ```bash
@@ -167,6 +168,14 @@ You can use either mock data or real data for training.
   ```
   Set `DATA_DIR` to `/path/to/mixtral-dataset` for training on real data.
   
+- **Downloading dataset for Qwen2.5 7/72B:**
+  ```bash
+  mkdir -p temp/qwen-datasets
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/qwen-datasets/wudao_qwenbpe_text_document.bin
+  wget https://atp-modelzoo-wlcb-pai.oss-cn-wulanchabu.aliyuncs.com/release/models/pai-megatron-patch/qwen-datasets/wudao_qwenbpe_text_document.idx
+  ```
+  Set `DATA_DIR` to `/path/to/qwen-dataset` for training on real data.
+  
 ### 2.3 Tokenizer
 You can assign the path of existing tokenizer to the command line argument `TOKENIZER_MODEL`. If tokenizer is not found, it will be downloaded if publicly available. 
 
@@ -206,7 +215,11 @@ You can assign the path of existing tokenizer to the command line argument `TOKE
   ```bash
   TOKENIZER_MODEL=tokenizer/tokenizer.model
   ```
-
+- **For Qwen2.5 Training:**
+  Uses the `HuggingFaceTokenizer`. Set the HuggingFace model path in the `TOKENIZER_MODEL` variable:
+  ```bash
+  TOKENIZER_MODEL=Qwen/Qwen2.5-7B or Qwen/Qwen2.5-72B # For Qwen2.5
+  ```
 ### 2.4 Multi-node Training
 If you're running multi-node training, update the following environment variables on each node.They can also be passed as command line arguments.
 
@@ -272,29 +285,37 @@ To run the training with `FSDP-v2` enabled, simply add `FSDP=1` argument, for ex
 
 - **Llama3-70B BF16:**
 ```bash
-TEE_OUTPUT=1 MBS=3 BS=24 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=8192 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
+CKPT_FORMAT=torch_dist TEE_OUTPUT=1 MBS=3 BS=24 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=8192 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh
 ```
+
+- **Llama3-70B FP8 Proxy model on Single Node**
+```bash
+CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh
+```
+**Note:**
+   - Please use >=2 nodes to run full llama 70B model with fp8 precision.
 
 - **Llama2-70B BF16:**
 ```bash
-TEE_OUTPUT=1 MBS=7 BS=56 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=4096 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
+CKPT_FORMAT=torch_dist TEE_OUTPUT=1 MBS=7 BS=56 TP=1 TE_FP8=0 FSDP=1 RECOMPUTE=1 SEQ_LENGTH=4096 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh
 ```
 
 - **Llama3.3-70B BF16:**
 ```bash
-TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh 
+TOKENIZER_MODEL=meta-llama/Llama-3.3-70B-Instruct CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh 
 ```
 **Note:** 
    - It is suggested to use `TP=1` when FSDP is enabled, for higher throughput. And FSDP-v2 is not supported with pipeline parallelism, expert parallelism, MCore's distributed optimizer, gradient accumulation fusion and fp16.
-   - Currently, FSDP is only compatible with BF16 precision
 
 Examples for MoE models with expert parallel:
 - **DeepSeekV2-Lite**
 ```bash
+export NVTE_FUSED_ATTN_CK=0
 GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh
 ```
 - **DeepSeekV3 3 layer proxy on Single Node**
 ```bash
+export NVTE_FUSED_ATTN_CK=0
 FORCE_BANLANCE=true \
 RUN_ENV=cluster \
 MODEL_SIZE=671B \
@@ -312,16 +333,26 @@ bash examples/deepseek_v3/train_deepseekv3.sh
 ```
 - **Mixtral 8x7B**
 ```bash
-RECOMPUTE_NUM_LAYERS=0 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=none PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=4096 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x7B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
+TOKENIZER_MODEL=<path/to/tokenizer.model> RECOMPUTE_NUM_LAYERS=0 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=none PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=4096 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x7B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
 ```
 - **Mixtral 8x22B 4 layer proxy on Single Node**
 ```bash
-RECOMPUTE_NUM_LAYERS=4 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=full NUM_LAYERS=4 PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
+TOKENIZER_MODEL=<path/to/tokenizer.model> RECOMPUTE_NUM_LAYERS=4 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=full NUM_LAYERS=4 PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh
 ```
-**Note:** 
-   - Mixtral 8x22B 4 layer proxy model has a known memory leak/ memory corruption issue. This does not impact the pre-training functionality or performance of the Mixtral 8x22B model.
 
-
+- **QWEN2.5 7B - BF16**
+  ```bash
+  bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=0 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B
+  ```
+- **QWEN2.5 7B - FP8**
+  ```bash
+  bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=1 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B
+  ```
+- **QWEN2.5 72B - BF16**
+  ```bash
+  bash examples/qwen/train_qwen2.sh FSDP=1 CP=1 PP=1 MBS=3 BS=24 TE_FP8=0 MODEL_SIZE=72 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-72B RECOMPUTE_ACTIVATIONS=full CKPT_FORMAT=torch_dist
+  ```
+  
 ### 3.2 Multi-node Training
 To run training on multiple nodes, launch the Docker container on each node. Example, follow these steps for 2 Node run with Node0 as master node :
 
