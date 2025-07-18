@@ -76,7 +76,7 @@ Use the following instructions to set up the environment, configure the script t
    ```bash
    docker pull rocm/megatron-lm:v25.6_py312
    ```
-   Alternatively, `rocm/megatron-lm-training-private:20250708_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
+   Alternatively, `rocm/megatron-lm-training-private:v25.6_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
 3. **Launch Docker Container**
    Start the Docker container:
