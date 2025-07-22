@@ -76,6 +76,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_infer
 | pyt_chai1_inference|
 | pyt_clip_inference (ViT-B-32, laion2b_s34b_b79k)|
 | pyt_wan2.1_inference (Wan2.1-T2V-14B)|
+| pyt_hy_video|
 
 ### Enable Tunable Operator ⚙️
 
