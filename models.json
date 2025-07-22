@@ -1055,6 +1055,24 @@
     "args": "--tunableop off"
   },
   {
+    "name": "pyt_janus_pro_inference",
+    "url": "",
+    "dockerfile": "docker/pyt_janus_pro_inference",
+    "scripts": "scripts/pyt_janus_pro_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_pyt_janus_pro_inference.csv",
+    "tags": [
+      "pyt",
+      "inference",
+      "janus-pro",
+      "multimodal"
+    ],
+    "timeout": -1,
+    "args": ""
+  },
+  {
     "name": "pyt_wan2.1_inference",
     "dockerfile": "docker/pyt_wan2.1_inference",
     "scripts": "scripts/pyt_wan2.1_inference/run.sh",
