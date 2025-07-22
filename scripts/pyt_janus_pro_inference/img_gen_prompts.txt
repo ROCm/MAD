@@ -1,0 +1,40 @@
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+#################################################################################
+
+A lone wolf’s silhouette against a full moon over a snowy pine forest.
+In the vastness of space, translucent jellyfish-like creatures drift among swirling nebulae and twinkling stars. Their bioluminescent tendrils glow violet and turquoise, trailing behind them as they pulse serenely through a field of cosmic dust and distant galaxies.
+A winding pathway through a secluded park at night, lined with paper lanterns casting warm light on benches and flowering shrubs, fireflies flickering around, illustrated in a gentle pastel palette.
+Several floating rock formations covered in lush greenery hovering above calm, clear water teeming with colorful fish, depicted in a vibrant, fantasy-themed digital painting.
+A vintage bicycle leaning against a sunlit brick wall with climbing ivy and irises.
+A small log cabin with smoke curling from its chimney sits nestled among towering pines on a mountainside. Snowflakes drift gently from leaden gray clouds, dusting the roof and pine needles, while warm light spills from the frosted windows onto an untouched blanket of snow.
+Knights in polished armor jousting before a crowd wearing period attire, banners fluttering from stone battlements, with limners painting the scene in tempera-style colors.
+A steaming cup of tea on a wooden table beside a rain-speckled window.
+An ornate, red velvet curtain parts to reveal a miniature stage where marionettes in period costumes dance. Gas lamps flicker around the carved mahogany proscenium arch, where shadowy patrons watch the show in anticipation.
+A grand Victorian-style glass greenhouse interior brimming with diverse orchids in full bloom, sunbeams streaming through stained-glass panes, rendered with intricate botanical details.
+A sprawling hexagonal grid of interconnected solar panels and hydroponic pods floats on a calm ocean bay. Lush green crops rise from glass-enclosed chambers, and sleek, autonomous drones hover above, gently shading the plants from midday sun. In the background, wind turbines with transparent blades spin slowly against a cloudless sky.
+A paper boat floating down a gentle stream lined with autumn leaves and a dreamy pink cottage.
+A small expedition tent on a snowy plain, surrounded by sled dogs resting, with vibrant green and pink northern lights dancing overhead, captured in a realistic arctic landscape.
+A lone guitarist playing under a bright neon sign in a rain-drenched, graffiti-covered alley, with reflections on wet pavement and hovering holographic advertisements, illustrated in moody neon noir.
