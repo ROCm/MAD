@@ -24,13 +24,51 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/vllm:rocm6.4.1_vllm_0.9.1_20250715
+ARG BASE_DOCKER=rocm/pytorch:latest
 FROM $BASE_DOCKER
 
 USER root
-ENV WORKSPACE_DIR=/workspace
-RUN mkdir -p $WORKSPACE_DIR
-WORKDIR $WORKSPACE_DIR
+ENV APP_DIR=/app
+RUN mkdir -p $APP_DIR
+WORKDIR $APP_DIR
+
+# Environment variables
+ENV HIP_FORCE_DEV_KERNARG=1
+ARG MAX_JOBS_ARG=192
+ENV MAX_JOBS=${MAX_JOBS_ARG}
+
+# Argument to check current GPU arch
+ARG MAD_SYSTEM_GPU_ARCHITECTURE
+ENV HIP_ARCHITECTURES=${MAD_SYSTEM_GPU_ARCHITECTURE}
+RUN echo HIP_ARCHITECTURES = ${HIP_ARCHITECTURES}
+
+# Install flash attention
+ARG BUILD_FA="1"
+ARG FA_BRANCH="v3.0.0.r1-cktile"
+ARG FA_REPO="https://github.com/ROCm/flash-attention.git"
+RUN if [ "$BUILD_FA" = "1" ]; then \
+    cd ${APP_DIR} \
+    && pip uninstall -y flash-attention \
+    && rm -rf flash-attention \
+    && git clone ${FA_REPO} \
+    && cd flash-attention \
+    && git checkout ${FA_BRANCH} \
+    && git submodule update --init \
+    && GPU_ARCHS=${HIP_ARCHITECTURES} python3 setup.py bdist_wheel --dist-dir=dist \
+    && pip install dist/*.whl \
+    && python -c "import flash_attn; print(f'Flash Attention version == {flash_attn.__version__}')"; \
+    fi
+
+# Install Janus-pro
+RUN cd ${APP_DIR} \
+  && git clone https://github.com/deepseek-ai/Janus.git \
+  && cd Janus \
+  && sed -i 's/^torch==/# torch==/' requirements.txt \
+  && pip install -e . \
+  && pip install datasets \
+  && cd ..
+
+WORKDIR /myworkspace
 
 # record configuration for posterity
 RUN pip3 list

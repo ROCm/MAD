@@ -762,6 +762,24 @@
      "--model_repo pyt_megatron_lm_train_llama-3.1-70b"
   },
   {
+    "name": "pyt_megatron_lm_train_llama-3.1-70b-proxy",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-70B-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_llama-3.1-70b-proxy"
+  },
+  {
     "name": "pyt_megatron_lm_train_llama-3.3-70b",
     "url": "",
     "dockerfile": "docker/megatron_train",
@@ -863,6 +881,42 @@
     "timeout": -1,
     "args":
      "--model_repo pyt_megatron_lm_train_mixtral-8x22b-proxy"
+  },
+  {
+    "name": "pyt_megatron_lm_train_qwen2.5-7b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen2.5-7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen2.5-7b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_qwen2.5-7b"
+  },
+    {
+    "name": "pyt_megatron_lm_train_qwen2.5-72b",
+    "url": "",
+    "dockerfile": "docker/megatron_train",
+    "scripts": "scripts/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen2.5-72B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen2.5-72b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_megatron_lm_train_qwen2.5-72b"
   },
   {
     "name": "jax_maxtext_train_llama-2-7b",
@@ -999,6 +1053,24 @@
       "inference"
     ],
     "args": "--tunableop off"
+  },
+  {
+    "name": "pyt_janus_pro_inference",
+    "url": "",
+    "dockerfile": "docker/pyt_janus_pro_inference",
+    "scripts": "scripts/pyt_janus_pro_inference/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_pyt_janus_pro_inference.csv",
+    "tags": [
+      "pyt",
+      "inference",
+      "janus-pro",
+      "multimodal"
+    ],
+    "timeout": -1,
+    "args": ""
   },
   {
     "name": "pyt_wan2.1_inference",
