@@ -1,8 +1,13 @@
-# MAD, Model Automation and Dashboarding
+# MAD - Model Automation and Dashboarding
 
-## What is this repository for? 
+## Overview
 
-MAD (Model Automation and Dashboarding), is a combination of AI/ML model zoo, automation for running the models on various GPU architectures, a mechanism of maintaining historical performance data, and generating dashboards for tracking. 
+MAD (Model Automation and Dashboarding) is a comprehensive AI/ML model automation platform that provides:
+
+- 🏗️ **Model Zoo**: Curated collection of AI/ML models
+- 🚀 **Automated Execution**: Run models across various GPU architectures
+- 📊 **Performance Tracking**: Historical performance data collection and analysis
+- 📈 **Dashboard Generation**: Visual tracking and reporting capabilities
 
 ## DISCLAIMER
 
@@ -10,188 +15,291 @@ The information presented in this document is for informational purposes only an
 
 © 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 
-## How to run model
+## Table of Contents
 
-Install requirements: 
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Usage Guide](#usage-guide)
+  - [Running Models](#running-models)
+  - [Tag Functionality](#tag-functionality)
+  - [Timeout Configuration](#timeout-configuration)
+  - [Debugging Options](#debugging-options)
+- [Contributing](#contributing)
+  - [Adding New Models](#adding-new-models)
+  - [Model Configuration](#model-configuration)
+  - [Docker Setup](#docker-setup)
+  - [Script Implementation](#script-implementation)
+- [Environment Variables](#environment-variables)
+- [License](#license)
+
+## Prerequisites
+
+- Docker installed and running
+- Python 3.9 or higher
+- GPU drivers (AMD ROCm or NVIDIA CUDA)
+
+## Quick Start
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd MAD
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Run a model**:
+   ```bash
+   madengine run --tags pyt_huggingface_bert
+   ```
+
+## Usage Guide
+
+### Running Models
+
+The madengine CLI [ROCm/madengine](https://github.com/ROCm/madengine/) provides a simple interface for running models locally. All models defined in `models.json` can be executed on a Docker host to collect performance results.
+
+**Please note that support of running models using tools/run_models.py is no longer recommended, and tools/run_models.py will be removed from MAD repo soon.**
+
+#### Basic Usage
+
+```bash
+madengine run [OPTIONS]
 ```
-pip3 install -r requirements.txt
+
+#### Available Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--tags TAGS` | Tags to filter models (comma-separated) | - |
+| `--timeout TIMEOUT` | Timeout in seconds | 7200 (2 hours) |
+| `--live-output` | Show real-time output | False |
+| `--clean-docker-cache` | Rebuild Docker images without cache | False |
+| `--keep-alive` | Keep container running after completion | False |
+| `--keep-model-dir` | Preserve model directory after run | False |
+| `-o OUTPUT, --output OUTPUT` | Output file for results | - |
+| `--log-level LOG_LEVEL` | Set logging level | INFO |
+
+#### Execution Process
+
+For each model, MAD performs the following steps:
+
+1. 🔨 **Build**: Creates Docker image named `ci-$(model_name)`
+2. 🚀 **Start**: Launches container named `container_$(model_name)`
+3. 📥 **Clone**: Downloads model repository from specified URL
+4. ▶️ **Execute**: Runs the model script
+5. 📊 **Report**: Generates `perf.csv` and `perf.html`
+
+### Tag Functionality
+
+Tags allow you to run specific subsets of models based on their characteristics:
+
+- **Framework tags**: `pyt`, `tf2`, `ort`
+- **Model tags**: `bert`, `gpt2`, `resnet50`
+- **Precision tags**: `fp16`, `fp32`
+- **Custom tags**: Any tag defined in `models.json`
+
+#### Examples
+
+```bash
+# Run a specific model
+madengine run --tags pyt_huggingface_bert
+
+# Run all PyTorch models
+madengine run --tags pyt
+
+# Run multiple tag combinations
+madengine run --tags tf2,bert,fp32
 ```
 
-With tools/run_models.py script, all models in models.json can be run locally on a docker host, to collect performance results.
+### Timeout Configuration
 
+Configure execution timeouts at multiple levels:
+
+1. **Default**: 2 hours (7200 seconds)
+2. **Model-specific**: Set `timeout` field in `models.json`
+3. **Runtime override**: Use `--timeout` command line option
+
+> **Note**: Setting timeout to `0` disables the timeout entirely.
+
+### Debugging Options
+
+For troubleshooting and development:
+
+```bash
+# See real-time logs
+madengine run --tags model_name --live-output
+
+# Keep container running for inspection
+madengine run --tags model_name --keep-alive
+
+# Rebuild Docker images from scratch
+madengine run --tags model_name --clean-docker-cache
 ```
-usage: tools/run_models.py [-h] [--tags TAGS] [--timeout TIMEOUT] [--live-output] [--clean-docker-cache] [--keep-alive] [--keep-model-dir] [-o OUTPUT] [--log-level LOG_LEVEL]
 
-Run the application of MAD, Model Automation and Dashboarding v1.0.0.
+> ⚠️ **Warning**: When using `--keep-alive`, you must manually stop and remove the container before running the same model again.
 
-options:
-  -h, --help            show this help message and exit
-  --tags TAGS
-                        Tags to run model (can be multiple).
-  --timeout TIMEOUT     Timeout for the application running model in seconds, default timeout of 7200 (2 hours).
-  --live-output         Prints output in real-time directly on STDOUT.
-  --clean-docker-cache  Rebuild docker image without using cache.
-  --keep-alive          Keep the container alive after the application finishes running.
-  --keep-model-dir      Keep the model directory after the application finishes running.
-  -o OUTPUT, --output OUTPUT
-                        Output file for the result.
-  --log-level LOG_LEVEL
-                        Log level for the logger.
+## Contributing
+
+### Adding New Models
+
+Follow these steps to add a new model to the MAD repository:
+
+#### Step 1: Create Workload Name
+
+Follow the naming convention: `{framework}_{project}_{workload}`
+
+**Examples**:
+- `tf2_huggingface_gpt2`
+- `pyt_torchvision_resnet50`
+- `ort_onnx_bert`
+
+#### Step 2: Model Configuration
+
+Add an entry to `models.json`:
+
+```json
+{
+  "name": "tf2_bert_large",
+  "url": "https://github.com/ROCmSoftwarePlatform/bert",
+  "dockerfile": "docker/tf2_bert_large",
+  "scripts": "scripts/tf2_bert_large",
+  "n_gpus": "4",
+  "owner": "john.doe@amd.com",
+  "training_precision": "fp32",
+  "tags": [
+    "per_commit",
+    "tf2",
+    "bert",
+    "fp32"
+  ],
+  "args": ""
+}
 ```
 
-run_models.py is the main MAD CLI(Command Line Interface) for running models locally. While the tool has many options, running a singular model is very easy. To run any model simply look for its name or tag in the models.json and the command is of the form:
+#### Configuration Fields
 
-For each model in models.json, the script
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | ✅ | Unique model identifier |
+| `url` | ✅ | Repository URL to clone |
+| `dockerfile` | ✅ | Path to Dockerfile |
+| `scripts` | ✅ | Path to script directory |
+| `n_gpus` | ✅ | Number of GPUs (`-1` for all available) |
+| `owner` | ✅ | Contact email |
+| `training_precision` | ✅ | Precision level (fp16, fp32, etc.) |
+| `tags` | ✅ | List of tags for categorization |
+| `data` | ❌ | Optional data path |
+| `timeout` | ❌ | Model-specific timeout override |
+| `multiple_results` | ❌ | CSV file for multiple results |
+| `args` | ❌ | Additional script arguments |
 
-* builds docker images associated with each model. The images are named 'ci-$(model_name)', and are not removed after the script completes.
-* starts the docker container, with name, 'container_$(model_name)'. The container should automatically be stopped and removed whenever the script exits.
-* clones the git 'url', and runs the 'script'
-* compiles the final perf.csv and perf.html
+#### Step 3: Docker Setup
 
-### Tag functionality
+Create a Dockerfile in the `docker/` directory:
 
-With the tag functionality, the user can select a subset of the models, that have the corresponding tags matching user specified tags, to be run. User specified tags can be specified in 'tags.json' or with the --tags argument. If multiple tags are specified, all models that match any tag is selected. Each model name in models.json is automatically a tag that can be used to run that model. Tags are also supported in comma-separated form
+```dockerfile
+# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+FROM rocm/tensorflow:latest
 
-"python3 tools/run_models.py --tags TAG" so for example to run the pyt_huggingface_bert model use "python3 tools/run_models.py --tags pyt_huggingface_bert" or to run all pytorch models "python3 tools/run_models.py --tags pyt".
+# Install system dependencies
+RUN apt update && apt install -y \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
 
-### Custom timeouts
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    pandas \
+    numpy
 
-The default timeout for model run is 2 hrs. This can be overridden if the model in models.json contains a 'timeout' : TIMEOUT entry. Both the default timeout and/or timeout specified in models.json can be overridden using --timeout TIMEOUT command line argument. Having TIMEOUT set to 0 means that the model run will never timeout.
+# Download model data
+RUN URL=https://example.com/model-data.zip && \
+    wget --directory-prefix=/data -c $URL && \
+    ZIP_NAME=$(basename $URL) && \
+    unzip /data/$ZIP_NAME -d /data && \
+    rm /data/$ZIP_NAME
 
-### Debugging
+# Set working directory
+WORKDIR /workspace
+```
 
-Some of the more useful flags to be aware of are "--liveOutput" and "–keepAlive". "--liveOutput" will show all the logs as MAD is running, otherwise they are saved to log files on the current directory. "–keepAlive" will prevent MAD from stopping and removing the container when it is done, which can be very useful for manual debugging or experimentation. Note that when running with the "–keepAlive" flag the user is responsible for stopping and deleting that container. The same MAD model cannot run again until that container is cleared. 
+#### Step 4: Script Implementation
 
-For a more details on the tool please look at the "–help" flag 
+Create a script directory in `scripts/` with a `run.sh` file:
 
-## To add a model to the MAD repo
+```bash
+#!/bin/bash
+set -e
 
-0. create workload name. The names of the modules should follow a specfic format. First it should be the framework(tf_, tf2_, pyt_, ort_, ...) , the name of the project and finally the workload. For example
+# Model configuration
+MODEL_CONFIG_DIR=/data/model_config
+BATCH_SIZE=2
+SEQUENCE_LENGTH=512
+TRAIN_STEPS=100
+WARMUP_STEPS=10
+LEARNING_RATE=1e-4
 
-    ```
-    tf2_huggingface_gpt2
-    ```
-    Use this name in the models.json, as the dockerfile name and the scripts folder name.
+# Prepare data
+echo "Preparing training data..."
+python3 prepare_data.py \
+    --config_dir=$MODEL_CONFIG_DIR \
+    --batch_size=$BATCH_SIZE \
+    --seq_length=$SEQUENCE_LENGTH
 
-1. add the necessary info to the models.json file. Here is a sample model info entry for bert
-    ```json
-        {
-            "name": "tf2_bert_large",
-            "url": "https://github.com/ROCmSoftwarePlatform/bert",
-            "dockerfile": "docker/tf2_bert_large",
-            "scripts": "scripts/tf2_bert_large",
-            "n_gpus": "4",
-            "owner": "john.doe@amd.com",
-            "training_precision": "fp32",
-            "tags": [
-                "per_commit",
-                "tf2",
-                "bert",
-                "fp32"
-            ],
-            "args": ""
-        }
-    ```
-   | Field               | Description                                                                |
-   |---------------------| ---------------------------------------------------------------------------|
-   | name                | a unique model name                                                        |
-   | url                 | model url to clone                                                         |
-   | dockerfile          | initial search path dockerfile collection                                  |
-   | scripts             | model script to execute in dockerfile under cloned model directory         |
-   | data                | Optional field denoting data for script                                    |
-   | n_gpus              | number of gpus exposed inside docker container. '-1' => all available gpus |
-   | timeout             | model specific timeout, default of 2 hrs                                   |
-   | owner               | email address for model owner                                              |
-   | training\_precision | precision, currently used only for reporting                               |
-   | tags                | list of tags for selecting model. The model name is a default tag.         |
-   | multiple\_results   | optional parameter for multiple results, pointing to csv that holds results|
-   | args                | extra arguments passed to model scripts                                    | 
+# Train model
+echo "Starting model training..."
+python3 train_model.py \
+    --config_dir=$MODEL_CONFIG_DIR \
+    --batch_size=$BATCH_SIZE \
+    --max_seq_length=$SEQUENCE_LENGTH \
+    --num_train_steps=$TRAIN_STEPS \
+    --num_warmup_steps=$WARMUP_STEPS \
+    --learning_rate=$LEARNING_RATE \
+    2>&1 | tee training.log
 
-2. create a dockerfile, or reuse an existing dockerfile in the docker directory. Here is an example below that should serve as a template. 
-    ```docker
-    # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-    FROM rocm/tensorflow
+# Report performance
+echo "Generating performance metrics..."
+python3 report_metrics.py
+```
 
-    # Install dependencies
-    RUN apt update && apt install -y \
-        unzip 
-    RUN pip3 install pandas
+#### Performance Reporting
 
-    # Download data
-    RUN URL=https://storage.googleapis.com/bert_models/2018_10_18/uncased_L-24_H-1024_A-16.zip && \
-        wget --directory-prefix=/data -c $URL && \
-        ZIP_NAME=$(basename $URL) && \
-        unzip /data/$ZIP_NAME -d /data
-    ```
-3. create a directory in the scripts directory that contains everything necessary to do a run and report performance. The contents of this directory will be copied to the model root directory. Make sure the directory has a run script. If the script name is not explicitly specified, MAD assumes that the script name is 'run.sh'. Here is a sample run.sh script for bert.
-    ```bash
-        # setup model
-        MODEL_CONFIG_DIR=/data/uncased_L-24_H-1024_A-16
-        BATCH=2
-        SEQ=512
-        TRAIN_DIR=bert_large_ba${BATCH}_seq${SEQ}
-        TRAIN_STEPS=100
-        TRAIN_WARM_STEPS=10
-        LEARNING_RATE=1e-4
-        DATA_SOURCE_FILE_PATH=sample_text.txt
-        DATA_TFRECORD=sample_text_seq${SEQ}.tfrecord
-        MASKED_LM_PROB=0.15
-        calc_max_pred() {
-            echo $(python3 -c "import math; print(math.ceil($SEQ*$MASKED_LM_PROB))")
-        }
-        MAX_PREDICTION_PER_SEQ=$(calc_max_pred)
+**Single Result Format**:
+```python
+print(f"performance: {throughput} examples/sec")
+```
 
-        python3 create_pretraining_data.py \
-            --input_file=$DATA_SOURCE_FILE_PATH \
-            --output_file=$DATA_TFRECORD \
-            --vocab_file=$MODEL_CONFIG_DIR/vocab.txt \
-            --do_lower_case=True \
-            --max_seq_length=$SEQ \
-            --max_predictions_per_seq=$MAX_PREDICTION_PER_SEQ \
-            --masked_lm_prob=$MASKED_LM_PROB \
-            --random_seed=12345 \
-            --dupe_factor=5
+**Multiple Results Format**:
+Create a CSV file with columns: `models,performance,metric`
 
-        # train model
-        python3 run_pretraining.py \
-            --input_file=$DATA_TFRECORD \
-            --output_dir=$TRAIN_DIR \
-            --do_train=True \
-            --do_eval=True \
-            --bert_config_file=$MODEL_CONFIG_DIR/bert_config.json \
-            --train_batch_size=$BATCH \
-            --max_seq_length=$SEQ \
-            --max_predictions_per_seq=$MAX_PREDICTION_PER_SEQ \
-            --num_train_steps=$TRAIN_STEPS \
-            --num_warmup_steps=$TRAIN_WARM_STEPS \
-            --learning_rate=$LEARNING_RATE \
-            2>&1 | tee log.txt
+```csv
+models,performance,metric
+model_1,156.7,examples/sec
+model_2,89.3,tokens/sec
+```
 
-        # report performance metric
-        python3 get_bert_model_metrics.py $TRAIN_DIR
-    ```
-    Note that there is a python script for reporting performance that was also included in the model script directory. For single result reporting scripts, make sure that you print performance in the following format, `performance: PERFORMANCE_NUMBER PERFORMANCE_METRIC`. For example, the performance reporting script for bert, get_bert_model_metrics.py, prints `performance: 3.0637370347976685 examples/sec`.
+## Environment Variables
 
-    For scripts that report multiple results, signal MAD to expect multiple results with 'multiple\_results' field in models.json. This points to a csv generated by the script. The csv should have 3 columns, `models,performance,metric`, with different rows for different results. 
+### System Variables
 
-4. For a particular model, multiple tags such as the precision, the framework, workload may be given.  For example, the "tf2_mlperf_resnet50v1.nchw" could have the "tf2" and "resnet50" tag.  If this workload also specified the precision then this would be a valid tag as well (e.g. "fp16" or "fp32").  Also, MAD considers each model name to be a default tag, that need not be explicitly specified.
+MAD provides system information through environment variables:
 
+| Variable | Description |
+|----------|-------------|
+| `MAD_SYSTEM_GPU_ARCHITECTURE` | Host GPU architecture |
+| `MAD_RUNTIME_NGPUS` | Available GPU count |
 
-## Special environment variables 
+### Model Variables
 
-MAD uses special environment variables to provide additional functionality within MAD. These environment variables always have a MAD_ prefix. These variables are accessible within the model scripts. 
+Runtime model configuration:
 
-  | Variable                    | Description                          |
-  |-----------------------------|--------------------------------------|
-  | MAD_SYSTEM_GPU_ARCHITECTURE | GPU Architecture for the host system |
-  | MAD_RUNTIME_NGPUS           | Number of GPU available to the model |
+| Variable | Description |
+|----------|-------------|
+| `MAD_MODEL_NAME` | Model name from `models.json` |
+| `MAD_MODEL_NUM_EPOCHS` | Training epochs |
+| `MAD_MODEL_BATCH_SIZE` | Batch size |
 
-### Model environment variables
-
-MAD also exposes model-environment variables to allow for model tuning at runtime. These environment variables always have a MAD_MODEL_ prefix. These variables are accessible within the model scripts and are set to default values if not specified at runtime. 
-
-   | Field                       | Description                                                                       |
-   |-----------------------------| ----------------------------------------------------------------------------------|
-   | MAD_MODEL_NAME              | model's name in `models.json`                                                     |
-   | MAD_MODEL_NUM_EPOCHS        | number of epochs                                                                  |
-   | MAD_MODEL_BATCH_SIZE        | batch-size                                                                        |
