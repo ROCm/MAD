@@ -63,7 +63,7 @@ Use this command to run a performance benchmark test of the Chai-1 model on one 
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-python3 tools/run_models.py --tags pyt_chai1_inference --keep-model-dir --live-output --timeout 28800
+madengine run --tags pyt_chai1_inference --keep-model-dir --live-output --timeout 28800
 ```
 
 ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_inference`. The latency and throughput reports of the model are collected in the `perf.csv`.
@@ -86,7 +86,7 @@ By default, the `pyt_clip_inference` model already includes `--tunableop off` in
  This triggers a two-pass run: a warm-up followed by a performance-collection run, generating a `gemm_result_<dataset>.csv` file for analysis.
 
 ```sh
-python3 tools/run_models.py --tags pyt_clip_inference --keep-model-dir --live-output --timeout 28800
+madengine run --tags pyt_clip_inference --keep-model-dir --live-output --timeout 28800
 ```
 
 ## References 🔎
