@@ -17,11 +17,11 @@ With this image, users can easily build, run, and validate the training process 
 ## Training Environment Setup 🚀
 
 ### Streamlining the Workflow Using MAD's Tool
-To simplify the workflow, we can directly utilize the run_model tool provided by MAD. The parameter configurations have been set under the pyt_mpt30b_training tag within the model.json file. With a single command, we can now seamlessly build the Docker container, download the model, and fine-tune it.
+To simplify the workflow, we can directly utilize the madengine tool recommended by MAD. The parameter configurations have been set under the pyt_mpt30b_training tag within the model.json file. With a single command, we can now seamlessly build the Docker container, download the model, and fine-tune it.
 
 ```sh
 pip3 install -r requirements.txt
-python3 tools/run_models.py --tags pyt_mpt30b_training --live-output --clean-docker-cache --keep-model-dir
+madengine run --tags pyt_mpt30b_training --live-output --clean-docker-cache --keep-model-dir
 ```
 If failed downloading data, try to `export MAD_SECRETS_HFTOKEN=` your huggingface token, which you can generate following [these steps](https://huggingface.co/docs/hub/security-tokens).
 
