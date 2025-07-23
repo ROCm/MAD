@@ -122,7 +122,15 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
 elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   cd /workspace/Megatron-LM
-  TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  echo "[INFO] Benchmarking"
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  rm $TRAIN_LOG
+
+elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  cd /workspace/Megatron-LM
+  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
@@ -130,7 +138,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
 elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   cd /workspace/Megatron-LM
-  TOKENIZER_MODEL="meta-llama/Llama-3.3-70B-Instruct" TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  TOKENIZER_MODEL="meta-llama/Llama-3.3-70B-Instruct" CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
@@ -150,21 +158,24 @@ elif [ "$MODEL_REPO" == "Llama-2-7B" ]; then
 elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   cd /workspace/Megatron-LM
-  TEE_OUTPUT=1 RECOMPUTE=1 MBS=7 BS=56 TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
+  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=7 BS=56 TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  export NVTE_FUSED_ATTN_CK=0
   cd /workspace/Megatron-LM
   GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  export NVTE_FUSED_ATTN_CK=1
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  export NVTE_FUSED_ATTN_CK=0
   cd /workspace/Megatron-LM
   if [[ -z "$LAYERS" ]]; then
     LAYERS=3 # default proxy model uses 3 layers
@@ -173,6 +184,7 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   FORCE_BANLANCE=true RUN_ENV=cluster MODEL_SIZE=671B TRAIN_ITERS=50 SEQ_LEN=4096 NUM_LAYERS=$LAYERS MICRO_BATCH_SIZE=1 GLOBAL_BATCH_SIZE=32 PR=bf16 TP=1 PP=1 ETP=1 EP=8 GEMM_TUNING=1 NVTE_CK_USES_BWD_V3=1 USE_GROUPED_GEMM=true MOE_USE_LEGACY_GROUPED_GEMM=true GPT_LAYER_IN_TE=true MOCK_DATA=1 bash examples/deepseek_v3/train_deepseekv3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  export NVTE_FUSED_ATTN_CK=1
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
@@ -192,6 +204,26 @@ elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
   fi
   echo "[INFO] Proxy model uses $LAYERS layers"
   TOKENIZER_MODEL=/tokenizer/tokenizer.model RECOMPUTE_NUM_LAYERS=$LAYERS TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=full  NUM_LAYERS=$LAYERS PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh |& tee $TRAIN_LOG
+  echo "[INFO] Benchmarking"
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  rm $TRAIN_LOG
+
+elif [ "$MODEL_REPO" == "Qwen2.5-7B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  cd /workspace/Megatron-LM
+  if [[ "$DATATYPE" == "BF16" ]]; then
+    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=0 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
+  elif [[ "$DATATYPE" == "FP8" ]]; then
+    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=1 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
+  fi
+  echo "[INFO] Benchmarking"
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  rm $TRAIN_LOG
+
+elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  cd /workspace/Megatron-LM
+  bash examples/qwen/train_qwen2.sh FSDP=1 CP=1 PP=1 MBS=3 BS=24 TE_FP8=0 MODEL_SIZE=72 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-72B RECOMPUTE_ACTIVATIONS=full CKPT_FORMAT=torch_dist |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
