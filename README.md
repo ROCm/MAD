@@ -63,6 +63,8 @@ The information presented in this document is for informational purposes only an
 
 The MAD CLI (`madengine`) provides a simple interface for running models locally. All models defined in `models.json` can be executed on a Docker host to collect performance results.
 
+**Please note that support of running models using tools/run_models.py is no longer recommended, and tools/run_models.py will be removed from MAD repo soon.**
+
 #### Basic Usage
 
 ```bash
