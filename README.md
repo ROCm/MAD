@@ -301,12 +301,3 @@ Runtime model configuration:
 | `MAD_MODEL_NUM_EPOCHS` | Training epochs |
 | `MAD_MODEL_BATCH_SIZE` | Batch size |
 
-## License
-
-© 2025 Advanced Micro Devices, Inc. All Rights Reserved.
-
-The information presented in this document is for informational purposes only and may contain technical inaccuracies, omissions, and typographical errors. AMD makes no representations or warranties with respect to the contents hereof and assumes no responsibility for any inaccuracies, errors, or omissions that may appear in this information.
-
----
-
-**AMD, the AMD Arrow logo, and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.**
