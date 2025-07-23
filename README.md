@@ -1,8 +1,5 @@
 # MAD - Model Automation and Dashboarding
 
-[![License](https://img.shields.io/badge/License-AMD-blue.svg)](LICENSE.txt)
-[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)]()
-
 ## Overview
 
 MAD (Model Automation and Dashboarding) is a comprehensive AI/ML model automation platform that provides:
