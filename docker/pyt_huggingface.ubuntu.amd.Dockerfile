@@ -66,5 +66,5 @@ RUN locale-gen en_US.UTF-8
 # record configuration for posterity
 RUN pip3 list
 
-# install numpy < 2.0 to avoid compatibility issues
+# Install numpy < 2.0 to avoid compatibility issues
 RUN pip3 install "numpy<2"
