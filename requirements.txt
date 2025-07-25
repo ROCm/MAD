@@ -1,1 +1,1 @@
-madengine
+git+https://github.com/ROCm/madengine.git@main
