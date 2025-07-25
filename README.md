@@ -74,7 +74,7 @@ madengine run [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--tags TAGS` | Tags to filter models (space-separated) | - |
+| `--tags TAGS` | Tags to filter models (comma-separated) | - |
 | `--timeout TIMEOUT` | Timeout in seconds | 7200 (2 hours) |
 | `--live-output` | Show real-time output | False |
 | `--clean-docker-cache` | Rebuild Docker images without cache | False |
@@ -112,7 +112,7 @@ madengine run --tags pyt_huggingface_bert
 madengine run --tags pyt
 
 # Run multiple tag combinations
-madengine run --tags tf2 bert fp32
+madengine run --tags tf2,bert,fp32
 ```
 
 ### Timeout Configuration
@@ -302,3 +302,4 @@ Runtime model configuration:
 | `MAD_MODEL_NAME` | Model name from `models.json` |
 | `MAD_MODEL_NUM_EPOCHS` | Training epochs |
 | `MAD_MODEL_BATCH_SIZE` | Batch size |
+
