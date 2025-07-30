@@ -1,0 +1,5 @@
+accelerate
+transformers==4.51.3
+datasets
+loguru
+tqdm

@@ -1,0 +1,32 @@
+resources:
+  accelerators: H100:2
+  cpus: 32+
+  memory: 256+
+  image_id: docker:nvcr.io/nvidia/pytorch:25.06-py3
+
+envs:
+  HF_HOME: /mnt/hf_home
+  ALLOW_ALL_RANKS_OUTPUT: 0
+  NCCL_NET_GDR_LEVEL: LOC
+
+volumes: # {mount_path}: {volume_name}
+  /mnt/hf_home: hf-home
+
+run: |
+  ### env setup 
+  conda deactivate
+  source .venv/bin/activate
+
+  env | grep -i NCCL
+
+  ### torchtitan clone. SFT uses same dependency
+  cd /workspace & git clone https://github.com/MotifTechnologies/MAD.git
+  cd /workspace/MAD
+  git checkout add_motif
+
+  ### dependency installation
+  cd /workspace/MAD/scripts/pyt_motif_training/SFT
+  pip install -r requirements.txt
+
+  ### run!
+  python train_motif.py
