@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from accelerate import Accelerator
 
+
 def collate_fn(samples, tokenizer):
     inp, attn_mask = [], []
     for x in samples:
@@ -38,9 +39,7 @@ def main(args):
 
     # this demo will use 100 samples of origin data
     # downloading the dataset will consume about 2.5 gb of your storage
-    train_dataset = load_dataset(
-        "nvidia/AceReason-1.1-SFT", split="train[:100]"
-    )
+    train_dataset = load_dataset("nvidia/AceReason-1.1-SFT", split="train[:100]")
     total_iters = len(train_dataset) // args.batchsize
 
     # loading model
@@ -69,9 +68,9 @@ def main(args):
         batch_size=args.batchsize,
         collate_fn=partial(collate_fn, tokenizer=tokenizer),
         drop_last=True,
-        pin_memory = True,
+        pin_memory=True,
         shuffle=False,
-        num_workers=accelerator.num_processes
+        num_workers=accelerator.num_processes,
     )
 
     optimizer = AdamW(model.parameters(), lr=args.lr)
@@ -81,17 +80,19 @@ def main(args):
     # wrap everything with accelerator
     # use accelerate config when running!
     # adopted from train_llama.py
-    
+
     local_rank = accelerator.local_process_index
 
     pre_mem_use = torch.cuda.memory_allocated(device=f"cuda:{local_rank}") * 1e-6
     logger.info(f"GPU {local_rank} memory use = {pre_mem_use:.2f}MB")
 
-    optimizer, lr_scheduler, dataloader, model = accelerator.prepare(optimizer, lr_scheduler, dataloader, model)
+    optimizer, lr_scheduler, dataloader, model = accelerator.prepare(
+        optimizer, lr_scheduler, dataloader, model
+    )
 
     # train loop starts
     logger.info("=====TRAIN START=====")
-    
+
     for epoch in range(args.epochs):
         for idx, batch in enumerate(dataloader):
             loss = model(
@@ -121,7 +122,6 @@ def main(args):
     save_path = os.path.join(curr_path, "./exp01")
     os.mkdir(save_path)
 
-    
     unwrapped_model = accelerator.unwrap_model(model)
     unwrapped_model.save_pretrained(
         save_path,

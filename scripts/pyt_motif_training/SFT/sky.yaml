@@ -1,9 +1,10 @@
 resources:
-  accelerators: H100:2
+  accelerators: mi250:1
   cpus: 32+
   memory: 256+
-  image_id: docker:nvcr.io/nvidia/pytorch:25.06-py3
-
+  image_id: rocm/pytorch-training:v25.5
+setup:
+  pip install accelerate transformers==4.51.3 datasets loguru tqdm
 envs:
   HF_HOME: /mnt/hf_home
   ALLOW_ALL_RANKS_OUTPUT: 0
@@ -24,9 +25,5 @@ run: |
   cd /workspace/MAD
   git checkout add_motif
 
-  ### dependency installation
-  cd /workspace/MAD/scripts/pyt_motif_training/SFT
-  pip install -r requirements.txt
-
   ### run!
-  python train_motif.py
+  python /workspace/MAD/scripts/pyt_motif_training/SFT/train_motif.py
