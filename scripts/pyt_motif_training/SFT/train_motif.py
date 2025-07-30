@@ -15,11 +15,7 @@ from accelerate import Accelerator
 def collate_fn(samples, tokenizer):
     inp, attn_mask = [], []
     for x in samples:
-        message = [
-            {"role": "system", "content": "you are an helpful assistant"},
-            {"role": "user", "content": x["input"]},
-            {"role": "assistant", "content": x["output"]},
-        ]
+        message = [{"role": "system", "content": "you are an helpful assistant"}] + x['context']
         chat = tokenizer.apply_chat_template(message, tokenize=False)
         single_batch = tokenizer(
             chat,
@@ -39,7 +35,7 @@ def main(args):
 
     # this demo will use 100 samples of origin data
     # downloading the dataset will consume about 2.5 gb of your storage
-    train_dataset = load_dataset("nvidia/AceReason-1.1-SFT", split="train[:100]")
+    train_dataset = load_dataset("nvidia/HelpSteer3", split="train[:100]")
     total_iters = len(train_dataset) // args.batchsize
 
     # loading model
