@@ -87,7 +87,8 @@ def main(args):
     )
 
     # train loop starts
-    logger.info("=====TRAIN START=====")
+    if accelerator.is_main_process:
+        logger.info("=====TRAIN START=====")
 
     for epoch in range(args.epochs):
         for idx, batch in enumerate(dataloader):
