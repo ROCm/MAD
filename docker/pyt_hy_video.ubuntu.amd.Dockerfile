@@ -10,6 +10,7 @@ RUN pip install diffusers==0.32.2 distvae yunchang==0.6.0 opencv-python accelera
 RUN pip install imageio imageio-ffmpeg
 RUN pip install beautifulsoup4==4.12.3
 RUN pip install sentencepiece==0.1.99
+RUN pip install numpy==1.26.4
 
 # xDiT repository
 #RUN git clone git@github.com:mqhc2020/xDiT.git -b rocm_opt && \
