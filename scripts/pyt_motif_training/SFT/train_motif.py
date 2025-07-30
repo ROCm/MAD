@@ -47,7 +47,7 @@ def main(args):
         trust_remote_code=True,
         _attn_implementation="eager",  # also supports flash_attention_2, install if interested
         torch_dtype="bfloat16",  # used bfloat16 for 1-gpu MI250 budget, but you are free to use float32
-    )
+    ).bfloat16()
     model.train()
 
     # loading tokenizer
