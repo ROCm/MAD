@@ -79,9 +79,6 @@ def main(args):
 
     local_rank = accelerator.local_process_index
 
-    pre_mem_use = torch.cuda.memory_allocated(device=f"cuda:{local_rank}") * 1e-6
-    logger.info(f"GPU {local_rank} memory use = {pre_mem_use:.2f}MB")
-
     optimizer, lr_scheduler, dataloader, model = accelerator.prepare(
         optimizer, lr_scheduler, dataloader, model
     )

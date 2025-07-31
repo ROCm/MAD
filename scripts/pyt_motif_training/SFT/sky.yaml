@@ -15,15 +15,15 @@ volumes: # {mount_path}: {volume_name}
 
 run: |
   ### env setup 
-  conda deactivate
-  source .venv/bin/activate
+  # reinstall torch 2 for gfx90a. v25.5 does not match
+  pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.3
 
   env | grep -i NCCL
 
-  ### torchtitan clone. SFT uses same dependency
-  cd /workspace & git clone https://github.com/MotifTechnologies/MAD.git
-  cd /workspace/MAD
+  ### clone MAD repository
+  git clone https://github.com/MotifTechnologies/MAD.git
+  cd MAD
   git checkout add_motif
 
   ### run!
-  python /workspace/MAD/scripts/pyt_motif_training/SFT/train_motif.py
+  accelerate launch --config_file accelerate_config_1gpu.yaml train_motif.py
