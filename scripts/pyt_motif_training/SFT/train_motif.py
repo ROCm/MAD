@@ -128,7 +128,7 @@ if __name__ == "__main__":
     # define argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", "-e", type=int, default=1)
-    parser.add_argument("--batchsize", "-b", type=int, default=4)
+    parser.add_argument("--batchsize", "-b", type=int, default=2)
     parser.add_argument("--lr", "-l", type=float, default=5e-5)
     args = parser.parse_args()
 

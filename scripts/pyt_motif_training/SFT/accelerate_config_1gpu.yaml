@@ -3,7 +3,6 @@ debug: false
 distributed_type: FSDP
 downcast_bf16: 'no'
 enable_cpu_affinity: false
-### stable 5.8samples/sec
 fsdp_config:
   fsdp_activation_checkpointing: true
   fsdp_backward_prefetch: BACKWARD_PRE
