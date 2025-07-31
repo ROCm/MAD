@@ -45,7 +45,7 @@ def main(args):
     model = AutoModelForCausalLM.from_pretrained(
         "Motif-Technologies/Motif-2.6B",
         trust_remote_code=True,
-        _attn_implementation="eager",  # also supports flash_attention_2, install if interested
+        _attn_implementation="flash_attention_2",  # also supports flash_attention_2, install if interested
         torch_dtype="bfloat16",  # used bfloat16 for 1-gpu MI250 budget, but you are free to use float32
     ).bfloat16().cpu()
     model.train()
