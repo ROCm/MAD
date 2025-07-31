@@ -13,11 +13,11 @@ fsdp_config:
   fsdp_use_orig_params: true
   fsdp_sync_module_states: false
   fsdp_sharding_strategy: SHARD_GRAD_OP
-  fsdp_reshard_after_forward: true
+  fsdp_reshard_after_forward: false
   fsdp_state_dict_type: FULL_STATE_DICT
   fsdp_transformer_layer_cls_to_wrap: MotifDecoderLayer
   fsdp_version: 2
-main_process_ip: 0.0.0.0 # lo
+main_process_ip: 127.0.0.1 # lo
 main_process_port: 8884
 main_training_function: main
 mixed_precision: bf16

@@ -36,7 +36,7 @@ def main(args):
     # this demo will use 100 samples of origin data
     # downloading the dataset will consume about 2.5 gb of your storage
     train_dataset = load_dataset("nvidia/HelpSteer3", split="train[:100]")
-    total_iters = len(train_dataset) // args.batchsize
+    total_iters = len(train_dataset) // (args.batchsize * accelerator.state.num_processes)
 
     # loading model
     # due to tie-weights, you may see logs like below(which can be ignored, in progress)
@@ -47,7 +47,7 @@ def main(args):
         trust_remote_code=True,
         _attn_implementation="eager",  # also supports flash_attention_2, install if interested
         torch_dtype="bfloat16",  # used bfloat16 for 1-gpu MI250 budget, but you are free to use float32
-    ).bfloat16()
+    ).bfloat16().cpu()
     model.train()
 
     # loading tokenizer
@@ -77,8 +77,6 @@ def main(args):
     # use accelerate config when running!
     # adopted from train_llama.py
 
-    local_rank = accelerator.local_process_index
-
     optimizer, lr_scheduler, dataloader, model = accelerator.prepare(
         optimizer, lr_scheduler, dataloader, model
     )
@@ -96,7 +94,7 @@ def main(args):
             ).loss
 
             accelerator.backward(loss)
-            model.clip_grad_norm_(1.0)
+            accelerator.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad(set_to_none=True)
