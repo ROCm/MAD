@@ -1,5 +1,5 @@
 resources:
-  accelerators: mi250:1
+  accelerators: mi250:8
   cpus: 32+
   memory: 256+
   image_id: rocm/pytorch-training:v25.5
@@ -8,22 +8,17 @@ setup:
   GPU_ARCHS=“gfx90a” pip install flash-attn==2.8.0.post2 --no-build-isolation
   pip install accelerate transformers==4.51.3 datasets loguru tqdm
 envs:
-  HF_HOME: /mnt/hf_home
   ALLOW_ALL_RANKS_OUTPUT: 0
   NCCL_NET_GDR_LEVEL: LOC
-
-volumes: # {mount_path}: {volume_name}
-  /mnt/hf_home: hf-home
+  HF_TOKEN: <huggingface-token> # modify this!!!!
 
 run: |
   env | grep -i NCCL
 
   ### clone MAD repository
   git clone https://github.com/MotifTechnologies/MAD.git
-  cd MAD
+  cd MAD/scripts/pyt_motif_training/SFT
   git checkout add_motif
 
-  cd scripts/pyt_motif_training/SFT
   ### run!
-  cd 
-  accelerate launch --config_file accelerate_config_1gpu.yaml train_motif.py
+  accelerate launch --config_file accelerate_config_1node.yaml train_motif.py

@@ -1,4 +1,86 @@
+resources:
+  accelerators: MI250:8
+  cpus: 32+
+  memory: 256+
+  image_id: motif_image
+
+envs:
+  ALLOW_ALL_RANKS_OUTPUT: 0
+  NCCL_NET_GDR_LEVEL: LOC
+  HF_TOKEN: <huggingface-token> # modify this!!!!
+
+setup:
+  pip install kernels transformers -U
+
+run: |
+  ### env setup
+  conda deactivate
+  source .venv/bin/activate
+
+  TORCHTITAN_DIR="/workspace/torchtitan_public"
+  echo "Torchtitan directory path: $TORCHTITAN_DIR"
+  cd $TORCHTITAN_DIR
+
+  ### dependency
+  pip install -r requirements.txt
+
+  ### tokenizer download
+  export HF_TOKEN=$YOUR_TOKEN
+  python scripts/download_tokenizer.py --repo_id Motif-Technologies/Motif-2.6B
+
+  ### config update
+  update_config_param() {
+    local key=$1
+    local value=$2
+    local CONFIG_FILE=$3
+
+    # If the key exists, replace it
+    if grep -q "^$key" "$CONFIG_FILE"; then
+        sed -i "s/^$key *= *.*/$key = $value/" "$CONFIG_FILE"
+    else
+        echo "$key = $value" >> "$CONFIG_FILE"
+    fi
+  }
+
+  GLOBAL_BATCH_SIZE=256
+  GRAD_ACCUMULATION_STEPS=32
+  CONFIG_FILE="./torchtitan/models/motif/train_configs/motif_2.6b.toml" 
+
+  update_config_param "warmup_steps" 10 $CONFIG_FILE
+  update_config_param "steps" 50 $CONFIG_FILE
+  update_config_param "log_freq" 1 $CONFIG_FILE
+  update_config_param "enable_profiling" false $CONFIG_FILE
+  update_config_param "enable_tensorboard" false $CONFIG_FILE
+  update_config_param "compile" false $CONFIG_FILE
+
+  ### Set default parallel strategy to FSDP=True
+  # [parallelism]
+  update_config_param "data_parallel_replicate_degree" 1 $CONFIG_FILE
+  update_config_param "data_parallel_shard_degree" -1 $CONFIG_FILE
+  update_config_param "seq_len" 4096 $CONFIG_FILE
+  # [activation_checkpoint]
+  update_config_param "mode" '"selective"' $CONFIG_FILE
+
+  ### Set default datatype to BF16
+  # [float8]
+  update_config_param "enable_fsdp_float8_all_gather" false $CONFIG_FILE
+  update_config_param "precompute_float8_dynamic_scale_for_fsdp" false $CONFIG_FILE
+  update_config_param "force_recompute_fp8_weight_in_bwd" false $CONFIG_FILE
+
+  ### Check divisibility
+  N_PROC=$((${SKYPILOT_NUM_GPUS_PER_NODE} * ${SKYPILOT_NUM_NODES}))
+  if (( GLOBAL_BATCH_SIZE % (N_PROC * GRAD_ACCUMULATION_STEPS) == 0 )); then
+    LOCAL_BATCH_SIZE=$(( GLOBAL_BATCH_SIZE / (N_PROC * GRAD_ACCUMULATION_STEPS) ))
+  else
+    echo "[Error] GLOBAL_BATCH_SIZE (${GLOBAL_BATCH_SIZE}) is not divisible by N_PROC (${N_PROC})"
+    exit 1
+  fi
+
+  echo "Training model with batch size = $GLOBAL_BATCH_SIZE"
+  # [training]
+  update_config_param "local_batch_size" ${LOCAL_BATCH_SIZE} $CONFIG_FILE
+  update_config_param "global_batch_size" ${GLOBAL_BATCH_SIZE} $CONFIG_FILE
 
 
-
-# in progress
+  ### run  
+  CONFIG_FILE=$CONFIG_FILE bash run_train_skypilot.sh

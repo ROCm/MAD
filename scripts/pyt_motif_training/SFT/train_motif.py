@@ -21,7 +21,7 @@ def collate_fn(samples, tokenizer):
             chat,
             padding="max_length",
             truncation=True,
-            max_length=4096,
+            max_length=2048,
             return_tensors="pt",
         )
         inp.append(single_batch["input_ids"])
@@ -35,7 +35,7 @@ def main(args):
 
     # this demo will use 100 samples of origin data
     # downloading the dataset will consume about 2.5 gb of your storage
-    train_dataset = load_dataset("nvidia/HelpSteer3", split="train[:100]")
+    train_dataset = load_dataset("nvidia/HelpSteer3", split="train")
     total_iters = len(train_dataset) // (args.batchsize * accelerator.state.num_processes)
 
     # loading model
@@ -47,7 +47,8 @@ def main(args):
         trust_remote_code=True,
         _attn_implementation="flash_attention_2",  # also supports flash_attention_2, install if interested
         torch_dtype="bfloat16",  # used bfloat16 for 1-gpu MI250 budget, but you are free to use float32
-    ).bfloat16().cpu()
+        device_map="cpu"
+    )
     model.train()
 
     # loading tokenizer
@@ -64,7 +65,7 @@ def main(args):
         batch_size=args.batchsize,
         collate_fn=partial(collate_fn, tokenizer=tokenizer),
         drop_last=True,
-        pin_memory=True,
+        pin_memory=False,
         shuffle=False,
         num_workers=accelerator.num_processes,
     )
@@ -108,19 +109,6 @@ def main(args):
             accelerator.wait_for_everyone()
     accelerator.end_training()
 
-    # save trained model & tokenizer
-    # using AutoModel-compatible api
-    curr_path = os.getcwd()
-    save_path = os.path.join(curr_path, "./exp01")
-    os.mkdir(save_path)
-
-    unwrapped_model = accelerator.unwrap_model(model)
-    unwrapped_model.save_pretrained(
-        save_path,
-        is_main_process=accelerator.is_main_process,
-        save_function=accelerator.save,
-    )
-    tokenizer.save_pretrained(save_path)
     logger.info("=====TRAIN COMPLETE=====")
 
 
