@@ -13,9 +13,6 @@ setup:
   pip install kernels transformers -U
 
 run: |
-  ### env setup
-  conda deactivate
-  source .venv/bin/activate
 
   TORCHTITAN_DIR="/workspace/torchtitan_public"
   echo "Torchtitan directory path: $TORCHTITAN_DIR"
