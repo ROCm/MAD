@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,11 @@ base_output_directory: "./"
 hardware: "gpu"
 steps: 50
 model_name: "llama2-7b"
+enable_goodput_recording: False
+monitor_goodput: False
 enable_checkpointing: False
 attention: "cudnn_flash_te"
+packing: True
 log_period: 100
   #inter-node parallelism strategy
 dcn_data_parallelism: -1
@@ -54,7 +57,5 @@ weight_dtype: bfloat16
 checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
 max_target_length: 4096
 per_device_batch_size: 12
-hf_path: "parquet" 
-hf_train_files: "/hf_cache/hub/datasets--legacy-datasets--c4/snapshots/5abe0d085aa23dd9db2a6c1e86cfce4e4db6f0c3/en/partial-train/000*.parquet"
-dataset_type: "hf"
+dataset_type: "synthetic"
 tokenizer_path: "meta-llama/Llama-2-7b"

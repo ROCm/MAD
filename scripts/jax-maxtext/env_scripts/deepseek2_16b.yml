@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,11 @@ base_output_directory: "./"
 hardware: "gpu"
 steps: 50
 model_name: "deepseek2-16b"
+enable_goodput_recording: False
+monitor_goodput: False
 enable_checkpointing: False
 attention: "dot_product"
+packing: True
 log_period: 100
 #inter-node parallelism strategy
 dcn_data_parallelism: -1

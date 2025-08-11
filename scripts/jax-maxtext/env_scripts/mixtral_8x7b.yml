@@ -1,9 +1,8 @@
-#!/bin/bash
 ###############################################################################
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,41 +24,44 @@
 #
 #################################################################################
 
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
+base_config: "base.yml"
+run_name: "mixtral_8x7b_training"
+base_output_directory: "./"
+hardware: "gpu"
+steps: 40
+model_name: "mixtral-8x7b"
+enable_goodput_recording: False
+monitor_goodput: False
+enable_checkpointing: False
+attention: "cudnn_flash_te"
+packing: True
+log_period: 100
+  #inter-node parallelism strategy
+dcn_data_parallelism: -1
+dcn_fsdp_parallelism: 1
+  #intra-node parallelism strategy
+ici_fsdp_parallelism: 1
+ici_data_parallelism: 1
+ici_expert_parallelism: -1
+remat_policy: "minimal"
+use_iota_embed: True
+scan_layers: True
 
-# Parse named arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-    	--model_repo) MODEL_REPO="$2"; shift ;;
-    	*) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
-      --quantization) QUANTIZATION="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-done
+async_checkpointing: False
+logits_dot_in_fp32: False
+dtype: "bfloat16"
+quantization: "" #"nanoo_fp8"
+quantize_kvcache: False
+kv_quant_axis: "heads_and_dkv"
+kv_quant_dtype: "int8"
+weight_dtype: bfloat16
+checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
 
-echo "Model repo: $MODEL_REPO"
+per_device_batch_size: 12
+max_target_length: 4096
+sparse_matmul: False
+megablox: False
+capacity_factor: 1
 
-if [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-8b" ]]; then
-  model="Llama-3.1-8B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-70b" ]]; then
-  model="Llama-3.1-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.3-70b" ]]; then
-  model="Llama-3.3-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-7b" ]]; then
-  model="Llama-2-7B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-70b" ]]; then
-  model="Llama-2-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_deepseek-v2-lite-16b" ]]; then
-  model="DeepSeek-V2-lite"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_mixtral-8x7b" ]]; then
-  model="Mixtral-8x7B"
-fi
-
-./jax-maxtext_benchmark_setup.sh -m $model
-./jax-maxtext_benchmark_report.sh -m $model -q $QUANTIZATION
-
-echo "performance: 1 pass"
+dataset_type: "synthetic"
+tokenizer_path: "mistralai/Mixtral-8x7B-v0.1"
