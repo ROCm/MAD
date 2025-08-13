@@ -1,0 +1,8 @@
+model,benchmark,tp,in,out,bs,num_prompts,max_concurrency,datatype,max_num_seqs,max_seq_len_to_capture,max_num_batched_tokens,max_model_len
+amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
