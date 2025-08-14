@@ -27,30 +27,16 @@
 |              | throughput                              | Measure token generation throughput              |
 |              | serving                                 | Measure online serving throughput                |
 |              | all                                     | Measure all                                      |
+|              | meta-llama/Llama-2-70b-chat-hf          | [Llama 2 70B](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)                               |
 | $model_repo  | meta-llama/Llama-3.1-8B-Instruct   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
 | (float16)    | meta-llama/Llama-3.1-70B-Instruct  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                            |
 |              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |
-|              | meta-llama/Llama-3.2-11B-Vision-Instruct| [Llama 3.2 11B Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision-Instruct)                     |
-|              | meta-llama/Llama-2-7b-chat-hf           | [Llama 2 7B](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)                                |
-|              | meta-llama/Llama-2-70b-chat-hf          | [Llama 2 70B](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)                               |
 |              | mistralai/Mixtral-8x7B-Instruct-v0.1    | [Mixtral MoE 8x7B](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1)                         |
 |              | mistralai/Mixtral-8x22B-Instruct-v0.1   | [Mixtral MoE 8x22B](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1)                        |
-|              | mistralai/Mistral-7B-Instruct-v0.3      | [Mistral 7B](https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3)                           |
-|              | Qwen/Qwen2-7B-Instruct                  | [Qwen2 7B](https://huggingface.co/Qwen/Qwen2-7B-Instruct)                                       |
-|              | Qwen/Qwen2-72B-Instruct                 | [Qwen2 72B](https://huggingface.co/Qwen/Qwen2-72B-Instruct)                                      |
-|              | core42/jais-13b-chat                    | [JAIS 13B](https://huggingface.co/core42/jais-13b-chat)                                         |
-|              | core42/jais-30b-chat-v3                 | [JAIS 30B](https://huggingface.co/core42/jais-30b-chat-v3)                                      |
-|              | databricks/dbrx-instruct                | [DBRX Instruct](https://huggingface.co/databricks/dbrx-instruct)                                     |
-|              | google/gemma-2-27b                      | [Gemma 2 27B](https://huggingface.co/google/gemma-2-27b)                                           |
-|              | CohereForAI/c4ai-command-r-plus-08-2024 | [C4AI Command R+ 08-2024](https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024)                      |
-|              | deepseek-ai/deepseek-moe-16b-chat       | [DeepSeek MoE 16B](https://huggingface.co/deepseek-ai/deepseek-moe-16b-chat)                            |
 | $model_repo  | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
 | (float8)     | amd/Llama-3.1-405B-Instruct-FP8-KV | [Llama 3.1 405B](https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)                           |
 |              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | [Mixtral MoE 8x7B](https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV)                        |
 |              | amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV  | [Mixtral MoE 8x22B](https://huggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV)                       |
-|              | amd/Mistral-7B-v0.1-FP8-KV              | [Mistral 7B](https://huggingface.co/amd/Mistral-7B-v0.1-FP8-KV)                                   |
-|              | amd/dbrx-instruct-FP8-KV                | [DBRX Instruct](https://huggingface.co/amd/dbrx-instruct-FP8-KV)                                     |
-|              | amd/c4ai-command-r-plus-FP8-KV          | [C4AI Command R+ 08-2024](https://huggingface.co/amd/c4ai-command-r-plus-FP8-KV)                               |
 | $num_gpu     | 1 or 8                                  | Number of GPUs                                   |
 | $datatype    | float16, float8                         | Data type                                        |
 

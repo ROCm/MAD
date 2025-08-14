@@ -1,0 +1,18 @@
+model,benchmark,tp,in,out,bs,num_prompts,max_concurrency,datatype,max_num_seqs,max_seq_len_to_capture,max_num_batched_tokens,max_model_len
+meta-llama/Llama-3.1-70B-Instruct,throughput,8,128 2048,128 2048,,1024,,float16,1024,131072,131072,8192
+meta-llama/Llama-3.1-70B-Instruct,serving,8,128 2048,128 2048,,,1 8 32 128,float16,256,131072,131072,8192
+
+amd/Llama-3.1-70B-Instruct-FP8-KV,throughput,8,128 2048,128 2048,,1024,,float8,1024,131072,131072,8192
+amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,128 2048,128 2048,,,1 8 32 128,float8,256,131072,131072,8192
+
+meta-llama/Llama-3.1-405B-Instruct,throughput,8,128 2048,128 2048,,1024,,float16,1024,131072,131072,8192
+meta-llama/Llama-3.1-405B-Instruct,serving,8,128 2048,128 2048,,,1 8 32 128,float16,256,131072,131072,8192
+
+amd/Llama-3.1-405B-Instruct-FP8-KV,throughput,8,128 2048,128 2048,,1024,,float8,1024,131072,131072,8192
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,128 2048,128 2048,,,1 8 32 128,float8,256,131072,131072,8192
+
+mistralai/Mixtral-8x22B-Instruct-v0.1,throughput,8,128 2048,128 2048,,1024,,float16,1024,65536,65536,8192
+mistralai/Mixtral-8x22B-Instruct-v0.1,serving,8,128 2048,128 2048,,,1 8 32 128,float16,256,65536,65536,8192
+
+amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV,throughput,8,128 2048,128 2048,,1024,,float8,1024,65536,65536,8192
+amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV,serving,8,128 2048,128 2048,,,1 8 32 128,float8,256,65536,65536,8192
