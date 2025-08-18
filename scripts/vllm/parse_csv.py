@@ -31,9 +31,6 @@ def parse_throughput_csv(file_path):
     # Create a new DataFrame
     df_new = pd.DataFrame()
     
-    # Combine the columns of model, tp, num_prompts, input_len, output_len, and dtype to a new column named 'model'
-    df_new['model'] = df['model'] + '_' + 'throughput' + '_' + df['tp'].astype(str) + '_' + df['num_prompts'].astype(str) + '_' + df['in'].astype(str) + '_' + df['out'].astype(str) + '_' + df['dtype']
-    
     for row in df.to_dict(orient="records"):
         model = row['model'] + '_' + 'throughput' + '_' + str(row['tp']) + '_' + str(row['num_prompts']) + '_' + str(row['in']) + '_' + str(row['out']) + '_' + str(row['dtype'])
         outputs = ['throughput_tot (tok/sec)', 'throughput_gen (tok/sec)']
