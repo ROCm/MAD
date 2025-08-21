@@ -1,5 +1,7 @@
 # Training Performance Validation with ROCm Megatron-LM Training Docker on the AMD Instinct Accelerators
 
+**NOTE: ROCm Megatron-LM has limited support on the primus docker. Please follow the Primus with megatron-core framework guide to get started. We still maintain [backward compatibility with Rocm/Megatron-LM](https://github.com/AMD-AIG-AIMA/MAD-private/blob/megatron-lm-v25.7/benchmark/megatron_lm/Migration_Guide.md#backward-compatibility-with-megatron-lm) framework for existing models.**
+
 ## Overview
 
 ROCm Megatron-LM framework is a specialized fork of the robust Megatron-LM, designed to enable efficient training of large-scale language models on AMD GPUs. By leveraging AMD Instinct™ MI300X accelerators, AMD Megatron-LM delivers enhanced scalability, performance, and resource utilization for AI workloads. It is purpose-built to support models like Meta’s Llama 2, Llama 3, and Llama 3.1, enabling developers to train next-generation AI models with greater efficiency. See the GitHub repository at [ROCm/Megatron-LM](https://github.com/ROCm/Megatron-LM/).
@@ -8,14 +10,14 @@ For ease of use, AMD provides a ready-to-use Docker image for MI300X accelerator
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.4.1              |
-| Python            | 3.10, 3.12          |
-| PyTorch           | 2.8.0a0+git7d205b2   |
-| Transformer Engine | 2.1.0.dev0+8c4a512d      |
+| ROCm               | 6.4.2              |
+| Python            | 3.10          |
+| PyTorch           | 2.8.0a0+gitd06a406   |
+| Transformer Engine | 2.1.0.dev0+ba586519      |
 | Flash Attention   | 3.0.0               |
-| hipBLASLt         | 393e413        |
+| hipBLASLt         | 37ba1d36        |
 | Triton            | 3.3.0                 |
-| RCCL              | 2.23.4.7a84c5d      |
+| RCCL              | 2.22.3      |
 
 
 ## Supported features and models
@@ -74,24 +76,29 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.6_py312
+   docker pull rocm/megatron-lm:v25.7_py310
    ```
-   Alternatively, `rocm/megatron-lm-training-private:v25.6_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 128GG --name megatron_training_env rocm/megatron-lm:v25.6_py312
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name megatron_training_env rocm/megatron-lm:v25.7_py310
    ```
-   Alternatively, `rocm/megatron-lm:v25.6_py310` is available if python 3.10 with Ubuntu 22.04 is preferred
 
 5. **Execute the training_env container (optional if no already in the container)**
    ```bash
     docker start megatron_training_env
     docker exec -it megatron_training_env bash
    ```
-
-The docker container hosts verified commit `fd6f0d1` from [Megatron-LM repository](https://github.com/ROCm/Megatron-LM/tree/rocm_dev).
+   
+6. **Megatron-LM Backward Compatibility setup:**
+   Primus docker maintains Megatron-LM compatibility with limited support. To roll-back using Megatron-LM follow the steps outlined below. Once Megatron-LM is installed, follow the documentation to run workloads as usual.
+```bash
+cd /workspace/Megatron-LM/
+pip uninstall megatron-core
+pip install -e .
+```
+The docker container hosts verified commit `e8e9edc` from [Megatron-LM repository](https://github.com/ROCm/Megatron-LM/tree/rocm_dev).
 
 ---
 
