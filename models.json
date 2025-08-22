@@ -606,7 +606,7 @@
       "llama3"
     ],
     "timeout": -1,
-    "args":
+        "args":
      "--model_repo pyt_megatron_lm_train_llama-3.1-70b"
   },
   {
@@ -660,21 +660,8 @@
       "deepseek-v2-lite"
     ],
     "timeout": -1,
-    "args":
+        "args":
      "--model_repo pyt_megatron_lm_train_deepseek-v2-lite-16b"
-  },
-  {
-    "name": "pyt_mochi_video_inference",
-    "dockerfile": "docker/pyt_mochi_inference",
-    "scripts": "scripts/mochi/run_mochi.sh",
-    "n_gpus": "1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "tags": [
-      "pyt",
-      "inference"
-    ],
-    "args": "--model_repo genmo/mochi-1-preview --tunableop off"
   },
   {
     "name": "pyt_megatron_lm_train_deepseek-v3-proxy",
@@ -748,7 +735,7 @@
     "args":
      "--model_repo pyt_megatron_lm_train_qwen2.5-7b"
   },
-    {
+  {
     "name": "pyt_megatron_lm_train_qwen2.5-72b",
     "url": "",
     "dockerfile": "docker/megatron_train",
@@ -765,6 +752,19 @@
     "timeout": -1,
     "args":
      "--model_repo pyt_megatron_lm_train_qwen2.5-72b"
+  },
+  {
+    "name": "pyt_mochi_video_inference",
+    "dockerfile": "docker/pyt_mochi_inference",
+    "scripts": "scripts/mochi/run_mochi.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "inference"
+    ],
+    "args": "--model_repo genmo/mochi-1-preview --tunableop off"
   },
   {
     "name": "jax_maxtext_train_llama-2-7b",
@@ -996,6 +996,223 @@
       "video"
     ],
     "timeout": -1,
-    "args": ""
+    "args":
+     "--model_repo microsoft/phi-4 --test_option latency --num_gpu 1 --datatype float16"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-2-7b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-2-7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-2-7b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-2-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-2-70b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-3.1-8B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-8b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-3.1-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+        "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-3.3-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-3.3-70b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_deepseek-v2-lite-16b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-DeepSeek-V2-lite.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "deepseek-v2-lite"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_deepseek-v2-lite-16b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_deepseek-v3-proxy",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-DeepSeek-V3-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "deepseek-v3-proxy"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_deepseek-v3-proxy"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_mixtral-8x7b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Mixtral-8x7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "mixtral-8x7b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_mixtral-8x7b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_mixtral-8x22b-proxy",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Mixtral-8x22B-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "mixtral-8x22b-proxy"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_mixtral-8x22b-proxy"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_qwen2.5-7b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Qwen2.5-7B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen2.5-7b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_qwen2.5-7b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_qwen2.5-72b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Qwen2.5-72B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen2.5-72b"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_qwen2.5-72b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-70b-proxy",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-Llama-3.1-70B-proxy.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b-proxy"
   }
 ]
