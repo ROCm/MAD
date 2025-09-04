@@ -1,4 +1,4 @@
-## List of Models - focus SGlang Dissagerated P/D inference
+## List of Models - focus SGlang Disaggerated P/D inference
 
 Dense Models
 - Qwen3-32B (https://huggingface.co/Qwen/Qwen3-32B)
@@ -21,29 +21,29 @@ This repository contains scripts and documentation to launch PD Disaggregation u
 
 
 ## Building the Docker image
-Access the Dockerfile located https://github.com/ROCm/MAD/docker/sglang_dissag_inference.ubuntu.amd.Dockerfile
+Access the Dockerfile located https://github.com/ROCm/MAD/docker/sglang_disagg_inference.ubuntu.amd.Dockerfile
 It uses ‘lmsysorg/sglang:v0.4.9.post1-rocm630’ as the base docker image.
 
 ```bash
-docker build  -t sglang_dissag_pd_image -f sglang_dissag_inference.ubuntu.amd.Dockerfile .
+docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
 ```
 
 ## Scripts and Benchmarking
-Run instructions - scripts/sglang_dissag/README.MD
+Run instructions - scripts/sglang_disagg/README.MD
 
 Few files of significance:
 
-scripts/sglang_dissag/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc  
-scripts/sglang_dissag/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services
-scripts/sglang_dissag/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement
-scripts/sglang_dissag/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data
+scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc  
+scripts/sglang_disagg/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services
+scripts/sglang_disagg/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement
+scripts/sglang_disagg/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data
 
 ## Sbatch run command (one-liner)
 ```bash
 
 # Clone the repo
 git clone https://github.com/ROCm/MAD.git
-cd scripts/sglang_dissag
+cd scripts/sglang_disagg
 
 # Sbatch run command [run from the above folder]
 export DOCKER_IMAGE_NAME=<DOCKER IMAGE NAME>
