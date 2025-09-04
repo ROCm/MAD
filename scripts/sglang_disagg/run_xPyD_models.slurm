@@ -252,7 +252,7 @@ done
 echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
 
 MOONCAKE_COOKBOOK_PATH="/opt/mooncake-cookbook"
-BENCHMARK_FILE="${BENCHMARK_FILE:-$MOONCAKE_COOKBOOK_PATH/dissag_blog_p1/models_blog/run_xPyD_models.slurm}"
+BENCHMARK_FILE="${BENCHMARK_FILE:-$MOONCAKE_COOKBOOK_PATH/disagg_blog_p1/models_blog/run_xPyD_models.slurm}"
 timestamp=$(date +"%Y-%m-%d_%H-%M-%S")
 
 NNODES=$NUM_NODES
@@ -283,7 +283,7 @@ export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 
-export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-rocm/pytorch-private:sglang_dissag_pd_image_test_release1}"
+export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-sglang_disagg_pd_image_test_release1}"
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
