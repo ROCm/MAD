@@ -1,32 +1,11 @@
-# coding=utf-8
-# Copyright 2024 Sourab Mangrulkar. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from dataclasses import dataclass, field
 import os
 import sys
+from dataclasses import dataclass, field
 from typing import Optional
 import torch
-from transformers import set_seed
-
-from transformers import HfArgumentParser, TrainingArguments
-from trl import SFTTrainer
-from utils import (
-    create_and_prepare_model,
-    create_datasets,
-    loftq_init,
-    get_module_class_from_name,
-)
+from transformers import HfArgumentParser, set_seed
+from trl import SFTConfig, SFTTrainer
+from utils import create_and_prepare_model, create_datasets
 
 
 # Define and parse arguments.
@@ -37,9 +16,11 @@ class ModelArguments:
     """
 
     model_name_or_path: str = field(
-        metadata={
-            "help": "Path to pretrained model or model identifier from huggingface.co/models"
-        }
+        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+    )
+    max_seq_length: Optional[int] = field(
+        default=512,
+        metadata={"help": "The maximum total input sequence length after tokenization."},
     )
     chat_template_format: Optional[str] = field(
         default="none",
@@ -52,9 +33,7 @@ class ModelArguments:
     lora_r: Optional[int] = field(default=64)
     lora_target_modules: Optional[str] = field(
         default="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-        metadata={
-            "help": "comma separated list of target modules to apply LoRA layers to"
-        },
+        metadata={"help": "comma separated list of target modules to apply LoRA layers to"},
     )
     use_nested_quant: Optional[bool] = field(
         default=False,
@@ -80,7 +59,7 @@ class ModelArguments:
         default=False,
         metadata={"help": "Enables PEFT LoRA for training."},
     )
-    use_8bit_qunatization: Optional[bool] = field(
+    use_8bit_quantization: Optional[bool] = field(
         default=False,
         metadata={"help": "Enables loading model in 8bit."},
     )
@@ -96,20 +75,6 @@ class ModelArguments:
         default=False,
         metadata={"help": "Enables UnSloth for training."},
     )
-    use_loftq: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Enables LoftQ init for the LoRA adapters when using QLoRA."},
-    )
-    use_loftq_callback: Optional[bool] = field(
-        default=False,
-        metadata={
-            "help": "Enables LoftQ callback comparing logits of base model to the ones from LoftQ init. Provides better init."
-        },
-    )
-    moe_layer_name: Optional[str] = field(
-        default=None,
-        metadata={"help": "MOE layer name"},
-    )
 
 
 @dataclass
@@ -118,25 +83,13 @@ class DataTrainingArguments:
         default="timdettmers/openassistant-guanaco",
         metadata={"help": "The preference dataset to use."},
     )
-    packing: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Use packing dataset creating."},
-    )
-    dataset_text_field: str = field(
-        default="text", metadata={"help": "Dataset field to use as input text."}
-    )
-    max_seq_length: Optional[int] = field(default=512)
     append_concat_token: Optional[bool] = field(
         default=False,
-        metadata={
-            "help": "If True, appends `eos_token_id` at the end of each sample being packed."
-        },
+        metadata={"help": "If True, appends `eos_token_id` at the end of each sample being packed."},
     )
     add_special_tokens: Optional[bool] = field(
         default=False,
-        metadata={
-            "help": "If True, tokenizers adds special tokens to each sample being packed."
-        },
+        metadata={"help": "If True, tokenizers adds special tokens to each sample being packed."},
     )
     splits: Optional[str] = field(
         default="train,test",
@@ -149,19 +102,21 @@ def main(model_args, data_args, training_args):
     set_seed(training_args.seed)
 
     # model
-    model, peft_config, tokenizer = create_and_prepare_model(
-        model_args, data_args, training_args
-    )
+    model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
+    # make sure every parameter is the same dtype for FSDP flatten
+    # here we choose bfloat16 because the base model is in bf16 already
+    model = model.to(torch.bfloat16)
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
-    training_args.gradient_checkpointing = (
-        training_args.gradient_checkpointing and not model_args.use_unsloth
-    )
+    training_args.gradient_checkpointing = training_args.gradient_checkpointing and not model_args.use_unsloth
     if training_args.gradient_checkpointing:
-        training_args.gradient_checkpointing_kwargs = {
-            "use_reentrant": model_args.use_reentrant
-        }
+        training_args.gradient_checkpointing_kwargs = {"use_reentrant": model_args.use_reentrant}
+
+    training_args.dataset_kwargs = {
+        "append_concat_token": data_args.append_concat_token,
+        "add_special_tokens": data_args.add_special_tokens,
+    }
 
     # datasets
     train_dataset, eval_dataset = create_datasets(
@@ -174,32 +129,15 @@ def main(model_args, data_args, training_args):
     # trainer
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        packing=data_args.packing,
-        dataset_kwargs={
-            "append_concat_token": data_args.append_concat_token,
-            "add_special_tokens": data_args.add_special_tokens,
-        },
-        dataset_text_field=data_args.dataset_text_field,
-        max_seq_length=data_args.max_seq_length,
     )
     trainer.accelerator.print(f"{trainer.model}")
-    if model_args.use_peft_lora:
+    if hasattr(trainer.model, "print_trainable_parameters"):
         trainer.model.print_trainable_parameters()
-
-    # LoftQ initialization when using QLoRA
-    if model_args.use_4bit_quantization and model_args.use_loftq:
-        loftq_init(
-            trainer.model,
-            tokenizer,
-            train_dataset,
-            data_args.max_seq_length,
-            model_args,
-        )
 
     # train
     checkpoint = None
@@ -214,15 +152,11 @@ def main(model_args, data_args, training_args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, TrainingArguments)
-    )
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, SFTConfig))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(
-            json_file=os.path.abspath(sys.argv[1])
-        )
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     main(model_args, data_args, training_args)

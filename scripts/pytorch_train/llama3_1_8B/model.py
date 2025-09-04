@@ -180,7 +180,7 @@ class FP8Llama(nn.Module):
         self.layers = nn.ModuleList(layers)
         self.norm_lm_head = te.LayerNormLinear(embedding_dim, vocab_size, bias=False,normalization='RMSNorm', eps=eps)
 
-        position_encoding = te.attention.RotaryPositionEmbedding(embedding_dim//num_heads)(max_seq_len=max_seq_len)
+        position_encoding = te.dot_product_attention.rope.RotaryPositionEmbedding(embedding_dim//num_heads)(max_seq_len=max_seq_len)
         self.register_buffer('position_encoding', position_encoding.to(torch.bfloat16))
 
     def forward(self, idxs, is_first_microbatch):
