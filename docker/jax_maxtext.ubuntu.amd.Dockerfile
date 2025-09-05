@@ -1,5 +1,5 @@
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-#MIT License
+# MIT License
 #
 # Copyright (c) Advanced Micro Devices, Inc.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v25.5
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v25.7
 FROM $BASE_DOCKER
 
 USER root

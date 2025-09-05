@@ -1,9 +1,8 @@
-#!/bin/bash
 ###############################################################################
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,41 +24,7 @@
 #
 #################################################################################
 
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
-
-# Parse named arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-    	--model_repo) MODEL_REPO="$2"; shift ;;
-    	*) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
-      --quantization) QUANTIZATION="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-done
-
-echo "Model repo: $MODEL_REPO"
-
-if [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-8b" ]]; then
-  model="Llama-3.1-8B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-70b" ]]; then
-  model="Llama-3.1-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.3-70b" ]]; then
-  model="Llama-3.3-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-7b" ]]; then
-  model="Llama-2-7B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-70b" ]]; then
-  model="Llama-2-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_deepseek-v2-lite-16b" ]]; then
-  model="DeepSeek-V2-lite"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_mixtral-8x7b" ]]; then
-  model="Mixtral-8x7B"
-fi
-
-./jax-maxtext_benchmark_setup.sh -m $model
-./jax-maxtext_benchmark_report.sh -m $model -q $QUANTIZATION
-
-echo "performance: 1 pass"
+export XLA_FLAGS="--xla_gpu_enable_triton_gemm=False --xla_gpu_enable_latency_hiding_scheduler=TRUE --xla_gpu_enable_cublaslt=True --xla_gpu_graph_level=0  --xla_gpu_autotune_level=5 --xla_gpu_all_gather_combine_threshold_bytes=8589934592 --xla_gpu_enable_all_gather_combine_by_dim=FALSE --xla_gpu_memory_limit_slop_factor=95"
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.967
+export LD_LIBRARY_PATH=/usr/local/lib/:/opt/rocm/lib:$LD_LIBRARY_PATH
+export NVTE_CK_USES_BWD_V3=1

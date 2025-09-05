@@ -785,6 +785,24 @@
      "--model_repo jax_maxtext_train_llama-2-7b"
   },
   {
+    "name": "jax_maxtext_train_llama-2-7b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Llama-2-7B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-7b --quantization nanoo_fp8"
+  },
+  {
     "name": "jax_maxtext_train_llama-2-70b",
     "url": "",
     "dockerfile": "docker/jax_maxtext",
@@ -803,6 +821,24 @@
      "--model_repo jax_maxtext_train_llama-2-70b"
   },
   {
+    "name": "jax_maxtext_train_llama-2-70b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Llama-2-70B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "llama2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-2-70b --quantization nanoo_fp8"
+  },
+  {
     "name": "jax_maxtext_train_llama-3.1-8b",
     "url": "",
     "dockerfile": "docker/jax_maxtext",
@@ -819,6 +855,24 @@
     "timeout": -1,
     "args":
      "--model_repo jax_maxtext_train_llama-3.1-8b"
+  },
+  {
+    "name": "jax_maxtext_train_llama-3.1-8b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Llama-3.1-8B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "llama3"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_llama-3.1-8b --quantization nanoo_fp8"
   },
   {
     "name": "jax_maxtext_train_llama-3.1-70b",
@@ -857,7 +911,7 @@
      "--model_repo jax_maxtext_train_llama-3.3-70b"
   },
   {
-    "name": "jax_maxtext_train_deepseek-v3-lite",
+    "name": "jax_maxtext_train_deepseek-v2-lite-16b",
     "url": "",
     "dockerfile": "docker/jax_maxtext",
     "scripts": "scripts/jax-maxtext/run.sh",
@@ -865,14 +919,68 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_DeepSeek-V3-lite.csv",
+    "multiple_results": "perf_DeepSeek-V2-lite.csv",
     "tags": [
       "jax",
-      "llama3"
+      "deepseekv2"
     ],
     "timeout": -1,
     "args":
-     "--model_repo jax_maxtext_train_deepseek-v3-lite"
+     "--model_repo jax_maxtext_train_deepseek-v2-lite-16b"
+  },
+  {
+    "name": "jax_maxtext_train_deepseek-v2-lite-16b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_DeepSeek-V2-lite_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "deepseekv2"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_deepseek-v2-lite-16b --quantization nanoo_fp8"
+  },
+  {
+    "name": "jax_maxtext_train_mixtral-8x7b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Mixtral-8x7B.csv",
+    "tags": [
+      "jax",
+      "mixtral"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_mixtral-8x7b"
+  },
+  {
+    "name": "jax_maxtext_train_mixtral-8x7b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Mixtral-8x7B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "mixtral"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_mixtral-8x7b --quantization nanoo_fp8"
   },
   {
     "name": "pyt_chai1_inference",

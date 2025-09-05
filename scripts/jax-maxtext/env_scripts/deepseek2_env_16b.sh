@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,3 +28,4 @@ export XLA_FLAGS=" --xla_gpu_enable_triton_gemm=False --xla_gpu_enable_latency_h
 export HSA_FORCE_FINE_GRAIN_PCIE=1
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.967
 export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+export NVTE_CK_USES_BWD_V3=1
