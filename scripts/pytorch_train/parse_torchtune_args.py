@@ -37,7 +37,9 @@ parser.add_argument("--model",
                                 Llama-3-70B, Llama-3-8B, Llama-3.1-405B, \
                                 Llama-3.2-3B, Llama-3.2-1B, \
                                 Llama-3.2-vision-11B, Llama-3.2-vision-90B, \
-                                Llama-3.3-70B, Llama-4-scout-17B-16E")
+                                Llama-3.3-70B, Llama-4-scout-17B-16E, \
+                                Qwen2-1.5B, Qwen2-7B, Qwen2.5-32B, \
+                                Qwen2.5-72B, Qwen3-8B, Qwen3-32B")
 
 # read arguments
 args = parser.parse_args()
@@ -64,6 +66,15 @@ if model == "Llama-3.2-vision-11B" or model == "Llama-3.2-vision-90B":
 # Llama-4-scout-17B-16E => llama4, 17B_16E
 elif model == "Llama-4-scout-17B-16E":
     model_size = parts[3] + '_' + parts[4]
+# Qwen models => qwen2, qwen2_5, qwen3
+elif model.startswith("Qwen"):
+    model_size = parts[1]
+    if model.startswith("Qwen2.5"):
+        model_family = "qwen2_5"
+    elif model.startswith("Qwen2"):
+        model_family = "qwen2"
+    elif model.startswith("Qwen3"):
+        model_family = "qwen3"
 # Llama-3.1-70B => llama3_1, 70B_lora
 else:
     model_size = parts[2]

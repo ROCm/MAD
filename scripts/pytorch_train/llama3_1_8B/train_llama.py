@@ -44,11 +44,13 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 import torch.nn.functional as F
 import torch.optim as optim
 
-from accelerate import Accelerator, FullyShardedDataParallelPlugin
+from accelerate import Accelerator
 import accelerate
+from accelerate.utils import AORecipeKwargs, FullyShardedDataParallelPlugin, TorchDynamoPlugin
 import transformer_engine.pytorch as te
 from transformer_engine.common.recipe import Format, DelayedScaling
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torchao.float8 import Float8LinearConfig
 
 from model import ModelConfig, FP8Llama, FP8TransformerBlock
 
@@ -81,13 +83,32 @@ def train(args):
     accelerate.utils.set_seed(config['training']['seed'])
     
     # Initialize Accelerator with FSDP
-    fsdp_plugin = FullyShardedDataParallelPlugin(
+    fsdp2_plugin = FullyShardedDataParallelPlugin(
+        fsdp_version=2,
         auto_wrap_policy = partial(transformer_auto_wrap_policy, transformer_layer_cls={FP8TransformerBlock}),
         state_dict_config=FullStateDictConfig(offload_to_cpu=False, rank0_only=False),
         optim_state_dict_config=FullOptimStateDictConfig(offload_to_cpu=False, rank0_only=False),
     )
+    fsdp2_plugin.set_mixed_precision(args.precision)
+
+    dynamo_plugin = TorchDynamoPlugin(
+        backend="inductor",
+        use_regional_compilation=True,  # We use regional compilation to compile the model way faster
+    )
+
+    fp8_config = Float8LinearConfig(
+        enable_fsdp_float8_all_gather=True,  # extra saving by gathering parameters in fp8 and upcasting after
+        force_recompute_fp8_weight_in_bwd=True,
+    )
+
+    kwargs = []
+    if args.precision == "fp8":
+        kwargs = [AORecipeKwargs(config=fp8_config)]
+
     accelerator = Accelerator(
-        fsdp_plugin = fsdp_plugin,
+        fsdp_plugin = fsdp2_plugin,
+        dynamo_plugin=dynamo_plugin,
+        kwargs_handlers=kwargs,
     )
     world_size = accelerator.num_processes
     global_rank = accelerator.process_index
@@ -148,7 +169,8 @@ def train(args):
         accelerator.backward(loss)
 
         if accelerator.sync_gradients and (step + 1) % config['training']['grad_acc_steps'] == 0:
-            model.clip_grad_norm_(1.0)
+            accelerator.clip_grad_norm_(model.parameters(), 1.0)
+            #model.clip_grad_norm_(1.0)
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
@@ -198,6 +220,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, help="Configuration file of the model and exp")
     parser.add_argument('--log_file', type=str, help="Output log file")
+    parser.add_argument("--precision", type=str, default="fp8", choices=["fp8", "bf16"], help="Precision to train in")
     args = parser.parse_args()
     train(args)
 
