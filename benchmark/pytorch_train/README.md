@@ -4,16 +4,16 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.6` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.7` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 6.3.4 |
-| Python             | 3.10.17              |
-| PyTorch            | 2.8.0a0+git7d205b2   |
-| Transformer Engine | 1.14.0+2f85f5f2      |
+| ROCm               | 6.4.2 |
+| Python             | 3.10.18              |
+| PyTorch            | 2.8.0a0+gitd06a406   |
+| Transformer Engine | 2.2.0.dev0+94e53dd8      |
 | Flash Attention    | 3.0.0.post1          |
-| hipBLASLt          | 0.15.0-8c69191d      |
+| hipBLASLt          | 1.1.0-4b9a52edfc     |
 | Triton             | 3.3.0                |
 
 
@@ -27,6 +27,7 @@ Examples of the following models are pre-optimized for performance on the AMD In
 ### Finetuning:
 | Model          | Variants              |
 |----------------|------------------------|
+| **GPT OSS**     | 20B, 120B           |
 | **LLaMA 4**     | 17B_16E                    |
 | **LLaMA 3.2 Vision** | 11B, 90B           |
 | **LLaMA 3.2**   | 1B, 3B                 |
@@ -34,6 +35,10 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | **LLaMA 3.1**   | 8B, 70B, 405B          |
 | **LLaMA 3**     | 8B, 70B                |
 | **LLaMA 2**     | 7B, 13B, 70B           |
+| **Qwen 2**     | 1.5B, 7B           |
+| **Qwen 2.5**     | 32B, 72B           |
+| **Qwen 3**     | 8B, 32B           |
+
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -82,7 +87,7 @@ Use this command to run a performance benchmark test of the Llama 3.1 8B model o
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-madengine run --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+python3 tools/run_models.py --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
 ```
 
 ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama-3.1-8b`. The latency and throughput reports of the model are collected in the following path:
@@ -110,7 +115,14 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_llama-3.3-70b                 |
 | pyt_train_llama-4-scout-17b-16e         |
 | pyt_train_flux                          |
-
+| pyt_train_gpt_oss_20b                   |
+| pyt_train_gpt_oss_120b                  |
+| pyt_train_qwen2-1.5b                    |
+| pyt_train_qwen2-7b                      |
+| pyt_train_qwen2.5-32b                   |
+| pyt_train_qwen2.5-72b                   |
+| pyt_train_qwen3-8b                      |
+| pyt_train_qwen3-32b                     |
 
 ### Standalone benchmarking
 
@@ -118,12 +130,12 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/pytorch-training:v25.6
+docker pull rocm/pytorch-training:v25.7
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.6
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.7
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -187,6 +199,16 @@ To start the pretraining benchmark, use the following command with the appropria
 
 <pre lang="markdown"> ./pytorch_benchmark_report.sh -t $training_mode -m $model_repo -p $datatype -s $sequence_length </pre>
 
+> ⚠️ **Note on Flux 2 Model Support**
+>
+> Currently, Flux models are **not supported out-of-the-box** on `rocm/pytorch-training:v25.7`.
+>
+> ✅ **Solution:** To use Flux, please refer to the image: `rocm/pytorch-training:v25.6`.
+>
+> 📄 **Documentation Guide:**  
+> [ROCm PyTorch Training Docker Guide](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/benchmark-docker/pytorch-training.html)
+
+
 ##### 🧩 Pretraining Configuration Optionss
 |Name               | Options        | Description                                      |
 |--------------------|---------------|--------------------------------------------------|
@@ -219,7 +241,7 @@ To start the finetuning benchmark, use the following command.
 |                    | finetune_lora     | LoRA finetuning (BF16 supported)                                            |
 |                    | finetune_qlora    | qLoRA finetuning (BF16 supported)                                           |
 |                    | HF_finetune_lora  | LoRA finetuning using Huggingface PEFT                                      |
-| `$datatype`        | BF16       |      All models support BF16          |
+| `$datatype`        | FP8 or BF16       |     All models support BF16; FP8 is only available for full-weight fine-tuning         |
 | `$model_repo`      | Llama-4-17B_16E    | [Llama 4 Scout 17B-16E](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E )      |
 |                    | Llama-3.3-70B      | [Llama 3.3 70B](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)                        |
 |                    | Llama-3.2-Vision-90B| [Llama 3.2 90B Vision](https://huggingface.co/meta-llama/Llama-3.2-90B-Vision)   |
@@ -234,12 +256,20 @@ To start the finetuning benchmark, use the following command.
 |                    | Llama-2-70B        | [Llama 2 70B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
 |                    | Llama-2-13B        | [Llama 2 13B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
 |                    | Llama-2-7B         | [Llama 2 7B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
+|                    | GPT-OSS-20B        | [GPT-OSS 20B](https://huggingface.co/openai/gpt-oss-20b) |
+|                    | GPT-OSS-120B        | [GPT-OSS 20B](https://huggingface.co/openai/gpt-oss-120b) |
+|                    | Qwen2-1.5B        | [Qwen2-1.5B](https://huggingface.co/Qwen/Qwen2-1.5B) |
+|                    | Qwen2-7B        | [Qwen2-7B](https://huggingface.co/Qwen/Qwen2-7B) |
+|                    | Qwen2.5-32B        | [Qwen2.5-32B](https://huggingface.co/Qwen/Qwen2.5-32B) |
+|                    | Qwen2.5-72B        | [Qwen2.5-72B](https://huggingface.co/Qwen/Qwen2.5-72B) |
+|                    | Qwen3-32B        | [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) |
+|                    | Qwen3-8B        | [Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
 | `$sequence_length` | 2048 – 16384       | Sequence length for the language model                    |
 
 
 ##### Finetuning Support Matrix
 
-| Model Name           | finetune_fw | finetune_lora | finetune_qlora |
+| Model Name           | finetune_fw | finetune_lora | finetune_qlora | 
 |----------------------|-------------|----------------|----------------|
 | Llama 3.1 70B        | ✅           | ✅              | ✅              |
 | Llama 3.1 8B         | ✅           | ✅              | ❌              |
@@ -255,33 +285,45 @@ To start the finetuning benchmark, use the following command.
 | Llama 2 13B          | ✅           | ✅              | ❌              |
 | Llama 2 7B           | ✅           | ✅              | ✅              |
 | Llama 4 17B_16E (scout)  | ✅           | ✅              | ❌              |
+| GPT-OSS-20B   | ❌           | ✅              | ❌              |
+| GPT-OSS-120B   | ❌           | ✅              | ❌              |
+| Qwen2-1.5B   | ✅             | ✅              | ❌              |
+| Qwen2-7B   | ✅            | ✅              | ❌              |
+| Qwen2.5-72B   | ❌           | ✅              | ❌              |
+| Qwen2.5-32B   | ❌           | ✅              | ❌              |
+| Qwen3-8B   | ✅            | ✅              | ❌              |
+| Qwen3-32B   | ❌           | ✅              | ❌              |
+
 
 > ℹ️ **Note on Finetuning Support Matrix**
 >
 > In the table above, a **❌** indicates that the **upstream [`torchtune`](https://github.com/pytorch/torchtune)** repository does **not currently provide YAML configuration files** for that specific finetuning method and model combination.
 >
 > ✅ Users can still **easily configure** your own YAML files to enable support for these cases by following existing patterns under the **`/workspace/torchtune/recipes/configs/`** directory.
+> 
+> GPT-OSS models are supported using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index).
+>
+> Reference examples for Qwen models have been included, and other variants can be readily tested and configured through MAD.
 
 ##### Torchtune
 > 📌 **Benchmark Setup Note**
 >
-> This setup benchmarks different versions of **LLaMA models** using two datasets:
-> - **LLaMA 3.2 Vision** is evaluated using **`the_cauldron_dataset`**
 > - All other LLaMA models are evaluated using **`alpaca_dataset`**
-
-- ✅ For vision models (11B and 90B) with LoRA and QLoRA support, use the following `torchtune` commit for compatibility:
+>
+> - ✅ For vision models (11B and 90B) with LoRA and QLoRA support, use the following `torchtune` commit for compatibility:
   ```bash
   git checkout 48192e23188b1fc524dd6d127725ceb2348e7f0e
-
+   ```
 >
 > ⚠️ **Note on LLaMA 2 Maximum Sequence Length**
 > If you encounter an error like:
 > `ValueError: seq_len (16384) of input tensor should be smaller than max_seq_len (4096)`
 > It means your input sequence exceeds the allowed limit.
+>
 > ✅ **Solution:** Make sure your tokenized input is **≤ 4096 tokens**.
 > You may need to truncate or split longer sequences before passing them to the model.
 >
-> 🧪 Results will be based on commit **`86f148b46072de65c4889b00a2a6e2ae2475b76e`** from the upstream [**torchtune**](https://github.com/pytorch/torchtune) repository for **reproducibility**.
+> 🧪 Results will be based on commit **`b4c98ac2a37f0397d64c22579aed415ce7264db6`** from the upstream [**torchtune**](https://github.com/pytorch/torchtune) repository for **reproducibility**.
 > Users can also clone and use the **latest upstream version** to obtain **updated results**.
 
 
@@ -296,10 +338,10 @@ To start the finetuning benchmark, use the following command.
 ```
 
 ##### Huggingface PEFT
-Following example will run the benchmarking example of Llama 2 70B with [Ultra chat dataset](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k) using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
+Following example will run the benchmarking example of GPT-OSS models with [Ultra chat dataset](https://huggingface.co/datasets/smangrul/ultrachat-10k-chatml) using [HuggingFace PEFT](https://huggingface.co/docs/peft/en/index)
 
 ```
-./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-2-70B
+./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m GPT-OSS-20B
 ```
 
 ### Benchmarking examples
@@ -365,9 +407,14 @@ Example 12: Torchtune LoRA finetuning with Llama 4 17B_16E
 ./pytorch_benchmark_report.sh -t finetune_lora -p BF16 -m Llama-4-scout-17B-16E
 ```
 
-Example 13: Huggingface PEFT LoRA finetuning with Llama 3.1 70B
+Example 13: Huggingface PEFT LoRA finetuning with GPT-OSS-120B
 ```
-./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m Llama-3.1-70B
+./pytorch_benchmark_report.sh -t HF_finetune_lora -p BF16 -m GPT-OSS-120B
+```
+
+Example 14: Torchtune full weight finetuning with Llama 3.1 70B using FP8
+```
+./pytorch_benchmark_report.sh -t finetune_fw -p FP8 -m Llama-3.1-70B
 ```
 ### Multinode Training with Torchtitan
 
@@ -376,4 +423,21 @@ Our framework supports multinode training with Torchtitan. To launch training on
 ```bash
 cd scripts/pytorch_train
 sbatch run_slurm_train.sh
+```
 
+### Multinode Training with Torchtune
+Our framework supports multinode training with Torchtune. To launch training on a SLURM cluster for the Llama3.3-70B model, run:
+> 📌 **Benchmark Setup Note**
+>
+> - By default the Llama3.3-70B model is finetuned using **`alpaca_dataset`**
+> - Adjust the `*.[**yaml**](https://github.com/pytorch/torchtune/blob/main/recipes/configs/llama3_3/70B_full_multinode.yaml)` configuration inside the upstream [**torchtune**](https://github.com/pytorch/torchtune) if you’re using a different model
+> - Number of nodes, and all parameters can be tuned form the slurm script **`Torchtune_Multinode.sh`**
+> - Set the `mounting paths` inside the slurm script.
+
+```bash
+huggingface-cli login # Get access to HF llama model space
+huggingface-cli download meta-llama/Llama-3.3-70B-Instruct --local-dir ./models/Llama-3.3-70B-Instruct # Download the llama 3.3 model locally
+cd scripts/pytorch_train
+sbatch Torchtune_Multinode.sh
+```
+**Note:** After the run is finished, the log files will be there `result_torchtune` directory

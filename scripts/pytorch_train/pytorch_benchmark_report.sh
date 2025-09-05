@@ -66,7 +66,7 @@ while getopts "t:m:p:s:n:f:b:" opt; do
         s) SEQUENCE_LENGTH="$OPTARG" ;;
         n) NUM_GPUS="$OPTARG" ;;
         f) FSDP="$OPTARG" ;;
-	b) BATCH_SIZE="$OPTARG" ;;
+		b) BATCH_SIZE="$OPTARG" ;;
         *) usage ;;
     esac
 done
@@ -89,8 +89,8 @@ fi
 
 # Training mode validation
 if [[ "$TRAINING_MODE" == "HF_finetune_lora" ]]; then
-    if [[ ! ("$MODEL_REPO" == "Llama-2-70B" || "$MODEL_REPO" == "Llama-3.1-70B") || "$DATATYPE" != "BF16" ]]; then
-        echo "Error: finetuning options are only supported for Llama_2_70B and Llama_3.1_70B with BF16."
+    if [[ ! ("$MODEL_REPO" == "GPT-OSS-20B" || "$MODEL_REPO" == "GPT-OSS-120B") || "$DATATYPE" != "BF16" ]]; then
+        echo "Error: finetuning options are only supported for GPT-OSS-20B and GPT-OSS-120B with BF16."
         exit 1
     fi
 fi
@@ -100,6 +100,18 @@ if [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
         echo "Error: HF pretraining option are only supported for Llama_3.1_8B."
         exit 1
     fi
+fi
+
+# Check for incompatible FP8 + finetune_lora combination
+if [[ "$TRAINING_MODE" == "finetune_lora" && "$DATATYPE" == "FP8" ]]; then
+    echo "Error: finetune_lora is not supported with FP8 precision."
+    exit 1
+fi
+
+# Check for incompatible finetune_fw + large Qwen models combination
+if [[ "$TRAINING_MODE" == "finetune_fw" && ("$MODEL_REPO" == "Qwen3-32B" || "$MODEL_REPO" == "Qwen2.5-72B" || "$MODEL_REPO" == "Qwen2.5-32B") ]]; then
+    echo "Error: finetune_fw is not supported for Qwen3-32B, Qwen2.5-72B, and Qwen2.5-32B models."
+    exit 1
 fi
 
 if [[ "$NUM_GPUS" != "1" && "$NUM_GPUS" != "8" ]]; then
@@ -152,7 +164,7 @@ remove_config_param() {
     local value=$2
     local CONFIG_FILE=$3
 
-    # Escape possible special chars in value for sed (simple approach)
+    # Escape possible special chars in value for sed 
     local escaped_value=$(printf '%s\n' "$value" | sed 's/[][\/.^$*]/\\&/g')
 
     sed -i "/^$key *= *$escaped_value$/d" "$CONFIG_FILE"
@@ -161,105 +173,47 @@ remove_config_param() {
 
 if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
+    TORCHTITAN_DIR="/workspace/torchtitan/torchtitan/models/llama3/train_configs/"
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
-      echo "[INFO] LLAMA 3.1 8B TRAINING"
+      echo "[INFO] Benchmarking LLAMA 3.1 8B TRAINING"
+      MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_8b-$DATATYPE.toml" 
+      cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
+      CONFIG_FILE=$TORCHTITAN_DIR/llama3_8b-$DATATYPE.toml
       cd /workspace/torchtitan
-      ls $(pwd) 
-      echo "[INFO] Benchmarking"
-
-      # Update torchtitan config file
-      CONFIG_FILE="./torchtitan/models/llama3/train_configs/llama3_8b.toml" 
-      update_config_param "warmup_steps" 10 $CONFIG_FILE
-      update_config_param "steps" 50 $CONFIG_FILE
-      update_config_param "log_freq" 1 $CONFIG_FILE
-      update_config_param "enable_profiling" false $CONFIG_FILE
-      update_config_param "enable_tensorboard" false $CONFIG_FILE
-      update_config_param "compile" true $CONFIG_FILE
-
-      # Set default parallel strategy to FSDP=True
-      # [parallelism]
-      update_config_param "data_parallel_replicate_degree" 1 $CONFIG_FILE
-      update_config_param "data_parallel_shard_degree" 8 $CONFIG_FILE
-      update_config_param "seq_len" 8192 $CONFIG_FILE
-      # [activation_checkpoint]
-      update_config_param "mode" '"full"' $CONFIG_FILE
-
-      # Set default datatype to BF16
-      # [model]
-      remove_config_param "converters" '["float8"]' $CONFIG_FILE
-      # [float8]
-      update_config_param "enable_fsdp_float8_all_gather" false $CONFIG_FILE
-      update_config_param "precompute_float8_dynamic_scale_for_fsdp" false $CONFIG_FILE
-      update_config_param "force_recompute_fp8_weight_in_bwd" false $CONFIG_FILE
-
-      BATCH_SIZE=18
-      echo "Training model with batch size = $BATCH_SIZE"
-      update_config_param "batch_size" $BATCH_SIZE $CONFIG_FILE
-
       CONFIG_FILE=$CONFIG_FILE bash run_train.sh |& tee $TRAIN_LOG	
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
-      echo "[INFO] LLAMA 3.1 70B TRAINING"
+      echo "[INFO] Benchmarking LLAMA 3.1 70B TRAINING"
+      MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_70b-$DATATYPE.toml"
+      cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
+      CONFIG_FILE=$TORCHTITAN_DIR/llama3_70b-$DATATYPE.toml
       cd /workspace/torchtitan
-      echo "[INFO] Benchmarking"
-
-      # Update torchtitan config file
-      CONFIG_FILE="./torchtitan/models/llama3/train_configs/llama3_70b.toml"
-      update_config_param "warmup_steps" 10 $CONFIG_FILE
-      update_config_param "steps" 50 $CONFIG_FILE
-      update_config_param "log_freq" 1 $CONFIG_FILE
-      update_config_param "seq_len" 8192 $CONFIG_FILE
-      update_config_param "enable_profiling" false $CONFIG_FILE
-      update_config_param "enable_tensorboard" false $CONFIG_FILE
-      update_config_param "compile" true $CONFIG_FILE
-
-      # Set default parallel strategy to FSDP=True
-      # [parallelism]
-      update_config_param "data_parallel_replicate_degree" 1 $CONFIG_FILE
-      update_config_param "data_parallel_shard_degree" 8 $CONFIG_FILE
-      update_config_param "tensor_parallel_degree" 1 $CONFIG_FILE
-      # [activation_checkpoint]
-      update_config_param "mode" '"full"' $CONFIG_FILE
-
-      # Set default datatype to BF16
-      # [model]
-      remove_config_param "converters" '["float8"]' $CONFIG_FILE
-      # [float8]
-      update_config_param "enable_fsdp_float8_all_gather" false $CONFIG_FILE
-      update_config_param "precompute_float8_dynamic_scale_for_fsdp" false $CONFIG_FILE
-      update_config_param "force_recompute_fp8_weight_in_bwd" false $CONFIG_FILE
-
-      BATCH_SIZE=4
-      echo "Training model with batch size = $BATCH_SIZE"
-      update_config_param "batch_size" $BATCH_SIZE $CONFIG_FILE
-
       CONFIG_FILE=$CONFIG_FILE bash run_train.sh |& tee $TRAIN_LOG
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
     fi
 
     if [ "$MODEL_REPO" == "Flux" ]; then
-      echo "[INFO] FLUX TRAINING"
+      echo "[INFO] Benchmarking FLUX TRAINING"
       cd /workspace/FluxBenchmark
-      echo "[INFO] Benchmarking"
-      python launcher.py 
+      accelerate launch --config_file outputs/runs/sweep_000/1_accelerate_config.yaml train.py --mixed_precision bf16 --train_batch_size 1 --num_iterations 100
       TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --input $TRAIN_LOG --output $PERF_LOG 
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
     fi
 
 elif [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
     echo "[INFO] Executing HF pretraining benchmark..."
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
-      echo "[INFO] LLAMA 3.1 8B TRAINING"
+      echo "[INFO] LLAMA 3.1 8B TRAINING with $DATATYPE precision"
       cd llama3_1_8B
       echo "[INFO] Benchmarking"
       bash run_multigpu.sh |& tee $TRAIN_LOG	
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --input $TRAIN_LOG --output $PERF_LOG
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
@@ -273,7 +227,15 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
     METHOD=$(echo "$output" | grep "method" | cut -d ':' -f2 | xargs)
 
     huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-    cp Torchtune_Tester.sh /workspace
+    
+    # Choose the appropriate tester script based on model family and training mode
+    if [[ ("$MODEL_FAMILY" == "qwen2" || "$MODEL_FAMILY" == "qwen2_5" || "$MODEL_FAMILY" == "qwen3") && ("$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora") ]]; then
+        cp Torchtune_Tester_Qwen.sh /workspace
+        TESTER_SCRIPT="Torchtune_Tester_Qwen.sh"
+    else
+        cp Torchtune_Tester.sh /workspace
+        TESTER_SCRIPT="Torchtune_Tester.sh"
+    fi
     cd /workspace
 
     if [[ "$MODEL_FAMILY" == "llama3_2_vision" ]]; then
@@ -359,44 +321,75 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
         fi
 
     elif [[ "$MODEL_FAMILY" == "llama4" ]]; then
-        if [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
-            COMPILE=False
-        else
-            COMPILE=True
-        fi
-        PACKED=True
-        SEQ_LEN=8192
-        MBS=4
-
-    else
         COMPILE=True
         PACKED=True
         SEQ_LEN=8192
         MBS=4
+
+    elif [[ "$MODEL_FAMILY" == "qwen2" ]]; then
+        COMPILE=True
+        PACKED=True
+        SEQ_LEN=8192
+        if [[ "$MODEL_SIZE" == "1.5B" ]]; then
+            if [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
+                MBS=32
+            elif [[ "$TRAINING_MODE" == "finetune_lora" ]]; then
+                MBS=16
+            fi
+        elif [[ "$MODEL_SIZE" == "7B" ]]; then
+            MBS=16
+        fi
+
+    elif [[ "$MODEL_FAMILY" == "qwen2_5" ]]; then
+        COMPILE=True
+        PACKED=True
+        SEQ_LEN=8192
+        if [[ "$MODEL_SIZE" == "32B" ]]; then
+            MBS=8
+        elif [[ "$MODEL_SIZE" == "72B" ]]; then
+            MBS=4
+        fi
+
+    elif [[ "$MODEL_FAMILY" == "qwen3" ]]; then
+        COMPILE=True
+        PACKED=True
+        SEQ_LEN=8192
+        if [[ "$MODEL_SIZE" == "8B" ]]; then
+            MBS=16
+        elif [[ "$MODEL_SIZE" == "32B" ]]; then
+            MBS=8
+        fi
     fi
 
-    
-    echo "[INFO] MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD PACKED=$PACKED COMPILE=$COMPILE SEQ_LEN=$SEQ_LEN MBS=$MBS"
-    MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD COMPILE=$COMPILE PACKED=$PACKED SEQ_LEN=$SEQ_LEN CPU_OFFLOAD=False ACTIVATION_CHECKPOINTING=True MBS=$MBS GAS=1 EPOCHS=1 SEED=42 MAX_STEPS=20 bash Torchtune_Tester.sh |& tee $TRAIN_LOG 
+    if [[ "$TRAINING_MODE" == "finetune_fw" && "$DATATYPE" == "FP8" ]]; then
+        FP8=True
+        echo "[INFO] MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD PACKED=$PACKED COMPILE=$COMPILE SEQ_LEN=$SEQ_LEN MBS=$MBS FP8=$FP8"
+        MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD COMPILE=$COMPILE PACKED=$PACKED SEQ_LEN=$SEQ_LEN CPU_OFFLOAD=False ACTIVATION_CHECKPOINTING=True MBS=$MBS GAS=1 EPOCHS=1 SEED=42 MAX_STEPS=20 bash $TESTER_SCRIPT --fp8 |& tee $TRAIN_LOG 
+
+    else
+        FP8=False
+        echo "[INFO] MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD PACKED=$PACKED COMPILE=$COMPILE SEQ_LEN=$SEQ_LEN MBS=$MBS FP8=$FP8"
+        MODEL_FAMILY=$MODEL_FAMILY MODEL_SIZE=$MODEL_SIZE METHOD=$METHOD COMPILE=$COMPILE PACKED=$PACKED SEQ_LEN=$SEQ_LEN CPU_OFFLOAD=False ACTIVATION_CHECKPOINTING=True MBS=$MBS GAS=1 EPOCHS=1 SEED=42 MAX_STEPS=20 bash $TESTER_SCRIPT |& tee $TRAIN_LOG 
+    fi 
 
     echo "[INFO] Benchmarking"
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-            --input $TRAIN_LOG --output $PERF_LOG
+            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
 
 elif [[ "$TRAINING_MODE" == "HF_finetune_lora" ]]; then
     echo "Executing Huggingface LoRA finetuning library..."
     HF_PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
     cd $HF_PEFT_DIR
-    if [ "$MODEL_REPO" == "Llama-2-70B" ]; then
-        echo "[INFO] Llama-2-70b Finetuning with Ultrachat dataset using Huggingface library"
-        bash run_peft_fsdp.sh |& tee $TRAIN_LOG
-    elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
-        echo "[INFO] Llama-3.1-70b Finetuning with Ultrachat dataset using Huggingface library"
-        MODEL_DIR=meta-llama/Llama-3.1-70B-Instruct bash run_peft_fsdp.sh |& tee $TRAIN_LOG
+    if [ "$MODEL_REPO" == "GPT-OSS-20B" ]; then
+        echo "[INFO] GPT-OSS-20B Finetuning with Ultrachat dataset using Huggingface library"
+        bash run_peft_fsdp_gpt_20b.sh |& tee $TRAIN_LOG
+    elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
+        echo "[INFO] GPT-OSS-120B Finetuning with Ultrachat dataset using Huggingface library"
+        bash run_peft_fsdp_gpt_120b.sh |& tee $TRAIN_LOG
     fi
     echo "[INFO] Benchmarking"
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-            --input $TRAIN_LOG --output $PERF_LOG
+            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
         
 else
     echo "Error: Unsupported training mode."

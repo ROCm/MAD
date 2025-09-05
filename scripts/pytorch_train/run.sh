@@ -43,7 +43,7 @@ echo $MODEL_REPO
 #echo $SEQUENCE_LENGTH
 echo "=hyper params end="
 
-datatypes=("BF16")
+datatypes=("FP8" "BF16")
 sequence_lengths=("8192")
 
 # Convert from MAD repo names to standalone script names and set training tasks
@@ -57,7 +57,7 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-2-13b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-2-70b" ]]; then
   model="Llama-2-70B"
-  tasks=("finetune_lora" "finetune_qlora" "HF_finetune_lora")
+  tasks=("finetune_lora" "finetune_qlora")
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3-8b" ]]; then
   model="Llama-3-8B"
@@ -76,7 +76,8 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
-  tasks=("finetune_fw" "finetune_lora" "HF_finetune_lora" "pretrain")
+  #datatypes=("FP8")
+  tasks=("finetune_fw" "finetune_lora" "pretrain")
   #tasks=("pretrain")
   #tasks=("finetune_fw" "finetune_lora")
 
@@ -112,7 +113,42 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-4-scout-17b-16e" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
   model="Flux"
+  datatypes=("BF16")
   tasks=("pretrain")  # Flux only runs pretrain
+  
+elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_20b" ]]; then
+  model="GPT-OSS-20B"
+  datatypes=("BF16")
+  tasks=("HF_finetune_lora")  # Flux only runs pretrain
+  
+elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_120b" ]]; then
+  model="GPT-OSS-120B"
+  datatypes=("BF16")
+  tasks=("HF_finetune_lora")  # Flux only runs pretrain
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen2-1.5b" ]]; then
+  model="Qwen2-1.5B"
+  tasks=("finetune_fw" "finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen2-7b" ]]; then
+  model="Qwen2-7B"
+  tasks=("finetune_fw" "finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen2.5-32b" ]]; then
+  model="Qwen2.5-32B"
+  tasks=("finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen2.5-72b" ]]; then
+  model="Qwen2.5-72B"
+  tasks=("finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen3-8b" ]]; then
+  model="Qwen3-8B"
+  tasks=("finetune_fw" "finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_qwen3-32b" ]]; then
+  model="Qwen3-32B"
+  tasks=("finetune_lora")
 fi
 
 # Run pytorch setup script
@@ -121,9 +157,14 @@ bash ./pytorch_benchmark_setup.sh -m $model
 echo "Model: $model"
 # Loop through all combinations
 for task in "${tasks[@]}"; do
+  if [[ "$task" == "HF_pretrain" ]]; then
+    datatypes=("FP8")
+  fi
   for datatype in "${datatypes[@]}"; do
+
     for sequence_length in "${sequence_lengths[@]}"; do
       echo "Running: $task - $model - $datatype - $sequence_length"
+      
       ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
     done
   done

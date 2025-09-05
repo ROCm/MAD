@@ -1,16 +1,15 @@
 
 export LAUNCHER="accelerate launch \
-    --config_file fsdp_fp8.yaml \
     --num_processes $((NNODES * GPUS_ON_NODE)) \
     --num_machines $NNODES \
     --rdzv_backend c10d \
     --main_process_ip $HEAD_NODE_IP \
     --main_process_port 29500 \
     "
-export SCRIPT="train_llama.py"
+export SCRIPT="fsdp2_fp8.py"
 export SCRIPT_ARGS=" \
-    --config=./configs/Llama3.1-8B.json \
-    --log_file=result.log \
+    --sequence-length=8192 \
+    --num-steps=100 \
     "
     
 # This step is necessary because accelerate launch does not handle multiline arguments properly
