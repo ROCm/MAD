@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,10 +50,10 @@ mkdir /hf_cache
 huggingface-cli login --token $HF_TOKEN --add-to-git-credential
 
 # always download and use the real dataset
-huggingface-cli download legacy-datasets/c4 \
-	  --include "en/partial-train/000*.parquet" \
-	  --repo-type dataset \
-	  --revision refs/convert/parquet 
+# huggingface-cli download legacy-datasets/c4 \
+# 	  --include "en/partial-train/000*.parquet" \
+# 	  --repo-type dataset \
+# 	  --revision refs/convert/parquet 
 
 # debug
 # apt install tree -y > /dev/null
@@ -75,9 +75,11 @@ elif [[ "$MODEL_REPO" == "Llama-3.1-8B" ]]; then
 elif [[ "$MODEL_REPO" == "Llama-3.1-70B" ]]; then
   download_tokenizer "meta-llama/Meta-Llama-3-70B"
 elif [[ "$MODEL_REPO" == "Llama-3.3-70B" ]]; then
-  download_tokenizer "meta-llama/Meta-Llama-3.3-70B"
-elif [[ "$MODEL_REPO" == "DeepSeek-V3-lite" ]]; then
+  download_tokenizer "meta-llama/Llama-3.3-70B-Instruct"
+elif [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then
   echo "No tokenizer for download"
+elif [[ "$MODEL_REPO" == "Mixtral-8x7B" ]]; then
+  download_tokenizer "mistralai/Mixtral-8x7B-v0.1"
 else
     echo "Error: Unsupported training mode."
     exit 1
