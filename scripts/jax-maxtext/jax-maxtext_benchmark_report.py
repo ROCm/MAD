@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2024 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,10 @@ parser.add_argument("--mode",
 parser.add_argument("--model",
                         type=str,
                         help="model name")
+parser.add_argument("--quantization",
+                        type=str,
+                        default="bf16",
+                        help="quantization type, e.g. bf16, nanoo_fp8, etc.")
 parser.add_argument("--input",
                         type=str,
                         help="path to input file")
@@ -48,22 +52,24 @@ parser.add_argument("--output",
 args = parser.parse_args()
 input_file = args.input
 output_file = args.output
+quantization = args.quantization
 print("Input file path: ", input_file)
 print("Output file path: ", output_file)
+print("Quantization: ", quantization)
 
 def find_match(file, search_string, num_iters):
     with open(file, 'r') as file:
         content = file.read()
     pattern = fr"{re.escape(search_string)}\s*(\d+\.\d+|\d+)"
     matches = re.findall(pattern, content)
-    perf_nums = [float(num) for num in matches][-num_iters]
+    perf_nums = [float(num) for num in matches][-num_iters:]
     avg = np.average(perf_nums)
     return str("{:.2f}".format(avg))
 
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-3.3-70B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
-        args.model == "DeepSeek-V3-lite":
+        args.model == "DeepSeek-V2-lite" or args.model == "Mixtral-8x7B":
     tok_per_s_per_gpu = find_match(input_file, "Tokens/s/device:", 10)
     TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/device:", 10)
     data = [
