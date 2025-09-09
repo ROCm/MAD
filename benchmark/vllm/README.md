@@ -96,6 +96,7 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_vllm_mixtral-8x7b                  |
 | pyt_vllm_mixtral-8x22b                 |
 | pyt_vllm_qwq-32b                       |
+| pyt_vllm_qwen3-30b-a3b                 |
 | pyt_vllm_llama-3.1-8b_fp8              |
 | pyt_vllm_llama-3.1-70b_fp8             |
 | pyt_vllm_llama-3.1-405b_fp8            |
@@ -157,6 +158,7 @@ cd MAD/scripts/vllm
 |              | mistralai/Mixtral-8x7B-Instruct-v0.1    | [Mixtral MoE 8x7B](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1)                         |
 |              | mistralai/Mixtral-8x22B-Instruct-v0.1   | [Mixtral MoE 8x22B](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1)                        |
 |              | Qwen/QwQ-32B                            | [QwQ 32B](https://huggingface.co/Qwen/QwQ-32B)                                                      |
+|              | Qwen/Qwen3-30B-A3B                      | [Qwen 3 30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B)                                        |
 |              | microsoft/phi-4                         | [Phi-4](https://huggingface.co/microsoft/phi-4)                                                    |
 | $model_repo  | amd/Llama-3.1-8B-Instruct-FP8-KV   | [Llama 3.1 8B](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV)                            |
 | (float8)     | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
