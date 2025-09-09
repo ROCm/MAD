@@ -273,6 +273,22 @@
     "--model_repo Qwen/QwQ-32B --config configs/extended.csv"
   },
   {
+    "name": "pyt_vllm_qwen3-30b-a3b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "multiple_results": "perf_Qwen3-30B-A3B.csv",
+    "owner": "David.Silverstone@amd.com",
+    "training_precision": "",
+    "tags": [
+        "inference",
+        "pyt",
+        "qwen3"
+    ],
+    "args": "--model_repo Qwen/Qwen3-30B-A3B --config configs/extended.csv"
+  },
+  {
     "name": "pyt_train_llama-2-70b",
     "url": "",
     "dockerfile": "docker/pytorch_train",
