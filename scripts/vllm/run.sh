@@ -81,6 +81,7 @@ fi
 
 if [[ $VLLM_V1_SPLIT_ATTENTION == "on" ]]; then
     export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
+    export VLLM_ROCM_USE_AITER_MHA=0
 elif [[ $VLLM_V1_SPLIT_ATTENTION == "off" ]]; then
     export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=0
 fi
