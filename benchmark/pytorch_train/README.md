@@ -35,10 +35,10 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | **LLaMA 3.1**   | 8B, 70B, 405B          |
 | **LLaMA 3**     | 8B, 70B                |
 | **LLaMA 2**     | 7B, 13B, 70B           |
+| **Stable Diffusion**     | XL           |
 | **Qwen 2**     | 1.5B, 7B           |
 | **Qwen 2.5**     | 32B, 72B           |
 | **Qwen 3**     | 8B, 32B           |
-
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -115,6 +115,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_llama-3.3-70b                 |
 | pyt_train_llama-4-scout-17b-16e         |
 | pyt_train_flux                          |
+| pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning |
 | pyt_train_gpt_oss_20b                   |
 | pyt_train_gpt_oss_120b                  |
 | pyt_train_qwen2-1.5b                    |
@@ -256,6 +257,7 @@ To start the finetuning benchmark, use the following command.
 |                    | Llama-2-70B        | [Llama 2 70B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
 |                    | Llama-2-13B        | [Llama 2 13B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
 |                    | Llama-2-7B         | [Llama 2 7B](https://github.com/meta-llama/llama-models/tree/main/models/llama2) |
+|                    | SDXL               | [SDXL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)                                                   |
 |                    | GPT-OSS-20B        | [GPT-OSS 20B](https://huggingface.co/openai/gpt-oss-20b) |
 |                    | GPT-OSS-120B        | [GPT-OSS 20B](https://huggingface.co/openai/gpt-oss-120b) |
 |                    | Qwen2-1.5B        | [Qwen2-1.5B](https://huggingface.co/Qwen/Qwen2-1.5B) |
@@ -285,6 +287,7 @@ To start the finetuning benchmark, use the following command.
 | Llama 2 13B          | ✅           | ✅              | ❌              |
 | Llama 2 7B           | ✅           | ✅              | ✅              |
 | Llama 4 17B_16E (scout)  | ✅           | ✅              | ❌              |
+| SDXL                 | ❌           | ✅              | ❌              |
 | GPT-OSS-20B   | ❌           | ✅              | ❌              |
 | GPT-OSS-120B   | ❌           | ✅              | ❌              |
 | Qwen2-1.5B   | ✅             | ✅              | ❌              |
