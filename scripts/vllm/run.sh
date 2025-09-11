@@ -107,15 +107,6 @@ if [[ $VLLM_USE_V1 == 0 ]]; then
     # Use CK Flash Attention
     export VLLM_USE_TRITON_FLASH_ATTN=0
     VLLM_ARGS="--num-scheduler-steps 10"
-else
-    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
-        # AITER RMS norm does not work with inductor compile
-        export VLLM_ROCM_USE_AITER_RMSNORM=0
-        # AITER MHA is on by default but does not support full graph capture yet
-        if [[ $VLLM_ROCM_USE_AITER_MHA != 0 ]]; then
-            VLLM_ARGS='--compilation-config {"full_cuda_graph":false}'
-        fi
-    fi
 fi
 
 echo "=hyper params start="
@@ -146,7 +137,7 @@ do
                 export HF_TOKEN=$MAD_SECRETS_HFTOKEN
             fi
             # Explicitly download model before running benchmarks for easier debugging
-            huggingface-cli download $model --exclude "original/*" "*.tf" "*.onnx" "*.flax" "*.rust"
+            hf download $model --exclude "original/*" "*.tf" "*.onnx" "*.flax" "*.rust"
         fi
 
         # If $BENCHMARK is "all" or $BENCHMARK matches benchmark in config
@@ -219,7 +210,7 @@ do
                                 echo " " 2>&1 | tee log.txt
                                 echo "[INFO] LATENCY" 2>&1 | tee log.txt
                                 echo $model $tp $bs $in $out $datatype 2>&1 | tee log.txt
-                                python3 ${VLLM_DIR}/benchmarks/benchmark_latency.py --model $model -tp $tp --batch-size $bs --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --num-iters-warmup 3 --num-iters 5 --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
+                                vllm bench latency --model $model -tp $tp --batch-size $bs --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --num-iters-warmup 3 --num-iters 5 --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
                                 # convert vllm json to csv
                                 python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --batch-size $bs --input-len $in --output-len $out --dtype $datatype
                             done
@@ -235,7 +226,7 @@ do
                                 echo " " 2>&1 | tee log.txt
                                 echo "[INFO] THROUGHPUT" 2>&1 | tee log.txt
                                 echo $model $tp $req $in $out $datatype 2>&1 | tee log.txt
-                                python3 ${VLLM_DIR}/benchmarks/benchmark_throughput.py --model $model -tp $tp --num-prompts $num_prompts --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
+                                vllm bench throughput --model $model -tp $tp --num-prompts $num_prompts --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
                                 # convert vllm json to perf csv
                                 python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --num-prompts $num_prompts --input-len $in --output-len $out --dtype $datatype
                             done
@@ -266,7 +257,7 @@ do
                                     echo " " 2>&1 | tee log.txt
                                     echo "[INFO] SERVING" 2>&1 | tee log.txt
                                     echo $model $tp $max_concurrency $num_prompts $in $out $datatype 2>&1 | tee log.txt
-                                    python3 ${VLLM_DIR}/benchmarks/benchmark_serving.py --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --ignore-eos --max-concurrency $max_concurrency --num-prompts $num_prompts --random-input-len $in --random-output-len $out --trust-remote-code --save-result --result-filename $OUTPUT_JSON 2>&1 | tee log.txt
+                                    vllm bench serve --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --ignore-eos --max-concurrency $max_concurrency --num-prompts $num_prompts --random-input-len $in --random-output-len $out --trust-remote-code --save-result --result-filename $OUTPUT_JSON 2>&1 | tee log.txt
                                     # convert vllm json to perf csv
                                     python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --max-concurrency $max_concurrency --num-prompts $num_prompts --input-len $in --output-len $out --dtype $datatype
                                 done

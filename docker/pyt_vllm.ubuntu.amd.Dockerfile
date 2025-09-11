@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/vllm:rocm6.4.1_vllm_0.10.0_20250812
+ARG BASE_DOCKER=rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
 FROM $BASE_DOCKER
 
 USER root
