@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
 accelerator. It includes:
 
 -   ✅ ROCm™ 6.4.1
--   ✅ vLLM 0.10.0 (0.10.1.dev395+g340ea86df.rocm641)
+-   ✅ vLLM 0.10.1 (0.10.1rc2.dev409+g0b6bf6691.rocm641)
 -   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
 -   ✅ hipBLASLt 0.15
 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.10.0_20250812
+docker pull rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
 ```
 
 ### MAD-integrated benchmarking
@@ -83,7 +83,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-
 `pyt_vllm_llama_3.1-8b_serving.csv`
 
 Although the following models are pre-configured to collect offline throughput and online serving performance data,
-users can also change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
+users can also directly run the vLLm benchmark scripts and change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
 
 #### Available models
 
@@ -108,25 +108,100 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 ### Standalone benchmarking              
 -----------------------------
 
-Users also can run the benchmark tool after they launch a Docker container.
+Users also can run the benchmark tool after they launch a Docker container. For more information, please see the configs in [scripts/vllm/configs/](../../scripts/vllm/configs/) as well as the documentation for the [vLLM engine](https://docs.vllm.ai/en/latest/configuration/engine_args.html#engineargs) and the [vLLM benchmarks](https://github.com/vllm-project/vllm/blob/main/benchmarks/README.md)
 
+#### Docker launch
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.10.0_20250812
+docker pull rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.10.0_20250812
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
 ```
 
-Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/vllm*. 
+#### Throughput Command
+```
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+tp=1
+num_prompts=1024
+in=128
+out=128
+dtype=auto
+kv_cache_dtype=fp8
+max_num_seqs=1024
+max_seq_len_to_capture=131072
+max_num_batched_tokens=8192
+max_model_len=131072
 
-```sh
-git clone https://github.com/ROCm/MAD
-cd MAD/scripts/vllm
+vllm bench throughput --model $model \
+    -tp $tp \
+    --num-prompts $num_prompts \
+    --input-len $in \
+    --output-len $out \
+    --dtype $dtype \
+    --kv-cache-dtype $kv_cache_dtype \
+    --max-num-seqs $max_num_seqs \
+    --max-seq-len-to-capture $max_seq_len_to_capture \
+    --max-num-batched-tokens $max_num_batched_tokens \
+    --max-model-len $max_model_len \
+    --trust-remote-code \
+    --output-json ${model}_throughput.json \
+    --gpu-memory-utilization 0.9
 ```
 
-#### Command
+#### Serving Command
 
-```sh
-./run.sh --config $CONFIG_CSV --model_repo $MODEL_REPO ... {overrides}
+1. Start the server
+```
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+tp=1
+dtype=auto
+kv_cache_dtype=fp8
+max_num_seqs=256
+max_seq_len_to_capture=131072
+max_num_batched_tokens=8192
+max_model_len=131072
+
+vllm serve $model \
+    -tp $tp \
+    --dtype $dtype \
+    --kv-cache-dtype $kv_cache_dtype \
+    --max-num-seqs $max_num_seqs \
+    --max-seq-len-to-capture $max_seq_len_to_capture \
+    --max-num-batched-tokens $max_num_batched_tokens \
+    --max-model-len $max_model_len \
+    --no-enable-prefix-caching \
+    --swap-space 16 \
+    --disable-log-requests \
+    --trust-remote-code \
+    --gpu-memory-utilization 0.9
+
+    # Wait for model to load and server is ready to accept requests
+```
+
+2. On another terminal on the same machine, run the benchmark:
+```
+# Connect to the container
+docker exec -it test bash
+
+# Wait for the server to start
+until curl -s http://localhost:8000/v1/models; do sleep 30; done
+
+# Run the benchmark
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+max_concurrency=1
+num_prompts=10
+in=128
+out=128
+vllm bench serve --model $model \
+    --percentile-metrics "ttft,tpot,itl,e2el" \
+    --dataset-name random \
+    --ignore-eos \
+    --max-concurrency $max_concurrency \
+    --num-prompts $num_prompts \
+    --random-input-len $in \
+    --random-output-len $out \
+    --trust-remote-code \
+    --save-result \
+    --result-filename ${model}_serving.json
 ```
 
 >[!NOTE]
@@ -137,9 +212,6 @@ cd MAD/scripts/vllm
 ># pass your HF_TOKEN
 >export HF_TOKEN=$your_personal_hf_token
 >```
-
->[!NOTE]
->We currently recommend running with `VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1` for best performance.
 
 #### Variables
 
@@ -289,11 +361,8 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-- Add additional environment and benchmark overrides; the full list can be seen in [the run script](../../scripts/vllm/run.sh)
-- Removed deprecated models (Llama 2 7B, Mistral 7B, Qwen 2 7B, Qwen 2 72B, Gemma 2 27B, DeepSeek 16B MoE, DBRX Instruct, Falcon 180B)
-- Updated run script to use config CSVs and added [default.csv](../../scripts/vllm/configs/default.csv), [extended.csv](../../scripts/vllm/configs/extended.csv), and [performance.csv](../../scripts/vllm/configs/performance.csv) to support various models
-- Soft-deprecated offline latency benchmark in favor of online serving
-- AITER now supports FP8 KV cache
+- Make `VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1` the default setting for better performance.
+- Make `VLLM_ROCM_USE_AITER_RMSNORM=0` the default to avoid various issue with torch compile.
 
 ## Support 
 ----------
