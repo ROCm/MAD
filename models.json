@@ -702,6 +702,40 @@
      "--model_repo pyt_train_qwen3-32b"
   },
   {
+    "name": "primus_pyt_train_llama-3.1-8b",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/primus/pytorch-train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus_Llama-3.1-8B.csv",
+    "tags": [
+      "pyt",
+      "primus"
+    ],
+    "timeout": -1,
+    "args": "--model_repo primus_pyt_train_llama-3.1-8b"
+  },
+  {
+    "name": "primus_pyt_train_llama-3.1-70b",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/primus/pytorch-train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus_Llama-3.1-70B.csv",
+    "tags": [
+      "pyt",
+      "primus"
+    ],
+    "timeout": -1,
+    "args": "--model_repo primus_pyt_train_llama-3.1-70b"
+  },
+  {
     "name": "pyt_megatron_lm_train_llama-2-7b",
     "url": "",
     "dockerfile": "docker/megatron_train",
