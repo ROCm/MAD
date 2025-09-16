@@ -119,6 +119,18 @@ if [[ "$NUM_GPUS" != "1" && "$NUM_GPUS" != "8" ]]; then
     exit 1
 fi
 
+# Check for llama 3.2 vision 90b - not allowed to run
+if [[ "$MODEL_REPO" == "Llama-3.2-Vision-90B" ]]; then
+    echo "Error: Running the script for Llama 3.2 Vision 90B is not supported in Pytorch v25.8."
+    exit 1
+fi
+
+# Check for llama 4 with finetune lora - not allowed to run
+if [[ "$MODEL_REPO" == "Llama-4" && "$TRAINING_MODE" == "finetune_lora" ]]; then
+    echo "Error: Running Llama 4 with finetune lora is not supported in Pytorch v25.8."
+    exit 1
+fi
+
 # Run benchmark (Placeholder for actual script execution)
 echo "Running training benchmark with the following parameters:"
 echo "  Training Mode: $TRAINING_MODE"
@@ -145,31 +157,6 @@ PERF_LOG="$(pwd)/../perf_$MODEL_REPO.csv"
 echo "PERF LOG: $PERF_LOG"
 
 perf_script="$(pwd)/pytorch_benchmark_report.py"
-
-update_config_param() {
-    local key=$1
-    local value=$2
-    local CONFIG_FILE=$3
-
-    # If the key exists, replace it
-    if grep -q "^$key" "$CONFIG_FILE"; then
-        sed -i "s/^$key *= *.*/$key = $value/" "$CONFIG_FILE"
-    else
-        echo "$key = $value" >> "$CONFIG_FILE"
-    fi
-}
-
-remove_config_param() {
-    local key=$1
-    local value=$2
-    local CONFIG_FILE=$3
-
-    # Escape possible special chars in value for sed 
-    local escaped_value=$(printf '%s\n' "$value" | sed 's/[][\/.^$*]/\\&/g')
-
-    sed -i "/^$key *= *$escaped_value$/d" "$CONFIG_FILE"
-}
-
 
 if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."

@@ -4,17 +4,16 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.7` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.8` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 6.4.2 |
+| ROCm               | 6.4.3                |
 | Python             | 3.10.18              |
 | PyTorch            | 2.8.0a0+gitd06a406   |
-| Transformer Engine | 2.2.0.dev0+94e53dd8      |
+| Transformer Engine | 2.2.0.dev0+a1e66aae  |
 | Flash Attention    | 3.0.0.post1          |
-| hipBLASLt          | 1.1.0-4b9a52edfc     |
-| Triton             | 3.3.0                |
+| hipBLASLt          | 1.1.0-d1b517fc7a     |
 
 
 ## Models
@@ -38,7 +37,10 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | **Qwen 2**     | 1.5B, 7B           |
 | **Qwen 2.5**     | 32B, 72B           |
 | **Qwen 3**     | 8B, 32B           |
-
+### Training:
+| Model          | Variants              |
+|----------------|------------------------|
+| **NCF**        |                     |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -87,7 +89,7 @@ Use this command to run a performance benchmark test of the Llama 3.1 8B model o
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-python3 tools/run_models.py --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+madengine run --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
 ```
 
 ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama-3.1-8b`. The latency and throughput reports of the model are collected in the following path:
@@ -123,6 +125,8 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_qwen2.5-72b                   |
 | pyt_train_qwen3-8b                      |
 | pyt_train_qwen3-32b                     |
+| pyt_ncf_training                        |
+
 
 ### Standalone benchmarking
 
@@ -130,12 +134,12 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/pytorch-training:v25.7
+docker pull rocm/pytorch-training:v25.8
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.7
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.8
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -201,7 +205,7 @@ To start the pretraining benchmark, use the following command with the appropria
 
 > ⚠️ **Note on Flux 2 Model Support**
 >
-> Currently, Flux models are **not supported out-of-the-box** on `rocm/pytorch-training:v25.7`.
+> Currently, Flux models are **not supported out-of-the-box** on `rocm/pytorch-training:v25.8`.
 >
 > ✅ **Solution:** To use Flux, please refer to the image: `rocm/pytorch-training:v25.6`.
 >

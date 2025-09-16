@@ -101,7 +101,7 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-11b" ]]; then
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-90b" ]]; then
   model="Llama-3.2-vision-90B"
   #tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
-  tasks=("finetune_fw")
+  echo "Llama-3.2-vision-90B not supported in Pytorch v25.8"
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
   model="Llama-3.3-70B"
@@ -109,7 +109,9 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-4-scout-17b-16e" ]]; then
   model="Llama-4-scout-17B-16E"
-  tasks=("finetune_fw" "finetune_lora")
+  #tasks=("finetune_fw" "finetune_lora")
+  tasks=("finetune_fw")
+  echo "Llama-4-scout-17B-16E with LoRa not supported in Pytorch v25.8"
 
 elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
   model="Flux"
@@ -159,6 +161,8 @@ echo "Model: $model"
 for task in "${tasks[@]}"; do
   if [[ "$task" == "HF_pretrain" ]]; then
     datatypes=("FP8")
+  elif [[ "$task" == "finetune_lora" || "$task" == "finetune_qlora" ]]; then
+    datatypes=("BF16")
   fi
   for datatype in "${datatypes[@]}"; do
 

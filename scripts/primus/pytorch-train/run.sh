@@ -1,9 +1,9 @@
-# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+#!/bin/bash
 ###############################################################################
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,13 +24,47 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-training:v25.8
-FROM $BASE_DOCKER
 
-USER root
-ENV WORKSPACE_DIR=/workspace
-RUN mkdir -p $WORKSPACE_DIR
-WORKDIR $WORKSPACE_DIR
+export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 
-# record configuration for posterity
-RUN pip3 list
+# Parse named arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --model_repo) MODEL_REPO="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
+echo "=hyper params start="
+echo $MODEL_REPO
+#echo $TRAINING_MODE
+#echo $DATATYPE
+#echo $SEQUENCE_LENGTH
+echo "=hyper params end="
+
+datatypes=("FP8" "BF16")
+sequence_lengths=("8192")
+
+if [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-8b" ]]; then
+  model="Llama-3.1-8B"
+  tasks=("pretrain")
+elif [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-70b" ]]; then
+  model="Llama-3.1-70B"
+  tasks=("pretrain")
+fi
+
+# Run pytorch setup script
+bash ./pytorch_benchmark_setup.sh -m $model
+
+echo "Model: $model"
+# Loop through all combinations
+for task in "${tasks[@]}"; do
+  for datatype in "${datatypes[@]}"; do
+    for sequence_length in "${sequence_lengths[@]}"; do
+      echo "Running: $task - $model - $datatype - $sequence_length"
+      ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
+    done
+  done
+done
+
