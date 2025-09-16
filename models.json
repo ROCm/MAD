@@ -1522,6 +1522,28 @@
     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b-proxy"
   },
   {
+    "name": "pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning",
+    "url": "https://github.com/huggingface/diffusers",
+    "dockerfile": "docker/pyt_training_huggingface",
+    "scripts": "scripts/pyt_huggingface_diffusers/run.sh",
+    "data": "huggingface",
+    "n_gpus": "8",
+    "owner": "mad.support@amd.com",
+    "training_precision": "fp16",
+    "multiple_results": "results_pyt_huggingface_stable_diffusion_xl_lora._finetuning.csv",
+    "timeout": -1,
+    "tags": [
+      "training",
+      "perf",
+      "pyt",
+      "lora",
+      "diffusers",
+      "stable-diffusion-xl"
+    ],
+    "args":
+    ""
+  },
+  {
     "name": "pyt_ncf_training",
     "url": "https://github.com/ROCm/DeepLearningExamples",
     "data": "",
