@@ -32,10 +32,10 @@ Run instructions - scripts/sglang_disagg/README.MD
 
 Few files of significance:
 
-scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc <br>
-scripts/sglang_disagg/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services <br>
-scripts/sglang_disagg/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement <br>
-scripts/sglang_disagg/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data <br>
+scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc
+scripts/sglang_disagg/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services
+scripts/sglang_disagg/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement
+scripts/sglang_disagg/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data
 
 ## Sbatch run command (one-liner)
 ```bash
