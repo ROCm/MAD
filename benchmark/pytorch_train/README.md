@@ -38,7 +38,10 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | **Qwen 2**     | 1.5B, 7B           |
 | **Qwen 2.5**     | 32B, 72B           |
 | **Qwen 3**     | 8B, 32B           |
-
+### Training:
+| Model          | Variants              |
+|----------------|------------------------|
+| **NCF**        |                     |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -123,6 +126,8 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_qwen2.5-72b                   |
 | pyt_train_qwen3-8b                      |
 | pyt_train_qwen3-32b                     |
+| pyt_ncf_training                        |
+
 
 ### Standalone benchmarking
 
