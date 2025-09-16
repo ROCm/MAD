@@ -33,23 +33,21 @@ host_name=$(hostname)
 # =============================================================================
 
 declare -A MODEL_PREFILL_CONFIGS=(
-    ["Qwen3-30B-A3B"]="--tp-size 8 --ep-size 8 --dp 8 --enable-dp-attention --enable-ep-moe --moe-dense-tp-size 1 "
     ["Qwen3-32B"]="--tp-size 8"
     ["Mixtral-8x7B-v0.1"]="--tp-size 8"
     ["Llama-3.1-8B-Instruct"]="--tp-size 8"
     ["Llama-3.1-405B-Instruct-FP8-KV"]="--tp-size 8"
     ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="--tp-size 8"
-    ["DeepSeek-V2"]="--tp-size 8 --ep-size 8 --enable-ep-moe"
+    ["DeepSeek-V3"]="--tp-size 8"
 )
 
 declare -A MODEL_DECODE_CONFIGS=(
-    ["Qwen3-30B-A3B"]="--tp-size 8 --ep-size 8 --dp 8 --enable-dp-attention --enable-ep-moe --moe-dense-tp-size 1 "
     ["Qwen3-32B"]="--tp-size 8"
     ["Mixtral-8x7B-v0.1"]="--tp-size 8"
     ["Llama-3.1-8B-Instruct"]="--tp-size 8"
     ["Llama-3.1-405B-Instruct-FP8-KV"]="--tp-size 8"
     ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="--tp-size 8"
-    ["DeepSeek-V2"]="--tp-size 8 --ep-size 8 --enable-ep-moe"
+    ["DeepSeek-V3"]="--tp-size 8"
 )
 
 # =============================================================================
@@ -98,68 +96,6 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --node-ports 5000
 
 # =============================================================================
-# ETCD Server Setup
-# =============================================================================
-
-echo "Proceeding to start etcd server on $host_name"
-
-IFS=',' read -ra ADDR <<< "$IPADDRS"
-
-index=0
-for ip in "${ADDR[@]}"; do
-    if [[ "$ip" == "$host_ip" ]]; then
-        break
-    fi
-    index=$((index + 1))
-done
-node_name="etcd-$((index+1))"
-
-initial_cluster=""
-for i in "${!ADDR[@]}"; do
-    peer_name="etcd-$((i+1))"
-    initial_cluster+="$peer_name=http://${ADDR[i]}:2380"
-    if [[ $i -lt $((${#ADDR[@]} - 1)) ]]; then
-        initial_cluster+=","
-    fi
-done
-
-mkdir -p /var/lib/etcd
-
-/usr/local/bin/etcd/etcd \
-    --name "$node_name" \
-    --data-dir /var/lib/etcd \
-    --initial-advertise-peer-urls http://$host_ip:2380 \
-    --listen-peer-urls http://0.0.0.0:2380 \
-    --listen-client-urls http://0.0.0.0:2379 \
-    --advertise-client-urls http://$host_ip:2379 \
-    --initial-cluster-token etcd-cluster-1 \
-    --initial-cluster "$initial_cluster" \
-    --initial-cluster-state new \
-    2>&1 | tee /run_logs/${SLURM_JOB_ID}/etcd_NODE${NODE_RANK}.log >/dev/null &
-
-etcd_pid=$!
-
-echo "Waiting at etcd server barrier on $host_name"
-python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
-    --node-ips ${IPADDRS} \
-    --node-ports 2379
-
-echo "All etcd servers are up : $host_name"
-sleep 3
-
-echo "etcd endpoint health=================="
-/usr/local/bin/etcd/etcdctl endpoint health
-echo "======================================"
-
-echo "etcd member list======================"
-/usr/local/bin/etcd/etcdctl member list
-echo "======================================"
-
-echo "etcd status======================"
-/usr/local/bin/etcd/etcdctl endpoint status --write-out=table
-echo "======================================"
-
-# =============================================================================
 # Cluster Topology Configuration
 # =============================================================================
 
@@ -194,7 +130,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "${PREFILL_ARGS} are Proxy's Prefill"
     echo "${DECODE_ARGS} are Proxy's Decode"
     echo "================================================"
-    
+
     python -m sglang.srt.disaggregation.mini_lb \
         --prefill ${PREFILL_ARGS} \
         --decode ${DECODE_ARGS} \

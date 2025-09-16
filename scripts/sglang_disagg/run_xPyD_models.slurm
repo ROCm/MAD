@@ -22,24 +22,22 @@ echo ""
 # Define valid model names
 VALID_MODELS=( \
     "Qwen3-32B" \
-    "Qwen3-30B-A3B" \
     "Mixtral-8x7B-v0.1" \
     "Llama-3.1-8B-Instruct" \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
-    "DeepSeek-V2" \
+    "DeepSeek-V3" \
 )
 
 
 # Each model has an associated run file - Set it here
 declare -A MODEL_RUNFILES=(
     ["Qwen3-32B"]="sglang_disagg_server.sh"
-    ["Qwen3-30B-A3B"]="sglang_disagg_server.sh"
     ["Mixtral-8x7B-v0.1"]="sglang_disagg_server.sh"
     ["Llama-3.1-8B-Instruct"]="sglang_disagg_server.sh"
     ["Llama-3.1-405B-Instruct-FP8-KV"]="sglang_disagg_server.sh"
     ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="sglang_disagg_server.sh"
-    ["DeepSeek-V2"]="sglang_disagg_server.sh"
+    ["DeepSeek-V3"]="sglang_disagg_server.sh"
 )
 
 # Check if MODEL_NAME exists and fetch runfile
@@ -53,6 +51,7 @@ else
     exit 1
 fi
 
+export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x}"
 if test -z "${DOCKER_IMAGE_NAME}"; then
   echo "Error: DOCKER_IMAGE_NAME is not set or empty."
   exit 1
@@ -66,6 +65,7 @@ xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
 MODEL_NAME="${MODEL_NAME:-None}"
+MODEL_DIR="${MODEL_DIR:-"/shared-inference/models_blog/"}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -145,6 +145,10 @@ if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
 # Check /shared-inference/models_blog
 elif check_model_path "/shared-inference/models_blog/$MODEL_NAME" "/shared-inference/models_blog"; then
     MODEL_PATH="/shared-inference/models_blog/$MODEL_NAME"
+    echo ""
+    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
+elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
@@ -283,7 +287,6 @@ export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 
-export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-sglang_disagg_pd_image_test_release1}"
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
