@@ -7,8 +7,7 @@ Dense Models
 - amd/Llama-3.1-405B-Instruct-FP8-KV (https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)
 
 Small Experts Models
-- DeepSeek-V2 (https://huggingface.co/deepseek-ai/DeepSeek-V2)
-- Qwen3-30B-A3B (https://huggingface.co/Qwen/Qwen3-30B-A3B)
+- DeepSeek-V3 (https://huggingface.co/deepseek-ai/DeepSeek-V3)
 - Mixtral-8x7B-v0.1 (https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)
 
 This repository contains scripts and documentation to launch PD Disaggregation using the Mooncake framework for above models. You will find setup instructions, node assignment details and benchmarking commands.
@@ -22,7 +21,7 @@ This repository contains scripts and documentation to launch PD Disaggregation u
 
 ## Building the Docker image
 Access the Dockerfile located https://github.com/ROCm/MAD/docker/sglang_disagg_inference.ubuntu.amd.Dockerfile
-It uses ‘lmsysorg/sglang:v0.4.9.post1-rocm630’ as the base docker image.
+It uses ‘lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x’ as the base docker image.
 
 ```bash
 docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
@@ -33,7 +32,7 @@ Run instructions - scripts/sglang_disagg/README.MD
 
 Few files of significance:
 
-scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc  
+scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc
 scripts/sglang_disagg/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services
 scripts/sglang_disagg/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement
 scripts/sglang_disagg/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data
@@ -69,7 +68,12 @@ prefill_NODE<>.log - prefill services
 python3 benchmark_parser.py <log_path/benchmark_XXX_CONCURRENCY.log
 ```
 
-## Sample curl command to test launched server ( from docker on the proxy node)
+## sample curl command to test launched server ( from docker on the proxy node)
 ```bash
 curl -X POST http://127.0.0.1:30000/generate -H "Content-Type: application/json" -d '{ "text": "Let me tell you a story ", "sampling_params": { "temperature": 0.3 } }'
 ```
+
+## Known Issues
+For larger models, such as DeepSeekV3 and Llama-3.1-405B-Instruct-FP8-KV and higher concurrency(512+), errors with below signature is observed:<br>
+_'<TransferEncodingError: 400, message:\n  Not enough data to satisfy transfer length header.\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n '_<br>
+This leads to dropping requests and lower throughput.This issue is being discussed on the SGLang forums.
