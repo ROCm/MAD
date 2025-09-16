@@ -1,5 +1,4 @@
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-#ARG BASE_DOCKER=rocm/pytorch-nightly:latest
 ARG BASE_DOCKER=rocm/pytorch-training:v25.5
 FROM $BASE_DOCKER
 
