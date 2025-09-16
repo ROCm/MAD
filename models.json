@@ -1519,6 +1519,26 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b-proxy"
+    "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b-proxy"
+  },
+  {
+    "name": "pyt_ncf_training",
+    "url": "https://github.com/ROCm/DeepLearningExamples",
+    "data": "",
+    "dockerfile": "docker/pyt_ncf_training",
+    "scripts": "scripts/ncf/run.sh",
+    "n_gpus": "1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "fp32",
+    "multiple_results": "results_ncf.csv",
+    "tags": [
+      "pyt",
+      "training",
+      "recommendation",
+      "ncf"
+    ],
+    "timeout": -1,
+    "args":
+    ""
   }
 ]
