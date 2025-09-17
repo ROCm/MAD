@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x
+ARG BASE_DOCKER=docker.io/lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x
 FROM $BASE_DOCKER
 
 ARG GPU_ARCH=gfx942

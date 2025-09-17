@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch:latest
+ARG BASE_DOCKER=docker.io/rocm/pytorch:latest
 FROM $BASE_DOCKER
 
 USER root
@@ -65,5 +65,3 @@ RUN locale-gen en_US.UTF-8
 
 # record configuration for posterity
 RUN pip3 list
-
-

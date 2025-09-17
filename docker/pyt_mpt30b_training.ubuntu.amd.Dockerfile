@@ -1,6 +1,6 @@
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
 # PyTorch 2.7.0a0+git3a58512
-ARG BASE_DOCKER=rocm/pytorch-training:v25.5
+ARG BASE_DOCKER=docker.io/rocm/pytorch-training:v25.5
 FROM $BASE_DOCKER
 
 WORKDIR /workspace

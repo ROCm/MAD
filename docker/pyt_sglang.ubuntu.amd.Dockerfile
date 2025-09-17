@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.4.5-rocm630
+ARG BASE_DOCKER=docker.io/lmsysorg/sglang:v0.4.5-rocm630
 
 FROM $BASE_DOCKER
 

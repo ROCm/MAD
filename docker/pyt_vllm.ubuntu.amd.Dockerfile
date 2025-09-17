@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
+ARG BASE_DOCKER=docker.io/rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
 FROM $BASE_DOCKER
 
 USER root

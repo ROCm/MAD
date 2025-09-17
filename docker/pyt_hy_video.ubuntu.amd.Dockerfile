@@ -1,5 +1,5 @@
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-ARG BASE_DOCKER=rocm/pytorch:latest
+ARG BASE_DOCKER=docker.io/rocm/pytorch:latest
 FROM $BASE_DOCKER
 
 ARG work_dir=/hunyuanvideo

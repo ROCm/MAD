@@ -25,7 +25,7 @@
 #
 #################################################################################
 
-ARG BASE_DOCKER=rocm/pytorch:latest
+ARG BASE_DOCKER=docker.io/rocm/pytorch:latest
 FROM $BASE_DOCKER
 USER root
 ENV WORKSPACE_DIR=/workspace
@@ -89,4 +89,3 @@ RUN cd $WORKSPACE_DIR \
 
 # Display installed packages for verification
 RUN pip list
-

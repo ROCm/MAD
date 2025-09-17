@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-training:v25.8
+ARG BASE_DOCKER=docker.io/rocm/pytorch-training:v25.7
 FROM $BASE_DOCKER
 
 USER root
