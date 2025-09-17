@@ -549,6 +549,38 @@ def subprocess_run(cmd: List[str]):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
 
+def get_rocminfo_path():
+    """Get the rocminfo command.
+
+    Returns:
+        str: The absolute path to rocminfo.
+    """
+
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    rocminfo_path = os.path.join(rocm_path, "bin", "rocminfo")
+
+    if os.path.exists(rocminfo_path):
+        return rocminfo_path
+
+    raise Exception("rocminfo command not found...")
+
+
+def get_rocmsmi_path():
+    """Get the rocm-smi command.
+
+    Returns:
+        str: The absolute path to rocm-smi.
+    """
+
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    rocminfo_path = os.path.join(rocm_path, "bin", "rocm-smi")
+
+    if os.path.exists(rocminfo_path):
+        return rocminfo_path
+
+    raise Exception("rocm-smi command not found...")
+
+
 def get_gpu_vendor() -> str:
     """Get the GPU vendor.
 
@@ -565,8 +597,9 @@ def get_gpu_vendor() -> str:
         _ = subprocess_run(["/usr/bin/nvidia-smi"])
 
     except ERRORS as e1:
+        rocmsmi_path = get_rocmsmi_path()
         try:
-            _ = subprocess_run(["/opt/rocm/bin/rocm-smi"])
+            _ = subprocess_run([f"{rocmsmi_path}"])
 
         except ERRORS as e2:
             raise Exception("Unsupported GPU: Neither AMD nor NVIDIA")
@@ -671,9 +704,10 @@ def get_system_gpus() -> int:
             )
         )
     elif gpu_vendor == "AMD":
+        rocmsmi_path = get_rocmsmi_path()
         number_gpus = int(
             subprocess.check_output(
-                "rocm-smi --showid --csv | grep card | wc -l", shell=True
+                f"{rocmsmi_path} --showid --csv | grep card | wc -l", shell=True
             )
         )
     else:
@@ -765,9 +799,10 @@ def get_system_gpu_arch() -> str:
         else:
             raise Exception(f"Failed to get GPU architecture of NVIDIA: {gpu_name}")
     elif gpu_vendor == "AMD":
+        rocminfo_path = get_rocminfo_path()
         gpu_arch = (
             subprocess.check_output(
-                "/opt/rocm/bin/rocminfo |grep -o -m 1 'gfx.*'", shell=True
+                f"{rocminfo_path} | grep -o -m 1 'gfx.*'", shell=True
             )
             .decode("utf-8")
             .strip()
@@ -1265,7 +1300,7 @@ def update_perf_csv(
         # Read the perf.csv
         perf_csv_df = df_strip_columns(pd.read_csv(perf_csv))
     logger.info(perf_csv_df)
-    
+
     # Handle the results
     if multiple_results:
         perf_csv_df = handle_multiple_results(

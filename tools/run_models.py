@@ -26,8 +26,8 @@
 #################################################################################
 """MAD: Model Automation and Dashboarding
 
-The script builds the Docker image, runs the Docker container, executes training or inference of the LLMs on the container, 
-and logs the performance metrics. 
+The script builds the Docker image, runs the Docker container, executes training or inference of the LLMs on the container,
+and logs the performance metrics.
 
 The script takes the following arguments:
     --tags: tags to run model.
@@ -109,6 +109,7 @@ from utils import get_system_gpus, get_system_gpu_arch, get_gpu_vendor, get_host
 from utils import get_base_docker, get_base_docker_sha
 from utils import get_perf_metric, update_dict
 from utils import update_perf_csv
+from utils import get_rocminfo_path, get_rocmsmi_path
 from utils import Console, Docker, Timeout, RunDetails
 from version import __version__
 from logger import get_logger
@@ -180,12 +181,12 @@ def run_model(
         console: Console
     ) -> bool:
     """Run the model application.
-    
+
     Args:
         model_info (dict): The model information
         args (argparse.Namespace): The input arguments
         console (Console): The console object
-    
+
     Returns:
         bool: The status of the run (return code: True for success, False for failure)
     """
@@ -195,7 +196,7 @@ def run_model(
     keep_alive = args.keep_alive
     keep_model_dir = args.keep_model_dir
     log_level = args.log_level
-    output = args.output    
+    output = args.output
 
     log_file = f"logs/{model_name}.live.log"
     # Check the log file exist in the directory or not, if not then create the log file, if exist then empty the log file.
@@ -225,7 +226,7 @@ def run_model(
     run_details.machine_name = get_host_name()
     run_details.host_os = get_host_os()
     run_details.gpu_architecture = get_system_gpu_arch()
-    run_details.n_gpus = get_system_gpus()    
+    run_details.n_gpus = get_system_gpus()
     run_details.pipeline = os.environ.get('pipeline')
 
     # Parse the model dictionary
@@ -337,7 +338,7 @@ def run_model(
     docker_opts += get_env_docker_args(run_envs)
 
     docker_opts += get_gpu_docker_args()
-    # docker_opts += get_cpu_docker_args()        
+    # docker_opts += get_cpu_docker_args()
 
     mount_data_paths = []
     docker_opts += get_mount_docker_args(mount_data_paths)
@@ -352,8 +353,8 @@ def run_model(
         )
 
         docker = Docker(
-            image=model_docker_image, 
-            container_name=model_docker_container, 
+            image=model_docker_image,
+            container_name=model_docker_container,
             docker_opts=docker_opts,
             keep_alive=keep_alive,
             console=console
@@ -365,7 +366,8 @@ def run_model(
         if re.search("nvidia", dockerfile_gpu_suffix):
             docker.sh('/usr/bin/nvidia-smi || true')
         elif re.search("amd", dockerfile_gpu_suffix):
-            docker.sh('/opt/rocm/bin/rocm-smi || true')
+            rocmsmi_path = get_rocmsmi_path()
+            docker.sh(f'{rocmsmi_path} || true')
         else:
             logger.error("No GPU information available")
             raise ValueError("Unknown GPU type")
@@ -388,7 +390,7 @@ def run_model(
         # echo git commit
         run_details.git_commit = docker.sh(f"cd {model_dir} && git rev-parse HEAD")
         logger.info(f"MODEL GIT COMMIT is {run_details.git_commit}")
-        
+
         if model_url:
             docker.sh(f"cd {model_dir} && git submodule update --init --recursive")
 
@@ -433,7 +435,7 @@ def run_model(
             # Clean up the instance of docker
             del docker
             sys.exit(1)
-        
+
         test_duration = time.time() - test_start_time
         logger.info(f"Test duration: {test_duration} seconds")
 
@@ -473,9 +475,9 @@ def run_model(
                 run_details.performance = multiple_results
                 run_details.generate_json("common_info.json", multiple_results=True)
                 update_perf_csv(
-                    multiple_results=model["multiple_results"], 
-                    perf_csv=output, 
-                    model_name=run_details.model, 
+                    multiple_results=model["multiple_results"],
+                    perf_csv=output,
+                    model_name=run_details.model,
                     common_info="common_info.json"
                 )
             else:
@@ -496,24 +498,24 @@ def run_model(
         else:
             run_details.generate_json("perf_entry.json")
             update_perf_csv(exception_result="perf_entry.json", perf_csv=output)
-        
+
     except Exception as e:
         logger.error(f"Failed to write the run details to the output file: {e}")
 
     # Clean up the instance of docker
     del docker
 
-    return_code = True if run_details.status == 'SUCCESS' else False    
+    return_code = True if run_details.status == 'SUCCESS' else False
 
     return return_code
 
 
 def main() -> bool:
     """Main function to run the MAD application.
-    
+
     Returns:
         bool: The status of the run (return code: True for success, False for failure)
-        
+
     Raises:
         ValueError: If the GPU type is unknown
     """
