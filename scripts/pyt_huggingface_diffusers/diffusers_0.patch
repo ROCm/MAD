@@ -1,0 +1,78 @@
+diff --git a/examples/text_to_image/train_text_to_image_lora_sdxl.py b/examples/text_to_image/train_text_to_image_lora_sdxl.py
+index 12afb72b9..107888b9c 100644
+--- a/examples/text_to_image/train_text_to_image_lora_sdxl.py
++++ b/examples/text_to_image/train_text_to_image_lora_sdxl.py
+@@ -21,9 +21,9 @@ import math
+ import os
+ import random
+ import shutil
+-from contextlib import nullcontext
++import time
+ from pathlib import Path
+-
++from contextlib import nullcontext
+ import datasets
+ import numpy as np
+ import torch
+@@ -1095,6 +1095,11 @@ def main(args):
+         disable=not accelerator.is_local_main_process,
+     )
+ 
++    # [Benchmark] training e2e loop - start
++    accelerator.wait_for_everyone()
++    if accelerator.is_main_process:
++        train_e2e_start_time = time.time()
++
+     for epoch in range(first_epoch, args.num_train_epochs):
+         unet.train()
+         if args.train_text_encoder:
+@@ -1102,6 +1107,9 @@ def main(args):
+             text_encoder_two.train()
+         train_loss = 0.0
+         for step, batch in enumerate(train_dataloader):
++            if accelerator.is_main_process and epoch == 0 and step == 1:
++                train_e2e_start_time = time.time()
++
+             with accelerator.accumulate(unet):
+                 # Convert images to latent space
+                 if args.pretrained_vae_model_name_or_path is not None:
+@@ -1266,6 +1274,13 @@ def main(args):
+ 
+                 del pipeline
+                 torch.cuda.empty_cache()
++    
++    # [Benchmark] training e2e loop - end
++    accelerator.wait_for_everyone()
++    if accelerator.is_main_process:
++        train_e2e_end_time = time.time()
++        sub_avg = lambda total, it: total * (it / (it - 1)) if it > 1 else 0
++        logger.info(f"\n[Benchmark] e2e training completed (sec): {(sub_avg(train_e2e_end_time - train_e2e_start_time, args.max_train_steps)):.2f}\n")
+ 
+     # Save the lora layers
+     accelerator.wait_for_everyone()
+diff --git a/examples/text_to_image/train_text_to_image_sdxl.py b/examples/text_to_image/train_text_to_image_sdxl.py
+index 65a6131e6..b812ed912 100644
+--- a/examples/text_to_image/train_text_to_image_sdxl.py
++++ b/examples/text_to_image/train_text_to_image_sdxl.py
+@@ -748,7 +748,7 @@ def main(args):
+                 logger.warning(
+                     "xFormers 0.0.16 cannot be used for training in some GPUs. If you observe problems during training, please update xFormers to at least 0.0.17. See https://huggingface.co/docs/diffusers/main/en/optimization/xformers for more details."
+                 )
+-            unet.enable_xformers_memory_efficient_attention()
++            unet.enable_xformers_memory_efficient_attention(xformers.ops.fmha.MemoryEfficientAttentionCkOp)
+         else:
+             raise ValueError("xformers is not available. Make sure it is installed correctly")
+ 
+diff --git a/src/diffusers/models/attention_processor.py b/src/diffusers/models/attention_processor.py
+index 23ae05e2a..800a9d719 100755
+--- a/src/diffusers/models/attention_processor.py
++++ b/src/diffusers/models/attention_processor.py
+@@ -420,7 +420,7 @@ class Attention(nn.Module):
+                         op_fw, op_bw = attention_op
+                         dtype, *_ = op_fw.SUPPORTED_DTYPES
+                     q = torch.randn((1, 2, 40), device="cuda", dtype=dtype)
+-                    _ = xformers.ops.memory_efficient_attention(q, q, q)
++                    _ = xformers.ops.memory_efficient_attention(q.half(), q.half(), q.half())
+                 except Exception as e:
+                     raise e
+ 
