@@ -261,8 +261,7 @@ For unquantized training
 ```
 
 Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-2-7B -q nanoo_fp8
 ```
@@ -280,8 +279,7 @@ For unquantized training
 ```
 
 Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-2-70B -q nanoo_fp8
 ```
@@ -299,8 +297,7 @@ For unquantized training
 ```
 
 Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B -q nanoo_fp8
 ```
@@ -342,8 +339,7 @@ For unquantized training
 ```
 
 Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+
 ```
 ./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite -q nanoo_fp8
 ```
@@ -363,8 +359,7 @@ For unquantized training
 ```
 
 Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+
 ```
 ./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q nanoo_fp8
 ```
