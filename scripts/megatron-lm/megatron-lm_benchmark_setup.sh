@@ -37,6 +37,21 @@ done
 
 echo "[INFO] Setup script starting in directory $(pwd)"
 
+cd /workspace/Megatron-LM
+latest_commit=$(git log -1 )
+current_commit=$(git rev-parse HEAD)
+echo "[INFO] Megatron-LM commit hash: $current_commit"
+echo "[INFO] Megatron-LM latest commit hash: $latest_commit"
+if [ "$current_commit" != "$latest_commit" ]; then
+   echo "[INFO] Updating Megatron-LM to commit hash: $latest_commit"
+   git checkout $latest_commit
+   pip install -e .
+   cd /workspace/Primus
+   git pull
+else
+   echo "[INFO] Megatron-LM is already at the correct commit hash: $updated_hash"
+fi
+
 if [ "$MODEL_NAME" == "Mixtral-8x7B" ]; then
     mkdir -p /tokenizer
     cd /tokenizer
