@@ -37,33 +37,4 @@ done
 
 echo "[INFO] Primus setup script starting in directory $(pwd)"
 
-cd /workspace/Megatron-LM
-latest_commit=$(git log -1 )
-current_commit=$(git rev-parse HEAD)
-echo "[INFO] Megatron-LM commit hash: $current_commit"
-echo "[INFO] Megatron-LM latest commit hash: $latest_commit"
-if [ "$current_commit" != "$latest_commit" ]; then
-   echo "[INFO] Updating Megatron-LM to commit hash: $latest_commit"
-   git checkout $latest_commit
-   pip install -e .
-   cd /workspace/Primus
-   git pull
-else
-   echo "[INFO] Megatron-LM is already at the correct commit hash: $updated_hash"
-fi
-
-if [ "$MODEL_NAME" == "Mixtral-8x7B" ]; then
-    mkdir -p /tokenizer
-    cd /tokenizer
-    # download tokenizer.model from https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/blob/main/tokenizer.model
-    wget --header="Authorization: Bearer $HF_TOKEN" -O ./tokenizer.model https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/resolve/main/tokenizer.model
-    ls /tokenizer/tokenizer.model
-
-elif [ "$MODEL_NAME" == "Mixtral-8x22B-proxy" ]; then
-    mkdir -p /tokenizer
-    cd /tokenizer
-    # download tokenizer.model from https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/blob/main/tokenizer.model
-    wget --header="Authorization: Bearer $HF_TOKEN" -O ./tokenizer.model https://huggingface.co/mistralai/Mixtral-8x22B-v0.1/resolve/main/tokenizer.model
-    ls /tokenizer/tokenizer.model
-fi
-
+cd /workspace/Primus

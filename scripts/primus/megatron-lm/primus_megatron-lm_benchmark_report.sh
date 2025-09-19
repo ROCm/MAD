@@ -121,7 +121,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
 elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   export EXP=examples/megatron/configs/llama3.1_70B-pretrain.yaml
-  bash ./examples/run_pretrain.sh --train_iters 50 --num_layers 40 --fp8 hybrid --no_fp8_weight_transpose_cache true 2>&1 | tee $TRAIN_LOG
+  bash ./examples/run_pretrain.sh --train_iters 50 --num_layers 40 --fp8 hybrid 2>&1 | tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
