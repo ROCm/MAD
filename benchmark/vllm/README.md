@@ -213,6 +213,11 @@ vllm bench serve --model $model \
 >export HF_TOKEN=$your_personal_hf_token
 >```
 
+>[!NOTE]
+>For improved performance with certain Mixture-Of-Experts models e.g. Mixtral-8x22B,
+>try adding `export VLLM_ROCM_USE_AITER=1` to your commands.
+>```
+
 #### Variables
 
 | Name         | Options                                 | Description                                      |
