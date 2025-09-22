@@ -90,6 +90,11 @@ if [[ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]]; then
     fi
 fi
 
+if [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then
+    echo "Error: Running DeepSeek-V2-lite is not supported in Megatron-LM v25.8."
+    exit 1
+fi
+
 # Run benchmark (Placeholder for actual script execution)
 echo "Running training benchmark with the following parameters:"
 echo "  Model Repository: $MODEL_REPO"
@@ -163,15 +168,15 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
 
-elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
-  echo "[INFO] $MODEL_REPO TRAINING"
-  export NVTE_FUSED_ATTN_CK=0
-  cd /workspace/Megatron-LM
-  GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh |& tee $TRAIN_LOG
-  echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
-  export NVTE_FUSED_ATTN_CK=1
-  rm $TRAIN_LOG
+# elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
+#   echo "[INFO] $MODEL_REPO TRAINING"
+#   export NVTE_FUSED_ATTN_CK=0
+#   cd /workspace/Megatron-LM
+#   GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=20 bash examples/deepseek_v2/train_deepseekv2.sh |& tee $TRAIN_LOG
+#   echo "[INFO] Benchmarking"
+#   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+#   export NVTE_FUSED_ATTN_CK=1
+#   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
