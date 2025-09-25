@@ -48,8 +48,8 @@ elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-2-7b" ]]; then
   model="Llama-2-7B"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_llama-2-70b" ]]; then
   model="Llama-2-70B"
-elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_deepseek-v2-lite-16b" ]]; then
-  model="DeepSeek-V2-lite"
+# elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_deepseek-v2-lite-16b" ]]; then
+#   model="DeepSeek-V2-lite"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_deepseek-v3-proxy" ]]; then
   model="DeepSeek-V3-proxy"
 elif [[ "$MODEL_REPO" == "pyt_megatron_lm_train_mixtral-8x7b" ]]; then

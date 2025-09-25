@@ -1,6 +1,6 @@
 # Training Performance Validation with ROCm Megatron-LM Training Docker on the AMD Instinct Accelerators
 
-**NOTE: ROCm Megatron-LM has limited support on the primus docker. Please follow the Primus with megatron-core framework guide to get started. We still maintain [backward compatibility with Rocm/Megatron-LM](https://github.com/AMD-AIG-AIMA/MAD-private/blob/megatron-lm-v25.7/benchmark/megatron_lm/Migration_Guide.md#backward-compatibility-with-megatron-lm) framework for existing models.**
+**NOTE: ROCm Megatron-LM has limited support on the primus docker. Please follow the Primus with megatron-core framework guide to get started. We still maintain [backward compatibility with Rocm/Megatron-LM](https://github.com/ROCm/MAD/blob/develop/benchmark/megatron_lm/Migration_Guide.md#backward-compatibility-with-megatron-lm) framework for existing models.**
 
 ## Overview
 
@@ -10,12 +10,12 @@ For ease of use, AMD provides a ready-to-use Docker image for MI300X accelerator
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 6.4.2              |
+| ROCm               | 6.4.3              |
 | Python            | 3.10          |
 | PyTorch           | 2.8.0a0+gitd06a406   |
-| Transformer Engine | 2.1.0.dev0+ba586519      |
-| Flash Attention   | 3.0.0               |
-| hipBLASLt         | 37ba1d36        |
+| Transformer Engine | 2.2.0.dev0+54dd2bdc      |
+| Flash Attention   | 3.0.0.post1               |
+| hipBLASLt         | d1b517fc7a        |
 | Triton            | 3.3.0                 |
 | RCCL              | 2.22.3      |
 
@@ -76,13 +76,13 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   docker pull rocm/megatron-lm:v25.7_py310
+   docker pull rocm/megatron-lm:v25.8_py310
    ```
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name megatron_training_env rocm/megatron-lm:v25.7_py310
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name megatron_training_env rocm/megatron-lm:v25.8_py310
    ```
 
 5. **Execute the training_env container (optional if no already in the container)**
@@ -316,10 +316,14 @@ TOKENIZER_MODEL=meta-llama/Llama-3.3-70B-Instruct CKPT_FORMAT=torch_dist TEE_OUT
 
 Examples for MoE models with expert parallel:
 - **DeepSeekV2-Lite**
+
+**Note:** Please note DeepSeekV2-Lite is showing instability as GPU memory access fault for large iteration. Please use this workload through Primus framework for stability.
+
 ```bash
 export NVTE_FUSED_ATTN_CK=0
-GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=50 bash examples/deepseek_v2/train_deepseekv2.sh
+GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=20 bash examples/deepseek_v2/train_deepseekv2.sh
 ```
+     
 - **DeepSeekV3 3 layer proxy on Single Node**
 ```bash
 export NVTE_FUSED_ATTN_CK=0
