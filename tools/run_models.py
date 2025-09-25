@@ -109,7 +109,7 @@ from utils import get_system_gpus, get_system_gpu_arch, get_gpu_vendor, get_host
 from utils import get_base_docker, get_base_docker_sha
 from utils import get_perf_metric, update_dict
 from utils import update_perf_csv
-from utils import get_rocminfo_path, get_rocmsmi_path
+from utils import get_amdsmi_path, get_nvidiasmi_path
 from utils import Console, Docker, Timeout, RunDetails
 from version import __version__
 from logger import get_logger
@@ -364,10 +364,11 @@ def run_model(
 
         # Echo GPU information
         if re.search("nvidia", dockerfile_gpu_suffix):
-            docker.sh('/usr/bin/nvidia-smi || true')
+            nvidiasmi_path = get_nvidiasmi_path()
+            docker.sh(f'{nvidiasmi_path} || true')
         elif re.search("amd", dockerfile_gpu_suffix):
-            rocmsmi_path = get_rocmsmi_path()
-            docker.sh(f'{rocmsmi_path} || true')
+            amdsmi_path = get_amdsmi_path()
+            docker.sh(f'{amdsmi_path} || true')
         else:
             logger.error("No GPU information available")
             raise ValueError("Unknown GPU type")

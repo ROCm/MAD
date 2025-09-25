@@ -67,6 +67,7 @@ import signal
 import re
 import collections.abc
 import pandas as pd
+import shutil
 
 from logger import get_logger
 
@@ -548,6 +549,33 @@ def subprocess_run(cmd: List[str]):
 
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
+def get_cmd(cmd, known_paths):
+    '''
+        A function to get the full path to the command.
+
+        Args:
+            cmd (str): command name.
+            known_paths (list): list of known paths to search for the command.
+
+        Returns:
+            full path to the command if found, else throws an exception.
+    '''
+
+    cmd_path = shutil.which(cmd)
+    if cmd_path is not None:
+        return cmd_path
+
+    for path in known_paths:
+        if not os.path.isdir(path):
+            continue
+
+        cmd_path = os.path.join(path, cmd)
+        if os.path.isfile(cmd_path) and os.access(cmd_path, os.X_OK):
+            return cmd_path
+
+    # throw exception if command not found.
+    raise FileNotFoundError(f'{cmd} not found.')
+
 
 def get_rocminfo_path():
     """Get the rocminfo command.
@@ -555,14 +583,10 @@ def get_rocminfo_path():
     Returns:
         str: The absolute path to rocminfo.
     """
-
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    rocminfo_path = os.path.join(rocm_path, "bin", "rocminfo")
+    known_paths = [os.path.join(rocm_path, "bin")]
 
-    if os.path.exists(rocminfo_path):
-        return rocminfo_path
-
-    raise Exception("rocminfo command not found...")
+    return get_cmd("rocminfo", known_paths)
 
 
 def get_rocmsmi_path():
@@ -571,14 +595,38 @@ def get_rocmsmi_path():
     Returns:
         str: The absolute path to rocm-smi.
     """
-
     rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
-    rocminfo_path = os.path.join(rocm_path, "bin", "rocm-smi")
+    known_paths = [os.path.join(rocm_path, "bin")]
 
-    if os.path.exists(rocminfo_path):
-        return rocminfo_path
+    return get_cmd("rocm-smi", known_paths)
 
-    raise Exception("rocm-smi command not found...")
+
+def get_amdsmi_path():
+    """Get the amd-smi command.
+
+    Returns:
+        str: The absolute path to amd-smi.
+    """
+    rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+    known_paths = [os.path.join(rocm_path, "bin")]
+
+    return get_cmd("amd-smi", known_paths)
+
+
+def get_nvidiasmi_path():
+    """Get the nvidia-smi command.
+
+    Returns:
+        str: The absolute path to nvidia-smi.
+    """
+    cuda_path = os.environ.get("CUDA_PATH", "/usr/local/cuda")
+    known_paths = [
+        "/usr/bin",
+        "/usr/local/bin",
+        os.path.join(cuda_path, "bin")
+    ]
+
+    return get_cmd("nvidia-smi", known_paths)
 
 
 def get_gpu_vendor() -> str:
@@ -594,12 +642,13 @@ def get_gpu_vendor() -> str:
     ERRORS = (FileNotFoundError, subprocess.CalledProcessError)
 
     try:
-        _ = subprocess_run(["/usr/bin/nvidia-smi"])
+        nvidiasmi_path = get_nvidiasmi_path()
+        _ = subprocess_run([f"{nvidiasmi_path}"])
 
     except ERRORS as e1:
-        rocmsmi_path = get_rocmsmi_path()
+        amdsmi_path = get_amdsmi_path()
         try:
-            _ = subprocess_run([f"{rocmsmi_path}"])
+            _ = subprocess_run([f"{amdsmi_path}"])
 
         except ERRORS as e2:
             raise Exception("Unsupported GPU: Neither AMD nor NVIDIA")
@@ -704,10 +753,10 @@ def get_system_gpus() -> int:
             )
         )
     elif gpu_vendor == "AMD":
-        rocmsmi_path = get_rocmsmi_path()
+        amdsmi_path = get_amdsmi_path()
         number_gpus = int(
             subprocess.check_output(
-                f"{rocmsmi_path} --showid --csv | grep card | wc -l", shell=True
+                f"{amdsmi_path} --showid --csv | grep card | wc -l", shell=True
             )
         )
     else:
