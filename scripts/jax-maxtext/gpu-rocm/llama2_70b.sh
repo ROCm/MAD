@@ -67,7 +67,7 @@ docker=docker
 echo "For downloading data, we will mount \$HF_HOME to the docker and try to get llama tokenizer directly from there"
 echo "Please set \$HF_HOME when calling this script, your HF_HOME is set as"
 echo $HF_HOME
-huggingface-cli download legacy-datasets/c4 --include "*.parquet" --repo-type dataset  --revision refs/convert/parquet
+hf download legacy-datasets/c4 --include "*.parquet" --repo-type dataset  --revision refs/convert/parquet
 
 
 $docker run --rm --privileged --network host --device /dev/dri --device /dev/kfd \
