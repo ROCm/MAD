@@ -53,7 +53,7 @@ if [ -z "$HF_TOKEN" ]; then
 fi
 
 export HF_HOME=/workspace/huggingface
-huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+hf login --token $HF_TOKEN --add-to-git-credential
 
 HOME_DIR="/workspace"
 

@@ -47,10 +47,10 @@ echo "Building dependencies for $MODEL_REPO"
 set -x 
 export HF_HOME=/hf_cache
 mkdir /hf_cache
-huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+hf login --token $HF_TOKEN --add-to-git-credential
 
 # always download and use the real dataset
-# huggingface-cli download legacy-datasets/c4 \
+# hf download legacy-datasets/c4 \
 # 	  --include "en/partial-train/000*.parquet" \
 # 	  --repo-type dataset \
 # 	  --revision refs/convert/parquet 
@@ -63,7 +63,7 @@ huggingface-cli login --token $HF_TOKEN --add-to-git-credential
 # ls /hf_cache/hub/datasets--legacy-datasets--c4/snapshots/5abe0d085aa23dd9db2a6c1e86cfce4e4db6f0c3/en/partial-train/
 
 download_tokenizer(){
-  huggingface-cli download  $1 --include "**token**" 
+  hf download  $1 --include "**token**" 
 }
 
 if [[ "$MODEL_REPO" == "Llama-2-7B" ]]; then
