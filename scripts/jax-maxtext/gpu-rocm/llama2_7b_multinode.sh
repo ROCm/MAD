@@ -119,8 +119,8 @@ echo $NCCL_IB_HCA
 # get the test data
 pip install -U "huggingface_hub[cli]" > /dev/null
 export PATH=~/.local/bin/:$PATH
-huggingface-cli download meta-llama/Llama-2-7b-chat-hf  --local-dir $HOME/araina/data/Llama-2-7b-hf/ --cache-dir $HOME/araina/data > /dev/null
-huggingface-cli download legacy-datasets/c4 --include "*.parquet" --repo-type dataset --local-dir $HOME/araina/data/c4 --revision refs/convert/parquet --cache-dir $HOME/araina/data > /dev/null
+hf download meta-llama/Llama-2-7b-chat-hf  --local-dir $HOME/araina/data/Llama-2-7b-hf/ --cache-dir $HOME/araina/data > /dev/null
+hf download legacy-datasets/c4 --include "*.parquet" --repo-type dataset --local-dir $HOME/araina/data/c4 --revision refs/convert/parquet --cache-dir $HOME/araina/data > /dev/null
 
 
 

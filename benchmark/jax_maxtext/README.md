@@ -198,7 +198,7 @@ docker pull rocm/jax-training:maxtext-v25.7-jax060
 
 Export variables
 - MAD_SECRETS_HFTOKEN is your HuggingFace token to access models, tokenizers, data. See this [page](https://huggingface.co/docs/hub/en/security-tokens) for more info.
-- HF_HOME is where huggingface_hub will store local data, please refer to [Huggingface cli Document](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli#huggingface-cli-download) on how to download the data. If you already have downloaded/cached huggingface artifacts, set this variable to that path. Downloaded files typically get cached to a place like this: `~/.cache/huggingface`.
+- HF_HOME is where huggingface_hub will store local data, please refer to [Huggingface cli Document](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli#hf-download) on how to download the data. If you already have downloaded/cached huggingface artifacts, set this variable to that path. Downloaded files typically get cached to a place like this: `~/.cache/huggingface`.
 ```
 export MAD_SECRETS_HFTOKEN=<Your HuggingFace token>
 export HF_HOME=<Location of saved/cached HuggingFace models>

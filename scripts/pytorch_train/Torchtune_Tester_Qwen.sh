@@ -98,7 +98,7 @@ if [ ! -d "$MODEL_DIR" ]; then
     fi
 
     echo "Downloading model $HF_MODEL_NAME to $MODEL_DIR..."
-    huggingface-cli download "$HF_MODEL_NAME" --local-dir "$MODEL_DIR" || {
+    hf download "$HF_MODEL_NAME" --local-dir "$MODEL_DIR" || {
         echo "Model download failed"
         exit 1
     }

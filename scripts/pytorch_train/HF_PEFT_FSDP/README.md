@@ -14,8 +14,8 @@ docker run --rm -it --device /dev/dri --device /dev/kfd --network host --ipc hos
 cd HF_PEFT_FSDP
 
 # For formal testing we should use the correct model, not the unofficial mirror.
-huggingface-cli login
-huggingface-cli download meta-llama/Llama-2-70b-chat-hf --local-dir ./models/Llama-2-70b-chat-hf --exclude 'original/*.pth'
+hf login
+hf download meta-llama/Llama-2-70b-chat-hf --local-dir ./models/Llama-2-70b-chat-hf --exclude 'original/*.pth'
 ```
 
 ### Finetuning Command

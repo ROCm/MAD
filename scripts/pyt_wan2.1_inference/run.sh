@@ -45,7 +45,7 @@ if [ -d "$MODEL_DIR" ] && [ "$(ls -A $MODEL_DIR)" ]; then
     echo "Model dir already exists at $MODEL_DIR"
 else
     echo "Model dir not found. Downloading"
-    bash -c "huggingface-cli download Wan-AI/Wan2.1-T2V-14B --local-dir "$MODEL_DIR""
+    bash -c "hf download Wan-AI/Wan2.1-T2V-14B --local-dir "$MODEL_DIR""
 fi
 
 #Copy generate.py inference script to Wan2.1 folder

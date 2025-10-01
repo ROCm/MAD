@@ -213,7 +213,7 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
     MODEL_SIZE=$(echo "$output" | grep "model_size" | cut -d ':' -f2 | xargs)
     METHOD=$(echo "$output" | grep "method" | cut -d ':' -f2 | xargs)
 
-    huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+    hf login --token $HF_TOKEN --add-to-git-credential
     
     # Choose the appropriate tester script based on model family and training mode
     if [[ ("$MODEL_FAMILY" == "qwen2" || "$MODEL_FAMILY" == "qwen2_5" || "$MODEL_FAMILY" == "qwen3") && ("$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora") ]]; then

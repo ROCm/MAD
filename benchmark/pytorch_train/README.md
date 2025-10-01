@@ -443,8 +443,8 @@ Our framework supports multinode training with Torchtune. To launch training on 
 > - Set the `mounting paths` inside the slurm script.
 
 ```bash
-huggingface-cli login # Get access to HF llama model space
-huggingface-cli download meta-llama/Llama-3.3-70B-Instruct --local-dir ./models/Llama-3.3-70B-Instruct # Download the llama 3.3 model locally
+hf login # Get access to HF llama model space
+hf download meta-llama/Llama-3.3-70B-Instruct --local-dir ./models/Llama-3.3-70B-Instruct # Download the llama 3.3 model locally
 cd scripts/pytorch_train
 sbatch Torchtune_Multinode.sh
 ```
