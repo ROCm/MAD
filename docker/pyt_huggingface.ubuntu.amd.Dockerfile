@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch:latest
+ARG BASE_DOCKER=docker.io/rocm/pytorch:latest
 FROM $BASE_DOCKER
 
 USER root
@@ -63,7 +63,9 @@ RUN apt-get install -y netcat-traditional
 RUN apt-get install -y locales
 RUN locale-gen en_US.UTF-8
 
+# the model complains about numpy version, it requires <2.0.0
+RUN pip uninstall -y numpy
+RUN pip install numpy==1.26.4
+
 # record configuration for posterity
 RUN pip3 list
-
-

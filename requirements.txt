@@ -1,1 +1,1 @@
-git+https://github.com/ROCm/madengine.git@main
+git+https://github.com/danpetreamd/madengine.git@aac_tweaks
