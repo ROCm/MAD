@@ -29,6 +29,63 @@
     "args": ""
   },
   {
+    "name": "pyt_vllm_deepseek-r1",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-R1-0528.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_gpt-oss-20b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_gpt-oss-20b.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo openai/gpt-oss-20b --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_gpt-oss-120b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_gpt-oss-120b.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo openai/gpt-oss-120b --config configs/default.csv"
+  },
+  {
     "name": "pyt_vllm_llama-2-70b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
@@ -86,44 +143,6 @@
      "--model_repo amd/Llama-3.1-8B-Instruct-FP8-KV --config configs/extended.csv"
   },
   {
-    "name": "pyt_vllm_llama-3.1-70b",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "data": "huggingface",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_Llama-3.1-70B-Instruct.csv",
-    "tags": [
-      "pyt",
-      "vllm",
-      "vllm_default"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo meta-llama/Llama-3.1-70B-Instruct --config configs/default.csv"
-  },
-  {
-    "name": "pyt_vllm_llama-3.1-70b_fp8",
-    "url": "",
-    "dockerfile": "docker/pyt_vllm",
-    "scripts": "scripts/vllm/run.sh",
-    "data": "huggingface",
-    "n_gpus": "-1",
-    "owner": "mad.support@amd.com",
-    "training_precision": "",
-    "multiple_results": "perf_Llama-3.1-70B-Instruct-FP8-KV.csv",
-    "tags": [
-      "pyt",
-      "vllm",
-      "vllm_default"
-    ],
-    "timeout": -1,
-    "args":
-     "--model_repo amd/Llama-3.1-70B-Instruct-FP8-KV --config configs/default.csv"
-  },
-  {
     "name": "pyt_vllm_llama-3.1-405b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
@@ -160,6 +179,139 @@
     "timeout": -1,
     "args":
      "--model_repo amd/Llama-3.1-405B-Instruct-FP8-KV --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-3.1-405b_fp4",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.1-405B-Instruct-MXFP4-Preview.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/Llama-3.1-405B-Instruct-MXFP4-Preview --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-3.3-70b",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B-Instruct.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-3.3-70b_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B-Instruct-FP8-KV.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/Llama-3.3-70B-Instruct-FP8-KV --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-3.3-70b_fp4",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-3.3-70B-Instruct-MXFP4-Preview.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/Llama-3.3-70B-Instruct-MXFP4-Preview --config configs/default.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-4-scout-17b-16e",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-4-Scout-17B-16E-Instruct.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo meta-llama/Llama-4-Scout-17B-16E-Instruct --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-4-maverick-17b-128e",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-4-Maverick-17B-128E-Instruct.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_llama-4-maverick-17b-128e_fp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Llama-4-Maverick-17B-128E-Instruct-FP8.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 --config configs/default.csv"
   },
   {
     "name": "pyt_vllm_mixtral-8x7b",
@@ -255,14 +407,14 @@
      "--model_repo microsoft/phi-4 --config configs/extended.csv"
   },
   {
-    "name": "pyt_vllm_qwq-32b",
+    "name": "pyt_vllm_qwen3-8b",
     "data": "huggingface",
     "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_QwQ-32B.csv",
+    "multiple_results": "perf_Qwen3-8B.csv",
     "tags": [
       "pyt",
       "vllm",
@@ -270,23 +422,97 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/QwQ-32B --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-8B --config configs/extended.csv"
   },
   {
-    "name": "pyt_vllm_qwen3-30b-a3b",
-    "url": "",
+    "name": "pyt_vllm_qwen3-32b",
+    "data": "huggingface",
     "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
-    "multiple_results": "perf_Qwen3-30B-A3B.csv",
-    "owner": "David.Silverstone@amd.com",
+    "owner": "mad.support@amd.com",
     "training_precision": "",
+    "multiple_results": "perf_Qwen3-32B.csv",
     "tags": [
-        "inference",
-        "pyt",
-        "qwen3"
+      "pyt",
+      "vllm",
+      "vllm_extended"
     ],
-    "args": "--model_repo Qwen/Qwen3-30B-A3B --config configs/extended.csv"
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/Qwen3-32B --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_qwen3-30b-a3b",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-30B-A3B.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/Qwen3-30B-A3B --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_qwen3-30b-a3b_fp8",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-30B-A3B-FP8.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/Qwen3-30B-A3B-FP8 --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_qwen3-235b-a22b",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-235B-A22B.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/Qwen3-235B-A22B --config configs/extended.csv"
+  },
+  {
+    "name": "pyt_vllm_qwen3-235b-a22b_fp8",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-235B-A22B-FP8.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo Qwen/Qwen3-235B-A22B-FP8 --config configs/extended.csv"
   },
   {
     "name": "pyt_train_llama-2-70b",
@@ -1286,6 +1512,23 @@
     "timeout": -1,
     "args": 
     "--model_repo mosaicml/mpt-30b --test_option throughput --tunableop off"
+  },
+  {
+    "name": "pyt_mlperf_training_llama-2-70b",
+    "url": "",
+    "dockerfile": "docker/pyt_mlperf_training_llama-2-70b",
+    "scripts": "scripts/pyt_mlperf_training_llama-2-70b/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "tags": [
+      "pyt",
+      "finetune",
+      "llama2",
+      "training"
+    ],
+    "timeout": -1,
+    "args": ""
   },
   {
     "name": "pyt_hy_video",
