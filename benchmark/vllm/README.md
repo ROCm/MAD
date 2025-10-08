@@ -16,7 +16,7 @@ accelerators. It includes:
 -   ✅ ROCm™ 7.0.0
 -   ✅ vLLM 0.10.2 (0.11.0rc2.dev160+g790d22168.rocm700)
 -   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
--   ✅ hipBLASLt 1.0.0
+-   ✅ hipBLASLt 0.15.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
