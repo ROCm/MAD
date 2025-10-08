@@ -56,7 +56,7 @@ with open(args.vllm_json, newline='') as inpf:
                     writer.writerow([args.model, args.tensor_parallel_size, args.num_prompts, args.input_len, args.output_len, args.dtype, str(reader["tokens_per_second"]), throughput_gen])
             elif args.benchmark == "serving":
                 if(reader["total_token_throughput"] != 0):
-                    writer.writerow(['model', 'tp', 'max_concurrency', 'num_prompts', 'in', 'out', 'dtype', 'throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'median_ttft (ms)', 'median_tpot (ms)', 'median_itl (ms)', 'median_e2el (ms)']) if header_write else None
+                    writer.writerow(['model', 'tp', 'max_concurrency', 'num_prompts', 'in', 'out', 'dtype', 'throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'median_tpot (ms)', 'median_itl (ms)', 'median_e2el (ms)']) if header_write else None
                     writer.writerow(
                         [
                             args.model,
@@ -68,7 +68,6 @@ with open(args.vllm_json, newline='') as inpf:
                             args.dtype,
                             str(reader["total_token_throughput"]),
                             str(reader["output_throughput"]),
-                            str(reader["median_ttft_ms"]),
                             str(reader["median_tpot_ms"]),
                             str(reader["median_itl_ms"]),
                             str(reader["median_e2el_ms"])

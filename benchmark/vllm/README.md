@@ -10,15 +10,15 @@ in GPU memory. vLLM also incorporates many recent LLM acceleration and
 quantization algorithms. In addition, AMD implements high-performance custom
 kernels and modules in vLLM to enhance performance further.
 
-This Docker image packages vLLM with PyTorch for an AMD Instinct™ MI300X
-accelerator. It includes:
+This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X, MI350X and MI355X
+accelerators. It includes:
 
--   ✅ ROCm™ 6.4.1
--   ✅ vLLM 0.10.1 (0.10.1rc2.dev409+g0b6bf6691.rocm641)
--   ✅ PyTorch 2.7.0 (2.7.0+gitf717b2a)
--   ✅ hipBLASLt 0.15
+-   ✅ ROCm™ 7.0.0
+-   ✅ vLLM 0.10.2 (0.11.0rc2.dev160+g790d22168.rocm700)
+-   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
+-   ✅ hipBLASLt 1.0
 
-With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
+With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
 
 
@@ -26,7 +26,7 @@ This guide also provides tips and techniques so that users can get optimal perfo
 -----------------------------
 
 Use the following instructions to reproduce the benchmark results on an
-MI300X accelerator with a prebuilt vLLM Docker image.
+MI300X/MI325X/MI350X/MI355X accelerator with a prebuilt vLLM Docker image.
 
 Users have two choices to reproduce the benchmark results.
 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
+docker pull rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
 ```
 
 ### MAD-integrated benchmarking
@@ -75,7 +75,7 @@ Use this command to run a performance benchmark test of the Llama 3.1 8B model o
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-madengine run --tags pyt_vllm_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+madengine run --tags pyt_vllm_llama-3.1-8b --keep-model-dir --live-output
 ```
 
 ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b`. The throughput and serving reports of the model are collected in the following files: 
@@ -87,22 +87,38 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 
 #### Available models
 
-| model_name                             |
-| -------------------------------------- |
-| pyt_vllm_llama-3.1-8b                  |
-| pyt_vllm_llama-3.1-70b                 |
-| pyt_vllm_llama-3.1-405b                |
-| pyt_vllm_llama-2-70b                   |
-| pyt_vllm_mixtral-8x7b                  |
-| pyt_vllm_mixtral-8x22b                 |
-| pyt_vllm_qwq-32b                       |
-| pyt_vllm_qwen3-30b-a3b                 |
-| pyt_vllm_llama-3.1-8b_fp8              |
-| pyt_vllm_llama-3.1-70b_fp8             |
-| pyt_vllm_llama-3.1-405b_fp8            |
-| pyt_vllm_mixtral-8x7b_fp8              |
-| pyt_vllm_mixtral-8x22b_fp8             |
-| pyt_vllm_phi-4                         |
+>[!NOTE]
+>The MXFP4 models are only supported on the gfx950 architecture i.e. MI350X/MI355X accelerators.	
+>```
+
+| MAD model name                         | Model repo                             |
+| -------------------------------------- | -------------------------------------- |
+| pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
+| pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
+| pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
+| pyt_vllm_llama-2-70b                   | [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf) |
+| pyt_vllm_llama-3.1-8b                  | [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) |
+| pyt_vllm_llama-3.1-8b_fp8              | [amd/Llama-3.1-8B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV) |
+| pyt_vllm_llama-3.1-405b                | [meta-llama/Llama-3.1-405B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct) |
+| pyt_vllm_llama-3.1-405b_fp8            | [amd/Llama-3.1-405B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV) |
+| pyt_vllm_llama-3.1-405b_fp4            | [amd/Llama-3.1-405B-Instruct-MXFP4-Preview](https://huggingface.co/amd/Llama-3.1-405B-Instruct-MXFP4-Preview) |
+| pyt_vllm_llama-3.3-70b                 | [meta-llama/Llama-3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct) |
+| pyt_vllm_llama-3.3-70b_fp8             | [amd/Llama-3.3-70B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV) |
+| pyt_vllm_llama-3.3-70b_fp4             | [amd/Llama-3.3-70B-Instruct-MXFP4-Preview](https://huggingface.co/amd/Llama-3.3-70B-Instruct-MXFP4-Preview) |
+| pyt_vllm_llama-4-scout-17b-16e         | [meta-llama/Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct) |
+| pyt_vllm_llama-4-maverick-17b-128e     | [meta-llama/Llama-4-Maverick-17B-128E-Instruct](https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct) |
+| pyt_vllm_llama-4-maverick-17b-128e_fp8 | [meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8](https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) |
+| pyt_vllm_mixtral-8x7b                  | [mistralai/Mixtral-8x7B-Instruct-v0.1](https://hugggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) |
+| pyt_vllm_mixtral-8x7b_fp8              | [amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV](https://hugggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV) |
+| pyt_vllm_mixtral-8x22b                 | [mistralai/Mixtral-8x22B-Instruct-v0.1](https://hugggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1) |
+| pyt_vllm_mixtral-8x22b_fp8             | [amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV](https://hugggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV) |
+| pyt_vllm_phi-4                         | [microsoft/phi-4](https://huggingface.co/microsoft/phi-4) |
+| pyt_vllm_qwen3-8b                      | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
+| pyt_vllm_qwen3-32b                     | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) |
+| pyt_vllm_qwen3-30b-a3b                 | [Qwen/Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) |
+| pyt_vllm_qwen3-30b-a3b_fp8             | [Qwen/Qwen3-30B-A3B-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-FP8) |
+| pyt_vllm_qwen3-235b-a22b               | [Qwen/Qwen3-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) |
+| pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) |
 
 
 ### Standalone benchmarking              
@@ -112,9 +128,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
+docker pull rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm6.4.1_vllm_0.10.1_20250909
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
 ```
 
 #### Throughput Command
@@ -214,8 +230,8 @@ vllm bench serve --model $model \
 >```
 
 >[!NOTE]
->For improved performance with certain Mixture-Of-Experts models e.g. Mixtral-8x22B,
->try adding `export VLLM_ROCM_USE_AITER=1` to your commands.
+>For improved performance with certain Mixture-Of-Experts models e.g. Mixtral-8x22B,	
+>try adding `export VLLM_ROCM_USE_AITER=1` to your commands.	
 >```
 
 #### Variables
@@ -228,63 +244,8 @@ vllm bench serve --model $model \
 | $benchmark   | throughput                              | Measure offline end-to-end throughput              |
 |              | serving                                 | Measure online serving performance             |
 |              | all                                     | Measure both offline throughput and online serving |
-| $model_repo  | meta-llama/Llama-3.1-8B-Instruct   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
-| (float16)    | meta-llama/Llama-3.1-70B-Instruct  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                            |
-|              | meta-llama/Llama-3.1-405B-Instruct | [Llama 3.1 405B](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)                           |                 |
-|              | meta-llama/Llama-2-70b-chat-hf          | [Llama 2 70B](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf)                               |
-|              | mistralai/Mixtral-8x7B-Instruct-v0.1    | [Mixtral MoE 8x7B](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1)                         |
-|              | mistralai/Mixtral-8x22B-Instruct-v0.1   | [Mixtral MoE 8x22B](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1)                        |
-|              | Qwen/QwQ-32B                            | [QwQ 32B](https://huggingface.co/Qwen/QwQ-32B)                                                      |
-|              | Qwen/Qwen3-30B-A3B                      | [Qwen 3 30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B)                                        |
-|              | microsoft/phi-4                         | [Phi-4](https://huggingface.co/microsoft/phi-4)                                                    |
-| $model_repo  | amd/Llama-3.1-8B-Instruct-FP8-KV   | [Llama 3.1 8B](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV)                            |
-| (float8)     | amd/Llama-3.1-70B-Instruct-FP8-KV  | [Llama 3.1 70B](https://huggingface.co/amd/Llama-3.1-70B-Instruct-FP8-KV)                            |
-|              | amd/Llama-3.1-405B-Instruct-FP8-KV | [Llama 3.1 405B](https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)                           |
-|              | amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV   | [Mixtral MoE 8x7B](https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV)                        |
-|              | amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV  | [Mixtral MoE 8x22B](https://huggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV)                       |
-|              | amd/Mistral-7B-v0.1-FP8-KV              | [Mistral 7B](https://huggingface.co/amd/Mistral-7B-v0.1-FP8-KV)                                   |
+| $model_repo  | Huggingface model   | e.g. [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
 | overrides    | See [run.sh](../../scripts/vllm/run.sh)  | Additional overrides to the config CSV |
-
-#### Run the benchmark tests on the MI300X accelerator 🏃
-
-Here are some examples and the test results:
-
-- Benchmark example - throughput
-
-  Use this command to benchmark the throughput of the Llama 3.1 70B model on 8 GPUs with the float16 and float8 data type.
-
-  ```sh
-  export MAD_MODEL_NAME=pyt_vllm_llama-3.1-70b
-  ./run.sh --config configs/default.csv --model_repo meta-llama/Llama-3.1-70B-Instruct --benchmark throughput
-  export MAD_MODEL_NAME=pyt_vllm_llama-3.1-70b_fp8
-  ./run.sh -s --config configs/default.csv --model_repo amd/Llama-3.1-70B-Instruct-FP8-KV --benchmark throughput
-  ```
-
-  The throughput reports are available at:
-
-  - `./pyt_vllm_llama-3.1-70b_throughput.csv`
-  - `./pyt_vllm_llama-3.1-70b_fp8_throughput.csv`
-
-- Benchmark example - serving
-
-  Use this command to benchmark the serving of the Llama 3.1 70B model on 8 GPUs with the float16 and float8 data type.
-
-  ```sh
-  export MAD_MODEL_NAME=pyt_vllm_llama-3.1-70b
-  ./run.sh --config configs/default.csv --model_repo meta-llama/Llama-3.1-70B-Instruct --benchmark serving
-  export MAD_MODEL_NAME=pyt_vllm_llama-3.1-70b_fp8
-  ./run.sh -s --config configs/default.csv --model_repo amd/Llama-3.1-70B-Instruct-FP8-KV --benchmark serving
-  ```
-
-  The serving reports are available at:
-
-  - `./pyt_vllm_llama-3.1-70b_serving.csv`
-  - `./pyt_vllm_llama-3.1-70b_fp8_serving.csv`
-
->[!NOTE]
->Throughput is calculated as:
->-   `throughput_tot = requests * (input lengths + output lengths) / elapsed_time`
->-   `throughput_gen = requests * output lengths / elapsed_time`
 
 ## References 🔎
 ----------
@@ -366,8 +327,15 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-- Make `VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1` the default setting for better performance.
-- Make `VLLM_ROCM_USE_AITER_RMSNORM=0` the default to avoid various issue with torch compile.
+- ROCm 7.0 Docker image with MI350X/MI355X support
+- Added support and benchmark instructions for:
+    * Llama 4 Scout and Maverick
+    * Deepseek-R1-0528
+    * Llama 3.3 70B MXFP4 amd Llama 3.1 405B MXFP4 (MI35x only)
+    * gpt-oss 20b and 120b
+    * Qwen 3 32B, 30B-A3B, and 235B-A22B
+- Dropped deprecated `--max-seq-len-to-capture` flag
+- Bump --gpu-memory-utilization to 0.9 and make it configurable in config csv
 
 ## Support 
 ----------

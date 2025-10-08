@@ -53,7 +53,7 @@ def parse_serving_csv(file_path):
     # For serving, report multiple output metrics by appending the metric name to the model string and creating a new row for each metric
     for row in df.to_dict(orient="records"):
         model = row['model'] + '_' + 'serving' + '_' + str(row['tp']) + '_' + str(row['num_prompts']) + '_' + str(row['in']) + '_' + str(row['out']) + '_' + str(row['max_concurrency']) + '_' + str(row['dtype'])
-        outputs = ['throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'median_ttft (ms)', 'median_tpot (ms)', 'median_itl (ms)', 'median_e2el (ms)']
+        outputs = ['throughput_tot (tok/sec)', 'throughput_gen (tok/sec)', 'median_tpot (ms)', 'median_itl (ms)', 'median_e2el (ms)']
         for output in outputs:
             row_new = pd.DataFrame(index=[0])
             row_new['model'] = model + '_' + output.split()[0]
