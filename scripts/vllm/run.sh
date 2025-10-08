@@ -54,9 +54,9 @@ while [[ "$#" -gt 0 ]]; do
         --max_concurrency) MAX_CONCURRENCY="$2"; shift ;;
         --datatype) DATATYPE="$2"; shift ;;
         --max_num_seqs) MAX_NUM_SEQS="$2"; shift ;;
-        --max_seq_len_to_capture) MAX_SEQ_LEN_TO_CAPTURE="$2"; shift ;;
         --max_num_batched_tokens) MAX_NUM_BATCHED_TOKENS="$2"; shift ;;
         --max_model_len) MAX_MODEL_LEN="$2"; shift ;;
+        --gpu_memory_utilization) GPU_MEMORY_UTILIZATION="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -103,10 +103,43 @@ elif [[ $AITER_MHA == "off" ]]; then
     export VLLM_ROCM_USE_AITER_MHA=0
 fi
 
-if [[ $VLLM_USE_V1 == 0 ]]; then
-    # Use CK Flash Attention
-    export VLLM_USE_TRITON_FLASH_ATTN=0
-    VLLM_ARGS="--num-scheduler-steps 10"
+# vLLM overrides
+# gpt-oss on AITER gets best performance with --block-size 64 and FULL_AND_PIECEWISE graph capture
+if [[ $MODEL == "openai/gpt-oss-20b" || $MODEL == "openai/gpt-oss-120b" ]]; then
+    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
+        echo "Setting --block-size 64 and cudagraph_mode FULL_AND_PIECEWISE with AITER unified attention for gpt-oss"
+        export VLLM_USE_AITER_UNIFIED_ATTENTION=1
+        export VLLM_ROCM_USE_AITER_MHA=0
+        if [[ $MAD_SYSTEM_GPU_ARCHITECTURE == "gfx950" ]]; then
+            VLLM_ARGS='--block-size 64 --compilation-config {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+        elif [[ $MAD_SYSTEM_GPU_ARCHITECTURE == "gfx942" ]]; then
+            VLLM_ARGS='--block-size 64 --compilation-config {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+        fi
+    fi
+fi
+
+# Deepseek AITER MLA requires --block-size 1
+if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
+    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
+        echo "Setting --block-size 1 for Deepseek AITER MLA"
+        VLLM_ARGS="$VLLM_ARGS --block-size 1"
+    else
+        echo "Deepseek Triton MLA does not support cudagraph capture; using cudagraph_mode PIECEWISE"
+        VLLM_ARGS="$VLLM_ARGS --compilation-config {\"cudagraph_mode\":\"PIECEWISE\"}"
+    fi
+fi
+
+# MXFP4 models can use AITER FP4 asm GEMM; TODO on whether this improves perf across the board
+if [[ $MODEL == *"MXFP4"* ]]; then
+    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
+        echo "Using AITER FP4 asm GEMM for MXFP4"
+        export VLLM_ROCM_USE_AITER_FP4_ASM_GEMM=1
+    fi
+fi
+
+# Qwen 3 MoE workaround: disable rms_norm compilation
+if [[ $MODEL == *"Qwen3-30B-A3B"* || $MODEL == *"Qwen3-235B-A22B"* ]]; then
+    VLLM_ARGS="$VLLM_ARGS -O {\"custom_ops\":[\"-rms_norm\"]}"
 fi
 
 echo "=hyper params start="
@@ -120,7 +153,7 @@ echo "VLLM_ROCM_USE_AITER_MHA=$VLLM_ROCM_USE_AITER_MHA"
 echo "=hyper params end="
 
 # Read configs line-by-line and run benchmark
-while IFS="," read -r model benchmark tp in out bs num_prompts max_concurrency datatype max_num_seqs max_seq_len_to_capture max_num_batched_tokens max_model_len
+while IFS="," read -r model benchmark tp in out bs num_prompts max_concurrency datatype max_num_seqs max_num_batched_tokens max_model_len gpu_memory_utilization
 do
     # If $MODEL matches model in config
     if [[ $model == $MODEL ]]; then
@@ -152,25 +185,25 @@ do
             max_concurrency=${MAX_CONCURRENCY:-$max_concurrency}
             datatype=${DATATYPE:-$datatype}
             max_num_seqs=${MAX_NUM_SEQS:-$max_num_seqs}
-            max_seq_len_to_capture=${MAX_SEQ_LEN_TO_CAPTURE:-$max_seq_len_to_capture}
             max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-$max_num_batched_tokens}
             max_model_len=${MAX_MODEL_LEN:-$max_model_len}
-
-            GPU_UTIL=" --gpu-memory-utilization 0.9 "
-            # workaround until https://github.com/pytorch/pytorch/pull/157133 is available in docker image
-            if [[ $model_name == "Llama-3.1-8B-Instruct-FP8-KV" ]]; then
-                GPU_UTIL=" --gpu-memory-utilization 0.85 "
-            fi
+            gpu_memory_utilization=${GPU_MEMORY_UTILIZATION:-$gpu_memory_utilization}
 
             if [[ $datatype == "float16" ]]; then
                 DTYPE=" --dtype float16 "
             elif [[ $datatype == "bfloat16" ]]; then
-                DTYPE=" --dtype bfloat16 "
-            elif [[ $datatype == "float8" ]]; then
-                DTYPE=" --dtype float16 "
-                # Use FP8 kv cache for throughput
-                if [[ $benchmark == "throughput" ]]; then
-                    DTYPE=" ${DTYPE} --kv-cache-dtype fp8 "
+                DTYPE=" "
+            elif [[ $datatype == "float8" || $datatype == "float4" ]]; then
+                if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
+                    # Deepseek fp8 kv cache is currently broken on both Triton and AITER MLA backends
+                    DTYPE=" "
+                else
+                    # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
+                    if [[ $benchmark == "throughput" ]]; then
+                        DTYPE=" --dtype float16 --kv-cache-dtype fp8"
+                    else
+                        DTYPE=" --dtype float16"
+                    fi
                 fi
             else
                 echo "Unknown datatype: $datatype"
@@ -189,14 +222,14 @@ do
             if [ -n "$max_num_seqs" ]; then
                 MNS="--max-num-seqs $max_num_seqs"
             fi
-            if [ -n "$max_seq_len_to_capture" ]; then
-                MSLTC="--max-seq-len-to-capture $max_seq_len_to_capture"
-            fi
             if [ -n "$max_num_batched_tokens" ]; then
                 MNBT="--max-num-batched-tokens $max_num_batched_tokens"
             fi
             if [ -n "$max_model_len" ]; then
                 MML="--max-model-len $max_model_len"
+            fi
+            if [ -n "$gpu_memory_utilization" ]; then
+                GPU_UTIL="--gpu-memory-utilization $gpu_memory_utilization"
             fi
 
             OUTPUT_JSON="${MAD_MODEL_NAME}_${benchmark}.json"
@@ -210,9 +243,11 @@ do
                                 echo " " 2>&1 | tee log.txt
                                 echo "[INFO] LATENCY" 2>&1 | tee log.txt
                                 echo $model $tp $bs $in $out $datatype 2>&1 | tee log.txt
-                                vllm bench latency --model $model -tp $tp --batch-size $bs --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --num-iters-warmup 3 --num-iters 5 --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
+                                vllm bench latency --model $model -tp $tp --batch-size $bs --input-len $in --output-len $out $DTYPE $MNS $MNBT $MML $GPU_UTIL --num-iters-warmup 3 --num-iters 5 --trust-remote-code --output-json $OUTPUT_JSON $VLLM_ARGS 2>&1 | tee log.txt
                                 # convert vllm json to csv
                                 python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --batch-size $bs --input-len $in --output-len $out --dtype $datatype
+                                # delete json
+                                rm $OUTPUT_JSON
                             done
                         done
                     done
@@ -226,9 +261,11 @@ do
                                 echo " " 2>&1 | tee log.txt
                                 echo "[INFO] THROUGHPUT" 2>&1 | tee log.txt
                                 echo $model $tp $req $in $out $datatype 2>&1 | tee log.txt
-                                vllm bench throughput --model $model -tp $tp --num-prompts $num_prompts --input-len $in --output-len $out $DTYPE $MNS $MSLTC $MNBT $MML --trust-remote-code --output-json $OUTPUT_JSON $GPU_UTIL $VLLM_ARGS 2>&1 | tee log.txt
+                                vllm bench throughput --model $model -tp $tp --num-prompts $num_prompts --input-len $in --output-len $out $DTYPE $MNS $MNBT $MML $GPU_UTIL --trust-remote-code --output-json $OUTPUT_JSON $VLLM_ARGS 2>&1 | tee log.txt
                                 # convert vllm json to perf csv
                                 python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --num-prompts $num_prompts --input-len $in --output-len $out --dtype $datatype
+                                # delete json
+                                rm $OUTPUT_JSON
                             done
                         done
                     done
@@ -237,7 +274,7 @@ do
             elif [ $benchmark == "serving" ]; then
                 for tp in $TP_LIST; do
                     # start server and send it to background using nohup {command} &
-                    nohup vllm serve $model -tp $tp $DTYPE $MNS $MSLTC $MNBT $MML --swap-space 16 --no-enable-prefix-caching --disable-log-requests --disable-uvicorn-access-log --trust-remote-code $GPU_UTIL $VLLM_ARGS &
+                    nohup vllm serve $model -tp $tp $DTYPE $MNS $MNBT $MML $GPU_UTIL --swap-space 16 --no-enable-prefix-caching --disable-log-requests --disable-uvicorn-access-log --trust-remote-code $VLLM_ARGS &
                     # get the server pid
                     server_pid=$!
                     echo "vllm server pid: $server_pid"
@@ -257,9 +294,11 @@ do
                                     echo " " 2>&1 | tee log.txt
                                     echo "[INFO] SERVING" 2>&1 | tee log.txt
                                     echo $model $tp $max_concurrency $num_prompts $in $out $datatype 2>&1 | tee log.txt
-                                    vllm bench serve --model $model --percentile-metrics "ttft,tpot,itl,e2el" --dataset-name random --ignore-eos --max-concurrency $max_concurrency --num-prompts $num_prompts --random-input-len $in --random-output-len $out --trust-remote-code --save-result --result-filename $OUTPUT_JSON 2>&1 | tee log.txt
+                                    vllm bench serve --model $model --percentile-metrics "tpot,itl,e2el" --dataset-name random --ignore-eos --max-concurrency $max_concurrency --num-prompts $num_prompts --random-input-len $in --random-output-len $out --trust-remote-code --save-result --result-filename $OUTPUT_JSON 2>&1 | tee log.txt
                                     # convert vllm json to perf csv
                                     python3 vllm_json_to_csv.py --benchmark $benchmark --model $model_name --vllm_json $OUTPUT_JSON --output_csv $OUTPUT_CSV --tensor-parallel-size $tp --max-concurrency $max_concurrency --num-prompts $num_prompts --input-len $in --output-len $out --dtype $datatype
+                                    # delete json
+                                    rm $OUTPUT_JSON
                                 done
                             done
                         done

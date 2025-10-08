@@ -1,8 +1,44 @@
-model,benchmark,tp,in,out,bs,num_prompts,max_concurrency,datatype,max_num_seqs,max_seq_len_to_capture,max_num_batched_tokens,max_model_len
-amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
-amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
-amd/Llama-3.1-70B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+model,benchmark,tp,in,out,bs,num_prompts,max_concurrency,datatype,max_num_seqs,max_num_batched_tokens,max_model_len,gpu_memory_utilization
+deepseek-ai/DeepSeek-R1-0528,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+deepseek-ai/DeepSeek-R1-0528,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+deepseek-ai/DeepSeek-R1-0528,serving,8,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
 
-amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
-amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
-amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128 256,float8,256,131072,131072,32768
+openai/gpt-oss-120b,serving,1,1024,1024,,,4 8 16 32 64 128,float4,1024,8192,2304,0.9
+openai/gpt-oss-120b,serving,1,1024,8192,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,1,8192,1024,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+
+openai/gpt-oss-120b,serving,8,1024,1024,,,4 8 16 32 64 128,float4,1024,8192,2304,0.9
+openai/gpt-oss-120b,serving,8,1024,8192,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,8,8192,1024,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,1,1024,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,1,1024,8192,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,1,8192,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,8,1024,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,8,1024,8192,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.1-405B-Instruct-MXFP4-Preview,serving,8,8192,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,1,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,1,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,1,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-FP8-KV,serving,8,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,1,1024,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,1,1024,8192,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,1,8192,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,8,1024,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,8,1024,8192,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+amd/Llama-3.3-70B-Instruct-MXFP4-Preview,serving,8,8192,1024,,,4 8 16 32 64 128,float4,1024,131072,10240,0.9
+
+meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
+meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8,serving,8,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
