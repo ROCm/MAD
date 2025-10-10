@@ -193,17 +193,23 @@ do
                 DTYPE=" --dtype float16 "
             elif [[ $datatype == "bfloat16" ]]; then
                 DTYPE=" "
-            elif [[ $datatype == "float8" || $datatype == "float4" ]]; then
+            elif [[ $datatype == "float8" ]]; then
                 if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
                     # Deepseek fp8 kv cache is currently broken on both Triton and AITER MLA backends
                     DTYPE=" "
                 else
+                    # Use --dtype float16 for float8 models for attention kernels
                     # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
                     if [[ $benchmark == "throughput" ]]; then
                         DTYPE=" --dtype float16 --kv-cache-dtype fp8"
                     else
                         DTYPE=" --dtype float16"
                     fi
+                fi
+            elif [[ $datatype == "float4" ]]; then
+                # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
+                if [[ $benchmark == "throughput" ]]; then
+                    DTYPE=" --kv-cache-dtype fp8"
                 fi
             else
                 echo "Unknown datatype: $datatype"
