@@ -3,13 +3,13 @@ deepseek-ai/DeepSeek-R1-0528,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,
 deepseek-ai/DeepSeek-R1-0528,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
 deepseek-ai/DeepSeek-R1-0528,serving,8,8192,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
 
-openai/gpt-oss-120b,serving,1,1024,1024,,,4 8 16 32 64 128,float4,1024,8192,2304,0.9
-openai/gpt-oss-120b,serving,1,1024,8192,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
-openai/gpt-oss-120b,serving,1,8192,1024,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,1,1024,1024,,,4 8 16 32 64 128,bfloat16,1024,8192,2304,0.9
+openai/gpt-oss-120b,serving,1,1024,8192,,,4 8 16 32 64 128,bfloat16,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,1,8192,1024,,,4 8 16 32 64 128,bfloat16,1024,8192,10368,0.9
 
-openai/gpt-oss-120b,serving,8,1024,1024,,,4 8 16 32 64 128,float4,1024,8192,2304,0.9
-openai/gpt-oss-120b,serving,8,1024,8192,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
-openai/gpt-oss-120b,serving,8,8192,1024,,,4 8 16 32 64 128,float4,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,8,1024,1024,,,4 8 16 32 64 128,bfloat16,1024,8192,2304,0.9
+openai/gpt-oss-120b,serving,8,1024,8192,,,4 8 16 32 64 128,bfloat16,1024,8192,10368,0.9
+openai/gpt-oss-120b,serving,8,8192,1024,,,4 8 16 32 64 128,bfloat16,1024,8192,10368,0.9
 
 amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,1024,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
 amd/Llama-3.1-405B-Instruct-FP8-KV,serving,8,1024,8192,,,4 8 16 32 64 128,float8,1024,131072,10240,0.9
