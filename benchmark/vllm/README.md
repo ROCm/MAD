@@ -143,7 +143,6 @@ out=128
 dtype=auto
 kv_cache_dtype=fp8
 max_num_seqs=1024
-max_seq_len_to_capture=131072
 max_num_batched_tokens=8192
 max_model_len=131072
 
@@ -155,7 +154,6 @@ vllm bench throughput --model $model \
     --dtype $dtype \
     --kv-cache-dtype $kv_cache_dtype \
     --max-num-seqs $max_num_seqs \
-    --max-seq-len-to-capture $max_seq_len_to_capture \
     --max-num-batched-tokens $max_num_batched_tokens \
     --max-model-len $max_model_len \
     --trust-remote-code \
@@ -171,8 +169,7 @@ model=amd/Llama-3.1-8B-Instruct-FP8-KV
 tp=1
 dtype=auto
 kv_cache_dtype=fp8
-max_num_seqs=256
-max_seq_len_to_capture=131072
+max_num_seqs=1024
 max_num_batched_tokens=8192
 max_model_len=131072
 
@@ -181,7 +178,6 @@ vllm serve $model \
     --dtype $dtype \
     --kv-cache-dtype $kv_cache_dtype \
     --max-num-seqs $max_num_seqs \
-    --max-seq-len-to-capture $max_seq_len_to_capture \
     --max-num-batched-tokens $max_num_batched_tokens \
     --max-model-len $max_model_len \
     --no-enable-prefix-caching \
