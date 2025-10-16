@@ -1,6 +1,6 @@
 model,benchmark,tp,in,out,bs,num_prompts,max_concurrency,datatype,max_num_seqs,max_num_batched_tokens,max_model_len,gpu_memory_utilization
 openai/gpt-oss-20b,throughput,1,128,2048,,1024,,bfloat16,1024,8192,8192,0.9
-openai/gpt-oss-20b,serving,1,128 2048,128 2048,,,1 8 32 128,bfloat16,1024,8192,8192,0.9
+openai/gpt-oss-20b,serving,1,128,2048,,,128,bfloat16,1024,8192,8192,0.9
 
 meta-llama/Llama-2-70b-chat-hf,throughput,8,128,2048,,1024,,float16,1024,4096,4096,0.9
 meta-llama/Llama-2-70b-chat-hf,serving,8,128,2048,,,128,float16,1024,4096,4096,0.9
@@ -41,8 +41,8 @@ Qwen/Qwen3-30B-A3B,serving,1,128,2048,,,128,float16,1024,40960,8192,0.9
 Qwen/Qwen3-30B-A3B-FP8,throughput,1,128,2048,,1024,,float8,1024,40960,8192,0.9
 Qwen/Qwen3-30B-A3B-FP8,serving,1,128,2048,,,128,float8,1024,40960,8192,0.9
 
-Qwen/Qwen3-235B-A22B,throughput,8,128,2048,,1024,,float16,1024,40960,8192,0.9
-Qwen/Qwen3-235B-A22B,serving,8,128,2048,,,128,float16,1024,40960,8192,0.9
+Qwen/Qwen3-235B-A22B,throughput,4,128,2048,,1024,,float16,1024,40960,8192,0.9
+Qwen/Qwen3-235B-A22B,serving,4,128,2048,,,128,float16,1024,40960,8192,0.9
 
-Qwen/Qwen3-235B-A22B-FP8,throughput,8,128,2048,,1024,,float8,1024,40960,8192,0.9
-Qwen/Qwen3-235B-A22B-FP8,serving,8,128,2048,,,128,float8,1024,40960,8192,0.9
+Qwen/Qwen3-235B-A22B-FP8,throughput,4,128,2048,,1024,,float8,1024,40960,8192,0.9
+Qwen/Qwen3-235B-A22B-FP8,serving,4,128,2048,,,128,float8,1024,40960,8192,0.9
