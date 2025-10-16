@@ -31,6 +31,8 @@
 #./pytorch_benchmark_report.sh -t pretrain -m Llama-3.1-70B -p BF16 -s 8192
 ## Pretrain Llama 3.1 8B with FP8 precision 
 #./pytorch_benchmark_report.sh -t pretrain -m Llama-3.1-8B -p FP8 -s 8192
+## Posttrain Flux with BF16 precision
+#./pytorch_benchmark_report.sh -t posttrain -m Flux -p BF16 -s 8192
 ## Torchtune full weight finetuning with Llama 3.1 70B
 #./pytorch_benchmark_report.sh -t finetune_fw -m Llama-3.1-70B -p BF16 -s 8192
 ## Torchtune HF LoRA finetuning with Llama 2 70B
@@ -47,7 +49,7 @@ BATCH_SIZE=""
 usage() {
     echo "Usage: $0 -t <training_mode> -m <model_repo> -p <datatype> -s <sequence_length> -n <num_gpus> -f <fsdp>"
     echo "\nOptions:"
-    echo "  -t <training_mode>   Training mode (pretrain, HF_pretrain, finetune_fw, finetune_lora, finetune_qlora, HF_finetune_lora)"
+    echo "  -t <training_mode>   Training mode (pretrain, posttrain, HF_pretrain, finetune_fw, finetune_lora, finetune_qlora, HF_finetune_lora)"
     echo "  -m <model_repo>      Model repository (Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux)"
     echo "  -p <datatype>        Precision type (FP8 or BF16)"
     echo "  -s <sequence_length> Sequence length (between 2048 and 8192)"
@@ -183,15 +185,6 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
     fi
 
-    if [ "$MODEL_REPO" == "Flux" ]; then
-      echo "[INFO] Benchmarking FLUX TRAINING"
-      cd /workspace/FluxBenchmark
-      accelerate launch --config_file outputs/runs/sweep_000/1_accelerate_config.yaml train.py --mixed_precision bf16 --train_batch_size 1 --num_iterations 100
-      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
-      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
-    fi
-
 elif [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
     echo "[INFO] Executing HF pretraining benchmark..."
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
@@ -201,6 +194,30 @@ elif [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
       bash run_multigpu.sh |& tee $TRAIN_LOG	
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
 	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+    fi
+
+elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
+    echo "[INFO] Executing post-training benchmark..."
+    if [ "$MODEL_REPO" == "Flux" ]; then
+      echo "[INFO] Benchmarking FLUX TRAINING"
+      cd /workspace/AMDiffusionBenchmark
+      echo "[INFO] Removing all previous runs to avoid caching"
+      rm -rf outputs/runs/*
+      python launcher.py train_args=flux-dev
+      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
+    fi
+
+    if [ "$MODEL_REPO" == "Stable-Diffusion-XL" ]; then
+      echo "[INFO] Benchmarking STABLE-DIFFUSION-XL TRAINING"
+      cd /workspace/AMDiffusionBenchmark
+      echo "[INFO] Removing all previous runs to avoid caching"
+      rm -rf outputs/runs/*
+      python launcher.py train_args=stable-diffusion-xl
+      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
@@ -297,14 +314,6 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
         SEQ_LEN=8192
         if [[ "$MODEL_SIZE" == "70B" ]]; then
             MBS=4
-        fi
-
-    elif [[ "$MODEL_FAMILY" == "llama3_2" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "3B" || "$MODEL_SIZE" == "1B" ]]; then
-            MBS=16
         fi
 
     elif [[ "$MODEL_FAMILY" == "llama4" ]]; then

@@ -43,7 +43,7 @@ echo $MODEL_REPO
 #echo $SEQUENCE_LENGTH
 echo "=hyper params end="
 
-datatypes=("FP8" "BF16")
+datatypes=("BF16" "FP8")
 sequence_lengths=("8192")
 
 # Convert from MAD repo names to standalone script names and set training tasks
@@ -69,7 +69,7 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3-70b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
-  tasks=("finetune_fw" "finetune_lora" "pretrain" "HF_pretrain")
+  tasks=("pretrain" "HF_pretrain" "finetune_fw" "finetune_lora")
   #tasks=("pretrain")
   #tasks=("HF_pretrain")
   #tasks=("finetune_fw" "finetune_lora")
@@ -77,7 +77,7 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
   #datatypes=("FP8")
-  tasks=("finetune_fw" "finetune_lora" "pretrain")
+  tasks=("pretrain" "finetune_fw" "finetune_lora")
   #tasks=("pretrain")
   #tasks=("finetune_fw" "finetune_lora")
 
@@ -95,13 +95,11 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-3b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-11b" ]]; then
   model="Llama-3.2-vision-11B"
-  #tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
   tasks=("finetune_fw")
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-90b" ]]; then
   model="Llama-3.2-vision-90B"
-  #tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
-  echo "Llama-3.2-vision-90B not supported in Pytorch v25.8"
+  tasks=("finetune_fw")
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
   model="Llama-3.3-70B"
@@ -109,24 +107,28 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-4-scout-17b-16e" ]]; then
   model="Llama-4-scout-17B-16E"
-  #tasks=("finetune_fw" "finetune_lora")
-  tasks=("finetune_fw")
-  echo "Llama-4-scout-17B-16E with LoRa not supported in Pytorch v25.8"
+  tasks=("finetune_fw" "finetune_lora")
+  #tasks=("finetune_fw")
 
 elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
   model="Flux"
   datatypes=("BF16")
-  tasks=("pretrain")  # Flux only runs pretrain
+  tasks=("posttrain")  
+
+elif [[ "$MODEL_REPO" == "pyt_train_stable-diffusion-xl" ]]; then
+  model="Stable-Diffusion-XL"
+  datatypes=("BF16")
+  tasks=("posttrain")
   
 elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_20b" ]]; then
   model="GPT-OSS-20B"
   datatypes=("BF16")
-  tasks=("HF_finetune_lora")  # Flux only runs pretrain
+  tasks=("HF_finetune_lora")  
   
 elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_120b" ]]; then
   model="GPT-OSS-120B"
   datatypes=("BF16")
-  tasks=("HF_finetune_lora")  # Flux only runs pretrain
+  tasks=("HF_finetune_lora") 
 
 elif [[ "$MODEL_REPO" == "pyt_train_qwen2-1.5b" ]]; then
   model="Qwen2-1.5B"
@@ -160,15 +162,15 @@ echo "Model: $model"
 # Loop through all combinations
 for task in "${tasks[@]}"; do
   if [[ "$task" == "HF_pretrain" ]]; then
-    datatypes=("FP8")
+    curr_datatypes=("FP8")
   elif [[ "$task" == "finetune_lora" || "$task" == "finetune_qlora" ]]; then
-    datatypes=("BF16")
+    curr_datatypes=("BF16")
+  else 
+    curr_datatypes=("${datatypes[@]}")
   fi
-  for datatype in "${datatypes[@]}"; do
-
+  for datatype in "${curr_datatypes[@]}"; do
     for sequence_length in "${sequence_lengths[@]}"; do
       echo "Running: $task - $model - $datatype - $sequence_length"
-      
       ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
     done
   done

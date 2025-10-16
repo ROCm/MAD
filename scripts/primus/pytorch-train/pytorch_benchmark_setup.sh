@@ -44,6 +44,7 @@ done
 
 echo "Model repo: $MODEL_NAME"
 echo "Setup script starting in directory $(pwd)"
+export HSA_NO_SCRATCH_RECLAIM=1
 
 # Check if HF_TOKEN is set
 if [ -z "$HF_TOKEN" ]; then
@@ -52,35 +53,4 @@ if [ -z "$HF_TOKEN" ]; then
     exit 1
 fi
 
-export HF_HOME=/workspace/huggingface
-hf login --token $HF_TOKEN --add-to-git-credential
-
-HOME_DIR="/workspace"
-
-if [[ "$MODEL_NAME" == "Llama-3.1-8B" ]]; then
-  echo "Building torchtitan dependencies for $MODEL_NAME"
-  # Download Primus  
-  cd $HOME_DIR
-  cd Primus
-  git checkout dev/clairlee/mad-pytorch-v25.8
-
-fi 
-
-if [[ "$MODEL_NAME" == "Llama-3.1-70B" ]]; then
-  echo "Building torchtitan dependencies for $MODEL_NAME"
-  # Download Primus  
-  cd $HOME_DIR
-  cd Primus
-  git checkout dev/clairlee/mad-pytorch-v25.8
-
-fi
-
-
-if [[ -z "$MODEL_NAME" ]]; then
-  echo "Building dependencies for all models"
-  # Download Primus  
-  cd $HOME_DIR
-  cd Primus
-  git checkout dev/clairlee/mad-pytorch-v25.8
-
-fi
+echo "No setup required for running Primus Pytorch v25.9"

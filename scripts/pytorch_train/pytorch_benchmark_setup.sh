@@ -96,18 +96,11 @@ if [[ "$MODEL_NAME" == "Llama-3.3-70B" ]]; then
 fi
 
 # Dependency for Flux
-if [ "$MODEL_NAME" == "Flux" ]; then
-  echo "Building Flux dependencies for $MODEL_NAME"
-  cd /workspace/FluxBenchmark
-  pip3 install --no-cache-dir --upgrade pip packaging
-  pip3 install --no-cache-dir -r requirements.txt
-  export ROCBLAS_USE_HIPBLASLT=1
-  export DISABLE_ADDMM_CUDA_LT=0
-  export HIP_FORCE_DEV_KERNARG=1
-  export TORCH_NCCL_HIGH_PRIORITY=0
-  export GPU_MAX_HW_QUEUES=8
-  hf login --token $HF_TOKEN --add-to-git-credential
-  make download_assets
+if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" ]]; then
+  echo "Building AMDiffusionBenchmark dependencies for $MODEL_NAME"
+  cd /workspace/AMDiffusionBenchmark
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
+
   make download_assets
 fi
 
@@ -133,15 +126,7 @@ if [[ -z "$MODEL_NAME" ]]; then
           --exclude 'original/*.pth'
   python dataset.py
 
-  cd /workspace/FluxBenchmark
-  pip3 install --no-cache-dir --upgrade pip packaging
-  pip3 install --no-cache-dir -r requirements.txt
-  export ROCBLAS_USE_HIPBLASLT=1
-  export DISABLE_ADDMM_CUDA_LT=0
-  export HIP_FORCE_DEV_KERNARG=1
-  export TORCH_NCCL_HIGH_PRIORITY=0
-  export GPU_MAX_HW_QUEUES=8
-  hf login --token $HF_TOKEN --add-to-git-credential
-  make download_assets
+  cd /workspace/AMDiffusionBenchmark
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   make download_assets
 fi
