@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/megatron-lm:v25.8_py310
+ARG BASE_DOCKER=rocm/megatron-lm:v25.9_gfx942
 FROM $BASE_DOCKER
 
 USER root

@@ -91,7 +91,7 @@ if [[ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]]; then
 fi
 
 if [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then
-    echo "Error: Running DeepSeek-V2-lite is not supported in Megatron-LM v25.8."
+    echo "Error: Running DeepSeek-V2-lite is not supported in Megatron-LM v25.9."
     exit 1
 fi
 
@@ -135,7 +135,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
 elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   cd /workspace/Megatron-LM
-  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  FP8_WEIGHT_TRANSPOSE_CACHE=0 CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
   rm $TRAIN_LOG
