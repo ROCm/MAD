@@ -780,6 +780,23 @@
      "--model_repo pyt_train_flux"
   },
   {
+    "name": "pyt_train_stable-diffusion-xl",
+    "url": "",
+    "dockerfile": "docker/pytorch_train",
+    "scripts": "scripts/pytorch_train/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Stable-Diffusion-XL.csv",
+    "tags": [
+      "pyt"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo pyt_train_stable-diffusion-xl"
+  },
+  {
     "name": "pyt_train_gpt_oss_20b",
     "url": "",
     "dockerfile": "docker/pytorch_train",

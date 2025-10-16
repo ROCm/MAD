@@ -75,6 +75,23 @@ def find_match(file, search_string, search_range=None):
     print(f"{search_string} {result}")
     return result
 
+def find_token_match(file, search_string, search_range=None):
+    with open(file, 'r') as file:
+        content = file.read()
+    print("Content ", content)
+    # Match numbers with commas or decimals
+    pattern = fr'{re.escape(search_string)}\s*(\d{{1,7}})'
+    matches = re.findall(pattern, content)
+    data = [s.replace(",", "") for s in matches]
+    # Only save last match
+    if search_range is not None:
+        data = np.array(data[search_range[0]:search_range[1]])
+        result = np.average(data.astype(float))
+    else:
+        result = data[-1]
+    print(f"{search_string} {result}")
+    return result
+
 finetune_models = ["Llama-2-70B", "Llama-2-13B", "Llama-2-7B", "Llama-3-70B", "Llama-3-8B", \
             "Llama-3.1-405B", "Llama-3.1-70B", "Llama-3.1-8B", \
             "Llama-3.2-3B", "Llama-3.2-1B", "Llama-3.2-vision-11B", "Llama-3.2-vision-90B", \
@@ -97,15 +114,7 @@ if args.mode == "pretrain":
             {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
             {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
         ]
-    elif args.model == "Flux":
-        df = pd.read_csv(input_file)
-        FPS_per_GPU = df.iloc[-1]['avg_fps']
-        TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
-        data = [
-            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU', 'mode': args.mode, 'precision': precision},
-            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU', 'mode': args.mode, 'precision': precision}
-        ]
-
+    
 elif args.mode == "HF_pretrain":
     if args.model == "Llama-3.1-8B":
         tok_per_s_per_gpu = find_match(input_file, "Avg token per second:")
@@ -115,9 +124,27 @@ elif args.mode == "HF_pretrain":
             {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
         ]
 
+elif args.mode == "posttrain":
+    if args.model == "Flux":
+        df = pd.read_csv(input_file)
+        FPS_per_GPU = df.iloc[-1]['avg_fps_gpu']
+        TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
+        data = [
+            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU', 'mode': args.mode, 'precision': precision},
+            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU', 'mode': args.mode, 'precision': precision}
+        ]
+    elif args.model == "Stable-Diffusion-XL":
+        df = pd.read_csv(input_file)
+        FPS_per_GPU = df.iloc[-1]['avg_fps_gpu']
+        TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
+        data = [
+            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU', 'mode': args.mode, 'precision': precision},
+            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU', 'mode': args.mode, 'precision': precision}
+        ]
+
 elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model in finetune_models):
     max_memory_alloc = find_match(input_file, "Max memory alloc (last half):")
-    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu (last half):")
+    avg_tokens_per_s_per_gpu = find_token_match(input_file, "Average tokens/s/gpu (last half):")
     
     data = [
         {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc', 'mode': args.mode, 'precision': precision},

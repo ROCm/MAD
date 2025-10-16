@@ -77,6 +77,12 @@ llama4:
 EOF
 }
 
+
+# === Config Environment ===
+# export TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL=1
+# export TORCHINDUCTOR_MAX_AUTOTUNE=1
+# export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+
 # === Parse Arguments ===
 if [[ "$1" == "--help" ]]; then
   show_help
@@ -113,6 +119,21 @@ CHECKPOINT_DIR="${CHECKPOINT_DIR:-./checkpoints}"
 # Normalize the model and config directory paths (case-insensitive)
 MODEL_DIR="$(realpath "$MODEL_DIR" 2>/dev/null || echo "$MODEL_DIR")"
 CHECKPOINT_DIR="$(realpath "$CHECKPOINT_DIR" 2>/dev/null || echo "$CHECKPOINT_DIR")"
+
+
+# === Conditionally disable Inductor tuning for llama4 ===
+if [[ "${MODEL_FAMILY,,}" == "llama4" ]]; then
+  unset TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL \
+        TORCHINDUCTOR_MAX_AUTOTUNE \
+        TORCHINDUCTOR_COORDINATE_DESCENT_TUNING
+  echo "llama4 detected: disabled TORCHINDUCTOR_* tuning flags."
+else
+  # (Re-)enable for other model families if desired
+  export TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL=${TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL:-1}
+  export TORCHINDUCTOR_MAX_AUTOTUNE=${TORCHINDUCTOR_MAX_AUTOTUNE:-1}
+  export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=${TORCHINDUCTOR_COORDINATE_DESCENT_TUNING:-1}
+fi
+
 
 # === Optional Environment Overrides ===
 PACKED="${PACKED:-False}"

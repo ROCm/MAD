@@ -84,15 +84,15 @@ finetune_models = ["Llama-2-70B", "Llama-2-13B", "Llama-2-7B", "Llama-3-70B", "L
 if args.mode == "pretrain":
 
     if args.model == "Llama-3.1-8B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=(30, 40))
-        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=(30, 40))
+        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
         data = [
             {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
             {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
         ]
     elif args.model == "Llama-3.1-70B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=(30, 40))
-        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=(30, 40))
+        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
         data = [
             {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
             {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}

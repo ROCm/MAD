@@ -30,6 +30,11 @@ Optional environment variables:
 EOF
 }
 
+# === Config Environment ===
+export TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL=1
+export TORCHINDUCTOR_MAX_AUTOTUNE=1
+export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+
 # === Parse Arguments ===
 if [[ "$1" == "--help" ]]; then
   show_help

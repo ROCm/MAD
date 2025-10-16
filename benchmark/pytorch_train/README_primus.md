@@ -8,12 +8,12 @@ The ROCm PyTorch Training Docker `rocm/pytorch-training:v25.8` container, availa
 
 | Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 6.4.3                |
-| Python             | 3.10.18              |
-| PyTorch            | 2.8.0a0+gitd06a406   |
-| Transformer Engine | 2.2.0.dev0+a1e66aae  |
-| Flash Attention    | 3.0.0.post1          |
-| hipBLASLt          | 1.1.0-d1b517fc7a     |
+| ROCm               | 7.0.0                |
+| Python             | 3.10.12              |
+| PyTorch            | 2.9.0.dev20250821+rocm7.0.0.lw.git125803b7   |
+| Transformer Engine | 2.2.0.dev0+c3bcaab1  |
+| Flash Attention    | 2.8.3                |
+| hipBLASLt          | 1.1.0-911283acd1     |
 
 
 ## Models
@@ -47,17 +47,17 @@ See [Disable NUMA auto-balancing](https://rocm.docs.amd.com/en/latest/how-to/sys
 >
 
 This container should not be expected to provide generalized performance across all training workloads. Users should expect the container perform in the model configurations described below, but other configurations and run conditions are not validated by AMD.
-Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X and MI325X accelerators with the Docker image.
+Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X, MI325X, MI350X and MI355X accelerators with the Docker image.
 
 Use the following instructions to reproduce the benchmark results on an
-MI300X accelerator with a prebuilt Pytorch Docker image.
+MI300X accelerator with a prebuilt Pytorch Docker image. For best performance on MI325X, MI350X and MI355X, user needs adjust configurations (e.g. batch sizes) accordingly.
 
 Users have two choices to reproduce the benchmark results.
 
 -   [MAD-integrated benchmarking](#mad-integrated-benchmarking)
 -   [Standalone benchmarking](#standalone-benchmarking)
 
-### MAD-integrated benchmarking
+## MAD-integrated benchmarking
 
 Clone the ROCm Model Automation and Dashboarding (MAD) repository to a local directory and install the required packages on the host machine.
 
@@ -71,7 +71,7 @@ Use this command to run a performance benchmark test of the Llama 3.1 8B model o
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-madengine run --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+python3 tools/run_models.py --tags pyt_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
 ```
 
 ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama-3.1-8b`. The latency and throughput reports of the model are collected in the following path:
@@ -95,7 +95,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 To start the pretraining benchmark, use the following command.
 <pre lang="markdown"> ./pytorch_benchmark_report.sh -t $training_mode -m $model_repo -p $datatype  </pre>
 
-### Standalone benchmarking
+## Standalone benchmarking
 
 ### Download the Docker image and required packages
 Use the following command to pull the Docker image from the Docker hub
@@ -106,7 +106,7 @@ docker pull rocm/pytorch-training:v25.8
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.8
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/pytorch-training:v25.9
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -115,75 +115,164 @@ docker start training_env
 docker exec -it training_env bash
 ```
 
-### Clone the ROCm MAD repository
-In the Docker container, clone the ROCm MAD repository and navigate to the benchmark scripts directory at /workspace/MAD/scripts/pytorch-training
-```
-git clone https://github.com/ROCm/MAD
-cd MAD/scripts/pytorch-train
-```
-
 ### Prepare training datasets and dependency
 The following benchmarking examples may require downloading models and datasets from Hugging Face. To ensure successful access to gated repos, please set your `HF_TOKEN`
 ```
 # pass your HF_TOKEN
 export HF_TOKEN=$your_personal_hf_token
 ```
-Run setup scripts to install libraries and datasets needed for benchmarking
-```
-./pytorch_benchmark_setup.sh
-```
-Following libraries will be installed with the script above:
-|Benchmark Model     | Library       | Reference                                        |
-|--------------------|---------------|--------------------------------------------------|
-| Llama-3.1-8B,70B   | Primus        | [Primus](https://github.com/AMD-AGI/Primus)      |
-
 
 ### Benchmarking Command
 #### Pretraining
 To start the pretraining benchmark, use the following command with the appropriate options. See the list of options and their descriptions below.
 
-<pre lang="markdown"> ./pytorch_benchmark_report.sh -t $training_mode -m $model_repo -p $datatype -s $sequence_length </pre>
-
-
-##### 🧩 Pretraining Configuration Optionss
-|Name               | Options        | Description                                      |
-|--------------------|---------------|--------------------------------------------------|
-| $training_mode    | pretrain       | Benchmark pretraining                  |
-| $datatype         | FP8 or BF16    | Currently, only Llama 3.1 8B example supports FP8 precision |
-| $model_repo       | Llama-3.1-8B   | [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B)            |
-|                   | Llama-3.1-70B  | [Llama 3.1 70B](https://huggingface.co/meta-llama/Llama-3.1-70B)            |
-| $sequence_length  | Sequence length for language model | Between 2048 and 8192 (default 8192) |
-
-#### Primus Torchtitan 
-
-> ⚠️ **Note on Standalone Torchtitan Pretraining**
->
-> Currently, standalone torchtitan models is not supported in the `scripts/primus/pytorch_train` directory.
-> For torchtitan pretraining without Primus please refer to the `scripts/pytorch_train` directory.
-
-To start the pretraining benchmark, use the following command.
-<pre lang="markdown"> ./pytorch_benchmark_report.sh -t $training_mode -m $model_repo -p $datatype  </pre>
-
+#### Primus with Torchtitan backend 
+Primus is available at `/workspace/Primus` directory
 
 ### Benchmarking examples
-
-Example 1: Llama 3.1 70B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchititan](https://github.com/ROCm/torchtitan)
+Go to Primus directory
+```
+cd /workspace/Primus
+```
+Example 1: Llama 3.1 70B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
 Use this command to run a benchmark of the Llama 3.1 70B model.
 ```
-./pytorch_benchmark_report.sh -m Llama-3.1-70B
+EXP=examples/torchtitan/configs/llama3.1_70B-BF16-pretrain.yaml examples/run_pretrain.sh
 ```
 
-Example 2: Llama 3.1 8B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchititan](https://github.com/ROCm/torchtitan)
+Example 2: Llama 3.1 8B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
 ```
-./pytorch_benchmark_report.sh -m Llama-3.1-8B
-```
-
-Example 3: Llama 3.1 70B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchititan](https://github.com/ROCm/torchtitan)
-```
-./pytorch_benchmark_report.sh -m Llama-3.1-70B -p FP8
+EXP=examples/torchtitan/configs/llama3.1_8B-BF16-pretrain.yaml examples/run_pretrain.sh
 ```
 
-Example 4: Llama 3.1 8B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchititan](https://github.com/ROCm/torchtitan)
+Example 3: Llama 3.1 70B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
 ```
-./pytorch_benchmark_report.sh -m Llama-3.1-8B -p FP8
+EXP=examples/torchtitan/configs/llama3.1_70B-FP8-pretrain.yaml examples/run_pretrain.sh
 ```
+
+Example 4: Llama 3.1 8B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
+```
+EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml examples/run_pretrain.sh
+```
+
+#### MI300X Performance Configs
+- **Llama3.1-70B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 4
+```
+- **Llama3.1-8B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 4
+```
+- **Llama3.1-70B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 3 
+```
+- **Llama3.1-8B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 5 
+```
+#### MI325X Performance Configs
+- **Llama3.1-70B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 6
+```
+- **Llama3.1-8B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 6
+```
+- **Llama3.1-70B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 5 
+```
+- **Llama3.1-8B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 7 
+```
+#### MI35X Performance Configs
+- **Llama3.1-70B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 8
+```
+- **Llama3.1-8B BF16:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-BF16-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 5
+```
+- **Llama3.1-70B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_70B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 6 
+```
+- **Llama3.1-8B FP8:**
+```bash
+EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh \
+    --metrics.enable_tensorboard false --profiling.enable_profiling false \
+    --training.batch_size 8 
+```
+
+### Standalone torchtitan examples
+Standalone [Torchtitan](https://github.com/ROCm/torchtitan) is available at `/workspace/torchtitan` in the docker image
+Go to TorchTitan direcotry and download tokenizer
+
+```
+cd /workspace/torchtitan
+python3 scripts/download_tokenizer.py \
+    --repo_id meta-llama/Meta-Llama-3-8B \
+    --tokenizer_path "original" \
+    --hf_token=${HF_TOKEN}
+```
+
+Example 1: Llama 3.1 70B with BF16 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
+Use this command to run a benchmark of the Llama 3.1 70B model.
+```
+CONFIG_FILE="./llama3_70b_fsdp_bf16.toml" ./run_train.sh
+```
+
+Example 2: Llama 3.1 8B with BF16 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
+```
+CONFIG_FILE="./llama3_8b_fsdp_bf16.toml" ./run_train.sh
+```
+
+Example 3: Llama 3.1 70B with FP8 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
+```
+CONFIG_FILE="./llama3_70b_fsdp_fp8.toml" ./run_train.sh
+```
+
+Example 4: Llama 3.1 8B with FP8 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
+```
+CONFIG_FILE="./llama3_8b_fsdp_fp8.toml" ./run_train.sh
+```
+
