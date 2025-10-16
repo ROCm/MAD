@@ -151,15 +151,9 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
       echo "[INFO] Benchmarking LLAMA 3.1 8B TRAINING"
-      CONFIG_FILE=$(pwd)/primus_torchtitan_scripts/llama3_8b-$DATATYPE.yaml
-      cat $CONFIG_FILE
-      if [ "$DATATYPE" == "FP8" ]; then
-        FP8_CONV_FILE=$(pwd)/primus_torchtitan_scripts/llama3.1_8B_fp8-converter.yaml
-        cat $FP8_CONV_FILE
-        cp $FP8_CONV_FILE /workspace/Primus/primus/configs/models/torchtitan/
-        ls /workspace/Primus/primus/configs/models/torchtitan/
-      fi
       cd /workspace/Primus
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/llama3.1_8B-$DATATYPE-pretrain.yaml
+      cat $CONFIG_FILE
       EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG	
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
@@ -167,14 +161,9 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
       echo "[INFO] Benchmarking LLAMA 3.1 70B TRAINING"
-      CONFIG_FILE=$(pwd)/primus_torchtitan_scripts/llama3_70b-$DATATYPE.yaml
-      cat $CONFIG_FILE
-      if [ "$DATATYPE" == "FP8" ]; then
-        FP8_CONV_FILE=$(pwd)/primus_torchtitan_scripts/llama3.1_70B_fp8-converter.yaml
-        cp $FP8_CONV_FILE /workspace/Primus/primus/configs/models/torchtitan/
-        ls /workspace/Primus/primus/configs/models/torchtitan/
-      fi
       cd /workspace/Primus
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/llama3.1_70B-$DATATYPE-pretrain.yaml
+      cat $CONFIG_FILE
       EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
