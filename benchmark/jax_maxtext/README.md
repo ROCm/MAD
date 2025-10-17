@@ -2,37 +2,22 @@
 
 ## Overview
 
-MaxText framework for ROCm is a specialized fork from upstream MaxText, designed to enable training of large language model (LLM) on AMD GPUs. By leveraging AMD Instinct™ MI300X GPUs, MaxText delivers great scalability, performance, and resource utilization for AI workload. See the GitHub repository at [ROCm/maxtext](https://github.com/ROCm/maxtext/).
+MaxText framework for ROCm is a specialized fork from upstream MaxText, designed to enable training of large language model (LLM) on AMD GPUs. By leveraging AMD Instinct™ MI300X and MI355X GPUs, MaxText delivers great scalability, performance, and resource utilization for AI workload. See the GitHub repository at [ROCm/maxtext](https://github.com/ROCm/maxtext/).
 
-AMD provides a ready-to-use Docker image for AMD Instinct MI300X GPUs containing essential components, including Jax, XLA, ROCm libraries, and MaxText utilities. It contains the following software components to accelerate training workloads:
+AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs containing essential components, including Jax, XLA, ROCm libraries, and MaxText utilities. It contains the following software components to accelerate training workloads:
 
 >[!NOTE]
 >Shardy is a new config in JAX 0.6.0. You might get related errors if it's not configured correctly. For now you can turn it off by setting `shardy=False` during the training run. You can also follow the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) to enable it.
 >
 
-<table>
-<tr><th> Jax 0.5.0 </th><th> Jax 0.6.0 </th></tr>
-<tr><td>
-
 | Software component | Version        |
 |--------------------|----------------|
-| ROCm               | 6.4.1          |
-| Jax                | 0.5.0          |
-| Python             | 3.10.12        |
-| Transformer Engine | 2.1.0+90d703dd |
+| ROCm               | 7.0.0         |
+| Jax                | 0.6.2          |
+| Python             | 3.10.18        |
+| Transformer Engine | 2.2.0.dev0+c91bac54 |
 | hipBLASLt          | 1.x.x          |
 
-</td><td>
-
-| Software component | Version          |
-|--------------------|------------------|
-| ROCm               | 6.4.1            |
-| Jax                | 0.6.0            |
-| Python             | 3.10.12          |
-| Transformer Engine | 2.1.0+90d703dd   |
-| hipBLASLt          | 1.1.0-499ece1c21 |
-
-</td></tr> </table>
 
 ## Supported features and models
 MaxText supports the following key features to train large language models efficiently:
@@ -41,9 +26,9 @@ MaxText supports the following key features to train large language models effic
 * Flash Attention (FA) 3, with or without input sequence packing
 * GEMM tuning
 * Multi-node Support
-* NANOO FP8
+* NANOO FP8 (for MI300X) or FP8 (for MI355X)
 
-The following models are pre-optimized for performance on the AMD Instinct MI300X accelerator.
+The following models are pre-optimized for performance on the AMD Instinct MI300X and MI355X accelerator.
 
 * Llama 2 7B
 * Llama 2 70B
@@ -114,10 +99,10 @@ Set the following env variables. You can again check the multinode examples on h
 >
 
 This container should not be expected to provide generalized performance across all training workloads. Users should expect the container perform in the model configurations described below, but other configurations and run conditions are not validated by AMD.
-Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X and MI325X accelerators with the Docker image.
+Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X, MI325X, MI350X, MI355X accelerators with the Docker image.
 
 Use the following instructions to reproduce the benchmark results on an
-MI300X accelerator with a prebuilt JAX Docker image.
+MI300X or MI355X accelerator with a prebuilt JAX Docker image.
 
 Users have two choices to reproduce the benchmark results.
 
@@ -180,14 +165,8 @@ Download and launch the Docker image
 
 Use the following command to pull the Docker image from Docker Hub.
 
-JAX v0.5.0
 ```
-docker pull rocm/jax-training:maxtext-v25.7
-```
-
-JAX v0.6.0
-```
-docker pull rocm/jax-training:maxtext-v25.7-jax060
+docker pull rocm/jax-training:maxtext-v25.9
 ```
 ### Single Node Training examples
 
@@ -206,14 +185,8 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 
 Launch the Docker container.
 
-JAX v0.5.0
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.7
-```
-
-JAX v0.6.0
-```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.7-jax060
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.9
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -224,8 +197,8 @@ docker exec -it maxtext_training bash
 
 Clone Model Automation and Dashboarding (MAD) repo
 ```
-git clone https://github.com/AMD-AIG-AIMA/MAD-private.git
-cd MAD-private/scripts/jax-maxtext
+git clone https://github.com/ROCm/MAD.git
+cd MAD/scripts/jax-maxtext
 ```
 
 Run setup scripts to install libraries and datasets needed for benchmarking
@@ -260,11 +233,14 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m Llama-2-7B
 ```
 
-Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+Or for nanoo_fp8 quantized training on MI300X
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-2-7B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Llama-2-7B -q fp8
 ```
 
 2.	**Single-node training with Llama 2 70B model**
@@ -279,11 +255,14 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m Llama-2-70B
 ```
 
-Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+Or for nanoo_fp8 quantized training on MI300X
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-2-70B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Llama-2-70B -q fp8
 ```
 
 3.	**Single-node training with Llama 3.1 8B model**
@@ -298,11 +277,14 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B
 ```
 
-Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+Or for nanoo_fp8 quantized training on MI300X
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B -q fp8
 ```
 
 4.	**Single-node training with Llama 3.1 70B model**
@@ -317,6 +299,11 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m Llama-3.1-70B
 ```
 
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Llama-3.1-70B -q fp8
+```
+
 5.	**Single-node training with Llama 3.3 70B model**
 
 Setup
@@ -327,6 +314,11 @@ Setup
 For unquantized training
 ```
 ./jax-maxtext_benchmark_report.sh -m Llama-3.3-70B
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Llama-3.3-70B -q fp8
 ```
 
 6.	**Single-node training with DeepSeek2 16B model**
@@ -341,14 +333,15 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite
 ```
 
-Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+Or for nanoo_fp8 quantized training on MI300X
 ```
 ./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite -q nanoo_fp8
 ```
->[!NOTE]
->The reported TFLOP/s by Maxtext for deepseek is not accurate, please use the Tokens/s as performance indicator.
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite -q fp8
+```
 
 7.	**Single-node training with Mixtral-8x7B model**
 
@@ -362,11 +355,14 @@ For unquantized training
 ./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B
 ```
 
-Or for quantized training
->[!NOTE]
->Quantized training currently only support JAX v0.5.0 docker, support of JAX 0.6.0 will be added in upcoming releases
+Or for nanoo_fp8 quantized training on MI300X
 ```
 ./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q fp8
 ```
 
 
@@ -380,36 +376,36 @@ The examples below use slurm for running on multiple nodes.
 
 1. **Multi-node training with Llama 2 7B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh](https://github.com/AMD-AIG-AIMA/MAD-private/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh)
 
 Run the benchmark for multi-node node traininig
 ```
-sbatch -N <num_nodes> llama2_7b_multinode.sh
+sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_7b_multinode.sh
 ```
 
 2. **Multi-node training with Llama 2 70B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh](https://github.com/AMD-AIG-AIMA/MAD-private/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
-sbatch -N <num_nodes> llama2_70b_multinode.sh
+sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_70b_multinode.sh
 ```
 
 3. **Multi-node training with Llama 3 8B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh](https://github.com/AMD-AIG-AIMA/MAD-private/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
-sbatch -N <num_nodes> llama3_8b_multinode.sh
+sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_8b_multinode.sh
 ```
 
 4. **Multi-node training with Llama 3 70B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh](https://github.com/AMD-AIG-AIMA/MAD-private/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
-sbatch -N <num_nodes> llama3_70b_multinode.sh
+sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_70b_multinode.sh
 ```
