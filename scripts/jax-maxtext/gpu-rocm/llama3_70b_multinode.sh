@@ -13,13 +13,13 @@
 #SBATCH --reservation=gpu-40_gpu-41_gpu-43_gpu-44_gpu-46_gpu-47_gpu-50_gpu-55_reservation
 
 # SLURM_NNODES
-#     Total number of nodes in the job's resource allocation. See SLURM_JOB_NUM_NODES. Included for backwards compatibility. 
+#     Total number of nodes in the job's resource allocation. See SLURM_JOB_NUM_NODES. Included for backwards compatibility.
 
 # SLURM_NODEID
-#     ID of the nodes allocated. 
+#     ID of the nodes allocated.
 
 # SLURM_NODELIST
-#     List of nodes allocated to the job. See SLURM_JOB_NODELIST. Included for backwards compatibility. 
+#     List of nodes allocated to the job. See SLURM_JOB_NODELIST. Included for backwards compatibility.
 
 # srun echo $SLURM_NNODES
 # echo $SLURM_LOCALID
@@ -46,9 +46,24 @@ apt install -y gcc make libtool autoconf librdmacm-dev rdmacm-utils infiniband-d
 
 
 # Environment variables
-echo 'export XLA_FLAGS="--xla_gpu_enable_triton_gemm=False --xla_gpu_enable_cublaslt=True --xla_gpu_graph_level=0 --xla_gpu_autotune_level=0 --xla_gpu_enable_reduce_scatter_combine_by_dim=false --xla_gpu_reduce_scatter_combine_threshold_bytes=8589934592 --xla_gpu_all_reduce_combine_threshold_bytes=8589934592  --xla_gpu_all_gather_combine_threshold_bytes=137438953472 --xla_gpu_enable_all_gather_combine_by_dim=FALSE"
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.975
-export LD_LIBRARY_PATH=/usr/local/lib/:/opt/rocm/lib:$LD_LIBRARY_PATH' > $OUTPUT_DIR/maxtext_env_70b.sh
+echo '
+export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.97
+export NVTE_USE_HIPBLASLT=1
+export XLA_FLAGS="--xla_gpu_memory_limit_slop_factor=95 --xla_gpu_reduce_scatter_combine_threshold_bytes=8589934592 --xla_gpu_graph_level=0 --xla_gpu_enable_latency_hiding_scheduler=True --xla_gpu_all_gather_combine_threshold_bytes=8589934592 --xla_gpu_enable_triton_gemm=False --xla_gpu_enable_cublaslt=True --xla_gpu_autotune_level=0 --xla_gpu_enable_all_gather_combine_by_dim=FALSE"
+export GPU_MAX_HW_QUEUES=2
+export HIP_FORCE_DEV_KERNARG=1
+export HSA_FORCE_FINE_GRAIN_PCIE=1
+export NVTE_FUSED_ATTN=1
+export NCCL_DEBUG=VERSION
+export NCCL_IB_TIMEOUT=20
+export NVTE_CK_USES_BWD_V3=1
+export NVTE_CK_USES_FWD_V3=1
+export NVTE_CK_IS_V3_ATOMIC_FP32=0
+export NVTE_CK_HOW_V3_BF16_CVT=2
+export NVTE_FUSED_ATTN_CK=1
+export NVTE_FUSED_ATTN_AOTRITON=0
+' > $OUTPUT_DIR/maxtext_env_70b.sh
 
 
 # Model Configuration
@@ -60,7 +75,7 @@ model_name: "llama3-70b"
 enable_checkpointing: False
 attention: "cudnn_flash_te"
 dcn_data_parallelism: -1
-dcn_fsdp_parallelism: 1
+dcn_fsdp_parallelism: 2
 dcn_pipeline_parallelism: 1
 dcn_tensor_parallelism: 1
 dcn_sequence_parallelism: 1
@@ -69,11 +84,11 @@ ici_data_parallelism: 1
 ici_sequence_parallelism: 1
 ici_tensor_parallelism: 1
 ici_pipeline_parallelism: 1
- 
+
 remat_policy: 'full'
 optimizer_memory_host_offload: False
 param_scan_axis: 1
- 
+
 use_iota_embed: True
 scan_layers: True
 
@@ -91,10 +106,11 @@ weight_dtype: bfloat16
 checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
 per_device_batch_size: 7
 max_target_length: 8192
-hf_path: "parquet" 
-hf_train_files: "/home/amd/data/c4/en/partial-train/000*.parquet"
-dataset_type: "hf"
-tokenizer_path: "/home/amd/data/Llama-2-7b-hf/"' > $OUTPUT_DIR/llama3_70b_gpu.yml
+dataset_type: "synthetic"
+enable_goodput_recording: False
+monitor_goodput: False
+shardy: False
+' > $OUTPUT_DIR/llama3_70b_gpu.yml
 
 
 srun hostname
@@ -112,8 +128,6 @@ srun echo "MASTER_ADDR="$MASTER_ADDR
 export docker=podman
 #docker=docker
 
-IMAGE="rocm/jax-training:maxtext-v25.5"
-
 export NNODES=$SLURM_NNODES
 export JAX_COORDINATOR_IP=$MASTER_ADDR
 export JAX_COORDINATOR_PORT=1234
@@ -127,14 +141,6 @@ export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_8,mlx5_9
 # For Broadcom Thor NIC, uncomment the line below and comment the line above
 #export NCCL_IB_HCA=rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7
 echo $NCCL_IB_HCA
-
-# get the test data
-pip install -U "huggingface_hub[cli]" > /dev/null
-export PATH=~/.local/bin/:$PATH
-hf download meta-llama/Llama-2-7b-chat-hf  --local-dir $HOME/araina/data/Llama-2-7b-hf/ --cache-dir $HOME/araina/data > /dev/null
-hf download legacy-datasets/c4 --include "*.parquet" --repo-type dataset --local-dir $HOME/araina/data/c4 --revision refs/convert/parquet --cache-dir $HOME/araina/data > /dev/null
-
-
 
 srun --nodes=$SLURM_JOB_NUM_NODES --ntasks=$SLURM_JOB_NUM_NODES \
     --export=ALL \
@@ -151,22 +157,20 @@ srun --nodes=$SLURM_JOB_NUM_NODES --ntasks=$SLURM_JOB_NUM_NODES \
     --mount type=bind,source='${OUTPUT_DIR}',target=/workspace/maxtext/output \
     -e NNODES=$NNODES \
     -e NODE_RANK=$NODE_RANK \
-    -e JAX_COORDINATOR_IP=$JAX_COORDINATOR_IP \
-    -e JAX_COORDINATOR_PORT=$JAX_COORDINATOR_PORT \
-    -e NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME \
-    -e NCCL_IB_HCA=$NCCL_IB_HCA \
+    -e JAX_COORDINATOR_IP='${JAX_COORDINATOR_IP}' \
+    -e JAX_COORDINATOR_PORT='${JAX_COORDINATOR_PORT}' \
+    -e HIP_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     -w /workspace/maxtext \
     '${IMAGE}' \
     /bin/bash -c "
         set -e
         echo \"Running Llama-3-70b\"
-	echo '${IMAGE}'
+        echo '${IMAGE}'
         echo \"Coordinator IP: \$JAX_COORDINATOR_IP\"
-	cp '${OUTPUT_DIR}'/install_packages.sh .
-	cp '${OUTPUT_DIR}'/maxtext_env_70b.sh .
-	cp '${OUTPUT_DIR}'/llama3_70b_gpu.yml MaxText/configs/llama3_70b_gpu.yml
-	source install_packages.sh
-        source maxtext_env_70b.sh	
-        export NCCL_DEBUG=INFO && python MaxText/train.py MaxText/configs/llama3_70b_gpu.yml base_output_directory=output 2>&1 |& tee -a llama3_70b.real.log
+        cp '${OUTPUT_DIR}'/install_packages.sh .
+        cp '${OUTPUT_DIR}'/maxtext_env_70b.sh .
+        cp '${OUTPUT_DIR}'/llama3_70b_gpu.yml MaxText/configs/llama3_70b_gpu.yml
+        source install_packages.sh
+        source maxtext_env_70b.sh
+        python -m MaxText.train MaxText/configs/llama3_70b_gpu.yml 2>&1 |& tee -a llama3_70b.synthetic.log
     "'
-

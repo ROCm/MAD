@@ -24,8 +24,8 @@
 # SOFTWARE.
 #
 #################################################################################
-## Usage: 
-#./jax-maxtext_benchmark_report.sh  -m $model_name -q $quantization 
+## Usage:
+#./jax-maxtext_benchmark_report.sh  -m $model_name -q $quantization
 
 
 # Parse command-line arguments
@@ -57,25 +57,35 @@ cd $MAXTEXT
 
 
 execute_training(){
+  gpu_architecture=$(rocminfo | grep -o -m 1 'gfx.*' | xargs )
+  env_file=$ENV_SCRIPT_DIR/$1
+  if test -e $ENV_SCRIPT_DIR/$gpu_architecture"_"$1; then
+    env_file=$ENV_SCRIPT_DIR/$gpu_architecture"_"$1
+  fi
+  config_file=$ENV_SCRIPT_DIR/$2
+  if test -e $ENV_SCRIPT_DIR/$gpu_architecture"_"$2; then
+    config_file=$ENV_SCRIPT_DIR/$gpu_architecture"_"$2
+  fi
+
   # output for logging
   echo "Using env file:"
-  echo $ENV_SCRIPT_DIR/$1
-  cat $ENV_SCRIPT_DIR/$1
+  echo $env_file
+  cat $env_file
 
   echo "Using yaml config file:"
-  echo $ENV_SCRIPT_DIR/$2
-  cat $ENV_SCRIPT_DIR/$2
+  echo $config_file
+  cat $config_file
 
   # execute
-  source $ENV_SCRIPT_DIR/$1
-  python -m MaxText.train $ENV_SCRIPT_DIR/$2 \
+  source $env_file
+  python -m MaxText.train $config_file \
   quantization=$3 2>&1 |& tee -a  $2.log
   if [ -z "$3" ]; then
     python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG
   else
     python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG --quantization $3
   fi
-  
+
 }
 
 
