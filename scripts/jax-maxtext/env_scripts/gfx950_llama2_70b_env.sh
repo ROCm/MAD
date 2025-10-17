@@ -24,44 +24,19 @@
 #
 #################################################################################
 
-base_config: "base.yml"
-run_name: "deepseek2_16b_1node"
-base_output_directory: "./"
-hardware: "gpu"
-steps: 50
-model_name: "deepseek2-16b"
-enable_goodput_recording: False
-monitor_goodput: False
-enable_checkpointing: False
-attention: "cudnn_flash_te"
-packing: True
-log_period: 100
-#inter-node parallelism strategy
-dcn_data_parallelism: -1
-dcn_fsdp_parallelism: 1
-#intra-node parallelism strategy
-ici_fsdp_parallelism: 1
-ici_data_parallelism: 1
-ici_expert_parallelism: -1
-remat_policy: "minimal_flash"
-use_iota_embed: True
-scan_layers: True
-async_checkpointing: False
-logits_dot_in_fp32: False
-profiler: ""
-dtype: "bfloat16"
-quantization: ""
-quantize_kvcache: False
-kv_quant_axis: "heads_and_dkv"
-kv_quant_dtype: "int8"
-weight_dtype: bfloat16
-checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
-max_target_length: 4096
-dataset_type: "synthetic"
-per_device_batch_size: 8
-megablox: False
-capacity_factor: 1.25
-sparse_matmul: False
-sharding_tolerance: 0.05
-
-shardy: False
+export NVTE_ALLOW_NONDETERMINISTIC_ALGO=1
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.975	export XLA_PYTHON_CLIENT_MEM_FRACTION=.97
+export LD_LIBRARY_PATH=/usr/local/lib/:/opt/rocm/lib:$LD_LIBRARY_PATH	export NVTE_USE_HIPBLASLT=1
+export NVTE_CK_USES_BWD_V3=1
+export XLA_FLAGS="--xla_gpu_memory_limit_slop_factor=95 --xla_gpu_reduce_scatter_combine_threshold_bytes=8589934592 --xla_gpu_graph_level=0 --xla_gpu_enable_latency_hiding_scheduler=True --xla_gpu_all_gather_combine_threshold_bytes=8589934592 --xla_gpu_enable_triton_gemm=False --xla_gpu_enable_cublaslt=True --xla_gpu_autotune_level=0 --xla_gpu_enable_all_gather_combine_by_dim=FALSE"
+export GPU_MAX_HW_QUEUES=2
+export HIP_FORCE_DEV_KERNARG=1
+export HSA_FORCE_FINE_GRAIN_PCIE=1
+export NVTE_FUSED_ATTN=1
+export NCCL_DEBUG=VERSION
+export NVTE_CK_USES_BWD_V3=1
+export NVTE_CK_USES_FWD_V3=1
+export NVTE_CK_IS_V3_ATOMIC_FP32=0
+export NVTE_CK_HOW_V3_BF16_CVT=2
+export NVTE_FUSED_ATTN_CK=1
+export NVTE_FUSED_ATTN_AOTRITON=0
