@@ -376,7 +376,7 @@ The examples below use slurm for running on multiple nodes.
 
 1. **Multi-node training with Llama 2 7B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh](https://github.com/ROCm/MAD/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh)
 
 Run the benchmark for multi-node node traininig
 ```
@@ -385,7 +385,7 @@ sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_7b_multinode.sh
 
 2. **Multi-node training with Llama 2 70B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh](https://github.com/ROCm/MAD/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
@@ -394,7 +394,7 @@ sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_70b_multinode.sh
 
 3. **Multi-node training with Llama 3 8B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh](https://github.com/ROCm/MAD/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
@@ -403,7 +403,7 @@ sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_8b_multinode.sh
 
 4. **Multi-node training with Llama 3 70B model**\
    Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh](https://github.com/ROCm/MAD/blob/jax-maxtext-v25.7-jax0.6.0/scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh)
+[scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh)
 
 Run the benchmark for multinode node traininig
 ```
