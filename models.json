@@ -476,7 +476,7 @@
     "tags": [
       "pyt",
       "vllm",
-      "vllm_extended".
+      "vllm_extended",
       "inference"
     ],
     "timeout": -1,
