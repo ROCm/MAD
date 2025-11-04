@@ -37,13 +37,6 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         --config) CONFIG="$2"; shift ;;
         --model_repo) MODEL="$2"; shift ;;
-        # environment variables
-        --tunableop) TUNABLEOP="$2"; shift ;;
-        --vllm_v1) VLLM_V1="$2"; shift ;;
-        --vllm_v1_split_attention) VLLM_V1_SPLIT_ATTENTION="$2"; shift ;;
-        --aiter) AITER="$2"; shift ;;
-        --aiter_pa) AITER_PA="$2"; shift ;;
-        --aiter_mha) AITER_MHA="$2"; shift ;;
         # config overrides
         --benchmark) BENCHMARK="$2"; shift ;;
         --tp) TP="$2"; shift ;;
@@ -67,79 +60,37 @@ if [[ -z "$CONFIG" ]]; then
     exit 1
 fi
 
-if [[ $TUNABLEOP == "on" ]]; then 
-    export PYTORCH_TUNABLEOP_ENABLED=1
-elif [[ $TUNABLEOP == "off" ]]; then
-    export PYTORCH_TUNABLEOP_ENABLED=0
-fi
-
-if [[ $VLLM_V1 == "on" ]]; then
-    export VLLM_USE_V1=1
-elif [[ $VLLM_V1 == "off" ]]; then
-    export VLLM_USE_V1=0
-fi
-
-if [[ $VLLM_V1_SPLIT_ATTENTION == "on" ]]; then
-    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=1
-elif [[ $VLLM_V1_SPLIT_ATTENTION == "off" ]]; then
-    export VLLM_V1_USE_PREFILL_DECODE_ATTENTION=0
-fi
-
-if [[ $AITER == "on" ]]; then
-    export VLLM_ROCM_USE_AITER=1
-elif [[ $AITER == "off" ]]; then
-    export VLLM_ROCM_USE_AITER=0
-fi
-
-if [[ $AITER_PA == "on" ]]; then
-    export VLLM_ROCM_USE_AITER_PAGED_ATTN=1
-elif [[ $AITER_PA == "off" ]]; then
-    export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
-fi
-
-if [[ $AITER_MHA == "on" ]]; then
-    export VLLM_ROCM_USE_AITER_MHA=1
-elif [[ $AITER_MHA == "off" ]]; then
-    export VLLM_ROCM_USE_AITER_MHA=0
-fi
-
 # vLLM overrides
 # gpt-oss on AITER gets best performance with --block-size 64 and FULL_AND_PIECEWISE graph capture
 if [[ $MODEL == "openai/gpt-oss-20b" || $MODEL == "openai/gpt-oss-120b" ]]; then
-    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
-        echo "Setting --block-size 64 and cudagraph_mode FULL_AND_PIECEWISE with AITER unified attention for gpt-oss"
-        export VLLM_USE_AITER_UNIFIED_ATTENTION=1
-        export VLLM_ROCM_USE_AITER_MHA=0
-        if [[ $MAD_SYSTEM_GPU_ARCHITECTURE == "gfx950" ]]; then
-            VLLM_ARGS='--block-size 64 --compilation-config {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
-        elif [[ $MAD_SYSTEM_GPU_ARCHITECTURE == "gfx942" ]]; then
-            VLLM_ARGS='--block-size 64 --compilation-config {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
-        fi
-    fi
+    echo "Setting --block-size 64 and cudagraph_mode FULL_AND_PIECEWISE with AITER unified attention for gpt-oss"
+    export VLLM_USE_AITER_UNIFIED_ATTENTION=1
+    export VLLM_ROCM_USE_AITER_MHA=0
+    VLLM_ARGS='--block-size 64 -O {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
 fi
 
 # Deepseek AITER MLA requires --block-size 1
 if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
-    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
-        echo "Setting --block-size 1 for Deepseek AITER MLA"
-        VLLM_ARGS="$VLLM_ARGS --block-size 1"
-    else
+    if [[ $VLLM_ROCM_USE_AITER == 0 ]]; then
         echo "Deepseek Triton MLA does not support cudagraph capture; using cudagraph_mode PIECEWISE"
-        VLLM_ARGS="$VLLM_ARGS --compilation-config {\"cudagraph_mode\":\"PIECEWISE\"}"
+        VLLM_ARGS='-O {"cudagraph_mode":"PIECEWISE"}'
+    else
+        echo "Setting --block-size 1 for Deepseek AITER MLA"
+        VLLM_ARGS='--block-size 1'
     fi
 fi
 
-# MXFP4 models can use AITER FP4 asm GEMM; TODO on whether this improves perf across the board
+# Llama 4 currently does not support full cudagraph or attn fusion
+if [[ $MODEL == *"Llama-4"* ]]; then
+    VLLM_ARGS='-O {"cudagraph_mode":"PIECEWISE","pass_config":{"enable_attn_fusion":false}}'
+fi
+
+# MXFP4 models are only supported on MI35x i.e. gfx950
 if [[ $MODEL == *"MXFP4"* ]]; then
-    if [[ $VLLM_ROCM_USE_AITER == 1 ]]; then
-        echo "Using AITER FP4 asm GEMM for MXFP4"
-        export VLLM_ROCM_USE_AITER_FP4_ASM_GEMM=1
+    if [[ $MAD_SYSTEM_GPU_ARCHITECTURE != *"gfx950"* ]]; then
+        echo "MXFP4 models are only supported on MI35x i.e. gfx950 architecture"
+        exit 1
     fi
-fi
-
-# Qwen 3 MoE workaround: disable rms_norm compilation
-if [[ $MODEL == *"Qwen3-30B-A3B"* || $MODEL == *"Qwen3-235B-A22B"* ]]; then
-    VLLM_ARGS="$VLLM_ARGS -O {\"custom_ops\":[\"-rms_norm\"]}"
 fi
 
 echo "=hyper params start="

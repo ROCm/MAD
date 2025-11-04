@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.0.0
--   ✅ vLLM 0.10.2 (0.11.0rc2.dev160+g790d22168.rocm700)
+-   ✅ vLLM 0.11.1 (0.11.1rc2.dev141+g38f225c2a.rocm700)
 -   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
 -   ✅ hipBLASLt 1.0
 
@@ -53,12 +53,16 @@ For the experimental features and known issues concerning ROCm optimization effo
 
 To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [CSV configs](../../scripts/vllm/configs/)
 
+>[!NOTE]
+>If you're using this docker image on other AMD GPUs e.g. MI2xx or Radeon GPUs, please add
+>`export VLLM_ROCM_USE_AITER=0` to your commands, since AITER is only supported on the gfx942 and gfx950 architectures.
+
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
+docker pull rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
 ```
 
 ### MAD-integrated benchmarking
@@ -128,9 +132,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
+docker pull rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.10.2_20251006
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
 ```
 
 #### Throughput Command
@@ -223,11 +227,6 @@ vllm bench serve --model $model \
 >
 ># pass your HF_TOKEN
 >export HF_TOKEN=$your_personal_hf_token
->```
-
->[!NOTE]
->For improved performance with certain Mixture-Of-Experts models e.g. Mixtral-8x22B,	
->try adding `export VLLM_ROCM_USE_AITER=1` to your commands.	
 >```
 
 #### Variables
@@ -323,6 +322,12 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
+10/24 release:
+- Turned AITER on by default
+- Fixed Qwen 3 235B rms_norm segfault issue
+- Known performance drop on Llama 4 models due to upstream vLLM bug https://github.com/vllm-project/vllm/issues/26320
+
+10/06 release:
 - ROCm 7.0 Docker image with MI350X/MI355X support
 - Added support and benchmark instructions for:
     * Llama 4 Scout and Maverick
