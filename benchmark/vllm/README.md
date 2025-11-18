@@ -246,7 +246,7 @@ vllm bench serve --model $model \
 ----------
 
 For an overview of the optional performance features of vLLM with
-ROCm software, see [ROCm performance](https://github.com/ROCm/vllm/blob/main/ROCm_performance.md).
+ROCm software, see [vLLM inference performance testing](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/inference/benchmark-docker/vllm.html).
 
 To learn more about the options for the offline throughput and online serving
 benchmark scripts, see
