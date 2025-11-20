@@ -64,7 +64,7 @@ fi
 # gpt-oss on AITER gets best performance with --block-size 64 and FULL_AND_PIECEWISE graph capture
 if [[ $MODEL == "openai/gpt-oss-20b" || $MODEL == "openai/gpt-oss-120b" ]]; then
     echo "Setting --block-size 64 and cudagraph_mode FULL_AND_PIECEWISE with AITER unified attention for gpt-oss"
-    export VLLM_USE_AITER_UNIFIED_ATTENTION=1
+    export VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION=1
     export VLLM_ROCM_USE_AITER_MHA=0
     VLLM_ARGS='--block-size 64 -O {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
 fi
