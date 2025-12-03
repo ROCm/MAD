@@ -24,6 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
+export HF_HOME=/workspace/huggingface
 
 # Usage function
 usage() {
@@ -52,8 +53,7 @@ if [ -z "$HF_TOKEN" ]; then
     exit 1
 fi
 
-export HF_HOME=/workspace/huggingface
-hf login --token $HF_TOKEN --add-to-git-credential
+hf auth login --token $HF_TOKEN
 
 TORCHTITAN_DIR="/workspace/torchtitan"
 TORCHTUNE_DIR="/workspace/torchtune"
@@ -96,12 +96,17 @@ if [[ "$MODEL_NAME" == "Llama-3.3-70B" ]]; then
 fi
 
 # Dependency for Flux
-if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" ]]; then
+if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" || "$MODEL_NAME" == "Mochi-1" || "$MODEL_NAME" == "Hunyuan-video" || "$MODEL_NAME" == "Wan2_1-i2v" ]]; then
   echo "Building AMDiffusionBenchmark dependencies for $MODEL_NAME"
   cd /workspace/AMDiffusionBenchmark
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-
   make download_assets
+fi
+
+# Dependency for DLRM (Needed?)
+if [[ "$MODEL_NAME" == "DLRM" ]]; then
+  echo "Building dependencies for $MODEL_NAME"
+  cd /workspace/DLRMBenchmark
 fi
 
 if [[ -z "$MODEL_NAME" ]]; then

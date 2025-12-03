@@ -70,7 +70,7 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3-70b" ]]; then
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
   tasks=("pretrain" "HF_pretrain" "finetune_fw" "finetune_lora")
-  #tasks=("pretrain")
+  # tasks=("pretrain")
   #tasks=("HF_pretrain")
   #tasks=("finetune_fw" "finetune_lora")
 
@@ -119,7 +119,12 @@ elif [[ "$MODEL_REPO" == "pyt_train_stable-diffusion-xl" ]]; then
   model="Stable-Diffusion-XL"
   datatypes=("BF16")
   tasks=("posttrain")
-  
+
+elif [[ "$MODEL_REPO" == "pyt_train_dlrm" ]]; then
+  model="DLRM"
+  datatypes=("TF32" "FP32")
+  tasks=("pretrain")
+
 elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_20b" ]]; then
   model="GPT-OSS-20B"
   datatypes=("BF16")
@@ -153,6 +158,18 @@ elif [[ "$MODEL_REPO" == "pyt_train_qwen3-8b" ]]; then
 elif [[ "$MODEL_REPO" == "pyt_train_qwen3-32b" ]]; then
   model="Qwen3-32B"
   tasks=("finetune_lora")
+
+elif [[ "$MODEL_REPO" == "pyt_train_mochi-1" ]]; then
+  model="Mochi-1"
+  tasks=("posttrain")
+
+elif [[ "$MODEL_REPO" == "pyt_train_hunyuan-video" ]]; then
+  model="Hunyuan-video"
+  tasks=("posttrain")
+
+elif [[ "$MODEL_REPO" == "pyt_train_wan2_1-i2v" ]]; then
+  model="Wan2_1-i2v"
+  tasks=("posttrain")
 fi
 
 # Run pytorch setup script

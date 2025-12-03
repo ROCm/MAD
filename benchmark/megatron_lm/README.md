@@ -7,21 +7,21 @@
 ROCm Megatron-LM framework is a specialized fork of the robust Megatron-LM, designed to enable efficient training of large-scale language models on AMD GPUs. By leveraging AMD Instinct™ MI300X/MI350X accelerators, AMD Megatron-LM delivers enhanced scalability, performance, and resource utilization for AI workloads. It is purpose-built to support models like Meta’s Llama 2, Llama 3, and Llama 3.1, enabling developers to train next-generation AI models with greater efficiency. See the GitHub repository at [ROCm/Megatron-LM](https://github.com/ROCm/Megatron-LM/).
 
 >[!NOTE]
->`rocm//megatron-lm` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
+>`rocm/megatron-lm` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx942`) and `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx950`)container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm Megatron-lm Training Docker `rocm/primus:v25.10` (`rocm/pytorch-training:v25.10`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 7.0.0              |
+| ROCm               | 7.1.0              |
 | Python            | 3.10          |
-| PyTorch           | 2.9.0.dev20250821+rocm7.0.0.lw.git125803b7   |
-| Transformer Engine | 2.2.0.dev0+c3bcaab1      |
+| PyTorch           | 2.10.0.dev20251112+rocm7.1   |
+| Transformer Engine | 2.4.0.dev0+32e2d1d4      |
 | Flash Attention   | 2.8.3               |
-| hipBLASLt         | 911283acd1        |
-| Triton            | 3.4.0+rocm7.0.0.git56765e8c                 |
-| RCCL              | 2.26.6     |
+| hipBLASLt         | 09ab7153e2        |
+| Triton            | 3.4.0                 |
+| RCCL              | 2.27.7     |
 
 ## Supported features and models
 Megatron-LM provides the following key features to train large language models efficiently:
@@ -80,32 +80,22 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
     Download the Docker image required for training:
    ```bash
-   # MI35X architecture
-   docker pull rocm/megatron-lm:v25.9_gfx950
-
-   # MI300/MI325 architecture
-   docker pull rocm/megatron-lm:v25.9_gfx942
+   docker pull rocm/primus:v25.10
    ```
 
-3. **Launch Docker Container**
+2. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name megatron_training_env rocm/megatron-lm:v25.9_gfx950
-   ```
-
-5. **Execute the training_env container (optional if no already in the container)**
-   ```bash
-    docker start megatron_training_env
-    docker exec -it megatron_training_env bash
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name megatron_training_env rocm/primus:v25.10
    ```
    
-6. **Megatron-LM Backward Compatibility setup:**
+3. **Megatron-LM Backward Compatibility setup:**
    Primus docker maintains Megatron-LM compatibility with limited support. To roll-back using Megatron-LM follow the steps outlined below. Once Megatron-LM is installed, follow the documentation to run workloads as usual.
-```bash
-cd /workspace/Megatron-LM/
-pip uninstall megatron-core
-pip install -e .
-```
+    ```bash
+    cd /workspace/Megatron-LM/
+    pip uninstall megatron-core
+    pip install -e .
+    ```
 The docker container hosts verified commit from [Megatron-LM repository](https://github.com/ROCm/Megatron-LM/tree/rocm_dev).
 
 ---
@@ -273,6 +263,13 @@ If you're running multi-node training, update the following environment variable
 ---
 
 ## 3. How to Run
+```bash
+export HSA_NO_SCRATCH_RECLAIM=1
+export NVTE_CK_USES_BWD_V3=1
+
+# MI300/MI325 only extra settings
+export NVTE_CK_IS_V3_ATOMIC_FP32=1
+```
 
 ### 3.1 Single Node Training
 To run the training on a single node, go to Megatron-LM folder, use the following command:
@@ -414,6 +411,22 @@ TE_FP8=1 \
 SEQ_LENGTH=8192 \
 MODEL_SIZE=70 \
 FSDP=1 \
+TOTAL_ITERS=10 \
+bash examples/llama/train_llama3.sh
+```
+
+- **Llama3.1-70B FP8:**
+```bash
+CKPT_FORMAT=torch_dist \
+TEE_OUTPUT=1 \
+MBS=3 \
+BS=24 \
+TP=1 \
+TE_FP8=0 \
+FSDP=1 \
+RECOMPUTE=1 \
+SEQ_LENGTH=8192 \
+MODEL_SIZE=70 \
 TOTAL_ITERS=10 \
 bash examples/llama/train_llama3.sh
 ```

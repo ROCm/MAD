@@ -8,18 +8,18 @@ Primus framework with megatron backend is designed to enable efficient training 
 >`rocm/pytorch-training` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx942`) and `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx950`)container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v25.10` (`rocm/pytorch-training:v25.10`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component  | Version            |
 |---------------------|--------------------|
-| ROCm               | 7.0.0              |
+| ROCm               | 7.1.0              |
 | Python            | 3.10          |
-| PyTorch           | 2.9.0.dev20250821+rocm7.0.0.lw.git125803b7   |
-| Transformer Engine | 2.2.0.dev0+c3bcaab1      |
+| PyTorch           | 2.10.0.dev20251112+rocm7.1   |
+| Transformer Engine | 2.4.0.dev0+32e2d1d4      |
 | Flash Attention   | 2.8.3               |
-| hipBLASLt         | 911283acd1        |
-| Triton            | 3.4.0+rocm7.0.0.git56765e8c                 |
-| RCCL              | 2.26.6     |
+| hipBLASLt         | 09ab7153e2        |
+| Triton            | 3.4.0                 |
+| RCCL              | 2.27.7     |
 
 
 ## Supported features and models
@@ -80,11 +80,8 @@ Use the following instructions to set up the environment, configure the script t
 1. **Download Docker Image**
    Download the Docker image required for training:
    ```bash
-   # MI35X architecture
-   docker pull rocm/primus:v25.9_gfx950
-
-   # MI300/MI325 architecture
-   docker pull rocm/primus:v25.9_gfx942
+   # MI300/MI325/MI35X
+   docker pull rocm/primus:v25.10
    ```
 
 3. **Launch Docker Container**
@@ -140,9 +137,15 @@ export HSA_NO_SCRATCH_RECLAIM=1
 export NVTE_CK_USES_BWD_V3=1
 ```
 #### MI300X Performance Configs 
+```bash
+#Set these variables for better performance only on MI300/MI325X
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+export NVTE_CK_IS_V3_ATOMIC_FP32=1
+```
+
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_8B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama3.1_8B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid
@@ -150,14 +153,14 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_8B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama3.1_8B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **Llama2-7B FP8:**
 ```bash
-EXP=examples/megatron/configs/llama2_7B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama2_7B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid
@@ -165,21 +168,21 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama2-7B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama2_7B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama2_7B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_70B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama3.1_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **Llama3.1-70B FP8 Proxy model on Single Node:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_70B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama3.1_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --num_layers 40 \
@@ -191,14 +194,14 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama2-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama2_70B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama2_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **Llama3.3-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.3_70B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/llama3.3_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --micro_batch_size 2 \
     --global_batch_size 16 \
@@ -209,7 +212,7 @@ Examples for MoE models with expert parallelism enabled, i.e, `expert_model_para
 
 - **DeepSeekV2-Lite BF16:**
 ```bash
-EXP=examples/megatron/configs/deepseek_v2_lite-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/deepseek_v2_lite-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --global_batch_size 256 \
     --train_iters 50
@@ -217,23 +220,25 @@ bash examples/run_pretrain.sh \
 
 - **DeepSeekV3 BF16 3 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/deepseek_v3-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/deepseek_v3-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --num_layers 3 \
     --moe_layer_freq 1 \
+    --micro_batch_size 3 \
+    --global_batch_size 192 \
     --train_iters 50
 ```
 
 - **Mixtral 8x7B:**
 ```bash
-EXP=examples/megatron/configs/mixtral_8x7B_v0.1-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **Mixtral 8x22B 4 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/mixtral_8x22B_v0.1-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --num_layers 4 \
     --pipeline_model_parallel_size 1 \
@@ -244,14 +249,14 @@ bash examples/run_pretrain.sh \
 
 - **QWEN2.5 7B BF16:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_7B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/qwen2.5_7B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50
 ```
 
 - **QWEN2.5 7B FP8:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_7B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/qwen2.5_7B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid
@@ -259,16 +264,15 @@ bash examples/run_pretrain.sh \
 
 - **QWEN2.5 72B BF16:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_72B-pretrain.yaml \
+EXP=examples/megatron/configs/MI300X/qwen2.5_72B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50
 ```
 
-
 #### MI35X Performance Configs
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_8B-pretrain.yaml \
+EXP=examples/megatron/configs/MI355X/llama3.1_8B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid \
@@ -278,7 +282,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_8B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama3.1_8B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 4 \
@@ -287,7 +291,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama2-7B FP8:**
 ```bash
-EXP=examples/megatron/configs/llama2_7B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama2_7B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid \
@@ -297,7 +301,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama2-7B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama2_7B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama2_7B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 10 \
@@ -306,7 +310,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_70B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama3.1_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 4 \
@@ -315,7 +319,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama3.1-70B FP8:**
 ```bash
-EXP=examples/megatron/configs/llama3.1_70B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama3.1_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid \
@@ -326,7 +330,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama2-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama2_70B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama2_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 17 \
@@ -335,7 +339,7 @@ bash ./examples/run_pretrain.sh \
 
 - **Llama3.3-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/llama3.3_70B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/llama3.3_70B-pretrain.yaml \
 bash ./examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 6 \
@@ -344,7 +348,7 @@ bash ./examples/run_pretrain.sh \
 
 - **DeepSeekV2-Lite BF16:**
 ```bash
-EXP=examples/megatron/configs/deepseek_v2_lite-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/deepseek_v2_lite-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 12 \
@@ -353,7 +357,7 @@ bash examples/run_pretrain.sh \
 
 - **DeepSeekV3 BF16 3 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/deepseek_v3-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/deepseek_v3-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --num_layers 3 \
     --moe_layer_freq 1 \
@@ -364,7 +368,7 @@ bash examples/run_pretrain.sh \
 
 - **Mixtral 8x7B BF16:**
 ```bash
-EXP=examples/megatron/configs/mixtral_8x7B_v0.1-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/mixtral_8x7B_v0.1-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 4 \
@@ -373,7 +377,7 @@ bash examples/run_pretrain.sh \
 
 - **Mixtral 8x22B BF16 4 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/mixtral_8x22B_v0.1-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/mixtral_8x22B_v0.1-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --num_layers 4 \
     --pipeline_model_parallel_size 1 \
@@ -384,7 +388,7 @@ bash examples/run_pretrain.sh \
 
 - **QWEN2.5 7B BF16:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_7B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/qwen2.5_7B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 16 \
@@ -393,7 +397,7 @@ bash examples/run_pretrain.sh \
 
 - **QWEN2.5 7B FP8:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_7B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/qwen2.5_7B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --fp8 hybrid \
@@ -403,13 +407,15 @@ bash examples/run_pretrain.sh \
 
 - **QWEN2.5 72B BF16:**
 ```bash
-EXP=examples/megatron/configs/qwen2.5_72B-pretrain.yaml \
+EXP=examples/megatron/configs//MI355X/qwen2.5_72B-pretrain.yaml \
 bash examples/run_pretrain.sh \
     --train_iters 50 \
     --micro_batch_size 16 \
     --global_batch_size 256
 ```
-
+**Known Issues**:
+- DeepSeekV3 proxy model and Mixtral 8x22B proxy model may exit with error due to memory free issue. However, this does not impacts training runs. All iterations, in this case 50, should have been completed before the exit and the results should also be available at the end.
+  
 ### 3.2 Multi-node Training
 To run training on multiple nodes, you can use the [run_slurm_pretrain.sh](https://github.com/AMD-AGI/Primus/blob/main/examples/run_slurm_pretrain.sh) script to launch multinode workloads. Below we list multinode setup and examples to run multinode tests.
 
@@ -417,7 +423,8 @@ MultiNode Setup:
 ```bash
 git clone --recurse-submodules https://github.com/AMD-AGI/Primus.git
 cd Primus/
-git checkout aab4234
+git checkout release/v25.10
+git submodule update --init --recursive
 export DOCKER_IMAGE=<DOCKER_IMAGE>
 export HF_TOKEN=<your_HF_token>
 export HSA_NO_SCRATCH_RECLAIM=1
@@ -426,6 +433,10 @@ export NCCL_IB_HCA=<your_NCCL_IB_HCA> # specify which RDMA interfaces to use for
 export NCCL_SOCKET_IFNAME=<your_NCCL_SOCKET_IFNAME> # your Network Interface
 export GLOO_SOCKET_IFNAME=<your_GLOO_SOCKET_IFNAME> # your Network Interface
 export NCCL_IB_GID_INDEX=3 # Set InfiniBand GID index for NCCL communication. Default is 3 for ROCE
+
+# MI300/MI325 only extra settings
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1 
+export NVTE_CK_IS_V3_ATOMIC_FP32=1
 ```
 
 Notes:

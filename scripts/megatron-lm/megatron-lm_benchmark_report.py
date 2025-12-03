@@ -44,6 +44,21 @@ parser.add_argument("--input",
 parser.add_argument("--output",
                         type=str,
                         help="path to output file")
+parser.add_argument("--precision",
+                        type=str,
+                        help="precision type")
+parser.add_argument("--batch_size",
+                        type=str,
+                        help="batch size")
+parser.add_argument("--seq_len",
+                        type=str,
+                        help="sequence length")
+parser.add_argument("--device",
+                        type=str,
+                        help="device name")
+parser.add_argument("--num_gpus",
+                        type=str,
+                        help="number of GPUs")
 
 # read arguments
 args = parser.parse_args()
@@ -70,13 +85,13 @@ if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
     tok_per_s_per_gpu = find_match(input_file, "tokens/GPU/s:")
     TFLOPS_per_gpu = find_match(input_file, "throughput per GPU:")
     data = [
-        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
-        {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu'}
+        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+        {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
     ]
 elif args.model == "DeepSeek-V2-lite":
     tok_per_s_per_gpu = find_match(input_file, "tokens/GPU/s:")
     data = [
-        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu'},
+        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
     ]
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
@@ -86,7 +101,7 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','seq_len','device','num_gpus'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)

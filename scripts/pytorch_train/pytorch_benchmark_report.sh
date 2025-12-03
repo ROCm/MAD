@@ -33,6 +33,8 @@
 #./pytorch_benchmark_report.sh -t pretrain -m Llama-3.1-8B -p FP8 -s 8192
 ## Posttrain Flux with BF16 precision
 #./pytorch_benchmark_report.sh -t posttrain -m Flux -p BF16 -s 8192
+## Train DLRM with TF32 precision
+#./pytorch_benchmark_report.sh -t posttrain -m DLRM -p TF32
 ## Torchtune full weight finetuning with Llama 3.1 70B
 #./pytorch_benchmark_report.sh -t finetune_fw -m Llama-3.1-70B -p BF16 -s 8192
 ## Torchtune HF LoRA finetuning with Llama 2 70B
@@ -50,7 +52,7 @@ usage() {
     echo "Usage: $0 -t <training_mode> -m <model_repo> -p <datatype> -s <sequence_length> -n <num_gpus> -f <fsdp>"
     echo "\nOptions:"
     echo "  -t <training_mode>   Training mode (pretrain, posttrain, HF_pretrain, finetune_fw, finetune_lora, finetune_qlora, HF_finetune_lora)"
-    echo "  -m <model_repo>      Model repository (Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux)"
+    echo "  -m <model_repo>      Model repository (Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux, DLRM)"
     echo "  -p <datatype>        Precision type (FP8 or BF16)"
     echo "  -s <sequence_length> Sequence length (between 2048 and 8192)"
     echo "  -n <num_gpus>        Number of GPUs (1 or 8)"
@@ -73,14 +75,24 @@ while getopts "t:m:p:s:n:f:b:" opt; do
     esac
 done
 
+NNODES=1 # default to 1 node
+GPUS_PER_NODE=8 # default to 8 GPUs per node
+WORLD_SIZE=$((NNODES*GPUS_PER_NODE)) # default to 8 GPUs per node
+
 # Validate inputs
 if [[ -z "$TRAINING_MODE" || -z "$MODEL_REPO" ]]; then
     echo "Error: Missing required arguments."
     usage
 fi
 
-if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" ]]; then
-    echo "Error: Datatype must be either FP8 or BF16."
+if [[ "$MODEL_REPO" != "DLRM" ]]; then
+    if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" ]]; then
+        echo "Error: Datatype must be either FP8 or BF16."
+        exit 1
+    fi
+
+elif [[ "$DATATYPE" != "FP32" && "$DATATYPE" != "TF32" ]]; then
+    echo "Error: For DLRM model, datatype must be either FP32 or TF32."
     exit 1
 fi
 
@@ -160,6 +172,18 @@ echo "PERF LOG: $PERF_LOG"
 
 perf_script="$(pwd)/pytorch_benchmark_report.py"
 
+# Run rocminfo and grep for "AMD Instinct"
+DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+if [ -z "$DEVICE" ]; then
+  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  case "$ARCH" in
+    "gfx942") DEVICE="MI300X" ;;
+    "gfx950") DEVICE="MI355X" ;;
+    *) DEVICE="" ;;
+  esac
+fi             
+echo "GPU DEVICE name: $DEVICE"
+
 if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
     TORCHTITAN_DIR="/workspace/torchtitan/torchtitan/models/llama3/train_configs/"
@@ -169,9 +193,23 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
       CONFIG_FILE=$TORCHTITAN_DIR/llama3_8b-$DATATYPE.toml
       cd /workspace/torchtitan
-      CONFIG_FILE=$CONFIG_FILE bash run_train.sh |& tee $TRAIN_LOG	
+      SEQUENCE_LENGTH=2048
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=6
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=8
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=3
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=4
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG
+      fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
@@ -180,9 +218,41 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
       CONFIG_FILE=$TORCHTITAN_DIR/llama3_70b-$DATATYPE.toml
       cd /workspace/torchtitan
-      CONFIG_FILE=$CONFIG_FILE bash run_train.sh |& tee $TRAIN_LOG
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=8
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=6
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=3
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=4
+        CONFIG_FILE=$CONFIG_FILE bash run_train.sh --training.batch_size $BATCH_SIZE |& tee $TRAIN_LOG
+      fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE
+    fi
+
+    if [ "$MODEL_REPO" == "DLRM" ]; then
+      echo "[INFO] Benchmarking DLRM TRAINING"
+      if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        cd /workspace/DLRMBenchmark
+        echo "[INFO] Removing all previous runs to avoid caching"
+        rm -rf training_logs/
+        rm results.csv
+        HSA_NO_SCRATCH_RECLAIM=1 ./launch_training_single_node.sh -p $DATATYPE
+        TRAIN_LOG=results.csv
+        BATCH_SIZE=32768
+        python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE
+      else
+        echo "Error: DLRM training is not supported on $DEVICE."
+        exit 1
+      fi
     fi
 
 elif [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
@@ -191,33 +261,114 @@ elif [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
       echo "[INFO] LLAMA 3.1 8B TRAINING with $DATATYPE precision"
       cd llama3_1_8B
       echo "[INFO] Benchmarking"
-      bash run_multigpu.sh |& tee $TRAIN_LOG	
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        bash run_multigpu.sh |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        bash run_multigpu.sh |& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        bash run_multigpu.sh |& tee $TRAIN_LOG	
+      fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE
     fi
 
 elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
     echo "[INFO] Executing post-training benchmark..."
+	export HSA_NO_SCRATCH_RECLAIM=1
     if [ "$MODEL_REPO" == "Flux" ]; then
-      echo "[INFO] Benchmarking FLUX TRAINING"
+      echo "[INFO] Benchmarking FLUX training"
       cd /workspace/AMDiffusionBenchmark
       echo "[INFO] Removing all previous runs to avoid caching"
       rm -rf outputs/runs/*
-      python launcher.py train_args=flux-dev
+      SEQUENCE_LENGTH="256" 
+      if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+        BATCH_SIZE=16
+        python launcher.py train_args=flux-dev train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        BATCH_SIZE=10
+        python launcher.py train_args=flux-dev train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
       TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE 
     fi
 
     if [ "$MODEL_REPO" == "Stable-Diffusion-XL" ]; then
-      echo "[INFO] Benchmarking STABLE-DIFFUSION-XL TRAINING"
+      echo "[INFO] Benchmarking STABLE-DIFFUSION-XL training"
       cd /workspace/AMDiffusionBenchmark
       echo "[INFO] Removing all previous runs to avoid caching"
       rm -rf outputs/runs/*
-      python launcher.py train_args=stable-diffusion-xl
+      SEQUENCE_LENGTH="256"
+      if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+        BATCH_SIZE=30
+        python launcher.py train_args=stable-diffusion-xl train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        BATCH_SIZE=20
+        python launcher.py train_args=stable-diffusion-xl train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
       TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE 
+    fi
+
+    if [ "$MODEL_REPO" == "Mochi-1" ]; then
+      echo "[INFO] Benchmarking MOCHI-1 training"
+      cd /workspace/AMDiffusionBenchmark
+      echo "[INFO] Removing all previous runs to avoid caching"
+      rm -rf outputs/runs/*
+      SEQUENCE_LENGTH="256"
+      if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+        BATCH_SIZE=4
+        python launcher.py train_args=mochi-1 train_args.train_batch_size=$BATCH_SIZE|& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        BATCH_SIZE=1
+        python launcher.py train_args=mochi-1 train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
+      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE 
+    fi
+
+    if [ "$MODEL_REPO" == "Hunyuan-video" ]; then
+      echo "[INFO] Benchmarking HUNYUAN-VIDEO training"
+      cd /workspace/AMDiffusionBenchmark
+      echo "[INFO] Removing all previous runs to avoid caching"
+      rm -rf outputs/runs/*
+      SEQUENCE_LENGTH="256"
+      if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+        BATCH_SIZE=3
+        python launcher.py train_args=hunyuan-video train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        BATCH_SIZE=1
+        python launcher.py train_args=hunyuan-video train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
+      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE 
+    fi
+
+    if [ "$MODEL_REPO" == "Wan2_1-i2v" ]; then
+      echo "[INFO] Benchmarking WAN2_1-I2V training"
+      cd /workspace/AMDiffusionBenchmark
+      echo "[INFO] Removing all previous runs to avoid caching"
+      rm -rf outputs/runs/*
+      SEQUENCE_LENGTH="256"
+      if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+        BATCH_SIZE=1
+        python launcher.py train_args=wan2_1-i2v train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+        BATCH_SIZE=1
+        python launcher.py train_args=wan2_1-i2v train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
+      TRAIN_LOG=$(find ./outputs/runs/ -type f -name "runs_summary.csv")
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+	      --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE 
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
@@ -230,7 +381,7 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
     MODEL_SIZE=$(echo "$output" | grep "model_size" | cut -d ':' -f2 | xargs)
     METHOD=$(echo "$output" | grep "method" | cut -d ':' -f2 | xargs)
 
-    hf login --token $HF_TOKEN --add-to-git-credential
+    hf auth login --token $HF_TOKEN --add-to-git-credential
     
     # Choose the appropriate tester script based on model family and training mode
     if [[ ("$MODEL_FAMILY" == "qwen2" || "$MODEL_FAMILY" == "qwen2_5" || "$MODEL_FAMILY" == "qwen3") && ("$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora") ]]; then
@@ -241,119 +392,142 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
         TESTER_SCRIPT="Torchtune_Tester.sh"
     fi
     cd /workspace
-
-    if [[ "$MODEL_FAMILY" == "llama3_2_vision" ]]; then
-        PACKED=False
-        SEQ_LEN=8192
-
-        if [[ "$MODEL_SIZE" == "90B" ]]; then
-            MBS=16
-            if [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
-                COMPILE=False
-            else
-                COMPILE=True
-            fi
-
-        elif [[ "$MODEL_SIZE" == "11B" ]]; then
-            MBS=32
-            if [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
-                COMPILE=False
-            else
-                COMPILE=True
-            fi
+    # Llama 3.2 Vision
+    if [[ "$MODEL_FAMILY" == "llama3_2_vision" && "$MODEL_SIZE" == "90B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            PACKED=False; SEQ_LEN=8192; MBS=32; COMPILE=$([ "$TRAINING_MODE" == "finetune_fw" ] && echo "False" || echo "True")
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            PACKED=False; SEQ_LEN=8192; MBS=16; COMPILE=$([ "$TRAINING_MODE" == "finetune_fw" ] && echo "False" || echo "True")
         fi
-
-    elif [[ "$MODEL_FAMILY" == "llama3_2" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "1B" ]]; then
-            MBS=16
-        elif [[ "$MODEL_SIZE" == "3B" ]]; then
-            MBS=16
+    elif [[ "$MODEL_FAMILY" == "llama3_2_vision" && "$MODEL_SIZE" == "11B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            PACKED=False; SEQ_LEN=8192; MBS=64; COMPILE=$([ "$TRAINING_MODE" == "finetune_fw" ] && echo "False" || echo "True")
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            PACKED=False; SEQ_LEN=8192; MBS=32; COMPILE=$([ "$TRAINING_MODE" == "finetune_fw" ] && echo "False" || echo "True")
         fi
-   
-    elif [[ "$MODEL_FAMILY" == "llama2" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=4096
-        if [[ "$MODEL_SIZE" == "70B" ]]; then
-            MBS=8
-        elif [[ "$MODEL_SIZE" == "13B" ]]; then
-            MBS=32
-        elif [[ "$MODEL_SIZE" == "7B" ]]; then
-            MBS=32
+    # Llama 3.2
+    elif [[ "$MODEL_FAMILY" == "llama3_2" && "$MODEL_SIZE" == "1B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
         fi
-
-    elif [[ "$MODEL_FAMILY" == "llama3" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "70B" ]]; then
-            MBS=4
-        elif [[ "$MODEL_SIZE" == "8B" ]]; then
-            MBS=16
+    elif [[ "$MODEL_FAMILY" == "llama3_2" && "$MODEL_SIZE" == "3B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=64
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
         fi
-
-    elif [[ "$MODEL_FAMILY" == "llama3_1" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "405B" ]]; then
-            MBS=2
-            CPU_OFFLOAD=True # Claire: observe VRAM%, may disable
-        elif [[ "$MODEL_SIZE" == "70B" ]]; then
-            MBS=4
-        elif [[ "$MODEL_SIZE" == "8B" ]]; then
-            MBS=16
+    # Llama 2
+    elif [[ "$MODEL_FAMILY" == "llama2" && "$MODEL_SIZE" == "70B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=16
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=8
         fi
-
-    elif [[ "$MODEL_FAMILY" == "llama3_3" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "70B" ]]; then
-            MBS=4
+    elif [[ "$MODEL_FAMILY" == "llama2" && "$MODEL_SIZE" == "13B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=64
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=32
         fi
-
+    elif [[ "$MODEL_FAMILY" == "llama2" && "$MODEL_SIZE" == "7B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=64
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=4096; MBS=32
+        fi
+    # Llama 3
+    elif [[ "$MODEL_FAMILY" == "llama3" && "$MODEL_SIZE" == "70B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4
+        fi
+    elif [[ "$MODEL_FAMILY" == "llama3" && "$MODEL_SIZE" == "8B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        fi
+    # Llama 3.1        
+    elif [[ "$MODEL_FAMILY" == "llama3_1" && "$MODEL_SIZE" == "405B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4; CPU_OFFLOAD=False
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=2; CPU_OFFLOAD=True # observe VRAM %, may disable
+        fi
+    elif [[ "$MODEL_FAMILY" == "llama3_1" && "$MODEL_SIZE" == "70B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4
+        fi
+    elif [[ "$MODEL_FAMILY" == "llama3_1" && "$MODEL_SIZE" == "8B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        fi
+    # Llama 3.3
+    elif [[ "$MODEL_FAMILY" == "llama3_3" && "$MODEL_SIZE" == "70B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4
+        fi
+    # Llama 4
     elif [[ "$MODEL_FAMILY" == "llama4" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        MBS=4
-
-    elif [[ "$MODEL_FAMILY" == "qwen2" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "1.5B" ]]; then
-            if [[ "$TRAINING_MODE" == "finetune_fw" ]]; then
-                MBS=32
-            elif [[ "$TRAINING_MODE" == "finetune_lora" ]]; then
-                MBS=16
-            fi
-        elif [[ "$MODEL_SIZE" == "7B" ]]; then
-            MBS=16
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4
         fi
-
-    elif [[ "$MODEL_FAMILY" == "qwen2_5" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "32B" ]]; then
-            MBS=8
-        elif [[ "$MODEL_SIZE" == "72B" ]]; then
-            MBS=4
+    # Qwen 2    
+    elif [[ "$MODEL_FAMILY" == "qwen2" && "$MODEL_SIZE" == "1.5B" && "$TRAINING_MODE" == "finetune_fw" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
         fi
-
-    elif [[ "$MODEL_FAMILY" == "qwen3" ]]; then
-        COMPILE=True
-        PACKED=True
-        SEQ_LEN=8192
-        if [[ "$MODEL_SIZE" == "8B" ]]; then
-            MBS=16
-        elif [[ "$MODEL_SIZE" == "32B" ]]; then
-            MBS=8
+    elif [[ "$MODEL_FAMILY" == "qwen2" && "$MODEL_SIZE" == "1.5B" && "$TRAINING_MODE" == "finetune_lora" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        fi
+    # Qwen 2.5
+    elif [[ "$MODEL_FAMILY" == "qwen2" && "$MODEL_SIZE" == "7B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=32
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        fi
+    # Qwen 2.5
+    elif [[ "$MODEL_FAMILY" == "qwen2_5" && "$MODEL_SIZE" == "32B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
+        fi
+    elif [[ "$MODEL_FAMILY" == "qwen2_5" && "$MODEL_SIZE" == "72B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=4
+        fi
+    # Qwen 3        
+    elif [[ "$MODEL_FAMILY" == "qwen3" && "$MODEL_SIZE" == "8B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=14
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=14
+        fi
+    elif [[ "$MODEL_FAMILY" == "qwen3" && "$MODEL_SIZE" == "32B" ]]; then
+        if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=16
+        elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+            COMPILE=True; PACKED=True; SEQ_LEN=8192; MBS=8
         fi
     fi
 
@@ -370,22 +544,27 @@ elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora"
 
     echo "[INFO] Benchmarking"
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+            --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $WORLD_SIZE
 
 elif [[ "$TRAINING_MODE" == "HF_finetune_lora" ]]; then
     echo "Executing Huggingface LoRA finetuning library..."
+    export HSA_NO_SCRATCH_RECLAIM=1
     HF_PEFT_DIR="$(pwd)/HF_PEFT_FSDP"
     cd $HF_PEFT_DIR
     if [ "$MODEL_REPO" == "GPT-OSS-20B" ]; then
+        BATCH_SIZE=8
         echo "[INFO] GPT-OSS-20B Finetuning with Ultrachat dataset using Huggingface library"
         bash run_peft_fsdp_gpt_20b.sh |& tee $TRAIN_LOG
     elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
+        BATCH_SIZE=8
         echo "[INFO] GPT-OSS-120B Finetuning with Ultrachat dataset using Huggingface library"
         bash run_peft_fsdp_gpt_120b.sh |& tee $TRAIN_LOG
     fi
     echo "[INFO] Benchmarking"
     python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+            --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+            --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $WORLD_SIZE
         
 else
     echo "Error: Unsupported training mode."

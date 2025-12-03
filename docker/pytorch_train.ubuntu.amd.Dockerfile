@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-training:v25.9_gfx942
+ARG BASE_DOCKER=rocm/primus:v25.10
 FROM $BASE_DOCKER
 
 USER root

@@ -48,6 +48,18 @@ parser.add_argument("--output",
 parser.add_argument("--precision",
                         type=str,
                         help="training precision")
+parser.add_argument("--batch_size",
+                        type=int,
+                        help="batch size used for training")
+parser.add_argument("--seq_len",
+                        type=int,
+                        help="sequence length used for training")
+parser.add_argument("--device",
+                        type=str,
+                        help="device architecture (e.g., MI300X, MI350X, MI355X)")
+parser.add_argument("--num_gpus",
+                        type=int,
+                        help="number of GPUs used for training")
 
 # read arguments
 args = parser.parse_args()
@@ -66,7 +78,27 @@ def find_match(file, search_string, search_range=None):
     pattern = fr"{re.escape(search_string)}\s*(\d+\.\d+|\d{{1,3}}(?:,\d{{3}})*(?:\.\d+)?|\d+)"
     matches = re.findall(pattern, content)
     data = [s.replace(",", "") for s in matches]
-    # Only save last match
+    if not data:
+        print(f"Warning: No matches found for '{search_string}' pattern")
+        return None
+    if search_range is not None:
+        data = np.array(data[search_range[0]:search_range[1]])
+        result = np.average(data.astype(float))
+    else:
+        result = data[-1]
+    print(f"{search_string} {result}")
+    return result
+
+def find_gpu_memory_match(file, search_string, search_range=None):
+    with open(file, 'r') as file:
+        content = file.read()
+    # Match numbers with commas or decimals
+    pattern = fr"{re.escape(search_string)}.*?\((\d+\.\d+)%\)"
+    matches = re.findall(pattern, content)
+    data = [s.replace(",", "") for s in matches]
+    if not data:
+        print(f"Warning: No matches found for '{search_string}' pattern")
+        return None
     if search_range is not None:
         data = np.array(data[search_range[0]:search_range[1]])
         result = np.average(data.astype(float))
@@ -86,49 +118,30 @@ if args.mode == "pretrain":
     if args.model == "Llama-3.1-8B":
         tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
         TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
         data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
         ]
     elif args.model == "Llama-3.1-70B":
         tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
         TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
         data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
         ]
-    elif args.model == "Flux":
-        df = pd.read_csv(input_file)
-        FPS_per_GPU = df.iloc[-1]['avg_fps']
-        TFLOPS_per_GPU = df.iloc[-1]['avg_tflops']
+    elif args.model == "DeepSeek-V2":
+        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
         data = [
-            {'model': args.model, 'performance': FPS_per_GPU, 'metric': 'FPS_per_GPU', 'mode': args.mode, 'precision': precision},
-            {'model': args.model, 'performance': TFLOPS_per_GPU, 'metric': 'TFLOPS_per_GPU', 'mode': args.mode, 'precision': precision}
+            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
+            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
         ]
-
-elif args.mode == "HF_pretrain":
-    if args.model == "Llama-3.1-8B":
-        tok_per_s_per_gpu = find_match(input_file, "Avg token per second:")
-        TFLOPS_per_gpu = find_match(input_file, "Avg TFLOP/s:")
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision}
-        ]
-
-elif (args.mode == "finetune_fw" or args.mode == "finetune_lora" or args.mode == "finetune_qlora") and (args.model in finetune_models):
-    max_memory_alloc = find_match(input_file, "Max memory alloc (last half):")
-    avg_tokens_per_s_per_gpu = find_match(input_file, "Average tokens/s/gpu (last half):")
-    
-    data = [
-        {'model': args.model, 'performance': max_memory_alloc, 'metric': 'max_memory_alloc', 'mode': args.mode, 'precision': precision},
-        {'model': args.model, 'performance': avg_tokens_per_s_per_gpu, 'metric': 'avg_tokens_per_s_per_gpu', 'mode': args.mode, 'precision': precision},
-    ]
-
-elif (args.mode == "HF_finetune_lora") and (args.model == "GPT-OSS-20B" or args.model == "GPT-OSS-120B"):
-    train_samples_per_s = find_match(input_file, "'train_samples_per_second':")
-    data = [
-        {'model': args.model, 'performance': train_samples_per_s, 'metric': 'train_samples_per_s', 'mode': args.mode, 'precision': precision}
-    ]
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
     mode = 'w'  # Write if file doesn't exist or is empty
@@ -137,7 +150,7 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode', 'precision'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode', 'precision', 'batch_size', 'seq_len', 'device', 'num_gpus'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)

@@ -128,45 +128,101 @@ echo "  Sequence Length: $SEQUENCE_LENGTH"
 echo "  Number of GPUs: $NUM_GPUS"
 echo "  FSDP: $FSDP"
 echo "  Batch size: $BATCH_SIZE"
-
-# config environment
-export HF_HOME=/workspace/huggingface
-export ROCBLAS_USE_HIPBLASLT=1
-export DISABLE_ADDMM_CUDA_LT=0
-export HIP_FORCE_DEV_KERNARG=1
-export TORCH_NCCL_HIGH_PRIORITY=0
-export GPU_MAX_HW_QUEUES=8
-export WANDB_DISABLED=true
     
-TRAIN_LOG="$(pwd)/$MODEL_REPO-$TRAINING_MODE.csv"
+TRAIN_LOG="$(pwd)/primus-pytorch-$MODEL_REPO-$TRAINING_MODE.csv"
 echo "TRAIN LOG: $TRAIN_LOG"
 
-PERF_LOG="$(pwd)/../perf_primus_$MODEL_REPO.csv"
+PERF_LOG="$(pwd)/../perf_primus-pytorch-$MODEL_REPO.csv"
 echo "PERF LOG: $PERF_LOG"
 
-perf_script="$(pwd)/pytorch_benchmark_report.py"
+perf_script="$(pwd)/primus_pytorch_benchmark_report.py"
 
+# Run rocminfo and grep for "AMD Instinct"
+DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+if [ -z "$DEVICE" ]; then
+  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  case "$ARCH" in
+    "gfx942") DEVICE="MI300X" ;;
+    "gfx950") DEVICE="MI355X" ;;
+    *) DEVICE="" ;;
+  esac
+fi             
+echo "GPU DEVICE name: $DEVICE"
+if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+  export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+  export NVTE_CK_IS_V3_ATOMIC_FP32=1
+fi
+export HSA_NO_SCRATCH_RECLAIM=1
 
 if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
       echo "[INFO] Benchmarking LLAMA 3.1 8B TRAINING"
       cd /workspace/Primus
-      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/llama3.1_8B-$DATATYPE-pretrain.yaml
-      cat $CONFIG_FILE
-      EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG	
+      SEQUENCE_LENGTH=8192
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/llama3.1_8B-$DATATYPE-pretrain.yaml
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=6
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=8
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=4
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=5
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
       echo "[INFO] Benchmarking LLAMA 3.1 70B TRAINING"
       cd /workspace/Primus
-      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/llama3.1_70B-$DATATYPE-pretrain.yaml
-      cat $CONFIG_FILE
-      EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+      SEQUENCE_LENGTH=8192
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=8
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	  
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=6
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=4
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=3
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+      fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
-          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG 
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
+    fi
+
+    if [ "$MODEL_REPO" == "DeepSeek-V2" ]; then
+      echo "[INFO] Benchmarking DeepSeek-V2 TRAINING"
+      cd /workspace/Primus
+      SEQUENCE_LENGTH=4096
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml
+      if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=16
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear false --primus_turbo.use_classic_attention false |& tee $TRAIN_LOG	  
+      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=16
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 true --primus_turbo.use_turbo_float8_linear true --primus_turbo.use_classic_attention false |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
+        BATCH_SIZE=10
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear false --primus_turbo.use_classic_attention true |& tee $TRAIN_LOG	
+      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
+        BATCH_SIZE=8
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear true --primus_turbo.use_classic_attention true |& tee $TRAIN_LOG	
+      fi
+      python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
+          --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
     fi
 
 else
