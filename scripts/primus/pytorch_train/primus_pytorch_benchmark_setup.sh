@@ -24,47 +24,34 @@
 # SOFTWARE.
 #
 #################################################################################
+export HF_HOME=/workspace/huggingface
 
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
+# Usage function
+usage() {
+    echo "Usage: $0 -m MODEL_NAME"
+    echo "  -m: Model name (Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux, or empty for all models)"
+    echo "  Example: $0 -m Llama-3.1-8B"
+    exit 1
+}
 
 # Parse named arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --model_repo) MODEL_REPO="$2"; shift ;;
+        -m) MODEL_NAME="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
 
-echo "=hyper params start="
-echo $MODEL_REPO
-#echo $TRAINING_MODE
-#echo $DATATYPE
-#echo $SEQUENCE_LENGTH
-echo "=hyper params end="
+echo "Model repo: $MODEL_NAME"
+echo "Setup script starting in directory $(pwd)"
+export HSA_NO_SCRATCH_RECLAIM=1
 
-datatypes=("FP8" "BF16")
-sequence_lengths=("8192")
-
-if [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-8b" ]]; then
-  model="Llama-3.1-8B"
-  tasks=("pretrain")
-elif [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-70b" ]]; then
-  model="Llama-3.1-70B"
-  tasks=("pretrain")
+# Check if HF_TOKEN is set
+if [ -z "$HF_TOKEN" ]; then
+    echo "ERROR: HF_TOKEN environment variable is not set"
+    echo "Please set your Hugging Face token: export HF_TOKEN=your_token_here"
+    exit 1
 fi
 
-# Run pytorch setup script
-bash ./pytorch_benchmark_setup.sh -m $model
-
-echo "Model: $model"
-# Loop through all combinations
-for task in "${tasks[@]}"; do
-  for datatype in "${datatypes[@]}"; do
-    for sequence_length in "${sequence_lengths[@]}"; do
-      echo "Running: $task - $model - $datatype - $sequence_length"
-      ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length
-    done
-  done
-done
-
+echo "No setup required for running Primus Pytorch v25.9"

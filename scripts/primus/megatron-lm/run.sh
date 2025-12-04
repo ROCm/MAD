@@ -68,13 +68,8 @@ fi
 echo "Running setup script to download tokenizers"
 bash ./primus_megatron-lm_benchmark_setup.sh -m $model
 
-datatypes=("BF16")
-if [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
-  datatypes=("BF16" "FP8")
-elif [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
-  datatypes=("FP8")
-fi
 
+datatypes=("BF16" "FP8")
 # Loop through all combinations
 for datatype in "${datatypes[@]}"; do
   echo "Running: $model - $datatype"
