@@ -8,16 +8,16 @@ PyTorch is an open-source machine learning framework that is widely used for mod
 >`rocm/pytorch-training` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx942`) and `rocm/primus:v25.9_gfx942` (`rocm/pytorch-training:v25.9_gfx950`)container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v25.10` (`rocm/pytorch-training:v25.10`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 7.0.0                |
+| ROCm               | 7.1.0                |
 | Python             | 3.10.12              |
-| PyTorch            |2.9.0.dev20250821+rocm7.0.0.lw.git125803b7   |
-| Transformer Engine | 2.2.0.dev0+c3bcaab1  |
+| PyTorch            |2.10.0.dev20251112+rocm7.1  |
+| Transformer Engine | 2.4.0.dev0+32e2d1d4 |
 | Flash Attention    | 2.8.3          |
-| hipBLASLt          | 1.1.0-911283acd1     |
+| hipBLASLt          |  1.2.0-09ab7153e2     |
 
 
 ## Models
@@ -26,6 +26,7 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | Model          | Variants              |
 |----------------|------------------------|
 | **LLaMA 3.1**   | 8B, 70B         |
+| **DeepSeek V2**    | 16B      |
 
 ### Finetuning:
 | Model          | Variants              |
@@ -43,12 +44,14 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | **Qwen 2.5**     | 32B, 72B           |
 | **Qwen 3**     | 8B, 32B           |
 | **FLUX.1-dev**  | –                    |
+| **DLRM v2**  | –                    |
 | **Stable Diffusion XL**  | –                    |
 
 ### Training:
 | Model          | Variants              |
 |----------------|------------------------|
 | **NCF**        |                     |
+| **DLRM v2**  | –                    |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -125,6 +128,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_llama-3.3-70b                 |
 | pyt_train_llama-4-scout-17b-16e         |
 | pyt_train_flux                          |
+| pyt_train_dlrm                        |
 | pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning |
 | pyt_train_gpt_oss_20b                   |
 | pyt_train_gpt_oss_120b                  |
@@ -135,7 +139,7 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 | pyt_train_qwen3-8b                      |
 | pyt_train_qwen3-32b                     |
 | pyt_train_stable-diffusion-xl           
-| pyt_ncf_training                        |
+| pyt__training                        |
 
 ### Standalone benchmarking
 
@@ -143,19 +147,13 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_train_llama
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/primus:v25.9_gfx942
+docker pull rocm/primus:v25.10
 ```
->[!NOTE]
->Use `rocm/primus:v25.9_gfx950` for MI350X/MI355X
->
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v25.9_gfx942
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v25.9
 ```
->[!NOTE]
->Use `rocm/primus:v25.9_gfx950` for MI350X/MI355X
->
 
 Execute the training_env container (optional if no already in the container)
 ```
@@ -216,90 +214,24 @@ Following Datasets will be downloaded
 ### Benchmarking Command
 #### Pretraining
 ##### Primus with Torchtitan backend 
-Primus is available at `/workspace/Primus` directory
+Primus is available at `/workspace/Primus` directory. For torchtitan pre-training benchmarking examples, please use the [README_primus.md](https://github.com/AMD-AGI/MAD-private/blob/pytorch_megatron-lm_v25.10/benchmark/pytorch_train/README_primus.md) documentation.
+
+##### DLRM
+DLRM is available at `/workspace/DLRMBenchmark` directory
 
 ###### Benchmarking examples
-Go to Primus directory
+Go to DLRM directory
 ```
-cd /workspace/Primus
+cd /workspace/DLRMBenchmark
 ```
-Example 1: Llama 3.1 70B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
-Use this command to run a benchmark of the Llama 3.1 70B model.
+Example: MLPerf DLRM-v2 with TF32 precision
 ```
-EXP=examples/torchtitan/configs/llama3.1_70B-BF16-pretrain.yaml examples/run_pretrain.sh --training.batch_size 4
+./launch_training_single_node.sh
 ```
->[!NOTE]
->Use `--training.batch_size 8` for MI350X/MI355X
->
-
-Example 2: Llama 3.1 8B with BF16 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
+To run with MAD within docker container use the following command
 ```
-EXP=examples/torchtitan/configs/llama3.1_8B-BF16-pretrain.yaml examples/run_pretrain.sh --training.batch_size 3
+./pytorch_benchmark_report.sh -t pretrain -m DLRM
 ```
->[!NOTE]
->Use `--training.batch_size 6` for MI350X/MI355X
->
-
-Example 3: Llama 3.1 70B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
-```
-EXP=examples/torchtitan/configs/llama3.1_70B-FP8-pretrain.yaml examples/run_pretrain.sh --training.batch_size 3
-```
->[!NOTE]
->Use `--training.batch_size 6` for MI350X/MI355X
->
-
-Example 4: Llama 3.1 8B with FP8 precision with [Primus](https://github.com/AMD-AGI/Primus) [Torchtitan](https://github.com/ROCm/torchtitan)
-```
-EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml examples/run_pretrain.sh --training.batch_size 4
-```
->[!NOTE]
->Use `--training.batch_size 8` for MI350X/MI355X
->
-
-##### Standalone torchtitan examples
-Standalone [Torchtitan](https://github.com/ROCm/torchtitan) is available at `/workspace/torchtitan` in the docker image
-Go to TorchTitan direcotry and download tokenizer
-
-```
-cd /workspace/torchtitan
-python3 scripts/download_tokenizer.py \
-    --repo_id meta-llama/Meta-Llama-3-8B \
-    --tokenizer_path "original" \
-    --hf_token=${HF_TOKEN}
-```
-
-Example 1: Llama 3.1 70B with BF16 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
-Use this command to run a benchmark of the Llama 3.1 70B model.
-```
-CONFIG_FILE="./llama3_70b_fsdp_bf16.toml" ./run_train.sh --training.batch_size 4
-```
->[!NOTE]
->Use `--training.batch_size 8` for MI350X/MI355X
->
-
-Example 2: Llama 3.1 8B with BF16 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
-```
-CONFIG_FILE="./llama3_8b_fsdp_bf16.toml" ./run_train.sh --training.batch_size 3
-```
->[!NOTE]
->Use `--training.batch_size 6` for MI350X/MI355X
->
-
-Example 3: Llama 3.1 70B with FP8 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
-```
-CONFIG_FILE="./llama3_70b_fsdp_fp8.toml" ./run_train.sh --training.batch_size 3
-```
->[!NOTE]
->Use `--training.batch_size 6` for MI350X/MI355X
->
-
-Example 4: Llama 3.1 8B with FP8 precision with [Torchtitan](https://github.com/ROCm/torchtitan)
-```
-CONFIG_FILE="./llama3_8b_fsdp_fp8.toml" ./run_train.sh --training.batch_size 4
-```
->[!NOTE]
->Use `--training.batch_size 8` for MI350X/MI355X
->
 
 #### Finetuning
 To start the finetuning benchmark, use the following command.
@@ -429,7 +361,7 @@ Example 1: Llama 3.1 8B with FP8 precision using transformer engine (TE) and [Hu
 
 Example 2: Flux.1 Dev with BF16 precision with [FluxBenchmark](https://github.com/ROCm/FluxBenchmark)
 ```
-./pytorch_benchmark_report.sh -t posttrain-p BF16 -m Flux
+./pytorch_benchmark_report.sh -t posttrain -p BF16 -m Flux
 ```
 
 Example 3: Torchtune full weight finetuning with Llama 3.1 70B
@@ -489,7 +421,12 @@ Example 13: Torchtune full weight finetuning with Llama 3.1 70B using FP8
 
 Example 14: Stable-diffusion-xl with BF16 precision with [Stable-diffusionBenchmark](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0)
 ```
-./pytorch_benchmark_report.sh -t posttrain-p BF16 -m Flux
+./pytorch_benchmark_report.sh -t posttrain -p BF16 -m Flux
+```
+
+Example 15: DLRM with TF32 precision with [DLRMBenchmark](https://github.com/AMD-AGI/DLRMBenchmark)
+```
+./pytorch_benchmark_report.sh -t pretrain -p TF32 -m DLRM
 ```
 
 ### Multinode Training with Torchtitan

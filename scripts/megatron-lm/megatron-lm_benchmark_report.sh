@@ -38,7 +38,11 @@
 ## Pretrain Mixtral 8x7B
 #./megatron-lm_benchmark_report.sh -m Mixtral-8x7B -l 4
 MODEL_REPO=""
+MODE="pretrain"
 DATATYPE="BF16"
+NNODES=1
+GPUS_PER_NODE=8 # default to 8 GPUs per node
+NUM_GPUS=8
 
 usage() {
     echo "Usage: $0 -m <model_repo> -p <datatype> -l <layers>"
@@ -111,126 +115,242 @@ echo "PERF LOG: $PERF_LOG"
 
 perf_script="$(pwd)/megatron-lm_benchmark_report.py"
 
+# Run rocminfo and grep for "AMD Instinct"
+DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+if [ -z "$DEVICE" ]; then
+  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  case "$ARCH" in
+    "gfx942") DEVICE="MI300X" ;;
+    "gfx950") DEVICE="MI355X" ;;
+    *) DEVICE="" ;;
+  esac
+fi             
+echo "GPU DEVICE name: $DEVICE"
+
+cd /workspace/Megatron-LM
+
 # run models
 if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
+  SEQ_LEN=8192
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=4
+    BS=512
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=2
+    BS=128
+  fi
   if [ "$DATATYPE" == "FP8" ]; then
-    TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+    TEE_OUTPUT=1 MBS=$MBS BS=$BS TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=8 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   elif [ "$DATATYPE" == "BF16" ]; then
-    TEE_OUTPUT=1 MBS=2 BS=128 TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=8 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+    TEE_OUTPUT=1 MBS=$MBS BS=$BS TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=8 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   fi
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
-  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  SEQ_LEN=8192
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=3
+    BS=24
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype must be BF16 if running on MI300X/MI325X."
+      exit 1
+    elif [ "$DATATYPE" == "BF16" ]; then
+      MBS=3
+      BS=24
+    fi
+  fi
+  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=$MBS BS=$BS TP=1 TE_FP8=0 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
-  FP8_WEIGHT_TRANSPOSE_CACHE=0 CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=3 BS=24 TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  SEQ_LEN=8192
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=3
+    BS=24
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=3
+    BS=24
+  fi
+  if [ "$DATATYPE" == "FP8" ]; then
+    FP8_WEIGHT_TRANSPOSE_CACHE=0 CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=$MBS BS=$BS TP=1 TE_FP8=1 SEQ_LENGTH=8192 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=10 NUM_LAYERS=40 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  elif [ "$DATATYPE" == "BF16" ]; then
+    echo "Error: Datatype must be FP8."
+    exit 1
+  fi
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
-  TOKENIZER_MODEL="meta-llama/Llama-3.3-70B-Instruct" CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=2 BS=16 TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  SEQ_LEN=8192
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=6
+    BS=48
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=2
+    BS=16
+  fi
+  if [ "$DATATYPE" == "FP8" ]; then
+    echo "Error: Datatype must be BF16."
+    exit 1
+  elif [ "$DATATYPE" == "BF16" ]; then
+    TOKENIZER_MODEL="meta-llama/Llama-3.3-70B-Instruct" CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 SEQ_LENGTH=8192 MBS=$MBS BS=$BS TE_FP8=0 TP=1 PP=1 FSDP=1 MODEL_SIZE=70 TOTAL_ITERS=50 bash examples/llama/train_llama3.sh |& tee $TRAIN_LOG
+  fi
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Llama-2-7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
+  SEQ_LEN=4096
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=4
+    BS=256
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=4
+    BS=256
+  fi
   if [ "$DATATYPE" == "FP8" ]; then
-    TEE_OUTPUT=1 MBS=4 BS=256 TP=1 TE_FP8=1 SEQ_LENGTH=4096 MODEL_SIZE=7 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
+    TEE_OUTPUT=1 MBS=$MBS BS=$BS TP=1 TE_FP8=1 SEQ_LENGTH=4096 MODEL_SIZE=7 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
   elif [ "$DATATYPE" == "BF16" ]; then
-    TEE_OUTPUT=1 MBS=4 BS=256 TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=7 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
+    TEE_OUTPUT=1 MBS=$MBS BS=$BS TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=7 FSDP=0 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
   fi
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  cd /workspace/Megatron-LM
-  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=7 BS=56 TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
+  SEQ_LEN=4096
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=7
+    BS=56
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=7
+    BS=56
+  fi
+  CKPT_FORMAT=torch_dist TEE_OUTPUT=1 RECOMPUTE=1 MBS=$MBS BS=$BS TP=1 TE_FP8=0 SEQ_LENGTH=4096 MODEL_SIZE=70 FSDP=1 TOTAL_ITERS=50 bash examples/llama/train_llama2.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 # elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
 #   echo "[INFO] $MODEL_REPO TRAINING"
 #   export NVTE_FUSED_ATTN_CK=0
+#   SEQ_LEN=4096
+#   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+#     MBS=4
+#   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+#     MBS=4
+#   fi
 #   cd /workspace/Megatron-LM
-#   GEMM_TUNING=1 PR=bf16 MBS=4 AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=20 bash examples/deepseek_v2/train_deepseekv2.sh |& tee $TRAIN_LOG
+#   GEMM_TUNING=1 PR=bf16 MBS=$MBS AC=none SEQ_LEN=4096 PAD_LEN=4096 TRAIN_ITERS=20 bash examples/deepseek_v2/train_deepseekv2.sh |& tee $TRAIN_LOG
 #   echo "[INFO] Benchmarking"
-#   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+#   python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
 #   export NVTE_FUSED_ATTN_CK=1
 #   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  SEQ_LEN=4096
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=1
+    BS=32
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=1
+    BS=32
+  fi
   export NVTE_FUSED_ATTN_CK=0
-  cd /workspace/Megatron-LM
   if [[ -z "$LAYERS" ]]; then
     LAYERS=3 # default proxy model uses 3 layers
   fi
   echo "[INFO] Proxy model uses $LAYERS layers"
-  FORCE_BANLANCE=true RUN_ENV=cluster MODEL_SIZE=671B TRAIN_ITERS=50 SEQ_LEN=4096 NUM_LAYERS=$LAYERS MICRO_BATCH_SIZE=1 GLOBAL_BATCH_SIZE=32 PR=bf16 TP=1 PP=1 ETP=1 EP=8 GEMM_TUNING=1 NVTE_CK_USES_BWD_V3=1 USE_GROUPED_GEMM=true MOE_USE_LEGACY_GROUPED_GEMM=true GPT_LAYER_IN_TE=true MOCK_DATA=1 bash examples/deepseek_v3/train_deepseekv3.sh |& tee $TRAIN_LOG
+  FORCE_BANLANCE=true RUN_ENV=cluster MODEL_SIZE=671B TRAIN_ITERS=50 SEQ_LEN=4096 NUM_LAYERS=$LAYERS MICRO_BATCH_SIZE=1 GLOBAL_BATCH_SIZE=$BS PR=bf16 TP=1 PP=1 ETP=1 EP=8 GEMM_TUNING=1 NVTE_CK_USES_BWD_V3=1 USE_GROUPED_GEMM=true MOE_USE_LEGACY_GROUPED_GEMM=true GPT_LAYER_IN_TE=true MOCK_DATA=1 bash examples/deepseek_v3/train_deepseekv3.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   export NVTE_FUSED_ATTN_CK=1
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  SEQ_LEN=4096
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=1
+    GBS=16
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=1
+    GBS=16
+  fi
   cd /workspace/Megatron-LM
-  TOKENIZER_MODEL=/tokenizer/tokenizer.model RECOMPUTE_NUM_LAYERS=0 TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=none PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=4096 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x7B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh |& tee $TRAIN_LOG
+  TOKENIZER_MODEL=/tokenizer/tokenizer.model RECOMPUTE_NUM_LAYERS=0 TEE_OUTPUT=1 MBS=$MBS GBS=$GBS TP_SIZE=1 PP_SIZE=1 AC=none PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=4096 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x7B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh |& tee $TRAIN_LOG
   echo "[INFO] Proxy model uses $LAYERS layers"
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  SEQ_LEN=8192
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=1
+    GBS=16
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=1
+    GBS=16
+  fi
   cd /workspace/Megatron-LM
   if [[ -z "$LAYERS" ]]; then
     LAYERS=4 # default proxy model uses 4 layers
   fi
   echo "[INFO] Proxy model uses $LAYERS layers"
-  TOKENIZER_MODEL=/tokenizer/tokenizer.model RECOMPUTE_NUM_LAYERS=$LAYERS TEE_OUTPUT=1 MBS=1 GBS=16 TP_SIZE=1 PP_SIZE=1 AC=full  NUM_LAYERS=$LAYERS PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh |& tee $TRAIN_LOG
+  TOKENIZER_MODEL=/tokenizer/tokenizer.model RECOMPUTE_NUM_LAYERS=$LAYERS TEE_OUTPUT=1 MBS=$MBS GBS=$GBS TP_SIZE=1 PP_SIZE=1 AC=full  NUM_LAYERS=$LAYERS PR=bf16 EP_SIZE=8 ETP_SIZE=1 SEQLEN=8192 FORCE_BALANCE=true MOCK_DATA=1 RUN_ENV=cluster MODEL_SIZE=8x22B TRAIN_ITERS=50 bash examples/mixtral/train_mixtral_moe.sh |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Qwen2.5-7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  SEQ_LEN=2048
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=10
+    BS=640
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=10
+    BS=640
+  fi
   cd /workspace/Megatron-LM
   if [[ "$DATATYPE" == "BF16" ]]; then
-    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=0 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
+    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=$MBS BS=$BS TE_FP8=0 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
   elif [[ "$DATATYPE" == "FP8" ]]; then
-    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=10 BS=640 TE_FP8=1 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
+    bash examples/qwen/train_qwen2.sh TP=1 CP=1 PP=1 MBS=$MBS BS=$BS TE_FP8=1 MODEL_SIZE=7 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-7B |& tee $TRAIN_LOG
   fi
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  SEQ_LEN=2048
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    MBS=3
+    BS=24
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    MBS=3
+    BS=24
+  fi
   cd /workspace/Megatron-LM
-  bash examples/qwen/train_qwen2.sh FSDP=1 CP=1 PP=1 MBS=3 BS=24 TE_FP8=0 MODEL_SIZE=72 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-72B RECOMPUTE_ACTIVATIONS=full CKPT_FORMAT=torch_dist |& tee $TRAIN_LOG
+  bash examples/qwen/train_qwen2.sh FSDP=1 CP=1 PP=1 MBS=$MBS BS=$BS TE_FP8=0 MODEL_SIZE=72 SEQ_LENGTH=2048 TOTAL_ITERS=50 MOCK_DATA=1 TOKENIZER_MODEL=Qwen/Qwen2.5-72B RECOMPUTE_ACTIVATIONS=full CKPT_FORMAT=torch_dist |& tee $TRAIN_LOG
   echo "[INFO] Benchmarking"
-  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG
+  python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
   rm $TRAIN_LOG
 
 else

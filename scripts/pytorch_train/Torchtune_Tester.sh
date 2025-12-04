@@ -82,6 +82,9 @@ EOF
 # export TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL=1
 # export TORCHINDUCTOR_MAX_AUTOTUNE=1
 # export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+export HSA_NO_SCRATCH_RECLAIM=1
+#export RCCL_MSCCL_ENABLE=0
+
 
 # === Parse Arguments ===
 if [[ "$1" == "--help" ]]; then
@@ -121,7 +124,7 @@ MODEL_DIR="$(realpath "$MODEL_DIR" 2>/dev/null || echo "$MODEL_DIR")"
 CHECKPOINT_DIR="$(realpath "$CHECKPOINT_DIR" 2>/dev/null || echo "$CHECKPOINT_DIR")"
 
 
-# === Conditionally disable Inductor tuning for llama4 ===
+# # === Conditionally disable Inductor tuning for llama4 ===
 if [[ "${MODEL_FAMILY,,}" == "llama4" ]]; then
   unset TORCHINDUCTOR_EXHAUSTIVE_FLEX_ATTENTION_EXPERIMENTAL \
         TORCHINDUCTOR_MAX_AUTOTUNE \
@@ -199,6 +202,17 @@ if [[ "$METHOD" == "lora" || "$METHOD" == "qlora" ]]; then
 else
     TUNE_METHOD="$METHOD"
 fi
+
+# === Ensure optimizer.fused=True in YAML ===
+echo "Checking optimizer.fused setting in YAML: $CONFIG_FILE"
+if grep -qE '^[[:space:]]*fused:[[:space:]]*False' "$CONFIG_FILE"; then
+  echo "optimizer.fused=False found, updating to True..."
+  sed -i 's/^[[:space:]]*fused:[[:space:]]*False/  fused: True/' "$CONFIG_FILE"
+  echo "Updated optimizer.fused=True in $CONFIG_FILE"
+else
+  echo "optimizer.fused is already True or not explicitly set. No changes made."
+fi
+
 
 # === Handle FP8 Patch for YAML Config ===
 if [[ "$FP8_ENABLED" == "true" ]]; then
