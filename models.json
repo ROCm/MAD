@@ -1077,7 +1077,8 @@
     "training_precision": "",
     "multiple_results": "perf_Mochi-1.csv",
     "tags": [
-      "pyt"
+      "pyt",
+      "training"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_mochi-1"
@@ -1093,7 +1094,8 @@
     "training_precision": "",
     "multiple_results": "perf_Hunyuan-video.csv",
     "tags": [
-      "pyt"
+      "pyt",
+      "training"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_hunyuan-video"
@@ -1109,7 +1111,8 @@
     "training_precision": "",
     "multiple_results": "perf_Wan2_1-i2v.csv",
     "tags": [
-      "pyt"
+      "pyt",
+      "training"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_wan2_1-i2v"
