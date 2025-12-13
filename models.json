@@ -831,7 +831,8 @@
     "training_precision": "",
     "multiple_results": "perf_Stable-Diffusion-XL.csv",
     "tags": [
-      "pyt"
+      "pyt",
+      "training"
     ],
     "timeout": -1,
     "args":
@@ -848,7 +849,8 @@
     "training_precision": "",
     "multiple_results": "perf_DLRM.csv",
     "tags": [
-      "pyt"
+      "pyt",
+      "training"
     ],
     "timeout": -1,
     "args":
