@@ -39,3 +39,4 @@ latencies can be found from `results.csv` once the benchmark runs have finished.
 | pyt_xdit_wan_2_1               | [Wan 2.1](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P)                          |
 | pyt_xdit_wan_2_2               | [Wan 2.2](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B)                              |
 | pyt_xdit_flux                  | [Flux.1](https://huggingface.co/black-forest-labs/FLUX.1-dev)                         |
+| pyt_xdit_sd_3_5                | [Stable diffusion 3.5](https://huggingface.co/stabilityai/stable-diffusion-3.5-large) |
