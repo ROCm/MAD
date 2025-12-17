@@ -66,14 +66,14 @@ if [[ $MODEL == "openai/gpt-oss-20b" || $MODEL == "openai/gpt-oss-120b" ]]; then
     echo "Setting --block-size 64 and cudagraph_mode FULL_AND_PIECEWISE with AITER unified attention for gpt-oss"
     export VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION=1
     export VLLM_ROCM_USE_AITER_MHA=0
-    VLLM_ARGS='--block-size 64 -O {"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    VLLM_ARGS='--block-size 64'
 fi
 
 # Deepseek AITER MLA requires --block-size 1
 if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
     if [[ $VLLM_ROCM_USE_AITER == 0 ]]; then
         echo "Deepseek Triton MLA does not support cudagraph capture; using cudagraph_mode PIECEWISE"
-        VLLM_ARGS='-O {"cudagraph_mode":"PIECEWISE"}'
+        VLLM_ARGS='--compilation-config {"cudagraph_mode":"PIECEWISE"}'
     else
         echo "Setting --block-size 1 for Deepseek AITER MLA"
         VLLM_ARGS='--block-size 1'
@@ -82,7 +82,7 @@ fi
 
 # Llama 4 currently does not support full cudagraph or attn fusion
 if [[ $MODEL == *"Llama-4"* ]]; then
-    VLLM_ARGS='-O {"cudagraph_mode":"PIECEWISE","pass_config":{"enable_attn_fusion":false}}'
+    VLLM_ARGS='--compilation-config {"cudagraph_mode":"PIECEWISE","pass_config":{"enable_attn_fusion":false}}'
 fi
 
 # MXFP4 models are only supported on MI35x i.e. gfx950
@@ -139,23 +139,21 @@ do
             max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-$max_num_batched_tokens}
             max_model_len=${MAX_MODEL_LEN:-$max_model_len}
             gpu_memory_utilization=${GPU_MEMORY_UTILIZATION:-$gpu_memory_utilization}
-
-            if [[ $datatype == "float16" ]]; then
+            
+            if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
+                # Deepseek fp8 kv cache is currently broken on both Triton and AITER MLA backends
+                DTYPE=" "
+            elif [[ $datatype == "float16" ]]; then
                 DTYPE=" --dtype float16 "
             elif [[ $datatype == "bfloat16" ]]; then
                 DTYPE=" "
             elif [[ $datatype == "float8" ]]; then
-                if [[ $MODEL == *"DeepSeek-V3"* || $MODEL == *"DeepSeek-R1"* ]]; then
-                    # Deepseek fp8 kv cache is currently broken on both Triton and AITER MLA backends
-                    DTYPE=" "
+                # Use --dtype float16 for float8 models for faster attention kernels
+                # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
+                if [[ $benchmark == "throughput" ]]; then
+                    DTYPE=" --dtype float16 --kv-cache-dtype fp8"
                 else
-                    # Use --dtype float16 for float8 models for attention kernels
-                    # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
-                    if [[ $benchmark == "throughput" ]]; then
-                        DTYPE=" --dtype float16 --kv-cache-dtype fp8"
-                    else
-                        DTYPE=" --dtype float16"
-                    fi
+                    DTYPE=" --dtype float16"
                 fi
             elif [[ $datatype == "float4" ]]; then
                 # Use fp8 kv cache for throughput benchmarking for float4 and float8 models
