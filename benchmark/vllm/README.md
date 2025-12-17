@@ -137,7 +137,7 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 ```sh
 docker pull rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm-dev:preview_1117_rc4_20251205
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
 ```
 
 #### Throughput Command
