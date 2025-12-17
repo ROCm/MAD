@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.0.0
--   ✅ vLLM 0.11.1 (0.11.1rc2.dev141+g38f225c2a.rocm700)
+-   ✅ vLLM 0.11.2 (0.11.2.dev673+g839868462.rocm700)
 -   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
 -   ✅ hipBLASLt 1.0
 
@@ -57,12 +57,15 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 >If you're using this docker image on other AMD GPUs e.g. MI2xx or Radeon GPUs, please add
 >`export VLLM_ROCM_USE_AITER=0` to your commands, since AITER is only supported on the gfx942 and gfx950 architectures.
 
+>[!NOTE]
+>There is a known regression with AITER for MoE models such as Mixtral and DeepSeek-R1. Consider using the previous release `rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103` for better performance.
+
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
+docker pull rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
 ```
 
 ### MAD-integrated benchmarking
@@ -132,9 +135,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
+docker pull rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm-dev:preview_1117_rc4_20251205
 ```
 
 #### Throughput Command
@@ -322,7 +325,10 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-10/24 release:
+12/09 release:
+- Improved performance on Llama 3 MXFP4 due to AITER updates + kernel fusions
+
+11/05 release:
 - Turned AITER on by default
 - Fixed Qwen 3 235B rms_norm segfault issue
 - Known performance drop on Llama 4 models due to upstream vLLM bug https://github.com/vllm-project/vllm/issues/26320
