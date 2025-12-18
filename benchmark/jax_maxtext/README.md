@@ -10,13 +10,26 @@ AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs
 >Shardy is a new config in JAX 0.6.0. You might get related errors if it's not configured correctly. For now you can turn it off by setting `shardy=False` during the training run. You can also follow the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) to enable it.
 >
 
+>[!NOTE]
+>There are known issues of rocm/jax-training:maxtext-v25.11.
+> 1. Minor performance regression (< 4%) for bf16 quantization in llama models and Mixtral 8x7b. 
+> 2. You may potentially see minor loss spikes, or loss curve may have slightly higher convergence end value w.r.t the previous image.
+> 3. For FP8 training on MI355, many models will display a warning message like: `Warning: Latency not found for MI_M=16, MI_N=16, MI_K=128, mi_input_type=BFloat8Float8_fnuz. Returning latency value of 32 (really slow).` The compile step may take longer than usual, but training will run. We are currently investigating this and will fix for the next release.
+> 4. The built-in JAX profiler isn't working. See [Profiling with rocprofv3](#profiling-with-rocprofv3) for details on how to profile with rocprofv3.
+>
+
+>[!NOTE]
+>We have refreshed the image from the previous release `rocm/jax-training:maxtext-v25.9` as `rocm/jax-training:maxtext-v25.9.1`.
+>This should include a fix to address segmentation fault issues during the launch of the previous image.
+>
+
 | Software component | Version        |
 |--------------------|----------------|
-| ROCm               | 7.0.0         |
-| Jax                | 0.6.2          |
-| Python             | 3.10.18        |
-| Transformer Engine | 2.2.0.dev0+c91bac54 |
-| hipBLASLt          | 1.x.x          |
+| ROCm               | 7.1.0         |
+| Jax                | 0.7.1          |
+| Python             | 3.12.3        |
+| Transformer Engine | 2.4.0.dev0+281042de |
+| hipBLASLt          | 1.2.x          |
 
 
 ## Supported features and models
@@ -166,7 +179,7 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v25.9
+docker pull rocm/jax-training:maxtext-v25.11
 ```
 ### Single Node Training examples
 
@@ -186,7 +199,7 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 Launch the Docker container.
 
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.9
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.11
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -409,3 +422,13 @@ Run the benchmark for multinode node traininig
 ```
 sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_70b_multinode.sh
 ```
+
+## Profiling with rocprofv3
+
+If you need to collect a trace and the JAX profiler isn't working then you can use rocprofv3 as a temporary workaround like this:
+```
+rocprofv3 --hip-trace --kernel-trace --memory-copy-trace --rccl-trace --output-format pftrace -d ./v3_traces -- python3 app.py
+```
+- Just replace `python3 app.py` with any command line command that you want to run such as `./jax-maxtext_benchmark_report.sh -m Llama-2-7B`.
+- You can set the directory where you want the .json traces to be saved using `-d <TRACE_DIRECTORY>`
+- The resulting traces can be opened in perfetto: https://ui.perfetto.dev/

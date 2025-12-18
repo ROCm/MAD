@@ -27,6 +27,7 @@
 
 base_config: "base.yml"
 run_name: "llama2_70b_training"
+base_output_directory: "./"
 hardware: "gpu"
 steps: 30
 model_name: "llama2-70b"
