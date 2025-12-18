@@ -37,6 +37,12 @@ while getopts "m:q:" opt; do
     esac
 done
 
+# Set default values for additional parameters
+MODE="pretrain"
+NNODES=1 # default to 1 node
+GPUS_PER_NODE=8 # default to 8 GPUs per node
+NUM_GPUS=$((NNODES*GPUS_PER_NODE))
+
 echo "=hyper params start="
 echo $MODEL_REPO
 echo $QUANTIZATION
@@ -48,6 +54,18 @@ else
   PERF_LOG="$(pwd)/../perf_${MODEL_REPO}_${QUANTIZATION}.csv"
 fi
 perf_script="$(pwd)/jax-maxtext_benchmark_report.py"
+
+# Run rocminfo and grep for "AMD Instinct"
+DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+if [ -z "$DEVICE" ]; then
+  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  case "$ARCH" in
+    "gfx942") DEVICE="MI300X" ;;
+    "gfx950") DEVICE="MI355X" ;;
+    *) DEVICE="" ;;
+  esac
+fi             
+echo "GPU DEVICE name: $DEVICE"
 
 MAXTEXT="/workspace/maxtext"
 MAXTEXT_DIR="/workspace/maxtext/MaxText"
@@ -76,14 +94,23 @@ execute_training(){
   echo $config_file
   cat $config_file
 
+  yaml() {
+      python3 -c "import yaml;print(yaml.safe_load(open('$1'))$2)"
+  }
+
+  per_device_batch_size=$(yaml $config_file "['per_device_batch_size']")
+  max_target_length==$(yaml $config_file "['max_target_length']")
+  echo $per_device_batch_size
+  echo $max_target_length
+
   # execute
   source $env_file
   python -m MaxText.train $config_file \
   quantization=$3 2>&1 |& tee -a  $2.log
   if [ -z "$3" ]; then
-    python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG
+    python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG --mode $MODE --quantization bf16 --batch_size $per_device_batch_size --seq_len $max_target_length --device $DEVICE --num_gpus $NUM_GPUS
   else
-    python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG --quantization $3
+    python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG --mode $MODE --quantization $3 --batch_size $per_device_batch_size --seq_len $max_target_length --device $DEVICE --num_gpus $NUM_GPUS
   fi
 
 }
