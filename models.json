@@ -57,7 +57,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_DeepSeek-MoE-16B-Chat.csv",
+    "multiple_results": "perf_deepseek-moe-16b-chat.csv",
     "tags": [
       "pyt",
       "vllm",
