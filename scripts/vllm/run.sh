@@ -85,6 +85,12 @@ if [[ $MODEL == *"Llama-4"* ]]; then
     VLLM_ARGS='--compilation-config {"cudagraph_mode":"PIECEWISE","pass_config":{"enable_attn_fusion":false}}'
 fi
 
+# DeepSeek MoE models are not compatible with AITER (weight shuffling issue)
+if [[ $MODEL == *"deepseek-moe"* ]]; then
+    echo "Disabling AITER for DeepSeek MoE model (not compatible with current AITER implementation)"
+    export VLLM_ROCM_USE_AITER=0
+fi
+
 # MXFP4 models are only supported on MI35x i.e. gfx950
 if [[ $MODEL == *"MXFP4"* ]]; then
     if [[ $MAD_SYSTEM_GPU_ARCHITECTURE != *"gfx950"* ]]; then

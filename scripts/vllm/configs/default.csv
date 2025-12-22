@@ -31,3 +31,6 @@ mistralai/Mixtral-8x22B-Instruct-v0.1,serving,8,128 2048,128 2048,,,1 8 32 128,f
 
 amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV,throughput,8,128 2048,128 2048,,1024,,float8,1024,65536,8192,0.9
 amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV,serving,8,128 2048,128 2048,,,1 8 32 128,float8,1024,65536,8192,0.9
+
+deepseek-ai/deepseek-moe-16b-chat,throughput,8,128 2048,128 2048,,1024,,bfloat16,1024,65536,4096,0.9
+deepseek-ai/deepseek-moe-16b-chat,serving,8,128 2048,128 2048,,,1 8 32 128,bfloat16,1024,131072,4096,0.7

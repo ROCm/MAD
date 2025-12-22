@@ -101,6 +101,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
+| pyt_vllm_deepseek-moe-16b-chat         | [deepseek-ai/deepseek-moe-16b-chat](https://huggingface.co/deepseek-ai/deepseek-moe-16b-chat) |
 | pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
 | pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
 | pyt_vllm_llama-2-70b                   | [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf) |

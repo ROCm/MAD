@@ -49,6 +49,26 @@
      "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.csv"
   },
   {
+    "name": "pyt_vllm_deepseek-moe-16b-chat",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-MoE-16B-Chat.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default",
+      "inference"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo deepseek-ai/deepseek-moe-16b-chat --config configs/default.csv"
+  },
+  {
     "name": "pyt_vllm_gpt-oss-20b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
