@@ -2211,6 +2211,40 @@
     ],
     "args": "--workload stablediffusion_3_5",
     "multiple_results": "results.csv"
+  },
+  {
+    "name": "pyt_xdit_flux_kontext",
+    "dockerfile": "docker/pyt_xdit",
+    "scripts": "scripts/pyt_xdit/run.sh",
+    "n_gpus": "8",
+    "owner": "nsakkine@amd.com",
+    "training_precision": "",
+    "tags": [
+        "inference",
+        "diffusion",
+        "ti2i",
+        "pyt",
+        "xdit"
+    ],
+    "args": "--workload flux.kontext",
+    "multiple_results": "results.csv"
+  },
+  {
+    "name": "pyt_xdit_flux_2",
+    "dockerfile": "docker/pyt_xdit",
+    "scripts": "scripts/pyt_xdit/run.sh",
+    "n_gpus": "8",
+    "owner": "nsakkine@amd.com",
+    "training_precision": "",
+    "tags": [
+        "inference",
+        "diffusion",
+        "t2i",
+        "pyt",
+        "xdit"
+    ],
+    "args": "--workload flux2",
+    "multiple_results": "results.csv"
   }
 ]
 
