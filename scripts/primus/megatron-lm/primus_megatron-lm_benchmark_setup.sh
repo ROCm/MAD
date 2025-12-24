@@ -38,3 +38,4 @@ done
 echo "[INFO] Primus setup script starting in directory $(pwd)"
 
 cd /workspace/Primus
+git pull
