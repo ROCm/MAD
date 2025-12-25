@@ -831,8 +831,7 @@
     "training_precision": "",
     "multiple_results": "perf_Stable-Diffusion-XL.csv",
     "tags": [
-      "pyt",
-      "training"
+      "pyt"
     ],
     "timeout": -1,
     "args":
@@ -849,8 +848,7 @@
     "training_precision": "",
     "multiple_results": "perf_DLRM.csv",
     "tags": [
-      "pyt",
-      "training"
+      "pyt"
     ],
     "timeout": -1,
     "args":
@@ -1049,7 +1047,7 @@
     "args": "--model_repo primus_pyt_train_llama-3.1-70b"
   },
   {
-    "name": "primus_pyt_train_deepseek-v2",
+    "name": "primus_pyt_train_deepseek-v3-16b",
     "url": "",
     "dockerfile": "docker/primus_pytorch_train",
     "scripts": "scripts/primus/pytorch_train/run.sh",
@@ -1057,14 +1055,14 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_primus-pytorch-DeepSeek-V2.csv",
+    "multiple_results": "perf_primus-pytorch-DeepSeek-V3-16B.csv",
     "tags": [
       "pyt",
       "primus",
       "training"
     ],
     "timeout": -1,
-    "args": "--model_repo primus_pyt_train_deepseek-v2"
+    "args": "--model_repo primus_pyt_train_deepseek-v3-16b"
   },
   {
     "name": "pyt_train_mochi-1",
@@ -1077,8 +1075,7 @@
     "training_precision": "",
     "multiple_results": "perf_Mochi-1.csv",
     "tags": [
-      "pyt",
-      "training"
+      "pyt"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_mochi-1"
@@ -1094,8 +1091,7 @@
     "training_precision": "",
     "multiple_results": "perf_Hunyuan-video.csv",
     "tags": [
-      "pyt",
-      "training"
+      "pyt"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_hunyuan-video"
@@ -1111,8 +1107,7 @@
     "training_precision": "",
     "multiple_results": "perf_Wan2_1-i2v.csv",
     "tags": [
-      "pyt",
-      "training"
+      "pyt"
     ],
     "timeout": -1,
     "args": "--model_repo pyt_train_wan2_1-i2v"
@@ -1836,7 +1831,7 @@
       "composer"
     ],
     "timeout": -1,
-    "args": 
+    "args":
     "--model_repo mosaicml/mpt-30b --test_option throughput --tunableop off"
   },
   {
@@ -2247,4 +2242,3 @@
     "multiple_results": "results.csv"
   }
 ]
-

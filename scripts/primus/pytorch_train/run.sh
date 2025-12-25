@@ -52,8 +52,9 @@ if [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-8b" ]]; then
 elif [[ "$MODEL_REPO" == "primus_pyt_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
   tasks=("pretrain")
-elif [[ "$MODEL_REPO" == "primus_pyt_train_deepseek-v2" ]]; then
-  model="DeepSeek-V2"
+elif [[ "$MODEL_REPO" == "primus_pyt_train_deepseek-v3-16b" ]]; then
+  model="DeepSeek-V3-16B"
+  datatypes=("BF16")
   tasks=("pretrain")
 fi
 
@@ -70,4 +71,3 @@ for task in "${tasks[@]}"; do
     done
   done
 done
-

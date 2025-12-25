@@ -4,7 +4,7 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.10` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v25.11` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
@@ -21,7 +21,7 @@ Examples of the following models are pre-optimized for performance on the AMD In
 | Model          | Variants              |
 |----------------|------------------------|
 | **LLaMA 3.1**   | 8B, 70B         |
-| **DeepSeek V2**    | 16B      |
+| **DeepSeek V3**    | 16B      |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -85,7 +85,7 @@ ROCm MAD launches a Docker container with the name `container_ci-primus_pyt_trai
 | --------------------------------------- |
 | primus_pyt_train_llama-3.1-8b                  |
 | primus_pyt_train_llama-3.1-70b                 |
-| primus_pyt_train_deepseek-v2                 |
+| primus_pyt_train_deepseek-v3-16b                 |
 
 
 To start the pretraining benchmark, use the following command.
@@ -97,12 +97,12 @@ To start the pretraining benchmark, use the following command.
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/primus:v25.10
+docker pull rocm/primus:v25.11
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v25.10
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v25.11
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -122,7 +122,7 @@ export HF_TOKEN=$your_personal_hf_token
 #### Pretraining
 To start the pretraining benchmark, use the following command with the appropriate options. See the list of options and their descriptions below.
 
-#### Primus with Torchtitan backend 
+#### Primus with Torchtitan backend
 Primus is available at `/workspace/Primus` directory
 
 ### Benchmarking examples
@@ -135,95 +135,80 @@ cd /workspace/Primus
 - **Llama3.1-70B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 4
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-8B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 4
+bash examples/run_pretrain.sh
 ```
-- **DeepSeek V2 BF16:**
+- **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 10 
+EXP=examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml \
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-70B FP8:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 3 
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-8B FP8:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh  --training.batch_size 5
-```
-- **DeepSeek V2 FP8:**
-```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh  --training.batch_size 8 
+bash examples/run_pretrain.sh
 ```
 
 #### MI325X Performance Configs
 - **Llama3.1-70B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 6
+bash examples/run_pretrain.sh --training.local_batch_size 6
 ```
 - **Llama3.1-8B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 6
+bash examples/run_pretrain.sh --training.local_batch_size 6
 ```
-- **DeepSeek V2 BF16:**
+- **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 10 
+EXP=examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml \
+bash examples/run_pretrain.sh --training.local_batch_size 10
 ```
 - **Llama3.1-70B FP8:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 5 
+bash examples/run_pretrain.sh --training.local_batch_size 5
 ```
 - **Llama3.1-8B FP8:**
 ```bash
 EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 7 
+bash examples/run_pretrain.sh --training.local_batch_size 7
 ```
-- **DeepSeek V2 FP8:**
-```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh  --training.batch_size 8 
-```
+
 
 #### MI35X Performance Configs
 - **Llama3.1-70B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 8
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-8B BF16:**
 ```bash
 EXP=examples/torchtitan/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 6
+bash examples/run_pretrain.sh
 ```
-- **DeepSeek V2 BF16:**
+- **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 16 
+EXP=examples/torchtitan/configs/MI355X/deepseek_v3_16b-pretrain.yaml \
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-70B FP8:**
 ```bash
 EXP=examples/torchtitan/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.batch_size 6 
+bash examples/run_pretrain.sh
 ```
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh  --training.batch_size 8 
+EXP=examples/torchtitan/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml \
+bash examples/run_pretrain.sh
 ```
-- **DeepSeek V2 FP8:**
-```bash
-EXP=examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh  --training.batch_size 16
-```
-

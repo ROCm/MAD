@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/primus:v25.10
+ARG BASE_DOCKER=rocm/primus:v25.11
 FROM $BASE_DOCKER
 
 USER root

@@ -133,7 +133,7 @@ if args.mode == "pretrain":
             {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
             {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
         ]
-    elif args.model == "DeepSeek-V2":
+    elif args.model == "DeepSeek-V3-16B":
         tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
         TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
         GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
@@ -155,4 +155,3 @@ with open(output_file, mode=mode, newline='') as file:
         writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")
-    
