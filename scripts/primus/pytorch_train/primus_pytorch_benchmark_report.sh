@@ -24,12 +24,12 @@
 # SOFTWARE.
 #
 #################################################################################
-## Usage: 
+## Usage:
 #./pytorch_benchmark_report.sh -t $training_mode -m $model_name -d $datatype -s $sequence_length
 ## example:
 ## Pretrain Llama 3.1 70B with BF16 precision
 #./pytorch_benchmark_report.sh -t pretrain -m Llama-3.1-70B -p BF16 -s 8192
-## Pretrain Llama 3.1 8B with FP8 precision 
+## Pretrain Llama 3.1 8B with FP8 precision
 #./pytorch_benchmark_report.sh -t pretrain -m Llama-3.1-8B -p FP8 -s 8192
 ## Torchtune full weight finetuning with Llama 3.1 70B
 #./pytorch_benchmark_report.sh -t finetune_fw -m Llama-3.1-70B -p BF16 -s 8192
@@ -79,44 +79,37 @@ fi
 
 if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" ]]; then
     echo "Error: Datatype must be either FP8 or BF16."
-    exit 1
 fi
 
 if ! [[ "$SEQUENCE_LENGTH" =~ ^[0-9]+$ ]] || (( SEQUENCE_LENGTH < 2048 || SEQUENCE_LENGTH > 8192 )); then
     echo "Error: Sequence length must be between 2048 and 8192."
-    exit 1
 fi
 
 # Training mode validation
 if [[ "$TRAINING_MODE" == "HF_finetune_lora" ]]; then
     if [[ ! ("$MODEL_REPO" == "GPT-OSS-20B" || "$MODEL_REPO" == "GPT-OSS-120B") || "$DATATYPE" != "BF16" ]]; then
         echo "Error: finetuning options are only supported for GPT-OSS-20B and GPT-OSS-120B with BF16."
-        exit 1
     fi
 fi
 
 if [[ "$TRAINING_MODE" == "HF_pretrain" ]]; then
     if [[ "$MODEL_REPO" != "Llama-3.1-8B" ]]; then
         echo "Error: HF pretraining option are only supported for Llama_3.1_8B."
-        exit 1
     fi
 fi
 
 # Check for incompatible FP8 + finetune_lora combination
 if [[ "$TRAINING_MODE" == "finetune_lora" && "$DATATYPE" == "FP8" ]]; then
     echo "Error: finetune_lora is not supported with FP8 precision."
-    exit 1
 fi
 
 # Check for incompatible finetune_fw + large Qwen models combination
 if [[ "$TRAINING_MODE" == "finetune_fw" && ("$MODEL_REPO" == "Qwen3-32B" || "$MODEL_REPO" == "Qwen2.5-72B" || "$MODEL_REPO" == "Qwen2.5-32B") ]]; then
     echo "Error: finetune_fw is not supported for Qwen3-32B, Qwen2.5-72B, and Qwen2.5-32B models."
-    exit 1
 fi
 
 if [[ "$NUM_GPUS" != "1" && "$NUM_GPUS" != "8" ]]; then
     echo "Error: Number of GPUs must be either 1 or 8."
-    exit 1
 fi
 
 # Run benchmark (Placeholder for actual script execution)
@@ -128,7 +121,7 @@ echo "  Sequence Length: $SEQUENCE_LENGTH"
 echo "  Number of GPUs: $NUM_GPUS"
 echo "  FSDP: $FSDP"
 echo "  Batch size: $BATCH_SIZE"
-    
+
 TRAIN_LOG="$(pwd)/primus-pytorch-$MODEL_REPO-$TRAINING_MODE.csv"
 echo "TRAIN LOG: $TRAIN_LOG"
 
@@ -146,7 +139,7 @@ if [ -z "$DEVICE" ]; then
     "gfx950") DEVICE="MI355X" ;;
     *) DEVICE="" ;;
   esac
-fi             
+fi
 echo "GPU DEVICE name: $DEVICE"
 if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
   export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
@@ -161,18 +154,19 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cd /workspace/Primus
       SEQUENCE_LENGTH=8192
       CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/llama3.1_8B-$DATATYPE-pretrain.yaml
+      # Extract batch size from CONFIG_FILE if not provided
+      if [ -z "$BATCH_SIZE" ] && [ -f "$CONFIG_FILE" ]; then
+        BATCH_SIZE=$(grep -E "^\s*local_batch_size:" $CONFIG_FILE | head -n1 | awk '{print $2}' | tr -d '\r')
+        echo "[INFO] Extracted batch size from config: $BATCH_SIZE"
+      fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=6
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=8
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=4
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=5
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
@@ -184,41 +178,39 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cd /workspace/Primus
       SEQUENCE_LENGTH=8192
       CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
+      # Extract batch size from CONFIG_FILE if not provided
+      if [ -z "$BATCH_SIZE" ] && [ -f "$CONFIG_FILE" ]; then
+        BATCH_SIZE=$(grep -E "^\s*local_batch_size:" $CONFIG_FILE | head -n1 | awk '{print $2}' | tr -d '\r')
+        echo "[INFO] Extracted batch size from config: $BATCH_SIZE"
+      fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=8
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	  
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=6
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=4
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=3
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
           --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
     fi
 
-    if [ "$MODEL_REPO" == "DeepSeek-V2" ]; then
-      echo "[INFO] Benchmarking DeepSeek-V2 TRAINING"
+    if [ "$MODEL_REPO" == "DeepSeek-V3-16B" ]; then
+      echo "[INFO] Benchmarking DeepSeek-V3-16B TRAINING"
       cd /workspace/Primus
       SEQUENCE_LENGTH=4096
       CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml
+      # Extract batch size from CONFIG_FILE if not provided
+      if [ -z "$BATCH_SIZE" ] && [ -f "$CONFIG_FILE" ]; then
+        BATCH_SIZE=$(grep -E "^\s*local_batch_size:" $CONFIG_FILE | head -n1 | awk '{print $2}' | tr -d '\r')
+        echo "[INFO] Extracted batch size from config: $BATCH_SIZE"
+      fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=16
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear false --primus_turbo.use_classic_attention false |& tee $TRAIN_LOG	  
-      elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=16
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 true --primus_turbo.use_turbo_float8_linear true --primus_turbo.use_classic_attention false |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
-        BATCH_SIZE=10
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear false --primus_turbo.use_classic_attention true |& tee $TRAIN_LOG	
-      elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
-        BATCH_SIZE=8
-        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh --training.local_batch_size $BATCH_SIZE --primus_turbo.use_moe_fp8 false --primus_turbo.use_turbo_float8_linear true --primus_turbo.use_classic_attention true |& tee $TRAIN_LOG	
+        EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \

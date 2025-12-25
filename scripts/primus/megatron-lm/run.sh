@@ -68,9 +68,48 @@ fi
 echo "Running setup script to download tokenizers"
 bash ./primus_megatron-lm_benchmark_setup.sh -m $model
 
+# Detect device
+DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+if [ -z "$DEVICE" ]; then
+  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  case "$ARCH" in
+    "gfx942") DEVICE="MI300X" ;;
+    "gfx950") DEVICE="MI355X" ;;
+    *) DEVICE="" ;;
+  esac
+fi
+echo "GPU DEVICE name: $DEVICE"
 
-datatypes=("BF16" "FP8")
-# Loop through all combinations
+# Define supported datatypes based on device and model
+datatypes=()
+
+if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+  # MI355X/MI350X support
+  if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
+    echo "Skipping $model - Not supported on $DEVICE"
+  elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-3.1-70B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
+    datatypes=("BF16" "FP8")
+  else
+    # Most other models only support BF16 on MI355X/MI350X
+    datatypes=("BF16")
+  fi
+elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+  # MI300X/MI325X support
+  if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
+    datatypes=("FP8")  # Only FP8 supported
+  elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
+    datatypes=("BF16" "FP8")  # Both supported
+  else
+    # Most large models only support BF16 on MI300X/MI325X
+    datatypes=("BF16")
+  fi
+else
+  # Unknown device, try both
+  datatypes=("BF16" "FP8")
+fi
+
+# datatypes=("FP8")
+# Loop through supported combinations
 for datatype in "${datatypes[@]}"; do
   echo "Running: $model - $datatype"
   ./primus_megatron-lm_benchmark_report.sh -m $model -p $datatype
