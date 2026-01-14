@@ -1,0 +1,99 @@
+## DeepSeek AITER MLA currently only supports --block-size 1
+- benchmark: accuracy
+  model: deepseek-ai/DeepSeek-R1-0528
+  tp: 8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+    block-size: 1
+  bench_args:
+    apply_chat_template: True
+
+## gpt-oss requires AITER unified attention and performs best with block-size 64 and FULL_AND_PIECEWISE cudagraph mode
+- benchmark: accuracy
+  model: openai/gpt-oss-120b
+  tp: 8
+  dtype: auto
+  env:
+    VLLM_ROCM_USE_AITER_MHA: 0
+    VLLM_USE_AITER_UNIFIED_ATTENTION: 1
+  extra_args:
+    async-scheduling: True
+    block-size: 64
+    compilation-config: '{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\"}'
+  bench_args:
+    apply_chat_template: True
+
+## Llama 3.x bf16 and fp8 perform better with --dtype float16 on gfx942
+- benchmark: accuracy
+  model:
+    meta-llama/Llama-3.1-405B-Instruct
+    amd/Llama-3.1-405B-Instruct-FP8-KV
+    meta-llama/Llama-3.3-70B-Instruct
+    amd/Llama-3.3-70B-Instruct-FP8-KV
+  tp: 8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+  bench_args:
+    apply_chat_template: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+## Llama 3.x MXFP4 (gfx950 only)
+- benchmark: accuracy
+  model:
+    amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+    amd/Llama-3.3-70B-Instruct-MXFP4-Preview
+  tp: 8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+  bench_args:
+    apply_chat_template: True
+
+## Llama 4 currently does not support full cudagraph or attn fusion
+- benchmark: accuracy
+  model:
+    meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+  tp: 8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+    compilation-config: '{\"cudagraph_mode\":\"PIECEWISE\",\"pass_config\":{\"enable_attn_fusion\":false}}'
+  bench_args:
+    apply_chat_template: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+## Mistral models require --tokenizer-mode mistral for correct decoding
+- benchmark: accuracy
+  model:
+    mistralai/Mixtral-8x22B-Instruct-v0.1
+    amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV
+  tp: 8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+  bench_args:
+    apply_chat_template: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+## Qwen 235B requires --enable-expert-parallel with tp 8
+- benchmark: accuracy
+  model:
+    Qwen/Qwen3-235B-A22B-Thinking-2507
+    Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+  dtype: auto
+  extra_args:
+    async-scheduling: True
+    enable-expert-parallel: True
+  bench_args:
+    apply_chat_template: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
