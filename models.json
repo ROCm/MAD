@@ -46,7 +46,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.csv"
+     "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_gpt-oss-20b",
@@ -66,7 +66,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo openai/gpt-oss-20b --config configs/extended.csv"
+     "--model_repo openai/gpt-oss-20b --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_gpt-oss-120b",
@@ -86,7 +86,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo openai/gpt-oss-120b --config configs/default.csv"
+     "--model_repo openai/gpt-oss-120b --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-2-70b",
@@ -106,7 +106,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-2-70b-chat-hf --config configs/extended.csv"
+     "--model_repo meta-llama/Llama-2-70b-chat-hf --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.1-8b",
@@ -126,7 +126,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-3.1-8B-Instruct --config configs/extended.csv"
+     "--model_repo meta-llama/Llama-3.1-8B-Instruct --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.1-8b_fp8",
@@ -146,7 +146,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo amd/Llama-3.1-8B-Instruct-FP8-KV --config configs/extended.csv"
+     "--model_repo amd/Llama-3.1-8B-Instruct-FP8-KV --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.1-405b",
@@ -166,7 +166,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-3.1-405B-Instruct --config configs/default.csv"
+     "--model_repo meta-llama/Llama-3.1-405B-Instruct --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.1-405b_fp8",
@@ -186,7 +186,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo amd/Llama-3.1-405B-Instruct-FP8-KV --config configs/default.csv"
+     "--model_repo amd/Llama-3.1-405B-Instruct-FP8-KV --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.1-405b_fp4",
@@ -205,8 +205,9 @@
       "inference"
     ],
     "timeout": -1,
+    "skip_gpu_arch": "gfx942",
     "args":
-     "--model_repo amd/Llama-3.1-405B-Instruct-MXFP4-Preview --config configs/default.csv"
+     "--model_repo amd/Llama-3.1-405B-Instruct-MXFP4-Preview --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.3-70b",
@@ -226,7 +227,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.csv"
+     "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.3-70b_fp8",
@@ -246,7 +247,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo amd/Llama-3.3-70B-Instruct-FP8-KV --config configs/default.csv"
+     "--model_repo amd/Llama-3.3-70B-Instruct-FP8-KV --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-3.3-70b_fp4",
@@ -265,8 +266,9 @@
       "inference"
     ],
     "timeout": -1,
+    "skip_gpu_arch": "gfx942",
     "args":
-     "--model_repo amd/Llama-3.3-70B-Instruct-MXFP4-Preview --config configs/default.csv"
+     "--model_repo amd/Llama-3.3-70B-Instruct-MXFP4-Preview --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-4-scout-17b-16e",
@@ -286,7 +288,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-4-Scout-17B-16E-Instruct --config configs/extended.csv"
+     "--model_repo meta-llama/Llama-4-Scout-17B-16E-Instruct --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_llama-4-maverick-17b-128e",
@@ -306,7 +308,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct --config configs/extended.csv"
+     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_llama-4-maverick-17b-128e_fp8",
@@ -326,7 +328,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 --config configs/default.csv"
+     "--model_repo meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8 --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_mixtral-8x7b",
@@ -345,7 +347,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo mistralai/Mixtral-8x7B-Instruct-v0.1 --config configs/extended.csv"
+     "--model_repo mistralai/Mixtral-8x7B-Instruct-v0.1 --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_mixtral-8x7b_fp8",
@@ -364,7 +366,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV --config configs/extended.csv"
+     "--model_repo amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_mixtral-8x22b",
@@ -384,7 +386,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo mistralai/Mixtral-8x22B-Instruct-v0.1 --config configs/default.csv"
+     "--model_repo mistralai/Mixtral-8x22B-Instruct-v0.1 --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_mixtral-8x22b_fp8",
@@ -404,7 +406,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV --config configs/default.csv"
+    "--model_repo amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_phi-4",
@@ -424,7 +426,7 @@
     ],
     "timeout": -1,
     "args":
-     "--model_repo microsoft/phi-4 --config configs/extended.csv"
+     "--model_repo microsoft/phi-4 --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-8b",
@@ -443,7 +445,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-8B --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-8B --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-32b",
@@ -462,7 +464,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-32B --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-32B --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-30b-a3b",
@@ -472,7 +474,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_Qwen3-30B-A3B.csv",
+    "multiple_results": "perf_Qwen3-30B-A3B-Thinking-2507.csv",
     "tags": [
       "pyt",
       "vllm",
@@ -481,7 +483,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-30B-A3B --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-30B-A3B-Thinking-2507 --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-30b-a3b_fp8",
@@ -491,7 +493,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_Qwen3-30B-A3B-FP8.csv",
+    "multiple_results": "perf_Qwen3-30B-A3B-Thinking-2507-FP8.csv",
     "tags": [
       "pyt",
       "vllm",
@@ -500,7 +502,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-30B-A3B-FP8 --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-30B-A3B-Thinking-2507-FP8 --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-235b-a22b",
@@ -510,7 +512,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_Qwen3-235B-A22B.csv",
+    "multiple_results": "perf_Qwen3-235B-A22B-Thinking-2507.csv",
     "tags": [
       "pyt",
       "vllm",
@@ -519,7 +521,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-235B-A22B --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-235B-A22B-Thinking-2507 --config configs/extended.yaml"
   },
   {
     "name": "pyt_vllm_qwen3-235b-a22b_fp8",
@@ -529,7 +531,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
-    "multiple_results": "perf_Qwen3-235B-A22B-FP8.csv",
+    "multiple_results": "perf_Qwen3-235B-A22B-Thinking-2507-FP8.csv",
     "tags": [
       "pyt",
       "vllm",
@@ -538,7 +540,7 @@
     ],
     "timeout": -1,
     "args":
-    "--model_repo Qwen/Qwen3-235B-A22B-FP8 --config configs/extended.csv"
+    "--model_repo Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 --config configs/extended.yaml"
   },
   {
     "name": "pyt_train_llama-2-70b",
