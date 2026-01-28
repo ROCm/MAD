@@ -161,16 +161,32 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
-          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $NUM_GPUS
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
@@ -185,23 +201,39 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "FP8" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "FP8" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
-          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $NUM_GPUS
     fi
 
     if [ "$MODEL_REPO" == "DeepSeek-V3-16B" ]; then
       echo "[INFO] Benchmarking DeepSeek-V3-16B TRAINING"
       cd /workspace/Primus
       SEQUENCE_LENGTH=4096
-      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-pretrain.yaml
+      CONFIG_FILE=$(pwd)/examples/torchtitan/configs/$DEVICE/deepseek_v3_16b-$DATATYPE-pretrain.yaml
       # Extract batch size from CONFIG_FILE if not provided
       if [ -z "$BATCH_SIZE" ] && [ -f "$CONFIG_FILE" ]; then
         BATCH_SIZE=$(grep -E "^\s*local_batch_size:" $CONFIG_FILE | head -n1 | awk '{print $2}' | tr -d '\r')
@@ -209,12 +241,20 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       fi
       if [[ ("$DEVICE" == "MI355X" || "$DEVICE" == "MI350X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       elif [[ ("$DEVICE" == "MI300X" || "$DEVICE" == "MI325X") && "$DATATYPE" == "BF16" ]]; then
         EXP=$CONFIG_FILE bash ./examples/run_pretrain.sh |& tee $TRAIN_LOG
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train pretrain \
+          --config $CONFIG_FILE 2>&1 | tee -a $TRAIN_LOG
       fi
       python3 $perf_script --mode $TRAINING_MODE --model $MODEL_REPO \
           --precision $DATATYPE --input $TRAIN_LOG --output $PERF_LOG \
-          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE
+          --batch_size $BATCH_SIZE --seq_len $SEQUENCE_LENGTH --device $DEVICE --num_gpus $NUM_GPUS
     fi
 
 else

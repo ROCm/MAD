@@ -163,14 +163,15 @@ export HIP_FORCE_DEV_KERNARG=1
 export TORCH_NCCL_HIGH_PRIORITY=0
 export GPU_MAX_HW_QUEUES=8
 export WANDB_DISABLED=true
-    
-TRAIN_LOG="$(pwd)/$MODEL_REPO-$TRAINING_MODE.csv"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TRAIN_LOG="$SCRIPT_DIR/$MODEL_REPO-$TRAINING_MODE.csv"
 echo "TRAIN LOG: $TRAIN_LOG"
 
-PERF_LOG="$(pwd)/../perf_$MODEL_REPO.csv"
+PERF_LOG="$SCRIPT_DIR/../perf_$MODEL_REPO.csv"
 echo "PERF LOG: $PERF_LOG"
 
-perf_script="$(pwd)/pytorch_benchmark_report.py"
+perf_script="$SCRIPT_DIR/pytorch_benchmark_report.py"
 
 # Run rocminfo and grep for "AMD Instinct"
 DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
@@ -238,7 +239,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
 
     if [ "$MODEL_REPO" == "DLRM" ]; then
       echo "[INFO] Benchmarking DLRM TRAINING"
-      if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+      if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" || "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
         cd /workspace/DLRMBenchmark
         echo "[INFO] Removing all previous runs to avoid caching"
         rm -rf training_logs/
