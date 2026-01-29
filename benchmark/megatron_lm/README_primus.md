@@ -8,16 +8,16 @@ Primus framework with megatron backend is designed to enable efficient training 
 >`rocm/pytorch-training` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.11` (`rocm/pytorch-training:v25.11`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.1` (`rocm/pytorch-training:v26.1`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component  | Version            |
 |---------------------|--------------------|
 | ROCm               | 7.1.0              |
 | Python            | 3.10          |
 | PyTorch           | 2.10.0.dev20251112+rocm7.1   |
-| Transformer Engine | 2.4.0.dev0+32e2d1d4      |
+| Transformer Engine | 2.6.0.dev0+f141f34b      |
 | Flash Attention   | 2.8.3               |
-| hipBLASLt         | 09ab7153e2        |
+| hipBLASLt         | 34459f66ea        |
 | Triton            | 3.4.0                 |
 | RCCL              | 2.27.7     |
 
@@ -81,13 +81,13 @@ Use the following instructions to set up the environment, configure the script t
    Download the Docker image required for training:
    ```bash
    # MI300/MI325/MI35X
-   docker pull rocm/primus:v25.11
+   docker pull rocm/primus:v26.1
    ```
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name primus_training_env rocm/primus:v25.11
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name primus_training_env rocm/primus:v26.1
    ```
 
 5. **Execute the training_env container (optional if no already in the container)**
@@ -145,206 +145,266 @@ export NVTE_CK_IS_V3_ATOMIC_FP32=1
 
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml
 ```
 
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml
 ```
 
 - **Llama2-7B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama2_7B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_7B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama2_7B-FP8-pretrain.yaml
 ```
 
 - **Llama2-7B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama2_7B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama2_7B-BF16-pretrain.yaml
 ```
 
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml
 ```
 
 - **Llama3.1-70B FP8 Proxy model on Single Node:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh \
-    --train_iters 50 \
-    --num_layers 40 \
-    --fp8 hybrid \
-    --no_fp8_weight_transpose_cache true
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B_fp8_proxy.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
+  --train_iters 50 \
+  --num_layers 40 \
+  --fp8 hybrid \
+  --no_fp8_weight_transpose_cache true
 ```
 **Note:**
    - Please use >=2 nodes to run full llama 70B model with fp8 precision on MI300. MI35X can support full 70B model with fp8 precision in a single node. Please refer to MI35X config in next section.
 
 - **Llama2-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama2_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama2_70B-BF16-pretrain.yaml
 ```
 
 - **Llama3.3-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/llama3.3_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.3_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/llama3.3_70B-BF16-pretrain.yaml
 ```
 
 Examples for MoE models with expert parallelism enabled, i.e, `expert_model_parallel_size > 1`
 
 - **DeepSeekV2-Lite BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/deepseek_v2_lite-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v2_lite.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/deepseek_v2_lite-BF16-pretrain.yaml
 ```
 
 - **DeepSeekV3 BF16 3 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/MI300X/deepseek_v3-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh \
-    --num_layers 3 \
-    --moe_layer_freq 1 \
-    --micro_batch_size 3 \
-    --global_batch_size 192 \
-    --train_iters 50
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v3_proxy.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/deepseek_v3-BF16-pretrain.yaml \
+  --num_layers 3 \
+  --moe_layer_freq 1 \
+  --micro_batch_size 3 \
+  --global_batch_size 192 \
+  --train_iters 50
 ```
 
 - **Mixtral 8x7B:**
 ```bash
-EXP=examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_mixtral_8x7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-BF16-pretrain.yaml
 ```
 
 - **Mixtral 8x22B 4 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh \
-    --num_layers 4 \
-    --pipeline_model_parallel_size 1 \
-    --micro_batch_size 1 \
-    --global_batch_size 16 \
-    --train_iters 50
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_mixtral_8x22B_proxy.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml \
+  --num_layers 4 \
+  --pipeline_model_parallel_size 1 \
+  --micro_batch_size 1 \
+  --global_batch_size 16 \
+  --train_iters 50
 ```
 
 - **QWEN2.5 7B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/qwen2.5_7B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/qwen2.5_7B-BF16-pretrain.yaml
 ```
 
 - **QWEN2.5 7B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI300X/qwen2.5_7B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_7B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/qwen2.5_7B-FP8-pretrain.yaml
 ```
 
 - **QWEN2.5 72B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI300X/qwen2.5_72B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_72B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/qwen2.5_72B-BF16-pretrain.yaml
 ```
 
 #### MI35X Performance Configs
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml
 ```
 
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml
 ```
 
 - **Llama2-7B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama2_7B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_7B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama2_7B-FP8-pretrain.yaml
 ```
 
 - **Llama2-7B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama2_7B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama2_7B-BF16-pretrain.yaml
 ```
 
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml
 ```
 
 - **Llama3.1-70B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml
 ```
 
 - **Llama2-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama2_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama2_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama2_70B-BF16-pretrain.yaml
 ```
 
 - **Llama3.3-70B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/llama3.3_70B-BF16-pretrain.yaml \
-bash ./examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.3_70B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.3_70B-BF16-pretrain.yaml
 ```
 
 - **DeepSeekV2-Lite BF16:**
 ```bash
-EXP=examples/megatron/configs//MI355X/deepseek_v2_lite-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v2_lite.log \
+  -- train pretrain \
+  --config examples/megatron/configs//MI355X/deepseek_v2_lite-BF16-pretrain.yaml
 ```
 
 - **DeepSeekV3 BF16 3 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/MI355X/deepseek_v3-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh \
-    --num_layers 3 \
-    --moe_layer_freq 1 \
-    --train_iters 50 \
-    --micro_batch_size 8 \
-    --global_batch_size 64
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v3_proxy.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/deepseek_v3-BF16-pretrain.yaml \
+  --num_layers 3 \
+  --moe_layer_freq 1 \
+  --train_iters 50 \
+  --micro_batch_size 8 \
+  --global_batch_size 64
 ```
 
 - **Mixtral 8x7B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/mixtral_8x7B_v0.1-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_mixtral_8x7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/mixtral_8x7B_v0.1-BF16-pretrain.yaml
 ```
 
 - **Mixtral 8x22B BF16 4 layer proxy on Single Node:**
 ```bash
-EXP=examples/megatron/configs/MI355X/mixtral_8x22B_v0.1-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_mixtral_8x22B_proxy.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/mixtral_8x22B_v0.1-BF16-pretrain.yaml
 ```
 
 - **QWEN2.5 7B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/qwen2.5_7B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_7B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/qwen2.5_7B-BF16-pretrain.yaml
 ```
 
 - **QWEN2.5 7B FP8:**
 ```bash
-EXP=examples/megatron/configs/MI355X/qwen2.5_7B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_7B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/qwen2.5_7B-FP8-pretrain.yaml
 ```
 
 - **QWEN2.5 72B BF16:**
 ```bash
-EXP=examples/megatron/configs/MI355X/qwen2.5_72B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen2.5_72B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/qwen2.5_72B-BF16-pretrain.yaml
 ```
 **Known Issues**:
 - DeepSeekV3 proxy model and Mixtral 8x22B proxy model may exit with error due to memory free issue. However, this does not impacts training runs. All iterations, in this case 50, should have been completed before the exit and the results should also be available at the end.

@@ -76,8 +76,17 @@ def find_match(file, search_string):
     pattern = fr"{re.escape(search_string)}\):\s*(\d+\.?\d*)/"
     matches = re.findall(pattern, content)
     if matches:
-        # Return the last match (most recent entry)
-        return matches[-1]
+        # Return the last 2 values if they exist (one from each run)
+        if len(matches) >= 2:
+            result = [matches[-2], matches[-1]]
+            print(f"Found {len(matches)} matches for '{search_string}', using last 2: {result}")
+        else:
+            result = [matches[-1]]
+            print(f"Found {len(matches)} match for '{search_string}': {result}")
+        return result
+    else:
+        print(f"Warning: No matches found for '{search_string}' pattern")
+        return []
 
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
@@ -85,12 +94,17 @@ if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "DeepSeek-V2-lite" or args.model == "DeepSeek-V3-proxy" or \
         args.model == "Llama-3.1-70B-proxy" or args.model == "Llama-3.3-70B" or \
         args.model == "Qwen2.5-7B" or args.model == "Qwen2.5-72B":
-    tok_per_s_per_gpu = find_match(input_file, "tokens/s/GPU")
-    TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/GPU")
-    data = [
-        {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-        {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
-    ]
+    tok_per_s_per_gpu_list = find_match(input_file, "tokens/s/GPU")
+    TFLOPS_per_gpu_list = find_match(input_file, "TFLOP/s/GPU")
+    
+    data = []
+    # Write separate rows for each run
+    for i, (tps, tflops) in enumerate(zip(tok_per_s_per_gpu_list, TFLOPS_per_gpu_list)):
+        run_label = f"run_{i+1}" if len(tok_per_s_per_gpu_list) > 1 else ""
+        data.extend([
+            {'model': args.model, 'performance': tps, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+            {'model': args.model, 'performance': tflops, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label}
+        ])
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
     mode = 'w'  # Write if file doesn't exist or is empty
@@ -99,7 +113,7 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','seq_len','device','num_gpus'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','seq_len','device','num_gpus','run'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)

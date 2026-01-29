@@ -424,7 +424,7 @@ Example 14: Stable-diffusion-xl with BF16 precision with [Stable-diffusionBenchm
 ./pytorch_benchmark_report.sh -t posttrain -p BF16 -m Flux
 ```
 
-Example 15: DLRM with TF32 precision with [DLRMBenchmark](https://github.com/AMD-AGI/DLRMBenchmark)
+Example 15: DLRM with TF32 precision with [DLRMBenchmark](https://github.com/AMD-AGI/DLRMBenchmark) (supported on MI300X, MI325X, MI350X, MI355X)
 ```
 ./pytorch_benchmark_report.sh -t pretrain -p TF32 -m DLRM
 ```
