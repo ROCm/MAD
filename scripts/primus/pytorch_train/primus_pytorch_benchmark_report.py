@@ -80,13 +80,18 @@ def find_match(file, search_string, search_range=None):
     data = [s.replace(",", "") for s in matches]
     if not data:
         print(f"Warning: No matches found for '{search_string}' pattern")
-        return None
+        return []
     if search_range is not None:
         data = np.array(data[search_range[0]:search_range[1]])
-        result = np.average(data.astype(float))
+        result = [np.average(data.astype(float))]
     else:
-        result = data[-1]
-    print(f"{search_string} {result}")
+        # Return the last 2 values if they exist (one from each run)
+        if len(data) >= 2:
+            result = [data[-2], data[-1]]
+            print(f"Found {len(data)} matches for '{search_string}', using last 2: {result}")
+        else:
+            result = [data[-1]]
+            print(f"Found {len(data)} match for '{search_string}': {result}")
     return result
 
 def find_gpu_memory_match(file, search_string, search_range=None):
@@ -98,13 +103,18 @@ def find_gpu_memory_match(file, search_string, search_range=None):
     data = [s.replace(",", "") for s in matches]
     if not data:
         print(f"Warning: No matches found for '{search_string}' pattern")
-        return None
+        return []
     if search_range is not None:
         data = np.array(data[search_range[0]:search_range[1]])
-        result = np.average(data.astype(float))
+        result = [np.average(data.astype(float))]
     else:
-        result = data[-1]
-    print(f"{search_string} {result}")
+        # Return the last 2 values if they exist (one from each run)
+        if len(data) >= 2:
+            result = [data[-2], data[-1]]
+            print(f"Found {len(data)} GPU memory matches for '{search_string}', using last 2: {result}")
+        else:
+            result = [data[-1]]
+            print(f"Found {len(data)} GPU memory match for '{search_string}': {result}")
     return result
 
 finetune_models = ["Llama-2-70B", "Llama-2-13B", "Llama-2-7B", "Llama-3-70B", "Llama-3-8B", \
@@ -116,32 +126,47 @@ finetune_models = ["Llama-2-70B", "Llama-2-13B", "Llama-2-7B", "Llama-3-70B", "L
 if args.mode == "pretrain":
 
     if args.model == "Llama-3.1-8B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
-        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
-        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
-        ]
+        tok_per_s_per_gpu_list = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu_list = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage_list = find_gpu_memory_match(input_file, "memory:", search_range=None)
+        
+        data = []
+        # Write separate rows for each run
+        for i, (tps, tflops, mem) in enumerate(zip(tok_per_s_per_gpu_list, TFLOPS_per_gpu_list, GPU_memory_usage_list)):
+            run_label = f"run_{i+1}" if len(tok_per_s_per_gpu_list) > 1 else ""
+            data.extend([
+                {'model': args.model, 'performance': tps, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': tflops, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': mem, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label}
+            ])
     elif args.model == "Llama-3.1-70B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
-        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
-        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
-        ]
+        tok_per_s_per_gpu_list = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu_list = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage_list = find_gpu_memory_match(input_file, "memory:", search_range=None)
+        
+        data = []
+        # Write separate rows for each run
+        for i, (tps, tflops, mem) in enumerate(zip(tok_per_s_per_gpu_list, TFLOPS_per_gpu_list, GPU_memory_usage_list)):
+            run_label = f"run_{i+1}" if len(tok_per_s_per_gpu_list) > 1 else ""
+            data.extend([
+                {'model': args.model, 'performance': tps, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': tflops, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': mem, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label}
+            ])
     elif args.model == "DeepSeek-V3-16B":
-        tok_per_s_per_gpu = find_match(input_file, "tps:", search_range=None)
-        TFLOPS_per_gpu = find_match(input_file, "tflops:", search_range=None)
-        GPU_memory_usage = find_gpu_memory_match(input_file, "memory:", search_range=None)
-        data = [
-            {'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus},
-            {'model': args.model, 'performance': GPU_memory_usage, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus}
-        ]
+        tok_per_s_per_gpu_list = find_match(input_file, "tps:", search_range=None)
+        TFLOPS_per_gpu_list = find_match(input_file, "tflops:", search_range=None)
+        GPU_memory_usage_list = find_gpu_memory_match(input_file, "memory:", search_range=None)
+        
+        data = []
+        # Write separate rows for each run
+        for i, (tps, tflops, mem) in enumerate(zip(tok_per_s_per_gpu_list, TFLOPS_per_gpu_list, GPU_memory_usage_list)):
+            run_label = f"run_{i+1}" if len(tok_per_s_per_gpu_list) > 1 else ""
+            data.extend([
+                {'model': args.model, 'performance': tps, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': tflops, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
+                {'model': args.model, 'performance': mem, 'metric': 'GPU_memory_usage', 'mode': args.mode, 'precision': precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label}
+            ])
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
     mode = 'w'  # Write if file doesn't exist or is empty
@@ -150,7 +175,7 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode', 'precision', 'batch_size', 'seq_len', 'device', 'num_gpus'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode', 'precision', 'batch_size', 'seq_len', 'device', 'num_gpus', 'run'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)

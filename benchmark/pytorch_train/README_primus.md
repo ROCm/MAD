@@ -4,24 +4,24 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/primus:v25.11` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.1` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
 | ROCm               | 7.1.0                |
 | Python             | 3.10.12              |
-| PyTorch            | 2.10.0.dev20251112+rocm7.1   |
-| Transformer Engine | 2.4.0.dev0+32e2d1d4  |
+| PyTorch            | 2.10.0.dev20251112+rocm7.1 |
+| Transformer Engine | 2.6.0.dev0+f141f34b  |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 09ab7153e2     |
+| hipBLASLt          | 34459f66ea           |
 
 ## Models
 Examples of the following models are pre-optimized for performance on the AMD Instinct MI300X and MI325X accelerator.
 ### Pre-training:
-| Model          | Variants              |
+| Model          | Variants               |
 |----------------|------------------------|
-| **LLaMA 3.1**   | 8B, 70B         |
-| **DeepSeek V3**    | 16B      |
+| **LLaMA 3.1**  | 8B, 70B                |
+| **DeepSeek V3**| 16B                    |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
 
@@ -97,12 +97,12 @@ To start the pretraining benchmark, use the following command.
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/primus:v25.11
+docker pull rocm/primus:v26.1
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v25.11
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v26.1
 ```
 
 Execute the training_env container (optional if no already in the container)
@@ -134,81 +134,116 @@ cd /workspace/Primus
 #### MI300X Performance Configs
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml
 ```
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml
 ```
 - **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v3_16b.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml
 ```
 - **Llama3.1-70B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml
 ```
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml
 ```
 
 #### MI325X Performance Configs
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.local_batch_size 6
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml \
+  --training.local_batch_size 6
 ```
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh --training.local_batch_size 6
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_8B-BF16-pretrain.yaml \
+  --training.local_batch_size 6
 ```
 - **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh --training.local_batch_size 10
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v3_16b.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/deepseek_v3_16b-pretrain.yaml \
+  --training.local_batch_size 10
 ```
 - **Llama3.1-70B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.local_batch_size 5
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
+  --training.local_batch_size 5
 ```
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh --training.local_batch_size 7
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI300X/llama3.1_8B-FP8-pretrain.yaml \
+  --training.local_batch_size 7
 ```
 
 
 #### MI35X Performance Configs
 - **Llama3.1-70B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml
 ```
 - **Llama3.1-8B BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml
 ```
 - **DeepSeek-V3-16b BF16:**
 ```bash
-EXP=examples/torchtitan/configs/MI355X/deepseek_v3_16b-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_deepseek_v3_16b.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI355X/deepseek_v3_16b-pretrain.yaml
 ```
 - **Llama3.1-70B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_70B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml
 ```
 - **Llama3.1-8B FP8:**
 ```bash
-EXP=examples/torchtitan/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml \
-bash examples/run_pretrain.sh
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_fp8.log \
+  -- train pretrain \
+  --config examples/torchtitan/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml
 ```

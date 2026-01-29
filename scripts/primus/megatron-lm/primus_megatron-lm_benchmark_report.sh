@@ -126,10 +126,18 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
     MBS=4
     GBS=512
     bash ./examples/run_pretrain.sh 2>&1 | tee $TRAIN_LOG
+    bash runner/primus-cli direct \
+      --log_file /tmp/primus_$MODEL_REPO.log \
+      -- train pretrain \
+      --config $EXP 2>&1 | tee -a $TRAIN_LOG
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     MBS=2
     GBS=128
     bash ./examples/run_pretrain.sh 2>&1 | tee $TRAIN_LOG
+    bash runner/primus-cli direct \
+      --log_file /tmp/primus_$MODEL_REPO.log \
+      -- train pretrain \
+      --config $EXP 2>&1 | tee -a $TRAIN_LOG
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
@@ -151,10 +159,18 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
       MBS=3
       GBS=24
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       MBS=4
       GBS=32
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -163,6 +179,10 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
       MBS=3
       GBS=24
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -186,7 +206,11 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       MBS=3
       GBS=24
-      bash ./examples/run_pretrain.sh  --num_layers 40 --fp8 hybrid --micro_batch_size $MBS --global_batch_size $GBS --no_fp8_weight_transpose_cache true 2>&1 | tee $TRAIN_LOG
+      bash ./examples/run_pretrain.sh --num_layers 40 --fp8 hybrid --micro_batch_size $MBS --global_batch_size $GBS --no_fp8_weight_transpose_cache true 2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       echo "Error: Datatype BF16 is not supported for $MODEL_REPO on $DEVICE. Only FP8 is supported."
     fi
@@ -214,6 +238,10 @@ elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
       MBS=6
       GBS=48
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -222,6 +250,10 @@ elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
       MBS=2
       GBS=16
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
 
@@ -245,18 +277,34 @@ elif [ "$MODEL_REPO" == "Llama-2-7B" ]; then
       export MBS=13
       export GBS=416
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       export MBS=10
       export GBS=640
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     export MBS=4
     export GBS=256
     if [ "$DATATYPE" == "FP8" ]; then
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
 
@@ -282,6 +330,10 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
       MBS=17
       GBS=272
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -290,6 +342,10 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
       MBS=7
       GBS=56
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -314,6 +370,10 @@ elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -322,6 +382,10 @@ elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
       MBS=4
       GBS=640
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -346,6 +410,10 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
       MBS=8
       GBS=64
       bash ./examples/run_pretrain.sh --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -354,6 +422,10 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
       MBS=3
       GBS=192
       bash ./examples/run_pretrain.sh --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -378,6 +450,10 @@ elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
       MBS=4
       GBS=256
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -386,6 +462,10 @@ elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
       MBS=2
       GBS=32
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
 
@@ -413,6 +493,10 @@ elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
       MBS=2
       GBS=16
       bash ./examples/run_pretrain.sh --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -421,6 +505,10 @@ elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
       MBS=1
       GBS=16
       bash ./examples/run_pretrain.sh --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -443,18 +531,34 @@ elif [ "$MODEL_REPO" == "Qwen2.5-7B" ]; then
       MBS=16
       GBS=768
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [[ "$DATATYPE" == "FP8" ]]; then
       MBS=20
       GBS=800
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     MBS=10
     GBS=640
     if [ "$DATATYPE" == "FP8" ]; then
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -474,6 +578,10 @@ elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
       MBS=16
       GBS=256
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -482,6 +590,10 @@ elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
       MBS=4
       GBS=32
       bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
