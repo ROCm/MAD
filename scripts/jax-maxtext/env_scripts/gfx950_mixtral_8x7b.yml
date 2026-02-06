@@ -57,7 +57,7 @@ kv_quant_dtype: "int8"
 weight_dtype: bfloat16
 checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
 
-per_device_batch_size: 12
+per_device_batch_size: 11
 max_target_length: 4096
 sparse_matmul: False
 megablox: False

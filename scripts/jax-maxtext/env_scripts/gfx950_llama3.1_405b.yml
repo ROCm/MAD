@@ -1,0 +1,45 @@
+base_config: "base.yml"
+run_name: "llama3_405B_training"
+hardware: "gpu"
+steps: 20
+model_name: "llama3.1-405b"
+enable_checkpointing: False
+attention: "cudnn_flash_te"
+dcn_data_parallelism: 1
+dcn_fsdp_parallelism: -1
+dcn_pipeline_parallelism: 1
+dcn_tensor_parallelism: 1
+dcn_sequence_parallelism: 1
+ici_fsdp_parallelism: -1
+ici_data_parallelism: 1
+ici_sequence_parallelism: 1
+ici_tensor_parallelism: 1
+ici_pipeline_parallelism: 1
+
+remat_policy: 'full'
+optimizer_memory_host_offload: False
+param_scan_axis: 1
+
+use_iota_embed: True
+scan_layers: True
+
+profiler: "" #"xplane"
+skip_first_n_steps_for_profiler: 3
+profiler_steps: 1
+shardy: False
+
+async_checkpointing: False
+logits_dot_in_fp32: False
+megablox: False
+dtype: "bfloat16"
+quantization: "fp8"
+quantize_kvcache: False
+kv_quant_axis: "heads_and_dkv"
+kv_quant_dtype: "int8"
+weight_dtype: bfloat16
+checkpoint_is_quantized: False # Set to True if reading from a saved aqt quantized checkpoint
+per_device_batch_size: 5 # 3 for 4 nodes, 5 for 8 nodes
+max_target_length: 8192
+
+dataset_type: "synthetic"
+tokenizer_path: "meta-llama/Llama-3.3-70B-Instruct"
