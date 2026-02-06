@@ -47,7 +47,7 @@ echo "Building dependencies for $MODEL_REPO"
 set -x 
 export HF_HOME=/hf_cache
 mkdir /hf_cache
-hf login --token $HF_TOKEN --add-to-git-credential
+hf auth login --token $HF_TOKEN --add-to-git-credential
 
 # always download and use the real dataset
 # hf download legacy-datasets/c4 \

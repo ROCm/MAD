@@ -43,7 +43,7 @@ dcn_fsdp_parallelism: 1
 ici_fsdp_parallelism: 1
 ici_data_parallelism: 1
 ici_expert_parallelism: -1
-remat_policy: "minimal"
+remat_policy: "save_dot_with_context_except_mlp"
 use_iota_embed: True
 scan_layers: True
 
