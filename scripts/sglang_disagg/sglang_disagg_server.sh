@@ -130,7 +130,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "${PREFILL_ARGS} are Proxy's Prefill"
     echo "${DECODE_ARGS} are Proxy's Decode"
     echo "================================================"
-    echo "Proxy server is waiting for prefile and decode nodes to be ready ..." \
+    echo "Proxy server is waiting for prefill and decode nodes to be ready ..." \
 	    | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
     sleep 20
     TIMEOUT_SECONDS=4000
