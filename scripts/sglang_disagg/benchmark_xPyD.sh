@@ -24,8 +24,8 @@ python3 -m sglang.bench_serving \
 echo ""
 CON="8 16 32 64 128 256 512"
 COMBINATIONS=("1024/1024" "8192/1024")
-
-for i in {1..2}; do
+echo "Benchmarking iterations: $BENCHMARK_ITR" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+for i in {1..$BENCHMARK_ITR}; do
     sleep 60
     echo "RUNNING: the benchserving script for iter: $i" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
     for combo in "${COMBINATIONS[@]}"; do
@@ -54,4 +54,5 @@ for i in {1..2}; do
         done
     done
 done
-
+python3 parse_to_csv.py ${LOG}_CONCURRENCY.log  -o ${LOG}_CONCURRENCY.csv \
+	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

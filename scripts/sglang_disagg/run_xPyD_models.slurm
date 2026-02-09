@@ -286,6 +286,7 @@ export yD=$yD
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
+export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
@@ -328,6 +329,7 @@ docker run --rm \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
     -e IPADDRS=$IPADDRS \
+    -e BENCHMARK_ITR=$BENCHMARK_ITR \
     --ulimit nofile=65536:65536 \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME bash -c "
