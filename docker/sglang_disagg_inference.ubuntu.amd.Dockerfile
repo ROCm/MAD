@@ -24,11 +24,13 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.5.post3-rocm700-mi30x
 FROM $BASE_DOCKER
 
 ARG GPU_ARCH=gfx942
 WORKDIR /sgl-workspace
+
+RUN pip install --upgrade sglang-router
 
 # Display installed packages for verification
 RUN pip list

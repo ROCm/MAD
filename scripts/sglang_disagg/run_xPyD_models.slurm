@@ -6,8 +6,8 @@
 #SBATCH --spread-job
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
-#SBATCH --output="/shared-inference/%u/model_blog_logs/slurm-%j.out"
-#SBATCH --error="/shared-inference/%u/model_blog_logs/slurm-%j.err"
+#SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
+#SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
 
 
 # ------------------------
@@ -51,7 +51,7 @@ else
     exit 1
 fi
 
-export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x}"
+export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-lmsysorg/sglang:v0.5.5.post3-rocm700-mi30x}"
 if test -z "${DOCKER_IMAGE_NAME}"; then
   echo "Error: DOCKER_IMAGE_NAME is not set or empty."
   exit 1
@@ -59,13 +59,13 @@ fi
 
 # Set current directory to be REPO directory with all relevant scripts
 export MOONCAKE_REPO_DIR=$(pwd)
-LOG_PATH="${LOG_PATH:-/shared-inference/${USER}/model_blog_logs}"
+LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
 MODEL_NAME="${MODEL_NAME:-None}"
-MODEL_DIR="${MODEL_DIR:-"/shared-inference/models_blog/"}"
+MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -95,7 +95,7 @@ validate_model_name "${MODEL_NAME}"
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-ORIGINAL_MODEL_PATH="/shared-inference/models_blog/${MODEL_NAME}"
+ORIGINAL_MODEL_PATH="/shared_inference/models_blog/${MODEL_NAME}"
 
 echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
@@ -142,9 +142,9 @@ if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
     MODEL_PATH="$MODEL_PATH_1"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared-inference/models_blog
-elif check_model_path "/shared-inference/models_blog/$MODEL_NAME" "/shared-inference/models_blog"; then
-    MODEL_PATH="/shared-inference/models_blog/$MODEL_NAME"
+# Check /shared_inference/models_blog
+elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
@@ -155,7 +155,7 @@ else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
     echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared-inference/models_blog/$MODEL_NAME"
+    echo "  - /shared_inference/models_blog/$MODEL_NAME"
     echo ""
     echo "Model must be accessible from all nodes for distributed execution."
     echo "Please ensure the model is available on all allocated nodes."
@@ -286,6 +286,7 @@ export yD=$yD
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
+export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
@@ -308,7 +309,7 @@ docker run --rm \
     --privileged \
     -v $HOME:$HOME \
     -v $HOME:$HOME \
-    -v /shared-inference:/shared-inference \
+    -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
@@ -328,11 +329,13 @@ docker run --rm \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
     -e IPADDRS=$IPADDRS \
+    -e BENCHMARK_ITR=$BENCHMARK_ITR \
+    --ulimit nofile=65536:65536 \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME bash -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "
 '
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker rm -f $DOCKER_CONT_NAME'
+srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
 
