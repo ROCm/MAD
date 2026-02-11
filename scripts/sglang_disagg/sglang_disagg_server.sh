@@ -90,10 +90,10 @@ fi
 echo "Waiting at the container creation barrier on $host_name"
 python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-ip ${host_ip} \
-    --local-port 5000 \
+    --local-port 4342 \
     --enable-port \
     --node-ips ${IPADDRS} \
-    --node-ports 5000
+    --node-ports 4342
 
 # =============================================================================
 # Cluster Topology Configuration
@@ -105,11 +105,11 @@ PREFILL_ARGS=""
 DECODE_ARGS=""
 
 for ((i=1; i<=$xP && i<${#IP_ARRAY[@]}; i++)); do
-    PREFILL_ARGS+="http://${IP_ARRAY[$i]}:30000 "
+    PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:2322 "
 done
 
 for ((i=$xP+1; i<${#IP_ARRAY[@]}; i++)); do
-    DECODE_ARGS+="http://${IP_ARRAY[$i]}:30000 "
+    DECODE_ARGS+=" --decode  http://${IP_ARRAY[$i]}:2322 "
 done
 
 # =============================================================================
@@ -130,20 +130,56 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "${PREFILL_ARGS} are Proxy's Prefill"
     echo "${DECODE_ARGS} are Proxy's Decode"
     echo "================================================"
+    echo "Proxy server is waiting for prefill and decode nodes to be ready ..." \
+	    | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
+    sleep 20
+    TIMEOUT_SECONDS=4000
+    SLEEP_SECONDS=10
+    SEARCH_SIGNAL="The server is fired up and ready to roll!"
+    SECONDS=0
+    for ((i=1; i<=$xP && i<${#IP_ARRAY[@]}; i++)); do
+         LOG_FILE=/run_logs/${SLURM_JOB_ID}/prefill_NODE${i}.log
+         #wait until prefill nodes get ready
+         until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
+            if [ $SECONDS -ge $TIMEOUT_SECONDS ]; then
+                echo "Awaited ${SECONDS} seconds. Timeout reached. Signal not found in prefill ${i} file" \
+			| tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
+	        	
+            fi
+            sleep $SLEEP_SECONDS
+	    SECONDS=$(( SECONDS + SLEEP_SECONDS))
+	 done      
+    done
 
-    python -m sglang.srt.disaggregation.mini_lb \
-        --prefill ${PREFILL_ARGS} \
-        --decode ${DECODE_ARGS} \
+    for ((i=$xP+1; i<${#IP_ARRAY[@]}; i++)); do
+         LOG_FILE=/run_logs/${SLURM_JOB_ID}/decode_NODE${i}.log
+         #wait until decode nodes get ready         
+         until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
+            if [ $SECONDS -ge $TIMEOUT_SECONDS ]; then
+               echo "Awaited ${SECONDS} seconds. Timeout reached. Signal not found in decode ${i} file" \
+		       | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
+            fi
+            sleep $SLEEP_SECONDS
+            SECONDS=$(( SECONDS + SLEEP_SECONDS))
+         done
+    done
+
+    sleep 10
+
+    python -m sglang_router.launch_router \
+    	--pd-disaggregation \
+        ${PREFILL_ARGS} \
+        ${DECODE_ARGS} \
         --host 0.0.0.0 \
-        --port 30000 \
-        2>&1 | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null &
+        --port 2322 \
+        2>&1 | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null &
     
     proxy_pid=$!
     
     echo "Waiting for all prefill and decode servers to be up . . ."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${IPADDRS} \
-        --node-ports 30000
+        --node-ports 2322
 
     echo "Proxy Server Ready for benchmarking on ${host_name}:${host_ip}"
 
@@ -163,7 +199,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
         --disaggregation-mode prefill \
         --disaggregation-ib-device ${IBDEVICES} \
         --host ${host_ip} \
-        --port 30000 \
+        --port 2322 \
         --stream-output \
         --trust-remote-code \
         --disaggregation-transfer-backend mooncake"
@@ -180,12 +216,12 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
     echo "Waiting for proxy server to be up..."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports 30000
+        --node-ports 2322
     
     echo "Waiting untill proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port 30000
+        --remote-port 2322
 
     echo "Killing the prefill server"
     kill $prefill_pid
@@ -199,7 +235,7 @@ else
         --disaggregation-mode decode \
         --disaggregation-ib-device ${IBDEVICES} \
         --host ${host_ip} \
-        --port 30000 \
+        --port 2322 \
         --stream-output \
         --trust-remote-code \
         --disaggregation-transfer-backend mooncake"
@@ -216,12 +252,12 @@ else
     echo "Waiting for proxy server to be up..."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports 30000
+        --node-ports 2322
     
     echo "Waiting untill proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port 30000
+        --remote-port 2322
 
     echo "Killing the decode server"
     kill $decode_pid
