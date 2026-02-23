@@ -16,7 +16,7 @@ set -e
 # Arguments:
 #   config_file.yml - Required. Path to model config YAML file (absolute or relative)
 #                     Examples: llama2-7b.gpu.yml, /path/to/model.gpu.yml, ../configs/my-model.yml
-#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:maxtext-v26.1)
+#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:maxtext-v26.2)
 #
 # Examples:
 #   sbatch jax_maxtext_multinode_benchmark.sh llama2-7b.gpu.yml
@@ -29,7 +29,7 @@ mkdir -p -v outputs; chmod a+w outputs
 LOOKUP_USER="${USER:-}"
 
 # ------- Parse command line arguments -------
-DEFAULT_DOCKER_IMAGE="rocm/jax-training:maxtext-v26.1"
+DEFAULT_DOCKER_IMAGE="rocm/jax-training:latest"
 
 if [[ $# -eq 0 ]]; then
     echo "ERROR: No config file provided!"
