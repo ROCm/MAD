@@ -11,9 +11,8 @@ AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs
 >
 
 >[!NOTE]
->There are known issues of rocm/jax-training:maxtext-v26.1.
-> 1. It is known that you may see NaNs in the losses when setting `packing=True`. As a workaround, we suggest turning off input sequence packing (`packing=False`). We are working to fix this.
-> 2. Docker `rocm/jax-training:maxtext-v26.1` will not have the [Primus](https://github.com/AMD-AGI/Primus/tree/main) repo. It is planned to be supported in the next release.
+> 1. It is known that you may see NaNs in the losses while using real data (not synthetic data) when setting `packing=True` and `NVTE_CK_IS_V3_ATOMIC_FP32=0`. Make sure to set `NVTE_CK_IS_V3_ATOMIC_FP32=1` for production training when using real data and input sequence packing (`packing=True`).
+
 
 | Software component | Version        |
 |--------------------|----------------|
@@ -110,10 +109,15 @@ Use the following instructions to set up the environment, configure the script t
 Use the following instructions to reproduce the benchmark results on an
 MI300X or MI355X accelerator with a prebuilt JAX Docker image.
 
-Users have two choices to reproduce the benchmark results.
+Users have two choices to reproduce the benchmark results using this Automation and Dashboarding repository.
 
--   [MAD-integrated benchmarking](#mad-integrated-benchmarking)
--   [Standalone benchmarking](#standalone-benchmarking)
+- [MAD-integrated benchmarking](#mad-integrated-benchmarking)
+- [Standalone benchmarking](#standalone-benchmarking)
+- [Primus benchmarking](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
+
+Jax MaxText has also been integrated into [Primus](https://github.com/AMD-AGI/Primus), which supports multiple backends including Megatron-LM, TorchTitan, and JAX MaxText, alongside ROCm-optimized components. Users can now use the unified `primus-cli` to run training jobs with Jax MaxText backend. 
+
+- [Using primus-cli to run training jobs with Jax MaxText backend](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
 
 ## MAD-integrated benchmarking
 
@@ -173,7 +177,7 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v26.1
+docker pull rocm/jax-training:maxtext-v26.2
 ```
 ### Single Node Training examples
 
@@ -193,7 +197,7 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 Launch the Docker container.
 
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.1
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.2
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -390,7 +394,7 @@ sbatch -N <NUM_NODES> jax_maxtext_multinode_benchmark.sh <config_file.yml> [dock
 **Parameters:**
 - `<NUM_NODES>`: Number of nodes to use for training (e.g., 2, 4, 8)
 - `<config_file.yml>`: Path to the YAML configuration file containing model and training parameters
-- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.1`
+- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.2`
 
 **Configuration files** are available in the `scripts/jax-maxtext/env_scripts/` directory for different models and GPU architectures:
 
@@ -416,7 +420,7 @@ sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_7b.yml
 
 2. **Multi-node training with Llama 2 70B model on 4 nodes with custom image:**
 ```bash
-sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.1
+sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.2
 ```
 
 3. **Multi-node training with Llama 3 8B model on 2 nodes:**
@@ -432,6 +436,40 @@ sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/llama3_70b.yml
 5. **Multi-node training with Llama 3.1 405B model on MI355X (gfx950) with 8 nodes:**
 ```bash
 sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/gfx950_llama3.1_405b.yml
+```
+
+## Using primus-cli to run training jobs with Jax MaxText backend
+
+**Clone the Primus repository**
+```
+git clone https://github.com/AMD-AIG-AIMA/Primus.git
+cd Primus
+git checkout dev/fuyuajin/maxtext-backend-test
+git submodule update --init third_party/maxtext/
+```
+
+**Run the training job with primus-cli**  
+
+For detailed usage of primus-cli, please refer to [Primus CLI User Guide](https://github.com/AMD-AGI/Primus/blob/main/docs/cli/PRIMUS-CLI-GUIDE.md).
+
+Here are some examples of using primus-cli to run training jobs with Jax MaxText backend.
+
+Direct Mode: Running the training directly on current host or within an existing docker container.
+```bash
+./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+```
+
+Container Mode: execute in Docker/Podman containers
+```bash
+./primus-cli container --image rocm/jax-training:maxtext-v26.2 \
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+```
+
+Slurm Mode: execute distributed training on a Slurm cluster
+```bash
+# Use a custom config file, where you can specify the docker image and set environment variables.
+./primus-cli --config my_maxtext_config.yaml slurm srun -N 8 \
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
 ```
 
 ## Profiling with rocprofv3
