@@ -338,6 +338,9 @@ docker run --rm \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
     -e IPADDRS=$IPADDRS \
+    -e PROXY_TYPE=${PROXY_TYPE:-vllm_router} \
+    -e ROUTER_PORT=${ROUTER_PORT:-2584} \
+    -e BENCHMARK_PORT=${BENCHMARK_PORT:-2584} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME bash -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}

@@ -116,3 +116,10 @@ RUN set -e && echo "Compiling NixlBench" && \
 RUN git clone --depth 1 https://github.com/vllm-project/vllm.git /tmp/vllm-src && \
     cp -r /tmp/vllm-src/tests /app/vllm/tests && \
     rm -rf /tmp/vllm-src
+
+# Install Rust compiler (required for building vllm-router)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install vllm-router
+RUN pip install vllm-router

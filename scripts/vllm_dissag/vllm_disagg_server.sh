@@ -15,6 +15,15 @@ xP="${xP:-1}"
 yD="${yD:-1}"
 IPADDRS="${IPADDRS:-localhost}"
 
+# Proxy configuration: "vllm_router" (default) or "toy_proxy"
+PROXY_TYPE="${PROXY_TYPE:-vllm_router}"
+ROUTER_PORT="${ROUTER_PORT:-2584}"
+
+if [[ "$PROXY_TYPE" != "vllm_router" && "$PROXY_TYPE" != "toy_proxy" ]]; then
+    echo "Error: Invalid PROXY_TYPE='$PROXY_TYPE'. Must be 'vllm_router' or 'toy_proxy'." >&2
+    exit 1
+fi
+
 echo "Listing NIXL_COOKBOOK_PATH : "
 ls ${NIXL_COOKBOOK_PATH}
 
@@ -30,6 +39,23 @@ pip install --ignore-installed --force-reinstall flask
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
 SERVER_PORT=2584
+
+if [ "$PROXY_TYPE" == "vllm_router" ]; then
+    PROXY_PORT=$ROUTER_PORT
+else
+    PROXY_PORT=$SERVER_PORT
+fi
+
+if [[ -z "$UCX_NET_DEVICES" ]]; then
+    echo "Error: UCX_NET_DEVICES is empty" >&2
+    exit 1
+fi
+
+if [[ -z "$NCCL_SOCKET_IFNAME" ]]; then
+    echo "Error: NCCL_SOCKET_IFNAME is empty" >&2
+    exit 1
+fi
+
 # =============================================================================
 # Model-Specific Configuration Maps
 # =============================================================================
@@ -197,35 +223,59 @@ if [ "$NODE_RANK" -eq 0 ]; then
         --node-ips ${PD_IPADDRS} \
         --node-ports $SERVER_PORT
 
-    if [[ -z "$UCX_NET_DEVICES" ]]; then
-        echo "Error: UCX_NET_DEVICES is empty" >&2
-        exit 1
-    fi
-    
-    if [[ -z "$NCCL_SOCKET_IFNAME" ]]; then
-        echo "Error: NCCL_SOCKET_IFNAME is empty" >&2
-        exit 1
-    fi
-
-    UCX_TLS=tcp,self,shm NCCL_UCX_TLS=tcp VLLM_USE_V1=1 \
-    python3 "/app/vllm/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py" \
+    if [ "$PROXY_TYPE" == "vllm_router" ]; then
+        echo "Starting vLLM Router (Production Proxy)..."
+        [ -f /root/.cargo/env ] && source /root/.cargo/env
+        
+        PREFILL_URLS=""
+        DECODE_URLS=""
+        for ip in ${PREFILL_ARGS}; do
+            PREFILL_URLS+="--prefill-url http://${ip}:${SERVER_PORT}/v1 "
+        done
+        for ip in ${DECODE_ARGS}; do
+            DECODE_URLS+="--decode-url http://${ip}:${SERVER_PORT}/v1 "
+        done
+        
+        UCX_TLS=tcp,self,shm VLLM_USE_V1=1 \
+        vllm-router \
             --host 0.0.0.0 \
-            --port $SERVER_PORT \
-            --prefiller-hosts ${PREFILL_ARGS} \
-            --prefiller-ports ${PREFILL_PORTS} \
-            --decoder-hosts ${DECODE_ARGS} \
-            --decoder-ports ${DECODE_PORTS} 2>&1 | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null &
-    proxy_pid=$!
+            --port $ROUTER_PORT \
+            --vllm-pd-disaggregation \
+            $PREFILL_URLS \
+            $DECODE_URLS \
+            --policy round_robin \
+            --prefill-policy round_robin \
+            --decode-policy round_robin \
+            --intra-node-data-parallel-size 1 \
+            --retry-max-retries 3 \
+            --prometheus-port 29000 \
+            2>&1 | tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null &
+        proxy_pid=$!
+        PROXY_PORT=$ROUTER_PORT
+    else
+        echo "Starting Toy Proxy Server..."
+
+        UCX_TLS=tcp,self,shm NCCL_UCX_TLS=tcp VLLM_USE_V1=1 \
+        python3 "/app/vllm/tests/v1/kv_connector/nixl_integration/toy_proxy_server.py" \
+                --host 0.0.0.0 \
+                --port $SERVER_PORT \
+                --prefiller-hosts ${PREFILL_ARGS} \
+                --prefiller-ports ${PREFILL_PORTS} \
+                --decoder-hosts ${DECODE_ARGS} \
+                --decoder-ports ${DECODE_PORTS} 2>&1 | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null &
+        proxy_pid=$!
+        PROXY_PORT=$SERVER_PORT
+    fi
     
     echo "Waiting for proxy server to be up . . ."
     python $NIXL_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${host_ip} \
-        --node-ports $SERVER_PORT
+        --node-ports $PROXY_PORT
 
-    echo "Proxy Server Ready for benchmarking on ${host_name}:${host_ip}"
-
+    echo "Proxy Server ($PROXY_TYPE) Ready for benchmarking on ${host_name}:${host_ip}:${PROXY_PORT}"
 
     sleep 10;
+    export BENCHMARK_PORT=$PROXY_PORT
     bash $NIXL_COOKBOOK_PATH/benchmark_xPyD.sh
 
     echo "Killing the proxy server"
@@ -272,12 +322,12 @@ elif  [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
     echo "Waiting for proxy server to be up..."
     python $NIXL_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports $SERVER_PORT
+        --node-ports $PROXY_PORT
 
     echo "Waiting untill proxy server closes..."
     python $NIXL_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port $SERVER_PORT
+        --remote-port $PROXY_PORT
 
     echo "Killing the prefill server"
     kill $prefill_pid
@@ -324,12 +374,12 @@ else
     echo "Waiting for proxy server to be up..."
     python $NIXL_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports $SERVER_PORT
+        --node-ports $PROXY_PORT
 
     echo "Waiting untill proxy server closes..."
     python $NIXL_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port $SERVER_PORT
+        --remote-port $PROXY_PORT
 
     echo "Killing the decode server"
     kill $decode_pid

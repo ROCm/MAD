@@ -1,9 +1,11 @@
 #!/bin/bash
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
+BENCHMARK_PORT="${BENCHMARK_PORT:-2584}"
 LOG="/run_logs/${SLURM_JOB_ID}/benchmark_${SLURM_JOB_ID}_${timestamp}_xP${xP}_yD${yD}_$MODEL_NAME"
 
 echo "==== Benchmark Serving Concurrency Sweep Test ${LOG} ===== "
+echo "Benchmark Port: ${BENCHMARK_PORT}"
 echo "UTC Time: $(TZ=UTC date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 echo "PST Time: $(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
  
@@ -26,7 +28,7 @@ for i in {1..1}; do
            --model $MODEL_PATH \
            --backend vllm \
            --host 127.0.0.1 \
-           --port 2584 \
+           --port $BENCHMARK_PORT \
            --dataset-name "random" \
            --random-input-len $isl \
            --random-output-len $osl \
