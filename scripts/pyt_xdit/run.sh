@@ -58,11 +58,17 @@ done
 
 SCRIPT="/app/.ci/run.py"
 BENCHMARK_CONFIGS="/app/.ci/benchmark_configs"
+ARCH=$(amd-smi static | grep TARGET_GRAPHICS_VERSION | head -1 | cut -d ':' -f 2 | xargs)
 
 CSV_OUTPUT_PATH="/outputs/results.csv"
 
 if [ ! -e $SCRIPT ]; then
     echo "'$SCRIPT' not found" >&2
+    exit 1
+fi
+
+if [ -z "$ARCH" ]; then
+    echo "Failed to get TARGET_GRAPHICS_VERSION from amd-smi" >&2
     exit 1
 fi
 
@@ -74,12 +80,16 @@ export HSA_NO_SCRATCH_RECLAIM=1
 
 # run workload
 echo "Run configurations:"
-python3 $SCRIPT --tag mad --dry-run ${BENCHMARK_CONFIGS}/${WORKLOAD}.yaml
-python3 $SCRIPT --tag mad --csv-output-path ${CSV_OUTPUT_PATH} ${BENCHMARK_CONFIGS}/${WORKLOAD}.yaml
+python3 $SCRIPT --tag mad --tag ${ARCH} --dry-run ${BENCHMARK_CONFIGS}/${WORKLOAD}.yaml
+python3 $SCRIPT --tag mad --tag ${ARCH} --csv-output-path ${CSV_OUTPUT_PATH} ${BENCHMARK_CONFIGS}/${WORKLOAD}.yaml
 
 if [ $? -ne 0 ]; then
   echo "Failed to run workload" >&2
   exit 1
 fi
+
+# Strip architecture suffixes from model column (e.g., ".gfx942", ".gfx950") in the MAD CSV output file
+awk -F, 'BEGIN{OFS=","} NR==1{print;next} {sub(/\.gfx(942|950)$/, "", $1); print}' \
+  "${CSV_OUTPUT_PATH}" > "${CSV_OUTPUT_PATH}.tmp" && mv "${CSV_OUTPUT_PATH}.tmp" "${CSV_OUTPUT_PATH}"
 
 cp ${CSV_OUTPUT_PATH} ../results.csv
