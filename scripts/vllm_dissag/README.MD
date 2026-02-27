@@ -45,6 +45,21 @@ export xP=<num_prefill_nodes>; export yD=<num_decode_nodes>; export MODEL_NAME=L
 # num_nodes = xP + xD + 1
 ```
 
+## Proxy Server Options
+
+The scripts support two proxy server types via the `PROXY_TYPE` environment variable:
+
+| Proxy Type | Description |
+|------------|-------------|
+| `vllm_router` (default) | Production-grade Rust-based load balancer |
+| `toy_proxy` | Simple Python-based proxy for testing |
+
+### Using Toy Proxy (for testing)
+```bash
+export PROXY_TYPE=toy_proxy
+# Then run sbatch/srun as usual
+```
+
 ## Benchmark parser ( for CONCURRENCY logs) to tabulate different data
 
 ```bash
