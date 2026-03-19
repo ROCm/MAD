@@ -1,7 +1,6 @@
-
 # 1k 1k mc1
 
-## gpt-oss requires AITER unified attention and performs best with block-size 64 and FULL_AND_PIECEWISE cudagraph mode
+## gpt-oss requires AITER unified attention and performs best with block-size 64
 - benchmark: serving
   model:
     openai/gpt-oss-20b
@@ -11,12 +10,10 @@
   dtype: auto
   max_concurrency: 1
   env:
-    VLLM_ROCM_USE_AITER_MHA: 0
-    VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION: 1
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
-    block-size: 64
-    compilation-config: '{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\"}'
+    --block-size: 64
+    --attention-backend: ROCM_AITER_UNIFIED_ATTN
 
 - benchmark: serving
   model:
@@ -32,8 +29,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -46,13 +45,14 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
 
-## Llama 4 currently does not support full cudagraph or attn fusion
 - benchmark: serving
   model:
     meta-llama/Llama-4-Scout-17B-16E-Instruct
@@ -62,9 +62,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
-    compilation-config: '{\"cudagraph_mode\":\"PIECEWISE\",\"pass_config\":{\"enable_attn_fusion\":false}}'
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -78,8 +79,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -94,9 +97,11 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
-    enable-expert-parallel: True
+    --attention-backend: ROCM_ATTN
+    --enable-expert-parallel: True
   arch_overrides:
     gfx942:
       dtype: float16
