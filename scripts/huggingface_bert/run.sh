@@ -52,7 +52,6 @@ torchrun $HF_PATH/examples/pytorch/language-modeling/run_mlm.py \
      --max_steps 150 \
      --logging_steps 1 \
      --output_dir /tmp/test-mlm-bbu \
-     --overwrite_output_dir \
 	 --per_device_train_batch_size="$MAD_MODEL_BATCH_SIZE" \
      --fp16 \
      --skip_memory_metrics=True \
