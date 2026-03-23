@@ -49,6 +49,26 @@
      "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.yaml"
   },
   {
+    "name": "pyt_vllm_deepseek-r1_fp4",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_DeepSeek-R1-0528-MXFP4-Preview.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default",
+      "inference"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/DeepSeek-R1-0528-MXFP4-Preview --config configs/default.yaml"
+  },
+  {
     "name": "pyt_vllm_gpt-oss-20b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
@@ -87,6 +107,26 @@
     "timeout": -1,
     "args":
      "--model_repo openai/gpt-oss-120b --config configs/default.yaml"
+  },
+  {
+    "name": "pyt_vllm_gpt-oss-120b_w4a8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_gpt-oss120b-w-mxfp4-a-fp8.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_default",
+      "inference"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo amd/gpt-oss120b-w-mxfp4-a-fp8 --config configs/default.yaml"
   },
   {
     "name": "pyt_vllm_llama-2-70b",
