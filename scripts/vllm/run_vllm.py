@@ -164,7 +164,7 @@ def run_latency(model, config):
         f"--output-len {config['out']} "
         f"--batch-size {config['bs']} "
         f"--num-iters-warmup 3 --num-iters 5 "
-        f"--trust-remote-code "
+        f"--no-enable-prefix-caching "
         f"--output-json {output_json} "
     )
     # pop env and extra args from config
@@ -202,7 +202,7 @@ def run_throughput(model, config):
         f"--input-len {config['inp']} "
         f"--output-len {config['out']} "
         f"--num-prompts {config['num_prompts']} "
-        f"--trust-remote-code "
+        f"--no-enable-prefix-caching "
         f"--output-json {output_json} "
     )
     # pop env and extra args from config
@@ -249,9 +249,8 @@ def run_serving(model, config):
         f"{model} "
         f"--dtype {config['dtype']} "
         f"-tp {config['tp']} "
-        f"--trust-remote-code "
-        f" --swap-space 16 "
-        f" --disable-uvicorn-access-log"
+        f"--no-enable-prefix-caching "
+        f"--disable-uvicorn-access-log "
     )
     # pop env and extra args from config
     env = config.pop('env', "")
@@ -279,14 +278,14 @@ def run_serving(model, config):
         bench_cmd = (
             "vllm bench serve "
             f"--model {model} "
-            f"--percentile-metrics tpot,itl,e2el "
+            f"--percentile-metrics ttft,tpot,itl,e2el "
             f"--dataset-name random "
             f"--ignore-eos "
+            f"--temperature 0 "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
-            f"--trust-remote-code "
             f"--save-result "
             f"--result-filename {output_json}"
         )
@@ -294,9 +293,9 @@ def run_serving(model, config):
         bench_args_str = ""
         for k, v in bench_args.items():
             if isinstance(v, bool):
-                bench_args_str += f"--{k} "
+                bench_args_str += f"{k} "
             else:
-                bench_args_str += f"--{k} {v} "
+                bench_args_str += f"{k} {v} "
         bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
         
         config["cmd"] = f"{server_cmd};{bench_cmd}"
@@ -348,9 +347,8 @@ def run_accuracy(model, config):
         f"{model} "
         f"--dtype {config['dtype']} "
         f"-tp {config['tp']} "
-        f"--trust-remote-code "
-        f" --swap-space 16 "
-        f" --disable-uvicorn-access-log"
+        f"--no-enable-prefix-caching "
+        f"--disable-uvicorn-access-log "
     )
     # pop env and extra args from config
     env = config.pop('env', "")
@@ -395,9 +393,9 @@ def run_accuracy(model, config):
         bench_args_str = ""
         for k, v in bench_args.items():
             if isinstance(v, bool):
-                bench_args_str += f"--{k} "
+                bench_args_str += f"{k} "
             else:
-                bench_args_str += f"--{k} {v} "
+                bench_args_str += f"{k} {v} "
         bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
         config["cmd"] = f"{server_cmd};{bench_cmd}"
         print(bench_cmd)
@@ -476,7 +474,7 @@ def main():
             # Use dataprovider if present for model weights
             if MAD_DATAHOME := os.environ.get('MAD_DATAHOME'):
                 model = MAD_DATAHOME
-            elif config.get('extra_args', {}).get('load-format', None) == 'dummy':
+            elif config.get('extra_args', {}).get('--load-format', None) == 'dummy':
                 print("Found --load-format dummy in config, using dummy weights for benchmarking")
             else:
                 # Explicitly download model before running benchmarks for easier debugging
@@ -490,9 +488,9 @@ def main():
             extra_args_str = ""
             for k, v in extra_args.items():
                 if isinstance(v, bool):
-                    extra_args_str += f" --{k}"
+                    extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" --{k} {v}"
+                    extra_args_str += f" {k} {v}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             

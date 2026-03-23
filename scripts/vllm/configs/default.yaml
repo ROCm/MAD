@@ -2,32 +2,33 @@
 
 ## DeepSeek AITER MLA currently only supports --block-size 1
 - benchmark: serving
-  model: deepseek-ai/DeepSeek-R1-0528
-  tp: 8
-  inp: 1024
-  out: 1024
-  dtype: auto
-  max_concurrency: 1 8 32 128
-  extra_args:
-    async-scheduling: True
-    block-size: 1
-
-## gpt-oss requires AITER unified attention and performs best with block-size 64 and FULL_AND_PIECEWISE cudagraph mode
-- benchmark: serving
-  model: openai/gpt-oss-120b
+  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-Preview
   tp: 8
   inp: 1024
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
   env:
-    VLLM_ROCM_USE_AITER_MHA: 0
-    VLLM_ROCM_USE_AITER_UNIFIED_ATTENTION: 1
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
-    block-size: 64
-    compilation-config: '{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\"}'
+    --block-size: 1
 
+## gpt-oss requires AITER unified attention and performs best with --block-size 64
+## gpt-oss w4a8 is gfx950 only
+- benchmark: serving
+  model: openai/gpt-oss-120b amd/gpt-oss120b-w-mxfp4-a-fp8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --block-size: 64
+    --attention-backend: ROCM_AITER_UNIFIED_ATTN
+
+## For LLama, Mixtral, etc. on gfx942, use float16 for better GEMM perf
 - benchmark: serving
   model:
     meta-llama/Llama-3.1-405B-Instruct
@@ -39,8 +40,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -55,10 +58,11 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
 
-## Llama 4 currently does not support full cudagraph or attn fusion
 - benchmark: serving
   model:
     meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
@@ -67,9 +71,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
-    compilation-config: '{\"cudagraph_mode\":\"PIECEWISE\",\"pass_config\":{\"enable_attn_fusion\":false}}'
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -83,8 +88,10 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
