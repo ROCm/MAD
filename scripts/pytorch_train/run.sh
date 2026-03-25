@@ -69,17 +69,17 @@ elif [[ "$MODEL_REPO" == "pyt_train_llama-3-70b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
-  tasks=("pretrain" "HF_pretrain" "finetune_fw" "finetune_lora")
+  # tasks=("pretrain" "HF_pretrain" "finetune_fw" "finetune_lora")
   # tasks=("pretrain")
   #tasks=("HF_pretrain")
-  #tasks=("finetune_fw" "finetune_lora")
+  tasks=("finetune_fw" "finetune_lora")
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
   #datatypes=("FP8")
-  tasks=("pretrain" "finetune_fw" "finetune_lora")
+  # tasks=("pretrain" "finetune_fw" "finetune_lora")
   #tasks=("pretrain")
-  #tasks=("finetune_fw" "finetune_lora")
+  tasks=("finetune_fw" "finetune_lora")
 
 elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-405b" ]]; then
   model="Llama-3.1-405B"
@@ -153,7 +153,9 @@ elif [[ "$MODEL_REPO" == "pyt_train_qwen2.5-72b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_qwen3-8b" ]]; then
   model="Qwen3-8B"
-  tasks=("finetune_fw" "finetune_lora")
+  #tasks=("finetune_fw" "finetune_lora")
+  datatypes=("FP8")
+  tasks=("finetune_fw")
 
 elif [[ "$MODEL_REPO" == "pyt_train_qwen3-32b" ]]; then
   model="Qwen3-32B"
@@ -192,4 +194,3 @@ for task in "${tasks[@]}"; do
     done
   done
 done
-

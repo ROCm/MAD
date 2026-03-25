@@ -40,20 +40,25 @@
 MODEL_REPO=""
 MODE="pretrain"
 DATATYPE="BF16"
+POSTTRAIN_TYPE="lora"
 
 usage() {
-  echo "Usage: $0 -m <model_repo> -p <datatype> -l <layers>"
+  echo "Usage: $0 -m <model_repo> -p <datatype> -t <mode> -f <posttrain_type>"
   echo "\nOptions:"
-  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy)"
+  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, Mamba-370M)"
   echo "  -p <datatype>        Precision type (FP8 or BF16)"
+  echo "  -t <mode>            Training mode (pretrain or posttrain, default: pretrain)"
+  echo "  -f <posttrain_type>  Post-training type (sft or lora, default: lora). Only used when mode is posttrain."
   exit 1
 }
 
 # Parse command-line arguments
-while getopts "m:p:" opt; do
+while getopts "m:p:t:f:" opt; do
   case "$opt" in
     m) MODEL_REPO="$OPTARG" ;;
     p) DATATYPE="$OPTARG" ;;
+    t) MODE="$OPTARG" ;;
+    f) POSTTRAIN_TYPE="$OPTARG" ;;
     *) usage ;;
   esac
 done
@@ -61,6 +66,8 @@ done
 echo "=hyper params start="
 echo $MODEL_REPO
 echo $DATATYPE
+echo $MODE
+echo $POSTTRAIN_TYPE
 echo "=hyper params end="
 
 # Validate inputs
@@ -74,6 +81,16 @@ if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" ]]; then
   exit 1
 fi
 
+if [[ "$MODE" != "pretrain" && "$MODE" != "posttrain" ]]; then
+  echo "Error: Mode must be either pretrain or posttrain."
+  exit 1
+fi
+
+if [[ "$POSTTRAIN_TYPE" != "sft" && "$POSTTRAIN_TYPE" != "lora" ]]; then
+  echo "Error: Post-training type must be either sft or lora."
+  exit 1
+fi
+
 # Run benchmark (Placeholder for actual script execution)
 echo "Running primus training benchmark with the following parameters:"
 echo "  Model Repository: $MODEL_REPO"
@@ -82,7 +99,7 @@ echo "  Model Repository: $MODEL_REPO"
 export MOCK_DATA=1
 
 # set performance output paths
-TRAIN_LOG="$(pwd)/primus-megatron-$MODEL_REPO-pretrain.csv"
+TRAIN_LOG="$(pwd)/primus-megatron-$MODEL_REPO-$MODE.csv"
 echo "TRAIN LOG: $TRAIN_LOG"
 
 PERF_LOG="$(pwd)/../perf_primus-megatron-$MODEL_REPO.csv"
@@ -93,7 +110,7 @@ perf_script="$(pwd)/primus_megatron-lm_benchmark_report.py"
 # Run rocminfo and grep for "AMD Instinct"
 DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
 echo "DEVICE found: $DEVICE"
-if [[ -z "$DEVICE" || "$DEVICE" != "MI300X" || "$DEVICE" != "MI355X" ]]; then
+if [[ -z "$DEVICE" || ("$DEVICE" != "MI300X" && "$DEVICE" != "MI355X") ]]; then
   ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
@@ -105,6 +122,15 @@ echo "GPU DEVICE name: $DEVICE"
 if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
   export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
   export NVTE_CK_IS_V3_ATOMIC_FP32=1
+fi
+
+# Map device names for config file paths
+if [ "$DEVICE" == "MI325X" ]; then
+  CONFIG_DEVICE="MI300X"
+elif [ "$DEVICE" == "MI350X" ]; then
+  CONFIG_DEVICE="MI355X"
+else
+  CONFIG_DEVICE="$DEVICE"
 fi
 
 # Set common environment variables
@@ -120,20 +146,17 @@ cd /workspace/Primus
 # run models
 if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/llama3.1_8B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.1_8B-$DATATYPE-pretrain.yaml
   SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
-    MBS=4
-    GBS=512
-    bash ./examples/run_pretrain.sh 2>&1 | tee $TRAIN_LOG
     bash runner/primus-cli direct \
       --log_file /tmp/primus_$MODEL_REPO.log \
       -- train pretrain \
       --config $EXP 2>&1 | tee -a $TRAIN_LOG
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    MBS=2
-    GBS=128
-    bash ./examples/run_pretrain.sh 2>&1 | tee $TRAIN_LOG
     bash runner/primus-cli direct \
       --log_file /tmp/primus_$MODEL_REPO.log \
       -- train pretrain \
@@ -141,32 +164,29 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
-  echo "[INFO] $MODEL_REPO TRAINING" # BF16 training only
-  export EXP=examples/megatron/configs/$DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
+  echo "[INFO] $MODEL_REPO TRAINING"
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
   SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
-      MBS=3
-      GBS=24
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=4
-      GBS=32
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -176,9 +196,6 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=3
-      GBS=24
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -187,30 +204,31 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING" # FP8 training only
-  export EXP=examples/megatron/configs/$DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.1_70B-$DATATYPE-pretrain.yaml
   SEQ_LEN=8192
+  # Set MBS/GBS through command line for proxy models 
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     echo "Error: Llama-3.1-70B-proxy model is not supported on $DEVICE. To train use the full Llama-3.1-70B model."
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       MBS=3
       GBS=24
-      bash ./examples/run_pretrain.sh --num_layers 40 --fp8 hybrid --micro_batch_size $MBS --global_batch_size $GBS --no_fp8_weight_transpose_cache true 2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 40 --fp8 hybrid --micro_batch_size $MBS --global_batch_size $GBS --no_fp8_weight_transpose_cache true 2>&1 | tee $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
       echo "Error: Datatype BF16 is not supported for $MODEL_REPO on $DEVICE. Only FP8 is supported."
     fi
@@ -218,26 +236,26 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
 
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/llama3.3_70B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.3_70B-$DATATYPE-pretrain.yaml
   SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=6
-      GBS=48
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -247,9 +265,6 @@ elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=2
-      GBS=16
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -259,48 +274,41 @@ elif [ "$MODEL_REPO" == "Llama-3.3-70B" ]; then
 
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Llama-2-7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/llama2_7B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama2_7B-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
-      export MBS=13
-      export GBS=416
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
-      export MBS=10
-      export GBS=640
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    export MBS=4
-    export GBS=256
     if [ "$DATATYPE" == "FP8" ]; then
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -310,26 +318,26 @@ elif [ "$MODEL_REPO" == "Llama-2-7B" ]; then
 
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/llama2_70B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama2_70B-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=17
-      GBS=272
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -339,9 +347,6 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=7
-      GBS=56
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -350,26 +355,26 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/deepseek_v2_lite-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/deepseek_v2_lite-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
-    MBS=12
-    GBS=768
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -379,9 +384,6 @@ elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=4
-      GBS=640
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -390,30 +392,31 @@ elif [ "$MODEL_REPO" == "DeepSeek-V2-lite" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/deepseek_v3-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/deepseek_v3-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
+  # Set MBS/GBS through command line for proxy models 
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
       MBS=8
       GBS=64
-      bash ./examples/run_pretrain.sh --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS 2>&1 | tee $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -421,35 +424,34 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
     elif [ "$DATATYPE" == "BF16" ]; then
       MBS=3
       GBS=192
-      bash ./examples/run_pretrain.sh --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS 2>&1 | tee $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/mixtral_8x7B_v0.1-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/mixtral_8x7B_v0.1-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=4
-      GBS=256
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -459,9 +461,6 @@ elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=2
-      GBS=32
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -471,32 +470,33 @@ elif [ "$MODEL_REPO" == "Mixtral-8x7B" ]; then
 
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   LAYERS=4 # default proxy model uses 4 layers
   echo "[INFO] Proxy model uses $LAYERS layers"
-  export EXP=examples/megatron/configs/$DEVICE/mixtral_8x22B_v0.1-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/mixtral_8x22B_v0.1-$DATATYPE-pretrain.yaml
   SEQ_LEN=8192
+  # Set MBS/GBS through command line for proxy models 
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
       MBS=2
       GBS=16
-      bash ./examples/run_pretrain.sh --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS 2>&1 | tee $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -504,57 +504,49 @@ elif [ "$MODEL_REPO" == "Mixtral-8x22B-proxy" ]; then
     elif [ "$DATATYPE" == "BF16" ]; then
       MBS=1
       GBS=16
-      bash ./examples/run_pretrain.sh --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 4 --pipeline_model_parallel_size 1 --micro_batch_size $MBS --global_batch_size $GBS 2>&1 | tee $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Qwen2.5-7B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/qwen2.5_7B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/qwen2.5_7B-$DATATYPE-pretrain.yaml
   SEQ_LEN=2048
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [[ "$DATATYPE" == "BF16" ]]; then
-      MBS=16
-      GBS=768
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [[ "$DATATYPE" == "FP8" ]]; then
-      MBS=20
-      GBS=800
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    MBS=10
-    GBS=640
     if [ "$DATATYPE" == "FP8" ]; then
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
     elif [ "$DATATYPE" == "BF16" ]; then
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -563,21 +555,21 @@ elif [ "$MODEL_REPO" == "Qwen2.5-7B" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   fi
 
 elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  export EXP=examples/megatron/configs/$DEVICE/qwen2.5_72B-$DATATYPE-pretrain.yaml
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/qwen2.5_72B-$DATATYPE-pretrain.yaml
   SEQ_LEN=2048
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=16
-      GBS=256
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -587,9 +579,6 @@ elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      MBS=4
-      GBS=32
-      bash ./examples/run_pretrain.sh  2>&1 | tee $TRAIN_LOG
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
@@ -598,13 +587,215 @@ elif [ "$MODEL_REPO" == "Qwen2.5-72B" ]; then
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
-    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
     rm $TRAIN_LOG
   else
     echo "[INFO] Training log not found - configuration not supported."
-    echo "model,performance,metric,mode,precision,batch_size,seq_len,device,num_gpus" > $PERF_LOG
-    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
-    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Qwen-3-32B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  echo "[WARNING] Removing nemo_experiments, outputs, and logs folders in Primus directory for $MODEL_REPO"
+  if [ -d "/workspace/Primus/nemo_experiments" ]; then
+    rm -rf /workspace/Primus/nemo_experiments
+    echo "[INFO] Removed nemo_experiments folder"
+  fi
+  if [ -d "/workspace/Primus/outputs" ]; then
+    rm -rf /workspace/Primus/outputs
+    echo "[INFO] Removed outputs folder"
+  fi
+  if [ -d "/workspace/Primus/logs" ]; then
+    rm -rf /workspace/Primus/logs
+    echo "[INFO] Removed logs folder"
+  fi
+  SEQ_LEN=8192
+  if [[ "$MODE" == "posttrain" ]]; then
+    export EXP=examples/megatron_bridge/configs/$CONFIG_DEVICE/qwen3_32b_${POSTTRAIN_TYPE}_posttrain.yaml
+    MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+    GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+    echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+    if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+      if [ "$DATATYPE" == "FP8" ]; then
+        echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+      elif [ "$DATATYPE" == "BF16" ]; then
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train posttrain \
+          --config $EXP 2>&1 | tee $TRAIN_LOG
+      fi
+    elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+      if [ "$DATATYPE" == "FP8" ]; then
+        echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+      elif [ "$DATATYPE" == "BF16" ]; then
+        bash runner/primus-cli direct \
+          --log_file /tmp/primus_$MODEL_REPO.log \
+          -- train posttrain \
+          --config $EXP 2>&1 | tee $TRAIN_LOG
+      fi
+    fi
+  elif [[ "$MODE" == "pretrain" ]]; then
+    echo "Error: $MODEL_REPO pretrain mode is not supported. Use posttrain mode instead."
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --posttrain_type $POSTTRAIN_TYPE --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,posttrain_type,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$POSTTRAIN_TYPE,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$POSTTRAIN_TYPE,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Zebra-Llama-1B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/zebra_llama_1B-pretrain.yaml
+  SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Zebra-Llama-3B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/zebra_llama_3B-pretrain.yaml
+  SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Zebra-Llama-8B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/zebra_llama_8B-pretrain.yaml
+  SEQ_LEN=8192
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      PRIMUS_TRAIN_RUNTIME=legacy bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Mamba-370M" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  export EXP=examples/megatron/configs/MI300X/mamba_370M-pretrain.yaml
+  SEQ_LEN=2048
+  MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+  echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
   fi
 
 else

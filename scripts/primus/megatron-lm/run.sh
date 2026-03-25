@@ -62,6 +62,16 @@ elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen2.5-7b" ]]; then
   model="Qwen2.5-7B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen2.5-72b" ]]; then
   model="Qwen2.5-72B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_zebra-llama-1b" ]]; then
+  model="Zebra-Llama-1B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_zebra-llama-3b" ]]; then
+  model="Zebra-Llama-3B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_zebra-llama-8b" ]]; then
+  model="Zebra-Llama-8B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen-3-32b" ]]; then
+  model="Qwen-3-32B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_mamba-370m" ]]; then
+  model="Mamba-370M"
 fi
 
 # Run primus pytorch setup script
@@ -87,6 +97,10 @@ if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
   # MI355X/MI350X support
   if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
     echo "Skipping $model - Not supported on $DEVICE"
+  elif [[ "$model" == "Qwen-3-32B" || "$model" == "Mamba-370M" ]]; then
+    datatypes=("BF16")  # Only BF16 supported on MI355X/MI350X
+  elif [[ "$model" == "Zebra-Llama-1B" || "$model" == "Zebra-Llama-3B" || "$model" == "Zebra-Llama-8B" ]]; then
+    datatypes=("BF16")  # Only BF16 supported on MI355X/MI350X
   elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-3.1-70B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
     datatypes=("BF16" "FP8")
   else
@@ -97,6 +111,8 @@ elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
   # MI300X/MI325X support
   if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
     datatypes=("FP8")  # Only FP8 supported
+  elif [[ "$model" == "Zebra-Llama-1B" || "$model" == "Zebra-Llama-3B" || "$model" == "Zebra-Llama-8B" || "$model" == "Mamba-370M" ]]; then
+    datatypes=("BF16")  # Only BF16 supported on MI300X/MI325X
   elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
     datatypes=("BF16" "FP8")  # Both supported
   else
@@ -108,9 +124,24 @@ else
   datatypes=("BF16" "FP8")
 fi
 
+# Determine mode (default to pretrain, but some models use posttrain)
+TRAIN_MODE="pretrain"
+posttrain_types=()
+if [[ "$model" == "Qwen-3-32B" ]]; then
+  TRAIN_MODE="posttrain"
+  posttrain_types=("lora" "sft")
+fi
+
 # datatypes=("FP8")
 # Loop through supported combinations
 for datatype in "${datatypes[@]}"; do
-  echo "Running: $model - $datatype"
-  ./primus_megatron-lm_benchmark_report.sh -m $model -p $datatype
+  if [[ "$TRAIN_MODE" == "posttrain" && ${#posttrain_types[@]} -gt 0 ]]; then
+    for pt_type in "${posttrain_types[@]}"; do
+      echo "Running: $model - $datatype - $TRAIN_MODE - $pt_type"
+      ./primus_megatron-lm_benchmark_report.sh -m $model -p $datatype -t $TRAIN_MODE -f $pt_type
+    done
+  else
+    echo "Running: $model - $datatype - $TRAIN_MODE"
+    ./primus_megatron-lm_benchmark_report.sh -m $model -p $datatype -t $TRAIN_MODE
+  fi
 done
