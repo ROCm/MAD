@@ -8,8 +8,8 @@
   env:
     VLLM_ROCM_USE_AITER: 1
   extra_args:
-    load-format: dummy
-    async-scheduling: True
+    --load-format: dummy
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -24,9 +24,9 @@
   env:
     VLLM_ROCM_USE_AITER: 1
   extra_args:
-    load-format: dummy
-    kv-cache-dtype: fp8
-    async-scheduling: True
+    --load-format: dummy
+    --kv-cache-dtype: fp8
+    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -42,11 +42,10 @@
   env:
     VLLM_ROCM_USE_AITER: 1
   extra_args:
-    load-format: dummy
-    async-scheduling: True
+    --load-format: dummy
+    --attention-backend: ROCM_ATTN
   bench_args:
-    dataset-name: random
-    random-range-ratio: 0.8
+    --random-range-ratio: 0.8
   arch_overrides:
     gfx942:
       dtype: float16
@@ -58,9 +57,9 @@
   env:
     VLLM_ROCM_USE_AITER: 1
   extra_args:
-    async-scheduling: True
+    --attention-backend: ROCM_ATTN
   bench_args:
-    apply_chat_template: True
+    --apply_chat_template: True
   arch_overrides:
     gfx942:
       dtype: float16

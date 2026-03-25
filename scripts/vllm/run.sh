@@ -49,7 +49,7 @@ if [[ -z "$CONFIG" ]]; then
 fi
 
 # install lm-eval for accuracy testing
-pip install -qqq lm-eval[api]
+pip install -qqq lm-eval[api] hf-transfer
 
 # Run benchmark; use -u to make python prints unbuffered
 python3 -u run_vllm.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK
