@@ -25,6 +25,8 @@
 #
 #################################################################################
 
+echo "WARNING: Standalone megatron-lm models are deprecated. Please use the corresponding primus model (scripts/primus/megatron-lm) instead." >&2
+
 export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 
 # Parse named arguments
@@ -80,12 +82,3 @@ for datatype in "${datatypes[@]}"; do
   echo "Running: $model - $datatype"
   ./megatron-lm_benchmark_report.sh -m $model -p $datatype
 done
-
-
-
-
-
-
-
-
-

@@ -2106,6 +2106,101 @@
     "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b-proxy"
   },
   {
+    "name": "primus_pyt_megatron_lm_train_zebra-llama-1b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Zebra-Llama-1B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "zebra-llama",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_zebra-llama-1b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_zebra-llama-3b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Zebra-Llama-3B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "zebra-llama",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_zebra-llama-3b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_zebra-llama-8b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Zebra-Llama-8B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "zebra-llama",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_zebra-llama-8b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_qwen-3-32b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Qwen-3-32B.csv",
+    "tags": [
+      "pyt",
+      "posttrain",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_qwen-3-32b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_mamba-370m",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Mamba-370M.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "mamba",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_mamba-370m"
+  },
+  {
     "name": "pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning",
     "url": "https://github.com/huggingface/diffusers",
     "dockerfile": "docker/pyt_training_huggingface",

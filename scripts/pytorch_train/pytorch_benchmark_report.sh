@@ -189,6 +189,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
     TORCHTITAN_DIR="/workspace/torchtitan/torchtitan/models/llama3/train_configs/"
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
+      echo "WARNING: This torchtitan model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
       echo "[INFO] Benchmarking LLAMA 3.1 8B TRAINING"
       MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_8b-$DATATYPE.toml" 
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
@@ -214,6 +215,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
+      echo "WARNING: This torchtitan model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
       echo "[INFO] Benchmarking LLAMA 3.1 70B TRAINING"
       MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_70b-$DATATYPE.toml"
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
@@ -373,6 +375,7 @@ elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
+    echo "WARNING: This torchtune model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
     echo "[INFO] Executing torchtune finetuning benchmark..."
     torchtune_parser="$(pwd)/parse_torchtune_args.py"
     output=$(python3 $torchtune_parser --mode $TRAINING_MODE --model $MODEL_REPO)
