@@ -34,7 +34,7 @@ import re
 parser = argparse.ArgumentParser(description='Convert primus pytorch train output format to MAD csv output format')
 parser.add_argument("--mode",
                         type=str,
-                        help="pretrain or finetune")
+                        help="pretrain or posttrain")
 parser.add_argument("--model",
                         type=str,
                         help="model name")
@@ -49,7 +49,15 @@ parser.add_argument("--precision",
                         help="precision type")
 parser.add_argument("--batch_size",
                         type=str,
-                        help="batch size")
+                        help="micro batch size")
+parser.add_argument("--global_batch_size",
+                        type=str,
+                        default=None,
+                        help="global batch size")
+parser.add_argument("--posttrain_type",
+                        type=str,
+                        default=None,
+                        help="post-training type (sft or lora)")
 parser.add_argument("--seq_len",
                         type=str,
                         help="sequence length")
@@ -67,44 +75,67 @@ output_file = args.output
 print("Input file path: ", input_file)
 print("Output file path: ", output_file)
 
-def find_match(file, search_string):
-    with open(file, 'r') as file:
-        content = file.read()
-    # Updated pattern to match the new log format
-    # Looks for patterns like "TFLOP/s/GPU): 322.5/320.6" or "tokens/s/GPU): 725.1/720.6"
-    # and extracts the first value (before the slash)
-    pattern = fr"{re.escape(search_string)}\):\s*(\d+\.?\d*)/"
-    matches = re.findall(pattern, content)
-    if matches:
-        # Return the last 2 values if they exist (one from each run)
-        if len(matches) >= 2:
-            result = [matches[-2], matches[-1]]
-            print(f"Found {len(matches)} matches for '{search_string}', using last 2: {result}")
-        else:
-            result = [matches[-1]]
-            print(f"Found {len(matches)} match for '{search_string}': {result}")
+def find_match(file_path, search_string):
+    with open(file_path, 'r') as f:
+        content = f.read()
+    
+    # Pattern 1: Original format like "TFLOP/s/GPU): 322.5/320.6" or "tokens/s/GPU): 725.1/720.6"
+    # Extracts the first value (before the slash)
+    pattern1 = fr"{re.escape(search_string)}\):\s*(\d+\.?\d*)/"
+    matches1 = re.findall(pattern1, content)
+    
+    # Pattern 2: Qwen-3-32B format like "7184.9MODEL_TFLOP/s/GPU" or "1234.5tokens/s/GPU"
+    # Value comes directly before the metric text (no colon, no space)
+    # Allow for optional whitespace or other characters before the number
+    pattern2 = fr"(\d+\.?\d*){re.escape(search_string)}"
+    matches2 = re.findall(pattern2, content)
+    
+    # Also try with MODEL_ prefix for TFLOP (e.g., "7184.9MODEL_TFLOP/s/GPU")
+    if "TFLOP/s/GPU" in search_string:
+        pattern3 = fr"(\d+\.?\d*)MODEL_TFLOP/s/GPU"
+        matches3 = re.findall(pattern3, content)
+        matches2.extend(matches3)
+    
+    # Pattern 4: Handle format with colon but no slash (e.g., "GPU utilization: 7184.9MODEL_TFLOP/s/GPU")
+    # This captures cases where there might be text before the value
+    if "TFLOP/s/GPU" in search_string:
+        pattern4 = fr":\s*(\d+\.?\d*)MODEL_TFLOP/s/GPU"
+        matches4 = re.findall(pattern4, content)
+        matches2.extend(matches4)
+    
+    # Combine all matches and return the last one
+    all_matches = matches1 + matches2
+    if all_matches:
+        # Return only the last value
+        result = all_matches[-1]
+        print(f"Found {len(all_matches)} matches for '{search_string}', using last: {result}")
         return result
     else:
         print(f"Warning: No matches found for '{search_string}' pattern")
-        return []
+        return None
 
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
         args.model == "Mixtral-8x7B" or args.model == "Mixtral-8x22B-proxy" or \
         args.model == "DeepSeek-V2-lite" or args.model == "DeepSeek-V3-proxy" or \
         args.model == "Llama-3.1-70B-proxy" or args.model == "Llama-3.3-70B" or \
-        args.model == "Qwen2.5-7B" or args.model == "Qwen2.5-72B":
-    tok_per_s_per_gpu_list = find_match(input_file, "tokens/s/GPU")
-    TFLOPS_per_gpu_list = find_match(input_file, "TFLOP/s/GPU")
+        args.model == "Qwen2.5-7B" or args.model == "Qwen2.5-72B" or \
+        args.model == "Zebra-Llama-1B" or args.model == "Zebra-Llama-3B" or args.model == "Zebra-Llama-8B" or \
+        args.model == "Qwen-3-32B" or args.model == "Mamba-370M":
+    # Only extract tokens/s/GPU for models other than Qwen-3-32B
+    if args.model != "Qwen-3-32B":
+        tok_per_s_per_gpu = find_match(input_file, "tokens/s/GPU")
+    else:
+        tok_per_s_per_gpu = None
+    TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/GPU")
     
     data = []
-    # Write separate rows for each run
-    for i, (tps, tflops) in enumerate(zip(tok_per_s_per_gpu_list, TFLOPS_per_gpu_list)):
-        run_label = f"run_{i+1}" if len(tok_per_s_per_gpu_list) > 1 else ""
-        data.extend([
-            {'model': args.model, 'performance': tps, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label},
-            {'model': args.model, 'performance': tflops, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': run_label}
-        ])
+    # Write data for metrics that are found (don't require both to be present)
+    # Skip tokens/s/GPU for Qwen-3-32B
+    if tok_per_s_per_gpu is not None and args.model != "Qwen-3-32B":
+        data.append({'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus})
+    if TFLOPS_per_gpu is not None:
+        data.append({'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus})
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
     mode = 'w'  # Write if file doesn't exist or is empty
@@ -113,9 +144,8 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','seq_len','device','num_gpus','run'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','global_batch_size','posttrain_type','seq_len','device','num_gpus'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")
-
