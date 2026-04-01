@@ -24,8 +24,10 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.5.5.post3-rocm700-mi30x
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.9-rocm720-mi30x
 FROM $BASE_DOCKER
+
+ENV PYTHONPATH=$PYTHONPATH:/sgl-workspace/mori:/sgl-workspace/aiter:
 
 ARG GPU_ARCH=gfx942
 WORKDIR /sgl-workspace
