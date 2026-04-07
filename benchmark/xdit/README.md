@@ -42,9 +42,9 @@ latencies can be found from `results.csv` once the benchmark runs have finished.
 | pyt_xdit_hunyuanvideo          | [HunyuanVideo](https://huggingface.co/tencent/HunyuanVideo)                           |
 | pyt_xdit_hunyuanvideo_1_5      | [HunyuanVideo 1.5](https://huggingface.co/tencent/HunyuanVideo-1.5)                   |
 | pyt_xdit_ltx_2                 | [LTX-2](https://huggingface.co/Lightricks/LTX-2)                                      |
-| pyt_xdit_qwen_image            | [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image)                                  |
+| pyt_xdit_qwen_image            | [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image-2512)                             |
 | pyt_xdit_qwen_image_edit       | [Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit)                        |
 | pyt_xdit_sd_3_5                | [Stable diffusion 3.5](https://huggingface.co/stabilityai/stable-diffusion-3.5-large) |
 | pyt_xdit_wan_2_1               | [Wan 2.1](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P)                          |
 | pyt_xdit_wan_2_2               | [Wan 2.2](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B)                              |
-| pyt_xdit_z_image_turbo         | [Z-Image Turbo](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo)                      |
+| pyt_xdit_z_image               | [Z-Image](https://huggingface.co/Tongyi-MAI/Z-Image)                                  |
