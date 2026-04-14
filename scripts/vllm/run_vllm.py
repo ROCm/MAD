@@ -34,6 +34,7 @@ import shutil
 import signal
 import argparse
 import itertools
+import shlex
 import subprocess
 from typing import List, Dict
 
@@ -490,7 +491,16 @@ def main():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" {k} {v}"
+                    s = str(v)
+                    st = s.strip()
+                    if (
+                        k == "--limit-mm-per-prompt"
+                        or (st[:1] in "{[")
+                        or any(ch.isspace() for ch in s)
+                    ):
+                        extra_args_str += f" {k} {shlex.quote(s)}"
+                    else:
+                        extra_args_str += f" {k} {v}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             

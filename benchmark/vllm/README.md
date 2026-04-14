@@ -61,6 +61,12 @@ The following command pulls the Docker image from Docker Hub.
 docker pull vllm/vllm-openai-rocm:v0.17.1
 ```
 
+For Gemma 4, use the Gemma4-tagged image (also referenced by [`docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile`](../../docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile)):
+
+```sh
+docker pull vllm/vllm-openai-rocm:gemma4
+```
+
 ### MAD-integrated benchmarking
 
 Clone the ROCm Model Automation and Dashboarding (MAD) repository to a local directory and install the required packages on the host machine.
@@ -86,7 +92,17 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 #### Available models
 
 >[!NOTE]
->The MXFP4 models are only supported on the gfx950 architecture i.e. MI350X/MI355X accelerators.	
+>The MXFP4 models are only supported on the gfx950 architecture i.e. MI350X/MI355X accelerators.
+
+>[!NOTE]
+>Gemma 4 models (`pyt_vllm_gemma-4-*`) are built from `vllm/vllm-openai-rocm:gemma4` (see [`docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile`](../../docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile)). Accept Google’s Gemma license on Hugging Face and set `MAD_SECRETS_HFTOKEN` for gated weight downloads.
+
+Serving recipes for Gemma 4 live in [`scripts/vllm/configs/default.yaml`](../../scripts/vllm/configs/default.yaml). Both Gemma 4 entries use **tensor parallel size 1**, **`TRITON_ATTN`**, **`float16` on gfx942** (via `arch_overrides`), **`--max-model-len` 32768**, text-only multimodal limits (`--limit-mm-per-prompt`), and **`VLLM_ROCM_USE_AITER=1`** where supported.
+
+| Model | Notes |
+| ----- | ----- |
+| **google/gemma-4-31B-it** | Dense instruct. Full serving sweep: **`max_concurrency` 1, 8, 32, 128** (four cold starts). |
+| **google/gemma-4-26B-A4B-it** | Sparse MoE (“A4B”). **AITER fused MoE is disabled** via **`VLLM_ROCM_USE_AITER_MOE=0`** so MoE runs on the **Triton** path. **Concurrency sweep is narrowed to 1 and 8** only for typical MAD Docker memory limits. |
 
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
@@ -112,6 +128,8 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_mixtral-8x22b                 | [mistralai/Mixtral-8x22B-Instruct-v0.1](https://hugggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1) |
 | pyt_vllm_mixtral-8x22b_fp8             | [amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV](https://hugggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV) |
 | pyt_vllm_phi-4                         | [microsoft/phi-4](https://huggingface.co/microsoft/phi-4) |
+| pyt_vllm_gemma-4-26b-a4b-it            | [google/gemma-4-26B-A4B-it](https://huggingface.co/google/gemma-4-26B-A4B-it) |
+| pyt_vllm_gemma-4-31b-it                | [google/gemma-4-31B-it](https://huggingface.co/google/gemma-4-31B-it) |
 | pyt_vllm_qwen3-8b                      | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
 | pyt_vllm_qwen3-32b                     | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) |
 | pyt_vllm_qwen3-30b-a3b                 | [Qwen/Qwen3-30B-A3B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507) |
@@ -131,6 +149,8 @@ docker pull vllm/vllm-openai-rocm:v0.17.1
 
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.17.1
 ```
+
+For Gemma 4 standalone runs, substitute `vllm/vllm-openai-rocm:gemma4` for the image tag in the `docker run` line above. For **`google/gemma-4-26B-A4B-it`** only, also set **`VLLM_ROCM_USE_AITER_MOE=0`** (same as the MAD `default.yaml` recipe) so MoE does not use AITER’s fused path.
 
 >[!NOTE]
 >We enable [AITER](https://github.com/ROCm/aiter) during `docker run` via `--env VLLM_ROCM_USE_AITER=1` for best performance
@@ -344,6 +364,10 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+MAD `pyt_vllm_gemma-4-*` configs (see [`default.yaml`](../../scripts/vllm/configs/default.yaml)):
+- **gemma-4-26B-A4B-it:** set `VLLM_ROCM_USE_AITER_MOE=0` (Triton MoE); narrowed default `max_concurrency` to **1 8** to avoid OOM on repeated server restarts.
+- **gemma-4-31B-it:** unchanged full sweep **1 8 32 128**; no `VLLM_ROCM_USE_AITER_MOE` override.
 
 v0.17.1 release:
 - Includes documentation and patches for upstream releases. Please track https://github.com/vllm-project/vllm/releases

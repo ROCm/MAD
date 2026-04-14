@@ -488,6 +488,44 @@
     "--model_repo Qwen/Qwen3-8B --config configs/extended.yaml"
   },
   {
+    "name": "pyt_vllm_gemma-4-26b-a4b-it",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm_gemma4",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_gemma-4-26B-A4B-it.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended",
+      "inference"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo google/gemma-4-26B-A4B-it --config configs/default.yaml"
+  },
+  {
+    "name": "pyt_vllm_gemma-4-31b-it",
+    "data": "huggingface",
+    "dockerfile": "docker/pyt_vllm_gemma4",
+    "scripts": "scripts/vllm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_gemma-4-31B-it.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_extended",
+      "inference"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo google/gemma-4-31B-it --config configs/default.yaml"
+  },
+  {
     "name": "pyt_vllm_qwen3-32b",
     "data": "huggingface",
     "dockerfile": "docker/pyt_vllm",

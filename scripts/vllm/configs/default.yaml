@@ -95,3 +95,44 @@
   arch_overrides:
     gfx942:
       dtype: float16
+
+## Gemma 4: vLLM recipe recommends 1x MI300-class GPU (BF16); tp 1 for text-only bench
+## Use TRITON_ATTN (Gemma4 default); 26B-A4B MoE: VLLM_ROCM_USE_AITER_MOE=0; narrow concurrency for 26B to avoid OOM
+- benchmark: serving
+  model: google/gemma-4-26B-A4B-it
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_USE_AITER_MOE: 0
+  extra_args:
+    --attention-backend: TRITON_ATTN
+    --max-model-len: 32768
+    --gpu-memory-utilization: 0.90
+    --limit-mm-per-prompt: '{"image":0,"audio":0}'
+    --async-scheduling: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+- benchmark: serving
+  model: google/gemma-4-31B-it
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --attention-backend: TRITON_ATTN
+    --max-model-len: 32768
+    --gpu-memory-utilization: 0.90
+    --limit-mm-per-prompt: '{"image":0,"audio":0}'
+    --async-scheduling: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
