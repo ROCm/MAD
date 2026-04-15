@@ -1,4 +1,4 @@
-## List of Models - focus SGlang Disaggerated P/D inference
+## List of Models - focus SGLang Disaggregated P/D inference
 
 Dense Models
 - Qwen3-32B (https://huggingface.co/Qwen/Qwen3-32B)
