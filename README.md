@@ -24,11 +24,13 @@ Below are blueprints of supported models along with their documentation.
 | [**vLLM disaggregated P/D inference**](scripts/vllm_dissag/README.MD) | Distributed Inference P/D disaggregation with vLLM | DeepSeek-V3, Llama-3.3-70B-Instruct-FP8-KV, Llama-3.1-405B-Instruct-FP8-KV, gpt-oss-120b |
 | [**SGLang disaggregated P/D inference**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disggregation with SGLang | Qwen3-32B, Llama-3.1-8B-Instruct, Llama-3.3-70B-Instruct-FP8-KV, Llama-3.1-405B-Instruct-FP8-KV, DeepSeek-V3, Mixtral-8x7B-v0.1 |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
+| [**Primus pretrain**](#primus-pretrain) | LLM pretraining through the [Primus](https://github.com/AMD-AGI/Primus) launcher (Megatron, TorchTitan, MaxText, and other backends) | Config-driven; see `scripts/Primus/examples/` |
 
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [Primus pretrain](#primus-pretrain)
 - [Usage Guide](#usage-guide)
   - [Running Models](#running-models)
   - [Tag Functionality](#tag-functionality)
@@ -50,10 +52,14 @@ Below are blueprints of supported models along with their documentation.
 
 ## Quick Start
 
-1. **Clone the repository**:
+1. **Clone the repository** (include the Primus submodule if you use [Primus pretrain](#primus-pretrain)):
    ```bash
-   git clone <repository-url>
+   git clone --recurse-submodules <repository-url>
    cd MAD
+   ```
+   If you already cloned without submodules, initialize Primus with:
+   ```bash
+   git submodule update --init scripts/Primus
    ```
 
 2. **Install dependencies**:
@@ -66,7 +72,20 @@ Below are blueprints of supported models along with their documentation.
    madengine run --tags pyt_huggingface_bert
    ```
 
+## Primus pretrain
 
+MAD integrates [AMD-AGI/Primus](https://github.com/AMD-AGI/Primus) as a Git submodule at **`scripts/Primus`**. The **`primus_pretrain`** entry in `models.json` uses **`docker/primus.ubuntu.amd.Dockerfile`** and **`scripts/primus_pretrain/`** (`run.sh` wraps Primus `examples/run_pretrain.sh`, copies logs under the madengine run directory, and writes **`primus_perf_output.csv`** for throughput / TFLOPs / MFU when logs include those metrics).
+
+- **Run with madengine** (tags include `primus`, `training`, `pretrain`):
+  ```bash
+  madengine run --tags primus_pretrain
+  ```
+- **Choose a config**: pass Primus YAML via script args, e.g. `--config_path examples/torchtitan/configs/MI300X/your_config.yaml` (path is relative to the Primus repo root). For SLURM or Kubernetes, you can set **`PRIMUS_CONFIG_PATH`** to the same path instead.
+- **Hugging Face–backed configs**: set **`HF_TOKEN`**, or **`MAD_SECRET_HFTOKEN`** (madengine v2 can inject the latter via `additional_context.docker_env_vars`).
+- **Docker build**: build from the **repository root** so `COPY scripts/Primus/` in `docker/primus.ubuntu.amd.Dockerfile` resolves; `madengine build` uses repo context for Dockerfiles whose path contains `primus`.
+- **Optional discovery**: `scripts/primus_pretrain/get_models_json.py` can expose individual Primus example YAMLs as separate models when used with madengine’s discover-models flow.
+
+For more detail, see comments in `docker/primus.ubuntu.amd.Dockerfile` and `scripts/primus_pretrain/run.sh`.
 
 ## Usage Guide
 
