@@ -1053,6 +1053,16 @@
      "--model_repo pyt_train_qwen3-32b"
   },
   {
+    "name": "primus_pretrain",
+    "dockerfile": "docker/primus",
+    "scripts": "scripts/primus_pretrain",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "bf16",
+    "tags": ["training", "primus", "megatron", "pretrain"],
+    "args": ""
+  },
+  {
     "name": "primus_pyt_train_llama-3.1-8b",
     "url": "",
     "dockerfile": "docker/primus_pytorch_train",
