@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=vllm-pd    # Specify a custom string for your slurm batch job
-#SBATCH -N 3           # Request N+1 nodes
-#SBATCH -n 3          # Request N+1 total tasks
+#SBATCH -N 2           # Request xP + yD nodes (proxy co-located on prefill master)
+#SBATCH -n 2          # Request xP + yD total tasks
 #SBATCH --ntasks-per-node=1
 #SBATCH --spread-job
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
@@ -9,6 +9,31 @@
 #SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
 #SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
 
+
+# ------------------------
+# Auto-detect and cd to the script directory so that $(pwd) always
+# points to the folder containing the server scripts, regardless of
+# where the user called sbatch from.
+# Under Slurm, $0 points to a spool copy, so prefer SLURM_SUBMIT_DIR.
+# ------------------------
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+    SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+    SCRIPT_DIR="${SCRIPT_DIR:-.}"
+fi
+cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
+
+REQUIRED_FILES=("vllm_disagg_server.sh" "vllm_disagg_mori_ep.sh" "vllm_disagg_server_deepep.sh" "benchmark_xPyD.sh")
+for f in "${REQUIRED_FILES[@]}"; do
+    if [[ ! -f "$f" ]]; then
+        echo "Error: Required file '$f' not found in $(pwd)." >&2
+        echo "Please run sbatch from the scripts/vllm_dissag/ directory, e.g.:" >&2
+        echo "  cd MAD/scripts/vllm_dissag && sbatch run_xPyD_models.slurm" >&2
+        exit 1
+    fi
+done
+echo "Running from: $(pwd)"
 
 # ------------------------
 # Print current time in UTC and PST formats
@@ -24,44 +49,26 @@ VALID_MODELS=( \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
+    "DeepSeek-V3-5layer" \
     "gpt-oss-120b" \
+    "DeepSeek-R1" \
 )
 
-
-# Each model has an associated run file - Set it here
-declare -A MODEL_RUNFILES=(
-    ["Llama-3.1-405B-Instruct-FP8-KV"]="vllm_disagg_server.sh"
-    ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="vllm_disagg_server.sh"
-    ["DeepSeek-V3"]="vllm_disagg_server.sh"
-    ["gpt-oss-120b"]="vllm_disagg_server.sh"
+# Models allowed for vllm_disagg_mori_ep.sh when RUN_MORI=1
+MORI_EP_VALID_MODELS=( \
+    "DeepSeek-V3" \
+    "DeepSeek-V3-5layer" \
+    "DeepSeek-R1" \
 )
 
-# Check if MODEL_NAME exists and fetch runfile
-if [[ -n "${MODEL_RUNFILES[$MODEL_NAME]}" ]]; then
-    RUN_FILE="${MODEL_RUNFILES[$MODEL_NAME]}"
-    echo "Model found: $MODEL_NAME"
-    echo "Runfile set: $RUN_FILE"
-else
-    echo "Error: Model '$MODEL_NAME' not found in MODEL_RUNFILES"
-    echo "Available models: ${!MODEL_RUNFILES[@]}"
-    exit 1
-fi
-
-export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-rocm/vllm:v0.14.0_amd_dev}"
-if test -z "${DOCKER_IMAGE_NAME}"; then
-  echo "Error: DOCKER_IMAGE_NAME is not set or empty."
-  exit 1
-fi
-
-# Set current directory to be REPO directory with all relevant scripts
-NIXL_REPO_DIR=$(pwd)
-LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
-
-xP="${xP:-1}" #-> Number of Prefill Servers
-yD="${yD:-1}" #-> Number of Decode Servers
+# Models allowed for vllm_disagg_server_deepep.sh when RUN_DEEPEP=1
+DEEPEP_VALID_MODELS=( \
+    "DeepSeek-V3" \
+    "DeepSeek-V3-5layer" \
+    "DeepSeek-R1" \
+)
 
 MODEL_NAME="${MODEL_NAME:-None}"
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -87,12 +94,85 @@ validate_model_name() {
 
 validate_model_name "${MODEL_NAME}"
 
+model_allows_mori_ep() {
+  local m="$1"
+  for x in "${MORI_EP_VALID_MODELS[@]}"; do
+    [[ "$m" == "$x" ]] && return 0
+  done
+  return 1
+}
+
+model_allows_deepep() {
+  local m="$1"
+  for x in "${DEEPEP_VALID_MODELS[@]}"; do
+    [[ "$m" == "$x" ]] && return 0
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Run-mode selection: exactly one of RUN_MORI / RUN_DEEPEP may be "1".
+# ---------------------------------------------------------------------------
+_run_mori="${RUN_MORI:-0}"
+_run_deepep="${RUN_DEEPEP:-0}"
+
+if [[ "$_run_mori" == "1" && "$_run_deepep" == "1" ]]; then
+  echo "Error: Both RUN_MORI and RUN_DEEPEP are set to 1. Set only one." >&2
+  exit 1
+fi
+
+if [[ "$_run_mori" == "1" ]]; then
+  if (( xP != 1 || yD != 1 )); then
+    echo "Error: RUN_MORI=1 requires xP=1 and yD=1 (got xP=$xP, yD=$yD). Multi-node MoRI EP is not yet supported." >&2
+    exit 1
+  fi
+  if model_allows_mori_ep "$MODEL_NAME"; then
+    RUN_FILE="vllm_disagg_mori_ep.sh"
+    echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
+  else
+    echo "Error: RUN_MORI=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS"
+    printf "MoRI EP allowed models:\n"
+    for m in "${MORI_EP_VALID_MODELS[@]}"; do
+      printf "  - %s\n" "$m"
+    done
+    exit 1
+  fi
+elif [[ "$_run_deepep" == "1" ]]; then
+  if model_allows_deepep "$MODEL_NAME"; then
+    RUN_FILE="vllm_disagg_server_deepep.sh"
+    echo "RUN_DEEPEP=1: using $RUN_FILE for model '$MODEL_NAME'"
+  else
+    echo "Error: RUN_DEEPEP=1 but MODEL_NAME '$MODEL_NAME' is not in DEEPEP_VALID_MODELS"
+    printf "DeepEP allowed models:\n"
+    for m in "${DEEPEP_VALID_MODELS[@]}"; do
+      printf "  - %s\n" "$m"
+    done
+    exit 1
+  fi
+else
+  RUN_FILE="vllm_disagg_server.sh"
+  echo "RUN_MORI/RUN_DEEPEP not set: using $RUN_FILE"
+fi
+
+if [[ -z "${DOCKER_IMAGE_NAME:-}" ]]; then
+  echo "Error: DOCKER_IMAGE_NAME is not set. Please export DOCKER_IMAGE_NAME before running."
+  exit 1
+fi
+export DOCKER_IMAGE_NAME
+
+# Set current directory to be REPO directory with all relevant scripts
+NIXL_REPO_DIR=$(pwd)
+LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
+
+xP="${xP:-1}" #-> Number of Prefill Servers
+yD="${yD:-1}" #-> Number of Decode Servers
+
+MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+
 
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-ORIGINAL_MODEL_PATH="/shared_inference/models_blog/${MODEL_NAME}"
-
 echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
 
@@ -163,9 +243,18 @@ echo ""
 
 
 # Calculate NUM_NODES based on xP and yD
-NUM_NODES=$((xP + yD + 1))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1)"
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1)"
+NUM_NODES=$((xP + yD))
+echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+
+# DeepEP configuration (only exported when RUN_DEEPEP=1)
+if [[ "$_run_deepep" == "1" ]]; then
+    export PREFILL_DEEPEP_BACKEND="${PREFILL_DEEPEP_BACKEND:-deepep_high_throughput}"
+    export DECODE_DEEPEP_BACKEND="${DECODE_DEEPEP_BACKEND:-deepep_low_latency}"
+    export ENABLE_DBO="${ENABLE_DBO:-false}"
+    export DBO_COMM_SMS="${DBO_COMM_SMS:-}"
+    export ENABLE_PROFILING="${ENABLE_PROFILING:-false}"
+    echo "DeepEP config: PREFILL_BACKEND=$PREFILL_DEEPEP_BACKEND DECODE_BACKEND=$DECODE_DEEPEP_BACKEND DBO=$ENABLE_DBO"
+fi
 
 # ------------------------
 # Extract first NUM_NODES from SLURM allocation and update SLURM variables
@@ -178,11 +267,7 @@ echo "SLURM_NTASKS: $SLURM_NTASKS"
 # Get the full nodelist and extract first NUM_NODES
 FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
 SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n $NUM_NODES)
-SELECTED_NODELIST_STR=$(echo "$SELECTED_NODES" | tr '\n' ',' | sed 's/,$//')
-
-# Create new nodelist in SLURM format
-# This is a simplified approach - for complex ranges, you might need more sophisticated parsing
-NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd, | sed 's/,/,/g')
+NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
 
 # Update SLURM environment variables
 export SLURM_NNODES=$NUM_NODES
@@ -234,20 +319,6 @@ echo "Selected nodes for execution:"
 echo "$SELECTED_NODES"
 echo ""
 
-# MAke sure xP*8 and yD*8 are multiple of by 129280 for Deepseek V3
-
-# ------------------------
-# SLURM Environment Variables
-# ------------------------
-echo "SLURM_JOB_ID: $SLURM_JOB_ID"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-echo "SLURM_TASKS_PER_NODE: $SLURM_TASKS_PER_NODE"
-echo "SLURM_JOB_CPUS_PER_NODE: $SLURM_JOB_CPUS_PER_NODE"
-echo "ulimit: $(ulimit -a)"
-echo ""
-
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
@@ -266,8 +337,9 @@ done
 echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
 
 NIXL_COOKBOOK_PATH="/opt/nixl-vllm-cookbook"
-BENCHMARK_FILE="${BENCHMARK_FILE:-$NIXL_COOKBOOK_PATH/dissag_blog_p1/models_blog/run_xPyD_models.slurm}"
-timestamp=$(date +"%Y-%m-%d_%H-%M-%S")
+BENCHMARK_ITR="${BENCHMARK_ITR:-1}"
+BENCHMARK_CON="${BENCHMARK_CON:-}"
+BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 
 NNODES=$NUM_NODES
 
@@ -275,7 +347,7 @@ echo "MASTER_NODE is ${MASTER_NODE}"
 echo "MASTER_ADDR is ${MASTER_ADDR}"
 echo "MASTER_PORT is ${MASTER_PORT}"
 echo "NNODES is ${NNODES}"
-echo "REPO Directory is ${MOONCAKE_REPO_DIR}"
+echo "REPO Directory is ${NIXL_REPO_DIR}"
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
@@ -296,6 +368,9 @@ export yD=$yD
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
+export BENCHMARK_ITR=$BENCHMARK_ITR
+export BENCHMARK_CON="${BENCHMARK_CON}"
+export BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}"
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
@@ -306,6 +381,28 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
+fuser -k 5000/tcp 2>/dev/null || true;
+fuser -k 2222/tcp 2>/dev/null || true;
+fuser -k 15000/tcp 2>/dev/null || true;
+sleep 2;
+docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+
+# --- Build host RDMA library mounts ---
+# Mount the host MLNX OFED userspace libraries into the container so that
+# libmlx5 / libibverbs always match the host kernel module, preventing
+# mlx5dv_devx_alloc_uar failures from ABI mismatches.
+_RDMA_MOUNTS=""
+_LIBDIR=/usr/lib/x86_64-linux-gnu
+for _lib in libmlx5.so libmlx5.so.1 libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+done
+for _vlib in $_LIBDIR/libmlx5.so.1.* $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
+    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+done
+[ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
+[ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -321,9 +418,11 @@ docker run --rm \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
-    --ulimit nofile=131072:131072 \
+    --ulimit nofile=524288:524288 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
+    $_RDMA_MOUNTS \
+    --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
     -e NNODES=$NNODES \
@@ -336,16 +435,23 @@ docker run --rm \
     -e yD=$yD \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \
-    -e BENCHMARK_FILE=$BENCHMARK_FILE \
+    -e BENCHMARK_ITR=$BENCHMARK_ITR \
+    -e BENCHMARK_CON="${BENCHMARK_CON}" \
+    -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
     -e IPADDRS=$IPADDRS \
     -e PROXY_TYPE=${PROXY_TYPE:-vllm_router} \
-    -e ROUTER_PORT=${ROUTER_PORT:-2584} \
-    -e BENCHMARK_PORT=${BENCHMARK_PORT:-2584} \
+    -e ROUTER_PORT=${ROUTER_PORT:-18001} \
+    -e BENCHMARK_PORT=${BENCHMARK_PORT:-18001} \
+    -e PREFILL_DEEPEP_BACKEND=${PREFILL_DEEPEP_BACKEND:-} \
+    -e DECODE_DEEPEP_BACKEND=${DECODE_DEEPEP_BACKEND:-} \
+    -e ENABLE_DBO=${ENABLE_DBO:-} \
+    -e DBO_COMM_SMS=${DBO_COMM_SMS:-} \
+    -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
     --name $DOCKER_CONT_NAME \
-    $DOCKER_IMAGE_NAME bash -c "
+    $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
 '
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm $DOCKER_CONT_NAME'
+srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 
