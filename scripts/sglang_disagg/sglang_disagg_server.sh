@@ -218,7 +218,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
         --node-ips ${MASTER_ADDR} \
         --node-ports 2322
     
-    echo "Waiting untill proxy server closes..."
+    echo "Waiting until proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
         --remote-port 2322
@@ -254,7 +254,7 @@ else
         --node-ips ${MASTER_ADDR} \
         --node-ports 2322
     
-    echo "Waiting untill proxy server closes..."
+    echo "Waiting until proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
         --remote-port 2322
