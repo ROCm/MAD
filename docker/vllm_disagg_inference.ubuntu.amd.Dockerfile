@@ -113,11 +113,18 @@ RUN pip install vllm-router
 
 WORKDIR /app
 
-# versions.txt is provided by the base image and contains MORI_REPO / MORI_BRANCH entries.
+# Install MORI from latest main (pinned commit).
+ARG MORI_REPO=https://github.com/ROCm/mori.git
+ARG MORI_COMMIT=241461c0aaf8be2a502397668d4b3e1aab90a188
 RUN pip install tqdm prettytable
-RUN git clone --recursive $(grep '^MORI_REPO:' /app/versions.txt | cut -d' ' -f2) && \
-    cd mori && \
-    git checkout $(grep '^MORI_BRANCH:' /app/versions.txt | cut -d' ' -f2)
+RUN pip uninstall -y mori 2>/dev/null || true && \
+    rm -rf /app/mori && \
+    git clone --recursive ${MORI_REPO} /app/mori && \
+    cd /app/mori && \
+    git checkout ${MORI_COMMIT} && \
+    PYTORCH_ROCM_ARCH=${GFX_COMPILATION_ARCH} pip install . && \
+    echo "MORI_REPO: ${MORI_REPO}" > /tmp/_mori_ver && \
+    echo "MORI_BRANCH: $(git rev-parse --short HEAD)" >> /tmp/_mori_ver
 
 RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && cd rocm-systems && \
     git sparse-checkout set --cone projects/rocshmem && \

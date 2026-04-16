@@ -191,7 +191,7 @@ check_model_path() {
     echo "Checking $check_name: $path"
 
     # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
+    srun --overlap --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
         if [ -d '$path' ]; then
             echo \"\$(hostname): ✓ Found $path\"
             exit 0
@@ -212,24 +212,23 @@ check_model_path() {
     fi
 }
 
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
+# Check MODEL_DIR first (user-provided), then standard paths
+if check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared-inference/models_blog
+elif check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then
+    MODEL_PATH="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+    echo ""
+    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
     MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
+    echo "  - $MODEL_DIR/$MODEL_NAME"
     echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
     echo "  - /shared_inference/models_blog/$MODEL_NAME"
     echo ""
@@ -322,16 +321,23 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
-MASTER_PORT=39566  # Choose an open port
+# Prefer 10.x.x.x overlay IPs for inter-node communication.
+_pick_overlay_ip() {
+    local raw
+    raw=$(srun --overlap --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$1" bash -c 'hostname -I')
+    local ip
+    for ip in $raw; do
+        case "$ip" in 10.*) echo "$ip"; return ;; esac
+    done
+    echo "$raw" | awk 'NR==1 {print $1}'
+}
+
+MASTER_ADDR=$(_pick_overlay_ip "$MASTER_NODE")
+MASTER_PORT=39566
 
 IPS=()
-
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
-    IPS+=("$IP")
+    IPS+=("$(_pick_overlay_ip "$NODE")")
 done
 
 echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
@@ -378,32 +384,37 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+srun --overlap --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
+podman ps -q | xargs --no-run-if-empty podman stop 2>/dev/null || true;
 fuser -k 5000/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
+fuser -k 20005/tcp 2>/dev/null || true;
+fuser -k 10001/tcp 2>/dev/null || true;
 sleep 2;
-docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+
+# Set VLLM_HOST_IP to this node'\''s overlay IP so MoRIIO uses routable addresses
+_VLLM_HOST_IP=$(echo "$IPADDRS" | tr "," "\n" | sed -n "$((SLURM_PROCID + 1))p")
+echo "[vllm-host-ip] SLURM_PROCID=$SLURM_PROCID  VLLM_HOST_IP=$_VLLM_HOST_IP"
 
 # --- Build host RDMA library mounts ---
-# Mount the host MLNX OFED userspace libraries into the container so that
-# libmlx5 / libibverbs always match the host kernel module, preventing
-# mlx5dv_devx_alloc_uar failures from ABI mismatches.
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
-for _lib in libmlx5.so libmlx5.so.1 libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+for _lib in libmlx5.so libmlx5.so.1 libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1 libionic.so libionic.so.1; do
     [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
-for _vlib in $_LIBDIR/libmlx5.so.1.* $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
+for _vlib in $_LIBDIR/libmlx5.so.1.* $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.* $_LIBDIR/libionic.so.1.*; do
     [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+
+# Ionic RDMA: if libibverbs dir is already mounted from host, the ionic
+# provider inside it is included automatically; no extra mounts needed.
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 
-docker run --rm \
+podman run --rm \
     --device /dev/dri \
     --device /dev/kfd \
     --device /dev/infiniband \
@@ -414,10 +425,11 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --privileged \
     -v $HOME:$HOME \
-    -v /shared_inference:/shared_inference \
-    -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    $([ -d /shared_inference ] && echo "-v /shared_inference:/shared_inference") \
+    $([ -d /shared/amdgpu ] && echo "-v /shared/amdgpu:/shared/amdgpu") \
+    $([ -d /mnt/m2m_nobackup ] && echo "-v /mnt/m2m_nobackup:/mnt/m2m_nobackup") \
+    -v /sys:/sys:ro \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size 64G \
     --ulimit nofile=524288:524288 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
@@ -447,11 +459,20 @@ docker run --rm \
     -e ENABLE_DBO=${ENABLE_DBO:-} \
     -e DBO_COMM_SMS=${DBO_COMM_SMS:-} \
     -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
+    -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0} \
+    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
+    -e MORI_GPU_ARCHS=${MORI_GPU_ARCHS:-gfx950} \
+    -e MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-}" \
+    -e MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-}" \
+    -e MORI_IO_LOG_LEVEL="${MORI_IO_LOG_LEVEL:-INFO}" \
+    -e VLLM_HOST_IP=$_VLLM_HOST_IP \
+    -e PYTHONUNBUFFERED=1 \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
+        rm -rf /root/.triton/cache/ /tmp/triton* /tmp/torchinductor_root/
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
 '
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+srun --overlap --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'podman stop $DOCKER_CONT_NAME 2>/dev/null || true; podman rm $DOCKER_CONT_NAME 2>/dev/null || true'
 

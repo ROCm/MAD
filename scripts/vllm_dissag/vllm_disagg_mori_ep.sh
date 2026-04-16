@@ -59,7 +59,12 @@ echo "PREFILL_DP_START_RANK=${PREFILL_DP_START_RANK}"
 echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}"
 echo "DECODE_DP_START_RANK=${DECODE_DP_START_RANK}"
 echo "DECODE_MASTER_ADDR=${DECODE_MASTER_ADDR}"
-host_ip=$(hostname -I | awk '{print $1}')
+# Prefer 10.x.x.x overlay IP for inter-node communication
+host_ip=""
+for _ip in $(hostname -I); do
+    case "$_ip" in 10.*) host_ip="$_ip"; break ;; esac
+done
+[ -z "$host_ip" ] && host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
 
 # =============================================================================
@@ -74,10 +79,24 @@ setup_mori_env() {
     export VLLM_ROCM_USE_AITER_MLA=1
     export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
     export VLLM_ALL2ALL_BACKEND=mori
-    export GLOO_SOCKET_IFNAME=eth0
+    export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0}
     export VLLM_ENGINE_READY_TIMEOUT_S=3600
     export VLLM_RINGBUFFER_WARNING_INTERVAL=3600
     export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=3600
+    export MORI_GPU_ARCHS=${MORI_GPU_ARCHS:-gfx950}
+    export MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE:-6442450944}
+    export ROCSHMEM_TEST_UUID=1
+
+    # MORI IO RDMA configuration for Ionic AINIC
+    if [ -n "${MORI_RDMA_DEVICES:-}" ]; then
+        export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES}"
+    fi
+    if [ -n "${MORI_IB_GID_INDEX:-}" ]; then
+        export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX}"
+    fi
+    if [ -n "${MORI_IO_LOG_LEVEL:-}" ]; then
+        export MORI_IO_LOG_LEVEL="${MORI_IO_LOG_LEVEL}"
+    fi
 }
 
 build_kv_transfer_config() {
