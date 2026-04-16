@@ -14,10 +14,8 @@ MODEL_PATH=$MODEL_PATH
 MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
-if [ "$xP" -gt 1 ] || [ "$yD" -gt 1 ]; then
-    echo "Error: xP > 1 or yD > 1 is not supported yet due to MoRI IO connector issues." >&2
-    exit 1
-fi
+# Multi-node DP (xP>1 or yD>1) requires PR #39276 patches.
+# Patches are applied at runtime by apply_moriio_2pd_patches.sh.
 IPADDRS="${IPADDRS:-localhost}"
 IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 
@@ -68,6 +66,18 @@ done
 host_name=$(hostname)
 
 # =============================================================================
+# Apply PR #39276 patches for multi-node DP (idempotent)
+# =============================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/apply_moriio_2pd_patches.sh" ]; then
+    bash "${SCRIPT_DIR}/apply_moriio_2pd_patches.sh"
+elif [ -f "/app/scripts/apply_moriio_2pd_patches.sh" ]; then
+    bash "/app/scripts/apply_moriio_2pd_patches.sh"
+else
+    echo "[WARNING] apply_moriio_2pd_patches.sh not found — skipping runtime patches"
+fi
+
+# =============================================================================
 # Helper Functions
 # =============================================================================
 
@@ -80,6 +90,9 @@ setup_mori_env() {
     export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
     export VLLM_ALL2ALL_BACKEND=mori
     export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0}
+    if [ -n "${MORI_SOCKET_IFNAME:-}" ]; then
+        export MORI_SOCKET_IFNAME="${MORI_SOCKET_IFNAME}"
+    fi
     export VLLM_ENGINE_READY_TIMEOUT_S=3600
     export VLLM_RINGBUFFER_WARNING_INTERVAL=3600
     export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=3600
@@ -128,8 +141,12 @@ launch_vllm_worker() {
         extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
     fi
 
-    local kv_config
-    kv_config=$(build_kv_transfer_config "${kv_role}")
+    local kv_args=()
+    if [[ "$role" == "master" ]]; then
+        local kv_config
+        kv_config=$(build_kv_transfer_config "${kv_role}")
+        kv_args+=(--kv-transfer-config "${kv_config}")
+    fi
 
     vllm serve ${MODEL_PATH} \
         -tp 1 \
@@ -147,7 +164,7 @@ launch_vllm_worker() {
         --trust-remote-code \
         --enforce-eager \
         "${extra_args[@]}" \
-        --kv-transfer-config "${kv_config}" \
+        "${kv_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
 
     WORKER_PID=$!

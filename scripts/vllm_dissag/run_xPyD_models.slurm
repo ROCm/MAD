@@ -122,10 +122,6 @@ if [[ "$_run_mori" == "1" && "$_run_deepep" == "1" ]]; then
 fi
 
 if [[ "$_run_mori" == "1" ]]; then
-  if (( xP != 1 || yD != 1 )); then
-    echo "Error: RUN_MORI=1 requires xP=1 and yD=1 (got xP=$xP, yD=$yD). Multi-node MoRI EP is not yet supported." >&2
-    exit 1
-  fi
   if model_allows_mori_ep "$MODEL_NAME"; then
     RUN_FILE="vllm_disagg_mori_ep.sh"
     echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
@@ -431,6 +427,7 @@ podman run --rm \
     -v /sys:/sys:ro \
     -v $HOME/.ssh:/root/.ssh \
     --ulimit nofile=524288:524288 \
+    --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     $_RDMA_MOUNTS \
@@ -461,6 +458,12 @@ podman run --rm \
     -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
     -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-eth0} \
     -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-eth0} \
+    -e NCCL_IB_HCA="${NCCL_IB_HCA:-}" \
+    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-} \
+    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-} \
+    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-} \
+    -e NCCL_DEBUG=${NCCL_DEBUG:-WARN} \
+    -e MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-} \
     -e MORI_GPU_ARCHS=${MORI_GPU_ARCHS:-gfx950} \
     -e MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-}" \
     -e MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-}" \
