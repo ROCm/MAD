@@ -182,6 +182,19 @@ launch_vllm_worker() {
         sed -i "s/default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT/default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})/" "$_torch_const" 2>/dev/null || true
     fi
 
+    # Execution mode: prefill always uses eager; decode can optionally use
+    # CUDA graphs via VLLM_CUDAGRAPH_MODE (e.g. FULL_DECODE_ONLY).
+    # --enforce-eager overrides --compilation-config, so they are mutually exclusive.
+    local exec_args=()
+    local _cudagraph_mode="${VLLM_CUDAGRAPH_MODE:-}"
+    if [[ "$log_prefix" == "decode" && -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
+        local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
+        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--cudagraph-capture-sizes ${_capture_sizes})
+    else
+        exec_args+=(--enforce-eager)
+    fi
+
     vllm serve ${MODEL_PATH} \
         -tp 1 \
         --data-parallel-size "${dp_size}" \
@@ -196,8 +209,8 @@ launch_vllm_worker() {
         --no-enable-prefix-caching \
         --all2all-backend mori \
         --trust-remote-code \
-        --enforce-eager \
         --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+        "${exec_args[@]}" \
         "${extra_args[@]}" \
         "${kv_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
