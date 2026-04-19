@@ -1,7 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=vllm-pd    # Specify a custom string for your slurm batch job
-#SBATCH -N 2           # Request xP + yD nodes (proxy co-located on prefill master)
-#SBATCH -n 2          # Request xP + yD total tasks
 #SBATCH --ntasks-per-node=1
 #SBATCH --spread-job
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
@@ -122,10 +120,6 @@ if [[ "$_run_mori" == "1" && "$_run_deepep" == "1" ]]; then
 fi
 
 if [[ "$_run_mori" == "1" ]]; then
-  if (( xP != 1 || yD != 1 )); then
-    echo "Error: RUN_MORI=1 requires xP=1 and yD=1 (got xP=$xP, yD=$yD). Multi-node MoRI EP is not yet supported." >&2
-    exit 1
-  fi
   if model_allows_mori_ep "$MODEL_NAME"; then
     RUN_FILE="vllm_disagg_mori_ep.sh"
     echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
@@ -381,24 +375,32 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
-fuser -k 5000/tcp 2>/dev/null || true;
-fuser -k 2222/tcp 2>/dev/null || true;
-fuser -k 15000/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT_DEFAULT:-5000}/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT_MORI:-2222}/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT_DEEPEP:-15000}/tcp 2>/dev/null || true;
 sleep 2;
 docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 
+# --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
+mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+
 # --- Build host RDMA library mounts ---
-# Mount the host MLNX OFED userspace libraries into the container so that
-# libmlx5 / libibverbs always match the host kernel module, preventing
-# mlx5dv_devx_alloc_uar failures from ABI mismatches.
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
-for _lib in libmlx5.so libmlx5.so.1 libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+
+for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
     [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
-for _vlib in $_LIBDIR/libmlx5.so.1.* $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
+for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
     [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
+
+for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
+    for _vlib in $_LIBDIR/${_pattern}; do
+        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    done
+done
+
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
@@ -419,8 +421,10 @@ docker run --rm \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
     --ulimit nofile=524288:524288 \
+    --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
+    -v /tmp/vllm_cache:/tmp/vllm_cache \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
@@ -439,14 +443,40 @@ docker run --rm \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
     -e IPADDRS=$IPADDRS \
-    -e PROXY_TYPE=${PROXY_TYPE:-vllm_router} \
-    -e ROUTER_PORT=${ROUTER_PORT:-18001} \
-    -e BENCHMARK_PORT=${BENCHMARK_PORT:-18001} \
     -e PREFILL_DEEPEP_BACKEND=${PREFILL_DEEPEP_BACKEND:-} \
     -e DECODE_DEEPEP_BACKEND=${DECODE_DEEPEP_BACKEND:-} \
     -e ENABLE_DBO=${ENABLE_DBO:-} \
     -e DBO_COMM_SMS=${DBO_COMM_SMS:-} \
     -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
+    -e NCCL_IB_HCA=${NCCL_IB_HCA:-} \
+    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-} \
+    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-} \
+    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-} \
+    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-} \
+    -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-} \
+    -e MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-} \
+    -e MORI_IB_GID_INDEX=${MORI_IB_GID_INDEX:-} \
+    -e MORI_RDMA_DEVICES=${MORI_RDMA_DEVICES:-} \
+    -e MORI_NUM_QP_PER_PE=${MORI_NUM_QP_PER_PE:-} \
+    -e VLLM_MORIIO_QP_PER_TRANSFER=${VLLM_MORIIO_QP_PER_TRANSFER:-} \
+    -e VLLM_MORIIO_NUM_WORKERS=${VLLM_MORIIO_NUM_WORKERS:-} \
+    -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
+    -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
+    -e GPU_MAX_HW_QUEUES=${GPU_MAX_HW_QUEUES:-} \
+    -e HIP_FORCE_DEV_KERNARG=${HIP_FORCE_DEV_KERNARG:-} \
+    -e HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-} \
+    -e VLLM_HANDSHAKE_TIMEOUT_MINS=${VLLM_HANDSHAKE_TIMEOUT_MINS:-} \
+    -e VLLM_ENGINE_READY_TIMEOUT_S=${VLLM_ENGINE_READY_TIMEOUT_S:-} \
+    -e ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-} \
+    -e ROCSHMEM_MAX_NUM_CONTEXTS=${ROCSHMEM_MAX_NUM_CONTEXTS:-} \
+    -e LOG_WAIT_TIMEOUT_SECONDS=${LOG_WAIT_TIMEOUT_SECONDS:-} \
+    -e TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton} \
+    -e VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm} \
+    -e COMGR_CACHE_DIR=${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr} \
+    -e AITER_JIT_DIR=${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit} \
+    -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+    -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
+    -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}

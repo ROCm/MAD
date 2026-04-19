@@ -1,6 +1,9 @@
 #!/bin/bash
 # VLLM Disaggregated Server Launcher - MoRI EP Configuration
 # =============================================================================
+# Supports multi-node xP/yD topologies with co-located proxy on NODE 0.
+# Applies vLLM PR #39276 patches at runtime for multi-node DP support.
+# =============================================================================
 
 # =============================================================================
 # Environment Configuration
@@ -14,10 +17,7 @@ MODEL_PATH=$MODEL_PATH
 MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
-if [ "$xP" -gt 1 ] || [ "$yD" -gt 1 ]; then
-    echo "Error: xP > 1 or yD > 1 is not supported yet due to MoRI IO connector issues." >&2
-    exit 1
-fi
+echo "MoRI EP topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD)))"
 IPADDRS="${IPADDRS:-localhost}"
 IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 
@@ -28,25 +28,26 @@ ls ${NIXL_COOKBOOK_PATH}
 # Port Configuration
 # =============================================================================
 
-RPC_PORT=13345
-SERVE_PORT=20005
-KV_PORT=9711
-PROXY_PORT=10001
-PROXY_PING_PORT=36367
-LOCAL_PING_PORT=61555
-HANDSHAKE_PORT=8405
-NOTIFY_PORT=61005
+RPC_PORT="${MORI_RPC_PORT:-13345}"
+SERVE_PORT="${MORI_SERVE_PORT:-20005}"
+KV_PORT="${MORI_KV_PORT:-9711}"
+PROXY_PORT="${MORI_PROXY_PORT:-10001}"
+PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-36367}"
+LOCAL_PING_PORT="${MORI_LOCAL_PING_PORT:-61555}"
+HANDSHAKE_PORT="${MORI_HANDSHAKE_PORT:-8405}"
+NOTIFY_PORT="${MORI_NOTIFY_PORT:-61005}"
 
 # =============================================================================
 # Node-Specific Configuration
 # =============================================================================
 
-PREFILL_DP_SIZE=$((xP * 8))
-DECODE_DP_SIZE=$((yD * 8))
-DP_PARALLEL_SIZE_LOCAL=8
-PREFILL_DP_START_RANK=$(( NODE_RANK * 8 ))
+_GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+PREFILL_DP_SIZE=$((xP * _GPUS_PER_NODE))
+DECODE_DP_SIZE=$((yD * _GPUS_PER_NODE))
+DP_PARALLEL_SIZE_LOCAL=${_GPUS_PER_NODE}
+PREFILL_DP_START_RANK=$(( NODE_RANK * _GPUS_PER_NODE ))
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
-DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * 8 ))
+DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _GPUS_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
 
 echo "-----------------------------Printing node specific details ----------------------"
@@ -69,15 +70,71 @@ host_name=$(hostname)
 setup_mori_env() {
     export VLLM_ROCM_USE_AITER=1
     export VLLM_ROCM_USE_AITER_MOE=1
+    export VLLM_ROCM_USE_AITER_MLA=1
+    export VLLM_ROCM_USE_AITER_RMSNORM="${VLLM_ROCM_USE_AITER_RMSNORM:-1}"
+    export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
+    export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
+    export VLLM_USE_AITER_TRITON_SILU_MUL=0
+
     export VLLM_LOGGING_LEVEL=INFO
     export VLLM_USE_V1=1
-    export VLLM_ROCM_USE_AITER_MLA=1
-    export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
     export VLLM_ALL2ALL_BACKEND=mori
-    export GLOO_SOCKET_IFNAME=eth0
-    export VLLM_ENGINE_READY_TIMEOUT_S=3600
-    export VLLM_RINGBUFFER_WARNING_INTERVAL=3600
-    export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=3600
+
+    # Network — values from cluster profile via Docker env, or defaults
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
+
+    # Timeouts — generous values so AITER JIT compilation on the first run
+    # doesn't trip internal watchdogs.
+    export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-10800}"
+    export VLLM_RINGBUFFER_WARNING_INTERVAL="${VLLM_RINGBUFFER_WARNING_INTERVAL:-3600}"
+    export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600}"
+    export VLLM_RPC_TIMEOUT="${VLLM_RPC_TIMEOUT:-300000}"
+
+    # RDMA / NCCL tuning — cluster-specific via Docker env
+    export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
+    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
+    export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-3}"
+    export NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-1}"
+    export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-3}"
+    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
+
+    # MoRI EP QP tuning
+    export MORI_NUM_QP_PER_PE="${MORI_NUM_QP_PER_PE:-4}"
+    export VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
+    export VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+
+    # MoRIIO robustness timeouts (used by PR #39276 patches)
+    export VLLM_MORIIO_TRANSFER_TIMEOUT_S="${VLLM_MORIIO_TRANSFER_TIMEOUT_S:-600}"
+    export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
+    export VLLM_HANDSHAKE_TIMEOUT_MINS="${VLLM_HANDSHAKE_TIMEOUT_MINS:-30}"
+
+    # Compilation caches — host-local bind-mount avoids NFS file-lock races
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm}"
+    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr}"
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"
+    mkdir -p "${TRITON_CACHE_DIR}" "${VLLM_CACHE_ROOT}" "${COMGR_CACHE_DIR}" "${AITER_JIT_DIR}" 2>/dev/null || true
+
+    # Pre-populate AITER tuning CSVs to prevent CSV race condition
+    if [[ "${VLLM_ROCM_USE_AITER:-1}" == "1" ]]; then
+        local _aiter_cfgs="/tmp/aiter_configs"
+        local _aiter_src="/usr/local/lib/python3.12/dist-packages/aiter/configs"
+        if [ -d "${_aiter_src}" ] && [ ! -f "${_aiter_cfgs}/a8w8_blockscale_tuned_gemm.csv" ]; then
+            mkdir -p "${_aiter_cfgs}"
+            cp "${_aiter_src}"/*.csv "${_aiter_cfgs}/" 2>/dev/null || true
+        fi
+    fi
+
+    # GPU / ROCm tuning
+    export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-2}"
+    export HIP_FORCE_DEV_KERNARG="${HIP_FORCE_DEV_KERNARG:-1}"
+    export HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-0}"
+    export HSA_NO_SCRATCH_RECLAIM="${HSA_NO_SCRATCH_RECLAIM:-1}"
+
+    # RocSHMEM
+    export ROCSHMEM_HEAP_SIZE="${ROCSHMEM_HEAP_SIZE:-8589934592}"
+    export ROCSHMEM_MAX_NUM_CONTEXTS="${ROCSHMEM_MAX_NUM_CONTEXTS:-256}"
 }
 
 build_kv_transfer_config() {
@@ -103,14 +160,27 @@ launch_vllm_worker() {
     setup_mori_env
 
     local extra_args=()
+    local kv_args=()
+
     if [[ "$role" == "master" ]]; then
-        extra_args+=(--api-server-count=8)
+        extra_args+=(--api-server-count=${_GPUS_PER_NODE})
+        # Fix 6: only master nodes get --kv-transfer-config.
+        # Child nodes join via --headless and participate in EP all-to-all
+        # but do not perform KV transfers.
+        local kv_config
+        kv_config=$(build_kv_transfer_config "${kv_role}")
+        kv_args+=(--kv-transfer-config "${kv_config}")
     else
         extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
     fi
 
-    local kv_config
-    kv_config=$(build_kv_transfer_config "${kv_role}")
+    # Patch PyTorch's default_pg_timeout so DP Gloo groups use our timeout
+    # instead of the 30-min default.
+    local _timeout_s="${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
+    local _torch_const="/usr/local/lib/python3.12/dist-packages/torch/distributed/constants.py"
+    if [ -f "$_torch_const" ]; then
+        sed -i "s/default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT/default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})/" "$_torch_const" 2>/dev/null || true
+    fi
 
     vllm serve ${MODEL_PATH} \
         -tp 1 \
@@ -120,15 +190,16 @@ launch_vllm_worker() {
         --data-parallel-rpc-port ${RPC_PORT} \
         --enable-expert-parallel \
         --port ${SERVE_PORT} \
-        --gpu-memory-utilization 0.8 \
+        --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.8} \
         --kv-cache-dtype fp8 \
         --block-size 1 \
         --no-enable-prefix-caching \
         --all2all-backend mori \
         --trust-remote-code \
         --enforce-eager \
+        --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
         "${extra_args[@]}" \
-        --kv-transfer-config "${kv_config}" \
+        "${kv_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
 
     WORKER_PID=$!
@@ -165,7 +236,8 @@ print_node_info() {
 # Container Synchronization
 # =============================================================================
 
-for _pid in $(ss -tlnp sport = 2222 2>/dev/null | grep -oP "pid=\K\d+"); do
+_BARRIER_PORT="${BARRIER_PORT_MORI:-2222}"
+for _pid in $(ss -tlnp sport = ${_BARRIER_PORT} 2>/dev/null | grep -oP "pid=\K\d+"); do
     kill -9 "$_pid" 2>/dev/null
 done
 sleep 2
@@ -173,10 +245,22 @@ sleep 2
 echo "Waiting at the container creation barrier on $host_name"
 python $NIXL_COOKBOOK_PATH/socket_barrier.py \
     --local-ip ${host_ip} \
-    --local-port 2222 \
+    --local-port ${_BARRIER_PORT} \
     --enable-port \
     --node-ips ${IPADDRS} \
-    --node-ports 2222
+    --node-ports ${_BARRIER_PORT}
+
+# =============================================================================
+# Runtime Patches — Apply vLLM PR #39276 for multi-node DP support
+# =============================================================================
+
+PATCH_SCRIPT="${NIXL_COOKBOOK_PATH:-$(dirname "$0")}/apply_moriio_2pd_patches.sh"
+if [ -f "${PATCH_SCRIPT}" ]; then
+    echo "Applying runtime patches (PR #39276)..."
+    bash "${PATCH_SCRIPT}" 2>&1
+else
+    echo "Warning: ${PATCH_SCRIPT} not found — skipping runtime patches"
+fi
 
 # =============================================================================
 # Node Role Assignment and Server Launch
@@ -199,7 +283,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Waiting for prefill & decode servers to be ready..."
     sleep 20
 
-    TIMEOUT_SECONDS=4000
+    TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-4000}"
     SLEEP_SECONDS=10
     SEARCH_SIGNAL="Application startup complete."
 
