@@ -268,10 +268,25 @@ python $NIXL_COOKBOOK_PATH/socket_barrier.py \
 # =============================================================================
 
 PATCH_SCRIPT="${NIXL_COOKBOOK_PATH:-$(dirname "$0")}/apply_moriio_2pd_patches.sh"
+_PATCH_REQUIRED=0
+if [ "$xP" -gt 1 ] || [ "$yD" -gt 1 ]; then
+    _PATCH_REQUIRED=1
+fi
+
 if [ -f "${PATCH_SCRIPT}" ]; then
     echo "Applying runtime patches (PR #39276)..."
-    bash "${PATCH_SCRIPT}" 2>&1
+    if ! bash "${PATCH_SCRIPT}" 2>&1; then
+        if [ "$_PATCH_REQUIRED" -eq 1 ]; then
+            echo "Error: runtime patch failed but multi-node DP requires PR #39276 (xP=${xP}, yD=${yD}). Aborting."
+            exit 1
+        fi
+        echo "Warning: runtime patch failed — continuing (1P/1D does not strictly require it)"
+    fi
 else
+    if [ "$_PATCH_REQUIRED" -eq 1 ]; then
+        echo "Error: ${PATCH_SCRIPT} not found but multi-node DP requires PR #39276 (xP=${xP}, yD=${yD}). Aborting."
+        exit 1
+    fi
     echo "Warning: ${PATCH_SCRIPT} not found — skipping runtime patches"
 fi
 

@@ -375,9 +375,9 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
-fuser -k ${BARRIER_PORT_DEFAULT:-5000}/tcp 2>/dev/null || true;
-fuser -k ${BARRIER_PORT_MORI:-2222}/tcp 2>/dev/null || true;
-fuser -k ${BARRIER_PORT_DEEPEP:-15000}/tcp 2>/dev/null || true;
+fuser -k 5000/tcp 2>/dev/null || true;
+fuser -k 2222/tcp 2>/dev/null || true;
+fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
 docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 
@@ -442,6 +442,9 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
+    -e BENCHMARK_PORT=${BENCHMARK_PORT:-} \
+    -e PROXY_TYPE=${PROXY_TYPE:-} \
+    -e ROUTER_PORT=${ROUTER_PORT:-} \
     -e IPADDRS=$IPADDRS \
     -e PREFILL_DEEPEP_BACKEND=${PREFILL_DEEPEP_BACKEND:-} \
     -e DECODE_DEEPEP_BACKEND=${DECODE_DEEPEP_BACKEND:-} \

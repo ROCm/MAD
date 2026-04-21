@@ -18,15 +18,19 @@ PATCH_FILE="/tmp/vllm_pr_${PR_NUM}.patch"
 
 # Locate the vLLM installation directory
 VLLM_INSTALL_DIR=""
+_PYTHON_VLLM_CANDIDATE="$(python3 -c "import vllm, os; print(os.path.dirname(vllm.__file__))" 2>/dev/null || true)"
 for _candidate in \
     /usr/local/lib/python3.12/dist-packages/vllm \
-    /usr/local/lib/python3.*/dist-packages/vllm \
-    $(python3 -c "import vllm, os; print(os.path.dirname(vllm.__file__))" 2>/dev/null); do
+    /usr/local/lib/python3.*/dist-packages/vllm; do
     if [ -d "$_candidate" ]; then
         VLLM_INSTALL_DIR="$_candidate"
         break
     fi
 done
+
+if [ -z "${VLLM_INSTALL_DIR}" ] && [ -n "${_PYTHON_VLLM_CANDIDATE}" ] && [ -d "${_PYTHON_VLLM_CANDIDATE}" ]; then
+    VLLM_INSTALL_DIR="${_PYTHON_VLLM_CANDIDATE}"
+fi
 
 if [ -z "${VLLM_INSTALL_DIR}" ]; then
     echo "[PR#${PR_NUM}] ERROR: Cannot find vLLM installation directory"

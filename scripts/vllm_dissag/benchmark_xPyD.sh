@@ -66,7 +66,7 @@ for i in $(seq 1 $BENCHMARK_ITR); do
            --ignore-eos \
            --max-concurrency $con \
            2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null
-           rc=$?
+           rc=${PIPESTATUS[0]}
            if [ $rc -eq 124 ]; then
                echo "[STALL] isl=$isl osl=$osl con=$con timed out after ${_scaled_timeout}s" \
                    | tee -a ${LOG}_CONCURRENCY.log ${LOG}_STALLS.log >/dev/null
