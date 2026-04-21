@@ -44,18 +44,16 @@ echo "[PR#${PR_NUM}] vLLM root: ${VLLM_ROOT}"
 # Download the patch
 echo "[PR#${PR_NUM}] Downloading patch from ${PATCH_URL}..."
 if ! curl -sL "${PATCH_URL}" -o "${PATCH_FILE}" 2>/dev/null; then
-    echo "[PR#${PR_NUM}] WARNING: Failed to download patch — check network connectivity"
-    echo "[PR#${PR_NUM}] Trying to continue without patching..."
-    exit 0
+    echo "[PR#${PR_NUM}] ERROR: Failed to download patch — check network connectivity"
+    exit 1
 fi
 
 # Verify we got a real patch file (not an HTML error page)
 if ! head -1 "${PATCH_FILE}" | grep -q "^From "; then
-    echo "[PR#${PR_NUM}] WARNING: Downloaded file is not a valid patch"
+    echo "[PR#${PR_NUM}] ERROR: Downloaded file is not a valid patch"
     echo "[PR#${PR_NUM}] First line: $(head -1 "${PATCH_FILE}")"
-    echo "[PR#${PR_NUM}] Skipping patch application"
     rm -f "${PATCH_FILE}"
-    exit 0
+    exit 1
 fi
 
 PATCH_LINES=$(wc -l < "${PATCH_FILE}")
@@ -103,4 +101,10 @@ _check_patch "distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py" "
 echo "[PR#${PR_NUM}] Verification: ${_ok}/${_total} checks passed"
 
 rm -f "${PATCH_FILE}"
+
+if [ "${_ok}" -ne "${_total}" ]; then
+    echo "[PR#${PR_NUM}] ERROR: Patch verification failed — refusing to continue with partial patches"
+    exit 1
+fi
+
 echo "[PR#${PR_NUM}] Done"
