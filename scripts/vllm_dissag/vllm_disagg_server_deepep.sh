@@ -296,6 +296,14 @@ launch_vllm_worker() {
     local kv_config
     kv_config=$(build_kv_transfer_config "${kv_role}" "${engine_id}" "${dp_size}")
 
+    local profiler_args=()
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        local _profile_dir="/run_logs/${SLURM_JOB_ID}/profiles/${log_prefix}_NODE${NODE_RANK}"
+        mkdir -p "${_profile_dir}"
+        profiler_args+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"${_profile_dir}\"}")
+        echo "Profiler enabled for ${role} NODE${NODE_RANK} → ${_profile_dir}"
+    fi
+
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
@@ -307,11 +315,12 @@ launch_vllm_worker() {
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
         --no-enable-prefix-caching --block-size 1 \
-        --gpu-memory-utilization 0.8 \
+        --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.8} \
         --kv-cache-dtype fp8 \
         --enable-expert-parallel \
         --all2all-backend "${backend}" \
         ${DBO_ARGS} \
+        "${profiler_args[@]}" \
         "${extra_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
@@ -464,6 +473,8 @@ if [ "$NODE_RANK" -eq 0 ]; then
 
     sleep 10
     export BENCHMARK_PORT="${PROXY_PORT}"
+    export DECODE_MASTER_IP
+    export SERVER_PORT
     bash "${NIXL_COOKBOOK_PATH}/benchmark_xPyD.sh"
 
     echo "Killing proxy server"

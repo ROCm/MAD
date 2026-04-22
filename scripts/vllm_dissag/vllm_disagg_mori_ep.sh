@@ -195,6 +195,14 @@ launch_vllm_worker() {
         exec_args+=(--enforce-eager)
     fi
 
+    local profiler_args=()
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        local _profile_dir="/run_logs/${SLURM_JOB_ID}/profiles/${log_prefix}_NODE${NODE_RANK}"
+        mkdir -p "${_profile_dir}"
+        profiler_args+=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"${_profile_dir}\"}")
+        echo "Profiler enabled for ${log_prefix} ${role} NODE${NODE_RANK} → ${_profile_dir}"
+    fi
+
     vllm serve ${MODEL_PATH} \
         -tp 1 \
         --data-parallel-size "${dp_size}" \
@@ -210,6 +218,7 @@ launch_vllm_worker() {
         --all2all-backend mori \
         --trust-remote-code \
         --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+        "${profiler_args[@]}" \
         "${exec_args[@]}" \
         "${extra_args[@]}" \
         "${kv_args[@]}" \
@@ -354,6 +363,8 @@ if [ "$NODE_RANK" -eq 0 ]; then
 
     sleep 20
     export BENCHMARK_PORT=${PROXY_PORT}
+    export DECODE_MASTER_ADDR
+    export SERVE_PORT
     bash $NIXL_COOKBOOK_PATH/benchmark_xPyD.sh
 
     echo "Killing the proxy server.."
