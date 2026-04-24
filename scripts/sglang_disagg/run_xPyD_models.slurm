@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=1p1d_bench-serving    # Specify a custom string for your slurm batch job
+#SBATCH --job-name=sglang-disagg   # Specify a custom string for your slurm batch job
 #SBATCH -N 3            # CHECK this to be right in batch jobs 
 #SBATCH -n 3          # CHECK this to be right in batch jobs
 #SBATCH --ntasks-per-node=1
@@ -19,36 +19,83 @@ echo "PST Time: $(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "======================="
 echo ""
 
-# Define valid model names
-VALID_MODELS=( \
+# -----------------------------------------------------------------------------
+# DP_MODE=1 allowlist — must match MORI_DP_MODE1_ALLOWED_MODELS in sglang_disagg_mori_io_ep.sh
+# -----------------------------------------------------------------------------
+MORI_DP_MODE1_ALLOWED_MODELS=(
+    "DeepSeek-V3"
+    "DeepSeek-R1"
+)
+
+mori_model_allows_dp_mode_one() {
+    local name="$1"
+    local m
+    for m in "${MORI_DP_MODE1_ALLOWED_MODELS[@]}"; do
+        [[ "$name" == "$m" ]] && return 0
+    done
+    return 1
+}
+
+mori_dp_mode1_allowed_models_lines() {
+    local m
+    for m in "${MORI_DP_MODE1_ALLOWED_MODELS[@]}"; do
+        printf '  - %s\n' "$m"
+    done
+}
+
+# MoRI IO EP (`sglang_disagg_mori_io_ep.sh`): most models use DP_MODE=0 (tp only).
+MORI_EP_VALID_MODELS=( \
     "Qwen3-32B" \
-    "Mixtral-8x7B-v0.1" \
+    "Mixtral-8x7B-Instruct-v0.1" \
     "Llama-3.1-8B-Instruct" \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
+    "DeepSeek-R1" \
 )
 
-
-# Each model has an associated run file - Set it here
-declare -A MODEL_RUNFILES=(
-    ["Qwen3-32B"]="sglang_disagg_server.sh"
-    ["Mixtral-8x7B-v0.1"]="sglang_disagg_server.sh"
-    ["Llama-3.1-8B-Instruct"]="sglang_disagg_server.sh"
-    ["Llama-3.1-405B-Instruct-FP8-KV"]="sglang_disagg_server.sh"
-    ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="sglang_disagg_server.sh"
-    ["DeepSeek-V3"]="sglang_disagg_server.sh"
+# Define valid model names
+VALID_MODELS=( \
+    "Qwen3-32B" \
+    "Mixtral-8x7B-Instruct-v0.1" \
+    "Llama-3.1-8B-Instruct" \
+    "Llama-3.1-405B-Instruct-FP8-KV" \
+    "amd-Llama-3.3-70B-Instruct-FP8-KV" \
+    "DeepSeek-V3" \
+    "DeepSeek-R1" \
 )
 
-# Check if MODEL_NAME exists and fetch runfile
-if [[ -n "${MODEL_RUNFILES[$MODEL_NAME]}" ]]; then
-    RUN_FILE="${MODEL_RUNFILES[$MODEL_NAME]}"
-    echo "Model found: $MODEL_NAME"
-    echo "Runfile set: $RUN_FILE"
+model_allows_mori_ep() {
+    local m="$1"
+    for x in "${MORI_EP_VALID_MODELS[@]}"; do
+        [[ "$m" == "$x" ]] && return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Run file: MoRI EP path when RUN_MORI=1, else default PD server script
+# ---------------------------------------------------------------------------
+_run_mori="${RUN_MORI:-0}"
+if [[ "$_run_mori" == "1" ]]; then
+    if model_allows_mori_ep "$MODEL_NAME"; then
+        RUN_FILE="sglang_disagg_mori_io_ep.sh"
+        echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
+    else
+        echo "Error: RUN_MORI=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS" >&2
+        printf "MoRI EP allowed models:\n" >&2
+        for m in "${MORI_EP_VALID_MODELS[@]}"; do
+            printf "  - %s\n" "$m" >&2
+        done
+        exit 1
+    fi
+    if [[ ! -f "$RUN_FILE" ]]; then
+        echo "Error: RUN_MORI=1 requires '$RUN_FILE' in $(pwd)." >&2
+        exit 1
+    fi
 else
-    echo "Error: Model '$MODEL_NAME' not found in MODEL_RUNFILES"
-    echo "Available models: ${!MODEL_RUNFILES[@]}"
-    exit 1
+    RUN_FILE="sglang_disagg_server.sh"
+    echo "RUN_MORI not set: using $RUN_FILE"    
 fi
 
 export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-lmsysorg/sglang:v0.5.5.post3-rocm700-mi30x}"
@@ -63,6 +110,11 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
+DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp flags, omit dp/ep CLI flags
+MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-16G}" #-> mori symmetric heap (multi-node MoE often needs 16G+)
+# sglang_disagg_mori_io_ep.sh (RUN_MORI=1): set to 1 to skip phases; pass from wrapper before sbatch
+SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
+SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
 
 MODEL_NAME="${MODEL_NAME:-None}"
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
@@ -91,6 +143,14 @@ validate_model_name() {
 
 validate_model_name "${MODEL_NAME}"
 
+if [[ "${RUN_MORI:-0}" == "1" ]] && [[ "${DP_MODE:-0}" == "1" ]]; then
+    if ! mori_model_allows_dp_mode_one "$MODEL_NAME"; then
+        echo "Error: DP_MODE=1 is not supported for model '${MODEL_NAME}'. Allowed models:" >&2
+        mori_dp_mode1_allowed_models_lines >&2
+        echo "Use DP_MODE=0 for other models." >&2
+        exit 1
+    fi
+fi
 
 # ------------------------
 # Model path validation and selection across all nodes
@@ -168,8 +228,7 @@ echo ""
 
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD + 1))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1)"
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1)"
+echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1) DP_MODE=$DP_MODE"
 
 # ------------------------
 # Extract first NUM_NODES from SLURM allocation and update SLURM variables
@@ -266,6 +325,7 @@ echo "MASTER_ADDR is ${MASTER_ADDR}"
 echo "MASTER_PORT is ${MASTER_PORT}"
 echo "NNODES is ${NNODES}"
 echo "REPO Directory is ${MOONCAKE_REPO_DIR}"
+echo "SKIP_BENCHMARK=${SKIP_BENCHMARK} SKIP_CURL_TEST=${SKIP_CURL_TEST} (sglang_disagg_mori_io_ep.sh NODE_RANK=0)"
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
@@ -283,10 +343,14 @@ export MASTER_PORT=$MASTER_PORT
 export MODEL_PATH=$MODEL_PATH
 export xP=$xP
 export yD=$yD
+export DP_MODE=$DP_MODE
+export MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
+export SKIP_BENCHMARK
+export SKIP_CURL_TEST
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
@@ -308,7 +372,6 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --privileged \
     -v $HOME:$HOME \
-    -v $HOME:$HOME \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
@@ -325,14 +388,19 @@ docker run --rm \
     -e MOONCAKE_COOKBOOK_PATH=$MOONCAKE_COOKBOOK_PATH \
     -e xP=$xP \
     -e yD=$yD \
+    -e DP_MODE=$DP_MODE \
+    -e MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
     -e IPADDRS=$IPADDRS \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
-    --ulimit nofile=65536:65536 \
+    -e SKIP_BENCHMARK=$SKIP_BENCHMARK \
+    -e SKIP_CURL_TEST=$SKIP_CURL_TEST \
+    --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
-    $DOCKER_IMAGE_NAME bash -c "
+    --entrypoint /bin/bash \
+    $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "
