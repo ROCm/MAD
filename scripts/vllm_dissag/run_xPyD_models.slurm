@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=vllm-pd    # Specify a custom string for your slurm batch job
+#SBATCH -N 2                  # Default 2 nodes (1P/1D); override with sbatch -N for larger topologies
 #SBATCH --ntasks-per-node=1
 #SBATCH --spread-job
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
