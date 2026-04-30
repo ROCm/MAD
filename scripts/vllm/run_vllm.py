@@ -491,16 +491,7 @@ def main():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    s = str(v)
-                    st = s.strip()
-                    if (
-                        k == "--limit-mm-per-prompt"
-                        or (st[:1] in "{[")
-                        or any(ch.isspace() for ch in s)
-                    ):
-                        extra_args_str += f" {k} {shlex.quote(s)}"
-                    else:
-                        extra_args_str += f" {k} {v}"
+                    extra_args_str += f" {k} {shlex.quote(str(v))}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             
