@@ -61,10 +61,10 @@ The following command pulls the Docker image from Docker Hub.
 docker pull vllm/vllm-openai-rocm:v0.17.1
 ```
 
-For Gemma 4, use the Gemma4-tagged image (also referenced by [`docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile`](../../docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile)):
+Gemma 4 models are served from the standard vLLM image (vLLM ≥0.20.0 ships Transformers v5 with native Gemma 4 support):
 
 ```sh
-docker pull vllm/vllm-openai-rocm:gemma4
+docker pull vllm/vllm-openai-rocm:v0.20.0
 ```
 
 ### MAD-integrated benchmarking
@@ -95,7 +95,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 >The MXFP4 models are only supported on the gfx950 architecture i.e. MI350X/MI355X accelerators.
 
 >[!NOTE]
->Gemma 4 models (`pyt_vllm_gemma-4-*`) are built from `vllm/vllm-openai-rocm:gemma4` (see [`docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile`](../../docker/pyt_vllm_gemma4.ubuntu.amd.Dockerfile)). Accept Google’s Gemma license on Hugging Face and set `MAD_SECRETS_HFTOKEN` for gated weight downloads.
+>Gemma 4 models (`pyt_vllm_gemma-4-*`) use the standard `docker/pyt_vllm` stack (vLLM ≥0.20.0 / Transformers ≥5.5.0). Accept Google’s Gemma license on Hugging Face and set `MAD_SECRETS_HFTOKEN` for gated weight downloads.
 
 Serving recipes for Gemma 4 live in [`scripts/vllm/configs/default.yaml`](../../scripts/vllm/configs/default.yaml). Both Gemma 4 entries use **tensor parallel size 1**, **`TRITON_ATTN`**, **`float16` on gfx942** (via `arch_overrides`), **`--max-model-len` 32768**, text-only multimodal limits (`--limit-mm-per-prompt`), and **`VLLM_ROCM_USE_AITER=1`** where supported.
 
@@ -150,7 +150,7 @@ docker pull vllm/vllm-openai-rocm:v0.17.1
 docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.17.1
 ```
 
-For Gemma 4 standalone runs, substitute `vllm/vllm-openai-rocm:gemma4` for the image tag in the `docker run` line above. For **`google/gemma-4-26B-A4B-it`** only, also set **`VLLM_ROCM_USE_AITER_MOE=0`** (same as the MAD `default.yaml` recipe) so MoE does not use AITER’s fused path.
+For Gemma 4 standalone runs use `vllm/vllm-openai-rocm:v0.20.0` (same image as other vLLM models). For **`google/gemma-4-26B-A4B-it`** only, also set **`VLLM_ROCM_USE_AITER_MOE=0`** (same as the MAD `default.yaml` recipe) so MoE does not use AITER’s fused path.
 
 >[!NOTE]
 >We enable [AITER](https://github.com/ROCm/aiter) during `docker run` via `--env VLLM_ROCM_USE_AITER=1` for best performance
