@@ -490,7 +490,7 @@
   {
     "name": "pyt_vllm_gemma-4-26b-a4b-it",
     "data": "huggingface",
-    "dockerfile": "docker/pyt_vllm_gemma4",
+    "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
@@ -509,7 +509,7 @@
   {
     "name": "pyt_vllm_gemma-4-31b-it",
     "data": "huggingface",
-    "dockerfile": "docker/pyt_vllm_gemma4",
+    "dockerfile": "docker/pyt_vllm",
     "scripts": "scripts/vllm/run.sh",
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
