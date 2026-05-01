@@ -28,7 +28,6 @@ ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.20.0
 FROM $BASE_DOCKER
 
 USER root
-RUN pip3 install --no-cache-dir "transformers>=5.5.0"
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
