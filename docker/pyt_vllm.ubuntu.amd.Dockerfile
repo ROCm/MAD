@@ -36,4 +36,4 @@ WORKDIR $WORKSPACE_DIR
 RUN pip3 list
 
 # Specify entrypoint to override upstream
-ENTRYPOINT [""]
+ENTRYPOINT []

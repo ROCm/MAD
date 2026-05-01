@@ -39,6 +39,19 @@ import subprocess
 from typing import List, Dict
 
 SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'bs', 'num_prompts', 'max_concurrency']
+
+
+def build_extra_args_str(extra_args: Dict) -> str:
+    parts = []
+    for k, v in extra_args.items():
+        if isinstance(v, bool):
+            if v:
+                parts.append(k)
+        else:
+            parts.append(f"{k} {shlex.quote(str(v))}")
+    return " ".join(parts)
+
+
 CSV_HEADER = [
     "model",
     "benchmark",
@@ -486,12 +499,7 @@ def main():
             env_vars = config.get("env", {})
             extra_args = config.get("extra_args", {})
             env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
-            extra_args_str = ""
-            for k, v in extra_args.items():
-                if isinstance(v, bool):
-                    extra_args_str += f" {k}"
-                else:
-                    extra_args_str += f" {k} {shlex.quote(str(v))}"
+            extra_args_str = build_extra_args_str(extra_args)
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             
