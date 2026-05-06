@@ -33,7 +33,7 @@ RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 
 ARG FA_REPO="https://github.com/Dao-AILab/flash-attention.git"
-ARG PYTORCH_ROCM_ARCH=gfx90a;gfx942;gfx1100;gfx1101;gfx1200;gfx1201
+ARG PYTORCH_ROCM_ARCH=gfx950;gfx90a;gfx942;gfx1100;gfx1101;gfx1200;gfx1201
 RUN git clone ${FA_REPO}
 RUN cd flash-attention \
     && git submodule update --init \
