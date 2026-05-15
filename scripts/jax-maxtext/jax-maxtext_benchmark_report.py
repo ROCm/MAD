@@ -81,7 +81,9 @@ def find_match(file, search_string, num_iters):
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-3.3-70B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
-        args.model == "DeepSeek-V2-lite" or args.model == "Mixtral-8x7B":
+        args.model == "DeepSeek-V2-lite" or args.model == "Mixtral-8x7B" or\
+        args.model == "Qwen3-14B" or\
+        args.model == "Qwen3-30B-A3B":
     tok_per_s_per_gpu = find_match(input_file, "Tokens/s/device:", 10)
     TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/device:", 10)
     data = [
