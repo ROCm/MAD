@@ -1769,6 +1769,124 @@
      "--model_repo jax_maxtext_train_mixtral-8x7b --quantization fp8"
   },
   {
+    "name": "jax_maxtext_train_qwen3-14b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-14B.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-14b"
+  },
+  {
+    "name": "jax_maxtext_train_qwen3-14b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Qwen3-14B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-14b --quantization nanoo_fp8"
+  },
+  {
+    "name": "jax_maxtext_train_qwen3-14b_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "fp8",
+    "multiple_results": "perf_Qwen3-14B_fp8.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-14b --quantization fp8"
+  },
+  {
+    "name": "jax_maxtext_train_qwen3-30b-a3b",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-30B-A3B.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-30b-a3b"
+  },
+  {
+    "name": "jax_maxtext_train_qwen3-30b-a3b_nanoo_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "nanoo_fp8",
+    "multiple_results": "perf_Qwen3-30B-A3B_nanoo_fp8.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-30b-a3b --quantization nanoo_fp8"
+  },
+  {
+    "name": "jax_maxtext_train_qwen3-30b-a3b_fp8",
+    "url": "",
+    "dockerfile": "docker/jax_maxtext",
+    "scripts": "scripts/jax-maxtext/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "fp8",
+    "multiple_results": "perf_Qwen3-30B-A3B_fp8.csv",
+    "tags": [
+      "jax",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo jax_maxtext_train_qwen3-30b-a3b --quantization fp8"
+  },
+  {
     "name": "pyt_chai1_inference",
     "dockerfile": "docker/pyt_chai1_inference",
     "scripts": "scripts/pyt_chai1_inference/run.sh",
