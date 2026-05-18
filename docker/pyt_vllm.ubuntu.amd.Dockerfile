@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.17.1
+ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.20.0
 FROM $BASE_DOCKER
 
 USER root
@@ -36,4 +36,4 @@ WORKDIR $WORKSPACE_DIR
 RUN pip3 list
 
 # Specify entrypoint to override upstream
-ENTRYPOINT [""]
+ENTRYPOINT []
