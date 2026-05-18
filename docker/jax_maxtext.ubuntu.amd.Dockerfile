@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.2
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.3
 FROM $BASE_DOCKER
 
 USER root

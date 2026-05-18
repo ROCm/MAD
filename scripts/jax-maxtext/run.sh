@@ -57,6 +57,10 @@ elif [[ "$MODEL_REPO" == "jax_maxtext_train_deepseek-v2-lite-16b" ]]; then
   model="DeepSeek-V2-lite"
 elif [[ "$MODEL_REPO" == "jax_maxtext_train_mixtral-8x7b" ]]; then
   model="Mixtral-8x7B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_qwen3-14b" ]]; then
+  model="Qwen3-14B"
+elif [[ "$MODEL_REPO" == "jax_maxtext_train_qwen3-30b-a3b" ]]; then
+  model="Qwen3-30B-A3B"
 fi
 
 ./jax-maxtext_benchmark_setup.sh -m $model
