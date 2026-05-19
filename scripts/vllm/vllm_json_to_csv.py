@@ -96,6 +96,7 @@ with open(args.output_csv, "a+", newline="") as outf:
                     metrics = {
                         "throughput_tot": str(reader["total_token_throughput"]),
                         "throughput_gen": str(reader["output_throughput"]),
+                        "median_ttft": str(reader["median_ttft_ms"]),
                         "median_tpot": str(reader["median_tpot_ms"]),
                         "median_itl": str(reader["median_itl_ms"]),
                         "median_e2el": str(reader["median_e2el_ms"]),
