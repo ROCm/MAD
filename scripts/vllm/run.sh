@@ -27,7 +27,9 @@
 set -ex
 
 # Preliminary setup
-export HF_HUB_CACHE="/myworkspace"
+if [[ -z "${HF_HUB_CACHE:-}" ]]; then
+    export HF_HUB_CACHE="/myworkspace"
+fi
 MAD_MODEL_NAME=$(echo $MAD_MODEL_NAME | tr "/" "_")
 
 while [[ "$#" -gt 0 ]]; do

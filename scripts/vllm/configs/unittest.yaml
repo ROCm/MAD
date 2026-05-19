@@ -9,7 +9,6 @@
     VLLM_ROCM_USE_AITER: 1
   extra_args:
     --load-format: dummy
-    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -26,7 +25,6 @@
   extra_args:
     --load-format: dummy
     --kv-cache-dtype: fp8
-    --attention-backend: ROCM_ATTN
   arch_overrides:
     gfx942:
       dtype: float16
@@ -43,23 +41,9 @@
     VLLM_ROCM_USE_AITER: 1
   extra_args:
     --load-format: dummy
-    --attention-backend: ROCM_ATTN
   bench_args:
     --random-range-ratio: 0.8
-  arch_overrides:
-    gfx942:
-      dtype: float16
-
-- benchmark: accuracy
-  model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
-  tp: 1
-  dtype: auto
-  env:
-    VLLM_ROCM_USE_AITER: 1
-  extra_args:
-    --attention-backend: ROCM_ATTN
-  bench_args:
-    --apply_chat_template: True
+    --lmeval_apply_chat_template: True
   arch_overrides:
     gfx942:
       dtype: float16
