@@ -312,6 +312,7 @@ def run_serving(model, config):
                 metrics = {
                     "throughput_tot": str(output["total_token_throughput"]),
                     "throughput_gen": str(output["output_throughput"]),
+                    "median_ttft": str(output["median_ttft_ms"]),
                     "median_tpot": str(output["median_tpot_ms"]),
                     "median_itl": str(output["median_itl_ms"]),
                     "median_e2el": str(output["median_e2el_ms"]),
