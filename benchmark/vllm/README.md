@@ -13,9 +13,9 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X, MI350X and MI355X
 accelerators. It includes:
 
--   ✅ ROCm™ 7.0.0
--   ✅ vLLM 0.17.1
--   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
+-   ✅ ROCm™ 7.2.1
+-   ✅ vLLM 0.19.1
+-   ✅ PyTorch 2.10.0 (2.10.0+git8514f05)
 -   ✅ hipBLASLt 1.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.17.1
+docker pull vllm/vllm-openai-rocm:v0.19.1
 ```
 
 ### MAD-integrated benchmarking
@@ -127,9 +127,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.17.1
+docker pull vllm/vllm-openai-rocm:v0.19.1
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.17.1
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.19.1
 ```
 
 >[!NOTE]
@@ -344,6 +344,9 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.19.1 release:
+- Merge accuracy benchmark into serving benchmark
 
 v0.17.1 release:
 - Includes documentation and patches for upstream releases. Please track https://github.com/vllm-project/vllm/releases
