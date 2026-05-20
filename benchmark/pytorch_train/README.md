@@ -8,14 +8,14 @@ The ROCm PyTorch Training Docker `rocm/primus:v26.2` container, available throug
 
 | Software component  | Version            |
 |--------------------|----------------------|
-| ROCm               | 7.2.0                |
+| ROCm               | 7.2.1                |
 | Python             | 3.12.3               |
-| PyTorch            | 2.10.0a0+git449b176    |
-| Transformer Engine | 2.8.0.dev0+51f74fa7  |
+| PyTorch            | 2.10.0+git94c6e04    |
+| Transformer Engine | 2.12.0.dev0+40434cf6 |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 1.2.0-de5c1aebb6           |
-| Triton            | 3.6.0                 |
-| RCCL              | 2.27.7     |
+| hipBLASLt          | 1.3.0-c4b2dc9869     |
+| Triton             | 3.6.0                |
+| RCCL               | 2.27.7               |
 
 
 ## Models
@@ -208,4 +208,3 @@ bash runner/primus-cli direct \
   -- train pretrain \
   --config examples/torchtitan/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml
 ```
-

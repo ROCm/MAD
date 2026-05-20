@@ -10,16 +10,16 @@ Primus framework with megatron backend is designed to enable efficient training 
 
 The ROCm PyTorch Training Docker `rocm/primus:v26.2` (`rocm/pytorch-training:v26.1`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
-| Software component  | Version            |
+| Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 7.2.0                |
+| ROCm               | 7.2.1                |
 | Python             | 3.12.3               |
-| PyTorch            | 2.10.0a0+git449b176    |
-| Transformer Engine | 2.8.0.dev0+51f74fa7  |
+| PyTorch            | 2.10.0+git94c6e04    |
+| Transformer Engine | 2.12.0.dev0+40434cf6 |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 1.2.0-de5c1aebb6           |
-| Triton            | 3.6.0                 |
-| RCCL              | 2.27.7     |
+| hipBLASLt          | 1.3.0-c4b2dc9869     |
+| Triton             | 3.6.0                |
+| RCCL               | 2.27.7               |
 
 ## Supported features and models
 Primus-Megatron-backend provides the following key features to train large language models efficiently:
@@ -50,7 +50,9 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Mixtral 8x22B
 * Qwen 2.5 7/72B
 * Zebra-Llama 1B/3B/8B
+* Qwen 3 30B (A3B)
 * Qwen 3 32B (SFT/ LoRA)
+* GPT OSS 20B
 
 ## System validation steps
 If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html) to set up your system before starting training.
@@ -304,6 +306,38 @@ bash runner/primus-cli direct \
   --config examples/megatron_bridge/configs/MI300X/qwen3_32b_sft_posttrain.yaml
 ```
 
+- **Qwen3-30B (A3B) BF16:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen3_30B_A3B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/qwen3_30B_A3B-BF16-pretrain.yaml
+```
+
+- **Qwen3-30B (A3B) FP8:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen3_30B_A3B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/qwen3_30B_A3B-FP8-pretrain.yaml
+```
+
+- **GPT-OSS-20B BF16:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_gpt_oss_20B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/gpt_oss_20B-BF16-pretrain.yaml
+```
+
+- **GPT-OSS-20B FP8:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_gpt_oss_20B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI300X/gpt_oss_20B-FP8-pretrain.yaml
+```
+
 #### MI35X Performance Configs
 - **Llama3.1-8B FP8:**
 ```bash
@@ -444,6 +478,38 @@ bash runner/primus-cli direct \
   --log_file /tmp/primus_qwen3_32b_lora.log \
   -- train posttrain \
   --config examples/megatron_bridge/configs/MI355X/qwen3_32b_lora_posttrain.yaml
+```
+
+- **Qwen3-30B (A3B) BF16:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen3_30B_A3B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/qwen3_30B_A3B-BF16-pretrain.yaml
+```
+
+- **Qwen3-30B (A3B) FP8:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_qwen3_30B_A3B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/qwen3_30B_A3B-FP8-pretrain.yaml
+```
+
+- **GPT-OSS-20B BF16:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_gpt_oss_20B.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/gpt_oss_20B-BF16-pretrain.yaml
+```
+
+- **GPT-OSS-20B FP8:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_gpt_oss_20B_fp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/gpt_oss_20B-FP8-pretrain.yaml
 ```
 
 ### 3.2 Multi-node Training
