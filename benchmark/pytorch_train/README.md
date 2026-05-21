@@ -219,7 +219,7 @@ bash runner/primus-cli direct \
 
 ### Multi-node Training
 
-Multi-node training using torchtitan is similar to megatron-LM. Refer [megatron multi-node training](https://github.com/gargrahul/MAD/blob/gargrahul/primus_v26.3/benchmark/megatron_lm/README.md#32-multi-node-training) for how to set the environment variables.
+Multi-node training using torchtitan is similar to megatron-LM. Refer [megatron multi-node training](../megatron_lm/README.md#32-multi-node-training) for how to set the environment variables.
 
 Here are two examples for multinode training on MI355X.
 
