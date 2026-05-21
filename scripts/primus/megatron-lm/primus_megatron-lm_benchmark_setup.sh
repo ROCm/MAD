@@ -179,7 +179,7 @@ index b58a1527..2d9882d6 100755
 +    elif [[ "$FRAMEWORK" == "torchtitan" ]]; then
 +        LOG_INFO "[direct] Using Torchtitan log parser"
 +
-+        num_warmup=$(grep 'lr_scheduler.warmup_steps' ${TRAIN_LOG} | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
++        num_warmup=$(grep -m 1 'lr_scheduler.warmup_steps' ${TRAIN_LOG} | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
 +        num_warmup="${num_warmup:-0}"
 +        echo "Num warmup (first steps skipped): $num_warmup"
 +
