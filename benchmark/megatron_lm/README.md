@@ -50,7 +50,7 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Mixtral 8x22B
 * Qwen 2.5 7/72B
 * Zebra-Llama 1B/3B/8B
-* Qwen 3 30B (A3B)
+* Qwen3-30B-A3B
 * Qwen3-235B-A22B
 * Qwen 3 32B (SFT/ LoRA)
 * GPT-OSS-20B
@@ -143,7 +143,7 @@ pip install -r requirements.txt
 #### MI300X Performance Configs
 ```bash
 #Set these variables for better performance only on MI300/MI325X
-export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+export HSA_NO_SCRATCH_RECLAIM=1
 export NVTE_CK_IS_V3_ATOMIC_FP32=1
 export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1 #for better performance
 ```
@@ -459,7 +459,7 @@ bash runner/primus-cli direct \
 To run training on multiple nodes, you can use `primus-cli` (recommended) or the [run_slurm_pretrain.sh](https://github.com/AMD-AGI/Primus/blob/main/examples/run_slurm_pretrain.sh) script to launch multinode workloads. Below we list multinode setup and examples to run multinode tests.
 
 MultiNode Setup:
-> **Verify NCCL / network env first.** The `pimus-cli` launcher script sets sensible `NCCL_*` defaults via `base_env.sh`, but auto-detection can pick the wrong device on multi-NIC nodes. Always confirm `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` (set to the same value as `NCCL_SOCKET_IFNAME`) are correct for your fabric. If necessary, you can `export` these environment variables before running.
+> **Verify NCCL / network env first.** The `primus-cli` launcher script sets sensible `NCCL_*` defaults via `base_env.sh`, but auto-detection can pick the wrong device on multi-NIC nodes. Always confirm `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` (set to the same value as `NCCL_SOCKET_IFNAME`) are correct for your fabric. If necessary, you can `export` these environment variables before running.
 
 ```bash
 git clone --recurse-submodules https://github.com/AMD-AGI/Primus.git
@@ -474,7 +474,7 @@ export GLOO_SOCKET_IFNAME=<your_GLOO_SOCKET_IFNAME> # your Network Interface
 export NCCL_IB_GID_INDEX=3 # Set InfiniBand GID index for NCCL communication. Default is 3 for ROCE
 
 # MI300/MI325 only extra settings
-export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+export HSA_NO_SCRATCH_RECLAIM=1
 export NVTE_CK_IS_V3_ATOMIC_FP32=1
 export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1 #for better performance
 ```
@@ -564,7 +564,7 @@ Launch the training using the `primus-cli` (recommended)
 # In the Primus directory
 ./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI325X/llama3.1_405B-FP8-pretrain.yaml --micro_batch_size 1 --global_batch_size 256 --decoder_first_pipeline_num_layers 15 --decoder_last_pipeline_num_layers 15
 ```
-We use TP=8 for Llama3.1-405B model on 8 nodes. Because it has 126 layers which is not divisable by 8, we need to set `decoder_first_pipeline_num_layers` and `decoder_last_pipeline_num_layers`.
+We use TP=8 for Llama3.1-405B model on 8 nodes. Because it has 126 layers which is not divisible by 8, we need to set `decoder_first_pipeline_num_layers` and `decoder_last_pipeline_num_layers`.
 
 Launch the training using the legacy script
 ```bash
