@@ -261,6 +261,7 @@ def run_serving(model, config):
     # start server
     print(server_cmd)
     server = subprocess.Popen(server_cmd, shell=True)
+    results = []
 
     try:
         # wait for server to start; timeout after 30 minutes
@@ -269,12 +270,15 @@ def run_serving(model, config):
             shell=True
         )
         if status.returncode != 0:
-            print("Server failed to start")
-            return [config]
+            raise Exception("Server failed to start")
         else:
             print(f"Server at {server.pid} contacted successfully", flush=True)
 
-        # run benchmark
+        # pop bench_args once; extract --apply_chat_template for lm_eval
+        bench_args = config.pop('bench_args', {})
+        apply_chat_template = bench_args.pop('--lmeval_apply_chat_template', False)
+
+        # run serving benchmark
         bench_cmd = (
             "vllm bench serve "
             f"--model {model} "
@@ -289,7 +293,6 @@ def run_serving(model, config):
             f"--save-result "
             f"--result-filename {output_json}"
         )
-        bench_args = config.pop('bench_args', {})
         bench_args_str = ""
         for k, v in bench_args.items():
             if isinstance(v, bool):
@@ -297,19 +300,19 @@ def run_serving(model, config):
             else:
                 bench_args_str += f"{k} {v} "
         bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
-        
+
         config["cmd"] = f"{server_cmd};{bench_cmd}"
         print(bench_cmd)
         subprocess.run(bench_cmd, shell=True, check=True)
 
         # parse output json
-        results = []
         with open(output_json, "r", newline="", encoding="utf-8") as f:
             output = json.load(f)
             if "total_token_throughput" in output:
                 metrics = {
                     "throughput_tot": str(output["total_token_throughput"]),
                     "throughput_gen": str(output["output_throughput"]),
+                    "median_ttft": str(output["median_ttft_ms"]),
                     "median_tpot": str(output["median_tpot_ms"]),
                     "median_itl": str(output["median_itl_ms"]),
                     "median_e2el": str(output["median_e2el_ms"]),
@@ -327,52 +330,7 @@ def run_serving(model, config):
                     }
                     results.append(result)
 
-        return results
-
-    finally:
-        # kill server and children
-        parent = psutil.Process(server.pid)
-        for child in parent.children(recursive=True):
-            child.send_signal(signal.SIGINT)
-        server.send_signal(signal.SIGINT)
-        _ = server.communicate()
-        del server
-
-def run_accuracy(model, config):
-    output_json = (
-        f"{config['model']}_accuracy_{config['tp']}.json"
-    )
-    server_cmd = (
-        "vllm serve "
-        f"{model} "
-        f"--dtype {config['dtype']} "
-        f"-tp {config['tp']} "
-        f"--no-enable-prefix-caching "
-        f"--disable-uvicorn-access-log "
-    )
-    # pop env and extra args from config
-    env = config.pop('env', "")
-    extra_args = config.pop('extra_args', "")
-    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
-    config["cmd"] = server_cmd
-
-    # start server
-    print(server_cmd)
-    server = subprocess.Popen(server_cmd, shell=True)
-
-    try:
-        # wait for server to start; timeout after 30 minutes
-        status = subprocess.run(
-            "timeout 1800 bash -c 'until curl -s http://localhost:8000/v1/models; do sleep 30; done' || exit 1",
-            shell=True
-        )
-        if status.returncode != 0:
-            print("Server failed to start")
-            return [config]
-        else:
-            print(f"Server at {server.pid} contacted successfully", flush=True)
-
-        # run benchmark
+        # run accuracy benchmark
         model_args = {
             "model": model,
             "max_gen_toks": 2048,
@@ -381,42 +339,33 @@ def run_accuracy(model, config):
             "base_url": "http://localhost:8000/v1/completions"
         }
         model_args = ",".join([f"{k}={v}" for k, v in model_args.items()])
-        bench_cmd = (
+        lmeval_cmd = (
             "lm_eval "
             "--model local-completions "
             f"--model_args {model_args} "
             f"--tasks gsm8k "
+            f"--batch_size {config['max_concurrency']} "
             f"--limit 250 "
             f"--output_path ./tmp "
         )
-        bench_args = config.pop('bench_args', {})
-        bench_args_str = ""
-        for k, v in bench_args.items():
-            if isinstance(v, bool):
-                bench_args_str += f"{k} "
-            else:
-                bench_args_str += f"{k} {v} "
-        bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
-        config["cmd"] = f"{server_cmd};{bench_cmd}"
-        print(bench_cmd)
-        subprocess.run(bench_cmd, shell=True, check=True)
+        if apply_chat_template:
+            lmeval_cmd += "--apply_chat_template "
+        config["cmd"] = f"{server_cmd};{bench_cmd};{lmeval_cmd}"
+        print(lmeval_cmd)
+        subprocess.run(lmeval_cmd, shell=True, check=True)
 
         # find output file and move into output_json
         output_files = glob.glob("./tmp/*/*.json")
         if len(output_files) == 0:
-            print("No output files found")
-            return [config]
+            raise Exception("No lmeval output files found")
         elif len(output_files) > 1:
-            print(f"Multiple output files found: {output_files}")
-            return [config]
+            raise Exception(f"Multiple lmeval output files found: {output_files}")
         else:
             output_file = output_files[0]
             shutil.move(output_file, output_json)
             shutil.rmtree("./tmp")
 
         # parse output json
-        results = []
-        
         with open(output_json, "r", newline="", encoding="utf-8") as f:
             output = json.load(f)
             if "results" in output and "gsm8k" in output["results"]:
@@ -430,8 +379,6 @@ def run_accuracy(model, config):
                     }
                     results.append(result)
 
-        return results
-
     finally:
         # kill server and children
         parent = psutil.Process(server.pid)
@@ -440,6 +387,8 @@ def run_accuracy(model, config):
         server.send_signal(signal.SIGINT)
         _ = server.communicate()
         del server
+
+        return results
 
 def main():
     args = parse_args()
@@ -503,8 +452,6 @@ def main():
                 results = run_throughput(model, config)
             elif benchmark == "serving":
                 results = run_serving(model, config)
-            elif benchmark == "accuracy":
-                results = run_accuracy(model, config)
             else:
                 raise ValueError(f"Unknown benchmark: {benchmark}")
             
