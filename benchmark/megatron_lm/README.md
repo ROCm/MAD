@@ -606,6 +606,7 @@ NNODES=8 EXP=examples/megatron/configs/MI300X/qwen2.5_72B-FP8-pretrain.yaml bash
 ```
 
 - **Mixtral-8x22B BF16 8 Nodes**
+
 Launch the training using the `primus-cli` (recommended)
 ```bash
 # In the Primus directory
@@ -618,6 +619,7 @@ NNODES=8 EXP=examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.y
 ```
 
 - **Llama3.1-405B FP8 8 Nodes**
+
 Launch the training using the `primus-cli` (recommended)
 ```bash
 # In the Primus directory
