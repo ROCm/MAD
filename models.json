@@ -1059,6 +1059,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "bf16",
+    "multiple_results": "primus_perf_output.csv",
     "tags": ["training", "primus", "megatron", "pretrain"],
     "args": ""
   },

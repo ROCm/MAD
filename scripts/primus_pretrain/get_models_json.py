@@ -26,7 +26,7 @@ def list_models():
     models = []
     if not os.path.isdir(PRIMUS_ROOT):
         return models
-    for yaml_path in sorted(glob.glob(CONFIGS_GLOB)):
+    for yaml_path in sorted(glob.glob(CONFIGS_GLOB, recursive=True)):
         rel_path = os.path.relpath(yaml_path, PRIMUS_ROOT)
         # Path shape: examples/<launcher>/configs/<arch>/<file>.yaml
         parts = rel_path.split(os.sep)
