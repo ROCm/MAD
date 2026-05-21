@@ -8,7 +8,7 @@ Primus framework with megatron backend is designed to enable efficient training 
 >`rocm/pytorch-training` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v26.2` (`rocm/pytorch-training:v26.1`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.3` (`rocm/pytorch-training:v26.3`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
@@ -51,8 +51,10 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Qwen 2.5 7/72B
 * Zebra-Llama 1B/3B/8B
 * Qwen 3 30B (A3B)
+* Qwen3-235B-A22B
 * Qwen 3 32B (SFT/ LoRA)
-* GPT OSS 20B
+* GPT-OSS-20B
+* GPT-OSS-120B
 
 ## System validation steps
 If you have already validated your system, skip this step; otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html) to set up your system before starting training.
@@ -84,14 +86,15 @@ Use the following instructions to set up the environment, configure the script t
    Download the Docker image required for training:
    ```bash
    # MI300/MI325/MI35X
-   docker pull rocm/primus:v26.2
+   docker pull rocm/primus:v26.3
    ```
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME --shm-size 128G --name primus_training_env rocm/primus:v26.2
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome --shm-size 128G --name primus_training_env rocm/primus:v26.3
    ```
+   **Note**: It's not recommended to bind the `$HOME` directory to the container using `-v $HOME:$HOME`. A good practice is only bind the directory you need to the container.
 
 5. **Execute the training_env container (optional if no already in the container)**
    ```bash
@@ -99,10 +102,10 @@ Use the following instructions to set up the environment, configure the script t
     docker exec -it primus_training_env bash
    ```
 
-The docker container hosts verified coomit `e16b27b` from [Primus repository](https://github.com/AMD-AGI/Primus/tree/e16b27bf6c1b2798f38848fc574fee60d9a9b902).
+The docker container hosts verified commit `e16b27b` from [Primus repository](https://github.com/AMD-AGI/Primus/tree/e16b27bf6c1b2798f38848fc574fee60d9a9b902).
 ---
 
-## 2. Configurations in Yaml Script (`‎examples/megatron/configs/`)
+## 2. Configurations in yaml files (`‎examples/megatron/configs/`)
 
 Primus defines training yaml for each model inside [‎examples/megatron/configs/](https://github.com/AMD-AGI/Primus/tree/e16b27bf6c1b2798f38848fc574fee60d9a9b902/examples/megatron/configs) repository. For example, use `examples/megatron/configs/llama3.1_8B-pretrain.yaml` for updating llama3.1_8B training parameters. Other yaml for the supported model can be found with `examples/megatron/configs/${MODEL_NAME}-pretrain.yaml` naming convention in this repository.
 
@@ -142,6 +145,7 @@ pip install -r requirements.txt
 #Set these variables for better performance only on MI300/MI325X
 export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
 export NVTE_CK_IS_V3_ATOMIC_FP32=1
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1 #for better performance
 ```
 
 - **Llama3.1-8B FP8:**
@@ -516,12 +520,14 @@ bash runner/primus-cli direct \
 To run training on multiple nodes, you can use the [run_slurm_pretrain.sh](https://github.com/AMD-AGI/Primus/blob/main/examples/run_slurm_pretrain.sh) script to launch multinode workloads. Below we list multinode setup and examples to run multinode tests.
 
 MultiNode Setup:
+> **Verify NCCL / network env first.** The `pimus-cli` launcher script sets sensible `NCCL_*` defaults via `base_env.sh`, but auto-detection can pick the wrong device on multi-NIC nodes. Always confirm `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_SOCKET_IFNAME`, and `GLOO_SOCKET_IFNAME` (set to the same value as `NCCL_SOCKET_IFNAME`) are correct for your fabric. If necessary, you can `export` these environment variables before running.
+
 ```bash
 git clone --recurse-submodules https://github.com/AMD-AGI/Primus.git
 cd Primus/
-git checkout 44f780d
+git checkout release/v26.3
 git submodule update --init --recursive
-export DOCKER_IMAGE=<DOCKER_IMAGE>
+export DOCKER_IMAGE=rocm/primus:v26.3
 export HF_TOKEN=<your_HF_token>
 export NCCL_IB_HCA=<your_NCCL_IB_HCA> # specify which RDMA interfaces to use for communication
 export NCCL_SOCKET_IFNAME=<your_NCCL_SOCKET_IFNAME> # your Network Interface
@@ -531,6 +537,14 @@ export NCCL_IB_GID_INDEX=3 # Set InfiniBand GID index for NCCL communication. De
 # MI300/MI325 only extra settings
 export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
 export NVTE_CK_IS_V3_ATOMIC_FP32=1
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1 #for better performance
+```
+
+For clusters using AMD AINIC, the following environment variables should be set.
+```bash
+export USING_AINIC=1
+export NCCL_PXN_DISABLE=0
+export NCCL_IB_GID_INDEX=1
 ```
 
 Notes:
@@ -590,6 +604,32 @@ NNODES=8 EXP=examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-BF16-pretrain.ya
 ```bash
 NNODES=8 EXP=examples/megatron/configs/MI300X/qwen2.5_72B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 8 --global_batch_size 512 --recompute_num_layers 80
 ```
+
+- **Mixtral-8x22B BF16 8 Nodes**
+Launch the training using the `primus-cli` (recommended)
+```bash
+# In the Primus directory
+./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml --micro_batch_size 2 --global_batch_size 256
+```
+
+Launch the training using the legacy script
+```bash
+NNODES=8 EXP=examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 2 --global_batch_size 256
+```
+
+- **Llama3.1-405B FP8 8 Nodes**
+Launch the training using the `primus-cli` (recommended)
+```bash
+# In the Primus directory
+./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI300X/llama3.1_405B-FP8-pretrain.yaml --micro_batch_size 1 --global_batch_size 256 --decoder_first_pipeline_num_layers 15 --decoder_last_pipeline_num_layers 15
+```
+We use TP=8 for Llama3.1-405B model on 8 nodes. Because it has 126 layers which is not divisable by 8, we need to set `decoder_first_pipeline_num_layers` and `decoder_last_pipeline_num_layers`.
+
+Launch the training using the legacy script
+```bash
+NNODES=8 EXP=examples/megatron/configs/MI300X/llama3.1_405B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 1 --global_batch_size 256  --decoder_first_pipeline_num_layers 15 --decoder_last_pipeline_num_layers 15
+```
+
 ---
 
 ## 4. Key Variables to Pay Attention To
