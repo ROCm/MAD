@@ -23,7 +23,7 @@ Examples of the following models are pre-optimized for performance on the AMD In
 ### Pre-training:
 | Model          | Variants               |
 |----------------|------------------------|
-| **LLaMA 3.1**  | 8B, 70B                |
+| **LLaMA 3.1**  | 8B, 70B, 405B          |
 | **DeepSeek V3**| 16B                    |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
@@ -136,6 +136,13 @@ cd /workspace/Primus
 ```
 
 #### MI300X Performance Configs
+
+```bash
+#Set these variables only on MI300/MI325X
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+export NVTE_CK_IS_V3_ATOMIC_FP32=1
+```
+
 - **Llama3.1-70B BF16:**
 ```bash
 bash runner/primus-cli direct \
@@ -214,23 +221,23 @@ bash runner/primus-cli direct \
 
 Multi-node training using torchtitan is similar to megatron-LM. Refer [megatron multi-node training](https://github.com/gargrahul/MAD/blob/gargrahul/primus_v26.3/benchmark/megatron_lm/README.md#32-multi-node-training) for how to set the environment variables.
 
-Here are two examples for training on 8-nodes MI355X.
+Here are two examples for multinode training on MI355X.
 
 
-- **Mixtral-8x22B BF16 8 Nodes**
+- **Llama3.1 70B FP8 4 Nodes MI355**
 
 Launch the training using the `primus-cli` (recommended)
 ```bash
 # In the Primus directory
-./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml --training.local_batch_size 3 --training.global_batch_size 192 --training.mock_data True
+./primus-cli slurm srun -N 4 -- train pretrain --config examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml --training.local_batch_size 6 --training.global_batch_size 192 --training.mock_data True
 ```
 
 Launch the training using the legacy script
 ```bash
-NNODES=8 EXP=examples/megatron/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml bash examples/run_slurm_pretrain.sh --training.local_batch_size 3 --training.global_batch_size 192 --training.mock_data True
+NNODES=4 EXP=examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --training.local_batch_size 6 --training.global_batch_size 192 --training.mock_data True
 ```
 
-- **Llama3.1-405B FP8 8 Nodes**
+- **Llama3.1-405B FP8 8 Nodes MI355**
 
 Launch the training using the `primus-cli` (recommended)
 ```bash
