@@ -188,20 +188,6 @@ bash runner/primus-cli direct \
   --config examples/megatron/configs/MI300X/llama3.1_70B-BF16-pretrain.yaml
 ```
 
-- **Llama3.1-70B FP8 Proxy model on Single Node:**
-```bash
-bash runner/primus-cli direct \
-  --log_file /tmp/primus_llama3.1_70B_fp8_proxy.log \
-  -- train pretrain \
-  --config examples/megatron/configs/MI300X/llama3.1_70B-FP8-pretrain.yaml \
-  --train_iters 50 \
-  --num_layers 40 \
-  --fp8 hybrid \
-  --no_fp8_weight_transpose_cache true
-```
-**Note:**
-   - Please use >=2 nodes to run full llama 70B model with fp8 precision on MI300. MI35X can support full 70B model with fp8 precision in a single node. Please refer to MI35X config in next section.
-
 - **Llama2-70B BF16:**
 ```bash
 bash runner/primus-cli direct \
@@ -228,38 +214,12 @@ bash runner/primus-cli direct \
   --config examples/megatron/configs/MI300X/deepseek_v2_lite-BF16-pretrain.yaml
 ```
 
-- **DeepSeekV3 BF16 3 layer proxy on Single Node:**
-```bash
-bash runner/primus-cli direct \
-  --log_file /tmp/primus_deepseek_v3_proxy.log \
-  -- train pretrain \
-  --config examples/megatron/configs/MI300X/deepseek_v3-BF16-pretrain.yaml \
-  --num_layers 3 \
-  --moe_layer_freq 1 \
-  --micro_batch_size 3 \
-  --global_batch_size 192 \
-  --train_iters 50
-```
-
 - **Mixtral 8x7B:**
 ```bash
 bash runner/primus-cli direct \
   --log_file /tmp/primus_mixtral_8x7B.log \
   -- train pretrain \
   --config examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-BF16-pretrain.yaml
-```
-
-- **Mixtral 8x22B 4 layer proxy on Single Node:**
-```bash
-bash runner/primus-cli direct \
-  --log_file /tmp/primus_mixtral_8x22B_proxy.log \
-  -- train pretrain \
-  --config examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml \
-  --num_layers 4 \
-  --pipeline_model_parallel_size 1 \
-  --micro_batch_size 1 \
-  --global_batch_size 16 \
-  --train_iters 50
 ```
 
 - **QWEN2.5 7B BF16:**
@@ -415,33 +375,12 @@ bash runner/primus-cli direct \
   --config examples/megatron/configs//MI355X/deepseek_v2_lite-BF16-pretrain.yaml
 ```
 
-- **DeepSeekV3 BF16 3 layer proxy on Single Node:**
-```bash
-bash runner/primus-cli direct \
-  --log_file /tmp/primus_deepseek_v3_proxy.log \
-  -- train pretrain \
-  --config examples/megatron/configs/MI355X/deepseek_v3-BF16-pretrain.yaml \
-  --num_layers 3 \
-  --moe_layer_freq 1 \
-  --train_iters 50 \
-  --micro_batch_size 8 \
-  --global_batch_size 64
-```
-
 - **Mixtral 8x7B BF16:**
 ```bash
 bash runner/primus-cli direct \
   --log_file /tmp/primus_mixtral_8x7B.log \
   -- train pretrain \
   --config examples/megatron/configs/MI355X/mixtral_8x7B_v0.1-BF16-pretrain.yaml
-```
-
-- **Mixtral 8x22B BF16 4 layer proxy on Single Node:**
-```bash
-bash runner/primus-cli direct \
-  --log_file /tmp/primus_mixtral_8x22B_proxy.log \
-  -- train pretrain \
-  --config examples/megatron/configs/MI355X/mixtral_8x22B_v0.1-BF16-pretrain.yaml
 ```
 
 - **QWEN2.5 7B BF16:**
@@ -605,25 +544,25 @@ NNODES=8 EXP=examples/megatron/configs/MI300X/mixtral_8x7B_v0.1-BF16-pretrain.ya
 NNODES=8 EXP=examples/megatron/configs/MI300X/qwen2.5_72B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 8 --global_batch_size 512 --recompute_num_layers 80
 ```
 
-- **Mixtral-8x22B BF16 8 Nodes**
+- **Mixtral-8x22B BF16 4 Nodes MI355**
 
 Launch the training using the `primus-cli` (recommended)
 ```bash
 # In the Primus directory
-./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml --micro_batch_size 2 --global_batch_size 256
+./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI355X/mixtral_8x22B_v0.1-BF16-pretrain.yaml --micro_batch_size 1 --global_batch_size 512 --num_virtual_stages_per_pipeline_rank 2 --pipeline_model_parallel_size 4 --expert_model_parallel_size 8 --recompute_num_layers 1 --moe_use_legacy_grouped_gemm True --gradient_accumulation_fusion True
 ```
 
 Launch the training using the legacy script
 ```bash
-NNODES=8 EXP=examples/megatron/configs/MI300X/mixtral_8x22B_v0.1-BF16-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 2 --global_batch_size 256
+NNODES=8 EXP=examples/megatron/configs/MI355X/mixtral_8x22B_v0.1-BF16-pretrain.yaml bash examples/run_slurm_pretrain.sh --micro_batch_size 1 --global_batch_size 512 --num_virtual_stages_per_pipeline_rank 2 --pipeline_model_parallel_size 4 --expert_model_parallel_size 8 --recompute_num_layers 1 --moe_use_legacy_grouped_gemm True --gradient_accumulation_fusion True
 ```
 
-- **Llama3.1-405B FP8 8 Nodes**
+- **Llama3.1-405B FP8 8 Nodes MI325**
 
 Launch the training using the `primus-cli` (recommended)
 ```bash
 # In the Primus directory
-./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI300X/llama3.1_405B-FP8-pretrain.yaml --micro_batch_size 1 --global_batch_size 256 --decoder_first_pipeline_num_layers 15 --decoder_last_pipeline_num_layers 15
+./primus-cli slurm srun -N 8 -- train pretrain --config examples/megatron/configs/MI325X/llama3.1_405B-FP8-pretrain.yaml --micro_batch_size 1 --global_batch_size 256 --decoder_first_pipeline_num_layers 15 --decoder_last_pipeline_num_layers 15
 ```
 We use TP=8 for Llama3.1-405B model on 8 nodes. Because it has 126 layers which is not divisable by 8, we need to set `decoder_first_pipeline_num_layers` and `decoder_last_pipeline_num_layers`.
 
