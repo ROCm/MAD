@@ -830,7 +830,12 @@ elif [ "$MODEL_REPO" == "GPT-OSS-20B" ]; then
 
 elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
+  # [fix: stale-log] clear leftover before training so benchmark check is honest
+  rm -f "$TRAIN_LOG" 
   SEQ_LEN=4096
+  # [fix: empty-csv] ensure CSV columns aren't blank when device branch skips training
+  MBS=N/A
+  GBS=N/A
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     export EXP=examples/megatron/configs/MI355X/gpt_oss_120B-$DATATYPE-pretrain.yaml
     MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
@@ -840,6 +845,10 @@ elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
       --log_file /tmp/primus_$MODEL_REPO.log \
       -- train pretrain \
       --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    
+    # [fix: silent-failure] tee hides trainer rc; drop log if training failed
+    train_rc=${PIPESTATUS[0]}
+    [ "$train_rc" -ne 0 ] && { echo "[ERROR] training failed (rc=$train_rc)"; rm -f "$TRAIN_LOG"; }
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     echo "Error: $MODEL_REPO is not supported on $DEVICE. Only MI355X is supported."
   fi
