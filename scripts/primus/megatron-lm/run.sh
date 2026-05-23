@@ -72,6 +72,14 @@ elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen-3-32b" ]]; then
   model="Qwen-3-32B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_mamba-370m" ]]; then
   model="Mamba-370M"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_gpt-oss-20b" ]]; then
+  model="GPT-OSS-20B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_gpt-oss-120b" ]]; then
+  model="GPT-OSS-120B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen-3-30b" ]]; then
+  model="Qwen-3-30B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_qwen-3-235b" ]]; then
+  model="Qwen-3-235B"
 fi
 
 # Run primus pytorch setup script
@@ -103,6 +111,8 @@ if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     datatypes=("BF16")  # Only BF16 supported on MI355X/MI350X
   elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-3.1-70B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
     datatypes=("BF16" "FP8")
+  elif [[ "$model" == "GPT-OSS-20B" || "$model" == "GPT-OSS-120B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
+    datatypes=("BF16" "FP8")
   else
     # Most other models only support BF16 on MI355X/MI350X
     datatypes=("BF16")
@@ -111,9 +121,13 @@ elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
   # MI300X/MI325X support
   if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
     datatypes=("FP8")  # Only FP8 supported
+  elif [[ "$model" == "GPT-OSS-120B" ]]; then
+    echo "Skipping $model - Not supported on $DEVICE (MI355X only)"
   elif [[ "$model" == "Zebra-Llama-1B" || "$model" == "Zebra-Llama-3B" || "$model" == "Zebra-Llama-8B" || "$model" == "Mamba-370M" ]]; then
     datatypes=("BF16")  # Only BF16 supported on MI300X/MI325X
   elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
+    datatypes=("BF16" "FP8")  # Both supported
+  elif [[ "$model" == "GPT-OSS-20B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
     datatypes=("BF16" "FP8")  # Both supported
   else
     # Most large models only support BF16 on MI300X/MI325X
