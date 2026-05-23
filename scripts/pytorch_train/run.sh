@@ -163,14 +163,17 @@ elif [[ "$MODEL_REPO" == "pyt_train_qwen3-32b" ]]; then
 
 elif [[ "$MODEL_REPO" == "pyt_train_mochi-1" ]]; then
   model="Mochi-1"
+  datatypes=("BF16")
   tasks=("posttrain")
 
 elif [[ "$MODEL_REPO" == "pyt_train_hunyuan-video" ]]; then
   model="Hunyuan-video"
+  datatypes=("BF16")
   tasks=("posttrain")
 
 elif [[ "$MODEL_REPO" == "pyt_train_wan2_1-i2v" ]]; then
   model="Wan2_1-i2v"
+  datatypes=("BF16")
   tasks=("posttrain")
 fi
 

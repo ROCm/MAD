@@ -4,18 +4,18 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/primus:v26.2` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.3` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component  | Version            |
 |--------------------|----------------------|
-| ROCm               | 7.2.0                |
+| ROCm               | 7.2.1                |
 | Python             | 3.12.3               |
-| PyTorch            | 2.10.0a0+git449b176    |
-| Transformer Engine | 2.8.0.dev0+51f74fa7  |
+| PyTorch            | 2.10.0+git94c6e04    |
+| Transformer Engine | 2.12.0.dev0+40434cf6 |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 1.2.0-de5c1aebb6           |
-| Triton            | 3.6.0                 |
-| RCCL              | 2.27.7     |
+| hipBLASLt          | 1.3.0-c4b2dc9869     |
+| Triton             | 3.6.0                |
+| RCCL               | 2.27.7               |
 
 
 ## Models
@@ -23,7 +23,7 @@ Examples of the following models are pre-optimized for performance on the AMD In
 ### Pre-training:
 | Model          | Variants               |
 |----------------|------------------------|
-| **LLaMA 3.1**  | 8B, 70B                |
+| **LLaMA 3.1**  | 8B, 70B, 405B          |
 | **DeepSeek V3**| 16B                    |
 
 Please note that some models, such as Llama 3, require an external license agreement through a third party (e.g. Meta).
@@ -100,13 +100,14 @@ To start the pretraining benchmark, use the following command.
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/primus:v26.2
+docker pull rocm/primus:v26.3
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v26.2
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v26.3
 ```
+**Note**: It's not recommended to bind the `$HOME` directory to the container using `-v $HOME:$HOME`. A good practice is only binding the directory you need to the container.
 
 Execute the training_env container (optional if no already in the container)
 ```
@@ -135,6 +136,13 @@ cd /workspace/Primus
 ```
 
 #### MI300X Performance Configs
+
+```bash
+#Set these variables only on MI300/MI325X
+export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=1
+export NVTE_CK_IS_V3_ATOMIC_FP32=1
+```
+
 - **Llama3.1-70B BF16:**
 ```bash
 bash runner/primus-cli direct \
@@ -208,4 +216,38 @@ bash runner/primus-cli direct \
   -- train pretrain \
   --config examples/torchtitan/configs/MI355X/llama3.1_8B-FP8-pretrain.yaml
 ```
+
+### Multi-node Training
+
+Multi-node training using torchtitan is similar to megatron-LM. Refer [megatron multi-node training](../megatron_lm/README.md#32-multi-node-training) for how to set the environment variables.
+
+Here are two examples for multinode training on MI355X.
+
+
+- **Llama3.1 70B FP8 4 Nodes MI355**
+
+Launch the training using the `primus-cli` (recommended)
+```bash
+# In the Primus directory
+./primus-cli slurm srun -N 4 -- train pretrain --config examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml --training.local_batch_size 6 --training.global_batch_size 192 --training.mock_data True
+```
+
+Launch the training using the legacy script
+```bash
+NNODES=4 EXP=examples/megatron/configs/MI355X/llama3.1_70B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --training.local_batch_size 6 --training.global_batch_size 192 --training.mock_data True
+```
+
+- **Llama3.1-405B FP8 8 Nodes MI355**
+
+Launch the training using the `primus-cli` (recommended)
+```bash
+# In the Primus directory
+./primus-cli slurm srun -N 8 -- train pretrain --config examples/torchtitan/configs/MI355X/llama3.1_405B-FP8-pretrain.yaml --training.local_batch_size 3 --training.global_batch_size 192 --training.mock_data True
+```
+
+Launch the training using the legacy script
+```bash
+NNODES=8 EXP=examples/torchtitan/configs/MI355X/llama3.1_405B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --training.local_batch_size 3 --training.global_batch_size 192 --training.mock_data True
+```
+
 
