@@ -1054,6 +1054,7 @@
   },
   {
     "name": "primus_pretrain",
+    "url": "",
     "dockerfile": "docker/primus",
     "scripts": "scripts/primus_pretrain",
     "n_gpus": "-1",
