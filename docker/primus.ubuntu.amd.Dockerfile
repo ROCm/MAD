@@ -16,7 +16,7 @@
 #
 # Local Docker / SLURM: bind-mount or shared filesystem provides scripts/Primus; run.sh prefers
 # that checkout when present, else uses PRIMUS_ROOT from this image.
-ARG BASE_DOCKER=docker.io/rocm/primus:v26.1
+ARG BASE_DOCKER=docker.io/rocm/primus:v26.3
 
 FROM $BASE_DOCKER
 
