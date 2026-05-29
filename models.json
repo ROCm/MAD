@@ -1060,6 +1060,7 @@
     "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "bf16",
+    "multiple_results": "primus_perf_output.csv",
     "tags": ["training", "primus", "megatron", "pretrain"],
     "args": ""
   },
@@ -2328,6 +2329,83 @@
     "timeout": -1,
     "args":
     "--model_repo primus_pyt_megatron_lm_train_mamba-370m"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_gpt-oss-20b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-GPT-OSS-20B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "gpt-oss",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_gpt-oss-20b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_gpt-oss-120b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-GPT-OSS-120B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "gpt-oss",
+      "training"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_gpt-oss-120b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_qwen-3-30b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Qwen-3-30B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_qwen-3-30b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_qwen-3-235b",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train",
+    "scripts": "scripts/primus/megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Qwen-3-235B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "qwen3",
+      "training"
+    ],
+    "timeout": -1,
+    "args":
+    "--model_repo primus_pyt_megatron_lm_train_qwen-3-235b"
   },
   {
     "name": "pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning",

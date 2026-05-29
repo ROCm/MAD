@@ -82,8 +82,8 @@ MAD integrates [AMD-AGI/Primus](https://github.com/AMD-AGI/Primus) as a Git subm
   ```
 - **Choose a config**: pass Primus YAML via script args, e.g. `--config_path examples/torchtitan/configs/MI300X/your_config.yaml` (path is relative to the Primus repo root). For SLURM or Kubernetes, you can set **`PRIMUS_CONFIG_PATH`** to the same path instead.
 - **Hugging Face–backed configs**: set **`HF_TOKEN`**, or **`MAD_SECRET_HFTOKEN`** (madengine v2 can inject the latter via `additional_context.docker_env_vars`).
-- **Docker build**: build from the **repository root** so `COPY scripts/Primus/` in `docker/primus.ubuntu.amd.Dockerfile` resolves; `madengine build` uses repo context for Dockerfiles whose path contains `primus`.
-- **Optional discovery**: `scripts/primus_pretrain/get_models_json.py` can expose individual Primus example YAMLs as separate models when used with madengine’s discover-models flow.
+- **Docker build (madengine path)**: build from the **repository root** so `COPY scripts/Primus/` in `docker/primus.ubuntu.amd.Dockerfile` resolves; `madengine build` uses repo context for Dockerfiles whose path contains `primus`.
+- **Optional discovery (madengine only)**: `scripts/primus_pretrain/get_models_json.py` can expose individual Primus example YAMLs as separate models when used with madengine’s discover-models flow. The legacy `tools/run_models.py` path is not supported for `primus_pretrain`, because it builds with `./docker` as context and will not satisfy this Dockerfile’s repo-root `COPY scripts/Primus/` requirement.
 
 For more detail, see comments in `docker/primus.ubuntu.amd.Dockerfile` and `scripts/primus_pretrain/run.sh`.
 

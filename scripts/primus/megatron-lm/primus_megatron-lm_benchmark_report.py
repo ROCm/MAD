@@ -121,7 +121,9 @@ if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-3.1-70B-proxy" or args.model == "Llama-3.3-70B" or \
         args.model == "Qwen2.5-7B" or args.model == "Qwen2.5-72B" or \
         args.model == "Zebra-Llama-1B" or args.model == "Zebra-Llama-3B" or args.model == "Zebra-Llama-8B" or \
-        args.model == "Qwen-3-32B" or args.model == "Mamba-370M":
+        args.model == "Qwen-3-32B" or args.model == "Mamba-370M" or \
+        args.model == "GPT-OSS-20B" or args.model == "GPT-OSS-120B" or args.model == "Qwen-3-30B" or \
+        args.model == "Qwen-3-235B":
     # Only extract tokens/s/GPU for models other than Qwen-3-32B
     if args.model != "Qwen-3-32B":
         tok_per_s_per_gpu = find_match(input_file, "tokens/s/GPU")

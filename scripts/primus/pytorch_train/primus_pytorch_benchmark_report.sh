@@ -154,9 +154,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cd /workspace/Primus
       SEQUENCE_LENGTH=8192
       # Map device names for config file paths
-      if [ "$DEVICE" == "MI325X" ]; then
-        CONFIG_DEVICE="MI300X"
-      elif [ "$DEVICE" == "MI350X" ]; then
+      if [ "$DEVICE" == "MI350X" ]; then
         CONFIG_DEVICE="MI355X"
       else
         CONFIG_DEVICE="$DEVICE"
@@ -198,9 +196,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cd /workspace/Primus
       SEQUENCE_LENGTH=8192
       # Map device names for config file paths
-      if [ "$DEVICE" == "MI325X" ]; then
-        CONFIG_DEVICE="MI300X"
-      elif [ "$DEVICE" == "MI350X" ]; then
+      if [ "$DEVICE" == "MI350X" ]; then
         CONFIG_DEVICE="MI355X"
       else
         CONFIG_DEVICE="$DEVICE"
@@ -242,9 +238,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
       cd /workspace/Primus
       SEQUENCE_LENGTH=4096
       # Map device names for config file paths
-      if [ "$DEVICE" == "MI325X" ]; then
-        CONFIG_DEVICE="MI300X"
-      elif [ "$DEVICE" == "MI350X" ]; then
+      if [ "$DEVICE" == "MI350X" ]; then
         CONFIG_DEVICE="MI355X"
       else
         CONFIG_DEVICE="$DEVICE"

@@ -21,7 +21,10 @@ if [[ -f "$script_dir/../Primus/examples/run_pretrain.sh" ]]; then
 elif [[ -f "/workspace/Primus/examples/run_pretrain.sh" ]]; then
   export PRIMUS_ROOT="/workspace/Primus"
 elif [[ -n "${PRIMUS_ROOT:-}" ]]; then
-  :
+  if [[ ! -f "$PRIMUS_ROOT/examples/run_pretrain.sh" ]]; then
+    echo "ERROR: Could not find Primus run_pretrain.sh. Set PRIMUS_ROOT or use a repo with scripts/Primus submodule." >&2
+    exit 1
+  fi
 elif [[ -f "/opt/primus/examples/run_pretrain.sh" ]]; then
   export PRIMUS_ROOT="/opt/primus"
 elif [[ -f "/workspace/examples/run_pretrain.sh" ]]; then
@@ -78,9 +81,11 @@ export DUMP_HLO_DIR="${DUMP_HLO_DIR:-$RUN_DIR/output/xla_dump_hlo}"
 # Run from PRIMUS_ROOT so EXP path (e.g. examples/torchtitan/configs/...) resolves correctly.
 # Do not use exec so we can run the perf extractor after training for madengine multiple_results.
 # Pass --job.dump_folder so Torchtitan writes checkpoints to RUN_DIR/outputs (not scripts/Primus/outputs).
+set +e
 cd "$PRIMUS_ROOT" && bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "$@" --job.dump_folder "$RUN_DIR/outputs"
 exitcode=$?
-# Extract tps/tflops/mfu from training log into primus_perf_output.csv (one row: model, performance, metric, tflops, model_flops_utilization)
+set -e
+# Extract tps/tflops/mfu from training log into primus_perf_output.csv (CSV rows: model, performance, metric; one row per metric)
 LOG_PATH="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 if [[ -f "$LOG_PATH" ]]; then
   python3 "$RUN_DIR/extract_primus_perf.py" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" || true
