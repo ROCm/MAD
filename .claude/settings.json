@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(madengine discover *)",
+      "Bash(python3 -m json.tool *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(rocm-smi *)",
+      "Bash(amd-smi *)",
+      "Read",
+      "Grep",
+      "Glob"
+    ]
+  }
+}
