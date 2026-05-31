@@ -17,9 +17,13 @@ When invoked:
    - Output file: `-o <path>` when the user wants results kept separately.
    - Timeout: `--timeout <s>` for long training runs (default 7200).
    - Profiling: `--additional-context '{"tools": [{"name": "<tool>"}]}'`
-     (e.g. `rocprofv3_compute`, `rpd`, `rccl_trace`).
+     (e.g. `rocprofv3_compute`, `rpd`, `rccl_trace`). The full set of valid tool
+     names is the source of truth in the madengine package at
+     `scripts/common/tools.json` (23+ tools, incl. `rocprofv3_full`,
+     `rocblas_trace`, `hipblaslt_trace`, `miopen_trace`, `rocprof_sys`).
    - Multi-node: add a `"slurm": {...}` or `"k8s": {...}` key to
-     `--additional-context` — presence of the key selects the target.
+     `--additional-context` — presence of the key selects the target. An explicit
+     `"deploy": "slurm"`/`"k8s"` key works too; neither key → local Docker.
    - Build/run split (build once, run many): `madengine build --tags <tag>
      [-r REGISTRY]` writes `build_manifest.json`, then `madengine run -m
      build_manifest.json` executes from it (skips rebuild).

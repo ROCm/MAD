@@ -11,6 +11,7 @@ Use the `mad-model-author` subagent. It should:
    `# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}` header), and
    `scripts/<dir>/run.sh` ending in `echo "performance: $performance <unit>"`.
 3. Validate `models.json` with `python3 -m json.tool models.json`.
+4. Confirm the entry is selectable with `madengine discover --tags $1` (GPU-free).
 
 Report the files created and the verification command
 `madengine run --tags $1 --live-output` (requires a GPU host).
