@@ -1,0 +1,1876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAD Claude Automation — How-To Guide</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg-elevated: #161b27;
+    --bg-card: #1a2035;
+    --bg-code: #0d1117;
+    --border: #2a3045;
+    --border-bright: #3a4460;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --text-dim: #64748b;
+    --accent-blue: #4f9cf9;
+    --accent-green: #34d399;
+    --accent-amber: #fbbf24;
+    --accent-red: #f87171;
+    --accent-purple: #a78bfa;
+    --accent-teal: #2dd4bf;
+    --badge-command: #1e3a5f;
+    --badge-command-text: #93c5fd;
+    --badge-agent: #1a3a2a;
+    --badge-agent-text: #6ee7b7;
+    --badge-workflow: #2d1f4a;
+    --badge-workflow-text: #c4b5fd;
+    --badge-warn: #3a2a10;
+    --badge-warn-text: #fcd34d;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; font-size: 16px; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.65;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Navigation ─────────────────────────────────────── */
+  nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 256px;
+    height: 100vh;
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 24px 0 40px;
+    z-index: 100;
+    flex-shrink: 0;
+  }
+
+  nav .nav-logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  nav .nav-logo .logo-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-blue);
+  }
+
+  nav .nav-logo .logo-sub {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  nav .nav-section {
+    padding: 6px 20px 2px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-top: 12px;
+  }
+
+  nav a {
+    display: block;
+    padding: 6px 20px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  nav a:hover {
+    color: var(--text);
+    background: rgba(79,156,249,0.07);
+    border-left-color: var(--accent-blue);
+  }
+
+  nav a.active {
+    color: var(--accent-blue);
+    border-left-color: var(--accent-blue);
+    background: rgba(79,156,249,0.1);
+  }
+
+  /* ── Main content ────────────────────────────────────── */
+  main {
+    margin-left: 256px;
+    flex: 1;
+    max-width: 960px;
+    padding: 48px 48px 80px;
+  }
+
+  /* ── Sections ────────────────────────────────────────── */
+  section {
+    margin-bottom: 72px;
+    scroll-margin-top: 24px;
+  }
+
+  h1 {
+    font-size: clamp(1.6rem, 2vw, 2.2rem);
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
+  .page-subtitle {
+    font-size: 1rem;
+    color: var(--text-muted);
+    margin-bottom: 48px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h2 .section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--border-bright);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 24px 0 12px;
+    letter-spacing: -0.005em;
+  }
+
+  p {
+    color: var(--text-muted);
+    margin-bottom: 14px;
+    max-width: 72ch;
+  }
+
+  a { color: var(--accent-blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  ul, ol {
+    padding-left: 20px;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+
+  li { margin-bottom: 5px; }
+
+  strong { color: var(--text); font-weight: 600; }
+
+  /* ── Badges ──────────────────────────────────────────── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .badge-command {
+    background: var(--badge-command);
+    color: var(--badge-command-text);
+    border: 1px solid rgba(147,197,253,0.2);
+  }
+
+  .badge-agent {
+    background: var(--badge-agent);
+    color: var(--badge-agent-text);
+    border: 1px solid rgba(110,231,183,0.2);
+  }
+
+  .badge-workflow {
+    background: var(--badge-workflow);
+    color: var(--badge-workflow-text);
+    border: 1px solid rgba(196,181,253,0.2);
+  }
+
+  .badge-warn {
+    background: var(--badge-warn);
+    color: var(--badge-warn-text);
+    border: 1px solid rgba(252,211,77,0.2);
+  }
+
+  /* ── Code blocks ─────────────────────────────────────── */
+  pre {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 16px 0;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    position: relative;
+  }
+
+  pre .copy-hint {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    font-family: var(--font-sans);
+    opacity: 0;
+    transition: opacity 0.2s;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 8px;
+    background: var(--border);
+    border-radius: 4px;
+  }
+
+  pre:hover .copy-hint { opacity: 1; }
+  pre .copy-hint:hover { color: var(--text-muted); }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    color: var(--accent-teal);
+    background: rgba(45,212,191,0.08);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  /* syntax colors */
+  .t-comment { color: #5c7a9e; }
+  .t-cmd { color: #f8d07e; }
+  .t-flag { color: #93c5fd; }
+  .t-string { color: #86efac; }
+  .t-var { color: #f9a8d4; }
+  .t-key { color: #c4b5fd; }
+  .t-perf { color: #34d399; font-weight: 600; }
+
+  /* ── Cards ───────────────────────────────────────────── */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 24px;
+    margin-bottom: 18px;
+  }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .card-header .card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .card-header .card-meta {
+    flex: 1;
+  }
+
+  .card-header .card-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .card-header .card-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .card p { max-width: none; }
+
+  .card-body {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+  }
+
+  .card-body ul {
+    margin: 8px 0 0;
+  }
+
+  /* ── Callout box ─────────────────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 20px 0;
+    border-left: 3px solid;
+  }
+
+  .callout-green {
+    background: rgba(52,211,153,0.07);
+    border-color: var(--accent-green);
+  }
+
+  .callout-amber {
+    background: rgba(251,191,36,0.07);
+    border-color: var(--accent-amber);
+  }
+
+  .callout-red {
+    background: rgba(248,113,113,0.07);
+    border-color: var(--accent-red);
+  }
+
+  .callout-blue {
+    background: rgba(79,156,249,0.07);
+    border-color: var(--accent-blue);
+  }
+
+  .callout-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .callout-green .callout-title { color: var(--accent-green); }
+  .callout-amber .callout-title { color: var(--accent-amber); }
+  .callout-red .callout-title { color: var(--accent-red); }
+  .callout-blue .callout-title { color: var(--accent-blue); }
+
+  .callout p { color: var(--text-muted); margin-bottom: 0; max-width: none; }
+
+  /* ── Table ───────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 16px 0;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.83rem;
+  }
+
+  th {
+    background: var(--bg-elevated);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.72rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+  }
+
+  td {
+    padding: 10px 14px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  td code { font-size: 0.8em; }
+
+  /* ── Decision flowchart ──────────────────────────────── */
+  .flow {
+    display: grid;
+    gap: 12px;
+    margin: 20px 0;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .flow-q {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-bright);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    color: var(--text);
+    font-weight: 500;
+    min-width: 220px;
+  }
+
+  .flow-arrow {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .flow-cmd {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-teal);
+    background: rgba(45,212,191,0.08);
+    border: 1px solid rgba(45,212,191,0.2);
+    border-radius: 6px;
+    padding: 8px 14px;
+  }
+
+  /* ── Architecture diagram ────────────────────────────── */
+  .arch-diagram {
+    background: var(--bg-code);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    margin: 20px 0;
+    overflow-x: auto;
+  }
+
+  /* ── Collapsible details ─────────────────────────────── */
+  details {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  summary {
+    padding: 14px 18px;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--bg-elevated);
+    user-select: none;
+    transition: background 0.15s;
+  }
+
+  summary:hover { background: var(--bg-card); }
+
+  summary::before {
+    content: '▶';
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  details[open] summary::before { transform: rotate(90deg); }
+  details::-webkit-details-marker { display: none; }
+
+  .details-body {
+    padding: 18px 20px;
+    background: var(--bg);
+  }
+
+  /* ── Phase list ──────────────────────────────────────── */
+  .phases {
+    display: flex;
+    gap: 0;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+
+  .phase-step {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px 14px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-right: none;
+    position: relative;
+  }
+
+  .phase-step:first-child { border-radius: 8px 0 0 8px; }
+  .phase-step:last-child { border-radius: 0 8px 8px 0; border-right: 1px solid var(--border); }
+
+  .phase-step .phase-num {
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .phase-step .phase-name {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent-blue);
+    margin-bottom: 4px;
+  }
+
+  .phase-step .phase-detail {
+    font-size: 0.74rem;
+    color: var(--text-dim);
+    line-height: 1.4;
+  }
+
+  /* ── Env var list ────────────────────────────────────── */
+  .env-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+
+  .env-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+
+  .env-card .env-name {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--accent-purple);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+
+  .env-card .env-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  /* ── Hero section ────────────────────────────────────── */
+  .hero {
+    background: linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-card) 100%);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 36px 40px;
+    margin-bottom: 48px;
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+  }
+
+  .hero-stat {
+    text-align: center;
+    flex-shrink: 0;
+    min-width: 80px;
+  }
+
+  .hero-stat .stat-val {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--accent-blue);
+    line-height: 1;
+  }
+
+  .hero-stat .stat-label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+  }
+
+  .hero-divider {
+    width: 1px;
+    background: var(--border);
+    align-self: stretch;
+  }
+
+  .hero-text h1 {
+    margin-bottom: 10px;
+  }
+
+  /* ── Scrollbar ───────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+  /* ── Responsive ──────────────────────────────────────── */
+  @media (max-width: 800px) {
+    nav { display: none; }
+    main { margin-left: 0; padding: 24px 20px 60px; }
+  }
+
+  /* ── SVG diagram ─────────────────────────────────────── */
+  svg text { font-family: var(--font-sans); }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar navigation ───────────────────────────────── -->
+<nav id="sidebar">
+  <div class="nav-logo">
+    <div class="logo-title">MAD Automation</div>
+    <div class="logo-sub">Claude Code How-To Guide</div>
+  </div>
+
+  <div class="nav-section">Overview</div>
+  <a href="#what-is-mad">What is MAD</a>
+  <a href="#architecture">Architecture</a>
+
+  <div class="nav-section">Get Started</div>
+  <a href="#quickstart">Quick-start Decision Table</a>
+  <a href="#perf-contract">Performance Contract</a>
+
+  <div class="nav-section">Slash Commands</div>
+  <a href="#cmd-benchmark">/mad-benchmark</a>
+  <a href="#cmd-add-model">/mad-add-model</a>
+  <a href="#cmd-profile">/mad-profile</a>
+  <a href="#cmd-report">/mad-report</a>
+  <a href="#cmd-tune">/mad-tune</a>
+  <a href="#cmd-validate">/mad-validate</a>
+
+  <div class="nav-section">Workflows</div>
+  <a href="#wf-sweep">mad-benchmark-sweep</a>
+  <a href="#wf-tune-search">mad-tune-search</a>
+
+  <div class="nav-section">Reference</div>
+  <a href="#agents">Agent Cards</a>
+  <a href="#env-vars">Env Variables</a>
+  <a href="#tips">Tips &amp; Gotchas</a>
+</nav>
+
+<!-- ── Main content ─────────────────────────────────────── -->
+<main>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="hero-text">
+    <h1>MAD Claude Automation</h1>
+    <p class="page-subtitle" style="border:none;padding:0;margin:0;">
+      A practical guide to benchmarking, adding, tuning, and analyzing AI model workloads
+      on AMD Instinct GPUs — using Claude Code's slash commands, agents, and workflows.
+    </p>
+  </div>
+  <div class="hero-divider"></div>
+  <div class="hero-stat">
+    <div class="stat-val">142</div>
+    <div class="stat-label">models</div>
+  </div>
+  <div class="hero-stat">
+    <div class="stat-val">6</div>
+    <div class="stat-label">commands</div>
+  </div>
+  <div class="hero-stat">
+    <div class="stat-val">4</div>
+    <div class="stat-label">agents</div>
+  </div>
+  <div class="hero-stat">
+    <div class="stat-val">2</div>
+    <div class="stat-label">workflows</div>
+  </div>
+</div>
+
+<!-- ── 1. What is MAD ─────────────────────────────────────── -->
+<section id="what-is-mad">
+  <h2><span class="section-num">1</span> What is MAD</h2>
+
+  <p>
+    <strong>MAD</strong> (Model Automation and Dashboarding) is a curated catalog of 142 AI model
+    workloads designed to run on AMD Instinct GPUs. Each model is one JSON entry in
+    <code>models.json</code>. The <strong>madengine</strong> CLI handles the full lifecycle:
+    building a Docker image, running the model inside a container, parsing a performance number
+    from stdout, and appending a row to <code>perf.csv</code>.
+  </p>
+
+  <p>
+    Claude Code automation sits on top of madengine. Instead of memorizing flags and file
+    conventions, you type a slash command — Claude dispatches the right subagent which constructs
+    and (when a GPU host is available) executes the correct madengine invocation.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>User task</th>
+          <th>Slash command</th>
+          <th>Subagent</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Run a benchmark</td>
+          <td><code>/mad-benchmark</code></td>
+          <td>mad-benchmark-runner</td>
+        </tr>
+        <tr>
+          <td>Add a new model</td>
+          <td><code>/mad-add-model</code></td>
+          <td>mad-model-author</td>
+        </tr>
+        <tr>
+          <td>Profile / trace a model</td>
+          <td><code>/mad-profile</code></td>
+          <td>mad-benchmark-runner</td>
+        </tr>
+        <tr>
+          <td>Analyze results</td>
+          <td><code>/mad-report</code></td>
+          <td>mad-perf-analyst</td>
+        </tr>
+        <tr>
+          <td>Tune for better perf</td>
+          <td><code>/mad-tune</code></td>
+          <td>mad-tuner</td>
+        </tr>
+        <tr>
+          <td>Validate model entries</td>
+          <td><code>/mad-validate</code></td>
+          <td>(inline script)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Two multi-agent <strong>workflows</strong> handle matrix benchmarking and systematic
+    tuning search: <code>mad-benchmark-sweep</code> and <code>mad-tune-search</code>.
+    These fan out parallel subagent calls and synthesize results into comparison tables.
+  </p>
+</section>
+
+<!-- ── 2. Architecture ────────────────────────────────────── -->
+<section id="architecture">
+  <h2><span class="section-num">2</span> Architecture</h2>
+
+  <p>
+    The system has three layers: the <strong>user interface</strong> (slash commands you type in
+    Claude Code), <strong>subagents</strong> (specialized Claude instances with tool access), and
+    the <strong>madengine CLI</strong> plus the MAD repository files.
+  </p>
+
+  <div class="arch-diagram">
+    <svg viewBox="0 0 820 420" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MAD architecture diagram">
+      <defs>
+        <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#4f9cf9" opacity="0.7"/>
+        </marker>
+        <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8" opacity="0.6"/>
+        </marker>
+      </defs>
+
+      <!-- Layer labels -->
+      <text x="12" y="56" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,56)" dy="0">USER</text>
+      <text x="12" y="200" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,200)" dy="0">AGENTS</text>
+      <text x="12" y="355" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,355)" dy="0">ENGINE</text>
+
+      <!-- Layer separators -->
+      <line x1="30" y1="105" x2="800" y2="105" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
+      <line x1="30" y1="285" x2="800" y2="285" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
+
+      <!-- ── Slash commands (top row) ── -->
+      <!-- /mad-benchmark -->
+      <rect x="42" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
+      <text x="101" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-benchmark</text>
+      <text x="101" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">/mad-profile</text>
+
+      <!-- /mad-add-model -->
+      <rect x="178" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
+      <text x="237" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-add-model</text>
+      <text x="237" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">scaffold files</text>
+
+      <!-- /mad-report -->
+      <rect x="314" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
+      <text x="373" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-report</text>
+      <text x="373" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">parse results</text>
+
+      <!-- /mad-tune -->
+      <rect x="450" y="20" width="100" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
+      <text x="500" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-tune</text>
+      <text x="500" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">measure-change</text>
+
+      <!-- /mad-validate -->
+      <rect x="568" y="20" width="105" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
+      <text x="620" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-validate</text>
+      <text x="620" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">GPU-free lint</text>
+
+      <!-- Workflows -->
+      <rect x="690" y="18" width="110" height="44" rx="8" fill="#2d1f4a" stroke="#a78bfa" stroke-width="1.5" opacity="0.9"/>
+      <text x="745" y="36" font-size="10.5" fill="#c4b5fd" text-anchor="middle" font-weight="700">benchmark-sweep</text>
+      <text x="745" y="50" font-size="10.5" fill="#c4b5fd" text-anchor="middle" font-weight="700">tune-search</text>
+
+      <!-- ── Agents (middle row) ── -->
+      <!-- benchmark-runner -->
+      <rect x="42" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="116" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">benchmark-runner</text>
+      <text x="116" y="158" font-size="9" fill="#34d399" text-anchor="middle">Bash · Read · Grep · Glob</text>
+      <text x="116" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">run &amp; profile</text>
+
+      <!-- model-author -->
+      <rect x="210" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="284" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">model-author</text>
+      <text x="284" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Write · Edit · Glob</text>
+      <text x="284" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">scaffold files</text>
+
+      <!-- perf-analyst -->
+      <rect x="378" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="452" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">perf-analyst</text>
+      <text x="452" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Grep · Bash (r/o)</text>
+      <text x="452" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">parse &amp; compare CSV</text>
+
+      <!-- tuner -->
+      <rect x="546" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="620" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">tuner</text>
+      <text x="620" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Edit · Bash · Grep</text>
+      <text x="620" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">measure-change-measure</text>
+
+      <!-- ── Engine layer (bottom) ── -->
+      <!-- madengine -->
+      <rect x="42" y="305" width="200" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
+      <text x="142" y="327" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="800">madengine</text>
+      <text x="142" y="344" font-size="9" fill="#64748b" text-anchor="middle">build · run · discover · report · database</text>
+      <text x="142" y="356" font-size="9" fill="#5c7a9e" text-anchor="middle">Docker / SLURM / Kubernetes</text>
+
+      <!-- models.json -->
+      <rect x="262" y="305" width="130" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
+      <text x="327" y="327" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">models.json</text>
+      <text x="327" y="342" font-size="9" fill="#64748b" text-anchor="middle">142 model entries</text>
+      <text x="327" y="355" font-size="9" fill="#64748b" text-anchor="middle">tags · dockerfile · scripts</text>
+
+      <!-- docker/ + scripts/ -->
+      <rect x="412" y="305" width="148" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
+      <text x="486" y="323" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">docker/ + scripts/</text>
+      <text x="486" y="338" font-size="9" fill="#64748b" text-anchor="middle">*.ubuntu.amd.Dockerfile</text>
+      <text x="486" y="351" font-size="9" fill="#64748b" text-anchor="middle">run.sh + perf line</text>
+      <text x="486" y="364" font-size="9" fill="#5c7a9e" text-anchor="middle">performance: N unit</text>
+
+      <!-- perf.csv -->
+      <rect x="580" y="305" width="120" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
+      <text x="640" y="326" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">perf.csv</text>
+      <text x="640" y="341" font-size="9" fill="#64748b" text-anchor="middle">one row per run</text>
+      <text x="640" y="354" font-size="9" fill="#64748b" text-anchor="middle">model · perf · metric</text>
+      <text x="640" y="367" font-size="9" fill="#64748b" text-anchor="middle">status · gpu_arch</text>
+
+      <!-- AMD GPU -->
+      <rect x="720" y="305" width="80" height="52" rx="8" fill="#1a1010" stroke="#f87171" stroke-width="1.5"/>
+      <text x="760" y="328" font-size="11" fill="#f87171" text-anchor="middle" font-weight="700">AMD GPU</text>
+      <text x="760" y="343" font-size="9" fill="#f87171" text-anchor="middle" opacity="0.7">required</text>
+      <text x="760" y="356" font-size="9" fill="#f87171" text-anchor="middle" opacity="0.7">for run/build</text>
+
+      <!-- Arrows: commands → agents -->
+      <line x1="101" y1="60" x2="101" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
+      <line x1="237" y1="60" x2="270" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
+      <line x1="373" y1="60" x2="430" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
+      <line x1="500" y1="60" x2="580" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
+      <!-- validate goes inline, not to an agent box -->
+
+      <!-- Workflows → agents (fan-out) -->
+      <line x1="745" y1="62" x2="620" y2="125" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)" opacity="0.6" stroke-dasharray="5,3"/>
+      <line x1="745" y1="62" x2="116" y2="125" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)" opacity="0.4" stroke-dasharray="5,3"/>
+
+      <!-- Arrows: agents → engine -->
+      <line x1="116" y1="173" x2="116" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
+      <line x1="284" y1="173" x2="284" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
+      <line x1="452" y1="173" x2="600" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
+      <line x1="620" y1="173" x2="620" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
+
+      <!-- madengine → GPU -->
+      <line x1="242" y1="331" x2="720" y2="340" stroke="#f87171" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.5" stroke-dasharray="4,3"/>
+    </svg>
+  </div>
+
+  <p>
+    Each slash command maps to a subagent. Workflows fan out to <em>multiple</em> parallel
+    subagent calls, then synthesize the results. Agents that need to run madengine always
+    check for AMD GPUs first — if none are present they produce a plan (the exact commands to
+    run on a GPU host) instead of executing.
+  </p>
+</section>
+
+<!-- ── 3. Quick-start ─────────────────────────────────────── -->
+<section id="quickstart">
+  <h2><span class="section-num">3</span> Quick-Start: What Do You Want to Do?</h2>
+
+  <div class="flow">
+    <div class="flow-row">
+      <div class="flow-q">Run one benchmark</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-benchmark pyt_vllm_llama-3.1-8b</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Benchmark multiple tags at once</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-benchmark-sweep (workflow)</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Add a brand-new model</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-add-model pyt_vllm_gemma-3-27b https://github.com/...</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Attach a GPU profiler</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-profile bert rocprofv3_compute</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Read or compare benchmark results</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-report perf.csv perf_old.csv</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Improve throughput of a model</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-tune bert throughput</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Validate files before a GPU run</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-validate bert</div>
+    </div>
+    <div class="flow-row">
+      <div class="flow-q">Systematic tuning search (N candidates)</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-cmd">/mad-tune-search (workflow)</div>
+    </div>
+  </div>
+
+  <div class="callout callout-amber">
+    <div class="callout-title">GPU host check</div>
+    <p>
+      <strong>madengine build and run require AMD GPUs.</strong> On a machine without GPUs,
+      agents automatically switch to <em>plan mode</em> — they validate the command and print
+      the exact invocation for you to run on a GPU host. GPU-free commands (discover, validate)
+      always work.
+    </p>
+  </div>
+</section>
+
+<!-- ── Performance contract ──────────────────────────────── -->
+<section id="perf-contract">
+  <h2><span class="section-num">4</span> The Performance Contract</h2>
+
+  <p>
+    This is the single most important MAD convention. Every model's <code>run.sh</code> must
+    emit <strong>exactly one line</strong> to stdout that madengine can grep. Without it,
+    madengine records the run with no performance value.
+  </p>
+
+  <div class="callout callout-green">
+    <div class="callout-title">Required output — single result</div>
+    <pre style="background:transparent;border:none;padding:0;margin:8px 0 0;"><code><span class="t-perf">performance: &lt;value&gt; &lt;unit&gt;</span></code></pre>
+    <p style="margin-top:8px;">
+      For example: <code>performance: 3847.2 tokens_per_second</code> or
+      <code>performance: 124 samples_per_second</code>.
+    </p>
+  </div>
+
+  <h3>Implementing the line in run.sh</h3>
+
+  <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Parse from the workload's own log output, then emit the contract line</span>
+<span class="t-var">performance</span>=$(grep -Eo <span class="t-string">"train_samples_per_second':[^,]+"</span> log.txt \
+  | sed <span class="t-string">"s/.*: //g"</span> | head -n 1)
+echo <span class="t-string">"performance: $performance samples_per_second"</span></pre>
+
+  <h3>Alternative: multiple results</h3>
+
+  <p>
+    When a script produces many rows (e.g. one per concurrency level), have the script write
+    its own CSV and declare <code>"multiple_results"</code> in <code>models.json</code>:
+  </p>
+
+  <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># models.json entry</span>
+{
+  <span class="t-key">"name"</span>: <span class="t-string">"pyt_vllm_deepseek-r1"</span>,
+  ...
+  <span class="t-key">"multiple_results"</span>: <span class="t-string">"perf_DeepSeek-R1.csv"</span>
+}</pre>
+
+  <div class="callout callout-red">
+    <div class="callout-title">Hard rule</div>
+    <p>
+      A run script must satisfy <strong>exactly one</strong> of the two contracts above.
+      Satisfying neither means madengine records a run with no performance value.
+      The <code>/mad-validate</code> command checks this statically before any GPU run.
+    </p>
+  </div>
+</section>
+
+<!-- ── Slash commands ─────────────────────────────────────── -->
+<section id="cmd-benchmark">
+  <h2><span class="section-num">5</span> Slash Command Reference</h2>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1e3a5f;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-benchmark
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-agent">benchmark-runner</span>
+        </div>
+        <div class="card-desc">Build and run a madengine benchmark for the given tag or model name.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-benchmark</span> <span class="t-string">&lt;tag-or-model&gt;</span> [extra options]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-benchmark</span> <span class="t-string">bert</span>
+<span class="t-cmd">/mad-benchmark</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--timeout 3600</span>
+<span class="t-cmd">/mad-benchmark</span> <span class="t-string">deepseek</span> <span class="t-flag">--output results/deepseek.csv</span></pre>
+
+      <p><strong>What the agent does</strong></p>
+      <ol>
+        <li>Runs <code>madengine discover --tags &lt;tag&gt;</code> to confirm the tag resolves (GPU-free).</li>
+        <li>Assembles: <code>madengine run --tags &lt;tag&gt; --live-output [-o path] [--timeout S]</code>.</li>
+        <li>Checks for AMD GPUs via <code>rocm-smi</code> / <code>amd-smi</code>.</li>
+        <li>On GPU host: runs the command and reports where <code>perf.csv</code> landed.</li>
+        <li>No GPU: prints the exact command to run on a GPU host and stops.</li>
+      </ol>
+
+      <p><strong>Expected output</strong></p>
+      <ul>
+        <li>A <code>perf.csv</code> row with the performance value and unit.</li>
+        <li>Live stdout from the model during the run (via <code>--live-output</code>).</li>
+        <li>Summary of resolved model(s), command used, and output file path.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="cmd-add-model">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1a3a2a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-add-model
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-agent">model-author</span>
+        </div>
+        <div class="card-desc">Scaffold a new MAD model — models.json entry, Dockerfile, and run.sh with the performance line.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-add-model</span> <span class="t-string">&lt;framework_project_workload&gt;</span> [base notes / repo url]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-add-model</span> <span class="t-string">pyt_vllm_gemma-3-27b</span> <span class="t-string">https://github.com/google/gemma</span>
+<span class="t-cmd">/mad-add-model</span> <span class="t-string">jax_maxtext_llama-4</span> <span class="t-string">bf16 inference, context=8192</span></pre>
+
+      <p><strong>What the agent does</strong></p>
+      <ol>
+        <li>Identifies the closest existing model of the same framework to use as template.</li>
+        <li>Creates three files:
+          <ul>
+            <li><code>models.json</code> entry (required fields: name, url, dockerfile, scripts, n_gpus, owner, training_precision, tags)</li>
+            <li><code>docker/&lt;name&gt;.ubuntu.amd.Dockerfile</code> with the required context header</li>
+            <li><code>scripts/&lt;dir&gt;/run.sh</code> ending in <code>echo "performance: $performance &lt;unit&gt;"</code></li>
+          </ul>
+        </li>
+        <li>Validates <code>models.json</code> with <code>python3 -m json.tool models.json</code>.</li>
+        <li>Confirms the entry is selectable: <code>madengine discover --tags &lt;name&gt;</code>.</li>
+      </ol>
+
+      <p><strong>Dockerfile required header (first line)</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}</span>
+ARG BASE_DOCKER=rocm/pytorch
+FROM $BASE_DOCKER</pre>
+
+      <p><strong>Expected output</strong></p>
+      <ul>
+        <li>Three file paths created/edited.</li>
+        <li>The template model that was used.</li>
+        <li>The verification command: <code>madengine run --tags &lt;name&gt; --live-output</code> (requires GPU).</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="cmd-profile">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#2d1a1a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-profile
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-agent">benchmark-runner</span>
+        </div>
+        <div class="card-desc">Run a madengine benchmark with a GPU profiling or tracing tool attached.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">&lt;tag-or-model&gt;</span> [tool: rocprofv3_compute|rpd|rccl_trace|...]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">bert</span>
+<span class="t-cmd">/mad-profile</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">rccl_trace</span>
+<span class="t-cmd">/mad-profile</span> <span class="t-string">deepseek</span> <span class="t-string">rocprofv3_memory</span></pre>
+
+      <p><strong>What the agent does</strong></p>
+      <ol>
+        <li>Picks the profiling tool (defaults to <code>rocprofv3_compute</code> if unspecified).</li>
+        <li>Builds the command with <code>--additional-context</code>:</li>
+      </ol>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">&lt;tag&gt;</span> <span class="t-flag">--live-output</span> \
+  <span class="t-flag">--additional-context</span> <span class="t-string">'{"tools": [{"name": "rocprofv3_compute"}]}'</span></pre>
+
+      <p><strong>Available profiling tools (common subset)</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tool name</th><th>What it captures</th></tr></thead>
+          <tbody>
+            <tr><td><code>rocprofv3_compute</code></td><td>Kernel execution, occupancy, compute metrics</td></tr>
+            <tr><td><code>rocprofv3_memory</code></td><td>Memory bandwidth, cache hit rates</td></tr>
+            <tr><td><code>rocprofv3_communication</code></td><td>GPU-to-GPU communication metrics</td></tr>
+            <tr><td><code>rpd</code></td><td>ROCm profiling data, timeline view</td></tr>
+            <tr><td><code>rccl_trace</code></td><td>Collective communication (AllReduce, etc.)</td></tr>
+            <tr><td><code>rocm_trace_lite</code></td><td>Lightweight system trace</td></tr>
+            <tr><td><code>gpu_info_power_profiler</code></td><td>Power draw over time</td></tr>
+            <tr><td><code>rocblas_trace</code> / <code>hipblaslt_trace</code></td><td>BLAS kernel calls</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The complete authoritative list (23+ tools) is in the madengine package at <code>scripts/common/tools.json</code>.</p>
+
+      <div class="callout callout-amber">
+        <div class="callout-title">Performance note</div>
+        <p>Profiling adds overhead. The perf number recorded under profiling is not a clean benchmark — use <code>/mad-benchmark</code> for baseline measurements.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cmd-report">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1f2a3a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f9cf9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-report
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-agent">perf-analyst</span>
+        </div>
+        <div class="card-desc">Parse and summarize MAD benchmark results from perf.csv or perf_entry_super.json. Compare two result sets to find regressions.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-report</span> [csv-or-json-path] [compare-to-path]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-report</span>                               <span class="t-comment"># defaults to perf.csv</span>
+<span class="t-cmd">/mad-report</span> <span class="t-string">results/after.csv</span>
+<span class="t-cmd">/mad-report</span> <span class="t-string">perf_new.csv</span> <span class="t-string">perf_baseline.csv</span>  <span class="t-comment"># comparison mode</span></pre>
+
+      <p><strong>What the agent does</strong></p>
+      <ul>
+        <li>Locates the result file(s) — defaults to <code>perf.csv</code>.</li>
+        <li>Single file: summarizes models run, performance + unit, pass/fail status.</li>
+        <li>Two files: per-model delta and % change; flags regressions (slower) vs improvements; respects each row's <code>metric</code> unit.</li>
+        <li>Leads with the headline finding, then a compact table.</li>
+      </ul>
+
+      <p><strong>Generate an HTML dashboard instead</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">madengine report to-html</span> <span class="t-flag">--csv-file-path</span> perf.csv</pre>
+
+      <p><strong>perf.csv columns</strong></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>model</code></td><td>Model name from models.json</td></tr>
+            <tr><td><code>performance</code></td><td>Numeric result parsed from stdout</td></tr>
+            <tr><td><code>metric</code></td><td>Unit (tokens_per_second, samples_per_second, …)</td></tr>
+            <tr><td><code>status</code></td><td>SUCCESS or failure reason</td></tr>
+            <tr><td><code>n_gpus</code></td><td>Number of GPUs used</td></tr>
+            <tr><td><code>training_precision</code></td><td>fp16, bf16, fp8, fp32, …</td></tr>
+            <tr><td><code>gpu_architecture</code></td><td>gfx942, gfx950, …</td></tr>
+            <tr><td><code>git_commit</code></td><td>Commit hash at run time</td></tr>
+            <tr><td><code>build_duration</code> / <code>test_duration</code></td><td>Wall time in seconds</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="cmd-tune">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#2a1f1a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-tune
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-agent">tuner</span>
+        </div>
+        <div class="card-desc">Iteratively tune a MAD model for better performance using a disciplined measure-change-measure loop.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-tune</span> <span class="t-string">&lt;tag-or-model&gt;</span> [target: throughput|latency] [lever hints]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-tune</span> <span class="t-string">bert</span>
+<span class="t-cmd">/mad-tune</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">throughput</span>
+<span class="t-cmd">/mad-tune</span> <span class="t-string">deepseek</span> <span class="t-string">latency</span> <span class="t-string">try tensor-parallel=4</span></pre>
+
+      <p><strong>What the agent does</strong></p>
+      <ol>
+        <li>Reads the model's <code>run.sh</code>, config files, and current <code>perf.csv</code> row to establish a baseline.</li>
+        <li>Identifies tuning levers for the stack:
+          <ul>
+            <li>Env vars: <code>MAD_MODEL_BATCH_SIZE</code>, <code>HIP_VISIBLE_DEVICES</code>, <code>NCCL_*</code>/<code>RCCL_*</code>, <code>PYTORCH_TUNABLEOP_ENABLED</code></li>
+            <li>Script/config args: tensor-parallel size, precision (fp16/bf16/fp8), sequence length, <code>gpu-memory-utilization</code>, <code>max-num-seqs</code></li>
+          </ul>
+        </li>
+        <li>Proposes one change at a time, applies it, re-measures, keeps improvements, reverts regressions.</li>
+        <li>No GPU: produces a ranked list of candidate changes with rationale and the exact madengine run commands to test each.</li>
+      </ol>
+
+      <p><strong>Expected output</strong></p>
+      <ul>
+        <li>Baseline performance value + unit.</li>
+        <li>Table of each change tried with measured delta.</li>
+        <li>Final recommended configuration with before/after numbers.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="cmd-validate">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1f2a1f;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          /mad-validate
+          <span class="badge badge-command">command</span>
+          <span class="badge badge-warn">GPU-free</span>
+        </div>
+        <div class="card-desc">Statically validate MAD model entries — JSON, paths, Dockerfile header, output contract. No GPU required.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Usage</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-validate</span> [tag-or-model | all]</pre>
+
+      <p><strong>Examples</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-validate</span>                    <span class="t-comment"># checks all 142 entries</span>
+<span class="t-cmd">/mad-validate</span> <span class="t-string">bert</span>               <span class="t-comment"># checks only models matching "bert"</span>
+<span class="t-cmd">/mad-validate</span> <span class="t-string">pyt_vllm_deepseek-r1</span></pre>
+
+      <p><strong>Checks performed</strong></p>
+
+      <p style="font-size:0.82rem;font-weight:700;color:var(--accent-red);margin:12px 0 6px;">Errors (break a run)</p>
+      <ul>
+        <li><code>models.json</code> parses as valid JSON.</li>
+        <li>All entries have a <code>name</code> field and names are unique.</li>
+        <li>Dockerfile exists at <code>&lt;dockerfile&gt;.ubuntu.amd.Dockerfile</code> and first line is the context header.</li>
+        <li>Scripts path exists (a <code>run.sh</code> or directory).</li>
+        <li>Output contract satisfied: run script contains a <code>performance:</code> line, or entry sets <code>multiple_results</code>.</li>
+      </ul>
+
+      <p style="font-size:0.82rem;font-weight:700;color:var(--accent-amber);margin:12px 0 6px;">Warnings (convention metadata, non-fatal)</p>
+      <ul>
+        <li>Missing any of: <code>url</code>, <code>owner</code>, <code>training_precision</code>, <code>tags</code>, <code>n_gpus</code>.</li>
+      </ul>
+
+      <div class="callout callout-blue">
+        <div class="callout-title">Workflow tip</div>
+        <p>Run <code>/mad-validate &lt;name&gt;</code> immediately after <code>/mad-add-model</code> and before any GPU run. It catches tag typos, missing files, and missing performance lines in seconds.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Workflows ──────────────────────────────────────────── -->
+<section id="wf-sweep">
+  <h2><span class="section-num">6</span> Workflow Reference</h2>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#2d1f4a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-benchmark-sweep
+          <span class="badge badge-workflow">workflow</span>
+        </div>
+        <div class="card-desc">Fan out a benchmark matrix across multiple MAD tags, run (or plan) each in parallel, and synthesize a comparison table.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>When to use</strong></p>
+      <p>When you want to compare performance across multiple model tags or GPU counts in one operation.</p>
+
+      <p><strong>Phases</strong></p>
+      <div class="phases">
+        <div class="phase-step">
+          <div class="phase-num">Phase 1</div>
+          <div class="phase-name">Resolve</div>
+          <div class="phase-detail">Expand the sweep matrix into concrete madengine invocations</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 2</div>
+          <div class="phase-name">Run</div>
+          <div class="phase-detail">Execute or plan each benchmark in parallel subagents</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 3</div>
+          <div class="phase-name">Synthesize</div>
+          <div class="phase-detail">Parse results into a comparison table with headline finding</div>
+        </div>
+      </div>
+
+      <p><strong>Args schema</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span>{
+  <span class="t-key">"tags"</span>:    [<span class="t-string">"bert"</span>, <span class="t-string">"pyt_vllm_llama-3.1-8b"</span>, <span class="t-string">"deepseek"</span>],  <span class="t-comment">// required</span>
+  <span class="t-key">"nGpus"</span>:   [<span class="t-string">"4"</span>, <span class="t-string">"8"</span>],                                    <span class="t-comment">// optional, default: no override</span>
+  <span class="t-key">"execute"</span>: true,                                           <span class="t-comment">// false = plan mode (default)</span>
+  <span class="t-key">"output"</span>:  <span class="t-string">"sweep_results/"</span>                                 <span class="t-comment">// optional</span>
+}</pre>
+
+      <p><strong>Example invocations</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Plan mode — safe, no GPU required</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-string">{ "tags": ["bert", "pyt_vllm_deepseek-r1"] }</span>
+
+<span class="t-comment"># Execute mode — AMD GPU required</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-string">{ "tags": ["bert", "pyt_vllm_llama-3.1-8b"], "execute": true }</span></pre>
+
+      <div class="callout callout-blue">
+        <div class="callout-title">perf.csv isolation</div>
+        <p>
+          Each sweep cell writes to its own <code>perf_&lt;tag&gt;.csv</code> — never a shared
+          <code>perf.csv</code>. This prevents parallel runs from clobbering each other.
+          Concatenate the files afterward for a combined report.
+        </p>
+      </div>
+
+      <div class="callout callout-amber">
+        <div class="callout-title">Precision is not a sweep axis</div>
+        <p>
+          In MAD, precision (fp16/bf16/fp8) is <strong>fixed per model</strong> in
+          <code>models.json</code> — it is not a runtime flag. To compare precisions,
+          list the distinct model tags (e.g. <code>pyt_vllm_llama-fp16</code> and
+          <code>pyt_vllm_llama-fp8</code>) in the <code>tags</code> array instead.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="wf-tune-search">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#2d1f4a;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-tune-search
+          <span class="badge badge-workflow">workflow</span>
+        </div>
+        <div class="card-desc">Generate N candidate tuning configs for one model, run (or plan) each in parallel, adversarially verify deltas, and synthesize the winning config.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>When to use</strong></p>
+      <p>When you want to explore multiple tuning dimensions simultaneously rather than sequentially, and have the workflow verify which improvements are real.</p>
+
+      <p><strong>Phases</strong></p>
+      <div class="phases">
+        <div class="phase-step">
+          <div class="phase-num">Phase 1</div>
+          <div class="phase-name">Baseline</div>
+          <div class="phase-detail">Read the model and establish current config + perf</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 2</div>
+          <div class="phase-name">Propose</div>
+          <div class="phase-detail">Generate N distinct single-lever candidates</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 3</div>
+          <div class="phase-name">Evaluate</div>
+          <div class="phase-detail">Run each + adversarially verify the claimed delta</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 4</div>
+          <div class="phase-name">Synthesize</div>
+          <div class="phase-detail">Pick the winning config from trustworthy results only</div>
+        </div>
+      </div>
+
+      <p><strong>Args schema</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span>{
+  <span class="t-key">"tag"</span>:        <span class="t-string">"bert"</span>,           <span class="t-comment">// required</span>
+  <span class="t-key">"target"</span>:     <span class="t-string">"throughput"</span>,     <span class="t-comment">// "throughput" | "latency" (default: throughput)</span>
+  <span class="t-key">"candidates"</span>: 4,                <span class="t-comment">// 1–8, default: 4</span>
+  <span class="t-key">"execute"</span>:    true             <span class="t-comment">// false = plan mode (default)</span>
+}</pre>
+
+      <p><strong>Example invocations</strong></p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Plan 6 candidates for bert, no GPU needed</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-string">{ "tag": "bert", "candidates": 6 }</span>
+
+<span class="t-comment"># Execute 4 candidates for latency optimization</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-string">{ "tag": "pyt_vllm_llama-3.1-8b", "target": "latency", "execute": true }</span></pre>
+
+      <p><strong>Adversarial verification</strong></p>
+      <p>
+        After each candidate is evaluated, a separate subagent reviews the claimed delta.
+        It marks results as <code>trustworthy: false</code> if the change was not actually
+        measured (planned/skipped), only one sample was taken, or the delta is within noise.
+        The final recommended configuration comes only from trustworthy results.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Agents ─────────────────────────────────────────────── -->
+<section id="agents">
+  <h2><span class="section-num">7</span> Agent Reference</h2>
+
+  <p>
+    Agents are specialized Claude instances with a defined tool set and a focused role.
+    They are dispatched automatically by slash commands and workflows — you generally never
+    call them directly.
+  </p>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1a3a2a;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-benchmark-runner
+          <span class="badge badge-agent">agent</span>
+        </div>
+        <div class="card-desc">Constructs and runs the correct madengine benchmark command from a model/tag or plain-English intent.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Tools:</strong> Bash, Read, Grep, Glob</p>
+      <p><strong>Called by:</strong> <code>/mad-benchmark</code>, <code>/mad-profile</code>, <code>mad-benchmark-sweep</code> (workflow)</p>
+      <ul>
+        <li>Resolves tags with <code>madengine discover</code> (read-only, no GPU).</li>
+        <li>Builds the full madengine run command including profiling context if requested.</li>
+        <li>Checks for GPUs — plan mode if absent, execute if present.</li>
+        <li>Reports resolved models, exact command, required env vars, and output file path.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1a3a2a;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-model-author
+          <span class="badge badge-agent">agent</span>
+        </div>
+        <div class="card-desc">Scaffolds a new MAD model — the models.json entry, the Dockerfile, and the run.sh with the performance line.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Tools:</strong> Read, Write, Edit, Grep, Glob</p>
+      <p><strong>Called by:</strong> <code>/mad-add-model</code></p>
+      <ul>
+        <li>Finds the closest existing model of the same framework to use as a template.</li>
+        <li>Creates all three required files following MAD conventions.</li>
+        <li>Validates <code>models.json</code> and confirms discoverability — never runs a GPU benchmark.</li>
+        <li>Reports file paths, template used, and the GPU verification command.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1a3a2a;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-perf-analyst
+          <span class="badge badge-agent">agent</span>
+          <span class="badge badge-warn">read-only</span>
+        </div>
+        <div class="card-desc">Reads and analyzes MAD benchmark results from perf.csv and perf_entry_super.json. Never edits files or runs workloads.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Tools:</strong> Read, Grep, Glob, Bash (read-only)</p>
+      <p><strong>Called by:</strong> <code>/mad-report</code></p>
+      <ul>
+        <li>Parses <code>perf.csv</code>, <code>perf_entry_super.json</code>, or any named CSV.</li>
+        <li>Summarizes or compares results; precise about units — never compares across different metric values.</li>
+        <li>States direction assumption (higher = better for throughput, lower = better for latency).</li>
+        <li>Uses <code>python3</code> for parsing — never installs packages.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon" style="background:#1a3a2a;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">
+          mad-tuner
+          <span class="badge badge-agent">agent</span>
+        </div>
+        <div class="card-desc">Iteratively tunes an existing MAD model using a measure-change-measure loop. Reverts regressions automatically.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p><strong>Tools:</strong> Read, Edit, Bash, Grep, Glob</p>
+      <p><strong>Called by:</strong> <code>/mad-tune</code>, <code>mad-tune-search</code> (workflow)</p>
+      <ul>
+        <li>Establishes baseline from <code>run.sh</code>, config files, and current <code>perf.csv</code>.</li>
+        <li>Proposes and applies one lever change at a time — keeps improvements, reverts regressions.</li>
+        <li>Requires AMD GPUs to measure. Without GPUs, produces a ranked candidate list with exact commands.</li>
+        <li>Never alters the <code>performance: &lt;value&gt; &lt;unit&gt;</code> output contract.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ── Env vars ───────────────────────────────────────────── -->
+<section id="env-vars">
+  <h2><span class="section-num">8</span> Environment Variables</h2>
+
+  <p>Pass these environment variables to control model behavior and authentication.</p>
+
+  <div class="env-grid">
+    <div class="env-card">
+      <div class="env-name">MAD_SECRETS_HFTOKEN</div>
+      <div class="env-desc">HuggingFace API token. Required for gated models (e.g. Llama 3, Gemma). Set before running any HF model.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">MAD_MODEL_BATCH_SIZE</div>
+      <div class="env-desc">Override the batch size for a model run. Primary tuning lever for throughput experiments.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">MAD_RUNTIME_NGPUS</div>
+      <div class="env-desc">Override the number of GPUs used at runtime (also controllable via n_gpus in models.json).</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">MAD_SYSTEM_GPU_ARCHITECTURE</div>
+      <div class="env-desc">GPU architecture identifier (e.g. gfx942, gfx950). Used for arch-specific builds and skip_gpu_arch filtering.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">MAD_MODEL_NAME</div>
+      <div class="env-desc">Model name passed into the container at runtime. Some scripts use this to select between model checkpoints.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">PYTORCH_TUNABLEOP_ENABLED</div>
+      <div class="env-desc">Enable PyTorch TunableOp for auto-tuned GEMM kernels. A common throughput tuning lever for PyTorch models.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">NCCL_* / RCCL_*</div>
+      <div class="env-desc">Collective communication tuning (chunk sizes, algorithms, socket buffers). Relevant for multi-GPU runs.</div>
+    </div>
+    <div class="env-card">
+      <div class="env-name">HIP_VISIBLE_DEVICES</div>
+      <div class="env-desc">Which GPU indices are visible to the container. Use to pin a run to specific GPUs.</div>
+    </div>
+  </div>
+
+  <p><strong>Export pattern (shell)</strong></p>
+  <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">export</span> <span class="t-var">MAD_SECRETS_HFTOKEN</span>=<span class="t-string">hf_...</span>
+<span class="t-cmd">export</span> <span class="t-var">MAD_MODEL_BATCH_SIZE</span>=<span class="t-string">32</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--live-output</span></pre>
+</section>
+
+<!-- ── Tips ───────────────────────────────────────────────── -->
+<section id="tips">
+  <h2><span class="section-num">9</span> Tips and Gotchas</h2>
+
+  <details open>
+    <summary>GPU guard — plan mode vs execute mode</summary>
+    <div class="details-body">
+      <p>
+        All agents check for AMD GPUs (<code>rocm-smi</code> or <code>amd-smi</code>) before
+        attempting to build or run. On a machine without GPUs:
+      </p>
+      <ul>
+        <li>The agent prints the <strong>exact madengine command</strong> to run on a GPU host.</li>
+        <li>It lists required env vars (e.g. <code>MAD_SECRETS_HFTOKEN</code>).</li>
+        <li>It stops — it does not attempt to run the command.</li>
+      </ul>
+      <p>
+        GPU-free operations always work: <code>madengine discover</code>, <code>/mad-validate</code>,
+        and plan mode for benchmarks and tuning.
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># GPU-free: confirm a tag resolves</span>
+<span class="t-cmd">madengine discover</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span></pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>Precision is not a runtime flag</summary>
+    <div class="details-body">
+      <p>
+        In MAD, <code>training_precision</code> (fp16, bf16, fp8, fp32) is fixed per model in
+        <code>models.json</code>. It is baked into the Dockerfile and run script — you cannot
+        change it with a madengine flag at runtime.
+      </p>
+      <p>
+        To compare precisions in a sweep, use <strong>separate model tags</strong> that differ
+        in precision. For example: <code>pyt_vllm_llama-fp16</code> and
+        <code>pyt_vllm_llama-fp8</code> as two entries in the <code>tags</code> array of
+        <code>mad-benchmark-sweep</code>.
+      </p>
+    </div>
+  </details>
+
+  <details>
+    <summary>perf.csv isolation in parallel sweeps</summary>
+    <div class="details-body">
+      <p>
+        The <code>mad-benchmark-sweep</code> workflow gives each cell its own output file
+        (<code>perf_&lt;tag&gt;.csv</code>) to prevent parallel runs from clobbering a shared
+        <code>perf.csv</code>. After a sweep, concatenate for a combined view:
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Merge sweep results (keep one header row)</span>
+head -1 perf_bert.csv > perf_combined.csv
+<span class="t-cmd">tail</span> -n +2 perf_bert.csv perf_deepseek.csv >> perf_combined.csv
+<span class="t-cmd">madengine report to-html</span> <span class="t-flag">--csv-file-path</span> perf_combined.csv</pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>madengine discover — GPU-free tag validation</summary>
+    <div class="details-body">
+      <p>
+        Before any GPU run, confirm that your tags resolve to real models.
+        <code>madengine discover</code> reads <code>models.json</code> without touching Docker
+        or GPUs.
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">madengine discover</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_deepseek-r1</span>
+<span class="t-cmd">madengine discover</span> <span class="t-flag">--tags</span> <span class="t-string">vllm</span>   <span class="t-comment"># matches all tags containing "vllm"</span></pre>
+      <p>
+        The <code>tags</code> field in a model entry supports <em>any-match</em>: madengine
+        selects a model if <code>--tags</code> matches the exact <code>name</code> OR any
+        string in the <code>tags</code> list.
+      </p>
+    </div>
+  </details>
+
+  <details>
+    <summary>tools.json — authoritative profiler name list</summary>
+    <div class="details-body">
+      <p>
+        The <code>/mad-profile</code> command accepts any profiler tool name. The complete
+        authoritative list (23+ tools) lives in the madengine package at
+        <code>scripts/common/tools.json</code>. Common names include:
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span>rocprofv3_compute    rocprofv3_memory     rocprofv3_communication
+rocprofv3_full       rocprofv3            rpd
+rocm_trace_lite      rccl_trace           gpu_info_power_profiler
+rocblas_trace        hipblaslt_trace      miopen_trace
+rocprof_sys</pre>
+      <p>
+        If an agent gives you an unknown tool error, consult <code>tools.json</code> directly
+        for the exact name.
+      </p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Deployment targets — local Docker vs SLURM vs Kubernetes</summary>
+    <div class="details-body">
+      <p>
+        madengine infers the deployment target from which key is present in
+        <code>--additional-context</code>. No special flag needed.
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Local Docker (default — no key)</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">--live-output</span>
+
+<span class="t-comment"># SLURM (presence of "slurm" key)</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">-c</span> <span class="t-string">'{"slurm": {"partition": "gpu", "nodes": 2}}'</span>
+
+<span class="t-comment"># Kubernetes (presence of "k8s" or "kubernetes" key)</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">-c</span> <span class="t-string">'{"k8s": {"namespace": "ml-jobs"}}'</span></pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>Build-once, run-many pattern</summary>
+    <div class="details-body">
+      <p>
+        When running the same model many times (e.g. during tuning), build the image once and
+        reuse it to save time.
+      </p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Step 1: build only, writes build_manifest.json</span>
+<span class="t-cmd">madengine build</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span>
+
+<span class="t-comment"># Step 2: run from manifest (skips rebuild)</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">-m</span> build_manifest.json <span class="t-flag">--live-output</span>
+
+<span class="t-comment"># Alternatively: skip the model run but verify image builds</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--skip-model-run</span></pre>
+    </div>
+  </details>
+
+  <details>
+    <summary>models.json naming convention</summary>
+    <div class="details-body">
+      <p>
+        Model names follow <code>{framework}_{project}_{workload}</code>. Examples:
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Framework</th><th>Project</th><th>Workload</th></tr></thead>
+          <tbody>
+            <tr><td><code>pyt_vllm_deepseek-r1</code></td><td>pyt (PyTorch)</td><td>vllm</td><td>deepseek-r1</td></tr>
+            <tr><td><code>jax_maxtext_llama-4</code></td><td>jax</td><td>maxtext</td><td>llama-4</td></tr>
+            <tr><td><code>pyt_primus_qwen3-1.7b</code></td><td>pyt</td><td>primus</td><td>qwen3-1.7b</td></tr>
+            <tr><td><code>huggingface_bert</code></td><td>huggingface</td><td>–</td><td>bert</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The <code>dockerfile</code> field stores the path prefix — madengine automatically
+        appends <code>.ubuntu.amd.Dockerfile</code>.
+      </p>
+    </div>
+  </details>
+
+  <details>
+    <summary>Uploading results to MongoDB</summary>
+    <div class="details-body">
+      <p>Use <code>madengine database</code> to push results to MongoDB after a run.</p>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Dry run first to preview</span>
+<span class="t-cmd">madengine database</span> <span class="t-flag">-f</span> perf_entry_super.json <span class="t-flag">--db</span> mad_results <span class="t-flag">-c</span> benchmarks \
+  <span class="t-flag">-k</span> model,timestamp <span class="t-flag">--dry-run</span>
+
+<span class="t-comment"># Upload for real</span>
+<span class="t-cmd">madengine database</span> <span class="t-flag">-f</span> perf_entry_super.json <span class="t-flag">--db</span> mad_results <span class="t-flag">-c</span> benchmarks \
+  <span class="t-flag">-k</span> model,timestamp</pre>
+      <p>
+        <code>perf_entry_super.json</code> is the enriched record (includes a <code>configs</code>
+        block) that gets pushed. <code>-k model,timestamp</code> sets the unique key for upsert.
+      </p>
+    </div>
+  </details>
+</section>
+
+</main>
+
+<script>
+  // ── Copy-to-clipboard ──────────────────────────────────────
+  function copyCode(btn) {
+    const pre = btn.closest('pre');
+    const text = pre.innerText.replace(/^copy\n?/, '').trim();
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'copied';
+      btn.style.color = 'var(--accent-green)';
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.color = '';
+      }, 1500);
+    });
+  }
+
+  // ── Active nav highlight on scroll ────────────────────────
+  const sections = document.querySelectorAll('section[id], div.hero');
+  const navLinks = document.querySelectorAll('nav a[href^="#"]');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === '#' + entry.target.id) {
+            link.classList.add('active');
+          }
+        });
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+
+  sections.forEach(s => { if (s.id) observer.observe(s); });
+</script>
+
+</body>
+</html>
