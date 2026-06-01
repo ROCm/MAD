@@ -954,7 +954,7 @@
     <div class="flow-row">
       <div class="flow-q">Benchmark multiple tags at once</div>
       <div class="flow-arrow">→</div>
-      <div class="flow-cmd">/mad-benchmark-sweep (workflow)</div>
+      <div class="flow-cmd">/mad-benchmark-sweep --tags bert,deepseek</div>
     </div>
     <div class="flow-row">
       <div class="flow-q">Add a brand-new model</div>
@@ -984,7 +984,7 @@
     <div class="flow-row">
       <div class="flow-q">Systematic tuning search (N candidates)</div>
       <div class="flow-arrow">→</div>
-      <div class="flow-cmd">/mad-tune-search (workflow)</div>
+      <div class="flow-cmd">/mad-tune-search --tag bert --candidates 6</div>
     </div>
   </div>
 
@@ -1370,7 +1370,7 @@ FROM $BASE_DOCKER</pre>
           mad-benchmark-sweep
           <span class="badge badge-workflow">workflow</span>
         </div>
-        <div class="card-desc">Fan out a benchmark matrix across multiple MAD tags, run (or plan) each in parallel, and synthesize a comparison table.</div>
+        <div class="card-desc">Fan out a benchmark matrix across multiple MAD tags, run (or plan) each in parallel, and synthesize a comparison table. Accepts the same CLI-style flags as <code>/mad-benchmark</code>.</div>
       </div>
     </div>
     <div class="card-body">
@@ -1396,20 +1396,43 @@ FROM $BASE_DOCKER</pre>
         </div>
       </div>
 
-      <p><strong>Args schema</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span>{
-  <span class="t-key">"tags"</span>:    [<span class="t-string">"bert"</span>, <span class="t-string">"pyt_vllm_llama-3.1-8b"</span>, <span class="t-string">"deepseek"</span>],  <span class="t-comment">// required</span>
-  <span class="t-key">"nGpus"</span>:   [<span class="t-string">"4"</span>, <span class="t-string">"8"</span>],                                    <span class="t-comment">// optional, default: no override</span>
-  <span class="t-key">"execute"</span>: true,                                           <span class="t-comment">// false = plan mode (default)</span>
-  <span class="t-key">"output"</span>:  <span class="t-string">"sweep_results/"</span>                                 <span class="t-comment">// optional</span>
-}</pre>
+      <p><strong>Arguments</strong></p>
+      <p>
+        Accepts <strong>CLI-style flags</strong> — the same syntax as <code>/mad-benchmark</code>.
+        Pass one or more tags after <code>--tags</code> (comma- and/or space-separated); each tag
+        becomes one sweep cell. A structured JSON object is also still accepted.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--tags a,b c</code></td><td>One or more model tags (comma and/or space separated). Required.</td></tr>
+            <tr><td><code>--additional-context '{...}'</code></td><td>Threaded <em>verbatim</em> into every cell (HF token, <code>docker_env_vars</code>, deployment keys). A per-cell <code>n_gpus</code> is merged in when <code>--ngpus</code> is set.</td></tr>
+            <tr><td><code>--ngpus 4,8</code></td><td>Optional GPU-count axis — multiplies the matrix (each tag × each count).</td></tr>
+            <tr><td><code>--timeout S</code></td><td>Optional per-cell timeout in seconds.</td></tr>
+            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Validate + resolve tags only, no GPU. <strong>Executes by default.</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
 
       <p><strong>Example invocations</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Plan mode — safe, no GPU required</span>
-<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-string">{ "tags": ["bert", "pyt_vllm_deepseek-r1"] }</span>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Execute mode (default) — AMD GPU required, context threaded into every cell</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert,pyt_vllm_qwen3-8b</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"gpu_vendor": "AMD", "guest_os": "UBUNTU"}'</span> <span class="t-flag">--live-output</span>
 
-<span class="t-comment"># Execute mode — AMD GPU required</span>
-<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-string">{ "tags": ["bert", "pyt_vllm_llama-3.1-8b"], "execute": true }</span></pre>
+<span class="t-comment"># Plan mode — safe, no GPU required</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert pyt_vllm_deepseek-r1</span> <span class="t-flag">--plan</span>
+
+<span class="t-comment"># GPU-count axis: each tag × each count</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">--ngpus</span> <span class="t-string">4,8</span></pre>
+
+      <div class="callout callout-amber">
+        <div class="callout-title">Executes by default</div>
+        <p>
+          On a GPU host this workflow <strong>runs immediately</strong>. Pass <code>--plan</code>
+          (or <code>--no-execute</code>) to only validate commands and resolve tags. Each cell
+          still self-skips if no AMD GPU is present.
+        </p>
+      </div>
 
       <div class="callout callout-blue">
         <div class="callout-title">perf.csv isolation</div>
@@ -1444,57 +1467,142 @@ FROM $BASE_DOCKER</pre>
           mad-tune-search
           <span class="badge badge-workflow">workflow</span>
         </div>
-        <div class="card-desc">Generate N candidate tuning configs for one model, run (or plan) each in parallel, adversarially verify deltas, and synthesize the winning config.</div>
+        <div class="card-desc"><strong>Profiles the model to diagnose its bottleneck</strong>, then generates profiling-informed tuning candidates, measures each <strong>cleanly and sequentially</strong>, adversarially verifies deltas, and synthesizes the winning config. Accepts the same CLI-style flags as <code>/mad-benchmark</code> / <code>/mad-profile</code>.</div>
       </div>
     </div>
     <div class="card-body">
       <p><strong>When to use</strong></p>
-      <p>When you want to explore multiple tuning dimensions simultaneously rather than sequentially, and have the workflow verify which improvements are real.</p>
+      <p>When you want tuning driven by real profiling evidence — not guesswork — and have the workflow verify which improvements are real. The Diagnose phase classifies the workload (compute / memory / communication / launch-bound) and the proposals target that specific bottleneck.</p>
+
+      <div class="callout callout-blue">
+        <div class="callout-title">Core design — profile to diagnose, clean-run to measure</div>
+        <p>
+          Profiling plays <strong>two distinct roles</strong>. The profiler runs <strong>once</strong>
+          (Diagnose) to find <em>what</em> to tune — kernel hotspots and whether the model is compute-,
+          memory-, communication-, or launch-bound. Then it is turned <strong>off</strong> for every
+          measurement run, because tracing overhead (e.g. <code>rocm_trace_lite</code> intercepts
+          nearly all GPU ops) buries the small perf deltas tuning produces and would make the verify
+          step reject real wins. The workflow automatically splits a single
+          <code>--additional-context</code> into a <em>profiled</em> variant (keeps <code>tools</code>)
+          for Diagnose and a <em>clean</em> variant (<code>tools</code> stripped) for the baseline and
+          all candidate measurements.
+        </p>
+      </div>
 
       <p><strong>Phases</strong></p>
       <div class="phases">
         <div class="phase-step">
           <div class="phase-num">Phase 1</div>
           <div class="phase-name">Baseline</div>
-          <div class="phase-detail">Read the model and establish current config + perf</div>
+          <div class="phase-detail">Establish a <strong>clean</strong> baseline number (profiler off)</div>
         </div>
         <div class="phase-step">
           <div class="phase-num">Phase 2</div>
-          <div class="phase-name">Propose</div>
-          <div class="phase-detail">Generate N distinct single-lever candidates</div>
+          <div class="phase-name">Diagnose</div>
+          <div class="phase-detail">Profile <strong>once</strong>; read hotspots; classify the bottleneck (compute/memory/comm/launch)</div>
         </div>
         <div class="phase-step">
           <div class="phase-num">Phase 3</div>
-          <div class="phase-name">Evaluate</div>
-          <div class="phase-detail">Run each + adversarially verify the claimed delta</div>
+          <div class="phase-name">Propose</div>
+          <div class="phase-detail">Generate N single-lever candidates, each <strong>citing the profiling evidence</strong></div>
         </div>
         <div class="phase-step">
           <div class="phase-num">Phase 4</div>
+          <div class="phase-name">Evaluate</div>
+          <div class="phase-detail">Measure each <strong>clean, one at a time</strong> + adversarially verify the delta inline</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">Phase 5</div>
           <div class="phase-name">Synthesize</div>
           <div class="phase-detail">Pick the winning config from trustworthy results only</div>
         </div>
       </div>
 
-      <p><strong>Args schema</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span>{
-  <span class="t-key">"tag"</span>:        <span class="t-string">"bert"</span>,           <span class="t-comment">// required</span>
-  <span class="t-key">"target"</span>:     <span class="t-string">"throughput"</span>,     <span class="t-comment">// "throughput" | "latency" (default: throughput)</span>
-  <span class="t-key">"candidates"</span>: 4,                <span class="t-comment">// 1–8, default: 4</span>
-  <span class="t-key">"execute"</span>:    true             <span class="t-comment">// false = plan mode (default)</span>
-}</pre>
+      <p><strong>Arguments</strong></p>
+      <p>
+        Accepts <strong>CLI-style flags</strong> — the same syntax as <code>/mad-benchmark</code>.
+        Tunes <em>one</em> model; if multiple tags are given, the first is used and the rest are
+        ignored (use <code>mad-benchmark-sweep</code> to compare models). A structured JSON object
+        is also still accepted.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>--tag NAME</code></td><td>The model to tune (<code>--tags</code> also accepted). Required.</td></tr>
+            <tr><td><code>--candidates N</code></td><td>Number of single-lever candidates, 1–8 (default 4).</td></tr>
+            <tr><td><code>--target throughput|latency</code></td><td>Optimization target (default throughput).</td></tr>
+            <tr><td><code>--additional-context '{...}'</code></td><td>Split into a <em>profiled</em> variant (Diagnose) and a <em>clean</em> variant (baseline + measurements). Threaded into every command (HF token, <code>docker_env_vars</code>). A <code>tools</code> entry here sets the profiler used in Diagnose. For <code>env</code>-lever candidates the agent merges the var into the clean context's <code>docker_env_vars</code>.</td></tr>
+            <tr><td><code>--profile-tool NAME</code></td><td>Profiler for the Diagnose phase (default <code>rocm_trace_lite</code>, or taken from a <code>tools</code> entry in <code>--additional-context</code>).</td></tr>
+            <tr><td><code>--timeout S</code></td><td>Optional per-run timeout in seconds.</td></tr>
+            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Produce the ranked candidate plan only, no GPU. <strong>Executes by default.</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
 
       <p><strong>Example invocations</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Plan 6 candidates for bert, no GPU needed</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-string">{ "tag": "bert", "candidates": 6 }</span>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Execute (default): diagnose with rocm_trace_lite, then tune throughput clean.</span>
+<span class="t-comment"># The "tools" key drives Diagnose; it is auto-stripped for the clean measurement runs.</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--candidates</span> <span class="t-string">6</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"gpu_vendor": "AMD", "guest_os": "UBUNTU", "tools": [{"name": "rocm_trace_lite"}]}'</span>
 
-<span class="t-comment"># Execute 4 candidates for latency optimization</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-string">{ "tag": "pyt_vllm_llama-3.1-8b", "target": "latency", "execute": true }</span></pre>
+<span class="t-comment"># Pick the diagnosis profiler explicitly (e.g. memory roofline)</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--profile-tool</span> <span class="t-string">rocprofv3_memory</span>
+
+<span class="t-comment"># Plan mode — diagnose from existing trace + static config, rank candidates, no GPU run</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">bert</span> <span class="t-flag">--candidates</span> <span class="t-string">6</span> <span class="t-flag">--plan</span>
+
+<span class="t-comment"># Latency optimization</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--target</span> <span class="t-string">latency</span></pre>
+
+      <div class="callout callout-amber">
+        <div class="callout-title">Sequential evaluation — and why</div>
+        <p>
+          Candidates are measured <strong>one at a time</strong>, not in parallel. Running several
+          benchmarks at once on the same GPUs makes them contend for compute and produces
+          meaningless deltas; and candidates that edit <code>run.sh</code>/configs in parallel
+          would race on the same files and clobber each other's apply/revert. GPUs are a serial
+          resource for clean benchmarking, so one-at-a-time is both correct and safe. The cheap
+          adversarial-verify step still runs inline right after each measurement. Each candidate
+          writes its own <code>perf_tune_&lt;id&gt;.csv</code>.
+        </p>
+      </div>
+
+      <p><strong>Bottleneck → lever map (best practice)</strong></p>
+      <p>The Diagnose phase classifies the workload from kernel hotspots, which dictates the levers the proposals target:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Bottleneck</th><th>Profiling signal</th><th>Levers to try</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Compute-bound</strong></td>
+              <td>GEMM/conv kernels dominate GPU time (e.g. <code>Cijk*</code>, <code>*gemm*</code>, <code>wvSplitK</code>); high occupancy. Signal: <code>rocm_trace_lite</code>/<code>rpd</code> hotspots, <code>rocprofv3_compute</code> occupancy.</td>
+              <td><code>PYTORCH_TUNABLEOP_ENABLED</code>, hipBLASLt tuning, fp8 / lower precision, larger batch size</td>
+            </tr>
+            <tr>
+              <td><strong>Memory-bound</strong></td>
+              <td>Attention / elementwise / norm / copy kernels dominate; low arithmetic intensity. Signal: <code>rocprofv3_memory</code> bandwidth.</td>
+              <td>KV-cache dtype, kernel fusion, <code>gpu-memory-utilization</code>, batch size</td>
+            </tr>
+            <tr>
+              <td><strong>Communication-bound</strong></td>
+              <td>RCCL/NCCL collectives (AllReduce/AllGather) are a large share (multi-GPU). Signal: <code>rocprofv3_communication</code>, <code>rccl_trace</code>.</td>
+              <td><code>NCCL_*</code>/<code>RCCL_*</code> tuning, tensor-parallel vs pipeline-parallel topology</td>
+            </tr>
+            <tr>
+              <td><strong>Launch-bound</strong></td>
+              <td>Many tiny kernels with timeline gaps / low GPU utilization. Signal: timeline gaps in <code>rocm_trace_lite</code>.</td>
+              <td>HIP/CUDA graphs, larger batch, fewer sync points</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <p><strong>Adversarial verification</strong></p>
       <p>
         After each candidate is evaluated, a separate subagent reviews the claimed delta.
         It marks results as <code>trustworthy: false</code> if the change was not actually
-        measured (planned/skipped), only one sample was taken, or the delta is within noise.
+        measured (planned/skipped), only one sample was taken, <strong>it ran under a profiler</strong>,
+        or the delta vs baseline is within run-to-run noise (~1–2%).
         The final recommended configuration comes only from trustworthy results.
       </p>
     </div>
