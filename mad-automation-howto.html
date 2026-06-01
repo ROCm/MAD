@@ -1605,6 +1605,21 @@ FROM $BASE_DOCKER</pre>
         or the delta vs baseline is within run-to-run noise (~1–2%).
         The final recommended configuration comes only from trustworthy results.
       </p>
+
+      <div class="callout callout-red">
+        <div class="callout-title">Set --timeout for long-running candidates</div>
+        <p>
+          Sequential evaluation means one slow candidate stalls the entire search.
+          Some levers (e.g. <code>PYTORCH_TUNABLEOP_ENABLED</code>) have a pathologically
+          slow first run (online GEMM benchmarking collapses throughput to &lt;1 tok/s).
+          The Docker container launched by madengine outlives the Claude session — if the
+          session ends mid-run the container keeps going but the workflow never completes
+          and the config edit is not reverted. Always pass <code>--timeout</code> to bound
+          each candidate, and confirm <code>extended.yaml</code> (or any edited config) is
+          clean after an interrupted run.
+        </p>
+        <pre style="background:transparent;border:none;padding:4px 0 0;margin:0;"><code>/mad-tune-search --tag pyt_vllm_qwen3-8b --timeout 1200</code></pre>
+      </div>
     </div>
   </div>
 </section>
@@ -1750,7 +1765,7 @@ FROM $BASE_DOCKER</pre>
     </div>
     <div class="env-card">
       <div class="env-name">PYTORCH_TUNABLEOP_ENABLED</div>
-      <div class="env-desc">Enable PyTorch TunableOp for auto-tuned GEMM kernels. A common throughput tuning lever for PyTorch models.</div>
+      <div class="env-desc">Enable PyTorch TunableOp for auto-tuned GEMM kernels. A common throughput tuning lever for PyTorch models. <strong>First run is very slow</strong> (online GEMM tuning collapses throughput to ~0.2–1 tok/s); results are only meaningful on a warm second run with cached kernels. Set <code>--timeout</code> generously or do a throwaway warmup pass before measuring.</div>
     </div>
     <div class="env-card">
       <div class="env-name">NCCL_* / RCCL_*</div>
@@ -1839,6 +1854,63 @@ head -1 perf_bert.csv > perf_combined.csv
         The <code>tags</code> field in a model entry supports <em>any-match</em>: madengine
         selects a model if <code>--tags</code> matches the exact <code>name</code> OR any
         string in the <code>tags</code> list.
+      </p>
+    </div>
+  </details>
+
+  <details>
+    <summary>TunableOp needs a warmup — don't measure cold</summary>
+    <div class="details-body">
+      <p>
+        <code>PYTORCH_TUNABLEOP_ENABLED=1</code> triggers online GEMM auto-tuning on
+        the <strong>first</strong> run. During this phase throughput collapses to roughly
+        0.2–1 tok/s as PyTorch benchmarks every matrix-multiply shape. The actual improvement
+        only shows on subsequent runs using the cached kernel selection.
+      </p>
+      <p>
+        Measuring TunableOp cold produces a misleading (and huge) regression that the verify
+        step will correctly mark untrustworthy — but only after burning 30+ minutes of GPU time.
+        Best practice:
+      </p>
+      <ul>
+        <li>Run a throwaway warmup pass first (<code>--skip-model-run</code> then one full run) to populate the cache.</li>
+        <li>Always set <code>--timeout</code> so a single candidate cannot stall the whole tune-search.</li>
+        <li>The profiling bottleneck data guides whether TunableOp is even worth trying — only relevant for compute-bound (GEMM-dominant) workloads.</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>Qwen3-8B live tuning findings (MI350X / gfx950)</summary>
+    <div class="details-body">
+      <p>
+        From a live profiling + tuning run on 8× AMD Instinct MI350X:
+      </p>
+      <p><strong>Profiling result</strong> (<code>rocm_trace_lite</code>, 397,292 GPU ops, 8.6% GPU utilization):</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kernel</th><th>% GPU time</th><th>Implication</th></tr></thead>
+          <tbody>
+            <tr><td><code>Cijk_Alik_Bljk_BBS_BH_Bias_HA…</code> (GEMM)</td><td>27.1%</td><td rowspan="2" style="vertical-align:middle;"><strong>Compute-bound</strong> — GEMM/wvSplitK dominate → target with TunableOp, hipBLASLt, higher concurrency</td></tr>
+            <tr><td><code>wvSplitK</code></td><td>20.6%</td></tr>
+            <tr><td><code>_fwd_kernel</code> (attention)</td><td>8.3%</td><td>Memory-bound secondary; paged attention</td></tr>
+            <tr><td><code>__amd_rocclr_copyBuffer</code></td><td>7.0%</td><td>Data movement overhead</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Best candidate result</strong> — <code>max_concurrency=32</code> (vs baseline concurrency=1):</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Metric</th><th>Baseline</th><th>Tuned</th><th>Delta</th></tr></thead>
+          <tbody>
+            <tr><td>throughput_tot</td><td>~422 tok/s</td><td>7,993 tok/s</td><td style="color:var(--accent-green);font-weight:700;">+18.9×</td></tr>
+            <tr><td>throughput_gen</td><td>~211 tok/s</td><td>3,996 tok/s</td><td style="color:var(--accent-green);font-weight:700;">+18.9×</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Baseline was run at <code>max_concurrency=1</code> (10 prompts) — a latency-optimized
+        config. Raising concurrency is the primary throughput lever for vLLM serving workloads.
       </p>
     </div>
   </details>
