@@ -803,141 +803,182 @@
   </p>
 
   <div class="arch-diagram">
-    <svg viewBox="0 0 820 420" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MAD architecture diagram">
+    <svg viewBox="0 0 840 380" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MAD architecture diagram">
       <defs>
         <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L0,6 L8,3 z" fill="#4f9cf9" opacity="0.7"/>
+          <path d="M0,0 L0,6 L8,3 z" fill="#4f9cf9" opacity="0.85"/>
         </marker>
-        <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <marker id="arrP" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#a78bfa" opacity="0.85"/>
+        </marker>
+        <marker id="arrG" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#34d399" opacity="0.8"/>
+        </marker>
+        <marker id="arrGray" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
           <path d="M0,0 L0,6 L8,3 z" fill="#94a3b8" opacity="0.6"/>
+        </marker>
+        <marker id="arrR" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#f87171" opacity="0.7"/>
+        </marker>
+        <marker id="arrBi" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto">
+          <path d="M8,0 L8,6 L0,3 z" fill="#94a3b8" opacity="0.6"/>
         </marker>
       </defs>
 
       <!-- Layer labels -->
-      <text x="12" y="56" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,56)" dy="0">USER</text>
-      <text x="12" y="200" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,200)" dy="0">AGENTS</text>
-      <text x="12" y="355" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1" text-anchor="start" transform="rotate(-90,12,355)" dy="0">ENGINE</text>
+      <text x="13" y="60" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1.5" text-anchor="middle" transform="rotate(-90,13,60)">USER</text>
+      <text x="13" y="190" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1.5" text-anchor="middle" transform="rotate(-90,13,190)">AGENTS</text>
+      <text x="13" y="300" font-size="10" fill="#64748b" font-weight="700" letter-spacing="1.5" text-anchor="middle" transform="rotate(-90,13,300)">ENGINE</text>
 
       <!-- Layer separators -->
-      <line x1="30" y1="105" x2="800" y2="105" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
-      <line x1="30" y1="285" x2="800" y2="285" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
+      <line x1="28" y1="120" x2="824" y2="120" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
+      <line x1="28" y1="216" x2="824" y2="216" stroke="#2a3045" stroke-width="1" stroke-dasharray="4,4"/>
 
-      <!-- ── Slash commands (top row) ── -->
+      <!-- Group labels -->
+      <text x="40" y="18" font-size="9" fill="#5c7a9e" font-weight="700" letter-spacing="1" text-anchor="start">SLASH COMMANDS</text>
+      <text x="658" y="18" font-size="9" fill="#7c6bb0" font-weight="700" letter-spacing="1" text-anchor="start">WORKFLOWS</text>
+
+      <!-- ── Slash commands (top row, 6 boxes) ── -->
       <!-- /mad-benchmark -->
-      <rect x="42" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
-      <text x="101" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-benchmark</text>
-      <text x="101" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">/mad-profile</text>
+      <rect x="40" y="26" width="92" height="40" rx="7" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.4" opacity="0.92"/>
+      <text x="86" y="44" font-size="9.5" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-benchmark</text>
+      <text x="86" y="57" font-size="8" fill="#5c7a9e" text-anchor="middle">build · run</text>
+
+      <!-- /mad-profile -->
+      <rect x="142" y="26" width="92" height="40" rx="7" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.4" opacity="0.92"/>
+      <text x="188" y="44" font-size="9.5" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-profile</text>
+      <text x="188" y="57" font-size="8" fill="#5c7a9e" text-anchor="middle">+ trace tool</text>
 
       <!-- /mad-add-model -->
-      <rect x="178" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
-      <text x="237" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-add-model</text>
-      <text x="237" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">scaffold files</text>
+      <rect x="244" y="26" width="92" height="40" rx="7" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.4" opacity="0.92"/>
+      <text x="290" y="44" font-size="9.5" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-add-model</text>
+      <text x="290" y="57" font-size="8" fill="#5c7a9e" text-anchor="middle">scaffold</text>
 
       <!-- /mad-report -->
-      <rect x="314" y="20" width="118" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
-      <text x="373" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-report</text>
-      <text x="373" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">parse results</text>
+      <rect x="346" y="26" width="92" height="40" rx="7" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.4" opacity="0.92"/>
+      <text x="392" y="44" font-size="9.5" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-report</text>
+      <text x="392" y="57" font-size="8" fill="#5c7a9e" text-anchor="middle">analyze csv</text>
 
       <!-- /mad-tune -->
-      <rect x="450" y="20" width="100" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
-      <text x="500" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-tune</text>
-      <text x="500" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">measure-change</text>
+      <rect x="448" y="26" width="92" height="40" rx="7" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.4" opacity="0.92"/>
+      <text x="494" y="44" font-size="9.5" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-tune</text>
+      <text x="494" y="57" font-size="8" fill="#5c7a9e" text-anchor="middle">measure-loop</text>
 
       <!-- /mad-validate -->
-      <rect x="568" y="20" width="105" height="40" rx="8" fill="#1e3a5f" stroke="#4f9cf9" stroke-width="1.5" opacity="0.9"/>
-      <text x="620" y="38" font-size="11" fill="#93c5fd" text-anchor="middle" font-weight="700">/mad-validate</text>
-      <text x="620" y="52" font-size="9" fill="#4f9cf9" text-anchor="middle">GPU-free lint</text>
+      <rect x="550" y="26" width="92" height="40" rx="7" fill="#3a2a10" stroke="#fbbf24" stroke-width="1.4" opacity="0.92"/>
+      <text x="596" y="44" font-size="9.5" fill="#fcd34d" text-anchor="middle" font-weight="700">/mad-validate</text>
+      <text x="596" y="57" font-size="8" fill="#8a7340" text-anchor="middle">GPU-free lint</text>
 
-      <!-- Workflows -->
-      <rect x="690" y="18" width="110" height="44" rx="8" fill="#2d1f4a" stroke="#a78bfa" stroke-width="1.5" opacity="0.9"/>
-      <text x="745" y="36" font-size="10.5" fill="#c4b5fd" text-anchor="middle" font-weight="700">benchmark-sweep</text>
-      <text x="745" y="50" font-size="10.5" fill="#c4b5fd" text-anchor="middle" font-weight="700">tune-search</text>
+      <!-- ── Workflows (right group, stacked) ── -->
+      <rect x="658" y="26" width="160" height="40" rx="7" fill="#2d1f4a" stroke="#a78bfa" stroke-width="1.4" opacity="0.92"/>
+      <text x="738" y="44" font-size="10" fill="#c4b5fd" text-anchor="middle" font-weight="700">mad-benchmark-sweep</text>
+      <text x="738" y="57" font-size="8" fill="#7c6bb0" text-anchor="middle">matrix → compare</text>
 
-      <!-- ── Agents (middle row) ── -->
+      <rect x="658" y="72" width="160" height="40" rx="7" fill="#2d1f4a" stroke="#a78bfa" stroke-width="1.4" opacity="0.92"/>
+      <text x="738" y="90" font-size="10" fill="#c4b5fd" text-anchor="middle" font-weight="700">mad-tune-search</text>
+      <text x="738" y="103" font-size="8" fill="#7c6bb0" text-anchor="middle">diagnose → tune</text>
+
+      <!-- ── Agents (middle row, 4 agents + inline validator) ── -->
       <!-- benchmark-runner -->
-      <rect x="42" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
-      <text x="116" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">benchmark-runner</text>
-      <text x="116" y="158" font-size="9" fill="#34d399" text-anchor="middle">Bash · Read · Grep · Glob</text>
-      <text x="116" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">run &amp; profile</text>
+      <rect x="40" y="132" width="148" height="52" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="114" y="150" font-size="10.5" fill="#6ee7b7" text-anchor="middle" font-weight="700">benchmark-runner</text>
+      <text x="114" y="164" font-size="8" fill="#34d399" text-anchor="middle">Bash · Read · Grep · Glob</text>
+      <text x="114" y="176" font-size="8" fill="#5c7a9e" text-anchor="middle">run &amp; profile</text>
 
       <!-- model-author -->
-      <rect x="210" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
-      <text x="284" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">model-author</text>
-      <text x="284" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Write · Edit · Glob</text>
-      <text x="284" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">scaffold files</text>
+      <rect x="200" y="132" width="148" height="52" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="274" y="150" font-size="10.5" fill="#6ee7b7" text-anchor="middle" font-weight="700">model-author</text>
+      <text x="274" y="164" font-size="8" fill="#34d399" text-anchor="middle">Read · Write · Edit · Glob</text>
+      <text x="274" y="176" font-size="8" fill="#5c7a9e" text-anchor="middle">scaffold files</text>
 
       <!-- perf-analyst -->
-      <rect x="378" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
-      <text x="452" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">perf-analyst</text>
-      <text x="452" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Grep · Bash (r/o)</text>
-      <text x="452" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">parse &amp; compare CSV</text>
+      <rect x="360" y="132" width="148" height="52" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="434" y="150" font-size="10.5" fill="#6ee7b7" text-anchor="middle" font-weight="700">perf-analyst</text>
+      <text x="434" y="164" font-size="8" fill="#34d399" text-anchor="middle">Read · Grep · Bash (r/o)</text>
+      <text x="434" y="176" font-size="8" fill="#5c7a9e" text-anchor="middle">parse &amp; compare</text>
 
       <!-- tuner -->
-      <rect x="546" y="125" width="148" height="48" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
-      <text x="620" y="143" font-size="11" fill="#6ee7b7" text-anchor="middle" font-weight="700">tuner</text>
-      <text x="620" y="158" font-size="9" fill="#34d399" text-anchor="middle">Read · Edit · Bash · Grep</text>
-      <text x="620" y="169" font-size="9" fill="#5c7a9e" text-anchor="middle">measure-change-measure</text>
+      <rect x="520" y="132" width="148" height="52" rx="8" fill="#1a3a2a" stroke="#34d399" stroke-width="1.5"/>
+      <text x="594" y="150" font-size="10.5" fill="#6ee7b7" text-anchor="middle" font-weight="700">tuner</text>
+      <text x="594" y="164" font-size="8" fill="#34d399" text-anchor="middle">Read · Edit · Bash · Grep</text>
+      <text x="594" y="176" font-size="8" fill="#5c7a9e" text-anchor="middle">measure-change</text>
+
+      <!-- inline validator (no agent) -->
+      <rect x="680" y="132" width="136" height="52" rx="8" fill="#241a08" stroke="#fbbf24" stroke-width="1.4" stroke-dasharray="5,3"/>
+      <text x="748" y="150" font-size="10.5" fill="#fcd34d" text-anchor="middle" font-weight="700">inline script</text>
+      <text x="748" y="164" font-size="8" fill="#c79a3a" text-anchor="middle">json · paths · header</text>
+      <text x="748" y="176" font-size="8" fill="#8a7340" text-anchor="middle">no subagent · GPU-free</text>
 
       <!-- ── Engine layer (bottom) ── -->
       <!-- madengine -->
-      <rect x="42" y="305" width="200" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
-      <text x="142" y="327" font-size="12" fill="#e2e8f0" text-anchor="middle" font-weight="800">madengine</text>
-      <text x="142" y="344" font-size="9" fill="#64748b" text-anchor="middle">build · run · discover · report · database</text>
-      <text x="142" y="356" font-size="9" fill="#5c7a9e" text-anchor="middle">Docker / SLURM / Kubernetes</text>
+      <rect x="40" y="240" width="210" height="58" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.6"/>
+      <text x="145" y="262" font-size="12.5" fill="#e2e8f0" text-anchor="middle" font-weight="800">madengine</text>
+      <text x="145" y="278" font-size="8.5" fill="#64748b" text-anchor="middle">build · run · discover · report · database</text>
+      <text x="145" y="291" font-size="8.5" fill="#5c7a9e" text-anchor="middle">Docker / SLURM / Kubernetes</text>
 
-      <!-- models.json -->
-      <rect x="262" y="305" width="130" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
-      <text x="327" y="327" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">models.json</text>
-      <text x="327" y="342" font-size="9" fill="#64748b" text-anchor="middle">142 model entries</text>
-      <text x="327" y="355" font-size="9" fill="#64748b" text-anchor="middle">tags · dockerfile · scripts</text>
-
-      <!-- docker/ + scripts/ -->
-      <rect x="412" y="305" width="148" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
-      <text x="486" y="323" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">docker/ + scripts/</text>
-      <text x="486" y="338" font-size="9" fill="#64748b" text-anchor="middle">*.ubuntu.amd.Dockerfile</text>
-      <text x="486" y="351" font-size="9" fill="#64748b" text-anchor="middle">run.sh + perf line</text>
-      <text x="486" y="364" font-size="9" fill="#5c7a9e" text-anchor="middle">performance: N unit</text>
-
-      <!-- perf.csv -->
-      <rect x="580" y="305" width="120" height="52" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.5"/>
-      <text x="640" y="326" font-size="11" fill="#e2e8f0" text-anchor="middle" font-weight="700">perf.csv</text>
-      <text x="640" y="341" font-size="9" fill="#64748b" text-anchor="middle">one row per run</text>
-      <text x="640" y="354" font-size="9" fill="#64748b" text-anchor="middle">model · perf · metric</text>
-      <text x="640" y="367" font-size="9" fill="#64748b" text-anchor="middle">status · gpu_arch</text>
+      <!-- MAD repo files -->
+      <rect x="270" y="240" width="290" height="58" rx="8" fill="#161b27" stroke="#3a4460" stroke-width="1.6"/>
+      <text x="415" y="261" font-size="11.5" fill="#e2e8f0" text-anchor="middle" font-weight="700">MAD repo files</text>
+      <text x="415" y="277" font-size="8.5" fill="#64748b" text-anchor="middle">models.json · docker/*.Dockerfile · scripts/run.sh</text>
+      <text x="415" y="290" font-size="8.5" fill="#5c7a9e" text-anchor="middle">perf.csv · perf_entry_super.json  (performance: N unit)</text>
 
       <!-- AMD GPU -->
-      <rect x="720" y="305" width="80" height="52" rx="8" fill="#1a1010" stroke="#f87171" stroke-width="1.5"/>
-      <text x="760" y="328" font-size="11" fill="#f87171" text-anchor="middle" font-weight="700">AMD GPU</text>
-      <text x="760" y="343" font-size="9" fill="#f87171" text-anchor="middle" opacity="0.7">required</text>
-      <text x="760" y="356" font-size="9" fill="#f87171" text-anchor="middle" opacity="0.7">for run/build</text>
+      <rect x="580" y="240" width="236" height="58" rx="8" fill="#1a1010" stroke="#f87171" stroke-width="1.6"/>
+      <text x="698" y="266" font-size="12" fill="#f87171" text-anchor="middle" font-weight="700">AMD GPU</text>
+      <text x="698" y="283" font-size="8.5" fill="#f87171" text-anchor="middle" opacity="0.7">required for build / run</text>
 
-      <!-- Arrows: commands → agents -->
-      <line x1="101" y1="60" x2="101" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
-      <line x1="237" y1="60" x2="270" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
-      <line x1="373" y1="60" x2="430" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
-      <line x1="500" y1="60" x2="580" y2="125" stroke="#4f9cf9" stroke-width="1.5" marker-end="url(#arr)" opacity="0.7"/>
-      <!-- validate goes inline, not to an agent box -->
+      <!-- ── Arrows: commands → agents (solid blue) ── -->
+      <line x1="86"  y1="66" x2="108" y2="132" stroke="#4f9cf9" stroke-width="1.4" marker-end="url(#arr)" opacity="0.8"/>
+      <line x1="188" y1="66" x2="124" y2="132" stroke="#4f9cf9" stroke-width="1.4" marker-end="url(#arr)" opacity="0.8"/>
+      <line x1="290" y1="66" x2="278" y2="132" stroke="#4f9cf9" stroke-width="1.4" marker-end="url(#arr)" opacity="0.8"/>
+      <line x1="392" y1="66" x2="430" y2="132" stroke="#4f9cf9" stroke-width="1.4" marker-end="url(#arr)" opacity="0.8"/>
+      <line x1="494" y1="66" x2="586" y2="132" stroke="#4f9cf9" stroke-width="1.4" marker-end="url(#arr)" opacity="0.8"/>
+      <!-- /mad-validate → inline script (amber) -->
+      <line x1="596" y1="66" x2="744" y2="132" stroke="#fbbf24" stroke-width="1.4" marker-end="url(#arr)" opacity="0.7"/>
 
-      <!-- Workflows → agents (fan-out) -->
-      <line x1="745" y1="62" x2="620" y2="125" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)" opacity="0.6" stroke-dasharray="5,3"/>
-      <line x1="745" y1="62" x2="116" y2="125" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arr)" opacity="0.4" stroke-dasharray="5,3"/>
+      <!-- ── Workflows → agents (dashed purple fan-out) ── -->
+      <path d="M662,56 C420,96 240,100 150,131" fill="none" stroke="#a78bfa" stroke-width="1.4" marker-end="url(#arrP)" opacity="0.6" stroke-dasharray="5,3"/>
+      <line x1="700" y1="112" x2="616" y2="132" stroke="#a78bfa" stroke-width="1.4" marker-end="url(#arrP)" opacity="0.7" stroke-dasharray="5,3"/>
+      <text x="436" y="100" font-size="7.5" fill="#7c6bb0" text-anchor="middle" font-style="italic">fan-out</text>
 
-      <!-- Arrows: agents → engine -->
-      <line x1="116" y1="173" x2="116" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
-      <line x1="284" y1="173" x2="284" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
-      <line x1="452" y1="173" x2="600" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
-      <line x1="620" y1="173" x2="620" y2="305" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.6"/>
+      <!-- ── Arrows: agents → engine ── -->
+      <!-- benchmark-runner → madengine -->
+      <line x1="114" y1="184" x2="132" y2="240" stroke="#34d399" stroke-width="1.4" marker-end="url(#arrG)" opacity="0.7"/>
+      <!-- model-author → repo files (writes) -->
+      <line x1="274" y1="184" x2="360" y2="240" stroke="#34d399" stroke-width="1.4" marker-end="url(#arrG)" opacity="0.7"/>
+      <!-- perf-analyst → repo files (reads perf.csv) -->
+      <line x1="434" y1="184" x2="430" y2="240" stroke="#34d399" stroke-width="1.4" marker-end="url(#arrG)" opacity="0.7"/>
+      <!-- tuner → repo files (edits configs) -->
+      <line x1="594" y1="184" x2="490" y2="240" stroke="#34d399" stroke-width="1.4" marker-end="url(#arrG)" opacity="0.7"/>
+      <!-- tuner → madengine (measures), faint long -->
+      <path d="M560,184 C400,212 230,214 170,239" fill="none" stroke="#34d399" stroke-width="1.2" marker-end="url(#arrG)" opacity="0.35" stroke-dasharray="4,3"/>
+      <!-- inline validator → repo files (read-only checks), faint -->
+      <line x1="748" y1="184" x2="540" y2="244" stroke="#fbbf24" stroke-width="1.2" marker-end="url(#arrG)" opacity="0.4" stroke-dasharray="4,3"/>
 
-      <!-- madengine → GPU -->
-      <line x1="242" y1="331" x2="720" y2="340" stroke="#f87171" stroke-width="1.5" marker-end="url(#arr2)" opacity="0.5" stroke-dasharray="4,3"/>
+      <!-- ── madengine ↔ repo files (reads models.json, writes perf.csv) ── -->
+      <line x1="250" y1="262" x2="270" y2="262" stroke="#94a3b8" stroke-width="1.3" marker-end="url(#arrGray)" marker-start="url(#arrBi)" opacity="0.6"/>
+      <!-- madengine → AMD GPU (build/run) -->
+      <line x1="560" y1="276" x2="580" y2="270" stroke="#f87171" stroke-width="1.4" marker-end="url(#arrR)" opacity="0.6"/>
+      <line x1="250" y1="284" x2="580" y2="284" stroke="#f87171" stroke-width="1.3" marker-end="url(#arrR)" opacity="0.45" stroke-dasharray="4,3"/>
     </svg>
   </div>
 
+  <p style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;font-size:0.78rem;color:var(--text-dim);margin:4px 0 18px;">
+    <span><span style="display:inline-block;width:22px;height:0;border-top:2px solid #4f9cf9;vertical-align:middle;margin-right:6px;"></span>command → agent</span>
+    <span><span style="display:inline-block;width:22px;height:0;border-top:2px dashed #a78bfa;vertical-align:middle;margin-right:6px;"></span>workflow fan-out</span>
+    <span><span style="display:inline-block;width:22px;height:0;border-top:2px solid #34d399;vertical-align:middle;margin-right:6px;"></span>agent → engine / files</span>
+    <span><span style="display:inline-block;width:22px;height:0;border-top:2px solid #fbbf24;vertical-align:middle;margin-right:6px;"></span>GPU-free path</span>
+    <span><span style="display:inline-block;width:22px;height:0;border-top:2px solid #f87171;vertical-align:middle;margin-right:6px;"></span>needs AMD GPU</span>
+  </p>
+
   <p>
-    Each slash command maps to a subagent. Workflows fan out to <em>multiple</em> parallel
-    subagent calls, then synthesize the results. Agents that need to run madengine always
-    check for AMD GPUs first — if none are present they produce a plan (the exact commands to
-    run on a GPU host) instead of executing.
+    Five of the six slash commands dispatch a subagent; <code>/mad-validate</code> runs an
+    <strong>inline script</strong> (no subagent, no GPU). The two workflows fan out to
+    <em>multiple</em> subagent calls in parallel — <code>mad-benchmark-sweep</code> drives the
+    benchmark-runner across a tag matrix, <code>mad-tune-search</code> drives the tuner through a
+    diagnose-then-measure search — then synthesize the results. Agents that need to run madengine
+    always check for AMD GPUs first; if none are present they produce a plan (the exact commands
+    to run on a GPU host) instead of executing.
   </p>
 </section>
 
