@@ -6,71 +6,78 @@ Dense Models
 - amd/Llama-3.3-70B-Instruct-FP8-KV (https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV)
 - amd/Llama-3.1-405B-Instruct-FP8-KV (https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)
 
-Small Experts Models
+MoE Models
 - DeepSeek-V3 (https://huggingface.co/deepseek-ai/DeepSeek-V3)
+- DeepSeek-R1 (https://huggingface.co/deepseek-ai/DeepSeek-R1)
 - Mixtral-8x7B-v0.1 (https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)
 
-This repository contains scripts and documentation to launch PD Disaggregation using the Mooncake framework for above models. You will find setup instructions, node assignment details and benchmarking commands.
+This repository contains scripts and documentation to launch PD Disaggregation for above models. You will find setup instructions, node assignment details and benchmarking commands.
 
 ## 📝 Prerequisites
 
-- A Slurm cluster with required Nodes -> xP + yD + 1 (minimum size 3: xP=1 and xD=1)
-- Docker container with SGLang, Mooncake, etcd and NIC drivers built-in. Refer to Building the Docker image section below.
+- A Slurm cluster with required Nodes -> xP + yD (minimum size 2: xP=1 and yD=1)
+- Docker container with SGLang, MoRI and NIC drivers built-in. Refer to Building the Docker image section below.
 - Access to a shared filesystem for log collection( cluster specific)
 
 
 ## Building the Docker image
-Access the Dockerfile located https://github.com/ROCm/MAD/docker/sglang_disagg_inference.ubuntu.amd.Dockerfile
-It uses ‘lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x’ as the base docker image.
+Access the Dockerfile located at `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`.
+It uses `lmsysorg/sglang:v0.5.11-rocm700-mi30x` as the base docker image.
 
 ```bash
 docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
 ```
 
-## Scripts and Benchmarking
-Run instructions - scripts/sglang_disagg/README.MD
+## Scripts
 
-Few files of significance:
+| File | Description |
+|------|-------------|
+| `run_xPyD_models.slurm` | SLURM script to launch docker containers on all nodes via `sbatch` |
+| `sglang_disagg_mori_io_ep.sh` | Container entrypoint — starts prefill/decode servers, proxy, and benchmark |
+| `models.yaml` | Model-specific CLI flags for all supported models |
+| `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
+| `benchmark_xPyD.sh` | Concurrency sweep benchmark using sglang bench_serving |
+| `benchmark_parser.py` | Log parser for CONCURRENCY benchmark logs |
 
-scripts/sglang_disagg/run_xPyD_models.slurm - slurm script to launch docker containers on all nodes using sbatch or salloc
-scripts/sglang_disagg/sglang_disagg_server.sh - Script that runs inside each docker to start required proxy, prefill and decode services
-scripts/sglang_disagg/benchmark_xPyD.sh - Benchmark script to run GSM8K for accuracy and sglang benchmarking tool for performance measurement
-scripts/sglang_disagg/benchmark_parser.py - Log parser script to be run on CONCURRENY benchmark log file to generate tabulated data
+## Quick Start
 
-## Sbatch run command (one-liner)
 ```bash
-
-# Clone the repo
 git clone https://github.com/ROCm/MAD.git
 cd scripts/sglang_disagg
 
-# Sbatch run command [run from the above folder]
-export DOCKER_IMAGE_NAME=<DOCKER IMAGE NAME>
-export xP=<num_prefill_nodes>; export yD=<num_decode_nodes>; export MODEL_NAME=Llama-3.1-8B-Instruct; sbatch -N <num_nodes> -n <num_nodes> --nodelist=<Nodes> run_xPyD_models.slurm
+export DOCKER_IMAGE_NAME=<DOCKER_IMAGE_NAME>
+export xP=1
+export yD=1
+export MODEL_NAME=Llama-3.1-8B-Instruct
+export RUN_MORI=1  # MoRI (default). Set RUN_MORI=0 for Mooncake/RIXLE (KV_TRANSFER_BACKEND=mooncake)
 
-# num_nodes = xP + xD + 1
+# num_nodes = xP + yD
+sbatch -N 2 -n 2 --nodelist=<node1,node2> run_xPyD_models.slurm
 ```
 
-## Post execution Log files:
-A directory inside the LOG_PATH variable in the slurm script is created by the name of slurm_job_ID. 
+## Log Files
 
-Inside that folder:
+Logs are written to `${LOG_PATH}/${SLURM_JOB_ID}/`:
 
-pd_sglang_bench_serving.sh_NODE<>.log - Overall log per ser Node 
-etcd_NODE<>.log  - for etcd services
-decode_NODE<>.log - Decode services
-prefill_NODE<>.log - prefill services
+| File | Description |
+|------|-------------|
+| `pd_sglang_bench_serving.sh_NODE<N>.log` | Main per-node log |
+| `prefill_NODE<N>.log` | Prefill server log |
+| `decode_NODE<N>.log` | Decode server log |
+| `benchmark_*_CONCURRENCY.log` / `.csv` | Benchmark results |
 
+## Benchmarking
 
-## Benchmark parser ( for CONCURRENCY logs) to tabulate different data
-
+Parse benchmark results:
 ```bash
-python3 benchmark_parser.py <log_path/benchmark_XXX_CONCURRENCY.log
+python3 benchmark_parser.py <log_path>/benchmark_XXX_CONCURRENCY.log
 ```
 
-## sample curl command to test launched server ( from docker on the proxy node)
+Smoke test from the proxy node:
 ```bash
-curl -X POST http://127.0.0.1:30000/generate -H "Content-Type: application/json" -d '{ "text": "Let me tell you a story ", "sampling_params": { "temperature": 0.3 } }'
+curl -X POST http://127.0.0.1:2322/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Let me tell you a story", "sampling_params": {"temperature": 0.3}}'
 ```
 
 ## Known Issues
