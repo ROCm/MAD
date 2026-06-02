@@ -141,8 +141,8 @@ validate_model_name() {
 
 validate_model_name "${MODEL_NAME}"
 
-if [[ "${DP_MODE:-0}" != "0" ]]; then
-    echo "Error: Only DP_MODE=0 (TP-only) is supported. Got DP_MODE=${DP_MODE}." >&2
+if [[ "${DP_MODE:-0}" == "1" ]] && (( xP > 1 || yD > 1 )); then
+    echo "Error: DP_MODE=1 requires xP=1 and yD=1 (1P1D). Got xP=${xP}, yD=${yD}." >&2
     exit 1
 fi
 
