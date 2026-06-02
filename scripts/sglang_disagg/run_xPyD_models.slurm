@@ -141,12 +141,8 @@ validate_model_name() {
 
 validate_model_name "${MODEL_NAME}"
 
-# DP_MODE=1 is currently limited to 1P1D (xP=1, yD=1).
-# Multi-node DP requires upstream fixes for distributed init (xP>1) and
-# inter-node EP collectives (yD>1). Use DP_MODE=0 for multi-node.
-if [[ "${DP_MODE:-0}" == "1" ]] && (( xP > 1 || yD > 1 )); then
-    echo "Error: DP_MODE=1 requires xP=1 and yD=1 (1P1D). Got xP=${xP}, yD=${yD}." >&2
-    echo "Use DP_MODE=0 for multi-node configurations." >&2
+if (( xP > 1 || yD > 1 )); then
+    echo "Error: Only 1P1D is supported (xP=1, yD=1). Got xP=${xP}, yD=${yD}." >&2
     exit 1
 fi
 
