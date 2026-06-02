@@ -141,18 +141,9 @@ validate_model_name() {
 
 validate_model_name "${MODEL_NAME}"
 
-if (( xP > 1 || yD > 1 )); then
-    echo "Error: Only 1P1D is supported (xP=1, yD=1). Got xP=${xP}, yD=${yD}." >&2
+if [[ "${DP_MODE:-0}" != "0" ]]; then
+    echo "Error: Only DP_MODE=0 (TP-only) is supported. Got DP_MODE=${DP_MODE}." >&2
     exit 1
-fi
-
-if [[ "${RUN_MORI:-0}" == "1" ]] && [[ "${DP_MODE:-0}" == "1" ]]; then
-    if ! mori_model_allows_dp_mode_one "$MODEL_NAME"; then
-        echo "Error: DP_MODE=1 is not supported for model '${MODEL_NAME}'. Allowed models:" >&2
-        mori_dp_mode1_allowed_models_lines >&2
-        echo "Use DP_MODE=0 for other models." >&2
-        exit 1
-    fi
 fi
 
 # ------------------------
