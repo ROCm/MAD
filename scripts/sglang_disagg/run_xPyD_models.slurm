@@ -1,9 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=sglang-disagg   # Specify a custom string for your slurm batch job
-#SBATCH -N 3            # CHECK this to be right in batch jobs 
-#SBATCH -n 3          # CHECK this to be right in batch jobs
+#SBATCH -N 2            # CHECK this to be right in batch jobs
+#SBATCH -n 2          # CHECK this to be right in batch jobs
 #SBATCH --ntasks-per-node=1
-#SBATCH --spread-job
+# --spread-job intentionally removed: it spreads nodes across IB rails, which causes
+# NCCL ibv_modify_qp timeouts on cross-rail node pairs.
+#
+# --switches=2: allow up to 2 IB switches (rails). select_same_rail_nodes() below
+# enforces per-role rail consistency. Set --switches=1 to force single rail.
+#SBATCH --switches=2
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
 #SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
@@ -74,33 +79,25 @@ model_allows_mori_ep() {
 }
 
 # ---------------------------------------------------------------------------
-# Run file: MoRI EP path when RUN_MORI=1, else default PD server script
+# Run file: always use sglang_disagg_mori_io_ep.sh (unified launcher).
+# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake/RIXLE IO).
+# RUN_MORI=1: uses mori IO (default).
 # ---------------------------------------------------------------------------
+RUN_FILE="sglang_disagg_mori_io_ep.sh"
 _run_mori="${RUN_MORI:-0}"
 if [[ "$_run_mori" == "1" ]]; then
-    if model_allows_mori_ep "$MODEL_NAME"; then
-        RUN_FILE="sglang_disagg_mori_io_ep.sh"
-        echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
-    else
-        echo "Error: RUN_MORI=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS" >&2
-        printf "MoRI EP allowed models:\n" >&2
-        for m in "${MORI_EP_VALID_MODELS[@]}"; do
-            printf "  - %s\n" "$m" >&2
-        done
-        exit 1
-    fi
-    if [[ ! -f "$RUN_FILE" ]]; then
-        echo "Error: RUN_MORI=1 requires '$RUN_FILE' in $(pwd)." >&2
-        exit 1
-    fi
+    echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
 else
-    RUN_FILE="sglang_disagg_server.sh"
-    echo "RUN_MORI not set: using $RUN_FILE"    
+    export KV_TRANSFER_BACKEND="mooncake"
+    echo "RUN_MORI=0: using $RUN_FILE with Mooncake/RIXLE IO (KV_TRANSFER_BACKEND=mooncake)"
+fi
+if [[ ! -f "$RUN_FILE" ]]; then
+    echo "Error: '$RUN_FILE' not found in $(pwd)." >&2
+    exit 1
 fi
 
-export DOCKER_IMAGE_NAME="${DOCKER_IMAGE_NAME:-lmsysorg/sglang:v0.5.5.post3-rocm700-mi30x}"
-if test -z "${DOCKER_IMAGE_NAME}"; then
-  echo "Error: DOCKER_IMAGE_NAME is not set or empty."
+if test -z "${DOCKER_IMAGE_NAME:-}"; then
+  echo "Error: DOCKER_IMAGE_NAME is not set. Pass it via env before sbatch."
   exit 1
 fi
 
@@ -111,7 +108,8 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp flags, omit dp/ep CLI flags
-MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-16G}" #-> mori symmetric heap (multi-node MoE often needs 16G+)
+
+# xP>1 or yD>1 with DP_MODE=0: each node runs an independent TP server; proxy registers all IPs.
 # sglang_disagg_mori_io_ep.sh (RUN_MORI=1): set to 1 to skip phases; pass from wrapper before sbatch
 SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
 SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
@@ -142,6 +140,15 @@ validate_model_name() {
 }
 
 validate_model_name "${MODEL_NAME}"
+
+# DP_MODE=1 is currently limited to 1P1D (xP=1, yD=1).
+# Multi-node DP requires upstream fixes for distributed init (xP>1) and
+# inter-node EP collectives (yD>1). Use DP_MODE=0 for multi-node.
+if [[ "${DP_MODE:-0}" == "1" ]] && (( xP > 1 || yD > 1 )); then
+    echo "Error: DP_MODE=1 requires xP=1 and yD=1 (1P1D). Got xP=${xP}, yD=${yD}." >&2
+    echo "Use DP_MODE=0 for multi-node configurations." >&2
+    exit 1
+fi
 
 if [[ "${RUN_MORI:-0}" == "1" ]] && [[ "${DP_MODE:-0}" == "1" ]]; then
     if ! mori_model_allows_dp_mode_one "$MODEL_NAME"; then
@@ -227,20 +234,30 @@ echo ""
 
 
 # Calculate NUM_NODES based on xP and yD
-NUM_NODES=$((xP + yD + 1))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1) DP_MODE=$DP_MODE"
+# The proxy/router runs on the first prefill node (NODE_RANK=0), so no extra node is needed.
+NUM_NODES=$((xP + yD))
+echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD) DP_MODE=$DP_MODE"
 
 # ------------------------
-# Extract first NUM_NODES from SLURM allocation and update SLURM variables
+# Extract NUM_NODES from SLURM allocation and select nodes
 # ------------------------
 echo "Original SLURM allocation:"
 echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
 echo "SLURM_NNODES: $SLURM_NNODES"
 echo "SLURM_NTASKS: $SLURM_NTASKS"
 
-# Get the full nodelist and extract first NUM_NODES
 FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
-SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n $NUM_NODES)
+AVAILABLE_COUNT=$(echo "$FULL_NODELIST" | wc -l)
+
+if (( AVAILABLE_COUNT < NUM_NODES )); then
+    echo "ERROR: Need ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but only ${AVAILABLE_COUNT} allocated." >&2
+    exit 1
+fi
+
+# Pick the first NUM_NODES nodes from the allocation and sort alphabetically.
+# srun assigns PROCID=0 to the alphabetically-first hostname regardless of --nodelist order.
+# IPADDRS[0..xP-1] = prefill, IPADDRS[xP..] = decode, so the sorted order must match.
+SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n "$NUM_NODES" | sort)
 SELECTED_NODELIST_STR=$(echo "$SELECTED_NODES" | tr '\n' ',' | sed 's/,$//')
 
 # Create new nodelist in SLURM format
@@ -268,7 +285,7 @@ export SLURM_NTASKS_PER_NODE=1
 export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
 export SLURM_JOB_ID="${SLURM_JOB_ID}"
 export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
-export SLURM_JOB_NAME="${SLURM_JOB_NAME:-1p1d_bench-serving}"
+export SLURM_JOB_NAME="${SLURM_JOB_NAME:-${xP}p${yD}d_bench-serving}"
 
 echo ""
 echo "Updated SLURM Environment Variables:"
@@ -344,7 +361,6 @@ export MODEL_PATH=$MODEL_PATH
 export xP=$xP
 export yD=$yD
 export DP_MODE=$DP_MODE
-export MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
@@ -389,7 +405,6 @@ docker run --rm \
     -e xP=$xP \
     -e yD=$yD \
     -e DP_MODE=$DP_MODE \
-    -e MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
@@ -397,6 +412,10 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e SKIP_BENCHMARK=$SKIP_BENCHMARK \
     -e SKIP_CURL_TEST=$SKIP_CURL_TEST \
+    -e KV_TRANSFER_BACKEND=${KV_TRANSFER_BACKEND:-} \
+    -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
+    -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
+    -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
