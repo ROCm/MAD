@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang-rocm:v0.5.10rc0-rocm700-mi30x-20260417
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.11-rocm720-mi30x
 FROM $BASE_DOCKER
 
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
@@ -35,39 +35,6 @@ ARG GPU_ARCH=gfx942
 WORKDIR /sgl-workspace
 
 RUN pip install --upgrade sglang-router
-
-# the default already installs mori with AINIC. Reinstall from source for cx7 and bnxt; ainic only clears USE_* overrides.
-ARG NIC_BACKEND="cx7"
-
-RUN set -eux; \
-  install_mori() { \
-    pip uninstall -y mori; \
-    cd /sgl-workspace/mori; \
-    pip install -r requirements-build.txt; \
-    pip install . --no-build-isolation; \
-    export PYTHONPATH="${PYTHONPATH}:/sgl-workspace/mori"; \
-  }; \
-  profile="/etc/profile.d/50-mori-nic-backend.sh"; \
-  case "${NIC_BACKEND}" in \
-    cx7) \
-      { echo "export USE_IONIC=OFF"; echo "export USE_BNXT=OFF"; } > "$profile"; \
-      . "$profile"; \
-      install_mori; \
-      ;; \
-    bnxt) \
-      echo "export USE_BNXT=ON" > "$profile"; \
-      . "$profile"; \
-      install_mori; \
-      ;; \
-    ainic) \
-      rm -f "$profile" || true; \
-      ;; \
-    *) \
-      echo "ERROR: Unsupported NIC_BACKEND='${NIC_BACKEND}'. Supported values are: cx7, bnxt, ainic." >&2; \
-      exit 1; \
-      ;; \
-  esac; \
-  echo "NIC_BACKEND=${NIC_BACKEND} USE_IONIC=${USE_IONIC-} USE_BNXT=${USE_BNXT-} PYTHONPATH=${PYTHONPATH-}"
 
 # Display installed packages for verification
 RUN pip list

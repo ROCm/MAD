@@ -1,101 +1,78 @@
-# Model catalog for sglang_disagg_mori_io_ep.sh (MoRI IO transfer + disaggregated PD).
+# Model catalog for sglang_disagg_mori_io_ep.sh (disaggregated PD).
 # -----------------------------------------------------------------------------
 # Loaded when MODEL_NAME is set; PARALLEL_MODE is tp or dp from DP_MODE in the shell:
-#   DP_MODE=0 -> PARALLEL_MODE=tp -> tp_flags, prefill.tp, decode.tp (plus base_flags). Use this for all models except when using DP_MODE=1 below.
-#   DP_MODE=1 -> PARALLEL_MODE=dp -> dp_flags, prefill.dp, decode.dp (plus base_flags). Allowlist MORI_DP_MODE1_ALLOWED_MODELS in sglang_disagg_mori_io_ep.sh (same array in run_xPyD_models.slurm).
-# Do not set --tp-size here; the launcher passes it (GENERIC_TP_SIZE=8 for DP_MODE=0).
+#   DP_MODE=0 -> PARALLEL_MODE=tp -> tp_flags, prefill.tp, decode.tp (plus base_flags).
+#   DP_MODE=1 -> PARALLEL_MODE=dp -> dp_flags, prefill.dp, decode.dp (plus base_flags).
+# Do not set --tp-size or --disaggregation-transfer-backend here; the launcher manages those.
 #
 # Each model contains:
 # - base_flags: always applied (prefill + decode)
-# - tp_flags / dp_flags: mode-level flags (dp_flags for DP_MODE=1 only on DeepSeek-V3 / DeepSeek-R1; other models use DP_MODE=0 only)
+# - tp_flags / dp_flags: mode-level flags applied to BOTH prefill and decode (omit if empty)
+# - prefill_dp_flags / decode_dp_flags: role-specific dp mode overrides (take precedence over dp_flags)
 # - prefill/decode.<tp|dp>: role + mode specific flags
-# - experimental_flags: optional extra CLI flags appended after role/mode flags on BOTH prefill and decode workers.
-#   Use for try-outs that are independent of TP vs DP (PARALLEL_MODE); omit or "" when unused.
+# - experimental_flags: optional extra CLI flags (omit if empty)
 
-# --- Dense Llama / Qwen (lighter defaults; tune after first OOM on cluster) ---
+# --- Dense Llama / Qwen ---
 
 Llama-3.1-8B-Instruct:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.85 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: ""
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 4)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 4)"
+    tp: "--disable-cuda-graph"
   decode:
-    tp: "--max-running-requests 4096 --cuda-graph-bs $(seq 1 8)"
-    dp: "--max-running-requests 4096 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
 
 Qwen3-32B:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.82 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: ""
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
+    tp: "--disable-cuda-graph"
   decode:
-    tp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
-    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
 
 amd-Llama-3.3-70B-Instruct-FP8-KV:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.8 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: ""
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
+    tp: "--disable-cuda-graph"
   decode:
-    tp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
-    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
 
 Llama-3.1-405B-Instruct-FP8-KV:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.78 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: ""
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
   prefill:
-    tp: "--max-running-requests 4 --cuda-graph-bs $(seq 1 2)"
-    dp: "--max-running-requests 4 --cuda-graph-bs $(seq 1 2)"
+    tp: "--disable-cuda-graph --disable-radix-cache"
   decode:
-    tp: "--max-running-requests 2048 --cuda-graph-bs $(seq 1 6)"
-    dp: "--max-running-requests 2048 --cuda-graph-bs $(seq 1 6)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 8)"
 
 # --- MoE ---
 
 Mixtral-8x7B-Instruct-v0.1:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.8 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: ""
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
+    tp: "--disable-cuda-graph"
   decode:
-    tp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
-    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
 
 DeepSeek-V3:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.8 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 "
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
+  # --enable-dp-attention-local-control-broadcast on both roles: forces all DP ranks to
+  # step together so idle ranks enter the MoRI EP collective.
+  dp_flags: "--enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1"
+  prefill_dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  decode_dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3) --mem-fraction-static 0.65"
   decode:
-    tp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
     dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
 
 DeepSeek-R1:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.8 --disable-radix-cache"
-  experimental_flags: ""
-  tp_flags: ""
-  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 "
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
+  dp_flags: "--enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1"
+  prefill_dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  decode_dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
   prefill:
-    tp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
-    dp: "--max-running-requests 8 --cuda-graph-bs $(seq 1 3)"
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3)"
   decode:
-    tp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
     dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 8)"
