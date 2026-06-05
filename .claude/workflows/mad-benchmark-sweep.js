@@ -153,6 +153,15 @@ const results = await parallel(matrix.map((cell, i) => () => {
 
   return agent(
     `MAD benchmark sweep cell "${label}".
+Pre-flight: before running madengine, verify it is installed:
+  if ! command -v madengine &>/dev/null; then
+    if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
+      pip install -r requirements.txt
+    else
+      echo "[pre-flight] madengine not found. Install: pip install git+https://github.com/ROCm/madengine.git@main"; exit 1
+    fi
+  fi
+  [ -f models.json ] || echo "[pre-flight] Warning: not in MAD repo root."
 Command: ${cmd}
 ${action}
 Return the cell label, the exact command, status, and performance/metric if available.`,

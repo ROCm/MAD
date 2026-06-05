@@ -35,6 +35,25 @@ When invoked:
         a single stdout line. Use this only when the template you copied does;
         do not mix the two contracts.
 
+Pre-flight — before any `madengine` invocation (including `madengine discover`),
+run this Bash block:
+```bash
+if ! command -v madengine &>/dev/null; then
+  if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
+    echo "[pre-flight] madengine not found. Installing from requirements.txt..."
+    pip install -r requirements.txt
+  else
+    echo "[pre-flight] madengine not found and requirements.txt is missing."
+    echo "  Install:  pip install git+https://github.com/ROCm/madengine.git@main"
+    echo "  Or clone MAD and run from its root (which has requirements.txt)."
+    exit 1
+  fi
+fi
+if [ ! -f models.json ]; then
+  echo "[pre-flight] Warning: models.json not found — run from the MAD repo root."
+fi
+```
+
 Rules:
 - The output contract is hard: either the `performance: <value> <unit>` stdout
   line, OR a `multiple_results` CSV declared in models.json. Never ship a script

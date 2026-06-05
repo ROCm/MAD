@@ -29,6 +29,24 @@ When invoked:
      build_manifest.json` executes from it (skips rebuild).
 3. Note required env vars (e.g. `export MAD_SECRETS_HFTOKEN=...` for HF models).
 
+Pre-flight — before any `madengine` invocation, run this Bash block:
+```bash
+if ! command -v madengine &>/dev/null; then
+  if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
+    echo "[pre-flight] madengine not found. Installing from requirements.txt..."
+    pip install -r requirements.txt
+  else
+    echo "[pre-flight] madengine not found and requirements.txt is missing."
+    echo "  Install:  pip install git+https://github.com/ROCm/madengine.git@main"
+    echo "  Or clone MAD and run from its root (which has requirements.txt)."
+    exit 1
+  fi
+fi
+if [ ! -f models.json ]; then
+  echo "[pre-flight] Warning: models.json not found — run from the MAD repo root."
+fi
+```
+
 Execution policy:
 - `madengine run`/`build` need AMD GPUs. Before running, check for GPUs
   (`rocm-smi` or `amd-smi`). If none are present, DO NOT run — instead print the

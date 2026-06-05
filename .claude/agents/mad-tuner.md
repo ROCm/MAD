@@ -22,6 +22,24 @@ When invoked:
 4. Keep a change only if it improves the metric without breaking the run
    (`status == SUCCESS`). Revert regressions.
 
+Pre-flight — before any `madengine` invocation, run this Bash block:
+```bash
+if ! command -v madengine &>/dev/null; then
+  if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
+    echo "[pre-flight] madengine not found. Installing from requirements.txt..."
+    pip install -r requirements.txt
+  else
+    echo "[pre-flight] madengine not found and requirements.txt is missing."
+    echo "  Install:  pip install git+https://github.com/ROCm/madengine.git@main"
+    echo "  Or clone MAD and run from its root (which has requirements.txt)."
+    exit 1
+  fi
+fi
+if [ ! -f models.json ]; then
+  echo "[pre-flight] Warning: models.json not found — run from the MAD repo root."
+fi
+```
+
 Rules:
 - Measuring requires AMD GPUs. If none are present (`rocm-smi`/`amd-smi` absent),
   do NOT execute — instead produce a ranked list of candidate changes with
