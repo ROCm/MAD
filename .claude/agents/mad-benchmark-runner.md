@@ -33,9 +33,9 @@ Execution policy:
 - `madengine run`/`build` need AMD GPUs. Before running, check for GPUs
   (`rocm-smi` or `amd-smi`). If none are present, DO NOT run — instead print the
   exact command(s) the user should run on a GPU host, and stop.
-- Smoke-test wiring with a single small tag before large sweeps. (There is no
-  `dummy` model in this repo's `models.json` — confirm a real tag with
-  `madengine discover`.)
+- Smoke-test wiring with a single small tag before large sweeps. Prefer a
+  lightweight existing model such as `dummy_multi` (tag `dummies`) when
+  appropriate, and always confirm the selected tag with `madengine discover`.
 
 Report: the resolved model list, the exact command, required env vars, and
 (if run) where results landed (`perf.csv` by default).
