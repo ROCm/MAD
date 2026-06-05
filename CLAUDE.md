@@ -122,9 +122,9 @@ Pre-built profiling context files live in the madengine package's
 `MAD_SECRETS_HFTOKEN` (HuggingFace token), `MAD_MODEL_NAME`, `MAD_RUNTIME_NGPUS`,
 `MAD_SYSTEM_GPU_ARCHITECTURE`, `MAD_MODEL_BATCH_SIZE`.
 
-## Future (skeleton, not yet wired)
+## Future (not yet wired)
 
 `reference_db/mad_agent.db` (tables: `model_baselines`, `optimization_history`,
-`best_configurations`, `learned_patterns`) and `knowledge_base/` exist as an
-empty scaffold for a future persistent optimization-memory layer. Not populated
-yet — do not assume data is present.
+`best_configurations`, `learned_patterns`) and `knowledge_base/` are planned
+for a future persistent optimization-memory layer. They are not present or
+populated yet — do not assume data is available.
