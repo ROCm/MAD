@@ -186,8 +186,7 @@ prefill_flags = prefill.get(mode, "") or ""
 
 exports = {
     "MODEL_BASE_FLAGS": cfg.get("base_flags", ""),
-    "MODEL_PREFILL_MODE_FLAGS": cfg.get(f"prefill_{mode}_flags", cfg.get(f"{mode}_flags", "")),
-    "MODEL_DECODE_MODE_FLAGS": cfg.get(f"decode_{mode}_flags", cfg.get(f"{mode}_flags", "")),
+    "MODEL_MODE_FLAGS": cfg.get(f"{mode}_flags", ""),
     "MODEL_PREFILL_FLAGS": prefill_flags,
     "MODEL_DECODE_FLAGS": decode.get(mode, ""),
     "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
@@ -198,8 +197,8 @@ for key, value in exports.items():
 PY
 )"
 
-PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_PREFILL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
-DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_DECODE_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE})"
 
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
