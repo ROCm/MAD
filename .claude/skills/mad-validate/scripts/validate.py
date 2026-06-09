@@ -8,9 +8,19 @@ Errors break a run (non-zero exit). Warnings are missing MAD-convention
 metadata (madengine itself defaults these — only `name` is structurally
 required per its Model dataclass — so they do not fail the build).
 """
-import json, os, sys, glob
+import json, os, subprocess, sys, glob
 
 sel = sys.argv[1] if len(sys.argv) > 1 else "all"
+
+# Resolve the repo root so the script works regardless of cwd.
+try:
+    repo_root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"], text=True, stderr=subprocess.DEVNULL
+    ).strip()
+    os.chdir(repo_root)
+except Exception:
+    pass  # fall back to cwd; works when already at repo root
+
 models = json.load(open("models.json"))
 
 

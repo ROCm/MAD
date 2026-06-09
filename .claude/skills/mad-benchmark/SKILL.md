@@ -5,14 +5,14 @@ argument-hint: <tag-or-model> [extra options]
 disable-model-invocation: true
 context: fork
 agent: mad-benchmark-runner
-allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash .claude/skills/mad-common/preflight.sh) Read Grep Glob
+allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash *) Read Grep Glob
 ---
 
 Benchmark `$ARGUMENTS` with madengine.
 
 ## Pre-flight
 ```!
-bash .claude/skills/mad-common/preflight.sh
+bash ${CLAUDE_SKILL_DIR}/../mad-common/preflight.sh
 ```
 
 ## Task

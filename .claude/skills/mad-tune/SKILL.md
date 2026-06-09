@@ -5,14 +5,14 @@ argument-hint: "<tag-or-model> [target: throughput|latency] [lever hints]"
 disable-model-invocation: true
 context: fork
 agent: mad-tuner
-allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash .claude/skills/mad-common/preflight.sh) Read Edit Grep Glob
+allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash *) Read Edit Grep Glob
 ---
 
 Tune `$ARGUMENTS`.
 
 ## Pre-flight
 ```!
-bash .claude/skills/mad-common/preflight.sh
+bash ${CLAUDE_SKILL_DIR}/../mad-common/preflight.sh
 ```
 
 ## Task

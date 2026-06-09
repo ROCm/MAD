@@ -148,20 +148,12 @@ const results = await parallel(matrix.map((cell, i) => () => {
   const cmd = `madengine run ${flags.join(' ')}${ctx}`
 
   const action = execute
-    ? `If AMD GPUs are present (check rocm-smi/amd-smi), RUN this command from the /home/ysha/MAD repo root and parse results. This model may emit a "performance: <value> <unit>" stdout line OR (if it is a multiple_results model) write per-metric rows to its own CSV — in that case report the primary throughput metric. Results land in ${outFile}. If no GPUs, set status "skipped".`
+    ? `If AMD GPUs are present (check rocm-smi/amd-smi), RUN this command from the MAD repo root and parse results. This model may emit a "performance: <value> <unit>" stdout line OR (if it is a multiple_results model) write per-metric rows to its own CSV — in that case report the primary throughput metric. Results land in ${outFile}. If no GPUs, set status "skipped".`
     : `Do NOT execute. Validate the command is well-formed and the tag resolves via "madengine discover --tags ${cell.tag}". Set status "planned".`
 
   return agent(
     `MAD benchmark sweep cell "${label}".
-Pre-flight: before running madengine, verify it is installed:
-  if ! command -v madengine &>/dev/null; then
-    if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
-      pip install -r requirements.txt
-    else
-      echo "[pre-flight] madengine not found. Install: pip install git+https://github.com/ROCm/madengine.git@main"; exit 1
-    fi
-  fi
-  [ -f models.json ] || echo "[pre-flight] Warning: not in MAD repo root."
+Pre-flight: run \`bash .claude/skills/mad-common/preflight.sh\` and stop if it exits non-zero.
 Command: ${cmd}
 ${action}
 Return the cell label, the exact command, status, and performance/metric if available.`,
