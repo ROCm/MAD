@@ -1,7 +1,7 @@
 #!/bin/bash
 # MoRI EP PD entrypoint (used when RUN_MORI=1 in run_xPyD_models.slurm).
 # Customize for MoRI expert-parallel + disaggregated launch; until then this
-# delegates to the standard Mooncake/RIXLE PD launcher.
+# delegates to the standard Mooncake PD launcher.
 
 _MORI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
@@ -206,7 +206,7 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
-# KV transfer backend: default mori, switchable to mooncake (Mooncake/RIXLE).
+# KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
