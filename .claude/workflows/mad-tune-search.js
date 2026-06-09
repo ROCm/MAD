@@ -161,15 +161,7 @@ const baseAction = execute
   : `Do NOT run anything. Read the static config only; leave baselinePerf null.`
 const baseline = await agent(
   `In the MAD repo, establish the tuning baseline for tag "${tag}" (target: ${target}).
-Pre-flight: before running madengine, verify it is installed:
-  if ! command -v madengine &>/dev/null; then
-    if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
-      pip install -r requirements.txt
-    else
-      echo "[pre-flight] madengine not found. Install: pip install git+https://github.com/ROCm/madengine.git@main"; exit 1
-    fi
-  fi
-  [ -f models.json ] || echo "[pre-flight] Warning: not in MAD repo root."
+Pre-flight: run \`bash .claude/skills/mad-common/preflight.sh\` and stop if it exits non-zero.
 Find its models.json entry, its scripts/.../run.sh, and any config it references.
 Summarize the current configuration and list the tuning levers available for this
 stack (env vars like MAD_MODEL_BATCH_SIZE / PYTORCH_TUNABLEOP_ENABLED / NCCL_*/RCCL_*,
@@ -205,6 +197,7 @@ const diagAction = execute
   : `Do NOT run anything. Classify the likely bottleneck from the static config, model architecture, and any EXISTING trace output already on disk (e.g. rocm_trace_lite_output/trace_summary.txt). Set tracePath to that file if found, else null.`
 const diag = await agent(
   `Diagnose the performance bottleneck of "${baseline.model}" to guide ${target} tuning.
+Pre-flight: run \`bash .claude/skills/mad-common/preflight.sh\` and stop if it exits non-zero.
 Baseline config: ${baseline.baselineSummary}
 ${diagAction}
 
@@ -298,6 +291,7 @@ for (const cand of candidates) {
 
   const evalResult = await agent(
     `Evaluate tuning candidate ${cand.id} for "${baseline.model}" (leverKind: ${cand.leverKind || 'other'}).
+Pre-flight: run \`bash .claude/skills/mad-common/preflight.sh\` and stop if it exits non-zero.
 Change: ${cand.change}
 Hypothesis: ${cand.hypothesis}
 Motivating evidence: ${cand.evidence}

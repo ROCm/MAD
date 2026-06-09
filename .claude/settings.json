@@ -10,6 +10,8 @@
       "Bash(git log *)",
       "Bash(rocm-smi *)",
       "Bash(amd-smi *)",
+      "Bash(bash .claude/skills/mad-common/preflight.sh)",
+      "Bash(python3 .claude/skills/mad-validate/scripts/validate.py *)",
       "Read",
       "Grep",
       "Glob"

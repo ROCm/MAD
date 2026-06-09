@@ -12,8 +12,12 @@ and appends a row to `perf.csv`.
 
 The four common user tasks here are: **benchmarking**, **adding a new model**,
 **tuning** a model/kernel for better perf, and **development** on the repo
-itself. Dedicated subagents and `/mad-*` slash commands exist for each — see
-`.claude/agents/` and `.claude/commands/`.
+itself. Each is a `/mad-*` **skill** (`.claude/skills/`) that forks to a curated
+subagent (`.claude/agents/`); larger fan-out jobs are **workflows**
+(`.claude/workflows/`). Skills: `/mad-benchmark`, `/mad-profile`, `/mad-tune`,
+`/mad-add-model` (manual-invoke; they build/run on GPUs), and `/mad-report`,
+`/mad-validate` (read-only, auto-invocable). Shared madengine pre-flight lives in
+`.claude/skills/mad-common/preflight.sh`.
 
 ## The performance contract (most important convention)
 
