@@ -2,7 +2,5 @@
 ARG BASE_DOCKER=rocm/pytorch-training:v25.5
 FROM $BASE_DOCKER
 
-
-
-# Pin numpy to < 2.0.0
-RUN pip install --upgrade numpy==1.26.4 scipy numba pandas
+# Pin numpy to < 2.0.0 and pandas<3.0
+RUN pip install --upgrade numpy==1.26.4 scipy numba "pandas<3.0"
