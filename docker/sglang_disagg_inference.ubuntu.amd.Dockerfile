@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.5.11-rocm720-mi30x
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x
 FROM $BASE_DOCKER
 
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
@@ -35,6 +35,35 @@ ARG GPU_ARCH=gfx942
 WORKDIR /sgl-workspace
 
 RUN pip install --upgrade sglang-router
+
+WORKDIR /sgl-workspace/mori
+
+ARG MORI_COMMIT="158c7e8335a0b19b3f1f422ff134d7869252135e"
+# Set INSTALL_MORI=1 to build/install MoRI at MORI_COMMIT; any other value skips it.
+ARG INSTALL_MORI=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    git ibverbs-utils libibverbs-dev \
+    openmpi-bin libopenmpi-dev \
+    libpci-dev libdw1 locales \
+    libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
+    cmake
+
+RUN if [ "${INSTALL_MORI}" = "1" ]; then \
+      echo "INSTALL_MORI=1: installing MoRI at ${MORI_COMMIT}" \
+      && git checkout main \
+      && git fetch origin \
+      && git pull origin main \
+      && git checkout ${MORI_COMMIT} \
+      && pip install -r requirements-build.txt \
+      && pip install -e . ; \
+    else \
+      echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; \
+    fi
+
+
+WORKDIR /sgl-workspace
 
 # Display installed packages for verification
 RUN pip list
