@@ -75,7 +75,6 @@ torchrun --nproc_per_node="$MAD_RUNTIME_NGPUS" $HF_PATH/examples/pytorch/languag
 	--dataloader_num_workers 1 \
 	--skip_memory_metrics \
 	--per_device_train_batch_size="$MAD_MODEL_BATCH_SIZE" \
-	--overwrite_output_dir \
 	--max_steps 150 "$@" \
 	2>&1 | tee log.txt
 

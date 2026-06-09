@@ -24,11 +24,17 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.5.2rc1-rocm700-mi30x
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.11-rocm720-mi30x
 FROM $BASE_DOCKER
+
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
+
+ENV PYTHONPATH=$PYTHONPATH:/sgl-workspace/mori:/sgl-workspace/aiter:
 
 ARG GPU_ARCH=gfx942
 WORKDIR /sgl-workspace
+
+RUN pip install --upgrade sglang-router
 
 # Display installed packages for verification
 RUN pip list

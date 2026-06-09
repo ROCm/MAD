@@ -1,0 +1,84 @@
+# 1k 1k mc1 mc8 mc32 mc128
+
+- benchmark: serving
+  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-Preview
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## gpt-oss w4a8 is gfx950 only
+- benchmark: serving
+  model: openai/gpt-oss-120b amd/gpt-oss120b-w-mxfp4-a-fp8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  bench_args:
+    --lmeval_apply_chat_template: True
+
+## For LLama, Mixtral, etc. on gfx942, use float16 for better GEMM perf
+- benchmark: serving
+  model:
+    meta-llama/Llama-3.1-405B-Instruct
+    amd/Llama-3.1-405B-Instruct-FP8-KV
+    meta-llama/Llama-3.3-70B-Instruct
+    amd/Llama-3.3-70B-Instruct-FP8-KV
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+## Llama 3.x MXFP4 (gfx950 only)
+- benchmark: serving
+  model:
+    amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+    amd/Llama-3.3-70B-Instruct-MXFP4-Preview
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+- benchmark: serving
+  model:
+    meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+- benchmark: serving
+  model:
+    mistralai/Mixtral-8x22B-Instruct-v0.1
+    amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  arch_overrides:
+    gfx942:
+      dtype: float16

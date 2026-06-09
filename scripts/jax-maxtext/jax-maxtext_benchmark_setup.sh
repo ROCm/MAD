@@ -47,7 +47,7 @@ echo "Building dependencies for $MODEL_REPO"
 set -x 
 export HF_HOME=/hf_cache
 mkdir /hf_cache
-hf login --token $HF_TOKEN --add-to-git-credential
+hf auth login --token $HF_TOKEN --add-to-git-credential
 
 # always download and use the real dataset
 # hf download legacy-datasets/c4 \
@@ -80,6 +80,10 @@ elif [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then
   echo "No tokenizer for download"
 elif [[ "$MODEL_REPO" == "Mixtral-8x7B" ]]; then
   download_tokenizer "mistralai/Mixtral-8x7B-v0.1"
+elif [[ "$MODEL_REPO" == "Qwen3-14B" ]]; then
+  download_tokenizer "Qwen/Qwen3-14B"
+elif [[ "$MODEL_REPO" == "Qwen3-30B-A3B" ]]; then
+  download_tokenizer "Qwen/Qwen3-30B-A3B"
 else
     echo "Error: Unsupported training mode."
     exit 1

@@ -11,25 +11,23 @@ AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs
 >
 
 >[!NOTE]
->There are known issues of rocm/jax-training:maxtext-v25.11.
-> 1. Minor performance regression (< 4%) for bf16 quantization in llama models and Mixtral 8x7b. 
-> 2. You may potentially see minor loss spikes, or loss curve may have slightly higher convergence end value w.r.t the previous image.
-> 3. For FP8 training on MI355, many models will display a warning message like: `Warning: Latency not found for MI_M=16, MI_N=16, MI_K=128, mi_input_type=BFloat8Float8_fnuz. Returning latency value of 32 (really slow).` The compile step may take longer than usual, but training will run. We are currently investigating this and will fix for the next release.
-> 4. The built-in JAX profiler isn't working. See [Profiling with rocprofv3](#profiling-with-rocprofv3) for details on how to profile with rocprofv3.
->
+> 1. It is known that you may see NaNs in the losses while using real data (not synthetic data) when setting `packing=True` and `NVTE_CK_IS_V3_ATOMIC_FP32=0`. Make sure to set `NVTE_CK_IS_V3_ATOMIC_FP32=1` for production training when using real data and input sequence packing (`packing=True`).
 
 >[!NOTE]
->We have refreshed the image from the previous release `rocm/jax-training:maxtext-v25.9` as `rocm/jax-training:maxtext-v25.9.1`.
->This should include a fix to address segmentation fault issues during the launch of the previous image.
->
+> There is a known slight performance regression for DeepSeek-V2-lite (16B) in v26.3. This is being tracked and will be addressed in a future release.
+
+>[!NOTE]
+> **JAX 0.9.1 Early Access known issues:**
+> 1. There is a known performance regression for MoE models (DeepSeek-V2-lite and Mixtral-8x7B).
+> 2. The trace viewer in profiling may be missing some information in the flame graph.
 
 | Software component | Version        |
 |--------------------|----------------|
-| ROCm               | 7.1.0         |
-| Jax                | 0.7.1          |
+| ROCm               | 7.2.1         |
+| Jax                | 0.8.2          |
 | Python             | 3.12.3        |
-| Transformer Engine | 2.4.0.dev0+281042de |
-| hipBLASLt          | 1.2.x          |
+| Transformer Engine | 2.8.0.dev0+9b312832 |
+| hipBLASLt          | 1.3.0+bfcf25fa18        |
 
 
 ## Supported features and models
@@ -47,9 +45,12 @@ The following models are pre-optimized for performance on the AMD Instinct MI300
 * Llama 2 70B
 * Llama 3/3.1 8B
 * Llama 3/3.1 70B
+* Llama 3.1 405B
 * Llama 3.3 70B
 * DeepSeek-V2-lite (16B)
 * Mixtral-8x7B
+* Qwen3 14B
+* Qwen3 30B-A3B
 
 Note: Some models, such as Llama 3, require an external license agreement through a third party (for example, Meta).
 
@@ -69,7 +70,7 @@ apt install iproute2 -y
 apt install -y linux-headers-"$(uname -r)" libelf-dev
 apt install -y gcc make libtool autoconf librdmacm-dev rdmacm-utils infiniband-diags ibverbs-utils perftest ethtool libibverbs-dev rdma-core strace libibmad5 libibnetdisc5 ibverbs-providers libibumad-dev libibumad3 libibverbs1 libnl-3-dev libnl-route-3-dev
 ```
-Please refer to your NIC manufacturer's webpage for further steps about compiling and install the RoCE driver. .e.g. for Broadcom, please refer to the section **Compiling Broadcom NIC Software from Source** in [Ethernet Networking Guide for AMD Instinct MI300X GPU Clusters](https://docs.broadcom.com/doc/957608-AN2XX)
+Please refer to your NIC manufacturer's webpage for further steps about compiling and install the RoCE driver, e.g. for Broadcom, please refer to the section **Compiling Broadcom NIC Software from Source** in [Ethernet Networking Guide for AMD Instinct MI300X GPU Clusters](https://docs.broadcom.com/doc/957608-AN2XX)
 
 Set the following env variables. You can again check the multinode examples on how to set these variables.
 - **Master Address:**
@@ -99,8 +100,8 @@ Set the following env variables. You can again check the multinode examples on h
   ```bash
   export NCCL_SOCKET_IFNAME=ens50f0np0
   ```
- - **RDMA Interface**
-   First make sure that packages above are installed on all the nodes. Then set the RDMA interfaces to use for communication.
+- **RDMA Interface**
+  First make sure that packages above are installed on all the nodes. Then set the RDMA interfaces to use for communication.
    ```bash
    # If using Broadcom NIC
    export NCCL_IB_HCA=rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7
@@ -114,13 +115,13 @@ Set the following env variables. You can again check the multinode examples on h
 This container should not be expected to provide generalized performance across all training workloads. Users should expect the container perform in the model configurations described below, but other configurations and run conditions are not validated by AMD.
 Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X, MI325X, MI350X, MI355X accelerators with the Docker image.
 
-Use the following instructions to reproduce the benchmark results on an
-MI300X or MI355X accelerator with a prebuilt JAX Docker image.
+Users have two choices to reproduce the benchmark results using this Automation and Dashboarding repository.
 
-Users have two choices to reproduce the benchmark results.
+- [MAD-integrated benchmarking](#mad-integrated-benchmarking)
+- [Standalone benchmarking](#standalone-benchmarking)
+- [Primus benchmarking](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
 
--   [MAD-integrated benchmarking](#mad-integrated-benchmarking)
--   [Standalone benchmarking](#standalone-benchmarking)
+Jax MaxText has also been integrated into [Primus](https://github.com/AMD-AGI/Primus), which supports multiple backends including Megatron-LM, TorchTitan, and JAX MaxText, alongside ROCm-optimized components. Users can now use the unified `primus-cli` to run training jobs with Jax MaxText backend.
 
 ## MAD-integrated benchmarking
 
@@ -132,7 +133,7 @@ cd MAD
 pip install -r requirements.txt
 ```
 
-Run models through MAD-integrated benchmarking with the following command
+Run models through MAD-integrated benchmarking with the following command:
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
@@ -168,9 +169,12 @@ ROCm MAD launches a Docker container with the name `container_ci-jax_maxtext_tra
 | jax_maxtext_train_llama-2-70b           |
 | jax_maxtext_train_llama-3.1-8b          |
 | jax_maxtext_train_llama-3.1-70b         |
+| jax_maxtext_train_llama-3.1-405b        |
 | jax_maxtext_train_llama-3.3-70b         |
 | jax_maxtext_train_deepseek-v2-lite-16b  |
 | jax_maxtext_train_mixtral-8x7b          |
+| jax_maxtext_train_qwen3-14b             |
+| jax_maxtext_train_qwen3-30b-a3b         |
 
 ## Standalone benchmarking
 
@@ -179,7 +183,7 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v25.11
+docker pull rocm/jax-training:maxtext-v26.3
 ```
 ### Single Node Training examples
 
@@ -199,7 +203,7 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 Launch the Docker container.
 
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v25.11
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.3
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -378,50 +382,274 @@ Or for fp8 quantized training on MI355X
 ./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q fp8
 ```
 
+8.	**Single-node training with Qwen3 14B model**
+
+Setup
+```
+./jax-maxtext_benchmark_setup.sh -m Qwen3-14B
+```
+
+For unquantized training
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-14B
+```
+
+Or for nanoo_fp8 quantized training on MI300X
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-14B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-14B -q fp8
+```
+
+9.	**Single-node training with Qwen3 30B-A3B model (MoE)**
+
+Setup
+```
+./jax-maxtext_benchmark_setup.sh -m Qwen3-30B-A3B
+```
+
+For unquantized training
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B
+```
+
+Or for nanoo_fp8 quantized training on MI300X
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B -q nanoo_fp8
+```
+
+Or for fp8 quantized training on MI355X
+```
+./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B -q fp8
+```
 
 
 ### Multi-Node Training examples
-Note: these scripts will launch the docker and execute the benchmark, so **please run it outside of any docker**.
+Note: these scripts will launch the docker and execute the benchmark, so **please run them outside of any docker**.
 
-Please make sure $HF_HOME is set before running the test. Refer to this [Readme](https://github.com/ROCm/maxtext/blob/main/benchmarks/gpu-rocm/readme.md) for more details on downloading the llama models before running the benchmark.
+The examples below use Slurm for running on multiple nodes. The unified multinode benchmark script accepts a configuration file that specifies the model and training parameters.
 
-The examples below use slurm for running on multiple nodes.
+#### Running Multi-Node Training
 
-1. **Multi-node training with Llama 2 7B model**\
-   Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_7b_multinode.sh)
+To run multi-node training, use the following command:
 
-Run the benchmark for multi-node node traininig
-```
-sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_7b_multinode.sh
+```bash
+sbatch -N <NUM_NODES> jax_maxtext_multinode_benchmark.sh <config_file.yml> [docker_image]
 ```
 
-2. **Multi-node training with Llama 2 70B model**\
-   Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama2_70b_multinode.sh)
+**Parameters:**
+- `<NUM_NODES>`: Number of nodes to use for training (e.g., 2, 4, 8)
+- `<config_file.yml>`: Path to the YAML configuration file containing model and training parameters
+- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.3`
 
-Run the benchmark for multinode node traininig
-```
-sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama2_70b_multinode.sh
+**Configuration files** are available in the `scripts/jax-maxtext/env_scripts/` directory for different models and GPU architectures:
+
+For MI300X (gfx942):
+- `llama2_7b.yml` - Llama 2 7B
+- `llama2_70b.yml` - Llama 2 70B
+- `llama3_8b.yml` - Llama 3 8B
+- `llama3_70b.yml` - Llama 3 70B
+- `qwen3_14b.yml` - Qwen3 14B
+- `qwen3_30b_a3b.yml` - Qwen3 30B-A3B
+
+For MI355X (gfx950):
+- `gfx950_llama2_7b.yml` - Llama 2 7B
+- `gfx950_llama2_70b.yml` - Llama 2 70B
+- `gfx950_llama3_8b.yml` - Llama 3 8B
+- `gfx950_llama3_70b.yml` - Llama 3 70B
+- `gfx950_llama3.1_405b.yml` - Llama 3.1 405B
+- `gfx950_qwen3_14b.yml` - Qwen3 14B
+- `gfx950_qwen3_30b_a3b.yml` - Qwen3 30B-A3B
+
+#### Example Commands
+
+1. **Multi-node training with Llama 2 7B model on 2 nodes:**
+```bash
+sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_7b.yml
 ```
 
-3. **Multi-node training with Llama 3 8B model**\
-   Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_8b_multinode.sh)
-
-Run the benchmark for multinode node traininig
-```
-sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_8b_multinode.sh
+2. **Multi-node training with Llama 2 70B model on 4 nodes with custom image:**
+```bash
+sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.3
 ```
 
-4. **Multi-node training with Llama 3 70B model**\
-   Use the slurm script:
-[scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh](https://github.com/ROCm/MAD/blob/develop/scripts/jax-maxtext/gpu-rocm/llama3_70b_multinode.sh)
+3. **Multi-node training with Llama 3 8B model on 2 nodes:**
+```bash
+sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama3_8b.yml
+```
 
-Run the benchmark for multinode node traininig
+4. **Multi-node training with Llama 3 70B model on 8 nodes:**
+```bash
+sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/llama3_70b.yml
 ```
-sbatch --export=ALL,IMAGE=<image_name> -N <num_nodes> llama3_70b_multinode.sh
+
+5. **Multi-node training with Llama 3.1 405B model on MI355X (gfx950) with 8 nodes:**
+```bash
+sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/gfx950_llama3.1_405b.yml
 ```
+
+## Using primus-cli to run training jobs with Jax MaxText backend
+
+**Clone the Primus repository**
+```
+git clone https://github.com/AMD-AIG-AIMA/Primus.git
+cd Primus
+git checkout main
+git submodule update --init third_party/maxtext/
+```
+
+**Run the training job with primus-cli**  
+
+For detailed usage of primus-cli, please refer to [Primus CLI User Guide](https://github.com/AMD-AGI/Primus/blob/main/docs/cli/PRIMUS-CLI-GUIDE.md).
+
+Here are some examples of using primus-cli to run training jobs with Jax MaxText backend.
+
+Direct Mode: Running the training directly on current host or within an existing docker container.
+```bash
+./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+```
+
+Container Mode: execute in Docker/Podman containers
+```bash
+./primus-cli container --image rocm/jax-training:maxtext-v26.3 \
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+```
+
+Slurm Mode: execute distributed training on a Slurm cluster
+```bash
+# Use a custom config file, where you can specify the docker image and set environment variables.
+./primus-cli --config my_maxtext_config.yaml slurm srun -N 8 \
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+```
+
+## Profiling with JAX XPlane Profiler
+
+MaxText has built-in XPlane profiling support via JAX's profiler. Traces capture GPU kernel timelines, RCCL collectives, HLO graphs, and more. The output can be viewed in TensorBoard's Trace Viewer or analyzed with TraceLens.
+
+### Key MaxText Profiler Flags
+
+The following MaxText config keys control profiling:
+
+```
+profiler=xplane                    # Use xplane format (produces .xplane.pb files)
+skip_first_n_steps_for_profiler=2  # Skip compilation/warmup steps
+profiler_steps=5                   # Number of steps to profile
+upload_all_profiler_results=True   # Save all GPU profiles (not just GPU0)
+```
+
+**Choosing step counts:**
+- `steps` should be > `skip_first_n_steps_for_profiler` + `profiler_steps` (e.g., `steps=12` with skip=2, profile=5 gives 5 warmup + 5 profiled + 2 cooldown)
+- `skip_first_n_steps_for_profiler=2` skips step 0 (compilation) and step 1 (warmup)
+- `profiler_steps=5` is typically enough; more steps = larger `.xplane.pb` files
+
+### Profiling with MAD/madengine
+
+The model YAML configs under `scripts/jax-maxtext/env_scripts/` already include a `profiler` key (set to `""` by default). To enable profiling when running through MAD or madengine, edit the YAML config for your model and set the profiler fields:
+
+```yaml
+profiler: "xplane"
+skip_first_n_steps_for_profiler: 2
+profiler_steps: 5
+upload_all_profiler_results: True
+steps: 12
+```
+
+Then run the benchmark as usual:
+
+```bash
+# Via madengine
+python3 madengine run --tags jax_maxtext_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+
+# Or via run_models.py
+python3 tools/run_models.py --tags jax_maxtext_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+```
+
+Profile output will be written under the `base_output_directory` specified in the YAML (see [Output Structure](#output-structure) below). Use `--keep-model-dir` so the container's output directory is preserved after the run.
+
+### Example: Profile a Model Standalone in Docker
+
+```bash
+#!/bin/bash
+set -e
+
+IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.3
+TAG="$2"         # Short tag for output folder, e.g. v26.3_llama2_7b
+PROFILE_DIR="/path/to/profiles/${TAG}"
+
+mkdir -p "${PROFILE_DIR}"
+
+docker run --rm --privileged --network=host \
+  --device=/dev/dri --device=/dev/kfd --ipc=host \
+  -v "${PROFILE_DIR}:/mnt/profile" \
+  "${IMAGE}" bash -c '
+export XLA_PYTHON_CLIENT_MEM_FRACTION=.97
+export LD_LIBRARY_PATH=/usr/local/lib/:/opt/rocm/lib:$LD_LIBRARY_PATH
+export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=True --xla_gpu_enable_command_buffer= <your other XLA flags>"
+export GPU_MAX_HW_QUEUES=2
+
+cd /workspace/maxtext
+
+python3 -m MaxText.train src/MaxText/configs/base.yml \
+  run_name=profile \
+  base_output_directory=/mnt/profile \
+  hardware=gpu \
+  steps=12 \
+  model_name=<your-model> \
+  dataset_type=synthetic \
+  enable_checkpointing=False \
+  enable_goodput_recording=False \
+  monitor_goodput=False \
+  <your model-specific flags> \
+  profiler=xplane \
+  skip_first_n_steps_for_profiler=2 \
+  profiler_steps=5 \
+  upload_all_profiler_results=True
+' 2>&1 | tee "${PROFILE_DIR}/run.log"
+
+echo "Profile files:"
+find "${PROFILE_DIR}" -name "*.xplane.pb" -o -name "*.trace.json.gz" 2>/dev/null
+```
+
+### Output Structure
+
+MaxText writes profiles in TensorBoard format:
+
+```
+<base_output_directory>/
+└── profile/
+    └── tensorboard/
+        └── plugins/
+            └── profile/
+                └── <YYYY_MM_DD_HH_MM_SS>/
+                    ├── <hostname>.xplane.pb          # Raw XPlane proto (GPU timelines)
+                    ├── <hostname>.trace.json.gz       # Trace viewer data
+                    └── *.hlo_proto.pb                 # HLO graphs for each compiled module
+```
+
+### Viewing Traces in TensorBoard
+
+```bash
+pip install tensorboard tensorboard-plugin-profile
+
+# Point --logdir at the directory containing the tensorboard/ folder
+tensorboard --logdir /path/to/profiles/<TAG>/profile --port 6006
+```
+
+Navigate to **Profile > Trace Viewer** in the TensorBoard UI.
+
+**Tips:**
+- Zoom into a single training step (skip the first profiled step as it may have residual warmup)
+- Look at individual GPU streams to see compute/RCCL overlap
+
+### Keeping Profile Files Small
+
+- Use `profiler_steps=5` (not more) to keep `.xplane.pb` under ~100MB
+- Too many steps can produce files >500MB that TensorBoard struggles to load
+- `enable_checkpointing=False` avoids checkpoint I/O noise in the trace
+- `dataset_type=synthetic` eliminates data loading variability
 
 ## Profiling with rocprofv3
 

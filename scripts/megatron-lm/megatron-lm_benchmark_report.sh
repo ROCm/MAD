@@ -99,6 +99,8 @@ if [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then
     exit 1
 fi
 
+echo "WARNING: This megatron-lm model is deprecated. Please use the corresponding primus model (scripts/primus/megatron-lm) instead." >&2
+
 # Run benchmark (Placeholder for actual script execution)
 echo "Running training benchmark with the following parameters:"
 echo "  Model Repository: $MODEL_REPO"

@@ -99,7 +99,7 @@ execute_training(){
   }
 
   per_device_batch_size=$(yaml $config_file "['per_device_batch_size']")
-  max_target_length==$(yaml $config_file "['max_target_length']")
+  max_target_length=$(yaml $config_file "['max_target_length']")
   echo $per_device_batch_size
   echo $max_target_length
 
@@ -150,6 +150,16 @@ elif [[ "$MODEL_REPO" == "Mixtral-8x7B" ]]; then
   echo "[INFO] MIXTRAL-8x7B TRAINING with following parameters"
   echo "  QUANTIZATION: $QUANTIZATION"
   execute_training mixtral_8x7b_env.sh mixtral_8x7b.yml $QUANTIZATION
+
+elif [[ "$MODEL_REPO" == "Qwen3-14B" ]]; then
+  echo "[INFO] QWEN3-14B TRAINING with following parameters"
+  echo "  QUANTIZATION: $QUANTIZATION"
+  execute_training qwen3_14b_env.sh qwen3_14b.yml $QUANTIZATION
+
+elif [[ "$MODEL_REPO" == "Qwen3-30B-A3B" ]]; then
+  echo "[INFO] QWEN3-30B-A3B TRAINING with following parameters"
+  echo "  QUANTIZATION: $QUANTIZATION"
+  execute_training qwen3_30b_a3b_env.sh qwen3_30b_a3b.yml $QUANTIZATION
 
 else
     echo "Error: Unsupported training mode."

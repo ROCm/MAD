@@ -163,14 +163,15 @@ export HIP_FORCE_DEV_KERNARG=1
 export TORCH_NCCL_HIGH_PRIORITY=0
 export GPU_MAX_HW_QUEUES=8
 export WANDB_DISABLED=true
-    
-TRAIN_LOG="$(pwd)/$MODEL_REPO-$TRAINING_MODE.csv"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TRAIN_LOG="$SCRIPT_DIR/$MODEL_REPO-$TRAINING_MODE.csv"
 echo "TRAIN LOG: $TRAIN_LOG"
 
-PERF_LOG="$(pwd)/../perf_$MODEL_REPO.csv"
+PERF_LOG="$SCRIPT_DIR/../perf_$MODEL_REPO.csv"
 echo "PERF LOG: $PERF_LOG"
 
-perf_script="$(pwd)/pytorch_benchmark_report.py"
+perf_script="$SCRIPT_DIR/pytorch_benchmark_report.py"
 
 # Run rocminfo and grep for "AMD Instinct"
 DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
@@ -188,6 +189,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     echo "[INFO] Executing pretraining benchmark..."
     TORCHTITAN_DIR="/workspace/torchtitan/torchtitan/models/llama3/train_configs/"
     if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
+      echo "WARNING: This torchtitan model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
       echo "[INFO] Benchmarking LLAMA 3.1 8B TRAINING"
       MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_8b-$DATATYPE.toml" 
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
@@ -213,6 +215,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
     fi
 
     if [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
+      echo "WARNING: This torchtitan model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
       echo "[INFO] Benchmarking LLAMA 3.1 70B TRAINING"
       MAD_CONFIG_FILE="$(pwd)/torchtitan_scripts/llama3_70b-$DATATYPE.toml"
       cp $MAD_CONFIG_FILE $TORCHTITAN_DIR
@@ -238,7 +241,7 @@ if [[ "$TRAINING_MODE" == "pretrain" ]]; then
 
     if [ "$MODEL_REPO" == "DLRM" ]; then
       echo "[INFO] Benchmarking DLRM TRAINING"
-      if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+      if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" || "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
         cd /workspace/DLRMBenchmark
         echo "[INFO] Removing all previous runs to avoid caching"
         rm -rf training_logs/
@@ -372,6 +375,7 @@ elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
     fi
 
 elif [[ "$TRAINING_MODE" == "finetune_fw" || "$TRAINING_MODE" == "finetune_lora" || "$TRAINING_MODE" == "finetune_qlora" ]]; then
+    echo "WARNING: This torchtune model is deprecated. Please use the corresponding primus model (scripts/primus/pytorch_train) instead." >&2
     echo "[INFO] Executing torchtune finetuning benchmark..."
     torchtune_parser="$(pwd)/parse_torchtune_args.py"
     output=$(python3 $torchtune_parser --mode $TRAINING_MODE --model $MODEL_REPO)

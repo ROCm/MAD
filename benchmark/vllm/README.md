@@ -13,9 +13,9 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X, MI350X and MI355X
 accelerators. It includes:
 
--   ✅ ROCm™ 7.0.0
--   ✅ vLLM 0.11.2 (0.11.2.dev673+g839868462.rocm700)
--   ✅ PyTorch 2.9.0 (2.9.0a0+git1c57644)
+-   ✅ ROCm™ 7.2.1
+-   ✅ vLLM 0.19.1
+-   ✅ PyTorch 2.10.0 (2.10.0+git8514f05)
 -   ✅ hipBLASLt 1.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
@@ -53,19 +53,12 @@ For the experimental features and known issues concerning ROCm optimization effo
 
 To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [CSV configs](../../scripts/vllm/configs/)
 
->[!NOTE]
->If you're using this docker image on other AMD GPUs e.g. MI2xx or Radeon GPUs, please add
->`export VLLM_ROCM_USE_AITER=0` to your commands, since AITER is only supported on the gfx942 and gfx950 architectures.
-
->[!NOTE]
->There is a known regression with AITER for MoE models such as Mixtral and DeepSeek-R1. Consider using the previous release `rocm/vllm:rocm7.0.0_vllm_0.11.1_20251103` for better performance.
-
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
+docker pull vllm/vllm-openai-rocm:v0.19.1
 ```
 
 ### MAD-integrated benchmarking
@@ -82,27 +75,26 @@ Use this command to run a performance benchmark test of the Llama 3.1 8B model o
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-madengine run --tags pyt_vllm_llama-3.1-8b --keep-model-dir --live-output
+madengine run --tags pyt_vllm_llama-3.1-8b_fp8 --keep-model-dir --live-output
 ```
 
-ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b`. The throughput and serving reports of the model are collected in the following files: 
-`pyt_vllm_llama_3.1-8b_throughput.csv`
-`pyt_vllm_llama_3.1-8b_serving.csv`
+ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b_fp8`. The benchmark results of the model are collected at `perf_Llama-3.1-8B-Instruct.csv`.
 
-Although the following models are pre-configured to collect offline throughput and online serving performance data,
+Although the following models are pre-configured to collect online serving performance data,
 users can also directly run the vLLm benchmark scripts and change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
 
 #### Available models
 
 >[!NOTE]
 >The MXFP4 models are only supported on the gfx950 architecture i.e. MI350X/MI355X accelerators.	
->```
 
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
+| pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4-Preview](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4-Preview) |
 | pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
 | pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
+| pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss120b-w-mxfp4-a-fp8) |
 | pyt_vllm_llama-2-70b                   | [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf) |
 | pyt_vllm_llama-3.1-8b                  | [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) |
 | pyt_vllm_llama-3.1-8b_fp8              | [amd/Llama-3.1-8B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV) |
@@ -122,10 +114,10 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_phi-4                         | [microsoft/phi-4](https://huggingface.co/microsoft/phi-4) |
 | pyt_vllm_qwen3-8b                      | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
 | pyt_vllm_qwen3-32b                     | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) |
-| pyt_vllm_qwen3-30b-a3b                 | [Qwen/Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) |
-| pyt_vllm_qwen3-30b-a3b_fp8             | [Qwen/Qwen3-30B-A3B-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-FP8) |
-| pyt_vllm_qwen3-235b-a22b               | [Qwen/Qwen3-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) |
-| pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-FP8) |
+| pyt_vllm_qwen3-30b-a3b                 | [Qwen/Qwen3-30B-A3B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507) |
+| pyt_vllm_qwen3-30b-a3b_fp8             | [Qwen/Qwen3-30B-A3B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507-FP8) |
+| pyt_vllm_qwen3-235b-a22b               | [Qwen/Qwen3-235B-A22B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507) |
+| pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8) |
 
 
 ### Standalone benchmarking              
@@ -135,9 +127,34 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
+docker pull vllm/vllm-openai-rocm:v0.19.1
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test rocm/vllm:rocm7.0.0_vllm_0.11.2_20251210
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.19.1
+```
+
+>[!NOTE]
+>We enable [AITER](https://github.com/ROCm/aiter) during `docker run` via `--env VLLM_ROCM_USE_AITER=1` for best performance
+>on MI3xx (i.e. gfx942 and gfx950) platforms. If you're using this docker image on other AMD GPUs e.g. MI2xx or Radeon,
+>please remove this environment variable, since AITER is only supported on the gfx942 and gfx950 architectures.
+
+#### Latency Command
+```
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+tp=1
+batch_size=16
+in=1024
+out=1024
+dtype=auto
+kv_cache_dtype=fp8
+
+vllm bench latency --model $model \
+    -tp $tp \
+    --batch-size $batch_size \
+    --input-len $in \
+    --output-len $out \
+    --dtype $dtype \
+    --kv-cache-dtype $kv_cache_dtype \
+    --output-json ${model}_latency.json \
 ```
 
 #### Throughput Command
@@ -145,13 +162,10 @@ docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
 tp=1
 num_prompts=1024
-in=128
-out=128
+in=1024
+out=1024
 dtype=auto
 kv_cache_dtype=fp8
-max_num_seqs=1024
-max_num_batched_tokens=8192
-max_model_len=131072
 
 vllm bench throughput --model $model \
     -tp $tp \
@@ -160,12 +174,7 @@ vllm bench throughput --model $model \
     --output-len $out \
     --dtype $dtype \
     --kv-cache-dtype $kv_cache_dtype \
-    --max-num-seqs $max_num_seqs \
-    --max-num-batched-tokens $max_num_batched_tokens \
-    --max-model-len $max_model_len \
-    --trust-remote-code \
     --output-json ${model}_throughput.json \
-    --gpu-memory-utilization 0.9
 ```
 
 #### Serving Command
@@ -176,22 +185,12 @@ model=amd/Llama-3.1-8B-Instruct-FP8-KV
 tp=1
 dtype=auto
 kv_cache_dtype=fp8
-max_num_seqs=1024
-max_num_batched_tokens=8192
-max_model_len=131072
 
 vllm serve $model \
     -tp $tp \
     --dtype $dtype \
     --kv-cache-dtype $kv_cache_dtype \
-    --max-num-seqs $max_num_seqs \
-    --max-num-batched-tokens $max_num_batched_tokens \
-    --max-model-len $max_model_len \
-    --no-enable-prefix-caching \
-    --swap-space 16 \
-    --disable-log-requests \
-    --trust-remote-code \
-    --gpu-memory-utilization 0.9
+    --no-enable-prefix-caching
 
     # Wait for model to load and server is ready to accept requests
 ```
@@ -208,8 +207,8 @@ until curl -s http://localhost:8000/v1/models; do sleep 30; done
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
 max_concurrency=1
 num_prompts=10
-in=128
-out=128
+in=1024
+out=1024
 vllm bench serve --model $model \
     --percentile-metrics "ttft,tpot,itl,e2el" \
     --dataset-name random \
@@ -218,9 +217,44 @@ vllm bench serve --model $model \
     --num-prompts $num_prompts \
     --random-input-len $in \
     --random-output-len $out \
-    --trust-remote-code \
     --save-result \
     --result-filename ${model}_serving.json
+```
+
+#### Accuracy Command
+
+1. Start the server
+```
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+tp=1
+dtype=auto
+kv_cache_dtype=fp8
+
+vllm serve $model \
+    -tp $tp \
+    --dtype $dtype \
+    --kv-cache-dtype $kv_cache_dtype \
+    --no-enable-prefix-caching
+
+    # Wait for model to load and server is ready to accept requests
+```
+
+2. On another terminal on the same machine, run the benchmark:
+```
+# Connect to the container
+docker exec -it test bash
+
+# Wait for the server to start
+until curl -s http://localhost:8000/v1/models; do sleep 30; done
+
+# Install lm-eval
+pip install lm-eval[api]
+
+# Run the benchmark
+model=amd/Llama-3.1-8B-Instruct-FP8-KV
+lm_eval --model local-completions \
+    --model_args model=$model,max_gen_toks=2048,num_concurrent=256,max_retries=10,base_url=http://localhost:8000/v1/completions \
+    --tasks gsm8k --limit 250 --output_path ./tmp
 ```
 
 >[!NOTE]
@@ -232,27 +266,13 @@ vllm bench serve --model $model \
 >export HF_TOKEN=$your_personal_hf_token
 >```
 
-#### Variables
-
-| Name         | Options                                 | Description                                      |
-| ------------ | --------------------------------------- | ------------------------------------------------ |
-| $config      | configs/default.csv                     | Run configs from the CSV matching the model repo and benchmark |
-|              | configs/extended.csv                    |                                 |
-|              | configs/performance.csv                 |                                 |
-| $benchmark   | throughput                              | Measure offline end-to-end throughput              |
-|              | serving                                 | Measure online serving performance             |
-|              | all                                     | Measure both offline throughput and online serving |
-| $model_repo  | Huggingface model   | e.g. [Llama 3.1 8B](https://huggingface.co/meta-llama/Llama-3.1-8B) |
-| overrides    | See [run.sh](../../scripts/vllm/run.sh)  | Additional overrides to the config CSV |
-
 ## References 🔎
 ----------
 
 For an overview of the optional performance features of vLLM with
 ROCm software, see [vLLM inference performance testing](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/inference/benchmark-docker/vllm.html).
 
-To learn more about the options for the offline throughput and online serving
-benchmark scripts, see
+To learn more about the options for the vllm benchmark scripts, see
 <https://github.com/ROCm/vllm/tree/main/benchmarks>.
 
 To learn how to run LLM models from Hugging Face or your own model, see the
@@ -324,6 +344,13 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.19.1 release:
+- Merge accuracy benchmark into serving benchmark
+
+v0.17.1 release:
+- Includes documentation and patches for upstream releases. Please track https://github.com/vllm-project/vllm/releases
+  for all future release notes.
 
 12/09 release:
 - Improved performance on Llama 3 MXFP4 due to AITER updates + kernel fusions

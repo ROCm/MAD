@@ -13,7 +13,7 @@ RUN rm -rf /opt/conda/envs/py_3.10/lib/python3.10/site-packages/numpy*
 RUN apt-get remove -y python3-blinker
 
 RUN bash -c "set -x && \
-    export PYTORCH_VERSION=\$(python -c \"import torch; print(torch.__version__)\") && \
+    export PYTORCH_VERSION=\$(pip show torch | grep '^Version:' | awk '{print \$2}' | awk -F '\\+' '{print \$1}') && \
     export PYTORCHVISION_VERSION=\$(pip show torchvision | grep '^Version:' | awk '{print \$2}') && \
     if [[ \"\$PYTORCH_VERSION\" == 2.3* ]]; then \
         LLM_FOUNDRY_BRANCH=\"v0.11.0\"; \
