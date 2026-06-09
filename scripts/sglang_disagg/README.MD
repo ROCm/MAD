@@ -88,7 +88,7 @@ The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation 
 | `1` | `mori` | MoRI IO | Supported |
 | `0` | `mooncake` | Mooncake | Supported |
 
-### Parallelism Mode (`DP_MODE`)
+### WideEP/LargeEP Parallelism Mode (`DP_MODE`)
 
 `PARALLEL_MODE` is derived strictly from `DP_MODE`, which selects the flag set from `models.yaml`.
 
