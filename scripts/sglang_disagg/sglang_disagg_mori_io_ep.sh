@@ -1,7 +1,7 @@
 #!/bin/bash
 # MoRI EP PD entrypoint (used when RUN_MORI=1 in run_xPyD_models.slurm).
 # Customize for MoRI expert-parallel + disaggregated launch; until then this
-# delegates to the standard Mooncake/RIXLE PD launcher.
+# delegates to the standard Mooncake PD launcher.
 
 _MORI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
@@ -186,8 +186,7 @@ prefill_flags = prefill.get(mode, "") or ""
 
 exports = {
     "MODEL_BASE_FLAGS": cfg.get("base_flags", ""),
-    "MODEL_PREFILL_MODE_FLAGS": cfg.get(f"prefill_{mode}_flags", cfg.get(f"{mode}_flags", "")),
-    "MODEL_DECODE_MODE_FLAGS": cfg.get(f"decode_{mode}_flags", cfg.get(f"{mode}_flags", "")),
+    "MODEL_MODE_FLAGS": cfg.get(f"{mode}_flags", ""),
     "MODEL_PREFILL_FLAGS": prefill_flags,
     "MODEL_DECODE_FLAGS": decode.get(mode, ""),
     "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
@@ -198,8 +197,8 @@ for key, value in exports.items():
 PY
 )"
 
-PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_PREFILL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
-DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_DECODE_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE})"
 
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
@@ -207,7 +206,7 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
-# KV transfer backend: default mori, switchable to mooncake (Mooncake/RIXLE).
+# KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
