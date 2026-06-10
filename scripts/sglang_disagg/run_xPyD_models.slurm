@@ -80,7 +80,7 @@ model_allows_mori_ep() {
 
 # ---------------------------------------------------------------------------
 # Run file: always use sglang_disagg_mori_io_ep.sh (unified launcher).
-# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake/RIXLE IO).
+# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake).
 # RUN_MORI=1: uses mori IO (default).
 # ---------------------------------------------------------------------------
 RUN_FILE="sglang_disagg_mori_io_ep.sh"
@@ -89,7 +89,7 @@ if [[ "$_run_mori" == "1" ]]; then
     echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
 else
     export KV_TRANSFER_BACKEND="mooncake"
-    echo "RUN_MORI=0: using $RUN_FILE with Mooncake/RIXLE IO (KV_TRANSFER_BACKEND=mooncake)"
+    echo "RUN_MORI=0: using $RUN_FILE with Mooncake (KV_TRANSFER_BACKEND=mooncake)"
 fi
 if [[ ! -f "$RUN_FILE" ]]; then
     echo "Error: '$RUN_FILE' not found in $(pwd)." >&2
@@ -140,11 +140,6 @@ validate_model_name() {
 }
 
 validate_model_name "${MODEL_NAME}"
-
-if [[ "${DP_MODE:-0}" == "1" ]] && (( xP > 1 || yD > 1 )); then
-    echo "Error: DP_MODE=1 requires xP=1 and yD=1 (1P1D). Got xP=${xP}, yD=${yD}." >&2
-    exit 1
-fi
 
 # ------------------------
 # Model path validation and selection across all nodes
