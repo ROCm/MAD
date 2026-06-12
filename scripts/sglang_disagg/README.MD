@@ -22,10 +22,32 @@ This repository contains scripts and documentation to launch PD Disaggregation f
 
 ## Building the Docker image
 Access the Dockerfile located at `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`.
-It uses `lmsysorg/sglang:v0.5.11-rocm700-mi30x` as the base docker image.
+It uses `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` as the base docker image.
 
 ```bash
 docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+```
+
+### Build arguments
+
+| Arg | Default | Description |
+|-----|---------|-------------|
+| `INSTALL_MORI` | `1` | When `1`, builds and installs MoRI at `MORI_COMMIT`. Set to any other value (e.g. `0`) to skip MoRI installation entirely. |
+| `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when `INSTALL_MORI=1`. |
+| `BASE_DOCKER` | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | Base SGLang ROCm image. |
+| `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
+
+Examples:
+
+```bash
+# Default build: installs MoRI pinned at MORI_COMMIT
+docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+
+# Skip MoRI (e.g. when using Mooncake KV transfer only)
+docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+
+# Pin a different MoRI commit
+docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
 ```
 
 ## Scripts
@@ -49,11 +71,34 @@ export DOCKER_IMAGE_NAME=<DOCKER_IMAGE_NAME>
 export xP=1
 export yD=1
 export MODEL_NAME=Llama-3.1-8B-Instruct
-export RUN_MORI=1  # MoRI (default). Set RUN_MORI=0 for Mooncake/RIXLE (KV_TRANSFER_BACKEND=mooncake)
+export RUN_MORI=1  # MoRI (default). Set RUN_MORI=0 for Mooncake (KV_TRANSFER_BACKEND=mooncake)
 
 # num_nodes = xP + yD
 sbatch -N 2 -n 2 --nodelist=<node1,node2> run_xPyD_models.slurm
 ```
+
+## Current Support Status
+
+### KV Cache Transfer Backend
+
+The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation KV-cache transfer backend (`--disaggregation-transfer-backend`) via `RUN_MORI`. The backend is intentionally kept out of `models.yaml` so model configs stay backend-agnostic, and it applies to all supported models.
+
+| `RUN_MORI` | `KV_TRANSFER_BACKEND` | Backend | Status |
+|------------|-----------------------|---------|--------|
+| `1` | `mori` | MoRI IO | Supported |
+| `0` | `mooncake` | Mooncake | Supported |
+
+### WideEP/LargeEP Parallelism Mode (`DP_MODE`)
+
+`PARALLEL_MODE` is derived strictly from `DP_MODE`, which selects the flag set from `models.yaml`.
+
+| `DP_MODE` | `PARALLEL_MODE` | Flags applied | Supported models |
+|-----------|-----------------|---------------|------------------|
+| `0` (default) | `tp` | `base_flags` + `tp_flags` + `prefill.tp` / `decode.tp` | All models |
+| `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1 only |
+
+- `DP_MODE=1` enables MoRI expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO).
+- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any other model with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for all non-DeepSeek models.
 
 ## Log Files
 
