@@ -66,4 +66,5 @@ capacity_factor: 1
 dataset_type: "synthetic"
 tokenizer_path: "mistralai/Mixtral-8x7B-v0.1"
 
+max_segments_per_seq: 32
 shardy: False
