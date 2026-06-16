@@ -11,23 +11,18 @@ AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs
 >
 
 >[!NOTE]
-> 1. It is known that you may see NaNs in the losses while using real data (not synthetic data) when setting `packing=True` and `NVTE_CK_IS_V3_ATOMIC_FP32=0`. Make sure to set `NVTE_CK_IS_V3_ATOMIC_FP32=1` for production training when using real data and input sequence packing (`packing=True`).
+> There is a known performance regression for Mixtral-8x7b in v26.4. This is being tracked and will be addressed in a future release.
 
 >[!NOTE]
-> There is a known slight performance regression for DeepSeek-V2-lite (16B) in v26.3. This is being tracked and will be addressed in a future release.
-
->[!NOTE]
-> **JAX 0.9.1 Early Access known issues:**
-> 1. There is a known performance regression for MoE models (DeepSeek-V2-lite and Mixtral-8x7B).
-> 2. The trace viewer in profiling may be missing some information in the flame graph.
+> There is a discrepancy in loss curve if you set `packing=false`. It converges at a slightly higher value than previous docker images. We can achieve the same convergence as past docker images if you set `NVTE_CK_USES_FWD_V3=0`. (i.e. using FAv2 for forward instead of FAv3). This is being tracked and will be addressed in a future release.
 
 | Software component | Version        |
 |--------------------|----------------|
-| ROCm               | 7.2.1         |
-| Jax                | 0.8.2          |
-| Python             | 3.12.3        |
-| Transformer Engine | 2.8.0.dev0+9b312832 |
-| hipBLASLt          | 1.3.0+bfcf25fa18        |
+| ROCm               | 7.14.0a20260526       |
+| Jax                | 0.9.1                 |
+| Python             | 3.12.3                |
+| Transformer Engine | 2.12.0.dev0+635d7c08  |
+| hipBLASLt          | 1.4.0+807283e5        |
 
 
 ## Supported features and models
@@ -183,7 +178,7 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v26.3
+docker pull rocm/jax-training:maxtext-v26.4
 ```
 ### Single Node Training examples
 
@@ -203,7 +198,7 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 Launch the Docker container.
 
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.3
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.4
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -443,7 +438,7 @@ sbatch -N <NUM_NODES> jax_maxtext_multinode_benchmark.sh <config_file.yml> [dock
 **Parameters:**
 - `<NUM_NODES>`: Number of nodes to use for training (e.g., 2, 4, 8)
 - `<config_file.yml>`: Path to the YAML configuration file containing model and training parameters
-- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.3`
+- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.4`
 
 **Configuration files** are available in the `scripts/jax-maxtext/env_scripts/` directory for different models and GPU architectures:
 
@@ -473,7 +468,7 @@ sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_7b.yml
 
 2. **Multi-node training with Llama 2 70B model on 4 nodes with custom image:**
 ```bash
-sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.3
+sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.4
 ```
 
 3. **Multi-node training with Llama 3 8B model on 2 nodes:**
@@ -514,7 +509,7 @@ Direct Mode: Running the training directly on current host or within an existing
 
 Container Mode: execute in Docker/Podman containers
 ```bash
-./primus-cli container --image rocm/jax-training:maxtext-v26.3 \
+./primus-cli container --image rocm/jax-training:maxtext-v26.4 \
   -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
 ```
 
@@ -575,8 +570,8 @@ Profile output will be written under the `base_output_directory` specified in th
 #!/bin/bash
 set -e
 
-IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.3
-TAG="$2"         # Short tag for output folder, e.g. v26.3_llama2_7b
+IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.4
+TAG="$2"         # Short tag for output folder, e.g. v26.4_llama2_7b
 PROFILE_DIR="/path/to/profiles/${TAG}"
 
 mkdir -p "${PROFILE_DIR}"

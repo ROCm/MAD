@@ -70,4 +70,5 @@ max_target_length: 8192
 dataset_type: "synthetic"
 tokenizer_path: "meta-llama/Llama-3.3-70B-Instruct"
 
+max_segments_per_seq: 32
 shardy: False
