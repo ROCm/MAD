@@ -59,8 +59,10 @@ RUN locale-gen en_US.UTF-8
 # Clone the chai_lab repository
 # Modify requirements.in to exclude torch and compile dependencies
 # Install chai_lab without re-installing torch
+
+ARG CHAI_BRANCH=main
 RUN cd $WORKSPACE_DIR && \
-ARG CHAI_BRANCH ="main",
+
     git clone --branch ${CHAI_BRANCH} https://github.com/chaidiscovery/chai-lab chai-lab && \
     cd chai-lab && \
 
