@@ -68,8 +68,9 @@ $docker run --rm --privileged --network host --device /dev/dri --device /dev/kfd
         echo \"Running Llama-2-7b\"
 	echo '${IMAGE}'
 	cp $OUTPUT_DIR/maxtext_env_7b.sh .
-	cp $OUTPUT_DIR/llama2_7b_gpu.yml MaxText/configs/llama2_7b_gpu.yml
+	mkdir -p configs
+	cp $OUTPUT_DIR/llama2_7b_gpu.yml configs/llama2_7b_gpu.yml
         source maxtext_env_7b.sh	
-        python MaxText/train.py MaxText/configs/llama2_7b_gpu.yml base_output_directory=output 2>&1 |& tee -a llama2_7b.real.log
+        python -m maxtext.trainers.pre_train.train configs/llama2_7b_gpu.yml base_output_directory=output 2>&1 |& tee -a llama2_7b.real.log
     "
 

@@ -26,7 +26,6 @@ scan_layers: True
 profiler: "" #"xplane"
 skip_first_n_steps_for_profiler: 3
 profiler_steps: 1
-shardy: False
 
 async_checkpointing: False
 logits_dot_in_fp32: False
@@ -43,3 +42,4 @@ max_target_length: 8192
 
 dataset_type: "synthetic"
 tokenizer_path: "meta-llama/Llama-3.3-70B-Instruct"
+max_segments_per_seq: 32

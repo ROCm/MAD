@@ -157,8 +157,9 @@ srun --nodes=$SLURM_JOB_NUM_NODES --ntasks=$SLURM_JOB_NUM_NODES \
         echo \"Coordinator IP: \$JAX_COORDINATOR_IP\"
         cp '${OUTPUT_DIR}'/install_packages.sh .
         cp '${OUTPUT_DIR}'/maxtext_env_8b.sh .
-        cp '${OUTPUT_DIR}'/llama3_8b_gpu.yml MaxText/configs/llama3_8b_gpu.yml
+        mkdir -p configs
+        cp '${OUTPUT_DIR}'/llama3_8b_gpu.yml configs/llama3_8b_gpu.yml
         source install_packages.sh
         source maxtext_env_8b.sh
-        python -m MaxText.train MaxText/configs/llama3_8b_gpu.yml 2>&1 |& tee -a llama3_8b.synthetic.log
+        python -m maxtext.trainers.pre_train.train configs/llama3_8b_gpu.yml 2>&1 |& tee -a llama3_8b.synthetic.log
     "'
