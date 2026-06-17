@@ -59,10 +59,14 @@ RUN locale-gen en_US.UTF-8
 # Clone the chai_lab repository
 # Modify requirements.in to exclude torch and compile dependencies
 # Install chai_lab without re-installing torch
+
+ARG CHAI_BRANCH=main
 RUN cd $WORKSPACE_DIR && \
-    git clone https://github.com/chaidiscovery/chai-lab chai-lab && \
+
+    git clone --branch ${CHAI_BRANCH} https://github.com/chaidiscovery/chai-lab chai-lab && \
     cd chai-lab && \
-    git checkout v0.4.4 && \
+
+    # Removing old branch v0.4.4, due to rdkit version incompatability
     sed '/torch/d' requirements.in > requirements.temp && \
     mv requirements.temp requirements.in && \
     pip-compile requirements.in && \
