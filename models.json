@@ -2676,7 +2676,7 @@
       "mori_io",
       "inference"
     ],
-    "timeout": -1,
+    "timeout": 0,
     "distributed": {
       "launcher": "slurm_multi"
     },
