@@ -2681,7 +2681,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Llama-3.1-8B-Instruct",
       "xP": "1",
       "yD": "1",
@@ -2713,7 +2713,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Qwen3-32B",
       "xP": "1",
       "yD": "1",
@@ -2745,7 +2745,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -2777,7 +2777,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -2809,7 +2809,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Mixtral-8x7B-Instruct-v0.1",
       "xP": "1",
       "yD": "1",
@@ -2841,7 +2841,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -2873,7 +2873,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -2905,7 +2905,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -2937,7 +2937,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -2969,7 +2969,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Llama-3.1-8B-Instruct",
       "xP": "1",
       "yD": "1",
@@ -3001,7 +3001,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Qwen3-32B",
       "xP": "1",
       "yD": "1",
@@ -3033,7 +3033,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3065,7 +3065,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3097,7 +3097,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Mixtral-8x7B-Instruct-v0.1",
       "xP": "1",
       "yD": "1",
@@ -3129,7 +3129,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3161,7 +3161,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3193,7 +3193,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3224,7 +3224,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3255,7 +3255,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3286,7 +3286,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3317,7 +3317,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3348,7 +3348,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "gpt-oss-120b",
       "xP": "1",
       "yD": "1",
@@ -3379,7 +3379,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3410,7 +3410,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3441,7 +3441,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3472,7 +3472,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3503,7 +3503,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3534,7 +3534,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3566,7 +3566,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "0"
     },
@@ -3594,7 +3594,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
@@ -3622,7 +3622,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "0"
     },
@@ -3650,7 +3650,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
@@ -3678,7 +3678,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "",
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
