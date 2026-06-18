@@ -13,17 +13,51 @@
 # Auto-detect and cd to the script directory so that $(pwd) always
 # points to the folder containing the server scripts, regardless of
 # where the user called sbatch from.
-# Under Slurm, $0 points to a spool copy, so prefer SLURM_SUBMIT_DIR.
+#
+# Priority:
+# 1. BASH_SOURCE — works for direct invocation (bash script.sh)
+# 2. SLURM_SUBMIT_DIR + script path — when sbatch submits from repo root,
+#    SLURM_SUBMIT_DIR is the CWD, not the script dir. Append the relative
+#    path from the SBATCH command to get the actual script directory.
+# 3. SLURM_SUBMIT_DIR alone — last resort (assumes sbatch was run from
+#    the script directory).
 # ------------------------
-if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-    SCRIPT_DIR="$SLURM_SUBMIT_DIR"
-else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-    SCRIPT_DIR="${SCRIPT_DIR:-.}"
-fi
+_resolve_script_dir() {
+    # Try BASH_SOURCE first (works for direct invocation)
+    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        local _d
+        _d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+        if [[ -n "$_d" && -f "$_d/vllm_disagg_server.sh" ]]; then
+            echo "$_d"
+            return 0
+        fi
+    fi
+
+    # Try SLURM_SUBMIT_DIR + relative script path
+    # When madengine does: sbatch scripts/vllm_dissag/run_xPyD_models.slurm
+    # SLURM_SUBMIT_DIR = repo root, so we need to append the dirname
+    if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+        local _candidate="$SLURM_SUBMIT_DIR/scripts/vllm_dissag"
+        if [[ -f "$_candidate/vllm_disagg_server.sh" ]]; then
+            echo "$_candidate"
+            return 0
+        fi
+        # Maybe they ran sbatch from the script dir itself
+        if [[ -f "$SLURM_SUBMIT_DIR/vllm_disagg_server.sh" ]]; then
+            echo "$SLURM_SUBMIT_DIR"
+            return 0
+        fi
+    fi
+
+    # Fallback
+    echo "."
+    return 1
+}
+
+SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
-REQUIRED_FILES=("vllm_disagg_server.sh" "vllm_disagg_mori_ep.sh" "vllm_disagg_server_deepep.sh" "benchmark_xPyD.sh")
+REQUIRED_FILES=("vllm_disagg_server.sh" "vllm_disagg_mori_ep.sh" "vllm_disagg_server_deepep.sh" "benchmark_xPyD.sh" "parse_to_csv.py")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
         echo "Error: Required file '$f' not found in $(pwd)." >&2
@@ -376,6 +410,7 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
+docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
 fuser -k 5000/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
@@ -443,37 +478,37 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
-    -e BENCHMARK_PORT=${BENCHMARK_PORT:-} \
-    -e PROXY_TYPE=${PROXY_TYPE:-} \
-    -e ROUTER_PORT=${ROUTER_PORT:-} \
+    ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
+    ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
+    ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
-    -e PREFILL_DEEPEP_BACKEND=${PREFILL_DEEPEP_BACKEND:-} \
-    -e DECODE_DEEPEP_BACKEND=${DECODE_DEEPEP_BACKEND:-} \
-    -e ENABLE_DBO=${ENABLE_DBO:-} \
-    -e DBO_COMM_SMS=${DBO_COMM_SMS:-} \
-    -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
-    -e NCCL_IB_HCA=${NCCL_IB_HCA:-} \
-    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-} \
-    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-} \
-    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-} \
-    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-} \
-    -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-} \
+    ${PREFILL_DEEPEP_BACKEND:+-e PREFILL_DEEPEP_BACKEND=$PREFILL_DEEPEP_BACKEND} \
+    ${DECODE_DEEPEP_BACKEND:+-e DECODE_DEEPEP_BACKEND=$DECODE_DEEPEP_BACKEND} \
+    ${ENABLE_DBO:+-e ENABLE_DBO=$ENABLE_DBO} \
+    ${DBO_COMM_SMS:+-e DBO_COMM_SMS=$DBO_COMM_SMS} \
+    ${ENABLE_PROFILING:+-e ENABLE_PROFILING=$ENABLE_PROFILING} \
+    ${NCCL_IB_HCA:+-e NCCL_IB_HCA=$NCCL_IB_HCA} \
+    ${NCCL_IB_GID_INDEX:+-e NCCL_IB_GID_INDEX=$NCCL_IB_GID_INDEX} \
+    ${NCCL_NET_GDR_LEVEL:+-e NCCL_NET_GDR_LEVEL=$NCCL_NET_GDR_LEVEL} \
+    ${NCCL_CROSS_NIC:+-e NCCL_CROSS_NIC=$NCCL_CROSS_NIC} \
+    ${NCCL_SOCKET_IFNAME:+-e NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME} \
+    ${GLOO_SOCKET_IFNAME:+-e GLOO_SOCKET_IFNAME=$GLOO_SOCKET_IFNAME} \
     -e MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-eth0} \
-    -e MORI_IB_GID_INDEX=${MORI_IB_GID_INDEX:-} \
-    -e MORI_RDMA_DEVICES=${MORI_RDMA_DEVICES:-} \
-    -e MORI_NUM_QP_PER_PE=${MORI_NUM_QP_PER_PE:-} \
-    -e VLLM_MORIIO_QP_PER_TRANSFER=${VLLM_MORIIO_QP_PER_TRANSFER:-} \
-    -e VLLM_MORIIO_NUM_WORKERS=${VLLM_MORIIO_NUM_WORKERS:-} \
+    ${MORI_IB_GID_INDEX:+-e MORI_IB_GID_INDEX=$MORI_IB_GID_INDEX} \
+    ${MORI_RDMA_DEVICES:+-e MORI_RDMA_DEVICES=$MORI_RDMA_DEVICES} \
+    ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
+    ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
+    ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
     -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
-    -e GPU_MAX_HW_QUEUES=${GPU_MAX_HW_QUEUES:-} \
-    -e HIP_FORCE_DEV_KERNARG=${HIP_FORCE_DEV_KERNARG:-} \
-    -e HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-} \
-    -e VLLM_HANDSHAKE_TIMEOUT_MINS=${VLLM_HANDSHAKE_TIMEOUT_MINS:-} \
-    -e VLLM_ENGINE_READY_TIMEOUT_S=${VLLM_ENGINE_READY_TIMEOUT_S:-} \
-    -e ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-} \
-    -e ROCSHMEM_MAX_NUM_CONTEXTS=${ROCSHMEM_MAX_NUM_CONTEXTS:-} \
-    -e LOG_WAIT_TIMEOUT_SECONDS=${LOG_WAIT_TIMEOUT_SECONDS:-} \
+    ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
+    ${HIP_FORCE_DEV_KERNARG:+-e HIP_FORCE_DEV_KERNARG=$HIP_FORCE_DEV_KERNARG} \
+    ${HSA_NO_SCRATCH_RECLAIM:+-e HSA_NO_SCRATCH_RECLAIM=$HSA_NO_SCRATCH_RECLAIM} \
+    ${VLLM_HANDSHAKE_TIMEOUT_MINS:+-e VLLM_HANDSHAKE_TIMEOUT_MINS=$VLLM_HANDSHAKE_TIMEOUT_MINS} \
+    ${VLLM_ENGINE_READY_TIMEOUT_S:+-e VLLM_ENGINE_READY_TIMEOUT_S=$VLLM_ENGINE_READY_TIMEOUT_S} \
+    ${ROCSHMEM_HEAP_SIZE:+-e ROCSHMEM_HEAP_SIZE=$ROCSHMEM_HEAP_SIZE} \
+    ${ROCSHMEM_MAX_NUM_CONTEXTS:+-e ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS} \
+    ${LOG_WAIT_TIMEOUT_SECONDS:+-e LOG_WAIT_TIMEOUT_SECONDS=$LOG_WAIT_TIMEOUT_SECONDS} \
     -e TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton} \
     -e VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm} \
     -e COMGR_CACHE_DIR=${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr} \
@@ -481,8 +516,8 @@ docker run --rm \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
-    -e VLLM_CUDAGRAPH_MODE=${VLLM_CUDAGRAPH_MODE:-} \
-    -e CUDAGRAPH_CAPTURE_SIZES="${CUDAGRAPH_CAPTURE_SIZES:-}" \
+    ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
+    ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}

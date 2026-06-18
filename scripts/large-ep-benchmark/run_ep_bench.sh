@@ -7,6 +7,7 @@ NODE_RANK="${NODE_RANK:-0}"
 NNODES="${NNODES:-1}"
 IPADDRS="${IPADDRS:-localhost}"
 IBDEVICES="${IBDEVICES:-mlx5_0}"
+SKIP_DEEPEP="${SKIP_DEEPEP:-0}"
 
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
@@ -28,13 +29,17 @@ cd $DEEPEP_PATH
 MORI_PATH="/app/mori"
 if [ "$NNODES" -eq 1 ]; then
     echo "Total number of nodes - ${NNODES}"
-    python tests/test_intranode.py 2>&1 | tee /run_logs/intranode_results.log
-    #python tests/test_intranode.py
-    sleep 20;
-    
-    export ROCSHMEM_USE_IB_HCA=$IBDEVICES
-    export ROCSHMEM_HEAP_SIZE=4147483648
-    python tests/test_low_latency.py 2>&1 | tee /run_logs/low_latency_1N_results.log 
+
+    if [ "$SKIP_DEEPEP" != "1" ]; then
+        python tests/test_intranode.py 2>&1 | tee /run_logs/intranode_results.log
+        sleep 20;
+
+        export ROCSHMEM_USE_IB_HCA=$IBDEVICES
+        export ROCSHMEM_HEAP_SIZE=4147483648
+        python tests/test_low_latency.py 2>&1 | tee /run_logs/low_latency_1N_results.log
+    else
+        echo "----- Skipping DeepEP benchmarks (SKIP_DEEPEP=1) -----"
+    fi
 
     echo "----- Performing Intranode MoRI -----"
     cd $MORI_PATH
@@ -57,19 +62,23 @@ else
     echo "Node Rank - $NODE_RANK"
     echo "NNODES - $NNODES"
 
-    echo "----- Running internode tests -----"
-    
-    python tests/test_internode.py 2>&1 | tee /run_logs/$LOG_FILE
-    sleep 20;
+    if [ "$SKIP_DEEPEP" != "1" ]; then
+        echo "----- Running internode tests -----"
 
-    echo "----- Running low latency tests -----"
-    export ROCSHMEM_HEAP_SIZE=$((3*1024*1024*1024))
-    export ROCSHMEM_MAX_NUM_CONTEXTS=144
-    #export ROCSHMEM_BACKEND=gda
-    #export ROCSHMEM_DISABLE_MIXED_IPC=0
-    #export ROCSHMEM_USE_IB_HCA=$IBDEVICES
-    python tests/test_low_latency.py 2>&1 | tee /run_logs/low-latency-${NODE_RANK}.log
-    sleep 20;
+        python tests/test_internode.py 2>&1 | tee /run_logs/$LOG_FILE
+        sleep 20;
+
+        echo "----- Running low latency tests -----"
+        export ROCSHMEM_HEAP_SIZE=$((3*1024*1024*1024))
+        export ROCSHMEM_MAX_NUM_CONTEXTS=144
+        #export ROCSHMEM_BACKEND=gda
+        #export ROCSHMEM_DISABLE_MIXED_IPC=0
+        #export ROCSHMEM_USE_IB_HCA=$IBDEVICES
+        python tests/test_low_latency.py 2>&1 | tee /run_logs/low-latency-${NODE_RANK}.log
+        sleep 20;
+    else
+        echo "----- Skipping DeepEP benchmarks (SKIP_DEEPEP=1) -----"
+    fi
 
     echo "---- Running mori internode tests -------"
     cd $MORI_PATH
@@ -89,6 +98,11 @@ else
         --master_addr=$MASTER_ADDR \
         --master_port=$MASTER_PORT \
         examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd bench --kernel-type v1_ll 2>&1 | tee /run_logs/mori_ll_${LOG_FILE}
+fi
+
+# Generate perf.csv for madengine from all benchmark logs
+if [[ -f "$MAD_REPO_PATH/parse_ep_to_csv.py" ]]; then
+    python3 $MAD_REPO_PATH/parse_ep_to_csv.py /run_logs -o /run_logs/perf.csv 2>&1
 fi
 
 exit 0
