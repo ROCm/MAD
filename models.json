@@ -2663,7 +2663,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_llama-3.1-8b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2682,7 +2681,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Llama-3.1-8B-Instruct",
       "xP": "1",
       "yD": "1",
@@ -2696,7 +2695,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_qwen3-32b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2715,7 +2713,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Qwen3-32B",
       "xP": "1",
       "yD": "1",
@@ -2729,7 +2727,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_llama-3.3-70b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2748,7 +2745,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -2762,7 +2759,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_llama-3.1-405b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2781,7 +2777,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -2795,7 +2791,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_mixtral-8x7b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2814,7 +2809,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Mixtral-8x7B-Instruct-v0.1",
       "xP": "1",
       "yD": "1",
@@ -2828,7 +2823,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2847,7 +2841,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -2861,7 +2855,6 @@
   {
     "name": "pyt_sglang_disagg_mori_io_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2880,7 +2873,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -2894,7 +2887,6 @@
   {
     "name": "pyt_sglang_disagg_mori_dp_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2913,7 +2905,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -2927,7 +2919,6 @@
   {
     "name": "pyt_sglang_disagg_mori_dp_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2946,7 +2937,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -2960,7 +2951,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_llama-3.1-8b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -2979,7 +2969,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Llama-3.1-8B-Instruct",
       "xP": "1",
       "yD": "1",
@@ -2993,7 +2983,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_qwen3-32b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3012,7 +3001,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Qwen3-32B",
       "xP": "1",
       "yD": "1",
@@ -3026,7 +3015,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_llama-3.3-70b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3045,7 +3033,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3059,7 +3047,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_llama-3.1-405b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3078,7 +3065,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3092,7 +3079,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_mixtral-8x7b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3111,7 +3097,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Mixtral-8x7B-Instruct-v0.1",
       "xP": "1",
       "yD": "1",
@@ -3125,7 +3111,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3144,7 +3129,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3158,7 +3143,6 @@
   {
     "name": "pyt_sglang_disagg_mooncake_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
     "dockerfile": "docker/sglang_disagg_inference",
     "scripts": "scripts/sglang_disagg/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3177,7 +3161,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:sglang-v0.5.11-rocm720-mi30x-20260526",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3191,7 +3175,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3210,7 +3193,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3223,7 +3206,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3242,7 +3224,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3255,7 +3237,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_deepseek-v3-5layer",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3274,7 +3255,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3287,7 +3268,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_llama-3.1-405b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3306,7 +3286,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "Llama-3.1-405B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3319,7 +3299,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_llama-3.3-70b-fp8",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3338,7 +3317,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "amd-Llama-3.3-70B-Instruct-FP8-KV",
       "xP": "1",
       "yD": "1",
@@ -3351,7 +3330,6 @@
   {
     "name": "pyt_vllm_disagg_nixl_gpt-oss-120b",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3370,7 +3348,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "gpt-oss-120b",
       "xP": "1",
       "yD": "1",
@@ -3383,7 +3361,6 @@
   {
     "name": "pyt_vllm_disagg_mori_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3402,7 +3379,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3415,7 +3392,6 @@
   {
     "name": "pyt_vllm_disagg_mori_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3434,7 +3410,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3447,7 +3423,6 @@
   {
     "name": "pyt_vllm_disagg_mori_deepseek-v3-5layer",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3466,7 +3441,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3479,7 +3454,6 @@
   {
     "name": "pyt_vllm_disagg_deepep_deepseek-v3",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3498,7 +3472,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3",
       "xP": "1",
       "yD": "1",
@@ -3511,7 +3485,6 @@
   {
     "name": "pyt_vllm_disagg_deepep_deepseek-r1",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3530,7 +3503,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-R1",
       "xP": "1",
       "yD": "1",
@@ -3543,7 +3516,6 @@
   {
     "name": "pyt_vllm_disagg_deepep_deepseek-v3-5layer",
     "url": "",
-    "docker_image": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
     "dockerfile": "docker/vllm_disagg_inference",
     "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
     "data": "huggingface",
@@ -3562,7 +3534,7 @@
       "launcher": "slurm_multi"
     },
     "env_vars": {
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-disagg-v0.19.0.dev-mori-158c7e83-2026-06-12",
+      "DOCKER_IMAGE_NAME": "",
       "MODEL_NAME": "DeepSeek-V3-5layer",
       "xP": "1",
       "yD": "1",
@@ -3575,7 +3547,6 @@
   {
     "name": "pyt_large_ep_bench_1n",
     "url": "",
-    "docker_image": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
     "dockerfile": "docker/large_ep_benchmark",
     "scripts": "scripts/large-ep-benchmark/run_benchmark.sbatch",
     "data": "",
@@ -3595,7 +3566,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+      "DOCKER_IMAGE_NAME": "",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "0"
     },
@@ -3604,7 +3575,6 @@
   {
     "name": "pyt_large_ep_bench_1n_mori_only",
     "url": "",
-    "docker_image": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
     "dockerfile": "docker/large_ep_benchmark",
     "scripts": "scripts/large-ep-benchmark/run_benchmark.sbatch",
     "data": "",
@@ -3624,7 +3594,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+      "DOCKER_IMAGE_NAME": "",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
@@ -3633,7 +3603,6 @@
   {
     "name": "pyt_large_ep_bench_2n",
     "url": "",
-    "docker_image": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
     "dockerfile": "docker/large_ep_benchmark",
     "scripts": "scripts/large-ep-benchmark/run_benchmark.sbatch",
     "data": "",
@@ -3653,7 +3622,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+      "DOCKER_IMAGE_NAME": "",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "0"
     },
@@ -3662,7 +3631,6 @@
   {
     "name": "pyt_large_ep_bench_2n_mori_only",
     "url": "",
-    "docker_image": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
     "dockerfile": "docker/large_ep_benchmark",
     "scripts": "scripts/large-ep-benchmark/run_benchmark.sbatch",
     "data": "",
@@ -3682,7 +3650,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+      "DOCKER_IMAGE_NAME": "",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
@@ -3691,7 +3659,6 @@
   {
     "name": "pyt_large_ep_bench_4n_mori_only",
     "url": "",
-    "docker_image": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
     "dockerfile": "docker/large_ep_benchmark",
     "scripts": "scripts/large-ep-benchmark/run_benchmark.sbatch",
     "data": "",
@@ -3711,7 +3678,7 @@
     },
     "env_vars": {
       "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
-      "DOCKER_IMAGE_NAME": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+      "DOCKER_IMAGE_NAME": "",
       "IBDEVICES": "mlx5_0",
       "SKIP_DEEPEP": "1"
     },
