@@ -80,28 +80,6 @@ pip install py-spy
 pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
 
-## Workaround for OCI-CX7: install rdma-core v62.0 (container's built-in version is too old).
-## Build once per image version to a shared versioned cache; subsequent runs install from cache.
-_RDMA_VER="v62.0"
-_IMG_TAG=$(echo "${DOCKER_IMAGE_NAME:-unknown}" | tr '/:' '_')
-_RDMA_CACHE="${RDMA_CORE_CACHE:-/shared_inference/rdma-core-cache/${_RDMA_VER}_${_IMG_TAG}}"
-if [[ -f "${_RDMA_CACHE}/lib/libibverbs.so" ]]; then
-    echo "Installing rdma-core ${_RDMA_VER} from cache: ${_RDMA_CACHE}"
-    cp -a "${_RDMA_CACHE}/lib/"* /usr/lib/ 2>/dev/null || true
-    cp -a "${_RDMA_CACHE}/include/"* /usr/include/ 2>/dev/null || true
-    ldconfig
-else
-    echo "Building rdma-core ${_RDMA_VER} (first run for image ${_IMG_TAG} — caching to ${_RDMA_CACHE})"
-    git clone --branch "${_RDMA_VER}" --depth 1 https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
-        cd /tmp/rdma-core && \
-        mkdir -p build && cd build && \
-        cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr -DNO_MAN_PAGES=1 .. && \
-        ninja && ninja install && ldconfig
-    mkdir -p "${_RDMA_CACHE}/lib" "${_RDMA_CACHE}/include"
-    cp -a /usr/lib/libibverbs* /usr/lib/librdmacm* /usr/lib/libmlx5* "${_RDMA_CACHE}/lib/" 2>/dev/null || true
-    cp -a /usr/include/infiniband "${_RDMA_CACHE}/include/" 2>/dev/null || true
-    rm -rf /tmp/rdma-core
-fi
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
