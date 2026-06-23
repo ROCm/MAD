@@ -34,6 +34,9 @@ WORKDIR $WORKSPACE_DIR
 # Install necessary system dependencies (if any, e.g., git, build-essential)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     numactl \
+    gnupg2 \
+    dirmngr \
+    wget \
     git && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     python3 -m pip install --upgrade pip
