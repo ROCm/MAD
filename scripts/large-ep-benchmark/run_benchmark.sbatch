@@ -8,9 +8,10 @@
 
 USER_NAME=$(whoami)
 PWD=$(pwd)
-LOG_PATH=${LOG_PATH:-"${PWD}/logs"}
+LOG_PATH=${LOG_PATH:-"/shared_inference/${USER_NAME}/model_blog_logs"}
 DOCKER_IMAGE=${DOCKER_IMAGE:-ep-benchmarking:latest}
 IBDEVICES=${IBDEVICES:-mlx5_0}
+SKIP_DEEPEP=${SKIP_DEEPEP:-0}
 
 # ------------------------
 # SLURM Environment Variables
@@ -59,12 +60,8 @@ echo "MASTER_ADDR is ${MASTER_ADDR}"
 echo "MASTER_PORT is ${MASTER_PORT}"
 echo "NNODES is ${NNODES}"
 
-if [ ! -d "$LOG_PATH" ]; then
-    mkdir -p "$LOG_PATH"
-    echo "Created directory: $LOG_PATH"
-else
-    echo "Directory already exists: $LOG_PATH"
-fi
+mkdir -p "$LOG_PATH/${SLURM_JOB_ID}"
+echo "Log directory: $LOG_PATH/${SLURM_JOB_ID}"
 
 export LOG_PATH=$LOG_PATH
 export DOCKER_IMAGE=$DOCKER_IMAGE
@@ -103,7 +100,7 @@ docker run --rm \
     -v /sys/class/net:/sys/class/net:ro \
     -v /sys/bus/pci:/sys/bus/pci:ro \
     --shm-size 64G \
-    -v ${LOG_PATH}:/run_logs \
+    -v ${LOG_PATH}/${SLURM_JOB_ID}:/run_logs \
     -v $MAD_REPO:$MAD_REPO_PATH \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
@@ -113,6 +110,7 @@ docker run --rm \
     -e NNODES=$NNODES \
     -e IPADDRS=$IPADDRS \
     -e IBDEVICES=$IBDEVICES \
+    -e SKIP_DEEPEP=$SKIP_DEEPEP \
     -e MAD_REPO_PATH=$MAD_REPO_PATH \
     -e MAD_REPO_EP_SCRIPTS=$MAD_REPO_EP_SCRIPTS \
     --entrypoint /bin/bash \
@@ -121,7 +119,8 @@ docker run --rm \
         echo Inside docker container ....
         echo ${MAD_REPO_PATH}
         $MAD_REPO_PATH/run_ep_bench.sh 2>&1 | tee /run_logs/ep_bench_results.log
-"    
+"
 '
 
-srun bash -c 'docker stop ep-bench; docker rm ep-bench;'
+srun bash -c 'docker stop ep-bench 2>/dev/null || true; docker rm -f ep-bench 2>/dev/null || true'
+
