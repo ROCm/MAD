@@ -56,4 +56,6 @@ for i in {1..$BENCHMARK_ITR}; do
     done
 done
 python3 parse_to_csv.py ${LOG}_CONCURRENCY.log  -o ${LOG}_CONCURRENCY.csv \
+	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
+	--model-name "${MODEL_NAME}" \
 	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

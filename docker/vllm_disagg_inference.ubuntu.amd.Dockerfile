@@ -114,10 +114,14 @@ RUN pip install vllm-router
 WORKDIR /app
 
 # versions.txt is provided by the base image and contains MORI_REPO / MORI_BRANCH entries.
+# Override MORI_BRANCH at build time: docker build --build-arg MORI_BRANCH=158c7e83 ...
+ARG MORI_BRANCH="158c7e83"
 RUN pip install tqdm prettytable
 RUN git clone --recursive $(grep '^MORI_REPO:' /app/versions.txt | cut -d' ' -f2) && \
     cd mori && \
-    git checkout $(grep '^MORI_BRANCH:' /app/versions.txt | cut -d' ' -f2)
+    git checkout ${MORI_BRANCH:-$(grep '^MORI_BRANCH:' /app/versions.txt | cut -d' ' -f2)} && \
+    git submodule update --init --recursive && \
+    pip install .
 
 RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && cd rocm-systems && \
     git sparse-checkout set --cone projects/rocshmem && \
@@ -126,6 +130,7 @@ RUN git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-syst
 WORKDIR /app/rocm-systems/projects/rocshmem
 RUN echo "ROCSHMEM_REPO=\"https://github.com/ROCm/rocm-systems.git\"" >> /app/versions.txt
 RUN echo "ROCSHMEM_BRANCH=\"$(git log | head -1 | awk '{print $2}' | cut -c1-8)\"" >> /app/versions.txt
+RUN pip install pyyaml
 RUN mkdir -p /app/rocshmem-build
 WORKDIR /app/rocshmem-build
 RUN /app/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS=$GFX_COMPILATION_ARCH
