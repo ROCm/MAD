@@ -8,18 +8,18 @@ Primus framework with megatron backend is designed to enable efficient training 
 >`rocm/pytorch-training` docker hub registry will be depreciated, in the future, please go to `rocm/primus` for latest ROCm pytorch training dockers, which will cover all the pytorch training ecosystem frameworks (e.g. TorchTitan, TorchTune, Megatron-LM, etc.).
 >
 
-The ROCm PyTorch Training Docker `rocm/primus:v26.3` (`rocm/pytorch-training:v26.3`) container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.4` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for pre-training a model on the AMD Instinct™ MI300X, MI325X, MI350X and MI355X accelerator. This ROCm PyTorch Docker includes the following components:
 
 | Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 7.2.1                |
+| ROCm               | 7.14.0a20260608      |
 | Python             | 3.12.3               |
-| PyTorch            | 2.10.0+git94c6e04    |
-| Transformer Engine | 2.12.0.dev0+40434cf6 |
+| PyTorch            | 2.12.0+git7e98855    |
+| Transformer Engine | 2.14.0.dev0+e6ede467 |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 1.3.0-c4b2dc9869     |
-| Triton             | 3.6.0                |
-| RCCL               | 2.27.7               |
+| hipBLASLt          | 1.4.0-c2fafc16       |
+| Triton             | 3.7.0+gitb4e20bbe    |
+| RCCL               | 2.28.9               |
 
 ## Supported features and models
 Primus-Megatron-backend provides the following key features to train large language models efficiently:
@@ -86,13 +86,13 @@ Use the following instructions to set up the environment, configure the script t
    Download the Docker image required for training:
    ```bash
    # MI300/MI325/MI35X
-   docker pull rocm/primus:v26.3
+   docker pull rocm/primus:v26.4
    ```
 
 3. **Launch Docker Container**
    Start the Docker container:
    ```bash
-   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome --shm-size 128G --name primus_training_env rocm/primus:v26.3
+   docker run -it --device /dev/dri --device /dev/kfd --device /dev/infiniband --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome --shm-size 128G --name primus_training_env rocm/primus:v26.4
    ```
    **Note**: It's not recommended to bind the `$HOME` directory to the container using `-v $HOME:$HOME`. A good practice is only bind the directory you need to the container.
 
@@ -319,6 +319,22 @@ bash runner/primus-cli direct \
   --config examples/megatron/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml
 ```
 
+- **Llama3.1-8B MXFP8:**
+```bash
+bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_mxfp8.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_8B-MXFP8-pretrain.yaml
+```
+
+- **Llama3.1-8B MXFP4:**
+```bash
+NVTE_USE_CAST_TRANSPOSE_TRITON=0 bash runner/primus-cli direct \
+  --log_file /tmp/primus_llama3.1_8B_mxfp4.log \
+  -- train pretrain \
+  --config examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml
+```
+
 - **Llama2-7B FP8:**
 ```bash
 bash runner/primus-cli direct \
@@ -464,9 +480,9 @@ MultiNode Setup:
 ```bash
 git clone --recurse-submodules https://github.com/AMD-AGI/Primus.git
 cd Primus/
-git checkout release/v26.3
+git checkout 236cfa9
 git submodule update --init --recursive
-export DOCKER_IMAGE=rocm/primus:v26.3
+export DOCKER_IMAGE=rocm/primus:v26.4
 export HF_TOKEN=<your_HF_token>
 export NCCL_IB_HCA=<your_NCCL_IB_HCA> # specify which RDMA interfaces to use for communication
 export NCCL_SOCKET_IFNAME=<your_NCCL_SOCKET_IFNAME> # your Network Interface

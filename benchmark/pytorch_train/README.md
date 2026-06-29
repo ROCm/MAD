@@ -4,18 +4,18 @@
 
 PyTorch is an open-source machine learning framework that is widely used for model training with GPU-optimized components for transformer-based models.
 
-The ROCm PyTorch Training Docker `rocm/primus:v26.3` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
+The ROCm PyTorch Training Docker `rocm/primus:v26.4` container, available through [AMD Infinity Hub](https://www.amd.com/en/developer/resources/infinity-hub.html), provides a prebuilt, optimized environment for fine-tuning, pre-training a model on the AMD Instinct™ MI300X and MI325X accelerator. This ROCm PyTorch Docker includes the following components:
 
-| Software component  | Version            |
+| Software component | Version              |
 |--------------------|----------------------|
-| ROCm               | 7.2.1                |
+| ROCm               | 7.14.0a20260608      |
 | Python             | 3.12.3               |
-| PyTorch            | 2.10.0+git94c6e04    |
-| Transformer Engine | 2.12.0.dev0+40434cf6 |
+| PyTorch            | 2.12.0+git7e98855    |
+| Transformer Engine | 2.14.0.dev0+e6ede467 |
 | Flash Attention    | 2.8.3                |
-| hipBLASLt          | 1.3.0-c4b2dc9869     |
-| Triton             | 3.6.0                |
-| RCCL               | 2.27.7               |
+| hipBLASLt          | 1.4.0-c2fafc16       |
+| Triton             | 3.7.0+gitb4e20bbe    |
+| RCCL               | 2.28.9               |
 
 
 ## Models
@@ -100,12 +100,12 @@ To start the pretraining benchmark, use the following command.
 Use the following command to pull the Docker image from the Docker hub
 
 ```
-docker pull rocm/primus:v26.3
+docker pull rocm/primus:v26.4
 ```
 
 Run the Docker container
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v26.3
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:/userHome -v  $HOME/.ssh:/root/.ssh --shm-size 64G --name training_env  rocm/primus:v26.4
 ```
 **Note**: It's not recommended to bind the `$HOME` directory to the container using `-v $HOME:$HOME`. A good practice is only binding the directory you need to the container.
 
@@ -249,5 +249,4 @@ Launch the training using the legacy script
 ```bash
 NNODES=8 EXP=examples/torchtitan/configs/MI355X/llama3.1_405B-FP8-pretrain.yaml bash examples/run_slurm_pretrain.sh --training.local_batch_size 3 --training.global_batch_size 192 --training.mock_data True
 ```
-
 

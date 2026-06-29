@@ -63,8 +63,10 @@ import json
 import csv
 import typing
 import subprocess
+import shlex
 import signal
 import re
+import glob
 import collections.abc
 import pandas as pd
 
@@ -549,6 +551,60 @@ def subprocess_run(cmd: List[str]):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
 
+def get_rocm_bin_dir() -> str:
+    """Directory containing ROCm user tools (``rocm-smi``, ``rocminfo``).
+
+    Resolution order:
+
+    1. ``${ROCM_PATH}/bin`` when ``ROCM_PATH`` is set and contains CLIs (UTD /
+       ``_rocm_sdk_devel`` layouts).
+    2. ``/opt/rocm/bin`` when present.
+    3. ``sys.prefix`` or ``/opt/venv`` ``.../site-packages/_rocm_sdk_devel/bin``.
+    4. Fallback ``/opt/rocm/bin`` (may be absent; callers still get a stable path).
+    """
+
+    def _has_cli(bin_dir: str) -> bool:
+        return bool(bin_dir) and (
+            os.path.isfile(os.path.join(bin_dir, "rocm-smi"))
+            or os.path.isfile(os.path.join(bin_dir, "rocminfo"))
+        )
+
+    candidates: typing.List[str] = []
+    rocm_path = os.environ.get("ROCM_PATH", "").strip()
+    if rocm_path:
+        candidates.append(os.path.join(rocm_path, "bin"))
+    candidates.append("/opt/rocm/bin")
+    py_mm = f"{sys.version_info.major}.{sys.version_info.minor}"
+    candidates.append(
+        os.path.join(
+            sys.prefix,
+            "lib",
+            f"python{py_mm}",
+            "site-packages",
+            "_rocm_sdk_devel",
+            "bin",
+        )
+    )
+    candidates.append(
+        os.path.join(
+            "/opt/venv",
+            "lib",
+            f"python{py_mm}",
+            "site-packages",
+            "_rocm_sdk_devel",
+            "bin",
+        )
+    )
+    candidates.extend(sorted(glob.glob(
+        "/opt/venv/lib/python*/site-packages/_rocm_sdk_devel/bin"
+    )))
+
+    for d in candidates:
+        if _has_cli(d):
+            return d
+    return "/opt/rocm/bin"
+
+
 def get_gpu_vendor() -> str:
     """Get the GPU vendor.
 
@@ -566,7 +622,7 @@ def get_gpu_vendor() -> str:
 
     except ERRORS as e1:
         try:
-            _ = subprocess_run(["/opt/rocm/bin/rocm-smi"])
+            _ = subprocess_run([os.path.join(get_rocm_bin_dir(), "rocm-smi")])
 
         except ERRORS as e2:
             raise Exception("Unsupported GPU: Neither AMD nor NVIDIA")
@@ -671,9 +727,10 @@ def get_system_gpus() -> int:
             )
         )
     elif gpu_vendor == "AMD":
+        rocm_smi = os.path.join(get_rocm_bin_dir(), "rocm-smi")
         number_gpus = int(
             subprocess.check_output(
-                "rocm-smi --showid --csv | grep card | wc -l", shell=True
+                f"{shlex.quote(rocm_smi)} --showid --csv | grep card | wc -l", shell=True
             )
         )
     else:
@@ -765,9 +822,10 @@ def get_system_gpu_arch() -> str:
         else:
             raise Exception(f"Failed to get GPU architecture of NVIDIA: {gpu_name}")
     elif gpu_vendor == "AMD":
+        rocminfo = os.path.join(get_rocm_bin_dir(), "rocminfo")
         gpu_arch = (
             subprocess.check_output(
-                "/opt/rocm/bin/rocminfo |grep -o -m 1 'gfx.*'", shell=True
+                f"{shlex.quote(rocminfo)} | grep -o -m 1 'gfx.*'", shell=True
             )
             .decode("utf-8")
             .strip()

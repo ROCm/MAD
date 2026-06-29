@@ -86,10 +86,36 @@ fi
 echo "Running setup script to download tokenizers"
 bash ./primus_megatron-lm_benchmark_setup.sh -m $model
 
+# Resolve ROCm CLI directory (UTD: ${ROCM_PATH}/bin or venv _rocm_sdk_devel; classic /opt/rocm/bin).
+# Inlined so device detection works when only this script is copied into the container (no scripts/common/).
+ROCM_BIN="/opt/rocm/bin"
+if [[ -n "${ROCM_PATH:-}" && -x "${ROCM_PATH}/bin/rocminfo" ]]; then
+  ROCM_BIN="${ROCM_PATH}/bin"
+elif [[ -x /opt/rocm/bin/rocminfo ]]; then
+  ROCM_BIN="/opt/rocm/bin"
+else
+  shopt -s nullglob
+  for _d in /opt/venv/lib/python*/site-packages/_rocm_sdk_devel/bin; do
+    if [[ -x "${_d}/rocminfo" ]]; then
+      ROCM_BIN="${_d}"
+      break
+    fi
+  done
+  shopt -u nullglob
+fi
+if [[ ! -x "${ROCM_BIN}/rocminfo" ]]; then
+  _rocm_which="$(command -v rocminfo 2>/dev/null || true)"
+  if [[ -n "${_rocm_which}" && -x "${_rocm_which}" ]]; then
+    ROCM_BIN="$(dirname "${_rocm_which}")"
+  fi
+fi
+export ROCM_BIN
+export PATH="${ROCM_BIN}:${PATH}"
+
 # Detect device
-DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+DEVICE=$("${ROCM_BIN}/rocminfo" | grep "AMD Instinct" | head -n1 | awk '{print $5}')
 if [ -z "$DEVICE" ]; then
-  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  ARCH=$("${ROCM_BIN}/rocminfo" | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
     "gfx950") DEVICE="MI355X" ;;
@@ -109,7 +135,11 @@ if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     datatypes=("BF16")  # Only BF16 supported on MI355X/MI350X
   elif [[ "$model" == "Zebra-Llama-1B" || "$model" == "Zebra-Llama-3B" || "$model" == "Zebra-Llama-8B" ]]; then
     datatypes=("BF16")  # Only BF16 supported on MI355X/MI350X
-  elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-3.1-70B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
+  elif [[ "$model" == "Llama-3.1-8B" ]]; then
+    datatypes=("BF16" "FP8" "MXFP8" "MXFP4")  # MXFP8/MXFP4 only supported on MI355X/MI350X
+  elif [[ "$model" == "Llama-3.1-70B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then
+    datatypes=("BF16" "FP8")
+  elif [[ "$model" == "GPT-OSS-20B" || "$model" == "GPT-OSS-120B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
     datatypes=("BF16" "FP8")
   elif [[ "$model" == "GPT-OSS-20B" || "$model" == "GPT-OSS-120B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
     datatypes=("BF16" "FP8")
