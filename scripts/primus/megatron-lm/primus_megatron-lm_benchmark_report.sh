@@ -46,7 +46,7 @@ usage() {
   echo "Usage: $0 -m <model_repo> -p <datatype> -t <mode> -f <posttrain_type>"
   echo "\nOptions:"
   echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
-  echo "  -p <datatype>        Precision type (FP8 or BF16)"
+  echo "  -p <datatype>        Precision type (FP8, BF16, MXFP8, or MXFP4). MXFP8/MXFP4 only supported on MI355X/MI350X."
   echo "  -t <mode>            Training mode (pretrain or posttrain, default: pretrain)"
   echo "  -f <posttrain_type>  Post-training type (sft or lora, default: lora). Only used when mode is posttrain."
   exit 1
@@ -76,8 +76,8 @@ if [[ -z "$MODEL_REPO" ]]; then
   usage
 fi
 
-if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" ]]; then
-  echo "Error: Datatype must be either FP8 or BF16."
+if [[ "$DATATYPE" != "FP8" && "$DATATYPE" != "BF16" && "$DATATYPE" != "MXFP8" && "$DATATYPE" != "MXFP4" ]]; then
+  echo "Error: Datatype must be one of FP8, BF16, MXFP8, or MXFP4."
   exit 1
 fi
 
@@ -111,11 +111,37 @@ echo "PERF LOG: $PERF_LOG"
 ls $(pwd)
 perf_script="$(pwd)/primus_megatron-lm_benchmark_report.py"
 
+# Resolve ROCm CLI directory (UTD: ${ROCM_PATH}/bin or venv _rocm_sdk_devel; classic /opt/rocm/bin).
+# Inlined so device detection works when only this script is copied into the container (no scripts/common/).
+ROCM_BIN="/opt/rocm/bin"
+if [[ -n "${ROCM_PATH:-}" && -x "${ROCM_PATH}/bin/rocminfo" ]]; then
+  ROCM_BIN="${ROCM_PATH}/bin"
+elif [[ -x /opt/rocm/bin/rocminfo ]]; then
+  ROCM_BIN="/opt/rocm/bin"
+else
+  shopt -s nullglob
+  for _d in /opt/venv/lib/python*/site-packages/_rocm_sdk_devel/bin; do
+    if [[ -x "${_d}/rocminfo" ]]; then
+      ROCM_BIN="${_d}"
+      break
+    fi
+  done
+  shopt -u nullglob
+fi
+if [[ ! -x "${ROCM_BIN}/rocminfo" ]]; then
+  _rocm_which="$(command -v rocminfo 2>/dev/null || true)"
+  if [[ -n "${_rocm_which}" && -x "${_rocm_which}" ]]; then
+    ROCM_BIN="$(dirname "${_rocm_which}")"
+  fi
+fi
+export ROCM_BIN
+export PATH="${ROCM_BIN}:${PATH}"
+
 # Run rocminfo and grep for "AMD Instinct"
-DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+DEVICE=$("${ROCM_BIN}/rocminfo" | grep "AMD Instinct" | head -n1 | awk '{print $5}')
 echo "DEVICE found: $DEVICE"
 if [[ -z "$DEVICE" || ("$DEVICE" != "MI300X" && "$DEVICE" != "MI355X") ]]; then
-  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  ARCH=$("${ROCM_BIN}/rocminfo" | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
     "gfx950") DEVICE="MI355X" ;;
@@ -155,15 +181,26 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
-    bash runner/primus-cli direct \
-      --log_file /tmp/primus_$MODEL_REPO.log \
-      -- train pretrain \
-      --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    if [[ "$DATATYPE" == "MXFP4" ]]; then
+      NVTE_USE_CAST_TRANSPOSE_TRITON=0 bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    else
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    bash runner/primus-cli direct \
-      --log_file /tmp/primus_$MODEL_REPO.log \
-      -- train pretrain \
-      --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    if [[ "$DATATYPE" == "MXFP8" || "$DATATYPE" == "MXFP4" ]]; then
+      echo "Error: Datatype $DATATYPE is not supported for $MODEL_REPO on $DEVICE. Only supported on MI355X/MI350X."
+    else
+      bash runner/primus-cli direct \
+        --log_file /tmp/primus_$MODEL_REPO.log \
+        -- train pretrain \
+        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
@@ -830,12 +867,7 @@ elif [ "$MODEL_REPO" == "GPT-OSS-20B" ]; then
 
 elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
-  # [fix: stale-log] clear leftover before training so benchmark check is honest
-  rm -f "$TRAIN_LOG" 
   SEQ_LEN=4096
-  # [fix: empty-csv] ensure CSV columns aren't blank when device branch skips training
-  MBS=N/A
-  GBS=N/A
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     export EXP=examples/megatron/configs/MI355X/gpt_oss_120B-$DATATYPE-pretrain.yaml
     MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
@@ -845,10 +877,6 @@ elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
       --log_file /tmp/primus_$MODEL_REPO.log \
       -- train pretrain \
       --config $EXP 2>&1 | tee -a $TRAIN_LOG
-    
-    # [fix: silent-failure] tee hides trainer rc; drop log if training failed
-    train_rc=${PIPESTATUS[0]}
-    [ "$train_rc" -ne 0 ] && { echo "[ERROR] training failed (rc=$train_rc)"; rm -f "$TRAIN_LOG"; }
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     echo "Error: $MODEL_REPO is not supported on $DEVICE. Only MI355X is supported."
   fi

@@ -365,7 +365,10 @@ def run_model(
         if re.search("nvidia", dockerfile_gpu_suffix):
             docker.sh('/usr/bin/nvidia-smi || true')
         elif re.search("amd", dockerfile_gpu_suffix):
-            docker.sh('/opt/rocm/bin/rocm-smi || true')
+            docker.sh(
+                'bash -c \'export PATH="${ROCM_PATH:-/opt/rocm}/bin:${PATH}"; '
+                "command -v rocm-smi >/dev/null && rocm-smi || true'"
+            )
         else:
             logger.error("No GPU information available")
             raise ValueError("Unknown GPU type")
