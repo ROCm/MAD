@@ -480,7 +480,7 @@ MultiNode Setup:
 ```bash
 git clone --recurse-submodules https://github.com/AMD-AGI/Primus.git
 cd Primus/
-git checkout 236cfa9
+git checkout v26.4.0
 git submodule update --init --recursive
 export DOCKER_IMAGE=rocm/primus:v26.4
 export HF_TOKEN=<your_HF_token>
