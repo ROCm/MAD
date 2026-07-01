@@ -76,53 +76,10 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # Dependencies and Environment Setup
 # =============================================================================
 
-pip install py-spy
-pip install --ignore-installed --force-reinstall flask
-pip install pyyaml
-
-
-host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
-host_name=$(hostname)
-
-if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
-    echo "ERROR: PARALLEL_MODE must be 'dp' or 'tp' (got: ${PARALLEL_MODE})"
-    exit 1
-fi
-
-# =============================================================================
-# Parallelism Settings
-# =============================================================================
-
-# DP_MODE=0: CLI --tp-size is IO_EP_TP_SIZE (default 8) on every worker; PREFILL_EP_SIZE/DECODE_EP_SIZE
-# still scale with xP/yD×GPUS_PER_NODE for MoRI env (not passed as CLI unless DP_MODE=1).
-# DP_MODE=1: --tp-size scales with cluster; --dp-size/--ep-size on CLI (same total degree as Nnodes×GPUS_PER_NODE).
+# === Model-Specific Configuration from YAML ===
+# Parse models.yaml into MODEL_* flags. (The runtime build layer was moved into
+# the image: docker/sglang_disagg_inference_full_overlay*.Dockerfile.)
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-8}"
-
-if [[ "$DP_MODE" == "1" ]]; then
-    PREFILL_TP_SIZE=$((xP * GPUS_PER_NODE))
-    DECODE_TP_SIZE=$((yD * GPUS_PER_NODE))
-else
-    PREFILL_TP_SIZE="${GENERIC_TP_SIZE}"
-    DECODE_TP_SIZE="${GENERIC_TP_SIZE}"
-fi
-
-
-if [[ "$DP_MODE" == "1" ]]; then
-    PREFILL_EP_SIZE=$((xP * GPUS_PER_NODE))
-    DECODE_EP_SIZE=$((yD * GPUS_PER_NODE))
-    PREFILL_DP_SIZE=$((xP * GPUS_PER_NODE))
-    DECODE_DP_SIZE=$((yD * GPUS_PER_NODE))
-    export PREFILL_DP_SIZE DECODE_DP_SIZE PREFILL_EP_SIZE DECODE_EP_SIZE
-else
-    unset PREFILL_DP_SIZE DECODE_DP_SIZE PREFILL_EP_SIZE DECODE_EP_SIZE 2>/dev/null || true
-fi
-export PREFILL_TP_SIZE DECODE_TP_SIZE
-
-# =============================================================================
-# Model-Specific Configuration from YAML
-# =============================================================================
-
 MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
 
 if [[ ! -f "$MODELS_YAML" ]]; then
@@ -175,6 +132,49 @@ for key, value in exports.items():
 PY
 )"
 
+host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
+host_name=$(hostname)
+
+if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
+    echo "ERROR: PARALLEL_MODE must be 'dp' or 'tp' (got: ${PARALLEL_MODE})"
+    exit 1
+fi
+
+# =============================================================================
+# Parallelism Settings
+# =============================================================================
+
+# DP_MODE=0: CLI --tp-size is IO_EP_TP_SIZE (default 8) on every worker; PREFILL_EP_SIZE/DECODE_EP_SIZE
+# still scale with xP/yD×GPUS_PER_NODE for MoRI env (not passed as CLI unless DP_MODE=1).
+# DP_MODE=1: --tp-size scales with cluster; --dp-size/--ep-size on CLI (same total degree as Nnodes×GPUS_PER_NODE).
+GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-8}"
+
+if [[ "$DP_MODE" == "1" ]]; then
+    PREFILL_TP_SIZE=$((xP * GPUS_PER_NODE))
+    DECODE_TP_SIZE=$((yD * GPUS_PER_NODE))
+else
+    PREFILL_TP_SIZE="${GENERIC_TP_SIZE}"
+    DECODE_TP_SIZE="${GENERIC_TP_SIZE}"
+fi
+
+
+if [[ "$DP_MODE" == "1" ]]; then
+    PREFILL_EP_SIZE=$((xP * GPUS_PER_NODE))
+    DECODE_EP_SIZE=$((yD * GPUS_PER_NODE))
+    PREFILL_DP_SIZE=$((xP * GPUS_PER_NODE))
+    DECODE_DP_SIZE=$((yD * GPUS_PER_NODE))
+    export PREFILL_DP_SIZE DECODE_DP_SIZE PREFILL_EP_SIZE DECODE_EP_SIZE
+else
+    unset PREFILL_DP_SIZE DECODE_DP_SIZE PREFILL_EP_SIZE DECODE_EP_SIZE 2>/dev/null || true
+fi
+export PREFILL_TP_SIZE DECODE_TP_SIZE
+
+# =============================================================================
+# Model-Specific Configuration from YAML
+# =============================================================================
+
+
 PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE})"
@@ -184,7 +184,7 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
-# KV transfer backend: default mori, switchable to mooncake (Mooncake).
+# KV transfer backend: default mori, switchable to mooncake or nixl.
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
@@ -534,15 +534,17 @@ PY
         echo ""
     fi
 
+    benchmark_status=0
     if [[ "${SKIP_BENCHMARK:-0}" != "1" ]] && [[ -n "${MOONCAKE_COOKBOOK_PATH:-}" ]]; then
         if [[ -f "${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh" ]]; then
             echo "Running ${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh"
             (
                 cd "${MOONCAKE_COOKBOOK_PATH}" || exit 1
                 bash benchmark_xPyD.sh
-            )
+            ) || benchmark_status=$?
         else
             echo "WARN: benchmark_xPyD.sh not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
+            benchmark_status=1
         fi
     fi
 
@@ -551,6 +553,11 @@ PY
 
     echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
     kill "${_node0_prefill_pid}"
+
+    if [[ "${benchmark_status}" -ne 0 ]]; then
+        echo "ERROR: benchmark failed with status ${benchmark_status}" >&2
+        exit "${benchmark_status}"
+    fi
 
 elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"

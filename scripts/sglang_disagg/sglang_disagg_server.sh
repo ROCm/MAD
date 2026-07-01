@@ -14,6 +14,17 @@ MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
 IPADDRS="${IPADDRS:-localhost}"
+KV_TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mooncake}"
+
+# KV_TRANSFER_BACKEND is interpolated into an eval'd launch command below; restrict
+# it to known-good values to avoid invalid backends and shell-token injection.
+case "$KV_TRANSFER_BACKEND" in
+    mori|mooncake|nixl) ;;
+    *)
+        echo "ERROR: unsupported KV_TRANSFER_BACKEND='$KV_TRANSFER_BACKEND' (expected: mori|mooncake|nixl)" >&2
+        exit 1
+        ;;
+esac
 
 # =============================================================================
 # Dependencies and Environment Setup
@@ -39,6 +50,7 @@ declare -A MODEL_PREFILL_CONFIGS=(
     ["Llama-3.1-405B-Instruct-FP8-KV"]="--tp-size 8"
     ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="--tp-size 8"
     ["DeepSeek-V3"]="--tp-size 8"
+    ["DeepSeek-R1"]="--tp-size 8"
 )
 
 declare -A MODEL_DECODE_CONFIGS=(
@@ -48,6 +60,7 @@ declare -A MODEL_DECODE_CONFIGS=(
     ["Llama-3.1-405B-Instruct-FP8-KV"]="--tp-size 8"
     ["amd-Llama-3.3-70B-Instruct-FP8-KV"]="--tp-size 8"
     ["DeepSeek-V3"]="--tp-size 8"
+    ["DeepSeek-R1"]="--tp-size 8"
 )
 
 # =============================================================================
@@ -142,9 +155,9 @@ if [ "$NODE_RANK" -eq 0 ]; then
          #wait until prefill nodes get ready
          until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
             if [ $SECONDS -ge $TIMEOUT_SECONDS ]; then
-                echo "Awaited ${SECONDS} seconds. Timeout reached. Signal not found in prefill ${i} file" \
-			| tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
-	        	
+                echo "FATAL: awaited ${SECONDS}s; readiness signal not found for prefill ${i} (${LOG_FILE}). Aborting before launching the router." \
+			| tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >&2
+                exit 1
             fi
             sleep $SLEEP_SECONDS
 	    SECONDS=$(( SECONDS + SLEEP_SECONDS))
@@ -156,8 +169,9 @@ if [ "$NODE_RANK" -eq 0 ]; then
          #wait until decode nodes get ready         
          until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
             if [ $SECONDS -ge $TIMEOUT_SECONDS ]; then
-               echo "Awaited ${SECONDS} seconds. Timeout reached. Signal not found in decode ${i} file" \
-		       | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
+               echo "FATAL: awaited ${SECONDS}s; readiness signal not found for decode ${i} (${LOG_FILE}). Aborting before launching the router." \
+		       | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >&2
+                exit 1
             fi
             sleep $SLEEP_SECONDS
             SECONDS=$(( SECONDS + SLEEP_SECONDS))
@@ -193,6 +207,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
 elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-'default'})"
     echo "Using prefill config: $PREFILL_MODEL_CONFIG"
+    echo "Using KV transfer backend: ${KV_TRANSFER_BACKEND}"
     
     PREFILL_CMD="MC_TE_METRIC=true python3 -m sglang.launch_server \
         --model-path $MODEL_PATH \
@@ -202,7 +217,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
         --port 2322 \
         --stream-output \
         --trust-remote-code \
-        --disaggregation-transfer-backend mooncake"
+        --disaggregation-transfer-backend ${KV_TRANSFER_BACKEND}"
     
     if [[ -n "$PREFILL_MODEL_CONFIG" ]]; then
         PREFILL_CMD="$PREFILL_CMD $PREFILL_MODEL_CONFIG"
@@ -229,6 +244,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
 else
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-'default'})"
     echo "Using decode config: $DECODE_MODEL_CONFIG"
+    echo "Using KV transfer backend: ${KV_TRANSFER_BACKEND}"
     
     DECODE_CMD="python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
@@ -238,7 +254,7 @@ else
         --port 2322 \
         --stream-output \
         --trust-remote-code \
-        --disaggregation-transfer-backend mooncake"
+        --disaggregation-transfer-backend ${KV_TRANSFER_BACKEND}"
     
     if [[ -n "$DECODE_MODEL_CONFIG" ]]; then
         DECODE_CMD="$DECODE_CMD $DECODE_MODEL_CONFIG"
