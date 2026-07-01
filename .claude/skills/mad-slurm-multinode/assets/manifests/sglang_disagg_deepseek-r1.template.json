@@ -1,0 +1,152 @@
+{
+  "built_images": {
+    "sglang-disagg-deepseek-r1": {
+      "model": "sglang_disagg_deepseek-r1",
+      "docker_image": "<FILL_TAG  single full-overlay image tag, e.g. sglang-v0512post1-overlay:rccl-<sha>smifix-mori-<sha>-rixl-<sha>-mooncake<ver>-gfx942 (append -rdma62oci when built from the OCI variant Dockerfile)>",
+      "dockerfile": "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile",
+      "base_docker": "lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x",
+      "build_duration": 0,
+      "local_image": true,
+      "registry_image": null,
+      "registry": null,
+      "gpu_vendor": "AMD"
+    }
+  },
+  "built_models": {
+    "sglang-disagg-deepseek-r1": {
+      "name": "sglang_disagg_deepseek-r1",
+      "url": "",
+      "dockerfile": "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile",
+      "scripts": "scripts/sglang_disagg/run.sh",
+      "data": "",
+      "n_gpus": "-1",
+      "owner": "mad.support@amd.com",
+      "training_precision": "",
+      "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+      "tags": ["pyt", "sglang", "disagg", "inference", "deepseek-r1"],
+      "timeout": 21600,
+      "args": "--model-name DeepSeek-R1 --model-path <FILL_MODEL_PATH  in-container absolute path to DeepSeek-R1 weights; if MODEL_PATH/config.json is absent run.sh rank-0 downloads from HF (MODEL_REPO override, else DeepSeek-R1 -> deepseek-ai/DeepSeek-R1-0528) and peers wait on MODEL_PATH/.stage_done> --run-mori 1 --dp-mode 1 --xp 2 --yd 2 --gpus-per-node 8 --kv-transfer-backend nixl",
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -v /sys:/sys:ro -v /sys/class/infiniband:/sys/class/infiniband:ro -v /run/udev:/run/udev:ro -v <FILL_MODEL_HOST_DIR  host NFS dir holding the weights>:<FILL_MODEL_CONTAINER_DIR  parent of --model-path, e.g. /shared_inference/models_blog> -v ./slurm_output/run_logs:/run_logs -e SLURM_JOB_ID"
+    }
+  },
+  "context": {
+    "skip_perf_collection": false,
+    "docker_env_vars": {
+      "MODEL_NAME": "DeepSeek-R1",
+      "MODEL_PATH": "<FILL_MODEL_PATH  same as built_models.args --model-path>",
+      "RUN_MORI": "1",
+      "DP_MODE": "1",
+      "xP": "2",
+      "yD": "2",
+      "GPUS_PER_NODE": "8",
+      "KV_TRANSFER_BACKEND": "nixl",
+      "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
+      "MORI_SHMEM_HEAP_SIZE": "17179869184",
+      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  shared-FS rdma-core build cache; only used by the OCI rdma-core-v62 image variant, e.g. /shared_inference/rdma-core-cache>",
+      "NCCL_DEBUG": "WARN",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  data-plane HCA list with ports, e.g. mlx5_0:1,...; see references/cluster-types.md>",
+      "IB_DEVICES": "<FILL_IB_DEVICES  data-plane HCA list without ports, e.g. mlx5_0,...>",
+      "MORI_RDMA_DEVICES": "<FILL_MORI_RDMA_DEVICES  same HCA list as IB_DEVICES; MoRI EP all-to-all transport>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "MORI_SOCKET_IFNAME": "<FILL_IFNAME  management iface; MoRI bootstrap iface>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "MORI_IB_GID_INDEX": "<FILL_GID  same GID index as NCCL_IB_GID_INDEX>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  e.g. mlx5; see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  e.g. mlx5; see references/cluster-types.md>",
+      "TORCH_NCCL_HIGH_PRIORITY": "1",
+      "GPU_MAX_HW_QUEUES": "2",
+      "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+      "NCCL_TIMEOUT": "900",
+      "HSA_ENABLE_SDMA": "0",
+      "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+      "OMP_NUM_THREADS": "8",
+      "MIOPEN_FIND_MODE": "1",
+      "SMOKE": "0",
+      "BENCHMARK_ITR": "1",
+      "BENCHMARK_COMBINATIONS": "1024/1024 8192/1024",
+      "BENCHMARK_CONCURRENCY_LEVELS": "8 16 32 64",
+      "BENCHMARK_PRECHECK": "0",
+      "BENCHMARK_FAIL_FAST": "1"
+    },
+    "docker_mounts": {
+      "/dev/infiniband": "/dev/infiniband",
+      "/sys/class/infiniband": "/sys/class/infiniband",
+      "<FILL_MODEL_CONTAINER_DIR  e.g. /shared_inference/models_blog (parent of --model-path)>": "<FILL_MODEL_HOST_DIR  host NFS dir containing DeepSeek-R1>",
+      "/run_logs": "./slurm_output/run_logs"
+    },
+    "docker_build_arg": {},
+    "gpu_vendor": "AMD",
+    "guest_os": "UBUNTU",
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  },
+  "credentials_required": [],
+  "summary": {
+    "successful_builds": [],
+    "failed_builds": [],
+    "total_build_time": 0,
+    "successful_pushes": [],
+    "failed_pushes": []
+  },
+  "deployment_config": {
+    "target": "slurm",
+    "slurm": {
+      "partition": "<FILL_PARTITION>",
+      "account": "<FILL_ACCOUNT or remove if cluster has none>",
+      "qos": "<FILL_QOS>",
+      "nodes": 4,
+      "gpus_per_node": 8,
+      "time": "02:30:00",
+      "output_dir": "./slurm_output",
+      "exclusive": true,
+      "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>"
+    },
+    "distributed": {
+      "launcher": "sglang-disagg",
+      "backend": "nccl",
+      "port": 29500,
+      "nnodes": 4,
+      "nproc_per_node": 8,
+      "sglang_disagg": {
+        "prefill_nodes": 2,
+        "decode_nodes": 2
+      }
+    },
+    "env_vars": {
+      "MODEL_NAME": "DeepSeek-R1",
+      "MODEL_PATH": "<FILL_MODEL_PATH  same as context.docker_env_vars>",
+      "RUN_MORI": "1",
+      "DP_MODE": "1",
+      "xP": "2",
+      "yD": "2",
+      "GPUS_PER_NODE": "8",
+      "KV_TRANSFER_BACKEND": "nixl",
+      "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
+      "MORI_SHMEM_HEAP_SIZE": "17179869184",
+      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  same as context.docker_env_vars; OCI rdma-core-v62 image variant only>",
+      "NCCL_DEBUG": "WARN",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  same value as context.docker_env_vars>",
+      "IB_DEVICES": "<FILL_IB_DEVICES  same value as context.docker_env_vars>",
+      "MORI_RDMA_DEVICES": "<FILL_MORI_RDMA_DEVICES  same value as context.docker_env_vars>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface>",
+      "MORI_SOCKET_IFNAME": "<FILL_IFNAME  management iface>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index>",
+      "MORI_IB_GID_INDEX": "<FILL_GID  same as NCCL_IB_GID_INDEX>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  e.g. mlx5>",
+      "IBV_DRIVERS": "<FILL_DRIVER  e.g. mlx5>",
+      "NCCL_TIMEOUT": "900",
+      "OMP_NUM_THREADS": "8",
+      "BENCHMARK_COMBINATIONS": "1024/1024 8192/1024",
+      "BENCHMARK_CONCURRENCY_LEVELS": "8 16 32 64",
+      "BENCHMARK_FAIL_FAST": "1"
+    },
+    "monitor": true,
+    "debug": false,
+    "docker_gpus": "0,1,2,3,4,5,6,7",
+    "gpus_per_node": 8
+  }
+}
