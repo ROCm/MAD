@@ -491,6 +491,27 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
 
+# --- Persistent JIT cache mount ---
+# The image points AITER_JIT_DIR/TRITON_CACHE_DIR/VLLM_CACHE_ROOT/COMGR_CACHE_DIR at
+# /opt/vllm_cache. Mount a host dir there so AITER CK kernels compile ONCE and are reused
+# across runs. Cold compile is ~15 min for the DeepSeek MoE/FP8 GEMM kernel set; a warm
+# boot is ~1 min. Keyed by image ID so a new image starts a fresh cache and does not reuse
+# stale-ABI shared objects. Host dir on local NVMe. Override JIT_CACHE_HOST, or set
+# JIT_CACHE_PERSIST=0 to disable and fall back to the image empty in-container cache.
+# NOTE: this whole section runs inside a single-quoted `srun bash -c '...'`, so avoid
+# single quotes here; the image-id hash is extracted with tr, not sed.
+if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
+    _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
+    _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
+    _IMG_KEY="${_IMG_KEY:-noimg}";
+    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
+    echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
+else
+    _JIT_CACHE_MOUNT="";
+fi
+
 # --- Build host RDMA library mounts ---
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
@@ -526,12 +547,13 @@ docker run --rm \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size 64G \
+    --shm-size ${DOCKER_SHM_SIZE:-256G} \
     --ulimit nofile=524288:524288 \
     --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
+    ${_JIT_CACHE_MOUNT} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \

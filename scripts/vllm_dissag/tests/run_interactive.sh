@@ -27,6 +27,22 @@ fuser -k 20005/tcp 2>/dev/null || true   # serve port
 sleep 2
 
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
+# Persistent JIT cache: the image points AITER_JIT_DIR/TRITON_CACHE_DIR/VLLM_CACHE_ROOT/
+# COMGR_CACHE_DIR at /opt/vllm_cache. Mount a host dir there so AITER CK kernels compile
+# ONCE and are reused across runs (cold compile is ~15 min; warm boot is ~1 min). Host dir
+# on local NVMe for speed. Keyed by the image ID so a new image (different kernels/ABI)
+# starts a fresh cache instead of reusing stale .so's; set JIT_CACHE_HOST to override, or
+# JIT_CACHE_PERSIST=0 to disable and fall back to an ephemeral in-container cache.
+if [[ "${JIT_CACHE_PERSIST:-1}" == "1" ]]; then
+    _IMG_KEY="$(docker image inspect --format '{{.Id}}' "$DOCKER_IMAGE_NAME" 2>/dev/null | sed 's/^sha256://; s/[^a-f0-9]//g' | cut -c1-12)"
+    _IMG_KEY="${_IMG_KEY:-noimg}"
+    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
+    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
+    echo "JIT cache (persistent, image ${_IMG_KEY}): ${_JIT_CACHE_HOST} -> /opt/vllm_cache"
+else
+    _JIT_CACHE_MOUNT=""
+fi
 
 # host RDMA library mounts
 _RDMA_MOUNTS=""
@@ -53,10 +69,11 @@ docker run --rm \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size 64G --ulimit nofile=524288:524288 --ulimit memlock=-1:-1 \
+    --shm-size "${DOCKER_SHM_SIZE:-256G}" --ulimit nofile=524288:524288 --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
+    ${_JIT_CACHE_MOUNT} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
