@@ -1,6 +1,7 @@
 #!/bin/bash
-# Interactive multi-node launcher for job 198867 (mirrors run_xPyD_models.slurm's
-# docker run, but NODE_RANK is passed per node instead of from SLURM_PROCID).
+# Interactive multi-node launcher (mirrors run_xPyD_models.slurm's docker run, but
+# NODE_RANK is passed per node instead of being derived from SLURM_PROCID). Used by
+# tests/drive_cell.sh to drive an existing allocation via `srun --overlap`.
 # Usage: run_interactive.sh <NODE_RANK>
 # Env expected: DOCKER_IMAGE_NAME, MODEL_NAME, MODEL_PATH, IPADDRS, MASTER_ADDR,
 #   MASTER_PORT, NNODES, xP, yD, CONNECTOR, WIDE_EP, BENCHMARK_CON,
