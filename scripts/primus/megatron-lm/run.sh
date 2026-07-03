@@ -40,6 +40,8 @@ if [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-3.1-8b" ]]; then
   model="Llama-3.1-8B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-3.1-70b" ]]; then
   model="Llama-3.1-70B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-3.1-405b" ]]; then
+  model="Llama-3.1-405B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-3.1-70b-proxy" ]]; then
   model="Llama-3.1-70B-proxy"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-3.3-70b" ]]; then
@@ -114,8 +116,17 @@ export PATH="${ROCM_BIN}:${PATH}"
 
 # Detect device
 DEVICE=$("${ROCM_BIN}/rocminfo" | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+# Fall back to amd-smi when the rocminfo output format changes or rocminfo is
+# unavailable (some newer ROCm/scaleout stacks).
+if [[ -z "$DEVICE" && -x "${ROCM_BIN}/amd-smi" ]]; then
+  DEVICE=$("${ROCM_BIN}/amd-smi" 2>/dev/null | awk '/AMD Instinct/ {print $5; exit}')
+fi
 if [ -z "$DEVICE" ]; then
   ARCH=$("${ROCM_BIN}/rocminfo" | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  # Fall back to the arch injected by madengine when rocminfo cannot report it.
+  if [[ -z "$ARCH" && -n "${MAD_SYSTEM_GPU_ARCHITECTURE:-}" ]]; then
+    ARCH=$(printf '%s' "${MAD_SYSTEM_GPU_ARCHITECTURE}" | tr -d '[:space:]')
+  fi
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
     "gfx950") DEVICE="MI355X" ;;

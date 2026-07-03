@@ -140,8 +140,17 @@ export PATH="${ROCM_BIN}:${PATH}"
 # Run rocminfo and grep for "AMD Instinct"
 DEVICE=$("${ROCM_BIN}/rocminfo" | grep "AMD Instinct" | head -n1 | awk '{print $5}')
 echo "DEVICE found: $DEVICE"
+# Fall back to amd-smi when the rocminfo output format changes or rocminfo is
+# unavailable (some newer ROCm/scaleout stacks).
+if [[ -z "$DEVICE" && -x "${ROCM_BIN}/amd-smi" ]]; then
+  DEVICE=$("${ROCM_BIN}/amd-smi" 2>/dev/null | awk '/AMD Instinct/ {print $5; exit}')
+fi
 if [[ -z "$DEVICE" || ("$DEVICE" != "MI300X" && "$DEVICE" != "MI355X") ]]; then
   ARCH=$("${ROCM_BIN}/rocminfo" | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  # Fall back to the arch injected by madengine when rocminfo cannot report it.
+  if [[ -z "$ARCH" && -n "${MAD_SYSTEM_GPU_ARCHITECTURE:-}" ]]; then
+    ARCH=$(printf '%s' "${MAD_SYSTEM_GPU_ARCHITECTURE}" | tr -d '[:space:]')
+  fi
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
     "gfx950") DEVICE="MI355X" ;;
@@ -161,13 +170,66 @@ else
   CONFIG_DEVICE="$DEVICE"
 fi
 
-# Set common environment variables
-export NNODES=1
-export CPUS_PER_TASK=128
+# Set common environment variables.
+# Keep compatibility with SLURM/madengine distributed env and only fall back to
+# single-node defaults: single-node runs behave exactly as before, while
+# multi-node scaleout runs pick up the injected topology.
+NNODES="${NNODES:-1}"
+export NNODES
+export CPUS_PER_TASK="${CPUS_PER_TASK:-128}"
 export HSA_NO_SCRATCH_RECLAIM=1
 export NVTE_CK_USES_BWD_V3=1
-GPUS_PER_NODE=8 # default to 8 GPUs per node
-NUM_GPUS=8
+GPUS_PER_NODE="${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}}"
+if ! [[ "$NNODES" =~ ^[0-9]+$ ]]; then NNODES=1; fi
+if ! [[ "$GPUS_PER_NODE" =~ ^[0-9]+$ ]]; then GPUS_PER_NODE=8; fi
+NUM_GPUS=$((NNODES * GPUS_PER_NODE))
+echo "[INFO] Distributed params: NNODES=$NNODES GPUS_PER_NODE=$GPUS_PER_NODE NUM_GPUS=$NUM_GPUS"
+
+# Round global batch size up to a multiple of micro_batch_size * data_parallel so
+# the global batch stays divisible across an arbitrary number of ranks.
+normalize_global_batch_size() {
+  local mbs="$1"
+  local gbs="$2"
+  local dp="$3"
+  local unit=$((mbs * dp))
+  if (( unit <= 0 )); then
+    echo "$gbs"
+    return
+  fi
+  if (( gbs % unit == 0 )); then
+    echo "$gbs"
+    return
+  fi
+  echo "$(( ((gbs + unit - 1) / unit) * unit ))"
+}
+
+# Emit the extra CLI flags needed to keep a run valid on multiple nodes: when
+# NUM_GPUS > 8 the config global_batch_size (tuned for a single 8-GPU node) is
+# renormalized and passed as an override. Prints nothing for single-node runs,
+# so behavior there is byte-for-byte identical to before.
+scaleout_gbs_override() {
+  local mbs="$1"
+  local gbs="$2"
+  if (( NUM_GPUS > 8 )) && [[ "$mbs" =~ ^[0-9]+$ && "$gbs" =~ ^[0-9]+$ ]]; then
+    local adjusted
+    adjusted=$(normalize_global_batch_size "$mbs" "$gbs" "$NUM_GPUS")
+    if [[ "$adjusted" != "$gbs" ]]; then
+      echo "[INFO] Adjusted global batch size for distributed run: ${gbs} -> ${adjusted} (MBS=${mbs}, NUM_GPUS=${NUM_GPUS})" >&2
+    fi
+    printf -- '--global_batch_size %s' "$adjusted"
+  fi
+}
+
+# Launch a single Primus pretrain run. Every rank must execute an identical
+# command so the model shape stays consistent across nodes; a mismatch makes
+# multi-node ranks rendezvous with different shapes and deadlocks the collectives.
+run_primus() {
+  local config="$1"; shift
+  bash runner/primus-cli direct \
+    --log_file "/tmp/primus_$MODEL_REPO.log" \
+    -- train pretrain \
+    --config "$config" "$@" 2>&1 | tee "$TRAIN_LOG"
+}
 
 cd /workspace/Primus
 
@@ -180,26 +242,18 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [[ "$DATATYPE" == "MXFP4" ]]; then
-      NVTE_USE_CAST_TRANSPOSE_TRITON=0 bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      NVTE_USE_CAST_TRANSPOSE_TRITON=0 run_primus "$EXP" $GBS_OVERRIDE
     else
-      bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      run_primus "$EXP" $GBS_OVERRIDE
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [[ "$DATATYPE" == "MXFP8" || "$DATATYPE" == "MXFP4" ]]; then
       echo "Error: Datatype $DATATYPE is not supported for $MODEL_REPO on $DEVICE. Only supported on MI355X/MI350X."
     else
-      bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      run_primus "$EXP" $GBS_OVERRIDE
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -221,26 +275,18 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
   MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
-      bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      run_primus "$EXP" $GBS_OVERRIDE
     elif [ "$DATATYPE" == "BF16" ]; then
-      bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      run_primus "$EXP" $GBS_OVERRIDE
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
     elif [ "$DATATYPE" == "BF16" ]; then
-      bash runner/primus-cli direct \
-        --log_file /tmp/primus_$MODEL_REPO.log \
-        -- train pretrain \
-        --config $EXP 2>&1 | tee -a $TRAIN_LOG
+      run_primus "$EXP" $GBS_OVERRIDE
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then
@@ -276,6 +322,36 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
     fi
   fi
 
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Llama-3.1-405B" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING" # BF16 training only
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.1_405B-$DATATYPE-pretrain.yaml
+
+  SEQ_LEN=8192
+  if [[ -f "$EXP" ]]; then
+    MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+    GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
+    echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  fi
+  if [[ "$DATATYPE" == "FP8" ]]; then
+    echo "Error: Datatype FP8 is not supported for $MODEL_REPO. Only BF16 is supported."
+  elif [[ ! -f "$EXP" ]]; then
+    echo "Error: Config file not found: $EXP"
+    echo "Hint: add llama3.1_405B-$DATATYPE-pretrain.yaml in Primus configs."
+  else
+    GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+    run_primus "$EXP" $GBS_OVERRIDE
+  fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
     python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
@@ -455,6 +531,15 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
   SEQ_LEN=4096
   # Set MBS/GBS through command line for proxy models 
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
+  # DeepEP (Primus-Turbo) is opt-in via PRIMUS_USE_DEEPEP=1 and applies to every
+  # supported device/precision branch below. DeepEP is incompatible with
+  # moe_shared_expert_overlap (Primus ROCm validate_args asserts it), so disable
+  # that overlap when enabling DeepEP. Default (unset/0) keeps alltoall over RCCL.
+  DEEPEP_ARGS=""
+  if [[ "${PRIMUS_USE_DEEPEP:-0}" == "1" ]]; then
+    DEEPEP_ARGS="--use_turbo_deepep true --moe_shared_expert_overlap false"
+    echo "[INFO] DeepEP enabled via PRIMUS_USE_DEEPEP=1 -> ${DEEPEP_ARGS}"
+  fi
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
@@ -478,7 +563,7 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
         --recompute_layer_ids null \
         --overlap_grad_reduce false \
         --overlap_param_gather false \
-        --gradient_accumulation_fusion false 2>&1 | tee $TRAIN_LOG
+        --gradient_accumulation_fusion false $DEEPEP_ARGS 2>&1 | tee $TRAIN_LOG
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
@@ -489,7 +574,7 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
       bash runner/primus-cli direct \
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
-        --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS 2>&1 | tee $TRAIN_LOG
+        --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS $DEEPEP_ARGS 2>&1 | tee $TRAIN_LOG
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then

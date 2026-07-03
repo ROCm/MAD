@@ -114,7 +114,25 @@ def find_match(file_path, search_string):
         print(f"Warning: No matches found for '{search_string}' pattern")
         return None
 
+def find_match_running_avg(file_path, search_string):
+    """Return the running-average value (the number AFTER the slash) from the
+    LAST logged iteration, e.g. '1885.6' from 'tokens/s/GPU): 2355.1/1885.6'.
+
+    Primus logs throughput as 'instant/running_avg'. The instantaneous value
+    has large run-to-run jitter (MoE routing imbalance, collective stragglers,
+    kernel warmup), so the trailing running average is a steadier figure,
+    especially for multi-node scaleout runs. Returns None when no match."""
+    with open(file_path, 'r') as f:
+        content = f.read()
+    pattern = fr"{re.escape(search_string)}\):\s*\d+\.?\d*/(\d+\.?\d*)"
+    matches = re.findall(pattern, content)
+    if matches:
+        print(f"Found {len(matches)} running-avg matches for '{search_string}', using last: {matches[-1]}")
+        return matches[-1]
+    return None
+
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
+        args.model == "Llama-3.1-405B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
         args.model == "Mixtral-8x7B" or args.model == "Mixtral-8x22B-proxy" or \
         args.model == "DeepSeek-V2-lite" or args.model == "DeepSeek-V3-proxy" or \
@@ -135,9 +153,23 @@ if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
     # Write data for metrics that are found (don't require both to be present)
     # Skip tokens/s/GPU for Qwen-3-32B
     if tok_per_s_per_gpu is not None and args.model != "Qwen-3-32B":
-        data.append({'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus})
+        data.append({'model': args.model, 'performance': tok_per_s_per_gpu, 'metric': 'tok_per_s_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': ''})
     if TFLOPS_per_gpu is not None:
-        data.append({'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus})
+        data.append({'model': args.model, 'performance': TFLOPS_per_gpu, 'metric': 'TFLOPS_per_gpu', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': ''})
+
+    # Additionally emit the trailing running-average throughput (value after the
+    # slash in the last logged iteration). Kept as separate, distinctly-named
+    # rows (metric suffix '_avg', run='avg') so the instantaneous metrics above
+    # are preserved and never confused with the steady-state average. This is a
+    # steadier figure for multi-node scaleout runs where per-iteration jitter is
+    # largest. Skipped for Qwen-3-32B, matching the tokens/s/GPU handling above.
+    if args.model != "Qwen-3-32B":
+        tok_avg = find_match_running_avg(input_file, "tokens/s/GPU")
+        if tok_avg is not None:
+            data.append({'model': args.model, 'performance': tok_avg, 'metric': 'tok_per_s_per_gpu_avg', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': 'avg'})
+    tflops_avg = find_match_running_avg(input_file, "TFLOP/s/GPU")
+    if tflops_avg is not None:
+        data.append({'model': args.model, 'performance': tflops_avg, 'metric': 'TFLOPS_per_gpu_avg', 'mode': args.mode, 'precision': args.precision, 'batch_size': args.batch_size, 'global_batch_size': args.global_batch_size, 'posttrain_type': args.posttrain_type, 'seq_len': args.seq_len, 'device': args.device, 'num_gpus': args.num_gpus, 'run': 'avg'})
 
 if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
     mode = 'w'  # Write if file doesn't exist or is empty
@@ -146,7 +178,7 @@ else:
 with open(output_file, mode=mode, newline='') as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','global_batch_size','posttrain_type','seq_len','device','num_gpus'])
+    writer = csv.DictWriter(file, fieldnames=['model','performance','metric','mode','precision','batch_size','global_batch_size','posttrain_type','seq_len','device','num_gpus','run'])
     if mode == 'w':
         writer.writeheader()
     writer.writerows(data)
