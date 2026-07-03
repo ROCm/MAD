@@ -9,9 +9,15 @@
 #   tp_flags / dp_flags mode-level, applied to BOTH roles (omit if empty)
 #   prefill/decode.<tp|dp>  role+mode specific flags
 #   experimental_flags  optional extra CLI flags
-#   env: {VAR: val}     optional per-model ENV overrides. Exported BEFORE the
-#                       connector's setup_env, so they override connector defaults
-#                       but still yield to a submit-time `-e VAR=...` (which wins).
+#   env: {VAR: val}     per-model ENV. Exported BEFORE the connector's setup_env, so it
+#                       overrides connector defaults but still yields to a submit-time
+#                       `-e VAR=...` (which wins). This is the SINGLE HOME for the model
+#                       serving recipe (KV_BLOCK_SIZE, KV_CACHE_DTYPE, per-role
+#                       PREFILL/DECODE_CUDAGRAPH_MODE, *_MORI_BACKEND, GPU_MEMORY_UTILIZATION,
+#                       KV_CACHE_MEMORY_BYTES, VLLM_ROCM_USE_AITER_MLA, ...). The Docker image
+#                       ships NONE of these — it is a clean binary/library artifact, so the
+#                       same image serves any model/cluster. (Platform + MoRI fabric env lives
+#                       in connectors/<connector>.env; both are forwarded via `docker -e`.)
 #
 # BOUNDARY — the launcher/connector owns the wideEP parallelism DEGREE and transport:
 #   --data-parallel-size / --enable-expert-parallel / --all2all-backend /
@@ -40,6 +46,8 @@ Llama-3.1-405B-Instruct-FP8-KV:
     TRITON_HIP_USE_ASYNC_COPY: "1"
     TRITON_HIP_USE_BLOCK_PINGPONG: "1"
     TRITON_HIP_ASYNC_FAST_SWIZZLE: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
   prefill:
     tp: "--tensor-parallel-size 8 --kv-cache-dtype fp8"
   decode:
@@ -57,6 +65,10 @@ amd-Llama-3.3-70B-Instruct-FP8-KV:
     TRITON_HIP_USE_ASYNC_COPY: "1"
     TRITON_HIP_USE_BLOCK_PINGPONG: "1"
     TRITON_HIP_ASYNC_FAST_SWIZZLE: "1"
+    # Per-role cudagraph (validated moriio+TP recipe): prefill eager, decode PIECEWISE
+    # (the ITL win). Previously an image-level ENV default; now lives with the model.
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
   prefill:
     tp: "--tensor-parallel-size 8 --max-model-len 65536 --kv-cache-dtype fp8 --disable-custom-all-reduce"
   decode:
@@ -70,6 +82,8 @@ gpt-oss-120b:
     VLLM_USE_AITER_UNIFIED_ATTENTION: "1"
     VLLM_ROCM_USE_AITER_MHA: "0"
     ROCM_TRITON_MOE_PRESHUFFLE_SCALES: "0"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
   prefill:
     tp: "--tensor-parallel-size 8"
   decode:
@@ -82,6 +96,8 @@ Qwen3-32B:
     VLLM_USE_V1: "1"
     VLLM_ROCM_USE_AITER: "1"
     VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
   prefill:
     tp: "--tensor-parallel-size 8"
   decode:
@@ -96,6 +112,8 @@ Qwen3-30B-A3B:
     VLLM_USE_V1: "1"
     VLLM_ROCM_USE_AITER: "1"
     VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
   prefill:
     tp: "--tensor-parallel-size 8"
   decode:

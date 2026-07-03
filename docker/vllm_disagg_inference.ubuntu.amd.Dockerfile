@@ -273,44 +273,26 @@ ENV LD_LIBRARY_PATH="/usr/local/ucx/lib:/usr/local/lib:/usr/local/RIXL/install/l
     PATH="/usr/local/ucx/bin:${PATH}"
 
 # -----------------------------------------------------------------------------
-# 5. Recipe config defaults baked as ENV (the validated v1.2.1 / mori121 knobs).
-#    Overridable at run time; the launcher still reads these via ${VAR:-}.
+# 5. Cache locations (structural: WHERE the JIT/compile caches live in the image).
+#    These are the mount target for the launcher's persistent host JIT cache.
 # -----------------------------------------------------------------------------
-# Decode/attention path (block=1 + AITER MLA GPU-faults -> block=16 + Triton MLA)
-ENV KV_BLOCK_SIZE=16 \
-    VLLM_ROCM_USE_AITER_MLA=0 \
-    VLLM_CUDAGRAPH_MODE=PIECEWISE \
-    KV_CACHE_DTYPE=fp8 \
-    GPU_MEMORY_UTILIZATION=0.80 \
-    KV_CACHE_MEMORY_BYTES=20000000000 \
-    TORCHINDUCTOR_BENCHMARK_KERNEL=0
-# NOTE: the ROCm-7.2.3 GPU-RDMA runtime env (expandable_segments:False x2,
-# HSA_ENABLE_IPC_MODE_LEGACY=0, MORI_GPU_ARCHS, HSA_NO_SCRATCH_RECLAIM) is NOT baked
-# here. It lives in scripts/vllm_dissag/connectors/<connector>.env and the slurm
-# launcher forwards it via `docker -e` (must reach PID 1; PyTorch reads alloc-conf at
-# import). Keeping it out of the image means one editable home per connector and no
-# image rebuild when the platform requirement changes. If you run this image WITHOUT
-# the launcher, set those vars yourself (see connectors/moriio.env).
-# Per-role cudagraph: prefill NONE (PIECEWISE prefill deadlocks the multi-node DP
-# capture barrier), decode PIECEWISE (keeps the ITL win).
-ENV PREFILL_CUDAGRAPH_MODE=NONE \
-    DECODE_CUDAGRAPH_MODE=PIECEWISE
-# Per-role all-to-all (decode low-latency = ~13% lower ITL)
-ENV VLLM_ALL2ALL_BACKEND=mori_high_throughput \
-    PREFILL_MORI_BACKEND=mori_high_throughput \
-    DECODE_MORI_BACKEND=mori_low_latency
-# (MoRIIO disagg fixes are native in the compiled vLLM (06_29 wide-ep WRITE branch);
-#  there is no runtime patcher, so no SKIP_RUNTIME_PATCH gate.)
-# Caches: use the image's /opt/vllm_cache (rebaked clean after the AITER bump)
+# The image ships NO runtime recipe / tuning / platform ENV. By design, everything
+# run-tunable is applied at launch, so this image stays a clean binary/library artifact
+# and the same image serves any model/cluster without a rebuild:
+#   - model-serving recipe (KV_BLOCK_SIZE, KV_CACHE_DTYPE, *_CUDAGRAPH_MODE, *_MORI_BACKEND,
+#     GPU_MEMORY_UTILIZATION, KV_CACHE_MEMORY_BYTES, VLLM_ROCM_USE_AITER_MLA, ...)
+#       -> scripts/vllm_dissag/models.yaml   (per-model env:, so dense vs MoE differ)
+#   - ROCm-7.2.3 GPU-RDMA platform env (expandable_segments:False x2, MORI_GPU_ARCHS,
+#     HSA_ENABLE_IPC_MODE_LEGACY=0, HSA_NO_SCRATCH_RECLAIM) and the MoRI/RDMA fabric
+#     tuning (MORI_RDMA_TC/SL, MORI_IB_GID_INDEX, MORI_NUM_QP_PER_PE, VLLM_MORIIO_*, ...)
+#       -> scripts/vllm_dissag/connectors/<connector>.env  (cluster-editable, no rebuild)
+# The slurm launcher forwards both via `docker -e` (platform env must reach PID 1 -
+# PyTorch reads alloc-conf at import). Running this image WITHOUT the launcher: set the
+# vars you need yourself (see connectors/moriio.env + models.yaml for the values).
 ENV AITER_JIT_DIR=/opt/vllm_cache/aiter_jit \
     VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
     TRITON_CACHE_DIR=/opt/vllm_cache/triton \
     COMGR_CACHE_DIR=/opt/vllm_cache/comgr
-# MoRI / RDMA fabric tuning (validated on OCI MI300X RoCEv2; override per-cluster)
-ENV MORI_RDMA_TC=41 MORI_RDMA_SL=0 MORI_IO_SL=1 \
-    MORI_IB_ENABLE_RELAXED_ORDERING=1 MORI_IB_GID_INDEX=1 \
-    MORI_NUM_QP_PER_PE=8 VLLM_MORIIO_QP_PER_TRANSFER=2 VLLM_MORIIO_NUM_WORKERS=4 \
-    HSA_FORCE_FINE_GRAIN_PCIE=1 HSA_ENABLE_SDMA=1
 
 # -----------------------------------------------------------------------------
 # 6. CRITICAL: scrub build-time MoRI JIT state. The `import mori` verification
