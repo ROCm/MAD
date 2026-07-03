@@ -64,17 +64,19 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 
 ## Building the Docker image
 
-No public prebuilt image ships — build your own from the fullsource Dockerfile (MoRI +
-AITER + vLLM + vllm-router, from Git pins on an open ROCm ci_base):
+No public prebuilt image ships — build your own from the one fullsource Dockerfile (MoRI +
+AITER + vLLM + vllm-router + optional UCX/RIXL/rocSHMEM/DeepEP, from Git pins on an open
+ROCm ci_base):
 
 ```bash
 cd MAD
-docker build -t <your-registry>/vllm-disagg-mori-ep:local \
-  -f docker/vllm_disagg_mori_ep_fullsource.ubuntu.amd.Dockerfile .
+docker build -t <your-registry>/vllm-disagg:local \
+  -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile .
 ```
 
-(`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile` is the thinner NIXL-only image for
-the rixl connector; the MoRIIO/MoRI-EP combos need the fullsource image above.)
+One image serves all connectors. `WITH_NIXL=1` (default) builds every transport (moriio
+TP/wideEP + rixl NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean
+MoRI-EP-only image (moriio + deepep-from-base, faster build).
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes

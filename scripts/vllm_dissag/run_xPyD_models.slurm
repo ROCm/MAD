@@ -235,10 +235,10 @@ fi
 if [[ -z "${DOCKER_IMAGE_NAME:-}" ]]; then
   echo "Error: DOCKER_IMAGE_NAME is not set. Please export DOCKER_IMAGE_NAME before running." >&2
   echo "  There is no public prebuilt image. Build your own from the provided Dockerfile:" >&2
-  echo "    docker build -f docker/vllm_disagg_mori_ep_fullsource.ubuntu.amd.Dockerfile \\" >&2
-  echo "      -t <your-registry>/vllm-disagg-mori-ep:local .   # MoRIIO/MoRI-EP + DeepEP" >&2
-  echo "    (for rixl/NIXL, docker/vllm_disagg_inference.ubuntu.amd.Dockerfile instead)" >&2
-  echo "  then: export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg-mori-ep:local" >&2
+  echo "    docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile \\" >&2
+  echo "      -t <your-registry>/vllm-disagg:local .   # all connectors (WITH_NIXL=1 default)" >&2
+  echo "    (add --build-arg WITH_NIXL=0 for a lean MoRI-EP-only image)" >&2
+  echo "  then: export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:local" >&2
   exit 1
 fi
 export DOCKER_IMAGE_NAME

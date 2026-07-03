@@ -66,7 +66,7 @@
 #     #41751 LL split, DP-rank hash-failsafe) are native in this vLLM (no runtime patcher).
 #
 # Build context = repo root:
-#   docker build -f docker/vllm_disagg_mori_ep_fullsource.ubuntu.amd.Dockerfile -t <registry>/<tag> .
+#   docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile -t <registry>/<tag> .
 #
 # BASE_IMAGE is the open rocm/vllm-dev ci_base pinned by the validated recipe
 # (dist-inf-cookbook Dockerfile.vllm.mori121_shareable). Override --build-arg
