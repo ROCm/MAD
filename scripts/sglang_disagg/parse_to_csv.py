@@ -163,15 +163,19 @@ def _get_run_metadata(pipeline: str = "sglang"):
 
     xP = os.environ.get("xP", "1")
     yD = os.environ.get("yD", "1")
-    dp_mode = os.environ.get("DP_MODE", "0")
-    run_mori = os.environ.get("RUN_MORI", "0")
+    dp_mode = os.environ.get("DP_MODE", "1")
+    run_mori = os.environ.get("RUN_MORI", "1")
+    kv_backend = os.environ.get("KV_TRANSFER_BACKEND", "mooncake").lower()
     gpus = os.environ.get("GPUS_PER_NODE", "8")
 
-    # Determine backend tag
-    if dp_mode == "1":
-        backend = "mori_dp"
-    elif run_mori == "1":
-        backend = "mori_io"
+    # Determine backend tag. RUN_MORI is the launcher's own switch and takes
+    # priority; DP_MODE only distinguishes mori_dp vs mori_io *within* the MoRI
+    # path. When MoRI is off, tag by the actual KV transfer backend so a
+    # Mooncake/NIXL run with DP_MODE=1 is not mislabelled as mori_dp.
+    if run_mori == "1":
+        backend = "mori_dp" if dp_mode == "1" else "mori_io"
+    elif kv_backend in ("mooncake", "nixl"):
+        backend = kv_backend
     else:
         backend = "mooncake"
 
