@@ -96,6 +96,19 @@ RUN if [[ -n "${RCCL_COMMIT}" ]]; then \
     git -C "$(cat /tmp/BLD_RCCL_HOME.txt)" rev-parse HEAD > "${RCCL_INSTALL_DIR}/RCCL_BUILT_SHA" && \
     echo "RCCL_BUILT_SHA=$(cat ${RCCL_INSTALL_DIR}/RCCL_BUILT_SHA)"
 
+# v26.4 compat: ROCm ships as pip wheels and the amdclang++ wrapper in
+# _rocm_sdk_devel/bin/ resolves its clang++/clang-23 helpers relative to its own
+# directory -- but those binaries live ONLY in _rocm_sdk_devel/lib/llvm/bin/.
+# RCCL's device-code compile invokes bin/amdclang++ directly and dies with
+# "amdclang++: binary '.../_rocm_sdk_devel/bin/clang++' does not exist". Symlink
+# the helpers into bin/ so the wrapper resolves. No-op on v26.3 / non-wheel bases.
+# (Fixing CC/CXX is NOT enough: --offload-device-only still calls bin/amdclang++.)
+RUN SDK="$(ls -d /opt/venv/lib/python*/site-packages/_rocm_sdk_devel 2>/dev/null || true)" && \
+    if [ -n "$SDK" ] && [ ! -e "$SDK/bin/clang++" ] && [ -d "$SDK/lib/llvm/bin" ]; then \
+      for b in clang clang++ clang-23; do ln -sf ../lib/llvm/bin/$b "$SDK/bin/$b"; done; \
+      echo "[v26.4-fix] symlinked clang/clang++/clang-23 into $SDK/bin"; \
+    fi
+
 RUN set -e && \
     BLD_RCCL_HOME=$(cat /tmp/BLD_RCCL_HOME.txt) && \
     cd "${BLD_RCCL_HOME}" && \
@@ -171,14 +184,18 @@ RUN set -e && \
     src=$(ls -L "${RCCL_INSTALL_DIR}/lib/librccl.so.1.0" 2>/dev/null || ls -L "${RCCL_INSTALL_DIR}/lib/librccl.so") && \
     echo "candidate librccl: $src" && \
     add_needed "$src" && \
-    ROCM_LIB=$(dirname "$(readlink -f /opt/rocm/lib/librccl.so.1)") && \
-    echo "system rocm lib dir: $ROCM_LIB" && \
-    echo "before:" && ls -la "$ROCM_LIB"/librccl.so* && \
-    for f in "$ROCM_LIB"/librccl.so*; do \
-      if [ -f "$f" ] && [ ! -L "$f" ]; then echo "overwriting real file: $f"; cp -fL "$src" "$f"; add_needed "$f"; fi; \
-    done && \
-    ldconfig && \
-    echo "after:" && ls -laL "$ROCM_LIB"/librccl.so.1 && \
+    if [ -e "/opt/rocm/lib/librccl.so.1" ]; then \
+      ROCM_LIB=$(dirname "$(readlink -f /opt/rocm/lib/librccl.so.1)"); \
+      echo "system rocm lib dir: $ROCM_LIB"; \
+      ls -la "$ROCM_LIB"/librccl.so* 2>/dev/null || true; \
+      for f in "$ROCM_LIB"/librccl.so*; do \
+        [ -f "$f" ] && [ ! -L "$f" ] && { echo "overwriting real file: $f"; cp -fL "$src" "$f"; add_needed "$f"; }; \
+      done; \
+      ldconfig; \
+      echo "after:"; ls -laL "$ROCM_LIB"/librccl.so.1 2>/dev/null || true; \
+    else \
+      echo "[rccl-overlay] /opt/rocm/lib/librccl.so.1 not present -- targeted /opt/rocm/lib overwrite skipped (global sweep covers it)"; \
+    fi && \
     TORCH_LIB=$(ls -d /opt/venv/lib/python*/site-packages/torch/lib 2>/dev/null | head -1) && \
     [ -n "$TORCH_LIB" ] && [ -d "$TORCH_LIB" ] && echo "torch lib dir: $TORCH_LIB" && \
     for f in "$TORCH_LIB"/librccl.so*; do \
@@ -189,8 +206,16 @@ RUN set -e && \
     ln -sf librccl.so.1   "$TORCH_LIB/librccl.so" && \
     add_needed "$TORCH_LIB/librccl.so.1.0" && \
     if [ ! -e "$TORCH_LIB/librocm_smi64.so" ]; then \
-      cp -v -L /opt/rocm/lib/librocm_smi64.so.1 "$TORCH_LIB/librocm_smi64.so"; \
-      ln -sfv librocm_smi64.so "$TORCH_LIB/librocm_smi64.so.1"; \
+      smi_src=$(ls /opt/rocm/lib/librocm_smi64.so.1 2>/dev/null || \
+                ls /opt/venv/lib/python*/site-packages/_rocm_sdk_libraries/lib/librocm_smi64.so.1 2>/dev/null || \
+                find /opt -name 'librocm_smi64.so.1' -not -type l 2>/dev/null | head -1 || true); \
+      if [ -n "$smi_src" ]; then \
+        cp -v -L "$smi_src" "$TORCH_LIB/librocm_smi64.so"; \
+        ln -sfv librocm_smi64.so "$TORCH_LIB/librocm_smi64.so.1"; \
+        echo "librocm_smi64 copied from: $smi_src"; \
+      else \
+        echo "[rccl-overlay] librocm_smi64.so.1 not found -- skipping copy (add-needed already applied to candidate)"; \
+      fi; \
     fi && \
     echo "=== global sweep: overwrite EVERY real librccl on disk with candidate ===" && \
     canon_src=$(readlink -f "$src") && \
