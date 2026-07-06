@@ -26,7 +26,7 @@
       "tags": ["pyt", "sglang", "disagg", "inference", "deepseek-r1"],
       "timeout": 21600,
       "args": "--model-name DeepSeek-R1 --model-path <FILL_MODEL_PATH  in-container absolute path to DeepSeek-R1 weights; if MODEL_PATH/config.json is absent run.sh rank-0 downloads from HF (MODEL_REPO override, else DeepSeek-R1 -> deepseek-ai/DeepSeek-R1-0528) and peers wait on MODEL_PATH/.stage_done> --run-mori 1 --dp-mode 1 --xp 2 --yd 2 --gpus-per-node 8 --kv-transfer-backend nixl",
-      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -v /sys:/sys:ro -v /sys/class/infiniband:/sys/class/infiniband:ro -v /run/udev:/run/udev:ro -v <FILL_MODEL_HOST_DIR  host NFS dir holding the weights>:<FILL_MODEL_CONTAINER_DIR  parent of --model-path, e.g. /shared_inference/models_blog> -v ./slurm_output/run_logs:/run_logs -e SLURM_JOB_ID"
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -v /sys:/sys:ro -v /sys/class/infiniband:/sys/class/infiniband:ro -v /run/udev:/run/udev:ro -v <FILL_MODEL_HOST_DIR  host NFS dir holding the weights>:<FILL_MODEL_CONTAINER_DIR  parent of --model-path, e.g. /shared_inference/models_blog> -v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs -e SLURM_JOB_ID"
     }
   },
   "context": {
@@ -74,8 +74,7 @@
     "docker_mounts": {
       "/dev/infiniband": "/dev/infiniband",
       "/sys/class/infiniband": "/sys/class/infiniband",
-      "<FILL_MODEL_CONTAINER_DIR  e.g. /shared_inference/models_blog (parent of --model-path)>": "<FILL_MODEL_HOST_DIR  host NFS dir containing DeepSeek-R1>",
-      "/run_logs": "./slurm_output/run_logs"
+      "<FILL_MODEL_CONTAINER_DIR  e.g. /shared_inference/models_blog (parent of --model-path)>": "<FILL_MODEL_HOST_DIR  host NFS dir containing DeepSeek-R1>"
     },
     "docker_build_arg": {},
     "gpu_vendor": "AMD",

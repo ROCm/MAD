@@ -2,6 +2,8 @@
 
 Keywords: source mad.env MODEL_DIR run-script, MAD_DOCKER_BUILDS shared storage,
 MAD_SECRETS_HFTOKEN HF 401 single-quoted, docker_mounts container_path host_path -v,
+run_logs shared NFS mount, SLURM_SUBMIT_DIR sbatch cwd rundir, WORKDIR not
+exported shlex.quote docker_mounts additional_docker_run_options,
 RCCL_AINIC_ROCE RDMAV_DRIVERS ionic,
 NCCL_IB_HCA mlx5 rdma per-cluster, perf.csv login-node aggregation,
 slurm.nodes distributed.nnodes nodelist world size,
@@ -32,6 +34,30 @@ here; this file is read before a run.
   whenever a host data directory maps to a container-internal path that differs
   from the host path. See
   [references/manifests.md](manifests.md) ("docker_mounts direction").
+- **Prefer `${SLURM_SUBMIT_DIR}` over `$WORKDIR`/relative paths in
+  `additional_docker_run_options` host mounts — it is a real, always-set SLURM
+  var that already equals the shared `rundir`.** `$WORKDIR` is a doc-only
+  convention (nothing in mad.env/madengine actually exports it), and a
+  relative host path (e.g. `./slurm_output/run_logs`) resolves against
+  whatever CWD the per-node `madengine run` process happens to have. SLURM
+  itself sets `SLURM_SUBMIT_DIR` to the directory `sbatch` was invoked from
+  (`deployment/slurm.py` runs `sbatch` without a `cwd=` override, and Step 6
+  always launches from `$WORKDIR/rundir`), and that value is inherited
+  end-to-end — through the generated job script, `srun` (no `--export`
+  restriction), and the final `docker run` (`additional_docker_run_options`
+  is concatenated unquoted and `console.sh()` runs with `env=None`, i.e. full
+  inherited environment) — so `${SLURM_SUBMIT_DIR}` reliably expands to
+  `rundir` at every node with zero manual filling. This only works for
+  `additional_docker_run_options`, NOT `docker_mounts`: madengine renders
+  `docker_mounts` values through `shlex.quote()`, which single-quotes the
+  whole string and blocks `$VAR`/`${VAR}` expansion outright — don't duplicate
+  a shared-path mount there. The `sglang_disagg_deepseek-r1` template's
+  `/run_logs` mount (`-v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs`)
+  is the reference example: `scripts/sglang_disagg/run.sh` requires `/run_logs`
+  and fails fast (no `/tmp` fallback) if it is missing or not writable, but
+  only checks writability, not actual cross-node sharedness — a node-local dir
+  that happens to exist would pass that check and silently break the
+  cross-node readiness rendezvous (see the `sglang_disagg` section below).
 - **`NCCL_IB_HCA` is per-cluster, not portable.** CX7 uses `mlx5_*`; AINIC
   uses `rdma0..7`. Copying an mlx5 list onto an AINIC node (or vice versa)
   inits zero NICs. Verify on the node.
