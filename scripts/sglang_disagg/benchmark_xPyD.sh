@@ -3,7 +3,10 @@ set -uo pipefail
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
 RUN_LOG_JOB_ID="${SLURM_JOB_ID:-0}"
-RUN_LOG_DIR="/run_logs/${RUN_LOG_JOB_ID}"
+# Honor RUN_LOG_DIR exported by run.sh (single source of truth for the log
+# location, including its /run_logs-vs-fallback decision). Only derive the
+# default when this script is invoked standalone without run.sh in the env.
+RUN_LOG_DIR="${RUN_LOG_DIR:-/run_logs/${RUN_LOG_JOB_ID}}"
 mkdir -p "$RUN_LOG_DIR" 2>/dev/null || true
 
 LOG="${RUN_LOG_DIR}/benchmark_${RUN_LOG_JOB_ID}_${timestamp}_xP${xP}_yD${yD}_${MODEL_NAME}"

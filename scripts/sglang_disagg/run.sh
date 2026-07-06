@@ -50,19 +50,25 @@ export NODE_RANK="${NODE_RANK:-${SGLANG_NODE_RANK:-${SLURM_PROCID:-0}}}"
 # Persist run.sh output to the shared /run_logs mount so failures are
 # diagnosable from the submission node (madengine discards model stdout).
 # The dir is created from inside the container (root); make it world-writable
-# so an ordinary user outside the container can clean it up afterwards. Fall
-# back to /tmp when /run_logs is absent/not writable, otherwise the tee in the
-# process substitution can't open its file and we lose the ERROR output we
-# need for the post-mortem.
+# so an ordinary user outside the container can clean it up afterwards.
+#
+# /run_logs MUST be a shared (NFS-backed) mount passed through the docker env:
+# the disaggregated launchers write per-node readiness logs
+# (prefill_NODE*/decode_NODE*/proxy_NODE*) to /run_logs/${SLURM_JOB_ID} and the
+# rank-0 proxy greps them across nodes. Disaggregated P/D always spans >=2 nodes
+# (rank-0 prefill/proxy + at least one decode node), so a node-local fallback
+# would silently break that cross-node rendezvous. Require /run_logs and fail
+# fast if it is missing or not writable.
 RUN_LOG_DIR="/run_logs/${SLURM_JOB_ID:-local}"
-if mkdir -p "${RUN_LOG_DIR}" 2>/dev/null && [[ -w "${RUN_LOG_DIR}" ]]; then
-    chmod 0777 /run_logs 2>/dev/null || true
-    chmod -R 0777 "${RUN_LOG_DIR}" 2>/dev/null || true
-else
-    RUN_LOG_DIR="/tmp/run_logs/${SLURM_JOB_ID:-local}"
-    mkdir -p "${RUN_LOG_DIR}" 2>/dev/null || true
-    chmod -R 0777 "${RUN_LOG_DIR}" 2>/dev/null || true
+if ! mkdir -p "${RUN_LOG_DIR}" 2>/dev/null || [[ ! -w "${RUN_LOG_DIR}" ]]; then
+    echo "FATAL: /run_logs is not writable. It must be a shared (NFS-backed)" >&2
+    echo "       mount passed through the docker env: the disaggregated launchers" >&2
+    echo "       write per-node readiness logs to /run_logs/\${SLURM_JOB_ID} and the" >&2
+    echo "       rank-0 proxy greps them across nodes. Mount it and re-run." >&2
+    exit 1
 fi
+chmod 0777 /run_logs 2>/dev/null || true
+chmod -R 0777 "${RUN_LOG_DIR}" 2>/dev/null || true
 export RUN_LOG_DIR
 exec > >(tee -a "${RUN_LOG_DIR}/run_sh_rank${NODE_RANK}.log") 2>&1
 export xP="${xP:-${SGLANG_DISAGG_PREFILL_NODES:-1}}"
