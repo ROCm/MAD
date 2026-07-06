@@ -114,15 +114,25 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
 
 IFS=',' read -ra IP_ARRAY <<< "$IPADDRS"
 
+# Colocated topology (matches sglang_disagg_mori_io_ep.sh): the router/proxy runs
+# on NODE_RANK=0 alongside the first prefill server, so no dedicated proxy node is
+# needed. Total nodes = xP + yD.
+#   IP_ARRAY[0..xP-1]     -> prefill nodes (NODE_RANK 0..xP-1)
+#   IP_ARRAY[xP..xP+yD-1] -> decode nodes  (NODE_RANK xP..xP+yD-1)
+# Backend sglang servers listen on SERVER_PORT; the router listens on ROUTER_PORT.
+# They must differ so prefill0 and the router can share NODE_RANK=0.
+SERVER_PORT="${SERVER_PORT:-3000}"
+ROUTER_PORT="${ROUTER_PORT:-2322}"
+
 PREFILL_ARGS=""
 DECODE_ARGS=""
 
-for ((i=1; i<=$xP && i<${#IP_ARRAY[@]}; i++)); do
-    PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:2322 "
+for ((i=0; i<$xP && i<${#IP_ARRAY[@]}; i++)); do
+    PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:${SERVER_PORT} "
 done
 
-for ((i=$xP+1; i<${#IP_ARRAY[@]}; i++)); do
-    DECODE_ARGS+=" --decode  http://${IP_ARRAY[$i]}:2322 "
+for ((i=$xP; i<${#IP_ARRAY[@]}; i++)); do
+    DECODE_ARGS+=" --decode  http://${IP_ARRAY[$i]}:${SERVER_PORT} "
 done
 
 # =============================================================================
@@ -139,10 +149,31 @@ if [ "$NODE_RANK" -eq 0 ]; then
 
     echo "CLUSTER INFO ===================================="
     echo "================================================"
-    echo "${host_name}:${host_ip} is Proxy Node"
+    echo "${host_name}:${host_ip} is Prefill Node 0 + Proxy/Router (co-located)"
     echo "${PREFILL_ARGS} are Proxy's Prefill"
     echo "${DECODE_ARGS} are Proxy's Decode"
     echo "================================================"
+
+    # Launch the first prefill server on this node, co-located with the router.
+    PREFILL_CMD="MC_TE_METRIC=true python3 -m sglang.launch_server \
+        --model-path $MODEL_PATH \
+        --disaggregation-mode prefill \
+        --disaggregation-ib-device ${IBDEVICES} \
+        --host ${host_ip} \
+        --port ${SERVER_PORT} \
+        --stream-output \
+        --trust-remote-code \
+        --disaggregation-transfer-backend ${KV_TRANSFER_BACKEND}"
+
+    if [[ -n "$PREFILL_MODEL_CONFIG" ]]; then
+        PREFILL_CMD="$PREFILL_CMD $PREFILL_MODEL_CONFIG"
+    fi
+
+    eval "$PREFILL_CMD" \
+        2>&1 | tee /run_logs/${SLURM_JOB_ID}/prefill_NODE${NODE_RANK}.log >/dev/null &
+
+    node0_prefill_pid=$!
+
     echo "Proxy server is waiting for prefill and decode nodes to be ready ..." \
 	    | tee /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null
     sleep 20
@@ -150,7 +181,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     SLEEP_SECONDS=10
     SEARCH_SIGNAL="The server is fired up and ready to roll!"
     SECONDS=0
-    for ((i=1; i<=$xP && i<${#IP_ARRAY[@]}; i++)); do
+    for ((i=0; i<$xP && i<${#IP_ARRAY[@]}; i++)); do
          LOG_FILE=/run_logs/${SLURM_JOB_ID}/prefill_NODE${i}.log
          #wait until prefill nodes get ready
          until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
@@ -164,7 +195,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
 	 done      
     done
 
-    for ((i=$xP+1; i<${#IP_ARRAY[@]}; i++)); do
+    for ((i=$xP; i<${#IP_ARRAY[@]}; i++)); do
          LOG_FILE=/run_logs/${SLURM_JOB_ID}/decode_NODE${i}.log
          #wait until decode nodes get ready         
          until grep -q "${SEARCH_SIGNAL}" "${LOG_FILE}"; do
@@ -185,7 +216,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
         ${PREFILL_ARGS} \
         ${DECODE_ARGS} \
         --host 0.0.0.0 \
-        --port 2322 \
+        --port ${ROUTER_PORT} \
         2>&1 | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log >/dev/null &
     
     proxy_pid=$!
@@ -193,7 +224,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Waiting for all prefill and decode servers to be up . . ."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${IPADDRS} \
-        --node-ports 2322
+        --node-ports ${SERVER_PORT}
 
     echo "Proxy Server Ready for benchmarking on ${host_name}:${host_ip}"
 
@@ -204,7 +235,10 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Killing the proxy server"
     kill $proxy_pid
 
-elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
+    echo "Killing the co-located prefill server"
+    kill $node0_prefill_pid
+
+elif [ "$NODE_RANK" -ge 1 ] && [ "$NODE_RANK" -lt "$xP" ]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-'default'})"
     echo "Using prefill config: $PREFILL_MODEL_CONFIG"
     echo "Using KV transfer backend: ${KV_TRANSFER_BACKEND}"
@@ -214,7 +248,7 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
         --disaggregation-mode prefill \
         --disaggregation-ib-device ${IBDEVICES} \
         --host ${host_ip} \
-        --port 2322 \
+        --port ${SERVER_PORT} \
         --stream-output \
         --trust-remote-code \
         --disaggregation-transfer-backend ${KV_TRANSFER_BACKEND}"
@@ -231,17 +265,17 @@ elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -le "$xP" ]; then
     echo "Waiting for proxy server to be up..."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports 2322
+        --node-ports ${ROUTER_PORT}
     
     echo "Waiting until proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port 2322
+        --remote-port ${ROUTER_PORT}
 
     echo "Killing the prefill server"
     kill $prefill_pid
 
-else
+elif [ "$NODE_RANK" -ge "$xP" ] && [ "$NODE_RANK" -le "$((xP + yD - 1))" ]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-'default'})"
     echo "Using decode config: $DECODE_MODEL_CONFIG"
     echo "Using KV transfer backend: ${KV_TRANSFER_BACKEND}"
@@ -251,7 +285,7 @@ else
         --disaggregation-mode decode \
         --disaggregation-ib-device ${IBDEVICES} \
         --host ${host_ip} \
-        --port 2322 \
+        --port ${SERVER_PORT} \
         --stream-output \
         --trust-remote-code \
         --disaggregation-transfer-backend ${KV_TRANSFER_BACKEND}"
@@ -268,16 +302,19 @@ else
     echo "Waiting for proxy server to be up..."
     python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
         --node-ips ${MASTER_ADDR} \
-        --node-ports 2322
+        --node-ports ${ROUTER_PORT}
     
     echo "Waiting until proxy server closes..."
     python $MOONCAKE_COOKBOOK_PATH/socket_wait.py \
         --remote-ip ${MASTER_ADDR} \
-        --remote-port 2322
+        --remote-port ${ROUTER_PORT}
 
     echo "Killing the decode server"
     kill $decode_pid
 
+else
+    echo "ERROR: NODE_RANK=${NODE_RANK} out of range (expected 0..$((xP + yD - 1))) for xP=${xP} yD=${yD}" >&2
+    exit 1
 fi
 
 # =============================================================================
