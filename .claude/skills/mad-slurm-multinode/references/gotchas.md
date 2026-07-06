@@ -220,7 +220,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   MoRI. To switch to the Primus-Turbo **DeepEP** dispatcher, set
   `PRIMUS_USE_DEEPEP=1` in the manifest env (a primus scaleout manifest can carry
   it defaulting to `"0"`), which makes
-  `scripts/primus_scaleout/megatron-lm/primus_megatron-lm_benchmark_report.sh`
+  `scripts/primus/megatron-lm/primus_megatron-lm_benchmark_report.sh`
   (invoked by the model `run.sh`) pass `--use_turbo_deepep true` to Primus. Primus
   then (`_is_turbo_deepep_enabled`) auto-sets `moe_enable_deepep=True` and
   `moe_token_dispatcher_type='flex'` and swaps in
@@ -247,3 +247,31 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   `skip_perf_collection` SLURM node as SUCCESS). Use a madengine that has this
   multi-node aggregation (present in ROCm/madengine `develop`); otherwise the run
   trains fine but is mis-reported as FAILED with an empty `perf.csv`.
+
+- **Per-model global batch size must be normalized to the world size, or Megatron
+  aborts at startup on non-standard node counts.** The config `global_batch_size`
+  is tuned for a single 8-GPU node; at any node count where
+  `GBS % (MBS * world_size) != 0` (e.g. a 3-node/24-GPU run: `512 % (4*24) != 0`)
+  Megatron aborts with `global batch size ... is not divisible by micro batch
+  size ... times data parallel size`. In our consolidated
+  `scripts/primus/megatron-lm/primus_megatron-lm_benchmark_report.sh` this is
+  handled generically for *every* model branch: `scaleout_gbs_override` reads
+  MBS/GBS from the run's config YAML and, when `NUM_GPUS > 8`, rounds GBS up to
+  the next multiple of `MBS * NUM_GPUS` (via `normalize_global_batch_size`) and
+  passes it as an explicit `--global_batch_size` override; single-node runs emit
+  no override so behavior there is byte-for-byte unchanged. Any new per-model
+  branch that hardcodes GBS should route it through `scaleout_gbs_override` to
+  stay node-count-portable. (Upstream fix for the 8B branch:
+  [mkuznet1/MAD#1](https://github.com/mkuznet1/MAD/pull/1) — our tree already
+  generalizes it, so no per-branch change is needed here.)
+
+- **`rocm/primus:v26.4` auto-loads `librccl-anp.so`, which deadlocks a bundled
+  RCCL overlay — set `NCCL_NET_PLUGIN=none`.** The v26.4 base image ships an
+  environment default of `NCCL_NET_PLUGIN=librccl-anp.so` (the ANP net plugin).
+  When the image carries a *bundled* RCCL overlay (the whole point of the
+  `rccl_overlay` Dockerfile), that plugin is incompatible with the overlay
+  `librccl` and RCCL init hangs at the first collective — the run never starts and
+  eventually times out. Set `NCCL_NET_PLUGIN=none` in the manifest env (both
+  `context.docker_env_vars` and `deployment_config.env_vars`, like the other
+  transport vars) to disable the plugin and let the bundled `librccl` drive the
+  IB/RoCE net path directly. The primus template ships this key set to `none`.

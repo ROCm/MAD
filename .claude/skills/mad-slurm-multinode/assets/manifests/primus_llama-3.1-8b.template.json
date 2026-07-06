@@ -41,6 +41,7 @@
       "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
       "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
       "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "NCCL_NET_PLUGIN": "none",
       "IBV_SHOW_WARNINGS": "1"
     },
     "docker_mounts": {
@@ -96,6 +97,7 @@
       "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
       "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
       "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "NCCL_NET_PLUGIN": "none",
       "NCCL_TIMEOUT": "900",
       "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
       "TORCH_NCCL_HIGH_PRIORITY": "1",

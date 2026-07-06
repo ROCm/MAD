@@ -191,7 +191,21 @@ RUN set -e && \
     if [ ! -e "$TORCH_LIB/librocm_smi64.so" ]; then \
       cp -v -L /opt/rocm/lib/librocm_smi64.so.1 "$TORCH_LIB/librocm_smi64.so"; \
       ln -sfv librocm_smi64.so "$TORCH_LIB/librocm_smi64.so.1"; \
-    fi
+    fi && \
+    echo "=== global sweep: overwrite EVERY real librccl on disk with candidate ===" && \
+    canon_src=$(readlink -f "$src") && \
+    for f in $(find / -name 'librccl.so*' -not -type l 2>/dev/null); do \
+      [ "$(readlink -f "$f")" = "$canon_src" ] && continue; \
+      echo "  overwrite: $f"; cp -fL "$src" "$f"; add_needed "$f"; \
+    done && \
+    ldconfig
+# WHY the global sweep: v26.4 splits ROCm libs into _rocm_sdk_libraries/lib
+# (runtime .so) and _rocm_sdk_devel/lib (dev). torch maps librccl.so.1 from
+# _rocm_sdk_libraries at RUNTIME (soname wins once loaded), which the targeted
+# /opt/rocm + torch/lib overwrites above do NOT cover -- so the candidate is
+# built and shipped but the STOCK base librccl is what actually runs. Overwriting
+# every non-symlink librccl on disk makes whichever copy the loader maps the
+# candidate, independent of ROCm's per-version layout churn.
 
 # ---- Stage 3 (optional): rdma-core from source ------------------------------
 # Builds only when RDMA_CORE_VERSION is non-empty (e.g. 63.0). Replaces the
@@ -261,8 +275,8 @@ RUN set -e && \
     TL=$(ls -d /opt/venv/lib/python*/site-packages/torch/lib | head -1) && \
     ldd "$TL/libtorch_hip.so" | grep -iE "rccl|smi" && \
     BUILT_SHA=$(cat "${RCCL_INSTALL_DIR}/RCCL_BUILT_SHA") && \
-    echo "=== ASSERT: every resolvable librccl is the candidate built @ ${BUILT_SHA} ===" && \
-    for p in "${RCCL_INSTALL_DIR}/lib/librccl.so.1" /opt/rocm/lib/librccl.so.1 "$TL/librccl.so.1"; do \
+    echo "=== ASSERT: EVERY librccl on disk is the candidate built @ ${BUILT_SHA} ===" && \
+    for p in $(find / -name 'librccl.so*' -not -type l 2>/dev/null); do \
       v=$(strings "$p" 2>/dev/null | grep -m1 -oE "RCCL version 2\.[0-9]+\.[0-9]+"); \
       echo "$v" | grep -q "RCCL version 2." || { echo "ASSERT FAIL: $p is not RCCL 2.x ($p -> ${v:-NONE})"; exit 1; }; \
       h=""; \
