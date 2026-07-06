@@ -17,7 +17,7 @@
       "name": "primus_pyt_megatron_lm_train_llama-3.1-70b_scaleout",
       "url": "",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd",
-      "scripts": "scripts/primus_scaleout/megatron-lm/run.sh",
+      "scripts": "scripts/primus/megatron-lm/run.sh",
       "n_gpus": "-1",
       "owner": "mad.support@amd.com",
       "training_precision": "",
