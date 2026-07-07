@@ -142,15 +142,31 @@ connector_launch_worker() {
     # Patch PyTorch default_pg_timeout (DP Gloo groups) — wideEP only. REQUIRED: the
     # DP ranks form a Gloo PG whose default timeout is 30 min; the cold AITER JIT
     # compile on first boot takes ~15-20 min, and ranks that finish early block on the
-    # slowest one — a 30-min PG timeout kills the launch mid-compile. vLLM doesn't plumb
-    # the Gloo timeout through, so we rewrite the constant it reads. Safe because the
+    # slowest one — a 30-min PG timeout kills the launch mid-compile. There is no clean
+    # runtime hook: torch reads no env var for this, and the value is frozen as a
+    # default-arg at torch-import time, so a post-import monkeypatch is too late. We
+    # therefore rewrite the source constant BEFORE torch is imported. Safe because the
     # container is --rm and site-packages is baked in the image (NOT host-mounted); do
-    # NOT host-mount dist-packages or this sed would corrupt the shared host copy.
+    # NOT host-mount dist-packages or this edit would corrupt the shared host copy.
     if parallelism_is_wide_ep; then
         local _timeout_s="${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
-        local _torch_const="/usr/local/lib/python3.12/dist-packages/torch/distributed/constants.py"
-        if [ -f "$_torch_const" ]; then
+        # Resolve torch's constants.py from the live interpreter (do not hardcode the
+        # python version dir — it drifts across images).
+        local _torch_const
+        _torch_const="$(python3 -c 'import os,torch.distributed as d; print(os.path.join(os.path.dirname(d.__file__),"constants.py"))' 2>/dev/null)"
+        if [[ -z "$_torch_const" || ! -f "$_torch_const" ]]; then
+            echo "WARN: could not locate torch/distributed/constants.py; Gloo PG timeout stays at the 30m default — long JIT compiles may time out." >&2
+        elif grep -q "default_pg_timeout: timedelta = timedelta(seconds=" "$_torch_const"; then
+            echo "[moriio] Gloo PG timeout already patched in ${_torch_const}"
+        else
             sed -i "s/default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT/default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})/" "$_torch_const" 2>/dev/null || true
+            # Verify the substitution actually landed — the target line changes across
+            # torch versions, and a silent no-op reintroduces the 30m timeout crash.
+            if grep -q "default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})" "$_torch_const"; then
+                echo "[moriio] Patched Gloo PG timeout -> ${_timeout_s}s in ${_torch_const}"
+            else
+                echo "WARN: failed to patch default_pg_timeout in ${_torch_const} (torch layout changed?); Gloo PG stays at the 30m default — long JIT compiles may time out. Update the sed target for this torch version." >&2
+            fi
         fi
     fi
 
