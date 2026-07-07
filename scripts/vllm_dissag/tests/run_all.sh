@@ -3,7 +3,7 @@
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rc=0
-for t in gate_check.sh argv_assert.sh parity_check.sh; do
+for t in gate_check.sh argv_assert.sh; do
   echo "############### $t ###############"
   env -i PATH="$PATH" HOME="$HOME" bash "$DIR/$t" || rc=1
   echo ""

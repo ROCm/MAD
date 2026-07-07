@@ -1,6 +1,6 @@
 #!/bin/bash
-# Offline argv + env assertions for behaviors NOT covered by the golden parity gate
-# (they are new to the unified launcher, so there is no legacy golden to diff).
+# Offline argv + env assertions for the unified launcher: checks that each connector ×
+# WIDE_EP × role cell emits the expected `vllm serve` flags/env (and omits the wrong ones).
 # No cluster / no GPUs. Exits 0 if all assertions hold.
 #
 # Covers:

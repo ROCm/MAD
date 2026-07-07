@@ -3,9 +3,8 @@
 # =============================================================================
 # The WIDE_EP axis (0=TP, 1=wideEP) decides the *parallelism* shape of a worker.
 # The exact `vllm serve` template still lives in each connector (the argv order
-# and a few flags genuinely differ by connector/EP backend, and we preserve them
-# byte-for-byte for parity), but the pieces that are IDENTICAL across connectors
-# live here so there is one source of truth:
+# and a few flags genuinely differ by connector/EP backend), but the pieces that
+# are IDENTICAL across connectors live here so there is one source of truth:
 #
 #   - master/child role args for wideEP (DP) workers
 #   - the DP "degree" math is computed in the driver (PREFILL_DP_SIZE etc.)

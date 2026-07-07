@@ -235,9 +235,8 @@ flowchart TD
 | `connectors/{rixl,moriio}.env` | per-connector platform env (expandable_segments:False etc.), forwarded via `docker -e` |
 | `models.yaml` | per-model flags + env catalog |
 | `tests/gate_check.sh` | combo-gate unit tests (model × connector × WIDE_EP allow/reject) |
-| `tests/argv_assert.sh` | flag/env argv assertions for the new behaviors |
-| `tests/parity_check.sh` + `tests/golden/` | dry-run argv parity gate vs the legacy launchers |
-| `tests/run_all.sh` | runs all offline gates |
+| `tests/argv_assert.sh` | per-cell `vllm serve` flag/env assertions from the driver's `DRY_RUN=1` output |
+| `tests/run_all.sh` | runs all offline gates (gate_check + argv_assert) |
 | `tests/{drive_cell,harvest,run_interactive}.sh` | interactive-allocation live-test drivers |
 | `tests/TEST_PLAN.md` | before/after verification plan |
 | `benchmark_xPyD.sh`, `benchmark_long_context.sh`, `benchmark_parser.py`, `parse_to_csv.py` | benchmark + parsing |

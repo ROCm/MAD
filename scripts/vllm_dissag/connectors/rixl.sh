@@ -291,8 +291,8 @@ _rixl_launch_deepep() {
     local kv_config; kv_config=$(_rixl_kv_config_deepep "${kv_role}" "${engine_id}" "${dp_size}")
 
     # Per-model dp: flags from models.yaml (driver-exported). Empty for the DeepSeek
-    # deepep entries today, so this is a no-op and parity stays byte-identical; kept so
-    # future per-model dp: tuning is actually honored on the deepep path.
+    # deepep entries today, so this is currently a no-op; kept so future per-model
+    # dp: tuning is actually honored on the deepep path.
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"

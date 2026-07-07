@@ -228,12 +228,23 @@ python3 benchmark_parser.py <log_path>/benchmark_XXX_CONCURRENCY.log
 
 ## Testing the launcher (no GPUs)
 
-`tests/parity_check.sh` runs the real launcher under `DRY_RUN=1` and diffs the assembled
-`vllm serve` argv against golden fixtures (`tests/golden/`) for every connector × parallelism × role
-cell, plus validation-rejection checks. Run it after any change to the launcher/connectors/yaml:
+Offline suites validate the launcher without a cluster — run after any change to the
+launcher/connectors/yaml:
 
 ```bash
-bash tests/parity_check.sh        # expect: ALL PARITY CELLS BYTE-IDENTICAL
+bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
+```
+
+- `tests/gate_check.sh` — connector × WIDE_EP combo validation (valid/invalid pairings, back-compat shims).
+- `tests/argv_assert.sh` — asserts expected `vllm serve` flags/env are present/absent per cell, from
+  the launcher's `DRY_RUN=1` output (no GPUs, no container).
+
+You can also dry-run any single cell to inspect the assembled command:
+
+```bash
+CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori DRY_RUN=1 NODE_RANK=0 \
+  MODEL_NAME=DeepSeek-V3 MODEL_PATH=/models/DeepSeek-V3 NIXL_COOKBOOK_PATH=$PWD \
+  xP=2 yD=2 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 bash vllm_disagg.sh
 ```
 
 ## Caveats

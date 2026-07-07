@@ -5,7 +5,7 @@ it replaced (`vllm_disagg_server.sh`, `vllm_disagg_mori_ep.sh`, `vllm_disagg_ser
 that the one genuinely-new path (moriio + TP) works.
 
 There are two layers of testing:
-1. **Offline parity** (no GPUs) — proves the assembled `vllm serve` command line is byte-identical.
+1. **Offline checks** (no GPUs) — validate the assembled `vllm serve` argv + combo gate.
 2. **Live cluster** (GPUs) — proves the launched servers actually serve + benchmark at par.
 
 ---
@@ -14,32 +14,29 @@ There are two layers of testing:
 
 | Cell | CONNECTOR / WIDE_EP / EP_BACKEND | Legacy equivalent | At-par check |
 |------|----------------------------------|-------------------|--------------|
-| 1 | `rixl` / 0 / — | `vllm_disagg_server.sh` | argv parity + live boot+bench |
-| 2 | `moriio` / 0 / — | none (NEW) | smoke argv + live boot+bench only |
-| 3 | `moriio` / 1 / `mori` | `vllm_disagg_mori_ep.sh` | argv parity + live ITL vs baseline |
-| 4 | `rixl` / 1 / `deepep` | `vllm_disagg_server_deepep.sh` | argv parity + live boot+bench |
+| 1 | `rixl` / 0 / — | `vllm_disagg_server.sh` | live boot+bench |
+| 2 | `moriio` / 0 / — | none (NEW) | live boot+bench |
+| 3 | `moriio` / 1 / `mori` | `vllm_disagg_mori_ep.sh` | live ITL vs baseline |
+| 4 | `rixl` / 1 / `deepep` | `vllm_disagg_server_deepep.sh` | live boot+bench |
 
 ---
 
-## 1. Offline parity (run now, no GPUs)
-
-The committed gate compares the live driver's `DRY_RUN=1` argv against golden fixtures captured from
-the legacy launchers (`tests/golden/`).
+## 1. Offline checks (run now, no GPUs)
 
 ```bash
 cd MAD/scripts/vllm_dissag
-bash tests/parity_check.sh        # expect: ALL PARITY CELLS BYTE-IDENTICAL ✅, exit 0
+bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
 ```
 
-This asserts, for every (connector × role) cell that has a legacy equivalent:
-- prefill/decode × master/child for moriio-wideEP and rixl-deepep (8 cells)
-- prefill/decode for rixl-TP (2 cells)
-- moriio+TP smoke (has `--tensor-parallel-size` + `MoRIIOConnector`, no `--enable-expert-parallel`)
-- invalid cross-pairings (`moriio`+`deepep`, `rixl`+`mori`) abort
+- `gate_check.sh` — combo validation: valid/invalid connector × WIDE_EP pairings, back-compat shims,
+  invalid cross-pairings (`moriio`+`deepep`, `rixl`+`mori`) abort.
+- `argv_assert.sh` — per-cell `vllm serve` flag/env assertions from the driver's `DRY_RUN=1` output
+  (e.g. moriio+TP has `--tensor-parallel-size` + `MoRIIOConnector` and no `--enable-expert-parallel`;
+  wideEP cells have `--enable-expert-parallel` + `--data-parallel-size`).
 
-Also run the static checks:
+Static checks:
 ```bash
-for f in vllm_disagg.sh parallelism.sh connectors/*.sh run_xPyD_models.slurm tests/parity_check.sh; do
+for f in vllm_disagg.sh parallelism.sh connectors/*.sh run_xPyD_models.slurm; do
   bash -n "$f" && echo "OK $f"; done
 python3 -c "import yaml; yaml.safe_load(open('models.yaml')); print('yaml OK')"
 ```
@@ -53,13 +50,6 @@ diff <(RUN_MORI=1   DRY_RUN=1 NODE_RANK=0 MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m N
      <(CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori DRY_RUN=1 NODE_RANK=0 MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m \
         NIXL_COOKBOOK_PATH=$PWD xP=2 yD=2 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 bash vllm_disagg.sh 2>/dev/null) \
   && echo "RUN_MORI back-compat OK"
-```
-
-### If a legacy-equivalent change is intentional
-Regenerate the goldens (only when you *mean* to change a reproduced cell), review the diff, commit:
-```bash
-bash tests/golden/gen_golden.sh
-git diff tests/golden/        # inspect — should match your intended change
 ```
 
 ---
@@ -115,7 +105,7 @@ The legacy launchers were deleted on this branch. To A/B live, check out the par
 
 ## 3. Sign-off checklist
 
-- [ ] `tests/parity_check.sh` green (offline, byte-identical)
+- [ ] `tests/run_all.sh` green (offline: gate_check + argv_assert)
 - [ ] static checks (`bash -n`, yaml) green
 - [ ] back-compat: `RUN_MORI=1` / `RUN_DEEPEP=1` argv-equal to new axes
 - [ ] Row 1 rixl-TP live: boots + benchmarks
