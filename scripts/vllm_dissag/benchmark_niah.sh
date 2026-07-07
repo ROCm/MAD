@@ -1,7 +1,7 @@
 #!/bin/bash
 # Drop-in replacement for benchmark_xPyD.sh that runs the NIAH long-context
 # retrieval test (issue vllm-project/vllm#47042) against the live disagg server,
-# instead of the throughput sweep. Selected via BENCHMARK_SCRIPT_FILE=tests/niah_bench.sh.
+# instead of the throughput sweep. Selected via BENCHMARK_SCRIPT_FILE=benchmark_niah.sh.
 #
 # Reads (from the launcher env): BENCHMARK_PORT (router/proxy port), MODEL_PATH,
 #   MODEL_NAME, SLURM_JOB_ID, xP, yD. NIAH_WORDS overridable.
@@ -23,6 +23,6 @@ NIAH_MODEL="${MODEL_PATH}" \
 NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
 NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
 NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
-  python3 "${DIR}/niah_test.py" 2>&1 | tee -a "${LOG}"
+  python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
 
 echo "NIAH results -> ${LOG}"

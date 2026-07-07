@@ -226,6 +226,21 @@ Parse a results log:
 python3 benchmark_parser.py <log_path>/benchmark_XXX_CONCURRENCY.log
 ```
 
+### Long-context retrieval (NIAH)
+
+`benchmark_niah.{sh,py}` run a needle-in-a-haystack retrieval sweep (adapted from
+vllm-project/vllm#47042): animal names are planted in filler text across growing context
+lengths and the model is scored on how many it retrieves. Select it in place of the throughput
+sweep via the launcher's benchmark hook:
+
+```bash
+export BENCHMARK_SCRIPT_FILE=benchmark_niah.sh
+export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
+```
+
+Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
+(`NIAH_URL`, `NIAH_MODEL`).
+
 ## Testing the launcher (no GPUs)
 
 Offline suites validate the launcher without a cluster — run after any change to the

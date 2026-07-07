@@ -239,5 +239,5 @@ flowchart TD
 | `tests/run_all.sh` | runs all offline gates (gate_check + argv_assert) |
 | `tests/{drive_cell,harvest,run_interactive}.sh` | interactive-allocation live-test drivers |
 | `tests/TEST_PLAN.md` | before/after verification plan |
-| `benchmark_xPyD.sh`, `benchmark_long_context.sh`, `benchmark_parser.py`, `parse_to_csv.py` | benchmark + parsing |
+| `benchmark_xPyD.sh`, `benchmark_long_context.sh`, `benchmark_niah.{sh,py}`, `benchmark_parser.py`, `parse_to_csv.py` | benchmark + parsing (NIAH = long-context retrieval, vllm#47042) |
 | `socket_barrier.py`, `socket_wait.py`, `salloc_launch.sh` | node coordination + salloc helper |
