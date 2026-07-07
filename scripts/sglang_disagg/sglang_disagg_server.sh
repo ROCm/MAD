@@ -33,11 +33,31 @@ esac
 pip install py-spy
 pip install --ignore-installed --force-reinstall flask
 
+# AINIC/ionic RoCE fix: MOONCAKE_COOKBOOK's set_env_vars.sh assumes a Mellanox/mlx5
+# fabric. On ionic-based RoCE clusters (e.g. mia1) it (1) hardcodes mlx5 IB device
+# names, (2) forces NCCL_IB_DISABLE=1, and (3) mangles NCCL_SOCKET_IFNAME via an
+# `ip route` awk parse. Save the transport iface set by the launcher, then re-assert
+# the correct ionic values after sourcing so RDMA over ionic actually engages.
+_SAVED_NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-}"
+
 source $MOONCAKE_COOKBOOK_PATH/set_env_vars.sh
 #trap 'echo "Error occurred. Cleaning up..."; exit 0' ERR
 
-host_ip=$(hostname -I | awk '{print $1}')
+# Re-assert RDMA/socket env clobbered by set_env_vars.sh (see note above).
+export NCCL_IB_DISABLE=0
+[[ -n "${IB_DEVICES:-}" ]] && export IBDEVICES="${IB_DEVICES}"
+export NCCL_SOCKET_IFNAME="${_SAVED_NCCL_SOCKET_IFNAME:-eno0}"
+export GLOO_SOCKET_IFNAME="${_SAVED_NCCL_SOCKET_IFNAME%%,*}"
+
+# This node's IP is already resolved by run.sh and handed to us (rank-ordered,
+# post-rendezvous) via IPADDRS. Reuse IPADDRS[NODE_RANK] so the address we bind
+# and advertise (--host, socket_barrier --local-ip) matches exactly what peers
+# registered for us in the router/barrier; re-deriving it here can pick a
+# different NIC on multi-homed nodes and desync the two.
+IFS=',' read -ra IP_ARRAY <<< "$IPADDRS"
+host_ip="${IP_ARRAY[NODE_RANK]:-$(hostname -I | awk '{print $1}')}"
 host_name=$(hostname)
+unset _SAVED_NCCL_SOCKET_IFNAME
 
 # =============================================================================
 # Model-Specific Configuration Maps
@@ -112,7 +132,7 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
 # Cluster Topology Configuration
 # =============================================================================
 
-IFS=',' read -ra IP_ARRAY <<< "$IPADDRS"
+# IP_ARRAY was already parsed from IPADDRS above (where host_ip is derived).
 
 # Colocated topology (matches sglang_disagg_mori_io_ep.sh): the router/proxy runs
 # on NODE_RANK=0 alongside the first prefill server, so no dedicated proxy node is
