@@ -187,7 +187,7 @@ Override any port with the matching env var (`ROUTER_PORT`, `MORI_SERVE_PORT`, e
 
 `ROUTER_BINARY` (both connectors): path to the `vllm-router` binary. Images that bake the
 router ship it on `PATH`, so this can be left unset. Runtime-only images that do NOT ship a
-router (e.g. the mori121 MoRI-EP image) require `ROUTER_BINARY=<path>` — point it at a built
+router require `ROUTER_BINARY=<path>` — point it at a built
 `vllm-router` on a shared mount. If unset and none is on `PATH`, the launcher aborts with a
 clear error.
 
