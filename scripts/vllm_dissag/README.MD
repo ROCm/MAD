@@ -190,8 +190,8 @@ clear error.
 
 ## Validation status (image capability)
 
-The consolidated launcher assembles correct argv for all 4 combos (offline gates in `tests/`),
-but each combo also needs the connector's transport built into the image:
+The consolidated launcher assembles correct argv for all 4 combos, but each combo also needs
+the connector's transport built into the image:
 
 | Combo | Live-validated | Image requirement |
 |-------|----------------|-------------------|
@@ -241,20 +241,10 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
 
-## Testing the launcher (no GPUs)
+## Inspecting the launcher (no GPUs)
 
-Offline suites validate the launcher without a cluster — run after any change to the
-launcher/connectors/yaml:
-
-```bash
-bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
-```
-
-- `tests/gate_check.sh` — connector × WIDE_EP combo validation (valid/invalid pairings, back-compat shims).
-- `tests/argv_assert.sh` — asserts expected `vllm serve` flags/env are present/absent per cell, from
-  the launcher's `DRY_RUN=1` output (no GPUs, no container).
-
-You can also dry-run any single cell to inspect the assembled command:
+Dry-run any cell to print the assembled `vllm serve` argv without launching — useful to
+sanity-check flags after editing the launcher/connectors/`models.yaml`:
 
 ```bash
 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori DRY_RUN=1 NODE_RANK=0 \
