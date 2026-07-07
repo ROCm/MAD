@@ -58,7 +58,7 @@ connector_setup_env() {
 
     export VLLM_LOGGING_LEVEL=INFO
     export VLLM_USE_V1=1
-    export VLLM_ALL2ALL_BACKEND=mori
+    export VLLM_ALL2ALL_BACKEND="${VLLM_ALL2ALL_BACKEND:-mori}"
 
     export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
