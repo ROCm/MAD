@@ -8,6 +8,8 @@
 #   NIAH_MODEL   model name/tag the server serves (required — the served path)
 #   NIAH_WORDS   comma list of context sizes in words (default 2000,8000,20000,35000)
 #   NIAH_MAXTOK  max_tokens for the answer (default 2048)
+#   NIAH_SEEDS   comma list of needle-layout seeds (default 0,1,2); summary reports
+#                mean/min/max across seeds to separate real accuracy from variance
 #   NIAH_TIMEOUT per-request timeout seconds (default 1800)
 import os, sys, json, random, urllib.request
 
@@ -16,6 +18,10 @@ MODEL = os.environ.get("NIAH_MODEL", "")
 WORDS = [int(x) for x in os.environ.get("NIAH_WORDS", "2000,8000,20000,35000").split(",") if x.strip()]
 MAXTOK = int(os.environ.get("NIAH_MAXTOK", "2048"))
 TIMEOUT = float(os.environ.get("NIAH_TIMEOUT", "1800"))
+# Needle layout is seeded, so a single run is deterministic (bit-exact repro on the
+# same stack). Run multiple seeds to distinguish real accuracy from single-needle
+# variance; the summary reports mean/min/max across seeds. Default 0,1,2.
+SEEDS = [int(x) for x in os.environ.get("NIAH_SEEDS", "0,1,2").split(",") if x.strip()]
 
 FILLER = (
     "table chair window bottle pencil garden river mountain coffee planet "
@@ -41,12 +47,12 @@ def make_haystack(n_words, seed=0):
     return " ".join(words)
 
 
-def run(n_words):
+def run(n_words, seed=0):
     body = {
         "model": MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": "Find the animals in this list:\n\n" + make_haystack(n_words)},
+            {"role": "user", "content": "Find the animals in this list:\n\n" + make_haystack(n_words, seed)},
         ],
         "temperature": 0.0,
         "max_tokens": MAXTOK,
@@ -70,7 +76,7 @@ def run(n_words):
             + (msg.get("reasoning_content") or "") + " "
             + (msg.get("reasoning") or "")).lower()
     found = sorted(a for a in ANIMALS if a in text)
-    print("words=%6d  found=%2d/10  %s" % (n_words, len(found), found), flush=True)
+    print("words=%6d  seed=%d  found=%2d/10  %s" % (n_words, seed, len(found), found), flush=True)
     return len(found)
 
 
@@ -79,14 +85,19 @@ def main():
         print("NIAH_MODEL must be set (the served model path/name)", file=sys.stderr)
         sys.exit(2)
     print("=== NIAH retrieval test ===", flush=True)
-    print("url=%s  model=%s  sizes=%s" % (URL, MODEL, WORDS), flush=True)
-    results = {}
+    print("url=%s  model=%s  sizes=%s  seeds=%s" % (URL, MODEL, WORDS, SEEDS), flush=True)
+    results = {}  # n_words -> list of scores across seeds (None on error)
     for n in WORDS:
-        results[n] = run(n)
-    print("=== NIAH summary ===", flush=True)
+        results[n] = [run(n, s) for s in SEEDS]
+    print("=== NIAH summary (mean/min/max across %d seed(s)) ===" % len(SEEDS), flush=True)
     for n in WORDS:
-        v = results[n]
-        print("  words=%6d  found=%s/10" % (n, "ERR" if v is None else v), flush=True)
+        vals = [v for v in results[n] if v is not None]
+        if not vals:
+            print("  words=%6d  ERR" % n, flush=True)
+            continue
+        mean = sum(vals) / len(vals)
+        print("  words=%6d  mean=%.1f/10  min=%d  max=%d  (n=%d)"
+              % (n, mean, min(vals), max(vals), len(vals)), flush=True)
 
 
 if __name__ == "__main__":
