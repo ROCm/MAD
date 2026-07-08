@@ -95,8 +95,7 @@ KV-transfer (Mooncake/NIXL) steps on top of `BASE_DOCKER` in a single image
 
 | Overlay Dockerfile | Substitutes | Key build args |
 |--------------------|-------------|----------------|
-| `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile` | RCCL + MoRI + Mooncake/NIXL (merged) | `RCCL_REPO/RCCL_BRANCH/RCCL_COMMIT`, `MORI_REPO/MORI_BRANCH/MORI_COMMIT` or `MORI_WHEEL_URL`, `MOONCAKE_VERSION` / `NIXL_VERSION` |
-| `docker/sglang_disagg_inference_full_overlay.oci-rdma62.ubuntu.amd.Dockerfile` | Same, OCI RDMA 6.2 variant | (as above) |
+| `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile` | RCCL + MoRI + Mooncake/NIXL (merged) | `RCCL_REPO/RCCL_BRANCH/RCCL_COMMIT`, `MORI_REPO/MORI_BRANCH/MORI_COMMIT` or `MORI_WHEEL_URL`, `MOONCAKE_VERSION` / `NIXL_VERSION`, `ENABLE_RDMA62` (set to `1` on hosts needing a newer rdma-core than the base image ships, to additionally build rdma-core v62 from source) |
 
 > **RCCL note:** a newer rocm-systems RCCL build links `librccl` without
 > the `librocm_smi64.so` `DT_NEEDED` the base carried. Since the overlay is first

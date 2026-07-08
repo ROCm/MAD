@@ -135,10 +135,11 @@ differ, the host path belongs on the value side.
   is a single full-overlay build
   (`docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile`): base
   SGLang + RCCL + MoRI + NIXL/Mooncake KV-transfer + Mooncake pip in one
-  Dockerfile (no base-image chaining). For OCI-CX7 hosts whose RDMA stack needs a
-  newer rdma-core than the base ships, build the `*.oci-rdma62.*` variant instead
-  (bakes rdma-core v62 in, so no host `libibverbs` bind-mounts are needed). The
-  full overlay re-adds the `rocm_smi` `DT_NEEDED`
+  Dockerfile (no base-image chaining). For hosts whose RDMA stack needs a
+  newer rdma-core than the base ships, build the same Dockerfile with
+  `--build-arg ENABLE_RDMA62=1` (bakes rdma-core v62 in, so no host `libibverbs`
+  bind-mounts are needed; unset/default skips that stage). The full overlay
+  re-adds the `rocm_smi` `DT_NEEDED`
   (`patchelf --add-needed librocm_smi64.so.<N>`) so a newer RCCL on the rocm720
   base does not break `import torch` (see [gotchas.md](gotchas.md#sglang_disagg)).
   Perf lands in `perf_sglang-disagg-DeepSeek-R1.csv`, collected on rank 0 only.

@@ -15,6 +15,12 @@
 #           NOTE: this is NOT ai-dynamo/nixl. The rocm KV transport for
 #           KV_TRANSFER_BACKEND=nixl is ROCm/RIXL; recipe mirrors the proven
 #           scripts/kvcache_transfer_bench/Dockerfile.
+#
+# Hosts whose RDMA stack needs a newer rdma-core than the base image ships:
+# pass --build-arg ENABLE_RDMA62=1 to additionally build + install rdma-core
+# v62 from source (newer libibverbs/librdmacm/libmlx5; no host libibverbs
+# bind-mounts needed). Default (unset) keeps the image-default rdma-core and
+# skips that stage entirely.
 ###############################################################################
 ARG BASE_DOCKER=lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x
 FROM $BASE_DOCKER
@@ -248,3 +254,32 @@ RUN set -e; \
 # Sanity: mooncake must import alongside nixl/rixl (non-fatal — module path may vary).
 RUN python3 -c "import mooncake; print('MOONCAKE_OVERLAY_OK')" \
     || echo "MOONCAKE_IMPORT_DIFFERS (verify sglang mooncake import path at runtime)"
+
+###############################################################################
+# 5) Optional: build + install rdma-core v62 from source, for hosts whose RDMA
+#    stack needs a newer libibverbs/librdmacm/libmlx5 than the base image
+#    ships. Formerly built at job start by the launcher; baked here (gated by
+#    ENABLE_RDMA62, empty by default) so the runtime env is not mutated and
+#    the default build never pays for it. Mirrors the RDMA_CORE_VERSION-gated
+#    stage in docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile.
+###############################################################################
+ARG ENABLE_RDMA62=
+ARG RDMA_VER=v62.0
+RUN if [[ -n "${ENABLE_RDMA62}" ]]; then \
+      set -e; \
+      git clone --branch "${RDMA_VER}" --depth 1 https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
+      cd /tmp/rdma-core && mkdir -p build && cd build && \
+      cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr -DNO_MAN_PAGES=1 .. && \
+      ninja && ninja install && ldconfig && \
+      rm -rf /tmp/rdma-core; \
+    else \
+      echo "ENABLE_RDMA62 unset — keeping base image rdma-core"; \
+    fi
+
+# Sanity: rebuilt libibverbs present (only when ENABLE_RDMA62 was set) and
+# python still imports (linker not corrupted).
+RUN set -e; \
+    if [[ -n "${ENABLE_RDMA62}" ]]; then \
+      ls -l /usr/lib/libibverbs.so* 2>/dev/null || ls -l /usr/lib/*/libibverbs.so* 2>/dev/null || true; \
+    fi; \
+    python3 -c "import torch; print(\"RDMA62_TORCH_OK\" if \"${ENABLE_RDMA62}\" else \"RDMA62_SKIPPED_TORCH_OK\", torch.__version__)"

@@ -94,8 +94,8 @@ Keywords: launcher sglang-disagg run.sh xP yD RUN_MORI DP_MODE KV_TRANSFER_BACKE
 nixl mooncake, detokenizer hang health check No response from detokenizer,
 MoRI overlay #366 inter-node decode freeze, RCCL overlay rsmi_init libtorch_hip
 undefined symbol torch broken, rocm720 base librocm_smi64, patchelf add-needed
-DT_NEEDED smifix, single full-overlay Dockerfile no base chaining, oci-rdma62
-rdma-core v62 variant, mooncake baked launcher build-layer removed runtime pip,
+DT_NEEDED smifix, single full-overlay Dockerfile no base chaining, ENABLE_RDMA62
+rdma-core v62 optional stage, mooncake baked launcher build-layer removed runtime pip,
 self-discover node IPs rendezvous IP_SYNC_TIMEOUT SGLANG_NODE_IPS not forwarded,
 per-node docker load shared tar, perf CSV rank0 BENCHMARK_FAIL_FAST, circuit
 breaker prefill workers Service Unavailable BENCHMARK_POINT_RETRIES transient
@@ -141,10 +141,14 @@ sweep retry.
   mutated the container runtime env and silently corrupted the Python libs (the
   model flags then stopped parsing and the server came up with defaults). Those pip
   deps and the Mooncake KV backend are now baked into the full-overlay Dockerfile;
-  rdma-core v62 lives only in the `*.oci-rdma62.*` variant (for OCI-CX7 hosts whose
-  RDMA stack needs a newer libibverbs/librdmacm/libmlx5 than the base ships — no
-  host `libibverbs` bind-mounts needed). Do not reintroduce a runtime build-layer
-  in the launcher.
+  rdma-core v62 is an optional stage in the SAME Dockerfile, gated by
+  `--build-arg ENABLE_RDMA62=1` (for hosts whose RDMA stack needs a newer
+  libibverbs/librdmacm/libmlx5 than the base ships — no host `libibverbs`
+  bind-mounts needed; unset/default skips the stage entirely, mirroring
+  `docker/primus_megatron_train_rccl_overlay...Dockerfile`'s `RDMA_CORE_VERSION`
+  gate). There is no separate rdma-core-variant Dockerfile anymore — it was a
+  ~92%-identical copy of the base overlay and was merged in to cut duplication.
+  Do not reintroduce a runtime build-layer in the launcher.
 
 - **The MoRI overlay (#366, e.g. commit `a14e6992`) is the one that fixes the
   mid-decode inter-node freeze.** (Commit hashes here and below — RCCL, MoRI,
