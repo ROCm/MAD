@@ -187,6 +187,17 @@ source "${SCRIPT_DIR}/mori_ep_env.sh"
 # KV transfer backend: default mori, switchable to mooncake or nixl.
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
+
+# _TRANSFER_BACKEND is interpolated into an eval'd launch command below; restrict
+# it to known-good values to avoid invalid backends and shell-token injection.
+case "$_TRANSFER_BACKEND" in
+    mori|mooncake|nixl) ;;
+    *)
+        echo "ERROR: unsupported KV_TRANSFER_BACKEND='$_TRANSFER_BACKEND' (expected: mori|mooncake|nixl)" >&2
+        exit 1
+        ;;
+esac
+
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 DECODE_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG

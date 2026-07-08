@@ -216,8 +216,7 @@ echo "   RUN_MORI=$RUN_MORI  DP_MODE=$DP_MODE  KV_TRANSFER_BACKEND=$KV_TRANSFER_
 echo "   MASTER_ADDR=$MASTER_ADDR  IPADDRS=$IPADDRS"
 echo "=============================================================="
 
-if [[ "$RUN_MORI" == "1" ]]; then
-    exec bash "$SCRIPT_DIR/sglang_disagg_mori_io_ep.sh"
-else
-    exec bash "$SCRIPT_DIR/sglang_disagg_server.sh"
-fi
+# sglang_disagg_mori_io_ep.sh is a functional superset of the retired
+# sglang_disagg_server.sh (per-model config from models.yaml, mori/mooncake/nixl
+# via KV_TRANSFER_BACKEND, DP_MODE support) — route both RUN_MORI values there.
+exec bash "$SCRIPT_DIR/sglang_disagg_mori_io_ep.sh"

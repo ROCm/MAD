@@ -103,12 +103,14 @@ sweep retry.
 
 - **The launcher is `sglang-disagg` with `scripts/sglang_disagg/run.sh` as the
   entrypoint** (PR #142 native launcher). `run.sh` reads topology from
-  `--xp/--yd` (or `xP`/`yD` env) and `--kv-transfer-backend` (`nixl`/`mooncake`);
-  with `--run-mori 1` it execs `sglang_disagg_mori_io_ep.sh`, otherwise
-  `sglang_disagg_server.sh`. There is no `slurm_multi` wrapper — one `madengine
-  run` is launched per node and the roles (proxy / prefill x xP / decode x yD)
-  are derived from `NODE_RANK` + the ordered IP list. Do not reintroduce a
-  `*_mn` slurm wrapper; it duplicates topology logic and drifts from `run.sh`.
+  `--xp/--yd` (or `xP`/`yD` env) and `--kv-transfer-backend` (`mori`/`mooncake`/
+  `nixl`), then always execs the unified `sglang_disagg_mori_io_ep.sh` (it
+  branches internally on `KV_TRANSFER_BACKEND`; the older Mooncake/NIXL-only
+  `sglang_disagg_server.sh` was retired as a functional subset). There is no
+  `slurm_multi` wrapper — one `madengine run` is launched per node and the
+  roles (proxy / prefill x xP / decode x yD) are derived from `NODE_RANK` + the
+  ordered IP list. Do not reintroduce a `*_mn` slurm wrapper; it duplicates
+  topology logic and drifts from `run.sh`.
 
 - **A newer RCCL build drops the `rocm_smi` `DT_NEEDED` and breaks
   `import torch` — re-add it with `patchelf`.** The RCCL stage of the single

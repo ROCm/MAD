@@ -56,8 +56,7 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 |------|-------------|
 | `run.sh` | **madengine entrypoint** (models.json `scripts` target). Bridges madengine's `sglang-disagg` launcher env to the launchers below |
 | `run_xPyD_models.slurm` | Standalone SLURM script to launch docker containers on all nodes via `sbatch` |
-| `sglang_disagg_mori_io_ep.sh` | Container entrypoint (MoRI EP) — starts prefill/decode servers, proxy, and benchmark |
-| `sglang_disagg_server.sh` | Container entrypoint (Mooncake/NIXL) |
+| `sglang_disagg_mori_io_ep.sh` | Unified container entrypoint (MoRI EP / Mooncake / NIXL, selected via `KV_TRANSFER_BACKEND`) — starts prefill/decode servers, proxy, and benchmark |
 | `models.yaml` | Model-specific CLI flags for all supported models |
 | `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
 | `benchmark_xPyD.sh` | Concurrency sweep benchmark using sglang bench_serving |
