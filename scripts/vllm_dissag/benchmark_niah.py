@@ -50,6 +50,11 @@ def run(n_words):
         ],
         "temperature": 0.0,
         "max_tokens": MAXTOK,
+        # Thinking models (e.g. GLM-5.1) emit chain-of-thought into a separate
+        # reasoning field and leave `content` empty until the final answer; with a
+        # small max_tokens the answer never appears in `content` and the score is a
+        # false 0/10. Disable thinking so the answer lands in `content` directly.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     data = json.dumps(body).encode()
     req = urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json"})
@@ -59,7 +64,11 @@ def run(n_words):
     except Exception as e:
         print("words=%6d  ERROR  %s" % (n_words, e), flush=True)
         return None
-    text = ((msg.get("content") or "") + " " + (msg.get("reasoning_content") or "")).lower()
+    # Score content plus any reasoning field (some servers surface CoT as
+    # `reasoning` or `reasoning_content`) so a thinking model is never mis-scored.
+    text = ((msg.get("content") or "") + " "
+            + (msg.get("reasoning_content") or "") + " "
+            + (msg.get("reasoning") or "")).lower()
     found = sorted(a for a in ANIMALS if a in text)
     print("words=%6d  found=%2d/10  %s" % (n_words, len(found), found), flush=True)
     return len(found)
