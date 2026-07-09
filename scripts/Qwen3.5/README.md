@@ -19,6 +19,26 @@ MODEL=qwen35-moe-mxfp4 TP=1 ACTION=sweep      ./run_sglang.sh
 Why TP1 and not TP-shard: a 3B-active model fits one GPU, so tensor-parallel only adds cross-GPU
 comm cost. Fill the node with independent instances instead. (ATOM excluded — crashes at ISL≥8192.)
 
+### Quickstart (run the default in 4 steps)
+```bash
+# 1. Get the weights (MXFP4, ~23 GB) to a path visible on every node:
+hf download amd/Qwen3.5-35B-A3B-MXFP4 --local-dir /path/to/models/Qwen3.5-35B-A3B-MXFP4
+
+# 2. Edit cluster.yaml:  set `nodes:` to your node(s), `models_root: /path/to/models`,
+#    and `srun_alloc:` to your reservation/jobid (or "" if nodes are free).
+
+# 3. From inside a Slurm allocation on those nodes, run the default:
+cd scripts/Qwen3.5
+MODEL=qwen35-moe-mxfp4 TP=1 DP=8 ACTION=serve ./run_sglang.sh   # 8 MXFP4 instances/node
+
+# 4. Query any instance (OpenAI-compatible, ports 8000..8007):
+curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"/path/to/models/Qwen3.5-35B-A3B-MXFP4",
+       "messages":[{"role":"user","content":"Hello"}],"max_tokens":256}'
+```
+`ACTION=sweep` instead of `serve` reproduces the benchmark. Notes: it's a **reasoning model** (allow
+generous `max_tokens`); the SGLang image + all flags are preset in `model.yaml` — nothing else to set.
+
 ## Design in one picture
 ```
 Each node (8 GPUs):  DP replicas, each TP-sharded.   DP × TP ≤ 8.   Full util ⇔ DP×TP = 8.
