@@ -355,6 +355,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B-proxy" ]; then
 elif [ "$MODEL_REPO" == "Llama-3.1-405B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING" # BF16 training only
   export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama3.1_405B-$DATATYPE-pretrain.yaml
+  rm -f "$TRAIN_LOG"
 
   SEQ_LEN=8192
   if [[ -f "$EXP" ]]; then
@@ -372,6 +373,8 @@ elif [ "$MODEL_REPO" == "Llama-3.1-405B" ]; then
     GBS=$(effective_global_batch_size "$MBS" "$GBS")
     run_primus "$EXP" $GBS_OVERRIDE
   fi
+  MBS="${MBS:-NA}"
+  GBS="${GBS:-NA}"
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
     python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS

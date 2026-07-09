@@ -139,7 +139,7 @@ export MASTER_ADDR="$(echo "$IPADDRS" | cut -d',' -f1)"
 export MODEL_NAME="${MODEL_NAME:-}"
 export MODEL_PATH="${MODEL_PATH:-}"
 export RUN_MORI="${RUN_MORI:-1}"
-export DP_MODE="${DP_MODE:-1}"
+export DP_MODE="${DP_MODE:-0}"
 # Default the KV transfer backend from RUN_MORI so the non-MoRI path does not
 # silently inherit an invalid `mori` backend (mooncake/NIXL use mooncake).
 if [[ "$RUN_MORI" == "1" ]]; then
