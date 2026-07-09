@@ -163,7 +163,7 @@ def _get_run_metadata(pipeline: str = "sglang"):
 
     xP = os.environ.get("xP", "1")
     yD = os.environ.get("yD", "1")
-    dp_mode = os.environ.get("DP_MODE", "1")
+    dp_mode = os.environ.get("DP_MODE", "0")
     run_mori = os.environ.get("RUN_MORI", "1")
     kv_backend = os.environ.get("KV_TRANSFER_BACKEND", "mooncake").lower()
     gpus = os.environ.get("GPUS_PER_NODE", "8")
