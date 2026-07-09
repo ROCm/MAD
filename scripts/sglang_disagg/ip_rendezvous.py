@@ -68,7 +68,10 @@ def serve(nnodes, host_ip, port, token, deadline):
                 continue
             wrank = int(msg.get("rank", -1))
             wip = str(msg.get("ip", "")).strip()
-            if 0 <= wrank < nnodes and wip:
+            # rank 0 is the server itself (by_rank[0] is already seeded with our
+            # own host_ip above); only accept reports from peers, rank 1..nnodes-1,
+            # so a buggy/spoofed rank-0 message can't clobber our own entry.
+            if 1 <= wrank < nnodes and wip:
                 old = conns.get(wrank)
                 if old is not None:
                     try:

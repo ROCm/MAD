@@ -185,13 +185,15 @@ if ! [[ "$GPUS_PER_NODE" =~ ^[0-9]+$ ]]; then GPUS_PER_NODE=8; fi
 NUM_GPUS=$((NNODES * GPUS_PER_NODE))
 echo "[INFO] Distributed params: NNODES=$NNODES GPUS_PER_NODE=$GPUS_PER_NODE NUM_GPUS=$NUM_GPUS"
 
-# Round global batch size up to a multiple of micro_batch_size * data_parallel so
-# the global batch stays divisible across an arbitrary number of ranks.
+# Round global batch size up to a multiple of micro_batch_size * world_size so
+# the global batch stays divisible across an arbitrary number of ranks. Note:
+# this uses total world size (NUM_GPUS), not the actual Megatron data-parallel
+# degree, which can be smaller than world size when TP/PP/CP/EP > 1.
 normalize_global_batch_size() {
   local mbs="$1"
   local gbs="$2"
-  local dp="$3"
-  local unit=$((mbs * dp))
+  local world_size="$3"
+  local unit=$((mbs * world_size))
   if (( unit <= 0 )); then
     echo "$gbs"
     return
@@ -205,8 +207,9 @@ normalize_global_batch_size() {
 
 # Emit the extra CLI flags needed to keep a run valid on multiple nodes: when
 # NUM_GPUS > 8 the config global_batch_size (tuned for a single 8-GPU node) is
-# renormalized and passed as an override. Prints nothing for single-node runs,
-# so behavior there is byte-for-byte identical to before.
+# renormalized against total world size and passed as an override. Prints
+# nothing for single-node runs, so behavior there is byte-for-byte identical
+# to before.
 scaleout_gbs_override() {
   local mbs="$1"
   local gbs="$2"
