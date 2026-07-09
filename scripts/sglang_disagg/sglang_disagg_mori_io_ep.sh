@@ -113,20 +113,25 @@ mode = os.environ["PARALLEL_MODE"]
 xP = int(os.environ.get("xP", "1"))
 gpus_per_node = int(os.environ.get("GPUS_PER_NODE", "8"))
 
+
+def q(v):
+    return shlex.quote(str(v if v is not None else ""))
+
+
 with open(config_path, "r", encoding="utf-8") as f:
     models = yaml.safe_load(f) or {}
 
 if model_name not in models:
-    print(f'echo "ERROR: Model {model_name} not found in {config_path}"; exit 1')
+    # Quote the interpolated values: this string is eval'd by the shell, so an
+    # unescaped model_name / config_path could break the launcher or inject
+    # shell tokens.
+    msg = f"ERROR: Model {model_name} not found in {config_path}"
+    print(f"echo {q(msg)}; exit 1")
     sys.exit(0)
 
 cfg = models[model_name] or {}
 prefill = cfg.get("prefill", {}) or {}
 decode = cfg.get("decode", {}) or {}
-
-
-def q(v):
-    return shlex.quote(str(v if v is not None else ""))
 
 
 prefill_flags = prefill.get(mode, "") or ""

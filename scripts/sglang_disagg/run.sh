@@ -73,7 +73,7 @@ export RUN_LOG_DIR
 exec > >(tee -a "${RUN_LOG_DIR}/run_sh_rank${NODE_RANK}.log") 2>&1
 export xP="${xP:-${SGLANG_DISAGG_PREFILL_NODES:-1}}"
 export yD="${yD:-${SGLANG_DISAGG_DECODE_NODES:-1}}"
-export NNODES="${NNODES:-${SGLANG_DISAGG_TOTAL_NODES:-${WORLD_SIZE:-$((xP + yD))}}}"
+export NNODES="${NNODES:-${SGLANG_DISAGG_TOTAL_NODES:-${SLURM_JOB_NUM_NODES:-$((xP + yD))}}}"
 export MASTER_PORT="${MASTER_PORT:-23731}"
 export IO_EP_TP_SIZE="${IO_EP_TP_SIZE:-${SGLANG_TP_SIZE:-8}}"
 # madengine forwards MASTER_ADDR (rank-0 host) into the container; use it as the
