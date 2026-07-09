@@ -205,20 +205,34 @@ normalize_global_batch_size() {
   echo "$(( ((gbs + unit - 1) / unit) * unit ))"
 }
 
+# Pure helper: the possibly-adjusted global batch size for NUM_GPUS>8 (world
+# size scaleout), or the original gbs unchanged for single-node runs / values
+# that don't parse as plain integers. Callers must reassign their own GBS
+# variable to this so the value used for the actual run (and reported to the
+# perf CSV) always agree -- see scaleout_gbs_override below.
+effective_global_batch_size() {
+  local mbs="$1"
+  local gbs="$2"
+  if (( NUM_GPUS > 8 )) && [[ "$mbs" =~ ^[0-9]+$ && "$gbs" =~ ^[0-9]+$ ]]; then
+    normalize_global_batch_size "$mbs" "$gbs" "$NUM_GPUS"
+  else
+    echo "$gbs"
+  fi
+}
+
 # Emit the extra CLI flags needed to keep a run valid on multiple nodes: when
 # NUM_GPUS > 8 the config global_batch_size (tuned for a single 8-GPU node) is
 # renormalized against total world size and passed as an override. Prints
 # nothing for single-node runs, so behavior there is byte-for-byte identical
-# to before.
+# to before. Callers should also run `GBS=$(effective_global_batch_size ...)`
+# so the reported GBS in the perf CSV matches the value actually used.
 scaleout_gbs_override() {
   local mbs="$1"
   local gbs="$2"
-  if (( NUM_GPUS > 8 )) && [[ "$mbs" =~ ^[0-9]+$ && "$gbs" =~ ^[0-9]+$ ]]; then
-    local adjusted
-    adjusted=$(normalize_global_batch_size "$mbs" "$gbs" "$NUM_GPUS")
-    if [[ "$adjusted" != "$gbs" ]]; then
-      echo "[INFO] Adjusted global batch size for distributed run: ${gbs} -> ${adjusted} (MBS=${mbs}, NUM_GPUS=${NUM_GPUS})" >&2
-    fi
+  local adjusted
+  adjusted=$(effective_global_batch_size "$mbs" "$gbs")
+  if [[ "$adjusted" != "$gbs" ]]; then
+    echo "[INFO] Adjusted global batch size for distributed run: ${gbs} -> ${adjusted} (MBS=${mbs}, NUM_GPUS=${NUM_GPUS})" >&2
     printf -- '--global_batch_size %s' "$adjusted"
   fi
 }
@@ -246,6 +260,7 @@ if [ "$MODEL_REPO" == "Llama-3.1-8B" ]; then
   GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+  GBS=$(effective_global_batch_size "$MBS" "$GBS")
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [[ "$DATATYPE" == "MXFP4" ]]; then
       NVTE_USE_CAST_TRANSPOSE_TRITON=0 run_primus "$EXP" $GBS_OVERRIDE
@@ -279,6 +294,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-70B" ]; then
   GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
   echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
   GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+  GBS=$(effective_global_batch_size "$MBS" "$GBS")
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       run_primus "$EXP" $GBS_OVERRIDE
@@ -353,6 +369,7 @@ elif [ "$MODEL_REPO" == "Llama-3.1-405B" ]; then
     echo "Hint: add llama3.1_405B-$DATATYPE-pretrain.yaml in Primus configs."
   else
     GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+    GBS=$(effective_global_batch_size "$MBS" "$GBS")
     run_primus "$EXP" $GBS_OVERRIDE
   fi
   if [ -f "$TRAIN_LOG" ]; then
