@@ -77,8 +77,6 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # =============================================================================
 
 # === Model-Specific Configuration from YAML ===
-# Parse models.yaml into MODEL_* flags. (The runtime build layer was moved into
-# the image: docker/sglang_disagg_inference_full_overlay*.Dockerfile.)
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
 MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
 
@@ -88,10 +86,16 @@ if [[ ! -f "$MODELS_YAML" ]]; then
 fi
 
 if ! python3 -c "import yaml" >/dev/null 2>&1; then
-    echo "ERROR: PyYAML is not installed in this image, but is required to parse" >&2
-    echo "       ${MODELS_YAML}. Use an image built from" >&2
-    echo "       docker/sglang_disagg_inference_full_overlay*.Dockerfile (which" >&2
-    echo "       installs pyyaml at build time), or 'pip install pyyaml'." >&2
+    echo "[stage_deps] PyYAML not found; installing at runtime (expected on the" >&2
+    echo "             base, non-overlay image) ..." >&2
+    pip install --no-cache-dir --quiet pyyaml || true
+fi
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+    echo "ERROR: PyYAML is not installed and could not be installed at runtime," >&2
+    echo "       but is required to parse ${MODELS_YAML}. Use an image built" >&2
+    echo "       from docker/sglang_disagg_inference_full_overlay*.Dockerfile" >&2
+    echo "       (which installs pyyaml at build time), or ensure network" >&2
+    echo "       access for 'pip install pyyaml'." >&2
     exit 1
 fi
 
