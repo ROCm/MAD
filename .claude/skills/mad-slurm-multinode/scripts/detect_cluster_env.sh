@@ -24,10 +24,10 @@ echo "MAD_SYSTEM_GPU_ARCHITECTURE : ${arch:-<unknown; check rocminfo>}"
 # --- RDMA / IB HCAs ---
 hcas=""
 if command -v ibv_devices >/dev/null 2>&1; then
-  hcas=$(ibv_devices 2>/dev/null | awk 'NR>2 {print $1}' | grep -E '^(mlx5_|rdma)' | sort)
+  hcas=$(ibv_devices 2>/dev/null | awk 'NR>2 {print $1}' | grep -E '^(mlx5_|rdma|bnxt_re)' | sort)
 fi
 if [ -z "$hcas" ] && [ -d /sys/class/infiniband ]; then
-  hcas=$(ls /sys/class/infiniband 2>/dev/null | grep -E '^(mlx5_|rdma)' | sort)
+  hcas=$(ls /sys/class/infiniband 2>/dev/null | grep -E '^(mlx5_|rdma|bnxt_re)' | sort)
 fi
 if [ -n "$hcas" ]; then
   list=$(echo "$hcas" | sed 's/$/:1/' | paste -sd, -)
@@ -36,6 +36,8 @@ if [ -n "$hcas" ]; then
     fam="AINIC (ionic) -> RDMAV_DRIVERS=ionic, IBV_DRIVERS=ionic, RCCL_AINIC_ROCE=1, GID likely 1"
   elif echo "$hcas" | grep -q '^mlx5'; then
     fam="CX7/Mellanox (mlx5) -> RDMAV_DRIVERS=mlx5, IBV_DRIVERS=mlx5, GID likely 3"
+  elif echo "$hcas" | grep -q '^bnxt_re'; then
+    fam="Broadcom Thor2 (bnxt_re) -> RDMAV_DRIVERS=bnxt_re, IBV_DRIVERS=bnxt_re, GID: check show_gids"
   else
     fam="unknown vendor -> archetype not auto-classified; confirm with the user (see references/cluster-types.md)"
   fi

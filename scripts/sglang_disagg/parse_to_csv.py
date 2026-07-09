@@ -188,8 +188,12 @@ def _get_run_metadata(pipeline: str = "sglang"):
         "gpus_per_node": gpus,
         "docker_image": os.environ.get("DOCKER_IMAGE_NAME", ""),
         "machine_name": os.environ.get("SLURM_JOB_NODELIST", ""),
-        "launcher": "slurm_multi",
-        "gpu_architecture": "gfx942",
+        # This script only runs behind madengine's native sglang-disagg launcher
+        # (scripts/sglang_disagg/run.sh), so the launcher name is fixed. The GPU
+        # architecture varies by cluster; madengine exports it, with a gfx942
+        # fallback for standalone/manual invocations.
+        "launcher": "sglang-disagg",
+        "gpu_architecture": os.environ.get("MAD_SYSTEM_GPU_ARCHITECTURE", "gfx942"),
     }
 
 

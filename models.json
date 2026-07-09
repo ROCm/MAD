@@ -1980,7 +1980,7 @@
   {
     "name": "sglang_disagg_deepseek-r1",
     "url": "",
-    "dockerfile": "docker/sglang_disagg_inference",
+    "dockerfile": "docker/sglang_disagg_inference_full_overlay",
     "scripts": "scripts/sglang_disagg/run.sh",
     "n_gpus": "8",
     "owner": "mad.support@amd.com",

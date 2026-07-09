@@ -13,10 +13,6 @@ On success the rank-ordered "ip0,ip1,..." list is printed to stdout (exit 0);
 on failure an empty line is printed (exit 2), so callers can use
 `out="$(ip_rendezvous.py ... || true)"` and test for emptiness.
 
-NOTE: this file is intentionally duplicated under scripts/sglang_disagg/ and
-scripts/vllm_dissag/ (each model packages its own script dir into the image).
-Keep both copies identical.
-
 Usage:
   ip_rendezvous.py <rank> <nnodes> <host_ip> <master_addr> <port> <job_id>
 Env:
