@@ -1,0 +1,32 @@
+[
+  {
+    "id": "factual",
+    "prompt": "What is the capital of France? Answer in one word.",
+    "expect_contains": ["Paris"],
+    "max_tokens": 512
+  },
+  {
+    "id": "arithmetic",
+    "prompt": "Compute 17 multiplied by 23. Give only the number.",
+    "expect_contains": ["391"],
+    "max_tokens": 512
+  },
+  {
+    "id": "code",
+    "prompt": "Write a Python one-liner that returns the sum of a list named nums. Output only the code.",
+    "expect_contains": ["sum(", "nums"],
+    "max_tokens": 512
+  },
+  {
+    "id": "reasoning",
+    "prompt": "If a train travels 60 km in 1.5 hours, what is its average speed in km/h? Give only the number.",
+    "expect_contains": ["40"],
+    "max_tokens": 512
+  },
+  {
+    "id": "instruction",
+    "prompt": "List exactly three primary colors, comma-separated, lowercase.",
+    "expect_contains": ["red", "blue"],
+    "max_tokens": 512
+  }
+]
