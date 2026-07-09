@@ -67,7 +67,7 @@ if ! mkdir -p "${RUN_LOG_DIR}" 2>/dev/null || [[ ! -w "${RUN_LOG_DIR}" ]]; then
     echo "       rank-0 proxy greps them across nodes. Mount it and re-run." >&2
     exit 1
 fi
-chmod 0777 /run_logs 2>/dev/null || true
+chmod 1777 /run_logs 2>/dev/null || true
 chmod -R 0777 "${RUN_LOG_DIR}" 2>/dev/null || true
 export RUN_LOG_DIR
 exec > >(tee -a "${RUN_LOG_DIR}/run_sh_rank${NODE_RANK}.log") 2>&1
@@ -200,10 +200,10 @@ if ! _weights_complete; then
     else
         echo "[stage_weights] NODE_RANK=${NODE_RANK} waiting for weights at ${MODEL_PATH}"
         for _i in $(seq 1 720); do
-            [[ -f "${_SENTINEL}" && -f "${MODEL_PATH}/config.json" ]] && break
+            _weights_complete && break
             sleep 10
         done
-        [[ -f "${MODEL_PATH}/config.json" ]] || { echo "[stage_weights] timed out waiting for weights" >&2; exit 1; }
+        _weights_complete || { echo "[stage_weights] timed out waiting for weights" >&2; exit 1; }
     fi
 fi
 

@@ -1982,7 +1982,7 @@
     "url": "",
     "dockerfile": "docker/sglang_disagg_inference_full_overlay",
     "scripts": "scripts/sglang_disagg/run.sh",
-    "n_gpus": "8",
+    "n_gpus": "-1",
     "owner": "mad.support@amd.com",
     "training_precision": "",
     "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
