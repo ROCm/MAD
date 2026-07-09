@@ -103,8 +103,7 @@ IP_SYNC_PORT="${IP_SYNC_PORT:-$((20000 + (${SLURM_JOB_ID:-0} % 40000)))}"
 
 # rank-0 acts as a tiny TCP rendezvous server: peers connect to MASTER_ADDR and
 # report their host IP; rank-0 aggregates the rank-ordered list and broadcasts.
-# The implementation lives in the sibling ip_rendezvous.py so it can be unit
-# tested and is shared (duplicated, kept identical) with scripts/vllm_dissag/.
+# The implementation lives in the sibling ip_rendezvous.py so it can be unit tested.
 _tcp_discover_ipaddrs() {
   python3 "$SCRIPT_DIR/ip_rendezvous.py" \
     "${NODE_RANK}" "${NNODES}" "${HOST_IP}" "${MASTER_ADDR}" "${IP_SYNC_PORT}" "${SLURM_JOB_ID:-0}"
