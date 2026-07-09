@@ -87,6 +87,14 @@ if [[ ! -f "$MODELS_YAML" ]]; then
     exit 1
 fi
 
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+    echo "ERROR: PyYAML is not installed in this image, but is required to parse" >&2
+    echo "       ${MODELS_YAML}. Use an image built from" >&2
+    echo "       docker/sglang_disagg_inference_full_overlay*.Dockerfile (which" >&2
+    echo "       installs pyyaml at build time), or 'pip install pyyaml'." >&2
+    exit 1
+fi
+
 export MODELS_YAML MODEL_NAME PARALLEL_MODE xP GPUS_PER_NODE
 eval "$(python3 - <<'PY'
 import os
