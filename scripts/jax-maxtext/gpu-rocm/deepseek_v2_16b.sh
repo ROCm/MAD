@@ -68,7 +68,8 @@ $docker run --rm --privileged --network host --device /dev/dri --device /dev/kfd
     echo \"Running Deepseek-v2-16b\"
     echo '${IMAGE}'
     cp $OUTPUT_DIR/deepseek2_env_16b.sh .
-    cp $OUTPUT_DIR/deepseek2_16b_gpu.yml MaxText/configs/.
+    mkdir -p configs
+    cp $OUTPUT_DIR/deepseek2_16b_gpu.yml configs/.
     source deepseek2_env_16b.sh
-    python /workspace/maxtext/MaxText/train.py MaxText/configs/deepseek2_16b_gpu.yml base_output_directory=output 2>&1 |& tee -a  deepseek_v2_16b.log
+    python -m maxtext.trainers.pre_train.train configs/deepseek2_16b_gpu.yml base_output_directory=output 2>&1 |& tee -a  deepseek_v2_16b.log
    "

@@ -68,7 +68,7 @@ fi
 echo "GPU DEVICE name: $DEVICE"
 
 MAXTEXT="/workspace/maxtext"
-MAXTEXT_DIR="/workspace/maxtext/MaxText"
+MAXTEXT_DIR="/workspace/maxtext/src/maxtext"
 ENV_SCRIPT_DIR="$(pwd)/env_scripts"
 
 cd $MAXTEXT
@@ -105,7 +105,7 @@ execute_training(){
 
   # execute
   source $env_file
-  python -m MaxText.train $config_file \
+  python -m maxtext.trainers.pre_train.train $config_file \
   quantization=$3 2>&1 |& tee -a  $2.log
   if [ -z "$3" ]; then
     python3 $perf_script --model $MODEL_REPO --input $MAXTEXT/$2.log --output $PERF_LOG --mode $MODE --quantization bf16 --batch_size $per_device_batch_size --seq_len $max_target_length --device $DEVICE --num_gpus $NUM_GPUS

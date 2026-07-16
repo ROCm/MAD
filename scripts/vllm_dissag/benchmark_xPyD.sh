@@ -37,7 +37,7 @@ IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024
 
 echo "Benchmarking iterations: $BENCHMARK_ITR" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 for i in $(seq 1 $BENCHMARK_ITR); do
-    echo "Running the benchserving script for iter: $i"
+    echo "Running the benchserving script for iter: $i" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
     for combo in "${COMBINATIONS[@]}"; do
        IFS="/" read -r isl osl <<< "$combo"
        for con in $CON; do
@@ -51,7 +51,8 @@ for i in $(seq 1 $BENCHMARK_ITR); do
            if [ "$_scaled_timeout" -lt "$_base_timeout" ]; then
                _scaled_timeout=$_base_timeout
            fi
-           echo "[RUNNING] prompts $p_con isl $isl osl $osl con $con (timeout ${_scaled_timeout}s)"
+           echo "[RUNNING] prompts $p_con isl $isl osl $osl con $con (timeout ${_scaled_timeout}s)" \
+               | tee -a ${LOG}_CONCURRENCY.log >/dev/null
            timeout $_scaled_timeout vllm bench serve \
            --model $MODEL_PATH \
            --backend vllm \
@@ -76,3 +77,7 @@ for i in $(seq 1 $BENCHMARK_ITR); do
         done
     done
 done
+python3 $NIXL_COOKBOOK_PATH/parse_to_csv.py ${LOG}_CONCURRENCY.log -o ${LOG}_CONCURRENCY.csv \
+	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
+	--model-name "${MODEL_NAME}" \
+	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

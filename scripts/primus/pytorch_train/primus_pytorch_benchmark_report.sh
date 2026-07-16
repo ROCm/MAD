@@ -130,10 +130,36 @@ echo "PERF LOG: $PERF_LOG"
 
 perf_script="$(pwd)/primus_pytorch_benchmark_report.py"
 
+# Resolve ROCm CLI directory (UTD: ${ROCM_PATH}/bin or venv _rocm_sdk_devel; classic /opt/rocm/bin).
+# Inlined so device detection works when only this script is copied into the container (no scripts/common/).
+ROCM_BIN="/opt/rocm/bin"
+if [[ -n "${ROCM_PATH:-}" && -x "${ROCM_PATH}/bin/rocminfo" ]]; then
+  ROCM_BIN="${ROCM_PATH}/bin"
+elif [[ -x /opt/rocm/bin/rocminfo ]]; then
+  ROCM_BIN="/opt/rocm/bin"
+else
+  shopt -s nullglob
+  for _d in /opt/venv/lib/python*/site-packages/_rocm_sdk_devel/bin; do
+    if [[ -x "${_d}/rocminfo" ]]; then
+      ROCM_BIN="${_d}"
+      break
+    fi
+  done
+  shopt -u nullglob
+fi
+if [[ ! -x "${ROCM_BIN}/rocminfo" ]]; then
+  _rocm_which="$(command -v rocminfo 2>/dev/null || true)"
+  if [[ -n "${_rocm_which}" && -x "${_rocm_which}" ]]; then
+    ROCM_BIN="$(dirname "${_rocm_which}")"
+  fi
+fi
+export ROCM_BIN
+export PATH="${ROCM_BIN}:${PATH}"
+
 # Run rocminfo and grep for "AMD Instinct"
-DEVICE=$(/opt/rocm/bin/rocminfo | grep "AMD Instinct" | head -n1 | awk '{print $5}')
+DEVICE=$("${ROCM_BIN}/rocminfo" | grep "AMD Instinct" | head -n1 | awk '{print $5}')
 if [[ -z "$DEVICE" || ("$DEVICE" != "MI300X" && "$DEVICE" != "MI355X") ]]; then
-  ARCH=$(/opt/rocm/bin/rocminfo | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
+  ARCH=$("${ROCM_BIN}/rocminfo" | grep -o 'gfx942\|gfx950' | head -n 1 | tr -d '[:space:]')
   case "$ARCH" in
     "gfx942") DEVICE="MI300X" ;;
     "gfx950") DEVICE="MI355X" ;;

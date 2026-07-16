@@ -6,6 +6,7 @@ to avoid code duplication.
 """
 
 import json
+import os
 import socket as sock
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -80,7 +81,14 @@ def collect_version_info(
         except Exception:
             rocm_version = "unknown"
         if rocm_version == "unknown":
-            for _path in ("/opt/rocm/.info/version", "/opt/rocm/version"):
+            _paths = ["/opt/rocm/.info/version", "/opt/rocm/version"]
+            _rp = os.environ.get("ROCM_PATH", "").strip()
+            if _rp:
+                _paths[:0] = [
+                    os.path.join(_rp, ".info", "version"),
+                    os.path.join(_rp, "version"),
+                ]
+            for _path in _paths:
                 try:
                     rocm_version = open(_path).read().strip()
                     break

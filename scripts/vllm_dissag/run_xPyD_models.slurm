@@ -13,17 +13,51 @@
 # Auto-detect and cd to the script directory so that $(pwd) always
 # points to the folder containing the server scripts, regardless of
 # where the user called sbatch from.
-# Under Slurm, $0 points to a spool copy, so prefer SLURM_SUBMIT_DIR.
+#
+# Priority:
+# 1. BASH_SOURCE — works for direct invocation (bash script.sh)
+# 2. SLURM_SUBMIT_DIR + script path — when sbatch submits from repo root,
+#    SLURM_SUBMIT_DIR is the CWD, not the script dir. Append the relative
+#    path from the SBATCH command to get the actual script directory.
+# 3. SLURM_SUBMIT_DIR alone — last resort (assumes sbatch was run from
+#    the script directory).
 # ------------------------
-if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-    SCRIPT_DIR="$SLURM_SUBMIT_DIR"
-else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-    SCRIPT_DIR="${SCRIPT_DIR:-.}"
-fi
+_resolve_script_dir() {
+    # Try BASH_SOURCE first (works for direct invocation)
+    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+        local _d
+        _d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+        if [[ -n "$_d" && -f "$_d/vllm_disagg.sh" ]]; then
+            echo "$_d"
+            return 0
+        fi
+    fi
+
+    # Try SLURM_SUBMIT_DIR + relative script path
+    # When madengine does: sbatch scripts/vllm_dissag/run_xPyD_models.slurm
+    # SLURM_SUBMIT_DIR = repo root, so we need to append the dirname
+    if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+        local _candidate="$SLURM_SUBMIT_DIR/scripts/vllm_dissag"
+        if [[ -f "$_candidate/vllm_disagg.sh" ]]; then
+            echo "$_candidate"
+            return 0
+        fi
+        # Maybe they ran sbatch from the script dir itself
+        if [[ -f "$SLURM_SUBMIT_DIR/vllm_disagg.sh" ]]; then
+            echo "$SLURM_SUBMIT_DIR"
+            return 0
+        fi
+    fi
+
+    # Fallback
+    echo "."
+    return 1
+}
+
+SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
-REQUIRED_FILES=("vllm_disagg_server.sh" "vllm_disagg_mori_ep.sh" "vllm_disagg_server_deepep.sh" "benchmark_xPyD.sh")
+REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
         echo "Error: Required file '$f' not found in $(pwd)." >&2
@@ -43,7 +77,7 @@ echo "PST Time: $(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "======================="
 echo ""
 
-# Define valid model names
+# Define valid model names (must have a models.yaml entry)
 VALID_MODELS=( \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
@@ -51,16 +85,18 @@ VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "gpt-oss-120b" \
     "DeepSeek-R1" \
+    "Qwen3-32B" \
+    "Qwen3-30B-A3B" \
 )
 
-# Models allowed for vllm_disagg_mori_ep.sh when RUN_MORI=1
+# Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
 MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
 )
 
-# Models allowed for vllm_disagg_server_deepep.sh when RUN_DEEPEP=1
+# Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
 DEEPEP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
@@ -110,8 +146,14 @@ model_allows_deepep() {
 }
 
 # ---------------------------------------------------------------------------
-# Run-mode selection: exactly one of RUN_MORI / RUN_DEEPEP may be "1".
+# Axis selection -> single launcher (vllm_disagg.sh).
+# Two axes: CONNECTOR={rixl|moriio} x WIDE_EP={0=TP|1=wideEP}; EP_BACKEND only
+# when WIDE_EP=1 (rixl->deepep, moriio->mori). Legacy RUN_MORI / RUN_DEEPEP are
+# still honored via a back-compat shim. The launcher itself does the final
+# CONNECTOR/WIDE_EP/EP_BACKEND validation; here we resolve them + gate the model
+# against the existing allowlists.
 # ---------------------------------------------------------------------------
+RUN_FILE="vllm_disagg.sh"
 _run_mori="${RUN_MORI:-0}"
 _run_deepep="${RUN_DEEPEP:-0}"
 
@@ -120,37 +162,83 @@ if [[ "$_run_mori" == "1" && "$_run_deepep" == "1" ]]; then
   exit 1
 fi
 
-if [[ "$_run_mori" == "1" ]]; then
-  if model_allows_mori_ep "$MODEL_NAME"; then
-    RUN_FILE="vllm_disagg_mori_ep.sh"
-    echo "RUN_MORI=1: using $RUN_FILE for model '$MODEL_NAME'"
+# Back-compat: legacy flags map onto the axes when CONNECTOR is not set explicitly.
+if [[ -z "${CONNECTOR:-}" ]]; then
+  if [[ "$_run_mori" == "1" ]]; then
+    CONNECTOR=moriio; WIDE_EP="${WIDE_EP:-1}"; EP_BACKEND="${EP_BACKEND:-mori}"
+  elif [[ "$_run_deepep" == "1" ]]; then
+    CONNECTOR=rixl; WIDE_EP="${WIDE_EP:-1}"; EP_BACKEND="${EP_BACKEND:-deepep}"
   else
-    echo "Error: RUN_MORI=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS"
-    printf "MoRI EP allowed models:\n"
-    for m in "${MORI_EP_VALID_MODELS[@]}"; do
-      printf "  - %s\n" "$m"
-    done
+    # Default keeps the historical "no flags" behavior: rixl + TP.
+    CONNECTOR=rixl; WIDE_EP="${WIDE_EP:-0}"
+  fi
+fi
+WIDE_EP="${WIDE_EP:-0}"
+
+# Models that ONLY run wideEP (DP/EP), never TP: the DeepSeek family is served with
+# the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
+# in TP mode is unsupported — the TP argv would double the model's own
+# --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+model_is_wide_ep_only() {
+  local m="$1"
+  for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
+  return 1
+}
+
+# Model allowlist gate (kept, sglang-style). wideEP modes use the per-backend
+# allowlists; TP uses the global VALID_MODELS (already validated above) minus the
+# wideEP-only models.
+if [[ "$WIDE_EP" == "0" ]]; then
+  if model_is_wide_ep_only "$MODEL_NAME"; then
+    echo "Error: MODEL_NAME '$MODEL_NAME' is wideEP-only (set WIDE_EP=1). TP mode is not supported for it." >&2
+    printf "wideEP-only models:\n"; for m in "${WIDE_EP_ONLY_MODELS[@]}"; do printf "  - %s\n" "$m"; done
     exit 1
   fi
-elif [[ "$_run_deepep" == "1" ]]; then
-  if model_allows_deepep "$MODEL_NAME"; then
-    RUN_FILE="vllm_disagg_server_deepep.sh"
-    echo "RUN_DEEPEP=1: using $RUN_FILE for model '$MODEL_NAME'"
-  else
-    echo "Error: RUN_DEEPEP=1 but MODEL_NAME '$MODEL_NAME' is not in DEEPEP_VALID_MODELS"
-    printf "DeepEP allowed models:\n"
-    for m in "${DEEPEP_VALID_MODELS[@]}"; do
-      printf "  - %s\n" "$m"
-    done
+elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "moriio" ]]; then
+  if ! model_allows_mori_ep "$MODEL_NAME"; then
+    echo "Error: CONNECTOR=moriio WIDE_EP=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS" >&2
+    printf "MoRI EP allowed models:\n"; for m in "${MORI_EP_VALID_MODELS[@]}"; do printf "  - %s\n" "$m"; done
     exit 1
   fi
+elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
+  if ! model_allows_deepep "$MODEL_NAME"; then
+    echo "Error: CONNECTOR=rixl WIDE_EP=1 (deepep) but MODEL_NAME '$MODEL_NAME' is not in DEEPEP_VALID_MODELS" >&2
+    printf "DeepEP allowed models:\n"; for m in "${DEEPEP_VALID_MODELS[@]}"; do printf "  - %s\n" "$m"; done
+    exit 1
+  fi
+fi
+
+export CONNECTOR WIDE_EP EP_BACKEND
+echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}) for model '$MODEL_NAME'"
+
+# ---------------------------------------------------------------------------
+# Connector platform env: per-connector <connector>.env holds the ROCm-7.2.3
+# runtime env that MUST reach the container at PID 1 (e.g. expandable_segments:False
+# for GPU-RDMA registration). Source the resolved connector's file and collect its
+# KEY=VALUE lines into CONNECTOR_ENV_ARGS as `-e KEY=${KEY:-VALUE}` pairs, so a
+# submit-time export of the same name still overrides. Forwarded in the docker run.
+# ---------------------------------------------------------------------------
+CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
+CONNECTOR_ENV_ARGS=""
+if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
+  echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
+  while IFS= read -r _line; do
+    [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
+    _k="${_line%%=*}"; _v="${_line#*=}"
+    CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
+  done < "$CONNECTOR_ENV_FILE"
 else
-  RUN_FILE="vllm_disagg_server.sh"
-  echo "RUN_MORI/RUN_DEEPEP not set: using $RUN_FILE"
+  echo "WARN: connector env file not found: $CONNECTOR_ENV_FILE" >&2
 fi
 
 if [[ -z "${DOCKER_IMAGE_NAME:-}" ]]; then
-  echo "Error: DOCKER_IMAGE_NAME is not set. Please export DOCKER_IMAGE_NAME before running."
+  echo "Error: DOCKER_IMAGE_NAME is not set. Please export DOCKER_IMAGE_NAME before running." >&2
+  echo "  There is no public prebuilt image. Build your own from the provided Dockerfile:" >&2
+  echo "    docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile \\" >&2
+  echo "      -t <your-registry>/vllm-disagg:local .   # all connectors (WITH_NIXL=1 default)" >&2
+  echo "    (add --build-arg WITH_NIXL=0 for a lean MoRI-EP-only image)" >&2
+  echo "  then: export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:local" >&2
   exit 1
 fi
 export DOCKER_IMAGE_NAME
@@ -336,6 +424,21 @@ BENCHMARK_ITR="${BENCHMARK_ITR:-1}"
 BENCHMARK_CON="${BENCHMARK_CON:-}"
 BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 
+# Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
+#   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
+#   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
+case "$BENCHMARK_SCRIPT" in
+    sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
+    long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+esac
+if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
+    echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
+    exit 1
+fi
+echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
+
 NNODES=$NUM_NODES
 
 echo "MASTER_NODE is ${MASTER_NODE}"
@@ -351,6 +454,7 @@ else
     echo "Directory already exists: $LOG_PATH"
 fi
 
+export CONNECTOR_ENV_ARGS="$CONNECTOR_ENV_ARGS"
 export LOG_PATH=$LOG_PATH
 export NIXL_REPO_DIR=$NIXL_REPO_DIR
 export NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH
@@ -366,6 +470,7 @@ export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 export BENCHMARK_ITR=$BENCHMARK_ITR
 export BENCHMARK_CON="${BENCHMARK_CON}"
 export BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}"
+export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE}"
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
@@ -376,6 +481,7 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
+docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
 fuser -k 5000/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
@@ -384,6 +490,27 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+
+# --- Persistent JIT cache mount ---
+# The image points AITER_JIT_DIR/TRITON_CACHE_DIR/VLLM_CACHE_ROOT/COMGR_CACHE_DIR at
+# /opt/vllm_cache. Mount a host dir there so AITER CK kernels compile ONCE and are reused
+# across runs. Cold compile is ~15 min for the DeepSeek MoE/FP8 GEMM kernel set; a warm
+# boot is ~1 min. Keyed by image ID so a new image starts a fresh cache and does not reuse
+# stale-ABI shared objects. Host dir on local NVMe. Override JIT_CACHE_HOST, or set
+# JIT_CACHE_PERSIST=0 to disable and fall back to the image empty in-container cache.
+# NOTE: this whole section runs inside a single-quoted `srun bash -c '...'`, so avoid
+# single quotes here; the image-id hash is extracted with tr, not sed.
+if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
+    _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
+    _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
+    _IMG_KEY="${_IMG_KEY:-noimg}";
+    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
+    echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
+else
+    _JIT_CACHE_MOUNT="";
+fi
 
 # --- Build host RDMA library mounts ---
 _RDMA_MOUNTS=""
@@ -420,12 +547,13 @@ docker run --rm \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size 64G \
+    --shm-size ${DOCKER_SHM_SIZE:-256G} \
     --ulimit nofile=524288:524288 \
     --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
+    ${_JIT_CACHE_MOUNT} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
@@ -443,46 +571,68 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
-    -e BENCHMARK_PORT=${BENCHMARK_PORT:-} \
-    -e PROXY_TYPE=${PROXY_TYPE:-} \
-    -e ROUTER_PORT=${ROUTER_PORT:-} \
+    ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
+    ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
+    ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
-    -e PREFILL_DEEPEP_BACKEND=${PREFILL_DEEPEP_BACKEND:-} \
-    -e DECODE_DEEPEP_BACKEND=${DECODE_DEEPEP_BACKEND:-} \
-    -e ENABLE_DBO=${ENABLE_DBO:-} \
-    -e DBO_COMM_SMS=${DBO_COMM_SMS:-} \
-    -e ENABLE_PROFILING=${ENABLE_PROFILING:-} \
-    -e NCCL_IB_HCA=${NCCL_IB_HCA:-} \
-    -e NCCL_IB_GID_INDEX=${NCCL_IB_GID_INDEX:-} \
-    -e NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-} \
-    -e NCCL_CROSS_NIC=${NCCL_CROSS_NIC:-} \
-    -e NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-} \
-    -e GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-} \
+    ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
+    ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
+    ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
+    ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
+    ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
+    ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
+    ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
+    ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
+    ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
+    ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
+    ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
+    ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
+    ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
+    ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
+    ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
+    ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
+    ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
+    ${MORI_RDMA_TC:+-e MORI_RDMA_TC=$MORI_RDMA_TC} \
+    ${MORI_RDMA_SL:+-e MORI_RDMA_SL=$MORI_RDMA_SL} \
+    ${MORI_SHMEM_HEAP_SIZE:+-e MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE} \
+    ${PREFILL_DEEPEP_BACKEND:+-e PREFILL_DEEPEP_BACKEND=$PREFILL_DEEPEP_BACKEND} \
+    ${DECODE_DEEPEP_BACKEND:+-e DECODE_DEEPEP_BACKEND=$DECODE_DEEPEP_BACKEND} \
+    ${ENABLE_DBO:+-e ENABLE_DBO=$ENABLE_DBO} \
+    ${DBO_COMM_SMS:+-e DBO_COMM_SMS=$DBO_COMM_SMS} \
+    ${ENABLE_PROFILING:+-e ENABLE_PROFILING=$ENABLE_PROFILING} \
+    ${NCCL_IB_HCA:+-e NCCL_IB_HCA=$NCCL_IB_HCA} \
+    ${NCCL_IB_GID_INDEX:+-e NCCL_IB_GID_INDEX=$NCCL_IB_GID_INDEX} \
+    ${NCCL_NET_GDR_LEVEL:+-e NCCL_NET_GDR_LEVEL=$NCCL_NET_GDR_LEVEL} \
+    ${NCCL_CROSS_NIC:+-e NCCL_CROSS_NIC=$NCCL_CROSS_NIC} \
+    ${NCCL_SOCKET_IFNAME:+-e NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME} \
+    ${GLOO_SOCKET_IFNAME:+-e GLOO_SOCKET_IFNAME=$GLOO_SOCKET_IFNAME} \
     -e MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-eth0} \
-    -e MORI_IB_GID_INDEX=${MORI_IB_GID_INDEX:-} \
-    -e MORI_RDMA_DEVICES=${MORI_RDMA_DEVICES:-} \
-    -e MORI_NUM_QP_PER_PE=${MORI_NUM_QP_PER_PE:-} \
-    -e VLLM_MORIIO_QP_PER_TRANSFER=${VLLM_MORIIO_QP_PER_TRANSFER:-} \
-    -e VLLM_MORIIO_NUM_WORKERS=${VLLM_MORIIO_NUM_WORKERS:-} \
+    ${MORI_IB_GID_INDEX:+-e MORI_IB_GID_INDEX=$MORI_IB_GID_INDEX} \
+    ${MORI_RDMA_DEVICES:+-e MORI_RDMA_DEVICES=$MORI_RDMA_DEVICES} \
+    ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
+    ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
+    ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
     -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
-    -e GPU_MAX_HW_QUEUES=${GPU_MAX_HW_QUEUES:-} \
-    -e HIP_FORCE_DEV_KERNARG=${HIP_FORCE_DEV_KERNARG:-} \
-    -e HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-} \
-    -e VLLM_HANDSHAKE_TIMEOUT_MINS=${VLLM_HANDSHAKE_TIMEOUT_MINS:-} \
-    -e VLLM_ENGINE_READY_TIMEOUT_S=${VLLM_ENGINE_READY_TIMEOUT_S:-} \
-    -e ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-} \
-    -e ROCSHMEM_MAX_NUM_CONTEXTS=${ROCSHMEM_MAX_NUM_CONTEXTS:-} \
-    -e LOG_WAIT_TIMEOUT_SECONDS=${LOG_WAIT_TIMEOUT_SECONDS:-} \
-    -e TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton} \
-    -e VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm} \
-    -e COMGR_CACHE_DIR=${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr} \
-    -e AITER_JIT_DIR=${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit} \
+    ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
+    ${HIP_FORCE_DEV_KERNARG:+-e HIP_FORCE_DEV_KERNARG=$HIP_FORCE_DEV_KERNARG} \
+    ${HSA_NO_SCRATCH_RECLAIM:+-e HSA_NO_SCRATCH_RECLAIM=$HSA_NO_SCRATCH_RECLAIM} \
+    ${VLLM_HANDSHAKE_TIMEOUT_MINS:+-e VLLM_HANDSHAKE_TIMEOUT_MINS=$VLLM_HANDSHAKE_TIMEOUT_MINS} \
+    ${VLLM_ENGINE_READY_TIMEOUT_S:+-e VLLM_ENGINE_READY_TIMEOUT_S=$VLLM_ENGINE_READY_TIMEOUT_S} \
+    ${ROCSHMEM_HEAP_SIZE:+-e ROCSHMEM_HEAP_SIZE=$ROCSHMEM_HEAP_SIZE} \
+    ${ROCSHMEM_MAX_NUM_CONTEXTS:+-e ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS} \
+    ${LOG_WAIT_TIMEOUT_SECONDS:+-e LOG_WAIT_TIMEOUT_SECONDS=$LOG_WAIT_TIMEOUT_SECONDS} \
+    ${TRITON_CACHE_DIR:+-e TRITON_CACHE_DIR=$TRITON_CACHE_DIR} \
+    ${VLLM_CACHE_ROOT:+-e VLLM_CACHE_ROOT=$VLLM_CACHE_ROOT} \
+    ${COMGR_CACHE_DIR:+-e COMGR_CACHE_DIR=$COMGR_CACHE_DIR} \
+    ${AITER_JIT_DIR:+-e AITER_JIT_DIR=$AITER_JIT_DIR} \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
-    -e VLLM_CUDAGRAPH_MODE=${VLLM_CUDAGRAPH_MODE:-} \
-    -e CUDAGRAPH_CAPTURE_SIZES="${CUDAGRAPH_CAPTURE_SIZES:-}" \
+    ${CONNECTOR_ENV_ARGS} \
+    ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
+    ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}

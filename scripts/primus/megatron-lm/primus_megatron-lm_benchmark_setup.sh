@@ -69,7 +69,7 @@ index b58a1527..2d9882d6 100755
 +    if [[ "$FRAMEWORK" == "megatron" ]]; then
 +        LOG_INFO "[direct] Using Megatron log parser"
 +
-+        num_warmup=$(grep -m1 'lr_warmup_iters' "${TRAIN_LOG}" | sed -En 's/.*lr_warmup_iters[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
++        num_warmup=$(grep 'lr_warmup_iters' "${TRAIN_LOG}" | sed -En 's/.*lr_warmup_iters[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
 +        num_warmup="${num_warmup:-0}"
 +        echo "Num warmup: $num_warmup"
 +
@@ -93,7 +93,7 @@ index b58a1527..2d9882d6 100755
 +    elif [[ "$FRAMEWORK" == "torchtitan" ]]; then
 +        LOG_INFO "[direct] Using Torchtitan log parser"
 +
-+        num_warmup=$(grep 'lr_scheduler.warmup_steps' "${TRAIN_LOG}" | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
++        num_warmup=$(grep 'lr_scheduler.warmup_steps' ${TRAIN_LOG} | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
 +        num_warmup="${num_warmup:-0}"
 +        echo "Num warmup (first steps skipped): $num_warmup"
 +
@@ -155,7 +155,7 @@ index b58a1527..2d9882d6 100755
 +    if [[ "$FRAMEWORK" == "megatron" ]]; then
 +        LOG_INFO "[direct] Using Megatron log parser"
 +
-+        num_warmup=$(grep -m 1 'lr_warmup_iters' "${TRAIN_LOG}" | sed -En 's/.*lr_warmup_iters[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
++        num_warmup=$(grep 'lr_warmup_iters' "${TRAIN_LOG}" | sed -En 's/.*lr_warmup_iters[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
 +        num_warmup="${num_warmup:-0}"
 +        echo "Num warmup: $num_warmup"
 +
@@ -179,7 +179,7 @@ index b58a1527..2d9882d6 100755
 +    elif [[ "$FRAMEWORK" == "torchtitan" ]]; then
 +        LOG_INFO "[direct] Using Torchtitan log parser"
 +
-+        num_warmup=$(grep -m 1 'lr_scheduler.warmup_steps' ${TRAIN_LOG} | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
++        num_warmup=$(grep 'lr_scheduler.warmup_steps' ${TRAIN_LOG} | sed -En 's/.*lr_scheduler.warmup_steps[^:]*:[[:space:]]*([0-9,]+).*/\1/p' | tr -d ',' 2>/dev/null)
 +        num_warmup="${num_warmup:-0}"
 +        echo "Num warmup (first steps skipped): $num_warmup"
 +
@@ -213,4 +213,44 @@ PATCH_EOF
   echo "[INFO] Metrics parser patch applied successfully to runner/primus-cli-direct.sh"
 else
   echo "[WARN] Metrics parser patch could not be applied (already applied or context mismatch), skipping"
+fi
+
+# Zebra-Llama FLOPs: Primus may pass a SimpleNamespace without hybrid_mlp_ratio / hybrid_attention_ratio
+# (see primus/configs/models/megatron/zebra_llama_*.yaml — ratio often omitted, defaults to 0 in Megatron).
+_ZEBRA_FLOPS="primus/backends/megatron/patches/zebra_llama_flops_patches.py"
+if [[ -f "$_ZEBRA_FLOPS" ]]; then
+  python3 << 'PY'
+from pathlib import Path
+
+path = Path("primus/backends/megatron/patches/zebra_llama_flops_patches.py")
+text = path.read_text()
+old = """        if args.hybrid_override_pattern:
+            counts = {"M": 0, "*": 0, "-": 0}
+            for layer_type in args.hybrid_override_pattern:
+                if layer_type in counts:
+                    counts[layer_type] += 1
+            return counts["*"], counts["M"], counts["-"]
+        else:
+            num_attn_layers = round(args.num_layers * args.hybrid_attention_ratio)
+            num_mlp_layers = round(args.num_layers * args.hybrid_mlp_ratio)"""
+new = """        hybrid_override_pattern = getattr(args, "hybrid_override_pattern", None)
+        if hybrid_override_pattern:
+            counts = {"M": 0, "*": 0, "-": 0}
+            for layer_type in hybrid_override_pattern:
+                if layer_type in counts:
+                    counts[layer_type] += 1
+            return counts["*"], counts["M"], counts["-"]
+        else:
+            hybrid_ar = getattr(args, "hybrid_attention_ratio", 0.0)
+            hybrid_mlp_r = getattr(args, "hybrid_mlp_ratio", 0.0)
+            num_attn_layers = round(args.num_layers * hybrid_ar)
+            num_mlp_layers = round(args.num_layers * hybrid_mlp_r)"""
+if old not in text:
+    print("[INFO] Zebra-Llama FLOPs patch: already applied or source mismatch, skipping")
+else:
+    path.write_text(text.replace(old, new, 1))
+    print("[INFO] Zebra-Llama FLOPs patch applied (getattr for hybrid ratios / override pattern)")
+PY
+else
+  echo "[WARN] Zebra-Llama FLOPs patch: $_ZEBRA_FLOPS not found, skipping"
 fi
