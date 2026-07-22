@@ -53,8 +53,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #For multigpu run, install following
 RUN pip install "xfuser>=0.4.1"
 
-# ROCm gpg key
-RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+# ROCm gpg key (keyring method — avoids deprecated apt-key / gpg-agent)
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /etc/apt/trusted.gpg.d && \
+    wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm.gpg
 RUN apt update && apt install -y \
     unzip \
     jq
