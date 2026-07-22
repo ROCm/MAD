@@ -13,8 +13,8 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X, MI350X and MI355X
 accelerators. It includes:
 
--   ✅ ROCm™ 7.2.1
--   ✅ vLLM 0.19.1
+-   ✅ ROCm™ 7.2.3
+-   ✅ vLLM 0.23.0
 -   ✅ PyTorch 2.10.0 (2.10.0+git8514f05)
 -   ✅ hipBLASLt 1.0
 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.19.1
+docker pull vllm/vllm-openai-rocm:v0.23.0
 ```
 
 ### MAD-integrated benchmarking
@@ -91,11 +91,19 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
-| pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4-Preview](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4-Preview) |
+| pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4) |
+| pyt_vllm_deepseek-v3.2_fp4             | [amd/DeepSeek-V3.2-MXFP4](https://huggingface.co/amd/DeepSeek-V3.2-MXFP4) |
+| pyt_vllm_deepseek-v4-flash             | [deepseek-ai/DeepSeek-V4-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash) |
+| pyt_vllm_deepseek-v4-pro               | [deepseek-ai/DeepSeek-V4-Pro](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro) |
+| pyt_vllm_glm-5.1_fp8                   | [zai-org/GLM-5.1-FP8](https://huggingface.co/zai-org/GLM-5.1-FP8) |
+| pyt_vllm_glm-5.1_fp4                   | [amd/GLM-5.1-MXFP4](https://huggingface.co/amd/GLM-5.1-MXFP4) |
+| pyt_vllm_glm-5.2_fp8                   | [zai-org/GLM-5.2-FP8](https://huggingface.co/zai-org/GLM-5.2-FP8) |
+| pyt_vllm_glm-5.2_fp4                   | [amd/GLM-5.2-MXFP4](https://huggingface.co/amd/GLM-5.2-MXFP4) |
 | pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
 | pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
 | pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss120b-w-mxfp4-a-fp8) |
-| pyt_vllm_llama-2-70b                   | [meta-llama/Llama-2-70b-chat-hf](https://huggingface.co/meta-llama/Llama-2-70b-chat-hf) |
+| pyt_vllm_kimi-k2.6                     | [moonshotai/Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6) |
+| pyt_vllm_kimi-k2.6_fp4                 | [amd/Kimi-K2.6-MXFP4](https://huggingface.co/amd/Kimi-K2.6-MXFP4) |
 | pyt_vllm_llama-3.1-8b                  | [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) |
 | pyt_vllm_llama-3.1-8b_fp8              | [amd/Llama-3.1-8B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV) |
 | pyt_vllm_llama-3.1-405b                | [meta-llama/Llama-3.1-405B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct) |
@@ -104,20 +112,22 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_llama-3.3-70b                 | [meta-llama/Llama-3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct) |
 | pyt_vllm_llama-3.3-70b_fp8             | [amd/Llama-3.3-70B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV) |
 | pyt_vllm_llama-3.3-70b_fp4             | [amd/Llama-3.3-70B-Instruct-MXFP4-Preview](https://huggingface.co/amd/Llama-3.3-70B-Instruct-MXFP4-Preview) |
-| pyt_vllm_llama-4-scout-17b-16e         | [meta-llama/Llama-4-Scout-17B-16E-Instruct](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct) |
-| pyt_vllm_llama-4-maverick-17b-128e     | [meta-llama/Llama-4-Maverick-17B-128E-Instruct](https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct) |
-| pyt_vllm_llama-4-maverick-17b-128e_fp8 | [meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8](https://huggingface.co/meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8) |
-| pyt_vllm_mixtral-8x7b                  | [mistralai/Mixtral-8x7B-Instruct-v0.1](https://hugggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) |
-| pyt_vllm_mixtral-8x7b_fp8              | [amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV](https://hugggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV) |
-| pyt_vllm_mixtral-8x22b                 | [mistralai/Mixtral-8x22B-Instruct-v0.1](https://hugggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1) |
-| pyt_vllm_mixtral-8x22b_fp8             | [amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV](https://hugggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV) |
-| pyt_vllm_phi-4                         | [microsoft/phi-4](https://huggingface.co/microsoft/phi-4) |
+| pyt_vllm_minimax-m2.7                  | [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) |
+| pyt_vllm_minimax-m2.7_fp4              | [amd/MiniMax-M2.7-MXFP4](https://huggingface.co/amd/MiniMax-M2.7-MXFP4) |
+| pyt_vllm_minimax-m3_mxfp8              | [MiniMaxAI/MiniMax-M3-MXFP8](https://huggingface.co/MiniMaxAI/MiniMax-M3-MXFP8) |
+| pyt_vllm_minimax-m3_fp4                | [amd/MiniMax-M3-MXFP4](https://huggingface.co/amd/MiniMax-M3-MXFP4) |
+| pyt_vllm_mixtral-8x7b                  | [mistralai/Mixtral-8x7B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1) |
+| pyt_vllm_mixtral-8x7b_fp8              | [amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV](https://huggingface.co/amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV) |
+| pyt_vllm_mixtral-8x22b                 | [mistralai/Mixtral-8x22B-Instruct-v0.1](https://huggingface.co/mistralai/Mixtral-8x22B-Instruct-v0.1) |
+| pyt_vllm_mixtral-8x22b_fp8             | [amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV](https://huggingface.co/amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV) |
 | pyt_vllm_qwen3-8b                      | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) |
 | pyt_vllm_qwen3-32b                     | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) |
 | pyt_vllm_qwen3-30b-a3b                 | [Qwen/Qwen3-30B-A3B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507) |
 | pyt_vllm_qwen3-30b-a3b_fp8             | [Qwen/Qwen3-30B-A3B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-30B-A3B-Thinking-2507-FP8) |
 | pyt_vllm_qwen3-235b-a22b               | [Qwen/Qwen3-235B-A22B-Thinking-2507](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507) |
 | pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8) |
+| pyt_vllm_qwen3.5-397b-a17b             | [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B) |
+| pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
 
 
 ### Standalone benchmarking              
@@ -127,9 +137,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.19.1
+docker pull vllm/vllm-openai-rocm:v0.23.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.19.1
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.23.0
 ```
 
 >[!NOTE]
@@ -345,7 +355,7 @@ owners and are only mentioned for informative purposes.   
 ----------
 This release note summarizes notable changes since the previous docker release.
 
-v0.19.1 release:
+v0.23.0 release:
 - Merge accuracy benchmark into serving benchmark
 
 v0.17.1 release:
