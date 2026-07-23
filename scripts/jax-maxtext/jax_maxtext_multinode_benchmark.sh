@@ -16,7 +16,7 @@ set -e
 # Arguments:
 #   config_file.yml - Required. Path to model config YAML file (absolute or relative)
 #                     Examples: llama2-7b.gpu.yml, /path/to/model.gpu.yml, ../configs/my-model.yml
-#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:maxtext-v26.4-jax0.9.1-te2.12.0)
+#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:latest)
 #
 # Examples:
 #   sbatch jax_maxtext_multinode_benchmark.sh llama2-7b.gpu.yml
