@@ -21,7 +21,7 @@ set -uo pipefail
 IMG="${IMG:-rocm/vllm-dev:vllm-0.23.1-rocm723-mi35x-mori-0625}"
 ROUTER_IMG="${ROUTER_IMG:-vllm/vllm-router:nightly-20260721-1fbcde7}"
 MODEL="${MODEL:-/models/MiniMax-M3-MXFP4}"     # flat dir w/ weights + remote-code .py (see README)
-LOG="${LOG:-./logs}"; mkdir -p "$LOG"
+LOG="${LOG:-$PWD/logs}"; mkdir -p "$LOG"; LOG="$(cd "$LOG" && pwd)"   # absolute (docker -v needs it)
 BACKEND="${BACKEND:-xgmi}"                       # xgmi | rdma
 UCXDEV="${UCXDEV:-ionic_0:1}"                    # RoCE NIC for UCX (rdma backend); harmless for xgmi
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.90}"            # lower to ~0.30 on shared/occupied nodes

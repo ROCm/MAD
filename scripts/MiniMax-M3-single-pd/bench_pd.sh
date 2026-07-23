@@ -13,7 +13,7 @@ set -uo pipefail
 IMG="${IMG:-rocm/vllm-dev:vllm-0.23.1-rocm723-mi35x-mori-0625}"
 MODEL="${MODEL:-/models/MiniMax-M3-MXFP4}"
 MOUNT="${MOUNT:-/models}"
-LOG="${LOG:-./logs/bench}"; mkdir -p "$LOG"
+LOG="${LOG:-$PWD/logs/bench}"; mkdir -p "$LOG"; LOG="$(cd "$LOG" && pwd)"   # absolute (docker -v needs it)
 ROUTER_PORT="${ROUTER_PORT:-30000}"
 SHAPES="${SHAPES:-1024,1024}"     # comma-separated "isl,osl"; space-separate multiple shapes
 CONCS="${CONCS:-1 8 32}"
@@ -24,7 +24,7 @@ for shape in $SHAPES; do
   ISL="${shape%,*}"; OSL="${shape#*,}"
   for c in $CONCS; do
     echo "[bench] --- isl=$ISL osl=$OSL conc=$c ---" | tee -a "$LOG/bench.log"
-    docker run --rm --entrypoint bash --network host -v "$MOUNT":"$MOUNT" "$IMG" -c "
+    docker run --rm --entrypoint bash --network host -v "$MOUNT":"$MOUNT" -v "$LOG":"$LOG" "$IMG" -c "
       vllm bench serve --backend openai-chat \
         --base-url http://$HOST_IP:$ROUTER_PORT --endpoint /v1/chat/completions \
         --model $MODEL --served-model-name minimaxm3 --dataset-name random \
