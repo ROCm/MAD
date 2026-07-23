@@ -88,11 +88,20 @@ for i in $(seq 1 120); do
 done
 sleep 10
 
-# 4) smoke inference through the router (exercises P->D KV transfer over $BACKEND)
+# 4) smoke inference through the router (exercises P->D KV transfer over $BACKEND).
+# Retry: right after registration the first request can fail while the engine warms up.
 echo "[run] === INFERENCE via router ($BACKEND) ===" | tee -a "$LOG/run.log"
-curl -sf http://$HOST_IP:$ROUTER_PORT/v1/chat/completions -H 'Content-Type: application/json' -d '{
- "model":"minimaxm3","messages":[{"role":"user","content":"What is 17 times 23? Reply with only the final number."}],
- "max_tokens":200,"temperature":0}' 2>&1 | tee "$LOG/infer.json" | tee -a "$LOG/run.log"
-echo "" | tee -a "$LOG/run.log"
+REQ='{"model":"minimaxm3","messages":[{"role":"user","content":"What is 17 times 23? Reply with only the final number."}],"max_tokens":200,"temperature":0}'
+for attempt in $(seq 1 12); do
+  resp=$(curl -s --max-time 120 http://$HOST_IP:$ROUTER_PORT/v1/chat/completions \
+    -H 'Content-Type: application/json' -d "$REQ" 2>&1)
+  if echo "$resp" | grep -q '"choices"'; then
+    echo "$resp" | tee "$LOG/infer.json" >/dev/null
+    echo "[run] inference OK (attempt $attempt)" | tee -a "$LOG/run.log"
+    echo "$resp" | python3 -c "import sys,json;d=json.load(sys.stdin);print('[run] answer:',d['choices'][0]['message'].get('content'))" 2>/dev/null | tee -a "$LOG/run.log"
+    break
+  fi
+  echo "[run] inference attempt $attempt not ready, retrying in 15s..." | tee -a "$LOG/run.log"; sleep 15
+done
 echo "[run] confirm backend: $(docker logs vm_decode 2>&1 | grep -oE 'Using MoRIIO backend: [A-Z]+' | tail -1)" | tee -a "$LOG/run.log"
 echo "[run] DONE $(date)" | tee -a "$LOG/run.log"
