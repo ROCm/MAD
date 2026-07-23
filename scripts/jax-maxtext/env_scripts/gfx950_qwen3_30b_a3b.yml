@@ -62,4 +62,4 @@ capacity_factor: 1
 dataset_type: "synthetic"
 tokenizer_path: "Qwen/Qwen3-30B-A3B"
 max_segments_per_seq: 32
-shardy: False
+shardy: True
