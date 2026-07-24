@@ -7,22 +7,25 @@ MaxText framework for ROCm is a specialized fork from upstream MaxText, designed
 AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs containing essential components, including Jax, XLA, ROCm libraries, and MaxText utilities. It contains the following software components to accelerate training workloads:
 
 >[!NOTE]
->Shardy is a new config in JAX 0.6.0. You might get related errors if it's not configured correctly. For now you can turn it off by setting `shardy=False` during the training run. You can also follow the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) to enable it.
+>Shardy is the partitioning system in JAX. The v26.5 Docker image ships JAX 0.10.0, so you now have to set `shardy=True` during the training run. You might get related errors if it's not configured correctly. See the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) for more details.
 >
 
 >[!NOTE]
-> There is a known performance regression for Mixtral-8x7b in v26.4. This is being tracked and will be addressed in a future release.
+> There is a known performance regression for Mixtral-8x7b in v26.5. This is being tracked and will be addressed in a future release.
 
 >[!NOTE]
 > There is a discrepancy in loss curve if you set `packing=false`. It converges at a slightly higher value than previous docker images. We can achieve the same convergence as past docker images if you set `NVTE_CK_USES_FWD_V3=0`. (i.e. using FAv2 for forward instead of FAv3). This is being tracked and will be addressed in a future release.
 
+>[!NOTE]
+> On MI355X (gfx950), RCCL's WarpSpeed feature (`RCCL_WARP_SPEED_AUTO`) — a gfx950-only optimization that is enabled by default in gfx950 builds — can cause NaN losses during training. To avoid this, set `RCCL_WARP_SPEED_AUTO=0`. For MAD-integrated benchmarking system, this is already applied automatically in the gfx950 (MI355X) environment scripts under `scripts/jax-maxtext/env_scripts/` (e.g. `gfx950_llama3_8b_env.sh`), so the benchmark scripts handle it for you. If you launch training manually on MI355X, export `RCCL_WARP_SPEED_AUTO=0` yourself. This variable is a no-op on MI300X (gfx942).
+
 | Software component | Version        |
 |--------------------|----------------|
-| ROCm               | 7.14.0a20260526       |
-| Jax                | 0.9.1                 |
+| ROCm               | 7.14.0                |
+| Jax                | 0.10.0                 |
 | Python             | 3.12.3                |
-| Transformer Engine | 2.12.0.dev0+635d7c08  |
-| hipBLASLt          | 1.4.0+807283e5        |
+| Transformer Engine | 2.15.0.dev0+rocm7.15.0a20260707.72d01a0  |
+| hipBLASLt          | 1.4.1+cd957402        |
 
 
 ## Supported features and models
@@ -178,7 +181,7 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v26.4
+docker pull rocm/jax-training:maxtext-v26.5
 ```
 ### Single Node Training examples
 
@@ -198,7 +201,7 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 Launch the Docker container.
 
 ```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.4
+docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.5
 ```
 
 Execute the training_env container (optional if not already in the container)
@@ -438,7 +441,7 @@ sbatch -N <NUM_NODES> jax_maxtext_multinode_benchmark.sh <config_file.yml> [dock
 **Parameters:**
 - `<NUM_NODES>`: Number of nodes to use for training (e.g., 2, 4, 8)
 - `<config_file.yml>`: Path to the YAML configuration file containing model and training parameters
-- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.4`
+- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.5`
 
 **Configuration files** are available in the `scripts/jax-maxtext/env_scripts/` directory for different models and GPU architectures:
 
@@ -468,7 +471,7 @@ sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_7b.yml
 
 2. **Multi-node training with Llama 2 70B model on 4 nodes with custom image:**
 ```bash
-sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.4
+sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.5
 ```
 
 3. **Multi-node training with Llama 3 8B model on 2 nodes:**
@@ -504,17 +507,23 @@ Here are some examples of using primus-cli to run training jobs with Jax MaxText
 
 Direct Mode: Running the training directly on current host or within an existing docker container.
 ```bash
+# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
+export RCCL_WARP_SPEED_AUTO=0
 ./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
 ```
 
 Container Mode: execute in Docker/Podman containers
 ```bash
-./primus-cli container --image rocm/jax-training:maxtext-v26.4 \
+# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
+export RCCL_WARP_SPEED_AUTO=0
+./primus-cli container --image rocm/jax-training:maxtext-v26.5 \
   -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
 ```
 
 Slurm Mode: execute distributed training on a Slurm cluster
 ```bash
+# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
+export RCCL_WARP_SPEED_AUTO=0
 # Use a custom config file, where you can specify the docker image and set environment variables.
 ./primus-cli --config my_maxtext_config.yaml slurm srun -N 8 \
   -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
@@ -570,8 +579,8 @@ Profile output will be written under the `base_output_directory` specified in th
 #!/bin/bash
 set -e
 
-IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.4
-TAG="$2"         # Short tag for output folder, e.g. v26.4_llama2_7b
+IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.5
+TAG="$2"         # Short tag for output folder, e.g. v26.5_llama2_7b
 PROFILE_DIR="/path/to/profiles/${TAG}"
 
 mkdir -p "${PROFILE_DIR}"
@@ -584,6 +593,8 @@ export XLA_PYTHON_CLIENT_MEM_FRACTION=.97
 export LD_LIBRARY_PATH=/usr/local/lib/:/opt/rocm/lib:$LD_LIBRARY_PATH
 export XLA_FLAGS="--xla_gpu_enable_latency_hiding_scheduler=True --xla_gpu_enable_command_buffer= <your other XLA flags>"
 export GPU_MAX_HW_QUEUES=2
+# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
+export RCCL_WARP_SPEED_AUTO=0
 
 cd /workspace/maxtext
 

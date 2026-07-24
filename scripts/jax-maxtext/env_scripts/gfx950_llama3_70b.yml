@@ -72,4 +72,4 @@ dataset_type: "synthetic"
 tokenizer_path: "meta-llama/Meta-Llama-3-70B"
 
 max_segments_per_seq: 32
-shardy: False
+shardy: True

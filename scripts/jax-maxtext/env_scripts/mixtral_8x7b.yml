@@ -46,6 +46,7 @@ ici_expert_parallelism: -1
 remat_policy: "save_dot_with_context_except_mlp"
 use_iota_embed: True
 scan_layers: True
+moe_dispatch_no_expert_sharding: True
 
 async_checkpointing: False
 logits_dot_in_fp32: False
@@ -67,4 +68,4 @@ dataset_type: "synthetic"
 tokenizer_path: "mistralai/Mixtral-8x7B-v0.1"
 
 max_segments_per_seq: 32
-shardy: False
+shardy: True
