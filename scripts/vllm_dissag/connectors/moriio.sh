@@ -200,6 +200,12 @@ connector_launch_worker() {
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+        # Bound the attention workspace: without --max-model-len vLLM sizes it for the
+        # model's full context (DeepSeek-V3 = 163840), producing a ~128 GiB workspace
+        # alloc that OOMs alongside the EP-sharded weights. MAX_MODEL_LEN (models.yaml)
+        # caps it to what the workload needs.
+        local mml_args=()
+        [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
@@ -213,6 +219,7 @@ connector_launch_worker() {
                     --port "${SERVE_PORT}" \
                     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
                     "${mem_args[@]}" \
+                    "${mml_args[@]}" \
                     --kv-cache-dtype "${_kvdtype}" \
                     --block-size "${_block}" \
                     --no-enable-prefix-caching \
@@ -233,6 +240,7 @@ connector_launch_worker() {
             --port ${SERVE_PORT} \
             --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.8} \
             "${mem_args[@]}" \
+            "${mml_args[@]}" \
             --kv-cache-dtype "${_kvdtype}" \
             --block-size "${_block}" \
             --no-enable-prefix-caching \
