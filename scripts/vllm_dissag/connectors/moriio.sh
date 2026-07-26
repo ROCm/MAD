@@ -40,7 +40,19 @@ connector_init() {
     # decode=low_latency (InterNodeV1LL) and REJECT the bare "mori" alias. Default
     # to the per-role names; override via PREFILL_MORI_BACKEND/DECODE_MORI_BACKEND
     # (or VLLM_ALL2ALL_BACKEND for the prefill side).
-    PREFILL_MORI_BACKEND="${PREFILL_MORI_BACKEND:-${VLLM_ALL2ALL_BACKEND:-mori_high_throughput}}"
+    #
+    # DP-aware prefill default: the high_throughput InterNodeV1 dispatch silently
+    # mis-routes MoE tokens at >=32-way expert parallelism (validated on DeepSeek-V3
+    # NIAH: PREFILL_DP=32 collapses to ~4/10 with empty answers; decode's low_latency
+    # path is clean at DP=32). Fall back to low_latency for prefill when PREFILL_DP>=32
+    # so wide topologies (4P+/xPyD) are correct out of the box. Any explicit
+    # PREFILL_MORI_BACKEND/VLLM_ALL2ALL_BACKEND override still wins.
+    local _prefill_default="mori_high_throughput"
+    if [[ "${PREFILL_DP_SIZE:-0}" -ge 32 ]]; then
+        _prefill_default="mori_low_latency"
+        echo "[moriio] PREFILL_DP_SIZE=${PREFILL_DP_SIZE} >= 32: defaulting prefill backend to mori_low_latency (high_throughput InterNodeV1 mis-routes at EP>=32)."
+    fi
+    PREFILL_MORI_BACKEND="${PREFILL_MORI_BACKEND:-${VLLM_ALL2ALL_BACKEND:-${_prefill_default}}}"
     DECODE_MORI_BACKEND="${DECODE_MORI_BACKEND:-mori_low_latency}"
 }
 
