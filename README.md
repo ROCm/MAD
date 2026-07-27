@@ -28,6 +28,7 @@ Below are blueprints of supported models along with their documentation.
 | [**Qwen3.5-35B-A3B aggregated inference**](scripts/Qwen3.5/README.md) | Single-node aggregated serving/benchmark (SGLang/vLLM); recommended default SGLang+MXFP4+TP1 (8 instances/node) | Qwen3.5-35B-A3B (MXFP4, FP8) |
 | [**MiniMax-M3 disaggregated P/D inference**](scripts/MiniMax-M3/README.md) | Distributed Inference P/D disaggregation for MiniMax-M3 on MI355X (ATOM+mooncake, MXFP4); top-throughput InferenceX config | MiniMax-M3 (MXFP4) |
 | [**MiniMax-M3 single-node P/D over XGMI**](scripts/MiniMax-M3-single-pd/README.md) | Single-node prefill/decode disaggregation for MiniMax-M3 on MI355X via vLLM + MoRIIO with GPU-to-GPU XGMI KV transfer (TP4/TP4) | MiniMax-M3 (MXFP4) |
+| [**GLM-5.2 disaggregated P/D inference**](scripts/GLM-5.2-disagg/README.md) | Two-node prefill/decode disaggregation for GLM-5.2 on MI355X (ATOM + atomesh + mooncake TCP KV transfer, TP8/TP8) | GLM-5.2 (MXFP4) |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 
 ## Table of Contents
