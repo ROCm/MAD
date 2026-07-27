@@ -165,6 +165,7 @@ def run_latency(model, config):
         f"--batch-size {config['bs']} "
         f"--num-iters-warmup 3 --num-iters 5 "
         f"--no-enable-prefix-caching "
+        f"--trust-remote-code "
         f"--output-json {output_json} "
     )
     # pop env and extra args from config
@@ -203,6 +204,7 @@ def run_throughput(model, config):
         f"--output-len {config['out']} "
         f"--num-prompts {config['num_prompts']} "
         f"--no-enable-prefix-caching "
+        f"--trust-remote-code "
         f"--output-json {output_json} "
     )
     # pop env and extra args from config
@@ -241,15 +243,13 @@ def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
         config["num_prompts"] = str(10 * int(config["max_concurrency"]))
-    output_json = (
-        f"{config['model']}_serving_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
-    )
     server_cmd = (
         "vllm serve "
         f"{model} "
         f"--dtype {config['dtype']} "
         f"-tp {config['tp']} "
         f"--no-enable-prefix-caching "
+        f"--trust-remote-code "
         f"--disable-uvicorn-access-log "
     )
     # pop env and extra args from config
@@ -274,11 +274,17 @@ def run_serving(model, config):
         else:
             print(f"Server at {server.pid} contacted successfully", flush=True)
 
-        # pop bench_args once; extract --apply_chat_template for lm_eval
+        # pop bench_args once
+        # extract --run_accuracy bool; by default always run accuracy after serving
+        # extract --apply_chat_template for lm_eval
         bench_args = config.pop('bench_args', {})
+        run_accuracy = bench_args.pop('--run_accuracy', True)
         apply_chat_template = bench_args.pop('--lmeval_apply_chat_template', False)
 
         # run serving benchmark
+        output_json = (
+            f"{config['model']}_serving_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
+        )
         bench_cmd = (
             "vllm bench serve "
             f"--model {model} "
@@ -286,6 +292,7 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--temperature 0 "
+            f"--trust-remote-code "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -330,54 +337,59 @@ def run_serving(model, config):
                     }
                     results.append(result)
 
-        # run accuracy benchmark
-        model_args = {
-            "model": model,
-            "max_gen_toks": 2048,
-            "num_concurrent": 256,
-            "max_retries": 10,
-            "base_url": "http://localhost:8000/v1/completions"
-        }
-        model_args = ",".join([f"{k}={v}" for k, v in model_args.items()])
-        lmeval_cmd = (
-            "lm_eval "
-            "--model local-completions "
-            f"--model_args {model_args} "
-            f"--tasks gsm8k "
-            f"--batch_size {config['max_concurrency']} "
-            f"--limit 250 "
-            f"--output_path ./tmp "
-        )
-        if apply_chat_template:
-            lmeval_cmd += "--apply_chat_template "
-        config["cmd"] = f"{server_cmd};{bench_cmd};{lmeval_cmd}"
-        print(lmeval_cmd)
-        subprocess.run(lmeval_cmd, shell=True, check=True)
+        if run_accuracy:
+            # run accuracy benchmark
+            output_json = (
+                f"{config['model']}_accuracy_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
+            )
+            model_args = {
+                "model": model,
+                "max_gen_toks": 2048,
+                "num_concurrent": 256,
+                "max_retries": 10,
+                "base_url": "http://localhost:8000/v1/completions",
+                "trust_remote_code": True
+            }
+            model_args = ",".join([f"{k}={v}" for k, v in model_args.items()])
+            lmeval_cmd = (
+                "lm_eval "
+                "--model local-completions "
+                f"--model_args {model_args} "
+                f"--tasks gsm8k "
+                f"--batch_size {config['max_concurrency']} "
+                f"--limit 250 "
+                f"--output_path ./tmp "
+            )
+            if apply_chat_template:
+                lmeval_cmd += "--apply_chat_template "
+            config["cmd"] = f"{server_cmd};{bench_cmd};{lmeval_cmd}"
+            print(lmeval_cmd)
+            subprocess.run(lmeval_cmd, shell=True, check=True)
 
-        # find output file and move into output_json
-        output_files = glob.glob("./tmp/*/*.json")
-        if len(output_files) == 0:
-            raise Exception("No lmeval output files found")
-        elif len(output_files) > 1:
-            raise Exception(f"Multiple lmeval output files found: {output_files}")
-        else:
-            output_file = output_files[0]
-            shutil.move(output_file, output_json)
-            shutil.rmtree("./tmp")
+            # find output file and move into output_json
+            output_files = glob.glob("./tmp/*/*.json")
+            if len(output_files) == 0:
+                raise Exception("No lmeval output files found")
+            elif len(output_files) > 1:
+                raise Exception(f"Multiple lmeval output files found: {output_files}")
+            else:
+                output_file = output_files[0]
+                shutil.move(output_file, output_json)
+                shutil.rmtree("./tmp")
 
-        # parse output json
-        with open(output_json, "r", newline="", encoding="utf-8") as f:
-            output = json.load(f)
-            if "results" in output and "gsm8k" in output["results"]:
-                gsm8k_results = output["results"]["gsm8k"]
-                if "exact_match,flexible-extract" in gsm8k_results:
-                    result = {
-                        "performance": gsm8k_results["exact_match,flexible-extract"],
-                        "metric": "exact_match,flexible-extract",
-                        "unit": "percent",
-                        **config
-                    }
-                    results.append(result)
+            # parse output json
+            with open(output_json, "r", newline="", encoding="utf-8") as f:
+                output = json.load(f)
+                if "results" in output and "gsm8k" in output["results"]:
+                    gsm8k_results = output["results"]["gsm8k"]
+                    if "exact_match,flexible-extract" in gsm8k_results:
+                        result = {
+                            "performance": gsm8k_results["exact_match,flexible-extract"],
+                            "metric": "exact_match,flexible-extract",
+                            "unit": "percent",
+                            **config
+                        }
+                        results.append(result)
 
     finally:
         # kill server and children
@@ -388,7 +400,7 @@ def run_serving(model, config):
         _ = server.communicate()
         del server
 
-        return results
+    return results
 
 def main():
     args = parse_args()
