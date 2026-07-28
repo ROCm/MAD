@@ -125,6 +125,89 @@ curl -X POST http://127.0.0.1:2322/generate \
   -d '{"text": "Let me tell you a story", "sampling_params": {"temperature": 0.3}}'
 ```
 
+## Agentic Replay Benchmark
+
+The agentic replay benchmark replays real Claude Code agentic coding traces using the `inferencex-agentx-mvp` scenario from [SemiAnalysisAI aiperf](https://github.com/SemiAnalysisAI/aiperf), driven against the sglang router (`:2322`). This workload is highly prefix-repetitive (each turn re-sends the accumulated context), so it exercises the radix prefix cache and reports a **measured** `gpu_cache_hit_rate` alongside the dataset's theoretical ceiling.
+
+It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` (or the `AGENTIC=1` shorthand). No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
+
+### Quick start (canonical DeepSeek-V3 1P/1D)
+
+```bash
+cd scripts/sglang_disagg
+
+export DOCKER_IMAGE_NAME=<mori-sglang-image>          # e.g. rocm/pytorch-private:sglang-...-mori-YYYYMMDD
+export AGENTIC=1                                       # shorthand: selects benchmark_agentic.sh
+export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000
+
+# 3 same-subnet (10.158.x) nodes with the model on local NVMe
+sbatch -N 3 -n 3 -p amd-rccl --time=90 \
+  --nodelist=<router-node>,<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+`AGENTIC=1` sets `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`; the in-container launcher then auto-enables server-side Prometheus metrics and strips `--disable-radix-cache` (cache ON). You can equivalently set `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` directly.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIC` | `0` | `1` = shorthand for `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` |
+| `BENCHMARK_SCRIPT_FILE` | `benchmark_xPyD.sh` | Set to `benchmark_agentic.sh` to run the agentic replay |
+| `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
+| `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
+| `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
+| `MAX_MODEL_LEN` | model-dependent | Max context length passed to aiperf (`--max-context-length`) |
+| `AGENTIC_PORT` | `2322` | sglang router port aiperf targets |
+| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
+| `ENABLE_RADIX_CACHE` | auto | `1` forces radix cache on i.e. strips `--disable-radix-cache` (auto-on for agentic) |
+
+Note: `AGENTIC_SERVER_METRICS` is set automatically by the launcher to the space-separated server metrics endpoints (`<prefill_ip>:3000 <decode_ip>:3000`) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
+
+### Supported models and modes
+
+Agentic replay works for every model in the recipe allowlist. `DP_MODE=1` (MoRI wideEP) is only valid for the DeepSeek models; all others run `DP_MODE=0` (TP-only).
+
+| Model | `DP_MODE` | Notes |
+|-------|-----------|-------|
+| DeepSeek-V3 | 1 (wideEP) | Canonical agentic target |
+| DeepSeek-R1 | 1 (wideEP) | Same path as DeepSeek-V3 |
+| Qwen3-32B | 0 (TP) | |
+| Mixtral-8x7B-Instruct-v0.1 | 0 (TP) | |
+| Llama-3.1-8B-Instruct | 0 (TP) | Good quick smoke |
+| amd-Llama-3.3-70B-Instruct-FP8-KV | 0 (TP) | |
+| Llama-3.1-405B-Instruct-FP8-KV | 0 (TP) | Needs larger topology |
+
+Topology is `xP` prefill + `yD` decode + 1 router node (minimum 3 nodes, i.e. 1P/1D).
+
+### Output files
+
+Written to `/run_logs/$SLURM_JOB_ID/` (host `LOG_PATH/<jobid>/`):
+
+```
+agentic_<jobid>_xP<n>_yD<n>_<model>.json   # aggregate metrics (parsed by validate_agentic_result.sh)
+aiperf_artifacts/                          # per-request logs, timeslices, server_metrics_export.{csv,json}
+```
+
+Key fields in the aggregate JSON:
+- `request_metrics.cache.theoretical_cache_hit_rate` — dataset-derived ceiling.
+- `server_metrics.present` / `server_metrics.cache.gpu_cache_hit_rate` — **measured** runtime GPU cache hit rate.
+- `request_accounting` — `records_profiled` vs `records_error_dropped` (error rate is computed over measured requests, excluding warmup).
+
+### Validation
+
+`scripts/common/validate_agentic_result.sh` runs automatically at the end of the agentic benchmark and prints, e.g.:
+
+```
+[validate] requests: 70/72 ok  error_rate=2.8%
+[validate] gpu_cache_hit_rate: 32.4%
+[validate] throughput_per_gpu: 6247 tok/s
+[validate][PASS] error_rate within 10%
+```
+
+Thresholds: `AGENTIC_MAX_ERROR_RATE` (default `0.10`, gates PASS/WARN) and `AGENTIC_MIN_CACHE_HIT` (default `0.30`, warn-only). A low cache hit rate on `xP>1` usually indicates the router is not keeping a conversation's turns on the worker holding its prefix (session-affinity).
+
 ## Known Issues
 For larger models, such as DeepSeekV3 and Llama-3.1-405B-Instruct-FP8-KV and higher concurrency(512+), errors with below signature is observed:<br>
 _'<TransferEncodingError: 400, message:\n  Not enough data to satisfy transfer length header.\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n '_<br>

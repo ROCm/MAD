@@ -9,7 +9,15 @@
 # - base_flags: always applied (prefill + decode)
 # - tp_flags / dp_flags: mode-level flags applied to BOTH prefill and decode (omit if empty)
 # - prefill/decode.<tp|dp>: role + mode specific flags
-# - experimental_flags: optional extra CLI flags (omit if empty)
+# - experimental_flags: optional extra CLI flags appended after role/mode flags on BOTH prefill and decode workers.
+#   Use for try-outs that are independent of TP vs DP (PARALLEL_MODE); omit or "" when unused.
+#
+# Radix prefix cache: base_flags below carry "--disable-radix-cache" for the default
+# xPyD performance sweeps (clean, cache-free throughput). The agentic replay benchmark
+# needs the cache ON, so the launcher (sglang_disagg_mori_io_ep.sh) STRIPS
+# "--disable-radix-cache" from PREFILL/DECODE configs when
+# BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh (or ENABLE_RADIX_CACHE=1). Do not remove it
+# here, or the perf sweeps lose their cache-free baseline.
 
 # --- Dense Llama / Qwen ---
 

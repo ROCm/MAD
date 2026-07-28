@@ -114,6 +114,14 @@ DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp f
 SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
 SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
 
+# Agentic replay shorthand: AGENTIC=1 selects the agentic benchmark hook. The
+# in-container launcher (sglang_disagg_mori_io_ep.sh) then auto-enables server
+# metrics + radix prefix cache for BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh.
+if [[ "${AGENTIC:-0}" == "1" ]]; then
+    export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE:-benchmark_agentic.sh}"
+    echo "AGENTIC=1: BENCHMARK_SCRIPT_FILE=${BENCHMARK_SCRIPT_FILE} (server metrics + radix cache auto-enabled)"
+fi
+
 MODEL_NAME="${MODEL_NAME:-None}"
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
@@ -300,14 +308,17 @@ echo ""
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
 MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
+# Prefer the 10.158.x fabric IP: nodes are multi-homed and picking the first
+# hostname -I address can land on a different subnet, which hangs the socket
+# barrier on mixed-subnet coordination. Cluster-specific (OCI useocpm2m fabric).
+MASTER_ADDR=$(echo "$MASTER_ADDR" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
     IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
+    IP=$(echo "$IP" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
     IPS+=("$IP")
 done
 
@@ -398,6 +409,22 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    -e BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE:-}" \
+    -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \
+    -e AGENTIC_CONC="${AGENTIC_CONC:-}" \
+    -e DURATION="${DURATION:-}" \
+    -e AGENTIC_PORT="${AGENTIC_PORT:-}" \
+    -e MODEL_PREFIX="${MODEL_PREFIX:-}" \
+    -e WEKA_LOADER_OVERRIDE="${WEKA_LOADER_OVERRIDE:-}" \
+    -e AIPERF_UNSAFE_OVERRIDE="${AIPERF_UNSAFE_OVERRIDE:-}" \
+    -e AGENTIC_CACHE_WARMUP_DURATION="${AGENTIC_CACHE_WARMUP_DURATION:-}" \
+    -e MAX_MODEL_LEN="${MAX_MODEL_LEN:-}" \
+    -e AIPERF_PIN="${AIPERF_PIN:-}" \
+    -e AGENTIC_UTILS_PIN="${AGENTIC_UTILS_PIN:-}" \
+    -e HF_HOME="${HF_HOME:-}" \
+    -e ENABLE_SERVER_METRICS="${ENABLE_SERVER_METRICS:-}" \
+    -e ENABLE_RADIX_CACHE="${ENABLE_RADIX_CACHE:-}" \
+    -e DRY_RUN="${DRY_RUN:-}" \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
