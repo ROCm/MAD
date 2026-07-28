@@ -348,6 +348,27 @@
      "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
   },
   {
+    "name": "pyt_atom_kimi-k3",
+    "url": "",
+    "dockerfile": "docker/pyt_atom",
+    "scripts": "scripts/atom/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "atom",
+      "atom_default",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942, gfx906, gfx908, gfx90a, A100, H100, V100",
+    "args":
+     "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
+  },
+  {
     "name": "pyt_vllm_llama-3.1-8b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
