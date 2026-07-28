@@ -80,6 +80,48 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | model_name                              |
 | --------------------------------------- |
 | pyt_sglang_deepseek-r1-distill-qwen-32b  |
+| pyt_sglang_kimi-k3                       |
+| pyt_sglang_kimi-k3_dspark                |
+
+>[!NOTE]
+>The two `pyt_sglang_kimi-k3*` entries are the exception to everything described above. They track the
+>AMD day-0 recipes in [sgl-project/sglang#32548](https://github.com/sgl-project/sglang/issues/32548)
+>(day-0 support: [#32541](https://github.com/sgl-project/sglang/pull/32541), see also the
+>[SGLang K3 cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3)) and differ in
+>four ways:
+>
+>- **Image.** They build from `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` via
+>  [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile),
+>  not the shared `lmsysorg/sglang:v0.4.5-rocm630` above, which predates K3 support.
+>- **Benchmark.** They measure *online serving* (`sglang serve` + `sglang.benchmark.serving`) through
+>  [scripts/sglang/run_sglang.py](../../scripts/sglang/run_sglang.py) and
+>  [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml), rather than the
+>  offline latency/throughput path documented below.
+>- **Hardware.** 8x MI350X/MI355X (gfx950) TP8 only, hence `skip_gpu_arch: gfx942`. The checkpoint is
+>  large, so make sure `HF_HUB_CACHE` has room; `pyt_sglang_kimi-k3_dspark` additionally pulls the
+>  [RadixArk/Kimi-K3-DSpark](https://huggingface.co/RadixArk/Kimi-K3-DSpark) draft checkpoint.
+>- **Invocation.** They carry no sweep tag, so a tag run does not pull the checkpoint and hold 8 GPUs.
+>  Run them explicitly by name:
+>
+>```sh
+>madengine run --tags pyt_sglang_kimi-k3 --keep-model-dir --live-output
+>madengine run --tags pyt_sglang_kimi-k3_dspark --keep-model-dir --live-output
+>```
+>
+>The sweep is 8192-token input / 1024-token output at concurrency 2/4/8/16/32. The issue does not state
+>its input and output lengths; they were recovered from its own tables, where
+>`(E2EL - TTFT) / TPOT + 1` lands on ~1024 output tokens on every row and
+>`concurrency x (inp + out) / E2EL` reproduces the reported total throughput only at 8192 input tokens.
+>Keeping that shape is what makes MAD's numbers comparable to the issue's.
+>
+>The runner emits `--tp-size` where the issue writes `--tp`. There is no `--tp` server argument;
+>`tp_size` has a single alias, `--tensor-parallel-size`, and `--tp` resolves only through argparse
+>prefix matching, which a future `--tp*` option would silently break.
+
+>[!WARNING]
+>The published performance tables were measured on **MI355X**. A commenter on the tracking issue reports
+>much weaker results on **MI350X** with untuned AITER kernels. Both report as gfx950, so `skip_gpu_arch`
+>cannot distinguish them — treat MI350X numbers from this recipe as unvalidated.
 
 ### Standalone benchmarking              
 -----------------------------

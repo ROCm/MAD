@@ -20,6 +20,42 @@
   env:
     VLLM_ROCM_USE_AITER: 1
 
+## Kimi K3 is natively MXFP4 (QAT), so there is no separate amd/ FP4 repo.
+## Flags and env mirror the gfx950 single-node TP8 profile from
+## https://recipes.vllm.ai/moonshotai/Kimi-K3/hw/mi355x.json
+## TP8 only: ~1680 GB minimum footprint fits an 8x MI355X node (2304 GB), not TP4.
+- benchmark: serving
+  model: moonshotai/Kimi-K3
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  # capped at 128 to match --max-num-seqs; higher concurrency would just queue
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    SAFETENSORS_FAST_GPU: 1
+    # 1 selects the aiter a8w4 MoE path; 0 falls back to a16w4
+    AITER_SITUV2_A8W4: 1
+    AITER_BF16_FP8_MOE_BOUND: 0
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+  extra_args:
+    --moe-backend: auto
+    --load-format: auto
+    --gpu-memory-utilization: 0.95
+    # MoonViT-V2 is only 401M params; TP on it is pure comm overhead
+    --mm-encoder-tp-mode: data
+    --max-num-seqs: 128
+    --max-num-batched-tokens: 4096
+    # K3 always thinks and returns reasoning_content
+    --reasoning-parser: kimi_k3
+    # text-only benchmark; skips loading MoonViT and frees VRAM for KV cache
+    --language-model-only: true
+  bench_args:
+    # gsm8k runs over /v1/completions, where the always-on reasoning is inline and
+    # exhausts the hardcoded max_gen_toks=2048 budget, so the score is meaningless
+    --run_accuracy: False
+
 - benchmark: serving
   model:
     deepseek-ai/DeepSeek-V3.2
