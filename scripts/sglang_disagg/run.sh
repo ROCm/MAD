@@ -179,6 +179,7 @@ if ! _weights_complete; then
         case "${MODEL_NAME}" in
             DeepSeek-R1)    _MODEL_REPO="deepseek-ai/DeepSeek-R1-0528" ;;
             Qwen3-Next-80B) _MODEL_REPO="Qwen/Qwen3-Next-80B-A3B-Instruct" ;;
+            GPT-OSS-120B)   _MODEL_REPO="openai/gpt-oss-120b" ;;
             *) echo "ERROR: weights missing at ${MODEL_PATH}; set MODEL_REPO for ${MODEL_NAME}" >&2; exit 1 ;;
         esac
     fi

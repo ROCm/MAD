@@ -53,6 +53,40 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 USER root
 
 ###############################################################################
+# 0) MXFP4-on-gfx942 enablement patch (GPT-OSS native-weight-format workaround).
+#    sglang's mxfp_supported() (srt/utils/common.py) only recognizes gfx95*
+#    (MI350/MI355) as MXFP4-capable, so `Mxfp4Config` never registers in
+#    QUANTIZATION_METHODS on gfx942 (MI300X/MI325X) even though the underlying
+#    Triton MXFP4 kernels already run correctly there — see upstream PR
+#    https://github.com/sgl-project/sglang/pull/13929 ("Enable OCP MXFP4
+#    support for gfx942 using triton kernel", not yet in this pinned release)
+#    and https://github.com/sgl-project/sglang/discussions/13611 (AMD
+#    confirms gfx94x supports MXFP4 at the hardware/kernel level, only the
+#    detection string is too narrow). This mirrors that PR: add "gfx942" to
+#    mxfp_supported()'s recognized-arch list only (NOT is_gfx95_supported(),
+#    which gates unrelated MI350-specific behavior and must stay gfx95-only).
+#    Gated by ARG so it's a no-op if the base image ever ships the upstream
+#    fix natively (grep finds nothing to replace -> sed is a harmless no-op,
+#    but the verification step below would then fail loudly instead of
+#    silently passing, so a real upstream fix is still visible).
+###############################################################################
+ARG SGLANG_SRT_UTILS_COMMON=/sgl-workspace/sglang/python/sglang/srt/utils/common.py
+RUN set -e; \
+    test -f "${SGLANG_SRT_UTILS_COMMON}" || { echo "MXFP4_PATCH_TARGET_MISSING ${SGLANG_SRT_UTILS_COMMON}"; exit 1; }; \
+    before="$(grep -c 'for gfx in \["gfx95"\]' "${SGLANG_SRT_UTILS_COMMON}")"; \
+    sed -i '/^def mxfp_supported/,/^def is_gfx95_supported/{s/for gfx in \["gfx95"\]/for gfx in ["gfx95", "gfx942"]/}' "${SGLANG_SRT_UTILS_COMMON}"; \
+    if grep -A6 '^def mxfp_supported' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
+      echo "MXFP4_GFX942_PATCH_APPLIED (was ${before} unpatched gfx95-only occurrence(s) in file)"; \
+    else \
+      echo "MXFP4_GFX942_PATCH_FAILED_OR_ALREADY_UPSTREAM — mxfp_supported() body has no gfx942 after patch attempt"; \
+      exit 1; \
+    fi; \
+    if grep -A10 '^def is_gfx95_supported' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
+      echo "MXFP4_PATCH_SCOPE_LEAK — is_gfx95_supported() unexpectedly also patched, aborting"; \
+      exit 1; \
+    fi
+
+###############################################################################
 # 1) RCCL overlay — rebuild RCCL from source so the RCCL under test wins over
 #    the base image's librccl. (mirrors sglang_disagg_inference_rccl_overlay)
 #    OFF by default: the sgl-dev base already carries a librccl with the right

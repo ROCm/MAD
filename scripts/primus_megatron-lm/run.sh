@@ -161,7 +161,7 @@ elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
   if [[ "$model" == "Llama-3.1-70B-proxy" ]]; then
     datatypes=("FP8")  # Only FP8 supported
   elif [[ "$model" == "GPT-OSS-120B" ]]; then
-    echo "Skipping $model - Not supported on $DEVICE (MI355X only)"
+    datatypes=("BF16" "FP8")  # Reuses the MI355X config with gfx942 CLI overrides
   elif [[ "$model" == "Zebra-Llama-1B" || "$model" == "Zebra-Llama-3B" || "$model" == "Zebra-Llama-8B" || "$model" == "Mamba-370M" ]]; then
     datatypes=("BF16")  # Only BF16 supported on MI300X/MI325X
   elif [[ "$model" == "Llama-3.1-8B" || "$model" == "Llama-2-7B" || "$model" == "Qwen2.5-7B" ]]; then

@@ -72,3 +72,23 @@ DeepSeek-R1:
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
     dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
+
+# GPT-OSS-120B is small enough (~117B total / ~5.1B active) that a single
+# 8-GPU node holds the full model at TP=8; no cross-node EP/MoRI needed (same
+# as pyt_vllm_disagg_nixl_gpt-oss-120b in models.json, which also runs RUN_MORI=0).
+# Each prefill/decode node in xPyD is an independent TP=8 replica (tp mode only).
+# --moe-runner-backend triton: the mxfp4 quant path's default ROCm+aiter MoE
+# kernel (aiter's Composable Kernel `moe_cktile2stages_gemm1`) fails to load
+# on gfx942 with `undefined symbol: ..._pk_float4_e2m1_t...` (the CK MXFP4
+# GEMM instantiation for gfx942 isn't compiled into this aiter build), so
+# force the generic Triton MoE runner instead — sglang's own fallback for
+# "ROCm+aiter without mxfp4" already uses "triton" for the same GEMM-coverage
+# reason (see server_args.py comment: "aiter CK kernel doesn't support all
+# GEMM dimensions"); this makes GPT-OSS's mxfp4 MoE layer use that same,
+# already-proven-on-ROCm path instead of the broken aiter CK one.
+GPT-OSS-120B:
+  base_flags: "--attention-backend aiter --moe-runner-backend triton --watchdog-timeout 1000000 --mem-fraction-static 0.73"
+  prefill:
+    tp: "--disable-cuda-graph"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
