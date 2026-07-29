@@ -439,7 +439,7 @@ def run_serving_profile(model, config):
     Serves `atom.entrypoints.openai_server` under rocm-trace-lite (`rtl trace --mode full`) with roctx
     prefill/decode/mixed phase markers (scripts/atom/profiling/), producing rtl_trace.db (GPU kernels +
     per-pass roctx markers), then aggregates it into ./profile/kernel_summary_payload.json for the
-    client-perf-hub uploader. Mirrors the vLLM/SGLang producer's run_serving_profile.
+    kernel-summary aggregator.
     """
     config.pop("bench_serving", None)  # perf.yaml-only knob; keep out of CSV row
     if not config.get("num_prompts"):
@@ -556,10 +556,8 @@ def run_serving_profile(model, config):
 
     os.makedirs("profile", exist_ok=True)
     payload_path = os.path.join("profile", "kernel_summary_payload.json")
-    # Shared, framework-agnostic curated aggregator (single source of truth = the vLLM
-    # producer, which includes #380 pass-curation). The whole MAD-private repo is present
-    # at runtime (madengine MODEL_DIR), so reference it by repo-relative path rather than
-    # keeping a per-engine copy (which drifts and misses curation).
+    # Shared, framework-agnostic curated aggregator. The MAD repo is present at runtime
+    # (madengine MODEL_DIR), so reference it by repo-relative path.
     scripts_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     aggregator = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiling", "kernel_summary_payload.py")
     try:
