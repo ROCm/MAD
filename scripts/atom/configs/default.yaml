@@ -1,15 +1,15 @@
 # ATOM Kimi-K3 serving benchmark configs
-# 1k/4k ISL, 1k OSL, mc64/128/256
+# 8k ISL, 1k OSL, mc1..256 — shared K3 sweep across vLLM/SGLang/ATOM
 # gfx950 (MI350X/MI355X) only — MXFP4 weights require gfx95x
 
 ## Kimi-K3 MXFP4 TP8
 - benchmark: serving
   model: moonshotai/Kimi-K3
   tp: 8
-  inp: 1024 4096
+  inp: 8192
   out: 1024
   kv_cache_dtype: fp8
-  max_concurrency: 64 128 256
+  max_concurrency: 1 4 8 16 32 64 128 256
   env:
     ATOM_LOADER_USE_THREADPOOL: 1
     ATOM_LOADER_THREADPOOL_WORKERS: 16
@@ -25,7 +25,7 @@
   extra_args:
     --trust-remote-code: true
     --max-model-len: 16384
-    --max-num-seqs: 64
+    --max-num-seqs: 256
     --max-num-batched-tokens: 10240
     --gpu-memory-utilization: 0.93
     --block-size: 128
