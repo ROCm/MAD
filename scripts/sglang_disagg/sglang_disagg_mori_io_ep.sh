@@ -6,6 +6,10 @@
 _MORI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
 
+# Cluster/Launcher/Model inline defaults (extracted). Must be sourced before first use.
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/config/runtime.defaults.sh"
+
 # -----------------------------------------------------------------------------
 # DP_MODE=1 allowlist (MoRI IO EP). Must stay in sync with run_xPyD_models.slurm.
 # -----------------------------------------------------------------------------
@@ -34,8 +38,6 @@ mori_dp_mode1_allowed_models_lines() {
 # Environment Configuration
 # =============================================================================
 
-MASTER_ADDR="${MASTER_ADDR:-localhost}"
-MASTER_PORT="${MASTER_PORT:-23731}"
 NODE_RANK="${NODE_RANK:-0}"
 MODEL_PATH=$MODEL_PATH
 MODEL_NAME="${MODEL_NAME:-}"
@@ -66,8 +68,6 @@ if [[ "$DP_MODE" == "1" ]] && ! mori_model_allows_dp_mode_one "$MODEL_NAME"; the
     exit 1
 fi
 
-IPADDRS="${IPADDRS:-localhost}"
-BARRIER_PORT="${BARRIER_PORT:-4342}"
 # IB_DEVICES controls --disaggregation-ib-device (RDMA NICs for KV-cache transfer).
 # Default is set in mori_ep_env.sh (sourced below). Override: set IB_DEVICES env var.
 # Note: CX7 rail NICs require same-rail nodes; mlx5_1 (mgmt NIC) is cross-rail safe.
@@ -96,9 +96,6 @@ fi
 # DP_MODE=0: CLI --tp-size is IO_EP_TP_SIZE (default 8) on every worker; PREFILL_EP_SIZE/DECODE_EP_SIZE
 # still scale with xP/yD×GPUS_PER_NODE for MoRI env (not passed as CLI unless DP_MODE=1).
 # DP_MODE=1: --tp-size scales with cluster; --dp-size/--ep-size on CLI (same total degree as Nnodes×GPUS_PER_NODE).
-GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-8}"
-
 if [[ "$DP_MODE" == "1" ]]; then
     PREFILL_TP_SIZE=$((xP * GPUS_PER_NODE))
     DECODE_TP_SIZE=$((yD * GPUS_PER_NODE))
@@ -122,8 +119,6 @@ export PREFILL_TP_SIZE DECODE_TP_SIZE
 # =============================================================================
 # Model-Specific Configuration from YAML
 # =============================================================================
-
-MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
 
 if [[ ! -f "$MODELS_YAML" ]]; then
     echo "ERROR: models.yaml not found at $MODELS_YAML"
@@ -386,9 +381,8 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
     # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
     # Requires shared /run_logs across nodes.
-    SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
-    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
-    ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
+    # SEARCH_SIGNAL / ROUTER_READY_TIMEOUT_SECONDS / ROUTER_POLL_SLEEP_SECONDS
+    # defaults are set in config/runtime.defaults.sh (sourced at the top).
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"
 
