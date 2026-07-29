@@ -10,7 +10,6 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 |-----------|---------|-------------|--------|
 | **vLLM** | `pyt_vllm_kimi-k3` | `vllm/vllm-openai-rocm:kimi-k3` | [recipes.vllm.ai](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x) |
 | **SGLang** | `pyt_sglang_kimi-k3` | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` | [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3) |
-| **SGLang + DSpark** | `pyt_sglang_kimi-k3_dspark` | (same image) | Speculative decoding with [Kimi-K3-DSpark](https://huggingface.co/RadixArk/Kimi-K3-DSpark) |
 | **ATom** | `pyt_atom_kimi-k3` | `rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3` | ROCm ATom |
 
 ## Hardware requirements
@@ -32,11 +31,8 @@ Install [madengine](https://github.com/ROCm/madengine) and clone this repository
 # vLLM
 madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output
 
-# SGLang (no speculative decoding)
+# SGLang
 madengine run --tags pyt_sglang_kimi-k3 --keep-model-dir --live-output
-
-# SGLang + DSpark speculative decoding
-madengine run --tags pyt_sglang_kimi-k3_dspark --keep-model-dir --live-output
 
 # ATom
 madengine run --tags pyt_atom_kimi-k3 --keep-model-dir --live-output
@@ -54,28 +50,18 @@ madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output \
 ### vLLM
 
 - **Tag**: `pyt_vllm_kimi-k3`
-- **Image**: [`vllm/vllm-openai-rocm:kimi-k3`](https://hub.docker.com/r/vllm/vllm-openai-rocm) (vLLM >= 0.27.0, not yet in a tagged release)
+- **Image**: [`vllm/vllm-openai-rocm:kimi-k3`](https://hub.docker.com/r/vllm/vllm-openai-rocm)
 - **Dockerfile**: [docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile)
 - **Config**: [scripts/vllm/configs/default.yaml](../../scripts/vllm/configs/default.yaml) (Kimi-K3 block)
 - **Benchmark**: Online serving at concurrency 1 / 8 / 32 / 128, input 1024, output 1024
-- **Notes**:
-  - `--language-model-only` skips MoonViT-V2, freeing VRAM for KV cache (text-only benchmark)
-  - `--no-enable-prefix-caching` for benchmark hygiene (MAD convention for all models)
-  - gsm8k accuracy is disabled because K3's always-on reasoning exhausts the `max_gen_toks=2048` budget over `/v1/completions`
-  - Env vars: `VLLM_ROCM_USE_AITER=1`, `SAFETENSORS_FAST_GPU=1`, `AITER_SITUV2_A8W4=1`, `AITER_BF16_FP8_MOE_BOUND=0`, `VLLM_USE_BREAKABLE_CUDAGRAPH=0`
 
 ### SGLang
 
-- **Tags**: `pyt_sglang_kimi-k3` (nospec) / `pyt_sglang_kimi-k3_dspark` (with DSpark speculative decoding)
+- **Tag**: `pyt_sglang_kimi-k3`
 - **Image**: [`lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727`](https://hub.docker.com/r/lmsysorg/sglang-rocm)
 - **Dockerfile**: [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile)
 - **Config**: [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml)
-- **Benchmark**: Online serving at concurrency 2 / 4 / 8 / 16 / 32, input 8192, output 1024 (matching the [SGLang tracking issue](https://github.com/sgl-project/sglang/issues/32548) tables)
-- **Notes**:
-  - `--attention-backend triton` and `--disable-radix-cache` per the recipe
-  - `--reasoning-parser kimi_k3` and `--tool-call-parser kimi_k3` for K3's always-on thinking
-  - DSpark variant adds `--speculative-draft-model-path RadixArk/Kimi-K3-DSpark --speculative-algorithm DSPARK`
-  - Env vars: `SGLANG_USE_AITER=1`, `SGLANG_AITER_K3_OPT=1`, `AITER_FLYDSL_FORCE=1`, `AITER_SITUV2_A8W4=1`
+- **Benchmark**: Online serving at concurrency 2 / 4 / 8 / 16 / 32, input 8192, output 1024
 
 ### ATom
 
@@ -84,10 +70,6 @@ madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output \
 - **Dockerfile**: [docker/pyt_atom_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_atom_kimi_k3.ubuntu.amd.Dockerfile)
 - **Config**: [scripts/atom/configs/default.yaml](../../scripts/atom/configs/default.yaml)
 - **Benchmark**: Online serving at concurrency 64 / 128 / 256, input 1024 and 4096, output 1024
-- **Notes**:
-  - `--kv_cache_dtype fp8` for FP8 KV cache
-  - `--max-num-batched-tokens 10240`, `--max-num-seqs 64`, `--block-size 128`
-  - Env vars: `ATOM_LOADER_USE_THREADPOOL=1`, `ATOM_LOADER_THREADPOOL_WORKERS=16`, `ATOM_SYNC_AFTER_LOAD=1`, `ATOM_DIST_TIMEOUT_SECONDS=3600`, `ATOM_USE_TRITON_GEMM=1`, `AITER_USE_GROUPED_GEMM=0`, `ATOM_USE_TRITON_MOE=0`, `AITER_FLYDSL_FORCE=1`, `AITER_FORCE_GFX1250=0`, `ATOM_USE_UNIFIED_ATTN=1`, `ATOM_FORCE_ATTN_TRITON=1`
 
 ## Standalone serving (without madengine)
 
