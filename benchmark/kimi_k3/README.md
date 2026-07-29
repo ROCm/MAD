@@ -128,7 +128,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri \
 ```sh
 vllm serve /model_weights \
   --dtype auto -tp 8 --trust-remote-code \
-  --enable-prefix-caching --load-format auto \
+  --no-enable-prefix-caching --load-format auto \
   --gpu-memory-utilization 0.95 --moe-backend auto \
   --mm-encoder-tp-mode data --max-num-seqs 128 \
   --max-num-batched-tokens 4096 --reasoning-parser kimi_k3 \
@@ -179,7 +179,7 @@ sglang serve --model-path /model_weights \
   --trust-remote-code --tp-size 8 \
   --attention-backend triton --dtype bfloat16 \
   --mem-fraction-static 0.85 --cuda-graph-max-bs-decode 256 \
-  --host 0.0.0.0 --port 30000 \
+  --host 127.0.0.1 --port 30000 \
   --disable-radix-cache \
   --reasoning-parser kimi_k3 --tool-call-parser kimi_k3
 ```
