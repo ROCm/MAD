@@ -767,14 +767,10 @@ def main():
                 os.environ['HF_TOKEN'] = MAD_SECRETS_HFTOKEN
             else:
                 print("Warning: MAD_SECRETS_HFTOKEN is not set. If a gated model is used, please set MAD_SECRETS_HFTOKEN=<your-huggingface-token>")
-            # Use CHECK_LOCAL_DATA env var to control whether to check for local data
-            # By default, this is set to False and can be enabled through madengine additional_context
-            CHECK_LOCAL_DATA = os.environ.get('CHECK_LOCAL_DATA', 'false').lower() == 'true'
-
             # Use dataprovider if present for model weights
-            if CHECK_LOCAL_DATA and (MAD_DATAHOME := os.environ.get('MAD_DATAHOME')) and os.path.exists(os.path.join(MAD_DATAHOME, model)):
-                model = os.path.join(MAD_DATAHOME, model)
-                print("Found MAD_DATAHOME updating model path.")
+            if MAD_DATAHOME := os.environ.get('MAD_DATAHOME'):
+                model = MAD_DATAHOME
+                print(f"Using MAD_DATAHOME as model path: {model}")
             elif config.get('extra_args', {}).get('--load_dummy', False):
                 print("Found --load_dummy in config, using dummy weights for benchmarking")
             else:
