@@ -39,6 +39,42 @@ madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output \
   --additional-context '{"docker_mounts": {"/model_weights": "/path/to/Kimi-K3"}, "docker_env_vars": {"MAD_DATAHOME": "/model_weights"}}'
 ```
 
+## Benchmark results (8x MI350X, TP8)
+
+### vLLM — online serving (input 1024, output 1024)
+
+| Concurrency | Output tok/s | Total tok/s | Median TTFT (ms) | Median TPOT (ms) |
+|:-----------:|:------------:|:-----------:|:-----------------:|:-----------------:|
+| 1           | 37.6         | 75.3        | —                 | —                 |
+| 8           | 246.2        | 492.5       | —                 | —                 |
+| 32          | 773.2        | 1,546.5     | —                 | —                 |
+| 128         | 1,891.2      | 3,782.3     | —                 | —                 |
+
+### SGLang — online serving (input 8192, output 1024)
+
+| Concurrency | Output tok/s | Total tok/s | Median TTFT (ms) | Median TPOT (ms) |
+|:-----------:|:------------:|:-----------:|:-----------------:|:-----------------:|
+| 2           | 86.4         | 777.6       | 1,197             | 21.8              |
+| 4           | 147.7        | 1,329.3     | 2,321             | 24.7              |
+| 8           | 251.4        | 2,263.0     | 3,691             | 28.6              |
+| 16          | 378.7        | 3,408.2     | 6,040             | 36.5              |
+| 32          | 522.0        | 4,698.0     | 11,106            | 50.7              |
+
+### ATom — online serving (input 1024, output 1024)
+
+| Concurrency | Output tok/s | Total tok/s | Median TTFT (ms) | Median TPOT (ms) |
+|:-----------:|:------------:|:-----------:|:-----------------:|:-----------------:|
+| 64          | 1,073.5      | 2,147.4     | 294               | 56.7              |
+| 128         | 1,102.9      | 2,208.3     | 53,004            | 57.2              |
+| 256         | 1,114.9      | 2,228.8     | 158,718           | 57.1              |
+
+### ATom — online serving (input 4096, output 1024)
+
+| Concurrency | Output tok/s | Total tok/s | Median TTFT (ms) | Median TPOT (ms) |
+|:-----------:|:------------:|:-----------:|:-----------------:|:-----------------:|
+| 64          | 917.1        | 4,587.2     | 431               | 68.0              |
+| 128         | 920.0        | 4,609.5     | 130,485           | 68.3              |
+
 ## Framework details
 
 ### vLLM
