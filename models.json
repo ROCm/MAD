@@ -328,6 +328,46 @@
      "--model_repo amd/Kimi-K2.6-MXFP4 --config configs/default.yaml"
   },
   {
+    "name": "pyt_vllm_kimi-k3",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm_kimi_k3",
+    "scripts": "scripts/vllm/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
+  },
+  {
+    "name": "pyt_atom_kimi-k3",
+    "url": "",
+    "dockerfile": "docker/pyt_atom_kimi_k3",
+    "scripts": "scripts/atom/run.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "atom",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
+  },
+  {
     "name": "pyt_vllm_llama-3.1-8b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",
@@ -2193,6 +2233,46 @@
     "timeout": 28800,
     "args":
      "--model_repo deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --test_option latency --num_gpu 8 --datatype bfloat16 --dataset random --batch_size 1,8,32 --lat_input_output_len '128:128;128:1024;1024:128;1024:1024'"
+  },
+  {
+    "name": "pyt_sglang_kimi-k3",
+    "url": "",
+    "dockerfile": "docker/pyt_sglang_kimi_k3",
+    "scripts": "scripts/sglang/run_kimi_k3.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "sglang",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant nospec"
+  },
+  {
+    "name": "pyt_sglang_kimi-k3_dspark",
+    "url": "",
+    "dockerfile": "docker/pyt_sglang_kimi_k3",
+    "scripts": "scripts/sglang/run_kimi_k3.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "sglang",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx942",
+    "args":
+     "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
   },
   {
     "name": "pyt_hy_video",

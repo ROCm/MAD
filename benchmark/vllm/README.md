@@ -104,6 +104,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss120b-w-mxfp4-a-fp8) |
 | pyt_vllm_kimi-k2.6                     | [moonshotai/Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6) |
 | pyt_vllm_kimi-k2.6_fp4                 | [amd/Kimi-K2.6-MXFP4](https://huggingface.co/amd/Kimi-K2.6-MXFP4) |
+| pyt_vllm_kimi-k3                       | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
 | pyt_vllm_llama-3.1-8b                  | [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) |
 | pyt_vllm_llama-3.1-8b_fp8              | [amd/Llama-3.1-8B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.1-8B-Instruct-FP8-KV) |
 | pyt_vllm_llama-3.1-405b                | [meta-llama/Llama-3.1-405B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct) |
@@ -128,6 +129,25 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8) |
 | pyt_vllm_qwen3.5-397b-a17b             | [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B) |
 | pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
+
+>[!NOTE]
+>`pyt_vllm_kimi-k3` is the one exception to the shared Docker image above. Kimi K3 requires
+>vLLM >= 0.27.0, which is not yet in a tagged `vllm-openai-rocm` release, so it builds from
+>the model-specific `vllm/vllm-openai-rocm:kimi-k3` image via
+>[docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile).
+>It needs an 8x MI350X/MI355X (gfx950) node — the ~1680 GB minimum footprint does not fit a
+>single 8x MI300X node — and the checkpoint is ~1.56 TB, so make sure `HF_HUB_CACHE` has room.
+>It is deliberately not tagged `vllm_default`; run it explicitly:
+>
+>```sh
+>madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output
+>```
+>
+>The config tracks the [MI355X recipe profile](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x)
+>for a text-only serving run, with two intentional deviations: MAD adds
+>`--no-enable-prefix-caching` for benchmark hygiene (as it does for every model here), and the
+>gsm8k accuracy stage is disabled because K3's always-on reasoning is returned inline over
+>`/v1/completions` and exhausts the generation budget.
 
 
 ### Standalone benchmarking              
