@@ -350,7 +350,7 @@
   {
     "name": "pyt_atom_kimi-k3",
     "url": "",
-    "dockerfile": "docker/pyt_atom",
+    "dockerfile": "docker/pyt_atom_kimi_k3",
     "scripts": "scripts/atom/run.sh",
     "data": "huggingface",
     "n_gpus": "-1",
