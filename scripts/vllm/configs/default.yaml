@@ -27,11 +27,12 @@
 - benchmark: serving
   model: moonshotai/Kimi-K3
   tp: 8
-  inp: 1024
+  inp: 8192
   out: 1024
   dtype: auto
-  # capped at 128 to match --max-num-seqs; higher concurrency would just queue
-  max_concurrency: 1 8 32 128
+  # shared K3 sweep across vLLM/SGLang/ATOM; --max-num-seqs is raised to 256 so
+  # the top of the sweep runs concurrently instead of queueing
+  max_concurrency: 1 4 8 16 32 64 128 256
   env:
     VLLM_ROCM_USE_AITER: 1
     SAFETENSORS_FAST_GPU: 1
@@ -45,7 +46,7 @@
     --gpu-memory-utilization: 0.95
     # MoonViT-V2 is only 401M params; TP on it is pure comm overhead
     --mm-encoder-tp-mode: data
-    --max-num-seqs: 128
+    --max-num-seqs: 256
     --max-num-batched-tokens: 4096
     # K3 always thinks and returns reasoning_content
     --reasoning-parser: kimi_k3
