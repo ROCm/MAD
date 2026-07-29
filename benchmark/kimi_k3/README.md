@@ -2,7 +2,7 @@
 
 ## Overview
 
-[Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) is Moonshot AI's first open-source model in the trillion-plus class (2.8 T parameters). It is a Mixture-of-Experts model with native MXFP4 quantization (QAT) and always-on reasoning, and ships as a single checkpoint — there is no separate AMD-quantized variant.
+[Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) is Moonshot AI's first open-source model in the trillion-plus class (2.8 T parameters). It is a Mixture-of-Experts model with native MXFP4 quantization (QAT) and always-on reasoning.
 
 MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD Instinct MI350X / MI355X (gfx950):
 
