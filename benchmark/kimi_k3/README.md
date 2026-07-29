@@ -10,7 +10,7 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 |-----------|---------|-------------|--------|
 | **vLLM** | `pyt_vllm_kimi-k3` | `vllm/vllm-openai-rocm:kimi-k3` | [recipes.vllm.ai](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x) |
 | **SGLang** | `pyt_sglang_kimi-k3` | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` | [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3) |
-| **ATom** | `pyt_atom_kimi-k3` | `rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3` | ROCm ATom |
+| **ATOM** | `pyt_atom_kimi-k3` | `rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3` | ROCm ATOM |
 
 ## Hardware requirements
 
@@ -28,7 +28,7 @@ madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output
 # SGLang
 madengine run --tags pyt_sglang_kimi-k3 --keep-model-dir --live-output
 
-# ATom
+# ATOM
 madengine run --tags pyt_atom_kimi-k3 --keep-model-dir --live-output
 ```
 
@@ -45,7 +45,7 @@ For benchmark results and enablement details, see the framework-specific blog po
 
 - **vLLM**: [Kimi K3 Is Here: Efficient Day-0 Support on vLLM](https://vllm.ai/blog/2026-07-27-k3)
 - **SGLang**: [Kimi-K3 Day-0 Support on SGLang](https://github.com/sgl-project/sglang/issues/32548)
-- **ATom**: [Kimi-K3 on AMD Instinct GPUs](https://www.amd.com/en/developer/resources/technical-articles/2026/kimi-k3-on-amd-instinct-gpus.html)
+- **ATOM**: [Kimi-K3 on AMD Instinct GPUs](https://www.amd.com/en/developer/resources/technical-articles/2026/kimi-k3-on-amd-instinct-gpus.html)
 
 ## Framework details
 
@@ -65,7 +65,7 @@ For benchmark results and enablement details, see the framework-specific blog po
 - **Config**: [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml)
 - **Benchmark**: Online serving at concurrency 2 / 4 / 8 / 16 / 32, input 8192, output 1024
 
-### ATom
+### ATOM
 
 - **Tag**: `pyt_atom_kimi-k3`
 - **Image**: [`rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3`](https://hub.docker.com/r/rocm/atom-dev)
@@ -175,7 +175,7 @@ python3 -m sglang.benchmark.serving \
 
 ---
 
-### ATom
+### ATOM
 
 #### 1. Launch container
 
