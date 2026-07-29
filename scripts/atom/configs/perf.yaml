@@ -1,0 +1,26 @@
+# ATOM Performance Recipes
+# Source: https://github.com/ROCm/ATOM/pull/1718 (recipes/Kimi-K3.md)
+# Merge strategy: User config wins; perf fills gaps (missing keys only)
+
+# Kimi-K3 MXFP4 (gfx950 / MI355)
+- model: moonshotai/Kimi-K3
+  extra_args:
+    --trust-remote-code: true
+    --max-model-len: 16384
+    --max-num-seqs: 64
+    --max-num-batched-tokens: 10240
+    --gpu-memory-utilization: 0.93
+    --block-size: 128
+    --no-enable_prefix_caching: true
+  env:
+    ATOM_LOADER_USE_THREADPOOL: '1'
+    ATOM_LOADER_THREADPOOL_WORKERS: '16'
+    ATOM_SYNC_AFTER_LOAD: '1'
+    ATOM_DIST_TIMEOUT_SECONDS: '3600'
+    ATOM_USE_TRITON_GEMM: '1'
+    AITER_USE_GROUPED_GEMM: '0'
+    ATOM_USE_TRITON_MOE: '0'
+    AITER_FLYDSL_FORCE: '1'
+    AITER_FORCE_GFX1250: '0'
+    ATOM_USE_UNIFIED_ATTN: '1'
+    ATOM_FORCE_ATTN_TRITON: '1'
