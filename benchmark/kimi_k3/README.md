@@ -73,7 +73,7 @@ madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output \
 | Concurrency | Output tok/s | Total tok/s | Median TTFT (ms) | Median TPOT (ms) |
 |:-----------:|:------------:|:-----------:|:-----------------:|:-----------------:|
 | 64          | 917.1        | 4,587.2     | 431               | 68.0              |
-| 128         | 920.0        | 4,609.5     | 130,485           | 68.3              |
+| 128         | 920.0        | 4,609.5     | 63,766            | 68.6              |
 
 ## Framework details
 
