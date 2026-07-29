@@ -14,14 +14,8 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 
 ## Hardware requirements
 
-- **8x MI350X or MI355X** (gfx950 architecture, TP8)
-- ~1680 GB minimum GPU memory footprint (fits 8x MI355X @ 2304 GB total)
-- Does **not** fit on 8x MI300X (gfx942) — all tags set `skip_gpu_arch: gfx942`
+- **8x MI350X or MI355X** (TP8)
 - Checkpoint is ~1.56 TB — ensure the model cache volume has enough space
-- Disable NUMA auto-balancing on the host for optimal performance:
-  ```sh
-  sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'
-  ```
 
 ## Quick start (MAD-integrated)
 
