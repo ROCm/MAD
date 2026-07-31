@@ -2,7 +2,7 @@
 # Wrapper for Primus pretrain when run via madengine (local, SLURM, or K8s).
 # Sets EXP from PRIMUS_CONFIG_PATH or --config_path, infers BACKEND from path,
 # then runs Primus examples/run_pretrain.sh. For HF-backed configs set HF_TOKEN
-# or MAD_SECRET_HFTOKEN (e.g. via additional_context.docker_env_vars in madengine v2).
+# or MAD_SECRETS_HFTOKEN (e.g. via additional_context.docker_env_vars in madengine v2).
 # Primus root: set PRIMUS_ROOT to override; else auto-detect.
 # After training, extracts tps/tflops/mfu from log and writes primus_perf_output.csv for madengine multiple_results.
 set -e
@@ -60,12 +60,12 @@ else
   export BACKEND="megatron"
 fi
 
-# HF_TOKEN for Primus prepare (HF-backed configs): use MAD_SECRET_HFTOKEN from madengine v2
+# HF_TOKEN for Primus prepare (HF-backed configs): use MAD_SECRETS_HFTOKEN from madengine v2
 # (set via additional_context.docker_env_vars) if HF_TOKEN not already set
 if [[ -n "${HF_TOKEN:-}" ]]; then
   export HF_TOKEN
-elif [[ -n "${MAD_SECRET_HFTOKEN:-}" ]]; then
-  export HF_TOKEN="$MAD_SECRET_HFTOKEN"
+elif [[ -n "${MAD_SECRETS_HFTOKEN:-}" ]]; then
+  export HF_TOKEN="$MAD_SECRETS_HFTOKEN"
 fi
 
 # Redirect Primus output/outputs to run_directory (workspace root when run via madengine).
