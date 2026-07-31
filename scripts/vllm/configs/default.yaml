@@ -1,7 +1,7 @@
 # 1k 1k mc1 mc8 mc32 mc128
 
 - benchmark: serving
-  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-Preview
+  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4
   tp: 8
   inp: 1024
   out: 1024
@@ -9,6 +9,106 @@
   max_concurrency: 1 8 32 128
   env:
     VLLM_ROCM_USE_AITER: 1
+
+- benchmark: serving
+  model: moonshotai/Kimi-K2.6 amd/Kimi-K2.6-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## Kimi K3 is natively MXFP4 (QAT), so there is no separate amd/ FP4 repo.
+## Flags and env mirror the gfx950 single-node TP8 profile from
+## https://recipes.vllm.ai/moonshotai/Kimi-K3/hw/mi355x.json
+## TP8 only: ~1680 GB minimum footprint fits an 8x MI355X node (2304 GB), not TP4.
+- benchmark: serving
+  model: moonshotai/Kimi-K3
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  # shared K3 sweep across vLLM/SGLang/ATOM; --max-num-seqs is raised to 256 so
+  # the top of the sweep runs concurrently instead of queueing
+  max_concurrency: 1 4 8 16 32 64 128 256
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    SAFETENSORS_FAST_GPU: 1
+    # 1 selects the aiter a8w4 MoE path; 0 falls back to a16w4
+    AITER_SITUV2_A8W4: 1
+    AITER_BF16_FP8_MOE_BOUND: 0
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+  extra_args:
+    --moe-backend: auto
+    --load-format: auto
+    --gpu-memory-utilization: 0.95
+    # MoonViT-V2 is only 401M params; TP on it is pure comm overhead
+    --mm-encoder-tp-mode: data
+    --max-num-seqs: 256
+    --max-num-batched-tokens: 4096
+    # K3 always thinks and returns reasoning_content
+    --reasoning-parser: kimi_k3
+    # text-only benchmark; skips loading MoonViT and frees VRAM for KV cache
+    --language-model-only: true
+  bench_args:
+    # gsm8k runs over /v1/completions, where the always-on reasoning is inline and
+    # exhausts the hardcoded max_gen_toks=2048 budget, so the score is meaningless
+    --run_accuracy: False
+
+- benchmark: serving
+  model:
+    deepseek-ai/DeepSeek-V3.2
+    amd/DeepSeek-V3.2-MXFP4
+    zai-org/GLM-5.1-FP8
+    amd/GLM-5.1-MXFP4
+    zai-org/GLM-5.2-FP8
+    amd/GLM-5.2-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    # GLM 5.2 has a context window of 1M tokens, which OOMs with bf16 KV cache
+    --max-model-len: 101372
+  arch_overrides:
+    # MI300 cannot fit FP8 TP4, override to TP8 only
+    gfx942:
+      tp: 8
+
+- benchmark: serving
+  model:
+    deepseek-ai/DeepSeek-V4-Flash
+    deepseek-ai/DeepSeek-V4-Pro
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --kv-cache-dtype: fp8
+
+- benchmark: serving
+  model:
+    MiniMaxAI/MiniMax-M3-MXFP8
+    amd/MiniMax-M3-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --block-size: 128
+    --attention-backend: TRITON_ATTN
+    --moe-backend: aiter
 
 ## gpt-oss w4a8 is gfx950 only
 - benchmark: serving
@@ -28,35 +128,10 @@
   model:
     meta-llama/Llama-3.1-405B-Instruct
     amd/Llama-3.1-405B-Instruct-FP8-KV
+    amd/Llama-3.1-405B-Instruct-MXFP4-Preview
     meta-llama/Llama-3.3-70B-Instruct
     amd/Llama-3.3-70B-Instruct-FP8-KV
-  tp: 8
-  inp: 1024
-  out: 1024
-  dtype: auto
-  max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-  arch_overrides:
-    gfx942:
-      dtype: float16
-
-## Llama 3.x MXFP4 (gfx950 only)
-- benchmark: serving
-  model:
-    amd/Llama-3.1-405B-Instruct-MXFP4-Preview
     amd/Llama-3.3-70B-Instruct-MXFP4-Preview
-  tp: 8
-  inp: 1024
-  out: 1024
-  dtype: auto
-  max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-
-- benchmark: serving
-  model:
-    meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
   tp: 8
   inp: 1024
   out: 1024

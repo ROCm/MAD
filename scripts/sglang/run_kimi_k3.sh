@@ -1,9 +1,9 @@
-# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+#!/bin/bash
 ###############################################################################
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,16 +24,41 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.23.0
-FROM $BASE_DOCKER
+# Entry point for the Kimi K3 SGLang serving benchmark. Separate from run.sh,
+# which drives the offline bench_one_batch / bench_offline_throughput path and
+# is gated to gfx94x; K3 is an online serving recipe on gfx950.
+set -ex
 
-USER root
-ENV WORKSPACE_DIR=/workspace
-RUN mkdir -p $WORKSPACE_DIR
-WORKDIR $WORKSPACE_DIR
+# Preliminary setup
+if [[ -z "${HF_HUB_CACHE:-}" ]]; then
+    export HF_HUB_CACHE="/myworkspace"
+fi
+export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 
-# record configuration for posterity
-RUN pip3 list
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --model_repo) MODEL="$2"; shift ;;
+        --config) CONFIG_ARG="$2"; shift ;;
+        --variant) VARIANT_ARG="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
 
-# Specify entrypoint to override upstream
-ENTRYPOINT [""]
+# Accept either CLI or env variable overrides
+if [[ -z "$CONFIG" ]]; then
+    CONFIG=${CONFIG_ARG:-"configs/kimi_k3.yaml"}
+fi
+if [[ -z "$VARIANT" ]]; then
+    VARIANT=${VARIANT_ARG:-"all"}
+fi
+
+pip install -qqq hf-transfer
+
+# Run benchmark; use -u to make python prints unbuffered
+python3 -u run_sglang.py --config $CONFIG --model $MODEL --variant $VARIANT
+
+# move the output csv to parent directory
+MODEL_NAME=$(basename $MODEL)
+OUTPUT_CSV="perf_${MODEL_NAME}.csv"
+mv $OUTPUT_CSV ../
