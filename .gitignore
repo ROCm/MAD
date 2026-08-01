@@ -69,6 +69,10 @@ venv.bak/
 # Results
 *.csv
 *.json
+!models.json
+!perf_super.json
+!perf_entry_super.json
+!perf_entry.json
 *.log
 *.out
 *.html
