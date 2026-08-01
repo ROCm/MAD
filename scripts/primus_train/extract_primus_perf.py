@@ -21,11 +21,52 @@ Output CSV format (model, performance, metric) — one row per metric:
   primus_run,9629.8,tokens_per_second
   primus_run,496.1,tflops
   primus_run,23.10,model_flops_utilization
+
+MFU fallback: Megatron 26.5+ logs (unlike Torchtitan) do not print an
+"mfu:" field at all, so MFU is instead estimated here as
+tflops / gpu_peak_tflops * 100, using dense (no-sparsity) matrix peak
+TFLOPS from AMD's published data sheets. The GPU model is read from
+MAD_SYSTEM_GPU_PRODUCT_NAME/MAD_SYSTEM_GPU_ARCHITECTURE (set by madengine
+in the container env), and precision (bf16 vs fp8) is inferred from the
+log filename (e.g. "...-FP8-pretrain.txt" vs "...-BF16-pretrain.txt").
+If either can't be determined, model_flops_utilization is left blank
+rather than guessed.
 """
 import argparse
 import csv
+import os
 import re
 import sys
+
+# Dense (no structured sparsity) BF16 matrix peak TFLOP/s per GPU, from AMD
+# Instinct data sheets. FP8 dense peak is 2x BF16 dense peak on all of these
+# CDNA3/CDNA4 parts. Matched against MAD_SYSTEM_GPU_PRODUCT_NAME (e.g. "AMD
+# Instinct MI300X") as a substring, most-specific names first.
+_PEAK_BF16_TFLOPS = {
+    "MI355X": 2500.0,
+    "MI350X": 2300.0,
+    "MI325X": 1307.4,
+    "MI300X": 1307.4,
+}
+
+
+def _estimate_mfu(tflops: str, log_path: str) -> str | None:
+    """Estimate model FLOPs utilization (%) when the log doesn't report it."""
+    try:
+        achieved_tflops = float(tflops)
+    except (TypeError, ValueError):
+        return None
+
+    gpu_name = os.environ.get("MAD_SYSTEM_GPU_PRODUCT_NAME") or os.environ.get(
+        "MAD_SYSTEM_GPU_ARCHITECTURE", ""
+    )
+    peak_bf16 = next((v for k, v in _PEAK_BF16_TFLOPS.items() if k in gpu_name), None)
+    if peak_bf16 is None:
+        return None
+
+    is_fp8 = "fp8" in os.path.basename(log_path).lower()
+    peak = peak_bf16 * 2 if is_fp8 else peak_bf16
+    return f"{(achieved_tflops / peak * 100.0):.2f}"
 
 
 def extract_metrics(log_path: str) -> dict:
@@ -107,6 +148,9 @@ def main():
     args = parser.parse_args()
 
     metrics = extract_metrics(args.log_path)
+    if metrics and metrics.get("mfu") is None and metrics.get("tflops") is not None:
+        metrics["mfu"] = _estimate_mfu(metrics["tflops"], args.log_path)
+
     if not metrics or metrics.get("tps") is None:
         print(f"Error: No TPS metric found in log {args.log_path}", file=sys.stderr)
         print("Expected one of:", file=sys.stderr)

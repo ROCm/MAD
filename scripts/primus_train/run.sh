@@ -31,18 +31,30 @@ else
   exit 1
 fi
 
-# EXP (required by Primus run_pretrain.sh): prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args
+# EXP (required by Primus run_pretrain.sh): prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args.
+# --config_path is a wrapper-only flag that Primus' own CLI (primus/cli/main.py) does not
+# recognize, so strip it (and its value) out of forward_args, which is what actually gets
+# passed to run_pretrain.sh below instead of the raw "$@".
+args=("$@")
+forward_args=()
+config_path_arg=""
+i=0
+while [[ $i -lt ${#args[@]} ]]; do
+  if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
+    config_path_arg="${args[i+1]}"
+    i=$((i + 2))
+    continue
+  fi
+  forward_args+=("${args[i]}")
+  i=$((i + 1))
+done
+
 if [[ -n "${PRIMUS_CONFIG_PATH:-}" ]]; then
   export EXP="$PRIMUS_CONFIG_PATH"
+elif [[ -n "$config_path_arg" ]]; then
+  export EXP="$config_path_arg"
 else
   export EXP="examples/megatron/exp_pretrain.yaml"
-  args=("$@")
-  for i in "${!args[@]}"; do
-    if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
-      export EXP="${args[i+1]}"
-      break
-    fi
-  done
 fi
 
 # Infer BACKEND from EXP path so run_pretrain.sh uses correct runner (torchtitan, megatron, maxtext, etc.)
@@ -78,8 +90,12 @@ export DUMP_HLO_DIR="${DUMP_HLO_DIR:-$RUN_DIR/output/xla_dump_hlo}"
 # Run from PRIMUS_ROOT so EXP path (e.g. examples/torchtitan/configs/...) resolves correctly.
 # Do not use exec so we can run the perf extractor after training for madengine multiple_results.
 # Pass --job.dump_folder so Torchtitan writes checkpoints to RUN_DIR/outputs (not scripts/Primus/outputs).
-cd "$PRIMUS_ROOT" && bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "$@" --job.dump_folder "$RUN_DIR/outputs"
+# Temporarily disable -e: with it on, a non-zero exit from training would abort this script
+# immediately (via the && chain below) and skip perf extraction entirely.
+set +e
+cd "$PRIMUS_ROOT" && bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "${forward_args[@]}" --job.dump_folder "$RUN_DIR/outputs"
 exitcode=$?
+set -e
 # Extract tps/tflops/mfu from training log into primus_perf_output.csv (one row: model, performance, metric, tflops, model_flops_utilization)
 LOG_PATH="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 if [[ -f "$LOG_PATH" ]]; then
