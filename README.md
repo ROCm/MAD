@@ -30,7 +30,7 @@ Below are blueprints of supported models along with their documentation.
 | [**MiniMax-M3 single-node P/D over XGMI**](scripts/MiniMax-M3-single-pd/README.md) | Single-node prefill/decode disaggregation for MiniMax-M3 on MI355X via vLLM + MoRIIO with GPU-to-GPU XGMI KV transfer (TP4/TP4) | MiniMax-M3 (MXFP4) |
 | [**GLM-5.2 disaggregated P/D inference**](scripts/GLM-5.2-disagg/README.md) | Two-node prefill/decode disaggregation for GLM-5.2 on MI355X (ATOM + atomesh + mooncake TCP KV transfer, TP8/TP8) | GLM-5.2 (MXFP4) |
 | [**AgentX Case-A conformance trace**](scripts/AgentX_CaseA/README.md) | Engine- and topology-agnostic agentic replay trace (deterministic, matches ExplainX Case-A on 6 axes) + aiperf driver for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
-| [**AgentX Case-B conformance trace**](scripts/AgentX_CaseB/README.md) | Large-context (up to 500K input) agentic replay trace (deterministic, matches customer Case-B on 6 axes) + aiperf driver + results, for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
+| [**AgentX Case-B conformance trace**](scripts/AgentX_CaseB/README.md) | Large-context (up to 500K input) agentic replay trace (deterministic, matches customer Case-B on 6 axes) + aiperf driver, for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 
 ## Table of Contents

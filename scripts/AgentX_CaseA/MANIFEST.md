@@ -52,6 +52,5 @@ same distribution; raise n_sessions for tighter percentiles.
 
 ## How it's benchmarked
 Replay this one frozen trace via aiperf `inferencex-agentx-mvp --custom-dataset-type
-weka_trace` against each engine at matched TP/concurrency. Because the trace is fixed, the
-only variable is the engine — an apples-to-apples ATOM-vs-vLLM comparison. Results in
-`../phaseB_results_caseA_conformance/`.
+weka_trace` against each endpoint at matched TP/concurrency (`replay_caseA.sh`). Because the
+trace is fixed, the only variable is the engine/topology — an apples-to-apples comparison.

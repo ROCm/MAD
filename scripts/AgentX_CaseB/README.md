@@ -96,15 +96,6 @@ URL=http://localhost:8801 SERVED=GLM-5.2-MXFP4 TOK=/models/GLM-5.2-MXFP4 ./repla
 | `replay_caseB.sh` | Generic aiperf replay/sweep driver against any `URL`. |
 | `caseB_conformance_corpus.tar.gz` | The frozen 300-session trace. |
 | `MANIFEST.md` | Conformance proof + provenance. |
-| `results/` | Measured results (see `results/COMPARISON.md`). |
-
-## Measured results (this run)
-
-See `results/COMPARISON.md`. Summary: on single-node GLM-5.2-MXFP4 (TP8, 512K ctx), **vLLM**
-served the full Case-B trace at **36 / 45 / 58 output tok/s** (conc 2/4/8). **ATOM** could not be
-measured on the current MI355X nodes due to an environmental aiter JIT (FileBaton) deadlock on
-cold kernel compilation — a serving-stack/node issue, not a trace issue. Details in
-`results/COMPARISON.md`.
 
 ## Notes
 
