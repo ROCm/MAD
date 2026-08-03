@@ -175,6 +175,26 @@ if [[ -z "${CONNECTOR:-}" ]]; then
 fi
 WIDE_EP="${WIDE_EP:-0}"
 
+[[ "${RUN_PROFILE:-0}" != 1 || "${CONNECTOR:-rixl}" == "moriio" ]] || { echo "CONNECTOR=moriio is required when RUN_PROFILE=1" >&2; exit 1; }
+RUN_PROFILE="${RUN_PROFILE:-0}"
+case "$RUN_PROFILE" in
+  0) ;;
+  1)
+    for f in "moriio_profiling/hooks.sh" "moriio_profiling/process_kernels.sh"; do
+      if [[ ! -f "$f" ]]; then
+        echo "Error: Required profiling file '$f' not found in $(pwd)." >&2
+        exit 1
+      fi
+    done
+    source "${SCRIPT_DIR}/moriio_profiling/hooks.sh"
+    moriio_profiling_configure_run "$_run_deepep" || exit $?
+    SKIP_WARMUP="${SKIP_WARMUP:-1}"
+    export SKIP_WARMUP
+    ;;
+  *) echo "Error: RUN_PROFILE must be 0 or 1 (got '$RUN_PROFILE')." >&2; exit 1 ;;
+esac
+export RUN_PROFILE
+
 # Models that ONLY run wideEP (DP/EP), never TP: the DeepSeek family is served with
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
@@ -220,13 +240,13 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # submit-time export of the same name still overrides. Forwarded in the docker run.
 # ---------------------------------------------------------------------------
 CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
-CONNECTOR_ENV_ARGS=""
+CONNECTOR_ENV_ARGS=()
 if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
   echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
   while IFS= read -r _line; do
     [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
     _k="${_line%%=*}"; _v="${_line#*=}"
-    CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
+    CONNECTOR_ENV_ARGS+=( -e "${_k}=${!_k:-$_v}" )   # submit-time export of $_k wins
   done < "$CONNECTOR_ENV_FILE"
 else
   echo "WARN: connector env file not found: $CONNECTOR_ENV_FILE" >&2
@@ -433,6 +453,9 @@ case "$BENCHMARK_SCRIPT" in
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
 esac
+if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+    BENCHMARK_SCRIPT_FILE="benchmark_xPyD_profile.sh"
+fi
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
     exit 1
@@ -454,7 +477,6 @@ else
     echo "Directory already exists: $LOG_PATH"
 fi
 
-export CONNECTOR_ENV_ARGS="$CONNECTOR_ENV_ARGS"
 export LOG_PATH=$LOG_PATH
 export NIXL_REPO_DIR=$NIXL_REPO_DIR
 export NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH
@@ -477,9 +499,19 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
+_PROFILE_RUN_RC=0
 
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+CONNECTOR_ENV_ARGS=("$@")
 echo "Rank $SLURM_PROCID on $(hostname)";
+_CLOCK_SAMPLER_PID="";
+clock_sampler_cleanup() {
+    if [ -n "${_CLOCK_SAMPLER_PID:-}" ]; then
+        kill "$_CLOCK_SAMPLER_PID" 2>/dev/null || true;
+        wait "$_CLOCK_SAMPLER_PID" 2>/dev/null || true;
+    fi
+}
+trap clock_sampler_cleanup EXIT;
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
 fuser -k 5000/tcp 2>/dev/null || true;
@@ -533,6 +565,26 @@ done
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 
+if [ "${RUN_PROFILE:-0}" = "1" ]; then
+    _CLOCK_DIR="$LOG_PATH/$SLURM_JOB_ID";
+    _CLOCK_FILE="$_CLOCK_DIR/clock_NODE${SLURM_PROCID}.jsonl";
+    mkdir -p "$_CLOCK_DIR";
+    if [ -e "$_CLOCK_FILE" ]; then
+        echo "[clock-sampler] ERROR: refusing to append to existing $_CLOCK_FILE" >&2;
+        exit 1;
+    fi
+    PYTHONDONTWRITEBYTECODE=1 python3 "$NIXL_REPO_DIR/moriio_profiling/trace_tools.py" \
+        clock-sampler --out "$_CLOCK_FILE" --node-rank "$SLURM_PROCID" --interval 1 &
+    _CLOCK_SAMPLER_PID=$!;
+    sleep 1;
+    if ! kill -0 "$_CLOCK_SAMPLER_PID" 2>/dev/null; then
+        wait "$_CLOCK_SAMPLER_PID" || true;
+        echo "[clock-sampler] ERROR: sampler failed to start on NODE${SLURM_PROCID}" >&2;
+        exit 1;
+    fi
+    echo "[clock-sampler] NODE${SLURM_PROCID} -> $_CLOCK_FILE";
+fi
+
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -572,6 +624,8 @@ docker run --rm \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
     ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
+    ${SKIP_WARMUP:+-e SKIP_WARMUP=$SKIP_WARMUP} \
+    ${BENCHMARK_NUM_PROMPTS:+-e BENCHMARK_NUM_PROMPTS=$BENCHMARK_NUM_PROMPTS} \
     ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
     ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
@@ -613,6 +667,7 @@ docker run --rm \
     ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
     ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
     ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
+    -e RUN_PROFILE=$RUN_PROFILE \
     -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
     ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
@@ -630,14 +685,25 @@ docker run --rm \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
-    ${CONNECTOR_ENV_ARGS} \
+    "${CONNECTOR_ENV_ARGS[@]}" \
     ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
+        if [ "$RUN_PROFILE" = "1" ]; then set -o pipefail; fi
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
-'
+' bash "${CONNECTOR_ENV_ARGS[@]}" || _PROFILE_RUN_RC=$?
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+
+# Profile post-processing combines traces and optionally extracts request mappings.
+# Propagate run/finalization failures first, then any post-processing failure.
+if [[ "$RUN_PROFILE" == "1" ]]; then
+    source "${SCRIPT_DIR}/moriio_profiling/process_kernels.sh"
+    _PROFILE_POSTHOC_RC=0
+    moriio_profiling_run_posthoc "$SLURM_JOB_ID" "$LOG_PATH" "$MASTER_NODE" "$NIXL_REPO_DIR" "$NIXL_COOKBOOK_PATH" "$DOCKER_IMAGE_NAME" \
+        || _PROFILE_POSTHOC_RC=$?
+    moriio_profiling_propagate_status "$_PROFILE_RUN_RC" "$_PROFILE_POSTHOC_RC" || exit $?
+fi
 
