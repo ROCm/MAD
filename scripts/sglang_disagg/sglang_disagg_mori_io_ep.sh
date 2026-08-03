@@ -5,6 +5,9 @@
 
 _MORI_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
+if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+    source "$SCRIPT_DIR/moriio_profiling/hooks.sh"
+fi
 
 # -----------------------------------------------------------------------------
 # DP_MODE=1 allowlist (MoRI IO EP). Must stay in sync with run_xPyD_models.slurm.
@@ -37,6 +40,9 @@ mori_dp_mode1_allowed_models_lines() {
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-23731}"
 NODE_RANK="${NODE_RANK:-0}"
+# SGLang's image default is true; disable cached-prefix early send unless the
+export SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX="${SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX:-0}"
+
 MODEL_PATH=$MODEL_PATH
 MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
@@ -79,7 +85,6 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 pip install py-spy
 pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
-
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
@@ -195,7 +200,17 @@ if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then
     echo "[override] Transfer backend: ${_TRANSFER_BACKEND}"
 fi
 
-
+if [[ "${EAGER:-0}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG+=" --disable-cuda-graph"
+    DECODE_MODEL_CONFIG+=" --disable-cuda-graph"
+    export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
+    echo "[eager] EAGER=1: appended --disable-cuda-graph to prefill + decode launch_server commands"
+fi
+if [[ "${REQ_TIME_STATS:-1}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG+=" --enable-request-time-stats-logging"
+    DECODE_MODEL_CONFIG+=" --enable-request-time-stats-logging"
+    export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
+fi
 # =============================================================================
 # Cluster Topology (dist-init endpoints)
 # =============================================================================
@@ -328,6 +343,7 @@ _wait_for_tcp() {
     done
 }
 
+
 if [[ "$NODE_RANK" -eq 0 ]]; then
     echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
 
@@ -378,7 +394,12 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     } | tee "$PREFILL_LOG"
     _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
     set -x
-    eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        _ROCPROF_PREFIX="$(_rocprof_prefix prefill)"
+        eval "${_ROCPROF_PREFIX}$_prefill_cmd" >>"$PREFILL_LOG" 2>&1 &
+    else
+        eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    fi
     set +x
     _node0_prefill_pid=$!
     _dbg "prefill server started pid=${_node0_prefill_pid}"
@@ -535,22 +556,37 @@ PY
     fi
 
     if [[ "${SKIP_BENCHMARK:-0}" != "1" ]] && [[ -n "${MOONCAKE_COOKBOOK_PATH:-}" ]]; then
-        if [[ -f "${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh" ]]; then
-            echo "Running ${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh"
+        BENCHMARK_SCRIPT="benchmark_xPyD.sh"
+        if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+            BENCHMARK_SCRIPT="benchmark_xPyD_profile.sh"
+        fi
+        if [[ -f "${MOONCAKE_COOKBOOK_PATH}/${BENCHMARK_SCRIPT}" ]]; then
+            echo "Running ${MOONCAKE_COOKBOOK_PATH}/${BENCHMARK_SCRIPT}"
             (
                 cd "${MOONCAKE_COOKBOOK_PATH}" || exit 1
-                bash benchmark_xPyD.sh
+                bash "${BENCHMARK_SCRIPT}"
             )
         else
-            echo "WARN: benchmark_xPyD.sh not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
+            echo "WARN: ${BENCHMARK_SCRIPT} not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
         fi
     fi
 
     echo "Killing the proxy server (pid=${proxy_pid})"
-    kill "${proxy_pid}"
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        pkill -TERM -f '[s]glang_router.launch_router' 2>/dev/null || true
+        # sgl-router renames its own process title to "sglang::router" once
+        pkill -KILL -x 'sglang::router' 2>/dev/null || true
+    else
+        kill "${proxy_pid}"
+    fi
 
-    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
-    kill "${_node0_prefill_pid}"
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        echo "Stopping the co-located prefill server (pid=${_node0_prefill_pid})"
+        finish_server prefill "${_node0_prefill_pid}" || exit $?
+    else
+        echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
+        kill "${_node0_prefill_pid}"
+    fi
 
 elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"
@@ -607,7 +643,12 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     } | tee "$PREFILL_LOG"
     _dbg "launching prefill server (PREFILL_NODE_RANK=${PREFILL_NODE_RANK}, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
     set -x
-    eval "$PREFILL_CMD" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        _ROCPROF_PREFIX="$(_rocprof_prefix prefill)"
+        eval "${_ROCPROF_PREFIX}$PREFILL_CMD" >>"$PREFILL_LOG" 2>&1 &
+    else
+        eval "$PREFILL_CMD" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    fi
     set +x
     prefill_pid=$!
     _dbg "prefill server started pid=${prefill_pid}"
@@ -623,8 +664,13 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
         --remote-ip "${MASTER_ADDR}" \
         --remote-port 2322
 
-    echo "Killing the prefill server"
-    kill "${prefill_pid}"
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        echo "Stopping the prefill server"
+        finish_server prefill "${prefill_pid}" || exit $?
+    else
+        echo "Killing the prefill server"
+        kill "${prefill_pid}"
+    fi
 
 elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-default})"
@@ -688,7 +734,12 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     } | tee "$DECODE_LOG"
     _dbg "launching decode server (DECODE_NODE_RANK=${DECODE_NODE_RANK}, DECODE_TP_SIZE=${DECODE_TP_SIZE})"
     set -x
-    eval "$DECODE_CMD" 2>&1 | tee -a "$DECODE_LOG" >/dev/null &
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        _ROCPROF_PREFIX="$(_rocprof_prefix decode)"
+        eval "${_ROCPROF_PREFIX}$DECODE_CMD" >>"$DECODE_LOG" 2>&1 &
+    else
+        eval "$DECODE_CMD" 2>&1 | tee -a "$DECODE_LOG" >/dev/null &
+    fi
     set +x
     decode_pid=$!
     _dbg "decode server started pid=${decode_pid}"
@@ -704,8 +755,13 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
         --remote-ip "${MASTER_ADDR}" \
         --remote-port 2322
 
-    echo "Killing the decode server"
-    kill "${decode_pid}"
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        echo "Stopping the decode server"
+        finish_server decode "${decode_pid}" || exit $?
+    else
+        echo "Killing the decode server"
+        kill "${decode_pid}"
+    fi
 
 else
     echo "ERROR: NODE_RANK=${NODE_RANK} out of range (expected 0..$((xP + yD))) for xP=${xP} yD=${yD}" >&2

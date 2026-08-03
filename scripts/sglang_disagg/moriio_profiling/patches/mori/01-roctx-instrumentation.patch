@@ -1,0 +1,430 @@
+diff --git a/src/io/engine.cpp b/src/io/engine.cpp
+index a22a97b2..99da9b7d 100644
+--- a/src/io/engine.cpp
++++ b/src/io/engine.cpp
+@@ -41,6 +41,7 @@
+ #include "src/io/fabric/backend_impl.hpp"
+ #include "src/io/rdma/backend_impl.hpp"
+ #include "src/io/xgmi/backend_impl.hpp"
++#include "src/io/roctx_mori.hpp"  // ADDITIVE: MORI_ROCTX-gated host-send roctx markers
+ 
+ namespace mori {
+ namespace io {
+@@ -151,6 +152,8 @@ void IOEngineSession::BatchWrite(const SizeVec& localOffsets, const SizeVec& rem
+                                  const SizeVec& sizes, TransferStatus* status,
+                                  TransferUniqueId id) {
+   MORI_IO_FUNCTION_TIMER;
++  // ADDITIVE (MORI_ROCTX=1): brackets the host KV-send dispatch for this transfer.
++  mori::io::MoriRoctxRange _mori_roctx_("mori.io.session_batch_write", static_cast<uint64_t>(id));
+   std::shared_ptr<internal::IoCallDiagnostics> diagnostics;
+   internal::ScopedIoCallDiagnosticsCapture capture(&diagnostics, "Session batch write");
+   backendSess->BatchWrite(localOffsets, remoteOffsets, sizes, status, id);
+@@ -529,6 +532,8 @@ void IOEngine::BatchWrite(const MemDescVec& localSrc, const BatchSizeVec& localO
+                           const BatchSizeVec& sizes, TransferStatusPtrVec& status,
+                           TransferUniqueIdVec& ids) {
+   MORI_IO_FUNCTION_TIMER;
++  // ADDITIVE (MORI_ROCTX=1): brackets the host engine-level batch KV-send.
++  mori::io::MoriRoctxRange _mori_roctx_("mori.io.engine_batch_write");
+   size_t batchSize = localSrc.size();
+   assert(batchSize == remoteDest.size());
+   assert(batchSize == localOffsets.size());
+diff --git a/src/io/rdma/backend_impl.cpp b/src/io/rdma/backend_impl.cpp
+index 211b59e5..b3ad2ca0 100644
+--- a/src/io/rdma/backend_impl.cpp
++++ b/src/io/rdma/backend_impl.cpp
+@@ -38,6 +38,7 @@
+ #include "mori/io/env.hpp"
+ #include "mori/io/logging.hpp"
+ #include "src/io/rdma/protocol.hpp"
++#include "src/io/roctx_mori.hpp"  // ADDITIVE: MORI_ROCTX_TRANSFER async post->cq range stop
+ namespace mori {
+ namespace io {
+ 
+@@ -736,6 +737,9 @@ NotifManager::FlushDrainStats NotifManager::ProcessOneCqe(
+         auto meta = ep.ledger
+                         ? ep.ledger->ReleaseByCqe(wc[i].wr_id, ep.sqDepth.get(), &mergedBatchSize)
+                         : nullptr;
++        // ADDITIVE (MORI_ROCTX_TRANSFER=1): stop the async post->cq range for this
++        // signaled WR on a FAILED/flush CQE (no-op if none was started for it).
++        mori::io::MoriRoctxTransferStop(ep.ledger ? ep.ledger.get() : nullptr, wc[i].wr_id);
+         if (meta) {
+           (void)meta->finishedBatchSize.fetch_add(mergedBatchSize);
+           if (isFlush) {
+@@ -840,6 +844,9 @@ NotifManager::FlushDrainStats NotifManager::ProcessOneCqe(
+         auto meta = ep.ledger
+                         ? ep.ledger->ReleaseByCqe(recordId, ep.sqDepth.get(), &mergedBatchSize)
+                         : nullptr;
++        // ADDITIVE (MORI_ROCTX_TRANSFER=1): stop the async post->cq range for this
++        // signaled WR on its SUCCESS CQE -> this is the real KV transfer duration.
++        mori::io::MoriRoctxTransferStop(ep.ledger ? ep.ledger.get() : nullptr, recordId);
+         if (meta) {
+           NotifySqStateChanged(ep);
+           uint32_t finishedBefore = meta->finishedBatchSize.fetch_add(mergedBatchSize);
+diff --git a/src/io/rdma/common.cpp b/src/io/rdma/common.cpp
+index 8e4e7f4c..c6321e5c 100644
+--- a/src/io/rdma/common.cpp
++++ b/src/io/rdma/common.cpp
+@@ -39,6 +39,7 @@
+ 
+ #include "mori/io/env.hpp"
+ #include "mori/io/logging.hpp"
++#include "src/io/roctx_mori.hpp"  // ADDITIVE: MORI_ROCTX-gated host-send roctx markers
+ 
+ namespace mori {
+ namespace io {
+@@ -606,6 +607,17 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+                              TransferUniqueId id, bool isRead, int postBatchSize,
+                              const RdmaTransferControl& control) {
+   MORI_IO_FUNCTION_TIMER;
++  // ADDITIVE (MORI_ROCTX=1): brackets the host ibv_post_send loop for this RDMA
++  // batch (write = the KV send on the prefill sender; read also routes here).
++  // bytes= carries the whole-call payload (sum of the per-request sizes).
++  // wrs= carries the whole-call pre-merge request count (sizes.size()) -- the
++  // same "known at entry, from the sizes vector" granularity as bytes=; this is
++  // an upper bound on the actual posted WR count (merging can only reduce it).
++  mori::io::MoriRoctxRange _mori_roctx_(
++      isRead ? "mori.rdma.batch_post.read" : "mori.rdma.batch_post.write",
++      static_cast<uint64_t>(id),
++      std::accumulate(sizes.begin(), sizes.end(), static_cast<uint64_t>(0)),
++      static_cast<uint64_t>(sizes.size()));
+ 
+   if ((localOffsets.size() != remoteOffsets.size()) || (sizes.size() != remoteOffsets.size())) {
+     return {StatusCode::ERR_INVALID_ARGS,
+@@ -654,6 +666,10 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+   thread_local std::vector<ChunkedSgeSegment> tlChunkPlan;
+   thread_local std::vector<int> tlEpWrsSinceSignal;
+   thread_local std::vector<size_t> tlEpMergedSinceSignal;
++  // ADDITIVE (MORI_ROCTX_TRANSFER=1): payload bytes accumulated since the last
++  // signal on each EP (mirrors tlEpMergedSinceSignal); attached to the signaled
++  // record's kv_transfer range and reset on signal.
++  thread_local std::vector<size_t> tlEpBytesSinceSignal;
+   thread_local int reentryDepth = 0;
+ 
+   struct ReentryGuard {
+@@ -670,6 +686,7 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+   std::vector<ChunkedSgeSegment> localChunkPlan;
+   std::vector<int> localEpWrsSinceSignal;
+   std::vector<size_t> localEpMergedSinceSignal;
++  std::vector<size_t> localEpBytesSinceSignal;  // ADDITIVE
+ 
+   std::vector<size_t>& indices = usePool ? tlIndices : localIndices;
+   std::vector<MergedWorkRequest>& mergedPool = usePool ? tlMergedPool : localMergedPool;
+@@ -678,6 +695,9 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+   std::vector<int>& epWrsSinceSignal = usePool ? tlEpWrsSinceSignal : localEpWrsSinceSignal;
+   std::vector<size_t>& epMergedSinceSignal =
+       usePool ? tlEpMergedSinceSignal : localEpMergedSinceSignal;
++  // ADDITIVE (MORI_ROCTX_TRANSFER=1): see tlEpBytesSinceSignal above.
++  std::vector<size_t>& epBytesSinceSignal =
++      usePool ? tlEpBytesSinceSignal : localEpBytesSinceSignal;
+ 
+   // Bound peak retained memory: if an earlier very large batch grew the pools far
+   // beyond the current need, release the excess so it doesn't stay resident.
+@@ -883,6 +903,7 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+ 
+   epWrsSinceSignal.assign(epNum, 0);
+   epMergedSinceSignal.assign(epNum, 0);
++  epBytesSinceSignal.assign(epNum, 0);  // ADDITIVE
+ 
+   // Rotate the starting EP by transfer id so single-segment (single WR)
+   // transfers spread evenly across all QPs instead of always landing on eps[0].
+@@ -905,6 +926,7 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+     const auto& localMr = localMrPerEp[epId];
+     const auto& remoteMr = remoteMrPerEp[epId];
+     size_t mergedReqSize = 0;
++    size_t batchBytes = 0;  // ADDITIVE: payload bytes for this post chunk
+     for (int j = st; j < end; j++) {
+       MergedWorkRequest& mergedWr = mergedWrs[j];
+       for (auto& sge : mergedWr.sges) sge.lkey = localMr.lkey;
+@@ -915,10 +937,12 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+       wr.wr_id = 0;
+       wr.next = (j + 1 < end) ? &mergedWrs[j + 1].wr : nullptr;
+       mergedReqSize += mergedWr.mergedRequests;
++      batchBytes += mergedWr.totalRemoteLength;  // ADDITIVE
+     }
+ 
+     epWrsSinceSignal[epId] += batchWrNum;
+     epMergedSinceSignal[epId] += mergedReqSize;
++    epBytesSinceSignal[epId] += batchBytes;  // ADDITIVE
+ 
+     bool isLastBatchForEp = ((i + epNum) >= numPostBatch);
+     bool sqNearFull = eps[epId].sqDepth && (epWrsSinceSignal[epId] >= eps[epId].maxSqDepth);
+@@ -936,6 +960,15 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+                                           static_cast<int>(epMergedSinceSignal[epId]));
+       last.wr_id = recordId;
+       last.send_flags = IBV_SEND_SIGNALED;
++      // ADDITIVE (MORI_ROCTX_TRANSFER=1): start an ASYNC post->cq range for this
++      // signaled WR, keyed by (ledger, recordId). Stopped when its CQE is reaped
++      // (NotifManager::ProcessOneCqe -> ledger->ReleaseByCqe) or, if this WR fails
++      // to post, in the not-posted cleanup below. Measures real KV transfer/wire
++      // time (ms), unlike the synchronous host-post anchor above (us).
++      mori::io::MoriRoctxTransferStart(eps[epId].ledger.get(), recordId,
++                                       static_cast<uint64_t>(id), isRead,
++                                       static_cast<uint64_t>(epBytesSinceSignal[epId]),
++                                       static_cast<uint64_t>(epWrsSinceSignal[epId]));
+     }
+ 
+     struct ibv_send_wr* badWr = nullptr;
+@@ -972,6 +1005,9 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+       } else if (needSignal) {
+         int dummy = 0;
+         eps[epId].ledger->ReleaseByCqe(recordId, nullptr, &dummy);
++        // ADDITIVE (MORI_ROCTX_TRANSFER=1): the signaled WR never posted, so no CQE
++        // will arrive -- stop its async range here to avoid a leaked range.
++        mori::io::MoriRoctxTransferStop(eps[epId].ledger.get(), recordId);
+       }
+ 
+       if (postedCount > 0 && (!needSignal || !lastWasPosted)) {
+@@ -1022,6 +1058,7 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
+     if (needSignal) {
+       epWrsSinceSignal[epId] = 0;
+       epMergedSinceSignal[epId] = 0;
++      epBytesSinceSignal[epId] = 0;  // ADDITIVE
+     }
+     MORI_IO_TRACE("ibv_post_send ep index {} batch index range [{}, {})", epId, st, end);
+   }
+diff --git a/src/io/roctx_mori.hpp b/src/io/roctx_mori.hpp
+new file mode 100644
+index 00000000..c14230bd
+--- /dev/null
++++ b/src/io/roctx_mori.hpp
+@@ -0,0 +1,240 @@
++// Copyright © Advanced Micro Devices, Inc. All rights reserved.
++// MIT License (see repository LICENSE).
++// ============================================================================
++// ADDITIVE, env-gated roctx markers for the MORI-IO HOST RDMA send path.
++//
++// TWO independent, additive instrumentations (each its own env gate; default OFF):
++//
++//   (1) MORI_ROCTX=1  -> SYNCHRONOUS push/pop ranges around the host ibv_post_send
++//       loop (IOEngine[Session]::BatchWrite + RdmaBatchReadWrite). These measure
++//       only the HOST POST cost (building WRs + ringing the NIC doorbell). They
++//       are stack/same-thread ranges (MoriRoctxRange RAII) and CANNOT span the
++//       async post->completion window. Marker names: mori.io.engine_batch_write,
++//       mori.rdma.batch_post.{write,read}.
++//
++//   (2) MORI_ROCTX_TRANSFER=1  -> ASYNCHRONOUS post->CQ ranges that measure the
++//       REAL KV transfer/wire duration: started when a *signaled* WR is posted
++//       (RdmaBatchReadWrite, needSignal branch) and stopped when its completion
++//       is reaped on the CQ (NotifManager::ProcessOneCqe -> ledger->ReleaseByCqe).
++//       Uses the PROCESS-WIDE async roctx API roctxRangeStartA/roctxRangeStop
++//       (start on the posting thread, stop on the CQ-poll thread). Marker name:
++//       mori.rdma.kv_transfer (its own dedicated trace lane).
++//
++//       RDMA uses SELECTIVE SIGNALING: only the tail WR of each post batch sets
++//       IBV_SEND_SIGNALED and receives a SubmissionLedger recordId (== wr_id).
++//       Only that signaled WR produces a CQE, so we start exactly ONE async range
++//       per signaled WR (keyed by the ledger recordId) -> every started range has
++//       a matching stop (the CQE, or the not-posted cleanup path). recordId is
++//       per-EP-ledger (not globally unique), so the range map is keyed by the
++//       PAIR (SubmissionLedger*, recordId), which is globally unique and identical
++//       at the post site (eps[i].ledger) and the CQ site (ep.ledger) because both
++//       hold the same shared SubmissionLedger instance.
++//
++// CRITICAL: rocprofv3 (rocprofiler-sdk) --marker-trace only intercepts the
++// rocprofiler-sdk ROCTx library librocprofiler-sdk-roctx.so, NOT legacy
++// libroctx64.so. We dlopen the sdk lib at runtime (RTLD_GLOBAL) and resolve the
++// roctx symbols from it (no link-time dependency added to libmori_io.so).
++//
++// Fully gated + exception-safe: when neither gate is set the lib is never dlopen'd
++// and every call is a no-op (a single bool check).
++// ============================================================================
++#pragma once
++
++#include <dlfcn.h>
++
++#include <cstdint>
++#include <cstdlib>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <utility>
++
++namespace mori {
++namespace io {
++namespace roctx_detail {
++
++using roctx_range_push_t = int (*)(const char*);
++using roctx_range_pop_t = int (*)();
++using roctx_mark_t = void (*)(const char*);
++// Process-wide async range API (start on one thread, stop from any other).
++using roctx_range_id_t = std::uint64_t;
++using roctx_range_start_t = roctx_range_id_t (*)(const char*);
++using roctx_range_stop_t = void (*)(roctx_range_id_t);
++
++inline bool GateOn(const char* name) {
++  const char* g = std::getenv(name);
++  if (g == nullptr) return false;
++  const char c = g[0];
++  return (c == '1' || c == 't' || c == 'T' || c == 'y' || c == 'Y' || c == 'o' || c == 'O');
++}
++
++struct RoctxApi {
++  bool enabled = false;           // MORI_ROCTX: push/pop host-post anchors
++  bool transfer_enabled = false;  // MORI_ROCTX_TRANSFER: async post->cq ranges
++  roctx_range_push_t push = nullptr;
++  roctx_range_pop_t pop = nullptr;
++  roctx_mark_t mark = nullptr;
++  roctx_range_start_t range_start = nullptr;
++  roctx_range_stop_t range_stop = nullptr;
++
++  RoctxApi() {
++    const bool want_post = GateOn("MORI_ROCTX");
++    const bool want_transfer = GateOn("MORI_ROCTX_TRANSFER");
++    if (!want_post && !want_transfer) return;
++    // sdk-roctx ONLY (the lib rocprofv3 --marker-trace intercepts).
++    void* h = dlopen("librocprofiler-sdk-roctx.so", RTLD_NOW | RTLD_GLOBAL);
++    if (h == nullptr) h = dlopen("librocprofiler-sdk-roctx.so.1", RTLD_NOW | RTLD_GLOBAL);
++    if (h == nullptr) return;
++    push = reinterpret_cast<roctx_range_push_t>(dlsym(h, "roctxRangePushA"));
++    pop = reinterpret_cast<roctx_range_pop_t>(dlsym(h, "roctxRangePop"));
++    mark = reinterpret_cast<roctx_mark_t>(dlsym(h, "roctxMarkA"));
++    range_start = reinterpret_cast<roctx_range_start_t>(dlsym(h, "roctxRangeStartA"));
++    range_stop = reinterpret_cast<roctx_range_stop_t>(dlsym(h, "roctxRangeStop"));
++    enabled = want_post && (push != nullptr && pop != nullptr);
++    transfer_enabled = want_transfer && (range_start != nullptr && range_stop != nullptr);
++  }
++};
++
++inline RoctxApi& api() {
++  static RoctxApi a;  // gate read + dlopen happen exactly once per process
++  return a;
++}
++
++// (SubmissionLedger*, recordId) -> async roctx range id. recordId is unique only
++// within one ledger, so the ledger pointer disambiguates across endpoints.
++using TransferKey = std::pair<std::uintptr_t, std::uint64_t>;
++struct TransferKeyHash {
++  std::size_t operator()(const TransferKey& k) const {
++    std::size_t h1 = std::hash<std::uintptr_t>{}(k.first);
++    std::size_t h2 = std::hash<std::uint64_t>{}(k.second);
++    return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
++  }
++};
++struct TransferRanges {
++  std::mutex mu;
++  std::unordered_map<TransferKey, roctx_range_id_t, TransferKeyHash> ranges;
++};
++inline TransferRanges& transfer_ranges() {
++  static TransferRanges t;
++  return t;
++}
++
++}  // namespace roctx_detail
++
++// RAII range: pushes on construction, pops on destruction (handles every return
++// path + exception). No-op when MORI_ROCTX is off. (HOST-POST anchor only.)
++class MoriRoctxRange {
++ public:
++  explicit MoriRoctxRange(const char* name) {
++    auto& a = roctx_detail::api();
++    if (a.enabled) {
++      a.push(name);
++      active_ = true;
++    }
++  }
++  MoriRoctxRange(const char* name, uint64_t id) {
++    auto& a = roctx_detail::api();
++    if (a.enabled) {
++      std::string s = std::string(name) + " id=" + std::to_string(id);
++      a.push(s.c_str());
++      active_ = true;
++    }
++  }
++  // ADDITIVE: host-post anchor variant carrying the whole-call payload size.
++  // Keeps id= LAST so end-anchored id= parsers stay valid: "<name> bytes=<N> id=<id>".
++  MoriRoctxRange(const char* name, uint64_t id, uint64_t bytes) {
++    auto& a = roctx_detail::api();
++    if (a.enabled) {
++      std::string s = std::string(name) + " bytes=" + std::to_string(bytes) +
++                      " id=" + std::to_string(id);
++      a.push(s.c_str());
++      active_ = true;
++    }
++  }
++  // ADDITIVE: host-post anchor variant that also carries the whole-call WR
++  // count (pre-merge request count, i.e. sizes.size() at the RdmaBatchReadWrite
++  // call site -- the same "known at entry, from the sizes vector" granularity
++  // already used for bytes above). Keeps id= LAST:
++  // "<name> bytes=<N> wrs=<M> id=<id>".
++  MoriRoctxRange(const char* name, uint64_t id, uint64_t bytes, uint64_t wrs) {
++    auto& a = roctx_detail::api();
++    if (a.enabled) {
++      std::string s = std::string(name) + " bytes=" + std::to_string(bytes) +
++                      " wrs=" + std::to_string(wrs) + " id=" + std::to_string(id);
++      a.push(s.c_str());
++      active_ = true;
++    }
++  }
++  ~MoriRoctxRange() {
++    if (active_) {
++      auto& a = roctx_detail::api();
++      if (a.pop != nullptr) a.pop();
++    }
++  }
++  MoriRoctxRange(const MoriRoctxRange&) = delete;
++  MoriRoctxRange& operator=(const MoriRoctxRange&) = delete;
++
++ private:
++  bool active_ = false;
++};
++
++inline void MoriRoctxMark(const std::string& msg) {
++  auto& a = roctx_detail::api();
++  if (a.enabled && a.mark != nullptr) a.mark(msg.c_str());
++}
++
++// --- ASYNC post->cq KV-transfer ranges (MORI_ROCTX_TRANSFER) ------------------
++// Start an async range for a SIGNALED WR at post time. Keyed by (ledger,recordId).
++// ADDITIVE: `wrs` carries epWrsSinceSignal[epId] at the signal point -- the
++// number of WRs (across possibly several RdmaBatchReadWrite calls, since
++// unsignaled chunks roll forward until the next signal) this one signaled
++// completion covers. Placed BEFORE id= (same rule as bytes=) so end-anchored
++// id= parsers keep matching: "<name> bytes=<N> wrs=<M> id=<id>".
++inline void MoriRoctxTransferStart(const void* ledger, std::uint64_t recordId,
++                                   std::uint64_t transferId, bool isRead,
++                                   std::uint64_t bytes = 0, std::uint64_t wrs = 0) {
++  auto& a = roctx_detail::api();
++  if (!a.transfer_enabled || a.range_start == nullptr || ledger == nullptr) return;
++  // bytes=/wrs= placed BEFORE id= so the end-anchored id= parsers keep matching.
++  std::string s =
++      std::string(isRead ? "mori.rdma.kv_transfer.read" : "mori.rdma.kv_transfer") +
++      " bytes=" + std::to_string(bytes) + " wrs=" + std::to_string(wrs) +
++      " id=" + std::to_string(transferId);
++  roctx_detail::roctx_range_id_t rid = a.range_start(s.c_str());
++  auto& t = roctx_detail::transfer_ranges();
++  std::lock_guard<std::mutex> lk(t.mu);
++  t.ranges[{reinterpret_cast<std::uintptr_t>(ledger), recordId}] = rid;
++}
++
++// Stop the async range for a completed/cleaned-up signaled WR. Idempotent: a
++// no-op if no range was started for this (ledger,recordId) (e.g. unsignaled WRs,
++// notification CQEs). The roctxRangeStop call is made OUTSIDE the map lock.
++inline void MoriRoctxTransferStop(const void* ledger, std::uint64_t recordId) {
++  auto& a = roctx_detail::api();
++  if (!a.transfer_enabled || a.range_stop == nullptr || ledger == nullptr) return;
++  roctx_detail::roctx_range_id_t rid = 0;
++  bool found = false;
++  {
++    auto& t = roctx_detail::transfer_ranges();
++    std::lock_guard<std::mutex> lk(t.mu);
++    auto it = t.ranges.find({reinterpret_cast<std::uintptr_t>(ledger), recordId});
++    if (it != t.ranges.end()) {
++      rid = it->second;
++      t.ranges.erase(it);
++      found = true;
++    }
++  }
++  if (found) a.range_stop(rid);
++}
++
++// Diagnostics: number of started-but-not-stopped transfer ranges (leak counter).
++inline std::size_t MoriRoctxTransferOutstanding() {
++  auto& a = roctx_detail::api();
++  if (!a.transfer_enabled) return 0;
++  auto& t = roctx_detail::transfer_ranges();
++  std::lock_guard<std::mutex> lk(t.mu);
++  return t.ranges.size();
++}
++
++}  // namespace io
++}  // namespace mori

@@ -20,34 +20,38 @@ This repository contains scripts and documentation to launch PD Disaggregation f
 - Access to a shared filesystem for log collection( cluster specific)
 
 
-## Building the Docker image
-Access the Dockerfile located at `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`.
-It uses `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` as the base docker image.
+## Build and submit
+Build the ordinary image from the repository root: `docker build -t <image> -f docker/sglang_disagg_inference.ubuntu.amd.Dockerfile .`
+Build the dedicated profiling image from the repository root: `docker build --build-arg ENABLE_ROCTX=1 -t <profile-image> -f docker/sglang_disagg_inference_profile.ubuntu.amd.Dockerfile .`
+Submit from `scripts/sglang_disagg/`: `DOCKER_IMAGE_NAME=<image> MODEL_NAME=<model> xP=1 yD=1 USE_CX7_NICS=1 sbatch -N2 -n2 run_xPyD_models.slurm`
+Use the profiling image with `RUN_PROFILE=1`. Its Dockerfile starts from the compatible public ROCm 7.2.0 SGLang base below and upgrades installed ROCm userspace packages to ROCm 7.2.3.
 
-```bash
-docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-```
-
-### Build arguments
+### Image build arguments (ordinary first; profiling from `BASE_DOCKER`)
 
 | Arg | Default | Description |
 |-----|---------|-------------|
 | `INSTALL_MORI` | `1` | When `1`, builds and installs MoRI at `MORI_COMMIT`. Set to any other value (e.g. `0`) to skip MoRI installation entirely. |
 | `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when `INSTALL_MORI=1`. |
-| `BASE_DOCKER` | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | Base SGLang ROCm image. |
+| `BASE_DOCKER` | `lmsysorg/sglang-rocm:v0.5.15.post1-rocm720-mi30x-20260718` | Compatible public ROCm 7.2.0 SGLang base; its userspace stack is upgraded to ROCm 7.2.3. |
 | `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
+| `ENABLE_ROCTX` | `0` | When `1`, `MORI_ROCTX_COMMIT` and `SGLANG_ROCTX_COMMIT` select pinned instrumentation and instrumented MoRI is rebuilt regardless of `INSTALL_MORI`, including `0`. It does not control the ROCm 7.2.3 upgrade. |
+
+The dedicated profiling build uses ROCm 7.2.3. The ordinary image remains the exact current `develop` Dockerfile. For `EAGER=0` profiling, do not substitute the stock ROCm 7.2.0 image: its CUDA Graph replay and rocprof finalization paths are known to fail.
 
 Examples:
 
 ```bash
 # Default build: installs MoRI pinned at MORI_COMMIT
-docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+docker build -t sglang_disagg_pd_image -f docker/sglang_disagg_inference.ubuntu.amd.Dockerfile .
 
 # Skip MoRI (e.g. when using Mooncake KV transfer only)
-docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f docker/sglang_disagg_inference.ubuntu.amd.Dockerfile .
 
 # Pin a different MoRI commit
-docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f docker/sglang_disagg_inference.ubuntu.amd.Dockerfile .
+
+# Enable ROCTX markers for profiling
+docker build --build-arg ENABLE_ROCTX=1 -t <profile-image> -f docker/sglang_disagg_inference_profile.ubuntu.amd.Dockerfile .
 ```
 
 ## Scripts
@@ -58,22 +62,25 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 | `sglang_disagg_mori_io_ep.sh` | Container entrypoint — starts prefill/decode servers, proxy, and benchmark |
 | `models.yaml` | Model-specific CLI flags for all supported models |
 | `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
-| `benchmark_xPyD.sh` | Concurrency sweep benchmark using sglang bench_serving |
+| `benchmark_xPyD.sh` | Ordinary current-`develop` concurrency sweep benchmark (used when profiling is off) |
+| `benchmark_xPyD_profile.sh` | Profiling concurrency sweep with deterministic RIDs, client CSV/manifests, and multi-sweep support |
 | `benchmark_parser.py` | Log parser for CONCURRENCY benchmark logs |
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/ROCm/MAD.git
-cd scripts/sglang_disagg
+cd MAD/scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<DOCKER_IMAGE_NAME>
 export xP=1
 export yD=1
 export MODEL_NAME=Llama-3.1-8B-Instruct
-export RUN_MORI=1  # MoRI (default). Set RUN_MORI=0 for Mooncake (KV_TRANSFER_BACKEND=mooncake)
+export RUN_MORI=1  # Explicit MoRI; RUN_PROFILE=1 defaults to MoRI, while normal runs default to Mooncake.
+export USE_CX7_NICS=1
 
 # num_nodes = xP + yD
+# CX7 requires an appropriate same-rail node allocation.
 sbatch -N 2 -n 2 --nodelist=<node1,node2> run_xPyD_models.slurm
 ```
 
@@ -97,7 +104,7 @@ The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation 
 | `0` (default) | `tp` | `base_flags` + `tp_flags` + `prefill.tp` / `decode.tp` | All models |
 | `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1 only |
 
-- `DP_MODE=1` enables MoRI expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO).
+- `DP_MODE=1` enables MoRI expert A2A with DP attention; `RUN_MORI` independently selects the disaggregation KV-transfer backend.
 - It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any other model with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for all non-DeepSeek models.
 
 ## Log Files
@@ -112,6 +119,12 @@ Logs are written to `${LOG_PATH}/${SLURM_JOB_ID}/`:
 | `benchmark_*_CONCURRENCY.log` / `.csv` | Benchmark results |
 
 ## Benchmarking
+
+`RUN_PROFILE=1` selects `benchmark_xPyD_profile.sh`; profiling off selects the exact current-`develop` `benchmark_xPyD.sh`. End-to-end profile submissions default to `SKIP_WARMUP=1`; set `SKIP_WARMUP=0` to run the legacy 1024-prompt/512-concurrency warmup. `BENCHMARK_NUM_PROMPTS` overrides the generated prompt count per sweep. The image's `SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX` feature defaults to `0` (off) in this launcher; set it explicitly to `1` to opt in.
+
+`RUN_PROFILE=1` enables MoRI by default; profiling off defaults to Mooncake unless `RUN_MORI` is explicitly set. `EAGER=0` avoids a global CUDA-graph disable and preserves supported graphs, but SGLang/model compatibility may still disable prefill graphs.
+
+Set `RUN_PROFILE=1` when submitting with the profiling image to enable integrated profiling (rocprof capture + kernel analysis). Profile benchmark requests receive deterministic RIDs and produce client timing/manifests without duplicate probe traffic. Multi-sweep runs use space-separated `ISL/OSL` entries in `BENCHMARK_COMBINATIONS`; a separate nonempty `BENCHMARK_CON` is required for profiling. `RUN_MORI=1` adds MoRI markers and strict request/KV correlation; `RUN_MORI=0` produces SGLang-only traces and reqstats without MoRI mapping artifacts. Output artifacts land under `moriio_profiling/artifacts/pull_<jobid>/`.
 
 Parse benchmark results:
 ```bash

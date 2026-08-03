@@ -1,0 +1,982 @@
+diff --git a/python/sglang/benchmark/serving.py b/python/sglang/benchmark/serving.py
+index cd80d277f0..f4802ae061 100644
+--- a/python/sglang/benchmark/serving.py
++++ b/python/sglang/benchmark/serving.py
+@@ -15,6 +15,7 @@ python3 -m sglang.benchmark.serving --backend sglang --dataset-name random --num
+ import argparse
+ import asyncio
+ import copy
++import csv
+ import importlib.util
+ import json
+ import math
+@@ -92,6 +93,8 @@ class RequestFuncInput:
+     extra_request_body: Dict[str, Any]
+     timestamp: Optional[float] = None
+     routing_key: Optional[str] = None
++    request_index: Optional[int] = None
++    rid: Optional[str] = None
+
+
+ @dataclass
+@@ -112,11 +115,21 @@ class RequestFuncOutput:
+     spec_cap_length: float = 0.0
+     spec_block_accept_length: float = 0.0
+     spec_cap_lens_histogram: List[int] = field(default_factory=list)
++    request_index: Optional[int] = None
++    rid: str = ""
++    requested_output_len: int = 0
++    client_send_wall_ns: Optional[int] = None
++    client_first_token_wall_ns: Optional[int] = None
++    client_done_wall_ns: Optional[int] = None
++    http_status: Optional[int] = None
+
+     @staticmethod
+     def init_new(request_func_input: RequestFuncInput):
+         output = RequestFuncOutput()
+         output.prompt_len = request_func_input.prompt_len
++        output.request_index = request_func_input.request_index
++        output.rid = request_func_input.rid or ""
++        output.requested_output_len = request_func_input.output_len
+         return output
+
+
+@@ -686,6 +699,8 @@ async def async_request_sglang_generate(
+         # Add image data if available (list of image urls/base64)
+         if request_func_input.image_data:
+             payload["image_data"] = request_func_input.image_data
++        if request_func_input.rid is not None:
++            payload["rid"] = request_func_input.rid
+
+         headers = get_request_headers()
+         if request_func_input.routing_key:
+@@ -701,9 +716,11 @@ async def async_request_sglang_generate(
+         most_recent_timestamp = st
+         last_output_len = 0
+         try:
++            output.client_send_wall_ns = time.time_ns()
+             async with session.post(
+                 url=api_url, json=payload, headers=headers
+             ) as response:
++                output.http_status = response.status
+                 if response.status == 200:
+                     async for chunk_bytes in response.content:
+                         chunk_bytes = chunk_bytes.strip()
+@@ -715,6 +732,8 @@ async def async_request_sglang_generate(
+                         if chunk == "[DONE]":
+                             pass
+                         else:
++                            if output.client_first_token_wall_ns is None:
++                                output.client_first_token_wall_ns = time.time_ns()
+                             data = json.loads(chunk)
+
+                             _meta_info = data.get("meta_info") or {}
+@@ -769,6 +788,9 @@ async def async_request_sglang_generate(
+             exc_info = sys.exc_info()
+             output.error = "".join(traceback.format_exception(*exc_info))
+             print(f"{output.error=}")
++        finally:
++            if output.client_send_wall_ns is not None:
++                output.client_done_wall_ns = time.time_ns()
+
+     if pbar:
+         pbar.update(1)
+@@ -1300,6 +1322,100 @@ def wrap_multi_turn_request_func(request_func: Callable, backend: str) -> Callab
+     return f
+
+
++def _write_client_trace_artifacts(
++    outputs: List[RequestFuncOutput],
++    request_id_prefix: str,
++    client_timing_csv: Optional[str],
++    client_manifest: Optional[str],
++    max_concurrency: Optional[int],
++) -> None:
++    """Write deterministic request timing artifacts after all tasks complete."""
++    rows = sorted(
++        outputs,
++        key=lambda output: (
++            output.request_index is None,
++            output.request_index if output.request_index is not None else 0,
++        ),
++    )
++    fieldnames = [
++        "request_index",
++        "rid",
++        "success",
++        "client_send_wall_ns",
++        "client_first_token_wall_ns",
++        "client_done_wall_ns",
++        "prompt_len",
++        "output_len",
++        "requested_output_len",
++        "http_status",
++        "error",
++    ]
++
++    if client_timing_csv:
++        path = Path(client_timing_csv)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        with path.open("w", newline="", encoding="utf-8") as file:
++            writer = csv.DictWriter(file, fieldnames=fieldnames)
++            writer.writeheader()
++            for output in rows:
++                writer.writerow({name: getattr(output, name) for name in fieldnames})
++
++    if client_manifest:
++        path = Path(client_manifest)
++        path.parent.mkdir(parents=True, exist_ok=True)
++        sends = [
++            output.client_send_wall_ns
++            for output in rows
++            if output.client_send_wall_ns is not None
++        ]
++        completions = [
++            output.client_done_wall_ns
++            for output in rows
++            if output.client_done_wall_ns is not None
++        ]
++        input_lengths = {output.prompt_len for output in rows}
++        output_lengths = {output.requested_output_len for output in rows}
++        window = {
++            "start": min(sends) if sends else None,
++            "end": max(completions) if completions else None,
++        }
++        requests_manifest = [
++            {
++                "request_index": output.request_index,
++                "rid": output.rid,
++                "success": output.success,
++                "client_send_wall_ns": output.client_send_wall_ns,
++                "client_first_token_wall_ns": output.client_first_token_wall_ns,
++                "client_done_wall_ns": output.client_done_wall_ns,
++                "prompt_len": output.prompt_len,
++                "output_len": output.output_len,
++                "requested_output_len": output.requested_output_len,
++                "http_status": output.http_status,
++                "error": output.error,
++            }
++            for output in rows
++        ]
++        manifest = {
++            "tag": request_id_prefix,
++            "request_id_prefix": request_id_prefix,
++            "n": len(rows),
++            "completed": sum(output.success for output in rows),
++            "concurrency": max_concurrency,
++            "isl_input_tokens": (
++                next(iter(input_lengths)) if len(input_lengths) == 1 else None
++            ),
++            "osl_max_new_tokens": (
++                next(iter(output_lengths)) if len(output_lengths) == 1 else None
++            ),
++            "benchmark_window_wall_ns": window,
++            # Backward-compatible alias for existing artifact consumers.
++            "probe_window_wall_ns": window,
++            "requests": requests_manifest,
++        }
++        with path.open("w", encoding="utf-8") as file:
++            json.dump(manifest, file, indent=2)
++
++
+ async def benchmark(
+     backend: str,
+     api_url: str,
+@@ -1323,6 +1439,9 @@ async def benchmark(
+     mooncake_num_rounds=1,
+     profile_prefill_url: Optional[List[str]] = None,
+     profile_decode_url: Optional[List[str]] = None,
++    request_id_prefix: Optional[str] = None,
++    client_timing_csv: Optional[str] = None,
++    client_manifest: Optional[str] = None,
+ ):
+     if backend in ASYNC_REQUEST_FUNCS:
+         request_func = ASYNC_REQUEST_FUNCS[backend]
+@@ -1338,6 +1457,8 @@ async def benchmark(
+         and _normalize_round_messages(first_prompt[0]) is not None
+     )
+     if is_multi_turn:
++        if request_id_prefix:
++            raise ValueError("--request-id-prefix does not support multi-turn datasets")
+         request_func = wrap_multi_turn_request_func(request_func, backend=backend)
+
+     # Limit concurrency
+@@ -1477,6 +1598,7 @@ async def benchmark(
+         lora_probs = None
+
+     pbar = None if disable_tqdm else tqdm(total=pbar_total)
++    request_index = 0
+     async for request in request_generator:
+         if lora_names is not None and len(lora_names) != 0:
+             if lora_request_distribution == "uniform":
+@@ -1508,7 +1630,14 @@ async def benchmark(
+             extra_request_body=merged_extra_body,
+             timestamp=request.timestamp,
+             routing_key=request.routing_key,
++            request_index=request_index,
++            rid=(
++                f"{request_id_prefix}-{request_index:03d}"
++                if request_id_prefix
++                else None
++            ),
+         )
++        request_index += 1
+
+         tasks.append(
+             asyncio.create_task(
+@@ -1518,6 +1647,14 @@ async def benchmark(
+     outputs: List[RequestFuncOutput] = await asyncio.gather(*tasks)
+     if is_multi_turn:
+         outputs = [x for output in outputs for x in output]
++    if request_id_prefix:
++        _write_client_trace_artifacts(
++            outputs=outputs,
++            request_id_prefix=request_id_prefix,
++            client_timing_csv=client_timing_csv,
++            client_manifest=client_manifest,
++            max_concurrency=max_concurrency,
++        )
+
+     # Stop profiler (only if profile_steps was not provided, as it auto-stops)
+     if profile and not (
+@@ -2103,6 +2240,9 @@ def run_benchmark(args_: argparse.Namespace):
+             mooncake_num_rounds=args.mooncake_num_rounds,
+             profile_prefill_url=getattr(args, "profile_prefill_url", None),
+             profile_decode_url=getattr(args, "profile_decode_url", None),
++            request_id_prefix=getattr(args, "request_id_prefix", None),
++            client_timing_csv=getattr(args, "client_timing_csv", None),
++            client_manifest=getattr(args, "client_manifest", None),
+         )
+     )
+
+@@ -2345,6 +2485,25 @@ def cli_main():
+         "actual request rate may be lower than specified with --request-rate, "
+         "if the server is not processing requests fast enough to keep up.",
+     )
++    tracing_group = parser.add_argument_group("request tracing arguments")
++    tracing_group.add_argument(
++        "--request-id-prefix",
++        type=str,
++        default=None,
++        help="Assign deterministic PREFIX-NNN request IDs to native /generate requests.",
++    )
++    tracing_group.add_argument(
++        "--client-timing-csv",
++        type=str,
++        default=None,
++        help="Write one wall-clock timing row per benchmark request.",
++    )
++    tracing_group.add_argument(
++        "--client-manifest",
++        type=str,
++        default=None,
++        help="Write request IDs and benchmark timing-window metadata as JSON.",
++    )
+     parser.add_argument("--output-file", type=str, help="Output JSONL file name.")
+     parser.add_argument(
+         "--output-details", action="store_true", help="Output details of benchmarking."
+@@ -2696,6 +2855,12 @@ def cli_main():
+     )
+     args = parser.parse_args()
+     _validate_parsed_gsp_args(parser, args)
++    if (args.client_timing_csv or args.client_manifest) and not args.request_id_prefix:
++        parser.error(
++            "--client-timing-csv/--client-manifest require --request-id-prefix"
++        )
++    if args.request_id_prefix and args.backend not in ("sglang", "sglang-native"):
++        parser.error("--request-id-prefix requires the native SGLang backend")
+     run_benchmark(args)
+
+
+diff --git a/python/sglang/srt/disaggregation/mori/conn.py b/python/sglang/srt/disaggregation/mori/conn.py
+index b175ca5411..2b67eb1ef5 100644
+--- a/python/sglang/srt/disaggregation/mori/conn.py
++++ b/python/sglang/srt/disaggregation/mori/conn.py
+@@ -27,6 +27,27 @@ from mori.io import (
+ )
+
+ from sglang.srt.disaggregation.base.conn import KVArgs, KVPoll
++
++# --- OPTIONAL roctx markers for KV-transfer visibility (gate: env SGLANG_KV_ROCTX=1) ---
++# No-op unless enabled AND libroctx64 is loadable. We emit roctx MARKS (instants), not
++# ranges, because a transfer's start/end can be on different threads; read the per-side
++# transfer window as (kv_*_done_ts - kv_*_start_ts) for matching bootstrap_room in a
++# roctx-CAPTURING trace (rocprofv3 --marker-trace, or RTL lite's roctx shim). These are
++# PREFILL/DECODE per-side windows on that engine's clock -- NOT cross-node wire time.
++import os as _os_kvx
++_kvx_mark = (lambda _m: None)
++if _os_kvx.environ.get("SGLANG_KV_ROCTX", "0") == "1":
++    try:
++        import ctypes as _ct_kvx
++        _lib_kvx = _ct_kvx.CDLL("libroctx64.so")
++        _lib_kvx.roctxMarkA.argtypes = [_ct_kvx.c_char_p]
++        def _kvx_mark(_m, _f=_lib_kvx.roctxMarkA):
++            try:
++                _f(_m.encode("ascii", "replace"))
++            except Exception:
++                pass
++    except Exception:
++        pass
+ from sglang.srt.disaggregation.common.conn import (
+     CommonKVBootstrapServer,
+     CommonKVManager,
+@@ -49,6 +70,46 @@ from sglang.srt.utils.network import NetworkAddress, get_local_ip_auto
+ logger = logging.getLogger(__name__)
+ MORI_GUARD = b"MoriMsgGuard"
+
++# --- roctx request-attribution map mark (ADDITIVE, SGLANG_ROCTX-gated, exception-safe) ---
++# The transfer_uid returned by self.engine.allocate_transfer_uid() is the SAME integer
++# the MORI-IO C++ backend prints as `id=N` on BOTH the host-post mark
++# (`mori.rdma.batch_post.write id=N`) and the CQ post->CQE range
++# (`mori.rdma.kv_transfer id=N`). Those marks are NOT request-tagged. Emitting one
++# instant `mori.map room=<bootstrap_room> uid=<transfer_uid>` mark per allocation lets an
++# offline consumer attribute BOTH lanes to the owning request by exact id-lookup. We use
++# the rocprofiler-sdk roctx lib (the one `rocprofv3 --marker-trace` intercepts) via
++# sglang.srt.observability.sglang_roctx -- NOT this file's legacy libroctx64 _kvx_mark,
++# which rocprofv3 does not see. Fully inert (single bool check) when SGLANG_ROCTX is unset.
++try:
++    from sglang.srt.observability.sglang_roctx import roctx_mark as _mori_roctx_mark
++except Exception:  # helper missing for any reason => fully inert
++    def _mori_roctx_mark(_msg):
++        return None
++
++# bootstrap_room is in scope at add_transfer_request() but NOT at every uid-alloc site
++# (_submit_batch_transfer_plan / _send_mamba_state are reached via send_kvcache /
++# send_state which do not carry it). The per-target sends run SYNCHRONOUSLY on the same
++# thread inside add_transfer_request's loop, so we stash the current room in a
++# threading.local at that entry and read it at the alloc sites. Thread-local (not a plain
++# instance attr) keeps concurrent senders on different threads from racing.
++_mori_room_tls = threading.local()
++
++
++def _mori_emit_map(transfer_uid, room=None):
++    """Emit `mori.map room=R uid=U`. room defaults to the current thread's stashed room.
++
++    No-op (never raises) when no room is known or when SGLANG_ROCTX is off. Additive.
++    """
++    if room is None:
++        room = getattr(_mori_room_tls, "room", None)
++    if room is None:
++        return
++    try:
++        _mori_roctx_mark("mori.map room=%d uid=%d" % (room, transfer_uid))
++    except Exception:
++        # Observability must never break the KV send path.
++        pass
++
+
+ def _normalize_state_indices_per_component(
+     state_indices: Optional[List],
+@@ -738,6 +799,9 @@ class MoriKVManager(CommonKVManager):
+             return []
+
+         transfer_uid = self.engine.allocate_transfer_uid()
++        # Attribute this transfer to the owning request (room from thread-local set in
++        # add_transfer_request); no-op when SGLANG_ROCTX off or room unknown.
++        _mori_emit_map(transfer_uid)
+
+         statuses = self.engine.batch_write(
+             [src_desc],
+@@ -983,7 +1047,10 @@ class MoriKVManager(CommonKVManager):
+             local_offsets.append([prefill_aux_index * item_len])
+             remote_offsets.append([dst_aux_index * item_len])
+             sizes.append([item_len])
+-            uids.append(self.engine.allocate_transfer_uid())
++            transfer_uid = self.engine.allocate_transfer_uid()
++            uids.append(transfer_uid)
++            # room is an explicit param on this path.
++            _mori_emit_map(transfer_uid, room)
+         return list(
+             self.engine.batch_write(
+                 src_descs, local_offsets, dst_descs, remote_offsets, sizes, uids
+@@ -1189,6 +1256,8 @@ class MoriKVManager(CommonKVManager):
+                 size = bytes_to_send
+
+             transfer_uid = self.engine.allocate_transfer_uid()
++            # room from thread-local (set in add_transfer_request); no-op if unknown.
++            _mori_emit_map(transfer_uid)
+             batch_statuses = self.engine.batch_write(
+                 [src_desc],
+                 [[src_offset]],
+@@ -1309,6 +1378,12 @@ class MoriKVManager(CommonKVManager):
+     ) -> Tuple[List[TransferStatus], Optional[List[TransferInfo]]]:
+         assert self.disaggregation_mode == DisaggregationMode.PREFILL
+
++        # Stash the owning room for this thread so the downstream uid-alloc sites
++        # (_submit_batch_transfer_plan / _send_mamba_state, reached via send_kvcache /
++        # send_state which do not carry bootstrap_room) can emit a request-attributable
++        # `mori.map` mark. The per-target sends below run synchronously on THIS thread.
++        _mori_room_tls.room = bootstrap_room
++
+         if (
+             bootstrap_room not in self.request_status
+             or self.request_status.get(bootstrap_room) == KVPoll.Failed
+@@ -1326,6 +1401,7 @@ class MoriKVManager(CommonKVManager):
+                 return [], None
+
+             self.update_status(bootstrap_room, KVPoll.Transferring)
++            _kvx_mark("kv_send_start room=%d" % bootstrap_room)
+             for info in transfer_infos.values():
+                 peer_info = self.decode_kv_args_table.get(info.engine_key)
+                 if not peer_info:
+@@ -1383,6 +1459,7 @@ class MoriKVManager(CommonKVManager):
+             )
+             return result_statuses, target_infos_snapshot
+
++        _kvx_mark("kv_send_done room=%d" % bootstrap_room)
+         return result_statuses, target_infos_snapshot
+
+
+@@ -1743,6 +1820,7 @@ class MoriKVReceiver(CommonKVReceiver):
+                     ]
+                 )
+         self.init_time = time.time()
++        _kvx_mark("kv_recv_start room=%s" % self.bootstrap_room)
+
+     def poll(self) -> KVPoll:
+         if self.conclude_state is not None:
+@@ -1750,6 +1828,8 @@ class MoriKVReceiver(CommonKVReceiver):
+
+         status = self.kv_mgr.check_status(self.bootstrap_room)
+         if status in (KVPoll.Success, KVPoll.Failed):
++            if status == KVPoll.Success:
++                _kvx_mark("kv_recv_done room=%s" % self.bootstrap_room)
+             self.conclude_state = status
+             return status
+
+diff --git a/python/sglang/srt/disaggregation/prefill.py b/python/sglang/srt/disaggregation/prefill.py
+index 6e8bc0db06..73df64fa19 100644
+--- a/python/sglang/srt/disaggregation/prefill.py
++++ b/python/sglang/srt/disaggregation/prefill.py
+@@ -1178,6 +1178,10 @@ class SchedulerDisaggregationPrefillMixin:
+         if not req.disagg_kv_sender.should_send_kv_chunk(len(page_indices), last_chunk):
+             return
+         req.disagg_kv_sender.send(page_indices, state_indices)
++        # Stamp the start of the KV transfer window (FIRST chunk only; the setter
++        # is one-shot). Guard against a missing time_stats just in case.
++        if getattr(req, "time_stats", None) is not None:
++            req.time_stats.set_prefill_kv_transfer_start_time()
+         req.start_send_idx = end_idx
+
+     def optimistic_release_and_requeue(self: Scheduler, req: Req) -> None:
+diff --git a/python/sglang/srt/managers/schedule_batch.py b/python/sglang/srt/managers/schedule_batch.py
+index a8cea65ec9..1f56c574f4 100755
+--- a/python/sglang/srt/managers/schedule_batch.py
++++ b/python/sglang/srt/managers/schedule_batch.py
+@@ -1044,6 +1044,16 @@ class Req(ReqDllmMixin):
+         self.bootstrap_host: str = bootstrap_host
+         self.bootstrap_port: Optional[int] = bootstrap_port
+         self.bootstrap_room: Optional[int] = bootstrap_room
++        # roctx (ADDITIVE, SGLANG_ROCTX-gated): tag this request's scheduler
++        # time-stats with its bootstrap_room so the roctx markers emitted at each
++        # SchedulerReqTimeStats stamp correlate per-request (bootstrap_room is the
++        # PD prefill<->decode join key). Pure no-op when SGLANG_ROCTX is unset.
++        try:
++            self.time_stats.roctx_id = (
++                str(bootstrap_room) if bootstrap_room is not None else ""
++            )
++        except Exception:
++            pass
+         # Decode-local: the already-emitted boundary token to replay when a
+         # retracted request is rebootstrapped. Set in pause_generation(retract)
+         # and consumed in the decode transfer commit; never plumbed to prefill.
+diff --git a/python/sglang/srt/observability/req_time_stats.py b/python/sglang/srt/observability/req_time_stats.py
+index 8e03bcaeab..a01b02eb91 100644
+--- a/python/sglang/srt/observability/req_time_stats.py
++++ b/python/sglang/srt/observability/req_time_stats.py
+@@ -39,6 +39,23 @@ from sglang.srt.observability.trace import (
+ )
+ from sglang.srt.utils import get_bool_env_var
+
++# --- roctx instrumentation (ADDITIVE, SGLANG_ROCTX-gated, exception-safe no-op) ---
++# Emits an instant roctx marker at every request-time-stats stamp point so that a
++# `rocprofv3 --marker-trace` capture shows the SchedulerReqTimeStats /
++# APIServerReqTimeStats timeline aligned with the GPU kernels. Fully inert (and
++# zero overhead) when SGLANG_ROCTX is unset; never alters serving behavior.
++try:
++    from sglang.srt.observability.sglang_roctx import (
++        ROCTX_ENABLED as _ROCTX_ENABLED,
++        roctx_mark as _roctx_mark,
++    )
++except Exception:  # helper missing for any reason => fully inert
++    _ROCTX_ENABLED = False
++
++    def _roctx_mark(_m):
++        return None
++
++
+ if TYPE_CHECKING:
+     from sglang.srt.disaggregation.base.conn import KVTransferMetric
+     from sglang.srt.managers.schedule_batch import ScheduleBatch
+@@ -236,6 +253,33 @@ class ReqTimeStatsBase:
+     )
+     disagg_mode: DisaggregationMode = DisaggregationMode.NULL
+     diff_realtime_monotonic: float = 0.0
++    # roctx per-request correlation tag: bootstrap_room on scheduler stats, rid on
++    # API stats. Populated where available (see schedule_batch.py / tokenizer_manager);
++    # blank otherwise. Plain additive field; only read when SGLANG_ROCTX=1.
++    roctx_id: str = ""
++
++    # Overridden by subclasses to label the observability layer in the marker name.
++    _ROCTX_LAYER = "base"
++
++    def _roctx(self, event: str) -> None:
++        """Emit a gated roctx instant marker for one request-time-stats stamp.
++
++        Fast no-op (a single bool check, no string work) when SGLANG_ROCTX is
++        unset. Exception-safe: observability must never break serving.
++        """
++        if not _ROCTX_ENABLED:
++            return
++        try:
++            layer = self._ROCTX_LAYER
++            if layer == "sched":
++                name = "reqstats.sched.%s.%s" % (self.disagg_mode_str(), event)
++            else:
++                name = "reqstats.%s.%s" % (layer, event)
++            if self.roctx_id:
++                name += " id=" + self.roctx_id
++            _roctx_mark(name)
++        except Exception:
++            pass
+
+     @classmethod
+     def new_from_obj(cls, obj: Optional[ReqTimeStatsBase], *args, **kwargs) -> Self:
+@@ -373,6 +417,8 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     api_server_dispatch_finish_time: float = 0.0
+     response_sent_to_client_time: float = 0.0
+
++    _ROCTX_LAYER = "api"
++
+     def __getstate__(self) -> object:
+         state = {}
+         # send to DP controller or Scheduler
+@@ -387,6 +433,7 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     def set_created_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.created_time = ts
++        self._roctx("request_received")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_req_start(convert_time_to_realtime_ns(ts))
+@@ -401,6 +448,7 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     def set_finished_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.finished_time = ts
++        self._roctx("request_finished")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_req_finish(convert_time_to_realtime_ns(ts))
+@@ -409,14 +457,17 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+         ts = ts or time.perf_counter()
+         self.first_token_time = ts
+         self.last_time = ts
++        self._roctx("first_token")
+
+     def set_last_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.last_time = ts
++        self._roctx("last_token")
+
+     def set_tokenize_finish_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.tokenize_finish_time = ts
++        self._roctx("tokenize_finish")
+
+         # tokenize span was started in set_created_time(); end it here.
+         if self.trace_ctx.tracing_enable:
+@@ -429,6 +480,7 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     def set_api_server_dispatch_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.api_server_dispatch_time = ts
++        self._roctx("dispatch")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_slice_start(
+@@ -440,6 +492,7 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     def set_api_server_dispatch_finish_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.api_server_dispatch_finish_time = ts
++        self._roctx("dispatch_finish")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_slice_end(
+@@ -452,6 +505,7 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+     def set_response_sent_to_client_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.response_sent_to_client_time = ts
++        self._roctx("response_sent")
+
+     def get_interval(self):
+         return time.perf_counter() - self.last_time
+@@ -476,10 +530,30 @@ class APIServerReqTimeStats(ReqTimeStatsBase):
+             meta_info["request_received_ts"] = convert_time_to_realtime(
+                 self.created_time
+             )
++        # Surface the FULL APIServerReqTimeStats timeline (all monotonic
++        # perf_counter fields -> wall-clock seconds). Previously only the four
++        # *_ts below were emitted; the tokenize/dispatch-start/first-token/
++        # last-token stamps are now emitted too so the client can capture the
++        # complete API-server-layer timeline. Gated (like the rest of this
++        # method) by --enable-metrics at the tokenizer_manager call site.
++        if self.tokenize_finish_time > 0.0:
++            meta_info["tokenize_finish_ts"] = convert_time_to_realtime(
++                self.tokenize_finish_time
++            )
++        if self.api_server_dispatch_time > 0.0:
++            meta_info["api_server_dispatch_ts"] = convert_time_to_realtime(
++                self.api_server_dispatch_time
++            )
+         if self.api_server_dispatch_finish_time > 0.0:
+             meta_info["api_server_dispatch_finish_ts"] = convert_time_to_realtime(
+                 self.api_server_dispatch_finish_time
+             )
++        if self.first_token_time > 0.0:
++            meta_info["first_token_ts"] = convert_time_to_realtime(
++                self.first_token_time
++            )
++        if self.last_time > 0.0:
++            meta_info["last_token_ts"] = convert_time_to_realtime(self.last_time)
+         if self.response_sent_to_client_time > 0.0:
+             meta_info["response_sent_to_client_ts"] = convert_time_to_realtime(
+                 self.response_sent_to_client_time
+@@ -534,6 +608,8 @@ class DPControllerReqTimeStats(ReqTimeStatsBase):
+     dpc_dispatch_time: float = 0.0
+     dpc_dispatch_finish_time: float = 0.0
+
++    _ROCTX_LAYER = "dpc"
++
+     def __getstate__(self) -> object:
+         state = {}
+         # send to Scheduler
+@@ -549,6 +625,7 @@ class DPControllerReqTimeStats(ReqTimeStatsBase):
+     def set_dp_dispatch_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.dpc_dispatch_time = ts
++        self._roctx("dispatch")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_slice_start(
+@@ -560,6 +637,7 @@ class DPControllerReqTimeStats(ReqTimeStatsBase):
+     def set_dp_dispatch_finish_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.dpc_dispatch_finish_time = ts
++        self._roctx("dispatch_finish")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_slice_end(
+@@ -580,6 +658,8 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     Decode: prealloc_queue -> transfer_queue -> wait_queue -> forward -> completion
+     """
+
++    _ROCTX_LAYER = "sched"
++
+     # Placeholder: not used currently
+     # propagated from tokenizer/grpc_server or dp controller
+     created_time: float = 0.0
+@@ -595,6 +675,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     # prefill node, get by time.perf_counter()
+     prefill_bootstrap_queue_entry_time: float = 0.0
+     prefill_transfer_queue_entry_time: float = 0.0
++    prefill_kv_transfer_start_time: float = 0.0
+     prefill_kv_transfer_finish_time: float = 0.0
+
+     # decode node, get by time.perf_counter()
+@@ -640,13 +721,16 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         calibrate_time_diff()
+         ts = ts or time.perf_counter()
+         self.scheduler_recv_time = ts
++        self._roctx("recv")
+
+     def set_spec_draft_start_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.spec_draft_start_time = ts
++        self._roctx("spec_draft_start")
+
+     def set_spec_draft_end_time(self, ts=None):
+         ts = ts or time.perf_counter()
++        self._roctx("spec_draft_end")
+
+         if self.trace_ctx.tracing_enable:
+             stage = RequestStage.SPEC_DRAFT
+@@ -655,6 +739,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     def set_spec_verify_start_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.spec_verify_start_time = ts
++        self._roctx("spec_verify_start")
+
+     def set_spec_verify_end_time(
+         self,
+@@ -666,6 +751,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         if accepted_tokens is not None:
+             num_correct_drafts = accepted_tokens
+         ts = ts or time.perf_counter()
++        self._roctx("spec_verify_end")
+
+         if self.trace_ctx.tracing_enable:
+             stage = RequestStage.SPEC_VERIFY
+@@ -683,9 +769,11 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     def set_run_batch_cpu_start_time(self, ts=None, attrs=None):
+         ts = ts or time.perf_counter()
+         self.run_batch_cpu_start_time = ts
++        self._roctx("run_batch_cpu_start")
+
+     def set_run_batch_cpu_end_time(self, ts=None, attrs=None):
+         ts = ts or time.perf_counter()
++        self._roctx("run_batch_cpu_end")
+         if self.run_batch_cpu_start_time > 0.0:
+             self.trace_slice(
+                 RequestStage.RUN_BATCH_CPU, self.run_batch_cpu_start_time, ts, attrs
+@@ -700,6 +788,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         self.last_chunked_prefill_finish_time = 0.0
+         self.last_decode_finish_time = 0.0
+         self.last_decode_scheduled_time = 0.0
++        self._roctx("retract")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.trace_event("retract", 1, convert_time_to_realtime_ns(ts))
+@@ -710,6 +799,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         self.prefill_finished_time = 0.0
+         self.completion_time = 0.0
+         self.prefill_transfer_queue_entry_time = 0.0
++        self.prefill_kv_transfer_start_time = 0.0
+         self.prefill_kv_transfer_finish_time = 0.0
+         self.last_forward_entry_time = 0.0
+         self.last_prefill_finished_time = 0.0
+@@ -735,12 +825,14 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+             self.set_retract_time(ts)
+
+         self.wait_queue_entry_time = ts
++        self._roctx("wait_queue_entry")
+
+     def set_forward_entry_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         if self.forward_entry_time == 0.0:
+             self.forward_entry_time = ts
+             self.last_forward_entry_time = ts
++            self._roctx("forward_entry")
+
+             if self.enable_metrics:
+                 self.metrics_collector.observe_queue_time(self.get_queueing_time())
+@@ -774,6 +866,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         ts = ts or time.perf_counter()
+         last_time = self.last_chunked_prefill_finish_time
+         self.last_chunked_prefill_finish_time = ts
++        self._roctx("chunked_prefill_finish")
+
+         if last_time == 0.0:
+             last_time = self.last_forward_entry_time
+@@ -787,6 +880,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         if self.prefill_finished_time == 0.0:
+             self.prefill_finished_time = ts
+             self.last_prefill_finished_time = ts
++            self._roctx("prefill_finished")
+
+             stage = RequestStage.PREFILL_FORWARD
+             self.observe_per_stage_req_latency(stage, ts - self.last_forward_entry_time)
+@@ -829,6 +923,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         ts = ts or time.perf_counter()
+         last_time = self.last_decode_finish_time
+         self.last_decode_finish_time = ts
++        self._roctx("decode_finish")
+
+         if self.enable_metrics or self.trace_ctx.tracing_enable:
+             if last_time == 0.0:
+@@ -874,10 +969,12 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+
+         if forward_mode.is_decode():
+             self.last_decode_scheduled_time = ts
++        self._roctx("scheduled")
+
+     def set_completion_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.completion_time = ts
++        self._roctx("completion")
+
+         if self.trace_ctx.tracing_enable:
+             self.trace_ctx.abort()
+@@ -960,10 +1057,12 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         ts = ts or time.perf_counter()
+         self.set_completion_time(ts)
+         self.forward_entry_time = ts
++        self._roctx("quick_finish")
+
+     def set_prefill_bootstrap_queue_entry_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.prefill_bootstrap_queue_entry_time = ts
++        self._roctx("prefill_bootstrap_queue_entry")
+
+         stage = RequestStage.PREFILL_PREPARE
+         self.observe_per_stage_req_latency(stage, ts - self.scheduler_recv_time)
+@@ -972,10 +1071,21 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     def set_prefill_transfer_queue_entry_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.prefill_transfer_queue_entry_time = ts
++        self._roctx("prefill_transfer_queue_entry")
++
++    def set_prefill_kv_transfer_start_time(self, ts=None):
++        # One-shot: stamp only the FIRST time a KV chunk is sent for this request
++        # (captures the start of the KV transfer window for chunked prefill).
++        if self.prefill_kv_transfer_start_time == 0.0:
++            self.prefill_kv_transfer_start_time = (
++                ts if ts is not None else time.perf_counter()
++            )
++            self._roctx("prefill_kv_transfer_start")
+
+     def set_prefill_kv_transfer_finish_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.prefill_kv_transfer_finish_time = ts
++        self._roctx("prefill_kv_transfer_finish")
+
+         stage = RequestStage.PREFILL_TRANSFER_KV_CACHE
+         self.observe_per_stage_req_latency(
+@@ -986,6 +1096,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     def set_decode_prealloc_queue_entry_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.decode_prealloc_queue_entry_time = ts
++        self._roctx("decode_prealloc_queue_entry")
+
+         stage = RequestStage.DECODE_PREPARE
+         self.observe_per_stage_req_latency(stage, ts - self.scheduler_recv_time)
+@@ -994,6 +1105,7 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+     def set_decode_transfer_queue_entry_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.decode_transfer_queue_entry_time = ts
++        self._roctx("decode_transfer_queue_entry")
+
+         stage = RequestStage.DECODE_BOOTSTRAP
+         self.observe_per_stage_req_latency(
+@@ -1015,10 +1127,12 @@ class SchedulerReqTimeStats(ReqTimeStatsBase):
+         ts = ts or time.perf_counter()
+         if self.bootstrap_done_time == 0.0:
+             self.bootstrap_done_time = ts
++            self._roctx("bootstrap_done")
+
+     def set_decode_prebuilt_finish_time(self, ts=None):
+         ts = ts or time.perf_counter()
+         self.decode_prebuilt_finish_time = ts
++        self._roctx("decode_prebuilt_finish")
+
+         stage = RequestStage.DECODE_FAKE_OUTPUT
+         self.observe_per_stage_req_latency(stage, ts - self.last_forward_entry_time)
+diff --git a/python/sglang/srt/observability/sglang_roctx.py b/python/sglang/srt/observability/sglang_roctx.py
+new file mode 100644
+index 0000000000..69dca495dc
+--- /dev/null
++++ b/python/sglang/srt/observability/sglang_roctx.py
+@@ -0,0 +1,115 @@
++# Copyright 2023-2024 SGLang Team
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++# ==============================================================================
++"""roctx marker helper for SGLang request-time-stats instrumentation.
++
++ADDITIVE / OPT-IN. This module is part of the private roctx fork; it is a pure
++addition (no upstream file is modified destructively). Every marker is gated
++behind the ``SGLANG_ROCTX=1`` environment variable and is an exception-safe
++no-op when the gate is unset → **zero behavioral change and zero overhead when
++off**.
++
++Why roctx (and not torch/kineto): roctx markers live in roctracer's external
++"roctx" domain. torch/kineto does NOT ingest that domain, so these marks are
++INVISIBLE to a torch profiler trace. They only surface under
++``rocprofv3 --marker-trace`` (or RTL-lite's roctx shim). Capture accordingly.
++
++Mechanism: we bind ``roctxMarkA`` from ``libroctx64.so`` via ctypes (no need to
++link the SGLang/MORI build against libroctx). ``roctxMarkA`` emits an *instant*
++marker (a point on the timeline), which is the right primitive here because a
++request's lifecycle stamps fire across multiple threads/processes (scheduler
++event loop, tokenizer/API frontend, TP workers) — a push/pop range would have
++to begin and end on the same thread, which these stamps do not. Read a
++start/end window as ``ts(end_mark) - ts(start_mark)`` for a matching request id.
++"""
++
++from __future__ import annotations
++
++import os
++
++__all__ = ["ROCTX_ENABLED", "roctx_mark", "roctx_available"]
++
++# Gate read once at import. Accept "1" (and, defensively, common truthy spellings).
++ROCTX_ENABLED = os.environ.get("SGLANG_ROCTX", "0").strip().lower() in (
++    "1",
++    "true",
++    "yes",
++    "on",
++)
++
++# _emit(name: bytes) -> None. Default is a no-op; replaced by the real ctypes
++# binding below only when the gate is on AND libroctx64.so loads cleanly.
++_emit = None  # type: ignore[assignment]
++
++
++def _init_backend() -> None:
++    """Bind roctxMarkA from libroctx64.so. Best-effort; leaves _emit=None on failure."""
++    global _emit
++    try:
++        import ctypes
++
++        # IMPORTANT: rocprofiler-sdk's `rocprofv3 --marker-trace` only intercepts
++        # the rocprofiler-sdk ROCTx library (librocprofiler-sdk-roctx.so), NOT the
++        # legacy roctracer libroctx64.so. Proven on ROCm 7.0: marks via
++        # librocprofiler-sdk-roctx.so render as slices in the pftrace; libroctx64.so
++        # marks do not. So prefer the sdk lib; fall back to libroctx64 (e.g. for an
++        # RTL/roctracer capture context). All ship in /opt/rocm*/lib.
++        lib = None
++        for cand in (
++            "librocprofiler-sdk-roctx.so",
++            "librocprofiler-sdk-roctx.so.1",
++            "libroctx64.so",
++            "libroctx64.so.4",
++        ):
++            try:
++                lib = ctypes.CDLL(cand)
++                break
++            except OSError:
++                continue
++        if lib is None:
++            return
++        fn = lib.roctxMarkA
++        fn.argtypes = [ctypes.c_char_p]
++        fn.restype = None
++
++        def _emit_impl(name_bytes, _fn=fn):  # bound default avoids global lookups
++            _fn(name_bytes)
++
++        _emit = _emit_impl
++    except Exception:
++        # Any failure (missing lib, missing symbol, etc.) → stay a no-op.
++        _emit = None
++
++
++if ROCTX_ENABLED:
++    _init_backend()
++
++
++def roctx_available() -> bool:
++    """True iff the gate is on and the roctx backend bound successfully."""
++    return ROCTX_ENABLED and _emit is not None
++
++
++def roctx_mark(message: str) -> None:
++    """Emit an instant roctx marker. No-op (and never raises) when disabled.
++
++    Safe to call on any hot path: when ``SGLANG_ROCTX`` is unset this returns
++    immediately after a single boolean check and the backend is never bound.
++    """
++    if not ROCTX_ENABLED or _emit is None:
++        return
++    try:
++        _emit(message.encode("ascii", "replace"))
++    except Exception:
++        # Observability must never break serving.
++        pass
