@@ -247,11 +247,33 @@ if [ "$NODE_RANK" -eq 0 ]; then
     # connector_start_proxy sets BENCHMARK_PORT (router->ROUTER_PORT, toy->PROXY_PORT).
     # Fall back to PROXY_PORT only if the connector didn't set it.
     export BENCHMARK_PORT="${BENCHMARK_PORT:-${PROXY_PORT}}"
-    # Agentic replay driver reads the endpoint via AGENTIC_PORT; it is the same
-    # port the sweep benchmark uses (BENCHMARK_PORT). Exported unconditionally so
-    # the default (non-agentic) sweep path is unaffected.
+    # Agentic replay driver reads the endpoint via AGENTIC_PORT; for the default
+    # sweep it is exactly BENCHMARK_PORT (the router/proxy port), so the non-agentic
+    # path is unaffected.
     export AGENTIC_PORT="${BENCHMARK_PORT}"
+
+    # Agentic path only: the vLLM PD router serves /v1/chat/completions but 503s on
+    # /v1/models under MoRIIO service discovery (empty HTTP worker registry). The
+    # shared harness (scripts/common/agentic_lib.sh) gates readiness + served-model
+    # resolution on GET /v1/models, so start a tiny side-port shim that answers
+    # /v1/models (gated on the router's /health) and stream-proxies everything else
+    # to the router, then point AGENTIC_PORT at the shim. Byte-for-byte no-op for the
+    # default sweep (guarded by BENCHMARK_SCRIPT_FILE).
+    _agentic_shim_pid=""
+    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" ]]; then
+        _shim_port="${AGENTIC_SHIM_PORT:-$((BENCHMARK_PORT + 1))}"
+        _shim_model="${MODEL:-${MODEL_PATH}}"
+        _shim_prefill="${AGENTIC_SERVER_METRICS%% *}"
+        AGENTIC_SHIM_PORT="${_shim_port}"         AGENTIC_SHIM_UPSTREAM="127.0.0.1:${BENCHMARK_PORT}"         AGENTIC_SHIM_MODEL="${_shim_model}" AGENTIC_SHIM_PREFILL="${_shim_prefill}"             python3 "$NIXL_COOKBOOK_PATH/agentic_models_shim.py"             > >(tee /run_logs/${SLURM_JOB_ID}/agentic_models_shim_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
+        _agentic_shim_pid=$!
+        export AGENTIC_PORT="${_shim_port}"
+        echo "[agentic-shim] models shim on :${_shim_port} -> router :${BENCHMARK_PORT} (model=${_shim_model})"
+        sleep 3
+    fi
+
     bash "$NIXL_COOKBOOK_PATH/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
+
+    [[ -n "$_agentic_shim_pid" ]] && { kill "$_agentic_shim_pid" 2>/dev/null || true; }
 
     echo "Killing the proxy server.."
     pkill -P $proxy_pid 2>/dev/null; kill $proxy_pid 2>/dev/null || true
