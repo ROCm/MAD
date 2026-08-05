@@ -226,7 +226,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   MoRI. To switch to the Primus-Turbo **DeepEP** dispatcher, set
   `PRIMUS_USE_DEEPEP=1` in the manifest env (a primus scaleout manifest can carry
   it defaulting to `"0"`), which makes
-  `scripts/primus/megatron-lm/primus_megatron-lm_benchmark_report.sh`
+  `scripts/primus_megatron-lm/primus_megatron-lm_benchmark_report.sh`
   (invoked by the model `run.sh`) pass `--use_turbo_deepep true` to Primus. Primus
   then (`_is_turbo_deepep_enabled`) auto-sets `moe_enable_deepep=True` and
   `moe_token_dispatcher_type='flex'` and swaps in
@@ -260,7 +260,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   `GBS % (MBS * world_size) != 0` (e.g. a 3-node/24-GPU run: `512 % (4*24) != 0`)
   Megatron aborts with `global batch size ... is not divisible by micro batch
   size ... times data parallel size`. In our consolidated
-  `scripts/primus/megatron-lm/primus_megatron-lm_benchmark_report.sh` this is
+  `scripts/primus_megatron-lm/primus_megatron-lm_benchmark_report.sh` this is
   handled generically for *every* model branch: `scaleout_gbs_override` reads
   MBS/GBS from the run's config YAML and, when `NUM_GPUS > 8`, rounds GBS up to
   the next multiple of `MBS * NUM_GPUS` (via `normalize_global_batch_size`) and
