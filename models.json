@@ -1575,6 +1575,29 @@
      "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
   },
   {
+    "name": "sglang-disagg-deepseek-r1-overlay",
+    "url": "",
+    "dockerfile": "docker/sglang_disagg_inference_full_overlay",
+    "scripts": "scripts/sglang_disagg/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+    "tags": [
+      "pyt",
+      "sglang",
+      "inference",
+      "disaggregated",
+      "deepseek-r1",
+      "moe",
+      "ep-internode",
+      "rccl-tp",
+      "mori-a2a"
+    ],
+    "timeout": 14400,
+    "args": ""
+  },
+  {
     "name": "pyt_hy_video",
     "url": "",
     "dockerfile": "docker/pyt_hy_video",
@@ -2901,5 +2924,65 @@
       "PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32": "1",
       "NVTE_CK_IS_V3_ATOMIC_FP32": "1"
     }
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train_rccl_overlay",
+    "scripts": "scripts/primus_megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Llama-3.1-8B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3",
+      "training",
+      "primus",
+      "scaleout"
+    ],
+    "timeout": -1,
+    "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-8b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-70b_overlay",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train_rccl_overlay",
+    "scripts": "scripts/primus_megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3",
+      "training",
+      "primus",
+      "scaleout"
+    ],
+    "timeout": -1,
+    "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b"
+  },
+  {
+    "name": "primus_pyt_megatron_lm_train_llama-3.1-405b_overlay",
+    "url": "",
+    "dockerfile": "docker/primus_megatron_train_rccl_overlay",
+    "scripts": "scripts/primus_megatron-lm/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_primus-megatron-Llama-3.1-405B.csv",
+    "tags": [
+      "pyt",
+      "pretrain",
+      "llama3",
+      "training",
+      "primus",
+      "scaleout"
+    ],
+    "timeout": -1,
+    "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-405b"
   }
 ]
