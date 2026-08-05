@@ -106,7 +106,7 @@
   <header class="top">
     <div>
       <h1>Kimi-K3 (MXFP4) — MoRI-EP Wide Expert-Parallel Serving</h1>
-      <p class="sub">Colocated PP2×TP8×EP8 on 2× nodes / 16× AMD Instinct MI325X (gfx942) · Broadcom Thor2 400G RoCE</p>
+      <p class="sub">Colocated PP2 × TP8 = 16 GPUs (MoE runs EP8 within each node) · 2× nodes AMD Instinct MI325X (gfx942) · Broadcom Thor2 400G RoCE</p>
     </div>
     <button class="toggle" id="themeToggle" aria-label="Toggle dark mode">◐ Theme</button>
   </header>
@@ -116,14 +116,14 @@
   </div>
 
   <div class="callout" style="border-left-color:var(--warning)">
-    <p><b>Topology note (read this):</b> this recipe is <b>PP2 × TP8 × EP8</b> on 16 GPUs. The expert group is <b>8-wide within each node</b> (896 experts ÷ 112 local = EP8), replicated on each of the 2 pipeline stages. So <b>MoRI-EP all-to-all runs intra-node</b> (across a node's 8 GPUs); the only cross-node traffic is the pipeline hand-off, which uses <b>NCCL</b>, not MoRI-EP. This config does <b>not</b> exercise MoRI-EP cross-node scale-out over the Thor2 rails — that was validated separately (see note below). "EP16" would be a misnomer; the 16 is the GPU count, not the expert-parallel width.</p>
+    <p><b>Topology note (read this):</b> the GPU count is <b>PP2 × TP8 = 16 GPUs</b> (DP=1) — EP is <b>not</b> a separate multiplicative axis. Within each 8-GPU pipeline stage the <em>same</em> 8 GPUs are used two ways: dense/attention layers run <b>TP8</b>, and MoE layers run <b>EP8</b> over those same 8 GPUs (896 experts ÷ 8 = 112/GPU). vLLM derives EP size = TP × DP = 8. So <b>MoRI-EP all-to-all runs intra-node</b> (across a node's 8 GPUs); the only cross-node traffic is the pipeline-stage hand-off, over <b>NCCL</b>, not MoRI-EP. This config does <b>not</b> exercise MoRI-EP cross-node scale-out (validated separately, see below). Both "EP16" and reading "PP2×TP8×EP8" as a product (which would imply 128 GPUs) are wrong — it's 16 GPUs, EP8 overlaying TP8 per node.</p>
   </div>
 
   <!-- ===================== HEADLINE TILES ===================== -->
   <div class="tiles">
     <div class="tile"><div class="k">Model</div><div class="v">Kimi-K3</div><div class="u">MXFP4 · ~2.8T MoE</div></div>
     <div class="tile"><div class="k">Experts</div><div class="v">896</div><div class="u">112 / GPU · EP8 per node</div></div>
-    <div class="tile"><div class="k">Parallelism</div><div class="v">PP2×TP8×EP8</div><div class="u">16 GPUs · world size 16</div></div>
+    <div class="tile"><div class="k">Parallelism</div><div class="v">PP2 × TP8</div><div class="u">16 GPUs · EP8 overlays TP per node</div></div>
     <div class="tile"><div class="k">All-to-all</div><div class="v">MoRI-EP</div><div class="u">mori_low_latency · intra-node</div></div>
     <div class="tile"><div class="k">Max context tested</div><div class="v">800K</div><div class="u">786,713 tokens · PASS</div></div>
     <div class="tile"><div class="k">NIAH accuracy</div><div class="v" style="color:var(--good-ink)">21/21</div><div class="u">7 sizes × 3 depths</div></div>
@@ -161,13 +161,13 @@
   <!-- ===================== HOW MoRI-EP WAS USED ===================== -->
   <h2>How MoRI-EP was used for the 896-expert MoE (EP8, intra-node)</h2>
   <div class="card">
-    <p>Kimi-K3 has <b>896 experts</b>. This config runs three parallelism axes on the 16 GPUs at once — they are orthogonal, not alternatives:</p>
+    <p>Kimi-K3 has <b>896 experts</b>. The <b>GPU count is PP2 × TP8 = 16</b> (DP=1). EP is <b>not</b> a third multiplicative factor — it reuses the tensor-parallel GPUs:</p>
     <ul class="tight">
-      <li><b>PP2</b> (pipeline): the model's layers are split into 2 stages, one per node — for weight fit. Cross-node.</li>
-      <li><b>TP8</b> (tensor): each layer's math is split across a node's 8 GPUs. Intra-node.</li>
-      <li><b>EP8</b> (expert): the 896 experts are split <b>8 ways = 112 per GPU</b> within a node ("linear" placement). Intra-node.</li>
+      <li><b>PP2</b> (pipeline): the model's layers are split into 2 stages, one per node — for weight fit. <b>Cross-node</b> (this is the only inter-node axis).</li>
+      <li><b>TP8</b> (tensor): within a node, each dense/attention layer's math is split across the 8 GPUs. Intra-node.</li>
+      <li><b>EP8</b> (expert): for MoE layers, those <em>same</em> 8 GPUs instead hold <b>112 experts each</b> (896 ÷ 8). vLLM sets EP size = TP × DP = 8. Intra-node — EP8 overlays TP8, it does not add GPUs.</li>
     </ul>
-    <p>The runtime confirms it: <code>[EP Rank 0/8]</code>, <code>Local/global experts 112/896</code> (896 ÷ 112 = <b>8</b>). The 8-way expert split is <b>replicated on each pipeline stage</b> — node A holds experts 0–895 for stage-0 layers, node B holds experts 0–895 again for stage-1 layers. Every GPU has a coordinate on all three axes (<code>PP∈{0,1}</code>, <code>TP∈{0..7}</code>, <code>EP∈{0..7}</code>).</p>
+    <p>The runtime confirms it: <code>[EP Rank 0/8]</code>, <code>Local/global experts 112/896</code> (896 ÷ 112 = <b>8</b>), <code>world_size=16</code>. The 8-way expert split is <b>replicated on each pipeline stage</b> — node A holds experts 0–895 for stage-0 layers, node B holds experts 0–895 again for stage-1 layers. So a GPU is TP-rank-N for dense layers and EP-rank-N for MoE layers — same GPU, two roles.</p>
     <p>So the <b>MoRI-EP</b> dispatch/combine all-to-all (<code>--all2all-backend mori_low_latency</code>) runs <b>within each node's 8-GPU EP group</b>. The <em>only</em> cross-node traffic is the PP activation hand-off (stage 0 → stage 1), which uses <b>NCCL over the Thor2 rails — not MoRI-EP</b>.</p>
     <div class="mono-block">                 NODE A  (PP stage 0)              NODE B  (PP stage 1)
       ┌───────────────────────────────┐   ┌───────────────────────────────┐
