@@ -510,5 +510,28 @@
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
         "args": "-N 2 -n 2"
+    },
+    {
+        "name": "sglang-disagg-deepseek-r1-overlay",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "deepseek-r1",
+            "moe",
+            "ep-internode",
+            "rccl-tp",
+            "mori-a2a"
+        ],
+        "timeout": 14400,
+        "args": ""
     }
 ]
