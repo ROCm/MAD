@@ -105,6 +105,16 @@ def find_match(file_path, search_string):
     
     # Combine all matches and return the last one
     all_matches = matches1 + matches2
+
+    # Pattern 5: Primus 26.5 iteration line, which dropped the "<inst>/<avg>"
+    # shape the patterns above rely on:
+    #   "compute per GPU (TFLOP/s/GPU): 477.3 (avg 474.3)"
+    #   "tokens/s/GPU inst/harmonic mean: 9260.4/9200.5"
+    # Only consulted when nothing above matched, so 26.4-era logs are unaffected.
+    if not all_matches:
+        all_matches = re.findall(fr"{re.escape(search_string)}\):\s*(\d+\.?\d*)\s*\(avg", content)
+        all_matches += re.findall(fr"{re.escape(search_string)} inst/harmonic mean:\s*(\d+\.?\d*)/", content)
+
     if all_matches:
         # Return only the last value
         result = all_matches[-1]
@@ -126,6 +136,12 @@ def find_match_running_avg(file_path, search_string):
         content = f.read()
     pattern = fr"{re.escape(search_string)}\):\s*\d+\.?\d*/(\d+\.?\d*)"
     matches = re.findall(pattern, content)
+    if not matches:
+        # Primus 26.5 shape: "(TFLOP/s/GPU): 477.3 (avg 474.3)" and
+        # "tokens/s/GPU inst/harmonic mean: 9260.4/9200.5". The trailing figure
+        # is still the running average (harmonic mean for tokens).
+        matches = re.findall(fr"{re.escape(search_string)}\):\s*\d+\.?\d*\s*\(avg\s*(\d+\.?\d*)\)", content)
+        matches += re.findall(fr"{re.escape(search_string)} inst/harmonic mean:\s*\d+\.?\d*/(\d+\.?\d*)", content)
     if matches:
         print(f"Found {len(matches)} running-avg matches for '{search_string}', using last: {matches[-1]}")
         return matches[-1]
