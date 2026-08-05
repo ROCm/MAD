@@ -1575,6 +1575,29 @@
      "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
   },
   {
+    "name": "sglang-disagg-deepseek-r1-overlay",
+    "url": "",
+    "dockerfile": "docker/sglang_disagg_inference_full_overlay",
+    "scripts": "scripts/sglang_disagg/run.sh",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+    "tags": [
+      "pyt",
+      "sglang",
+      "inference",
+      "disaggregated",
+      "deepseek-r1",
+      "moe",
+      "ep-internode",
+      "rccl-tp",
+      "mori-a2a"
+    ],
+    "timeout": 14400,
+    "args": ""
+  },
+  {
     "name": "pyt_hy_video",
     "url": "",
     "dockerfile": "docker/pyt_hy_video",
