@@ -24,7 +24,6 @@
 #
 #################################################################################
 
-import pandas as pd
 import argparse
 import csv
 import os
@@ -147,6 +146,10 @@ def find_match_running_avg(file_path, search_string):
         return matches[-1]
     return None
 
+# An unrecognized model falls through every branch below, so seed the rows here
+# to keep the write path a no-op instead of a NameError.
+data = []
+
 if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
         args.model == "Llama-3.1-405B" or \
         args.model == "Llama-2-7B" or args.model == "Llama-2-70B" or \
@@ -164,8 +167,7 @@ if args.model == "Llama-3.1-8B" or args.model == "Llama-3.1-70B" or \
     else:
         tok_per_s_per_gpu = None
     TFLOPS_per_gpu = find_match(input_file, "TFLOP/s/GPU")
-    
-    data = []
+
     # Write data for metrics that are found (don't require both to be present)
     # Skip tokens/s/GPU for Qwen-3-32B
     if tok_per_s_per_gpu is not None and args.model != "Qwen-3-32B":

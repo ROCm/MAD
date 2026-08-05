@@ -152,8 +152,6 @@ if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
     datatypes=("BF16" "FP8")
   elif [[ "$model" == "GPT-OSS-20B" || "$model" == "GPT-OSS-120B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
     datatypes=("BF16" "FP8")
-  elif [[ "$model" == "GPT-OSS-20B" || "$model" == "GPT-OSS-120B" || "$model" == "Qwen-3-30B" || "$model" == "Qwen-3-235B" ]]; then
-    datatypes=("BF16" "FP8")
   else
     # Most other models only support BF16 on MI355X/MI350X
     datatypes=("BF16")
