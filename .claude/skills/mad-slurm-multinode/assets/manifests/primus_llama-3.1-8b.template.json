@@ -2,9 +2,9 @@
   "built_images": {
     "rocm-primus-llama31-8b-overlay": {
       "model": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
-      "docker_image": "rocm/primus:v26.4-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
+      "docker_image": "rocm/primus:v26.5-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
-      "base_docker": "rocm/primus:v26.4",
+      "base_docker": "rocm/primus:v26.5",
       "build_duration": 0,
       "local_image": true,
       "registry_image": null,
@@ -17,7 +17,7 @@
       "name": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
       "url": "",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
-      "scripts": "scripts/primus/megatron-lm/run.sh",
+      "scripts": "scripts/primus_megatron-lm/run.sh",
       "n_gpus": "-1",
       "owner": "mad.support@amd.com",
       "training_precision": "",
