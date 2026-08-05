@@ -3,7 +3,10 @@
 Serves Kimi-K3 (MXFP4) across **2 nodes** (16× MI300X) with **expert parallelism** over
 true **MoRI-EP** all-to-all kernels: PP2×TP8 for weight fit (~102 GB/GPU) plus
 `--enable-expert-parallel --all2all-backend mori_low_latency`, so the 896 experts are
-distributed EP across the 16-way group and dispatched via MoRI RDMA all2all.
+split **8-way across each node's 8 GPUs** (112 experts/GPU, `[EP Rank x/8]`), replicated on
+each of the 2 pipeline stages, and dispatched via MoRI all2all. The EP group is intra-node,
+so MoRI-EP dispatch/combine runs across a node's 8 GPUs; the only cross-node traffic is the
+PP activation hand-off (NCCL).
 `AITER_SITUV2_A8W4=1` selects the a8w4 (fp8-activation × int4-weight) SiTU MoE path.
 This is the "MoRI-EP + a8w4" path (vs the generic all2all in `../wideep_int4_allgather`).
 Colocated (single instance; no prefill/decode disaggregation).
