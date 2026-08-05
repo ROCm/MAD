@@ -247,6 +247,10 @@ if [ "$NODE_RANK" -eq 0 ]; then
     # connector_start_proxy sets BENCHMARK_PORT (router->ROUTER_PORT, toy->PROXY_PORT).
     # Fall back to PROXY_PORT only if the connector didn't set it.
     export BENCHMARK_PORT="${BENCHMARK_PORT:-${PROXY_PORT}}"
+    # Agentic replay driver reads the endpoint via AGENTIC_PORT; it is the same
+    # port the sweep benchmark uses (BENCHMARK_PORT). Exported unconditionally so
+    # the default (non-agentic) sweep path is unaffected.
+    export AGENTIC_PORT="${BENCHMARK_PORT}"
     bash "$NIXL_COOKBOOK_PATH/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
 
     echo "Killing the proxy server.."

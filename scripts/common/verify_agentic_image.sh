@@ -39,6 +39,63 @@ ok()   { echo "[verify][OK] $*"; }
 
 echo "[verify] image: $IMG"
 
+# =============================================================================
+# vLLM branch (AGENTIC_ENGINE=vllm or RUN_VLLM=1). Verifies a vLLM disagg image
+# can support agentic replay: KV transfer backend importable + the vLLM OpenAI
+# API server module present (serves /v1/chat/completions + /v1/models). Leaves
+# the SGLang/RUN_MORI path below untouched.
+# =============================================================================
+if [[ "${AGENTIC_ENGINE:-}" == "vllm" || "${RUN_VLLM:-0}" == "1" ]]; then
+    _conn="${CONNECTOR:-rixl}"
+    echo "[verify] engine=vllm connector=${_conn}"
+
+    # 1. KV transfer backend importable in the image.
+    if [[ "$_conn" == "moriio" ]]; then
+        if docker run --rm --entrypoint bash "$IMG" -lc              'python3 - <<PY
+import importlib.util as u, sys
+# MoRIIO transfer: the vLLM MoRIIO KV connector module and/or the mori library.
+cands = ["vllm.distributed.kv_transfer.kv_connector.v1.moriio_connector",
+         "vllm.distributed.kv_transfer.kv_connector.v1.mori_connector",
+         "mori"]
+sys.exit(0 if any(u.find_spec(m) for m in cands) else 1)
+PY'; then
+            ok "MoRIIO transfer backend present (vLLM moriio connector / mori)"
+        else
+            fail "MoRIIO transfer backend not found in image (no vLLM moriio_connector module and no 'mori' package). Build with the MoRIIO-enabled Dockerfile."
+        fi
+    else
+        if docker run --rm --entrypoint bash "$IMG" -lc              'python3 -c "import nixl" 2>/dev/null'; then
+            ok "NIXL (rixl) transfer backend importable (import nixl)"
+        else
+            fail "'import nixl' failed in image. Build with WITH_NIXL=1 (the Dockerfile default) or use a MoRIIO image with CONNECTOR=moriio."
+        fi
+    fi
+
+    # 2. vLLM OpenAI API server module present (locate, do not import — importing
+    #    pulls the GPU engine and would false-negative in a GPU-less pre-flight).
+    if docker run --rm --entrypoint bash "$IMG" -lc \
+         'python3 - <<PY
+import importlib.util as u, sys
+sys.exit(0 if u.find_spec("vllm.entrypoints.openai.api_server") else 1)
+PY'; then
+        ok "vLLM OpenAI API server present (serves /v1/chat/completions + /v1/models)"
+    else
+        fail "Could not confirm vllm.entrypoints.openai.api_server. Verify the image ships vLLM with the OpenAI entrypoint."
+    fi
+
+    # 3. Optional: vllm-router binary (production proxy). Non-fatal (the toy proxy
+    #    path does not need it; ROUTER_BINARY can also point at a shared-FS build).
+    if docker run --rm --entrypoint bash "$IMG" -lc 'command -v vllm-router >/dev/null 2>&1'; then
+        ok "vllm-router binary on PATH"
+    else
+        echo "[verify][note] vllm-router not on PATH (ok if using the toy proxy or ROUTER_BINARY override)"
+    fi
+
+    ok "image pre-flight passed"
+    exit 0
+fi
+
+
 # 1. Mooncake transfer backend importable inside the image. The canonical import
 #    for SGLang's --disaggregation-transfer-backend mooncake is
 #    `from mooncake.engine import TransferEngine` (see

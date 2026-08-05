@@ -175,6 +175,16 @@ connector_launch_worker() {
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
 
+    # Agentic gating: the default sweep keeps prefix caching OFF (clean, cache-free
+    # throughput) via the hardcoded --no-enable-prefix-caching below. The agentic
+    # trace-replay path (BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh) — or an explicit
+    # ENABLE_PREFIX_CACHE=1 — STRIPS that flag so prefix caching is ON. Gated so the
+    # default (non-agentic) sweep argv is byte-for-byte unchanged.
+    local _prefix_cache_flag="--no-enable-prefix-caching"
+    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
+        _prefix_cache_flag=""
+    fi
+
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
@@ -215,7 +225,7 @@ connector_launch_worker() {
                     "${mem_args[@]}" \
                     --kv-cache-dtype "${_kvdtype}" \
                     --block-size "${_block}" \
-                    --no-enable-prefix-caching \
+                    ${_prefix_cache_flag} \
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
@@ -235,7 +245,7 @@ connector_launch_worker() {
             "${mem_args[@]}" \
             --kv-cache-dtype "${_kvdtype}" \
             --block-size "${_block}" \
-            --no-enable-prefix-caching \
+            ${_prefix_cache_flag} \
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
@@ -313,6 +323,14 @@ connector_start_proxy() {
     # moriio_toy: in-image toy proxy; resolves the script across the online_serving/
     #   -> disaggregated/ path move.
     # Sets BENCHMARK_PORT (router->ROUTER_PORT, toy->PROXY_PORT) for the driver.
+    # Agentic replay: point aiperf at the backend vLLM servers' /metrics (SERVE_PORT)
+    # for prefill+decode masters so it can scrape gpu cache-hit / throughput. Gated on
+    # the agentic path so the default sweep is unaffected. Consumed by
+    # scripts/common/agentic_lib.sh (build_replay_cmd -> aiperf --server-metrics).
+    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+        export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVE_PORT} ${DECODE_MASTER_ADDR}:${SERVE_PORT}}"
+        echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+    fi
     sleep 10
     if [ "$PROXY_TYPE" == "vllm_router" ]; then
         local PREFILL_URL="http://${PREFILL_MASTER_ADDR}:${SERVE_PORT}"
