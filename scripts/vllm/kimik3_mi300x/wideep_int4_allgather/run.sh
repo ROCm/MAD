@@ -1,8 +1,8 @@
 #!/bin/bash
 # Kimi-K3 (MXFP4) on MI300X / gfx942 -- Wide expert-parallel, generic all2all.
 # PP2xTP8 across 2 nodes for weight fit (~102 GB/GPU) PLUS --enable-expert-parallel
-# so the 896 experts split 8-way across each node's 8 GPUs (112/GPU), replicated per
-# --all2all-backend allgather_reducescatter (see ../wideep_int4_moriep for the true
+# so the 896 experts split 8-way across each node's 8 GPUs (112/GPU), replicated per PP
+# stage. Uses the generic --all2all-backend allgather_reducescatter (see ../wideep_int4_moriep
 # MoRI-EP kernels). AITER_SITUV2_A8W4=1 selects the a8w4 (fp8-act x int4-wt) SiTU
 # MoE path. Colocated (single instance; no prefill/decode disaggregation).
 #
