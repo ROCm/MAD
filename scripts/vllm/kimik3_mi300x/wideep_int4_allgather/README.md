@@ -1,8 +1,7 @@
 # Kimi-K3 (MXFP4) on MI300X / gfx942 — Wide-EP (generic all2all) + a8w4
 
 Serves Kimi-K3 (MXFP4) across **2 nodes** (16× MI300X) with **expert parallelism**:
-PP2×TP8 for weight fit (~102 GB/GPU) plus `--enable-expert-parallel`, so the 896
-experts are distributed EP across the 16-way group. Expert all-to-all uses the generic
+PP2×TP8 for weight fit (~102 GB/GPU) plus `--enable-expert-parallel`, so the 896 experts are split 8-way across each node's 8 GPUs (112/GPU), replicated per PP stage. Expert all-to-all uses the generic
 `--all2all-backend allgather_reducescatter` (see `../wideep_int4_moriep` for the true
 MoRI-EP kernels). `AITER_SITUV2_A8W4=1` selects the a8w4 (fp8-activation × int4-weight)
 SiTU MoE path. Colocated (single instance; no prefill/decode disaggregation).
