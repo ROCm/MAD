@@ -22,10 +22,12 @@ MI300X)** using PP2×TP8 (~102 GB/GPU per node). gfx942 also requires
 | Folder | Parallelism | Expert all2all | MoE path | Use when |
 |--------|-------------|----------------|----------|----------|
 | [`pp2xtp8/`](pp2xtp8/) | PP2×TP8, no EP | — | a16w4 | Simplest baseline; lowest single-user latency. |
-| [`wideep_int4_allgather/`](wideep_int4_allgather/) | PP2×TP8 + EP16 | `allgather_reducescatter` (generic) | a8w4 (`AITER_SITUV2_A8W4=1`) | Expert-parallel without MoRI kernels. |
-| [`wideep_int4_moriep/`](wideep_int4_moriep/) | PP2×TP8 + EP16 | `mori_low_latency` (**MoRI-EP**) | a8w4 (`AITER_SITUV2_A8W4=1`) | True MoRI-EP all2all expert dispatch. |
+| [`wideep_int4_allgather/`](wideep_int4_allgather/) | PP2×TP8, EP8/node | `allgather_reducescatter` (generic) | a8w4 (`AITER_SITUV2_A8W4=1`) | Expert-parallel without MoRI kernels. |
+| [`wideep_int4_moriep/`](wideep_int4_moriep/) | PP2×TP8, EP8/node | `mori_low_latency` (**MoRI-EP**) | a8w4 (`AITER_SITUV2_A8W4=1`) | MoRI-EP all2all expert dispatch (intra-node EP group). |
 
 All three are colocated — no prefill/decode disaggregation.
+
+> **EP scope:** the 896 experts split **8-way across each node's 8 GPUs** (112 experts/GPU → `[EP Rank x/8]`), and that EP8 group is replicated on each of the 2 pipeline stages. The expert all2all (incl. MoRI-EP) therefore runs **intra-node**; the only cross-node traffic is the PP activation hand-off, over NCCL. ("16" is the GPU count, not the EP width.)
 
 ## Quick start
 
