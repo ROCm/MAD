@@ -177,7 +177,7 @@
       └───────────────┬───────────────┘   └───────────────┬───────────────┘
                       │        PP activations (NCCL over Thor2 RDMA)
                       └───────────────►───────────────────┘
-   token ─► router (top-8 of 896) ─► MoRI-EP DISPATCH (within node) ─► experts
+   token ─► router (top-16 of 896) ─► MoRI-EP DISPATCH (within node) ─► experts
                                   ─► MoRI-EP COMBINE  (within node) ─► next layer</div>
     <p style="margin-bottom:0">Fabric knobs (set so MoRI-EP <em>can</em> use the Thor2 rails; here the EP group is intra-node so they govern on-node dispatch): <code>MORI_RDMA_DEVICES=rdma0..rdma7</code>, <code>MORI_IB_GID_INDEX=3</code> (RoCEv2), <code>MORI_NUM_QP_PER_PE=8</code>, <code>MORI_IB_ENABLE_RELAXED_ORDERING=1</code>, <code>MORI_GPU_ARCHS=gfx942</code>.</p>
   </div>
