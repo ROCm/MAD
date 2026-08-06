@@ -14,8 +14,8 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.2.3
--   ✅ vLLM 0.23.0
--   ✅ PyTorch 2.10.0 (2.10.0+git8514f05)
+-   ✅ vLLM 0.26.0
+-   ✅ PyTorch 2.11.0 (2.11.0+gitd0c8b1f3)
 -   ✅ hipBLASLt 1.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.23.0
+docker pull vllm/vllm-openai-rocm:v0.26.0
 ```
 
 ### MAD-integrated benchmarking
@@ -157,9 +157,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.23.0
+docker pull vllm/vllm-openai-rocm:v0.26.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.23.0
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.26.0
 ```
 
 >[!NOTE]
@@ -374,6 +374,9 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.26.0
+- Minimax gfx942 fix
 
 v0.23.0 release:
 - Merge accuracy benchmark into serving benchmark
