@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,39 +23,51 @@
 # SOFTWARE.
 #
 #################################################################################
+"""Config-driven online serving benchmark for SGLang.
+
+Structured after scripts/vllm/run_vllm.py, which solves the same problem for
+vLLM, and emits the same perf CSV schema so MAD's multiple_results ingestion is
+shared. The existing scripts/sglang/sglang_benchmark_report.sh stays as-is; it
+drives the offline bench_one_batch / bench_offline_throughput path.
+"""
 
 import os
 import csv
-import glob
 import json
 import yaml
 import psutil
-import shutil
 import signal
 import argparse
 import itertools
 import subprocess
 from typing import List, Dict
 
-SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'bs', 'num_prompts', 'max_concurrency']
+SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'num_prompts', 'max_concurrency']
 CSV_HEADER = [
     "model",
     "benchmark",
+    "variant",
     "tp",
     "inp",
     "out",
     "dtype",
     "num_prompts",
     "max_concurrency",
-    "bs",
     "cmd",
     "performance",
     "metric",
     "unit",
 ]
 
+HOST = "127.0.0.1"
+PORT = 30000
+# Kimi K3 is a ~1.5 TB checkpoint loaded over TP8; 30 minutes (what run_vllm.py
+# allows) is not enough. Overridable for smaller models.
+SERVER_START_TIMEOUT = int(os.environ.get("SGLANG_SERVER_START_TIMEOUT", 5400))
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description='Run VLLM benchmark')
+    parser = argparse.ArgumentParser(description='Run SGLang serving benchmark')
     parser.add_argument('--config',
                             type=str,
                             help='config yaml file',
@@ -64,6 +76,12 @@ def parse_args():
     parser.add_argument('--model',
                             type=str,
                             help='select model from config',
+                            required=False,
+                            default=None,
+                        )
+    parser.add_argument('--variant',
+                            type=str,
+                            help='select variant from config',
                             required=False,
                             default=None,
                         )
@@ -91,12 +109,6 @@ def parse_args():
                             required=False,
                             default=None,
                         )
-    parser.add_argument('--bs',
-                            type=str,
-                            help='select batch size from config',
-                            required=False,
-                            default=None,
-                        )
     parser.add_argument('--num_prompts',
                             type=str,
                             help='select num prompts from config',
@@ -112,6 +124,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+
 def expand_configs(args, configs: List[Dict]):
     # Apply architecture specific overrides to config
     cfgs = []
@@ -124,7 +137,7 @@ def expand_configs(args, configs: List[Dict]):
             print(f"Detected {arch} architecture, applying override {arch_override} to config {cfg}")
             cfg.update(arch_override)
         cfgs.append(cfg)
-    
+
     # Expand combinations from SUPPORTED_LIST_ARGS
     print(f"Expanding configs for the following keys: {SUPPORTED_LIST_ARGS} into individual configs")
     config_list = []
@@ -143,114 +156,43 @@ def expand_configs(args, configs: List[Dict]):
         if arg_val := getattr(args, arg_name):
             print(f"Filtering configs by {arg_name}={arg_val}")
             filtered_configs = [cfg for cfg in filtered_configs if cfg.get(arg_name, None) == arg_val]
-    
+
     # filter configs by benchmark
     if args.benchmark and args.benchmark != "all":
         print(f"Filtering configs by benchmark={args.benchmark}")
         filtered_configs = [cfg for cfg in filtered_configs if cfg["benchmark"] == args.benchmark]
 
+    # filter configs by variant; variants share a model, so this is the only way
+    # to select between recipes such as K3 nospec and K3 dspark
+    if args.variant and args.variant != "all":
+        print(f"Filtering configs by variant={args.variant}")
+        filtered_configs = [cfg for cfg in filtered_configs if cfg.get("variant", None) == args.variant]
+
     return filtered_configs
 
-def run_latency(model, config):
-    output_json = (
-        f"{config['model']}_latency_{config['tp']}_{config['inp']}_{config['out']}_{config['bs']}.json"
-    )
-    cmd = (
-        "vllm bench latency "
-        f"--model {model} "
-        f"--dtype {config['dtype']} "
-        f"-tp {config['tp']} "
-        f"--input-len {config['inp']} "
-        f"--output-len {config['out']} "
-        f"--batch-size {config['bs']} "
-        f"--num-iters-warmup 3 --num-iters 5 "
-        f"--no-enable-prefix-caching "
-        f"--trust-remote-code "
-        f"--output-json {output_json} "
-    )
-    # pop env and extra args from config
-    env = config.pop('env', "")
-    extra_args = config.pop('extra_args', "")
-    cmd = f"{env} {cmd} {extra_args}".strip()
-    config["cmd"] = cmd
-    print(cmd)
-    subprocess.run(cmd, shell=True, check=True)
 
-    # Parse output json
-    results = []
-    with open(output_json, "r", newline="", encoding="utf-8") as f:
-        output = json.load(f)
-        if "avg_latency" in output: 
-            result = {
-                "performance": output["avg_latency"],
-                "metric": "latency",
-                "unit": "ms",
-                **config
-            }
-            results.append(result)
+def read_last_json_line(path: str):
+    """SGLang appends one JSON object per run to --output-file, so the result of
+    this run is the last non-empty line (vLLM writes a plain JSON document)."""
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        lines = [line for line in f if line.strip()]
+    if not lines:
+        raise Exception(f"No benchmark results found in {path}")
+    return json.loads(lines[-1])
 
-    return results
-
-def run_throughput(model, config):
-    output_json = (
-        f"{config['model']}_throughput_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}.json"
-    )
-    cmd = (
-        "vllm bench throughput "
-        f"--model {model} "
-        f"--dtype {config['dtype']} "
-        f"-tp {config['tp']} "
-        f"--input-len {config['inp']} "
-        f"--output-len {config['out']} "
-        f"--num-prompts {config['num_prompts']} "
-        f"--no-enable-prefix-caching "
-        f"--trust-remote-code "
-        f"--output-json {output_json} "
-    )
-    # pop env and extra args from config
-    env = config.pop('env', "")
-    extra_args = config.pop('extra_args', "")
-    cmd = f"{env} {cmd} {extra_args}".strip()
-    config["cmd"] = cmd
-    print(cmd)
-    subprocess.run(cmd, shell=True, check=True)
-
-    # Parse output json
-    results = []
-    with open(output_json, "r", newline="", encoding="utf-8") as f:
-        output = json.load(f)
-        if "tokens_per_second" in output: 
-            elapsed_time = output["elapsed_time"]
-            throughput_gen = str(
-                int(int(config["num_prompts"]) * int(config["out"]) / elapsed_time)
-            )
-            metrics = {
-                "throughput_tot": str(output["tokens_per_second"]),
-                "throughput_gen": throughput_gen,
-            }
-            for metric, perf in metrics.items():
-                result = {
-                    "performance": perf,
-                    "metric": metric,
-                    "unit": "tok/sec",
-                    **config
-                }
-                results.append(result)
-
-    return results
 
 def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
         config["num_prompts"] = str(10 * int(config["max_concurrency"]))
     server_cmd = (
-        "vllm serve "
-        f"{model} "
+        "sglang serve "
+        f"--model-path {model} "
         f"--dtype {config['dtype']} "
-        f"-tp {config['tp']} "
-        f"--no-enable-prefix-caching "
+        f"--tp-size {config['tp']} "
         f"--trust-remote-code "
-        f"--disable-uvicorn-access-log "
+        f"--host {HOST} "
+        f"--port {PORT} "
     )
     # pop env and extra args from config
     env = config.pop('env', "")
@@ -259,14 +201,16 @@ def run_serving(model, config):
     config["cmd"] = server_cmd
 
     # start server
-    print(server_cmd)
+    print(server_cmd, flush=True)
     server = subprocess.Popen(server_cmd, shell=True)
     results = []
 
     try:
-        # wait for server to start; timeout after 30 minutes
+        # wait for the server to become ready. /health only returns 200 once the
+        # server leaves the Starting state, whereas /v1/models answers earlier.
         status = subprocess.run(
-            "timeout 1800 bash -c 'until curl -s http://localhost:8000/v1/models; do sleep 30; done' || exit 1",
+            f"timeout {SERVER_START_TIMEOUT} bash -c "
+            f"'until curl -sf http://{HOST}:{PORT}/health; do sleep 30; done' || exit 1",
             shell=True
         )
         if status.returncode != 0:
@@ -274,122 +218,58 @@ def run_serving(model, config):
         else:
             print(f"Server at {server.pid} contacted successfully", flush=True)
 
-        # pop bench_args once
-        # extract --run_accuracy bool; by default always run accuracy after serving
-        # extract --apply_chat_template for lm_eval
-        bench_args = config.pop('bench_args', {})
-        run_accuracy = bench_args.pop('--run_accuracy', True)
-        apply_chat_template = bench_args.pop('--lmeval_apply_chat_template', False)
-
         # run serving benchmark
         output_json = (
-            f"{config['model']}_serving_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
+            f"{config['model']}_{config['variant']}_serving_{config['tp']}_{config['inp']}_"
+            f"{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.jsonl"
         )
         bench_cmd = (
-            "vllm bench serve "
+            "python3 -m sglang.benchmark.serving "
+            f"--backend sglang "
+            f"--host {HOST} "
+            f"--port {PORT} "
             f"--model {model} "
-            f"--percentile-metrics ttft,tpot,itl,e2el "
             f"--dataset-name random "
-            f"--ignore-eos "
-            f"--temperature 0 "
-            f"--trust-remote-code "
-            f"--max-concurrency {config['max_concurrency']} "
-            f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
-            f"--save-result "
-            f"--result-filename {output_json}"
+            f"--random-range-ratio 1.0 "
+            f"--max-concurrency {config['max_concurrency']} "
+            f"--num-prompts {config['num_prompts']} "
+            f"--output-file {output_json}"
         )
-        bench_args_str = ""
-        for k, v in bench_args.items():
-            if isinstance(v, bool):
-                bench_args_str += f"{k} "
-            else:
-                bench_args_str += f"{k} {v} "
-        bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
-
         config["cmd"] = f"{server_cmd};{bench_cmd}"
-        print(bench_cmd)
+        print(bench_cmd, flush=True)
         subprocess.run(bench_cmd, shell=True, check=True)
 
-        # parse output json
-        with open(output_json, "r", newline="", encoding="utf-8") as f:
-            output = json.load(f)
-            if "total_token_throughput" in output:
-                metrics = {
-                    "throughput_tot": str(output["total_token_throughput"]),
-                    "throughput_gen": str(output["output_throughput"]),
-                    "median_ttft": str(output["median_ttft_ms"]),
-                    "median_tpot": str(output["median_tpot_ms"]),
-                    "median_itl": str(output["median_itl_ms"]),
-                    "median_e2el": str(output["median_e2el_ms"]),
-                }
-                for metric, perf in metrics.items():
-                    if "throughput" in metric:
-                        unit = "tok/sec"
-                    else:
-                        unit = "ms"
-                    result = {
-                        "performance": perf,
-                        "metric": metric,
-                        "unit": unit,
-                        **config
-                    }
-                    results.append(result)
-
-        if run_accuracy:
-            # run accuracy benchmark
-            output_json = (
-                f"{config['model']}_accuracy_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
-            )
-            model_args = {
-                "model": model,
-                "max_gen_toks": 2048,
-                "num_concurrent": 256,
-                "max_retries": 10,
-                "base_url": "http://localhost:8000/v1/completions",
-                "trust_remote_code": True
+        # parse output jsonl
+        output = read_last_json_line(output_json)
+        if "total_throughput" in output:
+            metrics = {
+                "throughput_tot": str(output["total_throughput"]),
+                "throughput_gen": str(output["output_throughput"]),
+                "median_ttft": str(output["median_ttft_ms"]),
+                "median_tpot": str(output["median_tpot_ms"]),
+                "median_itl": str(output["median_itl_ms"]),
+                # SGLang names this median_e2e_latency_ms, not vLLM's median_e2el_ms
+                "median_e2el": str(output["median_e2e_latency_ms"]),
             }
-            model_args = ",".join([f"{k}={v}" for k, v in model_args.items()])
-            lmeval_cmd = (
-                "lm_eval "
-                "--model local-completions "
-                f"--model_args {model_args} "
-                f"--tasks gsm8k "
-                f"--batch_size {config['max_concurrency']} "
-                f"--limit 250 "
-                f"--output_path ./tmp "
-            )
-            if apply_chat_template:
-                lmeval_cmd += "--apply_chat_template "
-            config["cmd"] = f"{server_cmd};{bench_cmd};{lmeval_cmd}"
-            print(lmeval_cmd)
-            subprocess.run(lmeval_cmd, shell=True, check=True)
-
-            # find output file and move into output_json
-            output_files = glob.glob("./tmp/*/*.json")
-            if len(output_files) == 0:
-                raise Exception("No lmeval output files found")
-            elif len(output_files) > 1:
-                raise Exception(f"Multiple lmeval output files found: {output_files}")
-            else:
-                output_file = output_files[0]
-                shutil.move(output_file, output_json)
-                shutil.rmtree("./tmp")
-
-            # parse output json
-            with open(output_json, "r", newline="", encoding="utf-8") as f:
-                output = json.load(f)
-                if "results" in output and "gsm8k" in output["results"]:
-                    gsm8k_results = output["results"]["gsm8k"]
-                    if "exact_match,flexible-extract" in gsm8k_results:
-                        result = {
-                            "performance": gsm8k_results["exact_match,flexible-extract"],
-                            "metric": "exact_match,flexible-extract",
-                            "unit": "percent",
-                            **config
-                        }
-                        results.append(result)
+            # only reported under speculative decoding
+            if output.get("accept_length"):
+                metrics["accept_length"] = str(output["accept_length"])
+            for metric, perf in metrics.items():
+                if "throughput" in metric:
+                    unit = "tok/sec"
+                elif metric == "accept_length":
+                    unit = "tokens"
+                else:
+                    unit = "ms"
+                result = {
+                    "performance": perf,
+                    "metric": metric,
+                    "unit": unit,
+                    **config
+                }
+                results.append(result)
 
     finally:
         # kill server and children
@@ -401,6 +281,7 @@ def run_serving(model, config):
         del server
 
     return results
+
 
 def main():
     args = parse_args()
@@ -435,13 +316,15 @@ def main():
             # Use dataprovider if present for model weights
             if MAD_DATAHOME := os.environ.get('MAD_DATAHOME'):
                 model = MAD_DATAHOME
-            elif config.get('extra_args', {}).get('--load-format', None) == 'dummy':
-                print("Found --load-format dummy in config, using dummy weights for benchmarking")
             else:
                 # Explicitly download model before running benchmarks for easier debugging
                 download_command=f"hf download {model} --exclude \"original/*\" \"*.tf\" \"*.onnx\" \"*.flax\" \"*.rust\""
                 subprocess.run(download_command, shell=True, check=True)
-            
+                # A speculative-decoding config needs its draft checkpoint too
+                draft = config.get("extra_args", {}).get("--speculative-draft-model-path")
+                if draft:
+                    subprocess.run(f"hf download {draft}", shell=True, check=True)
+
             # concatenate env vars and extra args into the corresponding strings
             env_vars = config.get("env", {})
             extra_args = config.get("extra_args", {})
@@ -454,19 +337,15 @@ def main():
                     extra_args_str += f" {k} {v}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
-            
+
             # run benchmark
             results = []
             benchmark = config["benchmark"]
-            if benchmark == "latency":
-                results = run_latency(model, config)
-            elif benchmark == "throughput":
-                results = run_throughput(model, config)
-            elif benchmark == "serving":
+            if benchmark == "serving":
                 results = run_serving(model, config)
             else:
                 raise ValueError(f"Unknown benchmark: {benchmark}")
-            
+
             # Write results to csv
             for result in results:
                 writer.writerow(result)

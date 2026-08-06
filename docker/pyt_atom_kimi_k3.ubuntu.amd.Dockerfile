@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_8e124a7_20260722
+ARG BASE_DOCKER=rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3@sha256:04ce312d4124e3c7f8a62a321bbd2d3f07328855f362f8e6374bdc5f51afc233
 FROM $BASE_DOCKER
 
 USER root
@@ -34,3 +34,6 @@ WORKDIR $WORKSPACE_DIR
 
 # record configuration for posterity
 RUN pip3 list
+
+# Specify entrypoint to override upstream
+ENTRYPOINT [""]

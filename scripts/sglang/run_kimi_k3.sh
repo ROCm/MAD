@@ -24,49 +24,41 @@
 # SOFTWARE.
 #
 #################################################################################
-export HF_HOME=/workspace/huggingface
+# Entry point for the Kimi K3 SGLang serving benchmark. Separate from run.sh,
+# which drives the offline bench_one_batch / bench_offline_throughput path and
+# is gated to gfx94x; K3 is an online serving recipe on gfx950.
+set -ex
 
-usage() {
-    echo "Usage: $0 -m MODEL_NAME"
-    echo "  -m: Model name (Flux, Stable-Diffusion-XL, Mochi-1, Hunyuan-video, Wan2_1-i2v, DLRM, or empty for all)"
-    echo "  Example: $0 -m Flux"
-    exit 1
-}
+# Preliminary setup
+if [[ -z "${HF_HUB_CACHE:-}" ]]; then
+    export HF_HUB_CACHE="/myworkspace"
+fi
+export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -m) MODEL_NAME="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
+        --model_repo) MODEL="$2"; shift ;;
+        --config) CONFIG_ARG="$2"; shift ;;
+        --variant) VARIANT_ARG="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
 done
 
-echo "Model: $MODEL_NAME"
-echo "Setup script starting in directory $(pwd)"
-
-if [ -z "$HF_TOKEN" ]; then
-    echo "ERROR: HF_TOKEN environment variable is not set"
-    echo "Please set your Hugging Face token: export HF_TOKEN=your_token_here"
-    exit 1
+# Accept either CLI or env variable overrides
+if [[ -z "$CONFIG" ]]; then
+    CONFIG=${CONFIG_ARG:-"configs/kimi_k3.yaml"}
+fi
+if [[ -z "$VARIANT" ]]; then
+    VARIANT=${VARIANT_ARG:-"all"}
 fi
 
-hf auth login --token $HF_TOKEN
+pip install -qqq hf-transfer
 
-if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" || "$MODEL_NAME" == "Mochi-1" || "$MODEL_NAME" == "Hunyuan-video" || "$MODEL_NAME" == "Wan2_1-i2v" ]]; then
-  echo "Building AMDiffusionBenchmark dependencies for $MODEL_NAME"
-  cd /workspace/AMDiffusionBenchmark
-  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-  make download_assets
-fi
+# Run benchmark; use -u to make python prints unbuffered
+python3 -u run_sglang.py --config $CONFIG --model $MODEL --variant $VARIANT
 
-if [[ "$MODEL_NAME" == "DLRM" ]]; then
-  echo "Building dependencies for $MODEL_NAME"
-  cd /workspace/DLRMBenchmark
-fi
-
-if [[ -z "$MODEL_NAME" ]]; then
-  echo "Building dependencies for all supported models"
-  cd /workspace/AMDiffusionBenchmark
-  huggingface-cli login --token $HF_TOKEN --add-to-git-credential
-  make download_assets
-fi
+# move the output csv to parent directory
+MODEL_NAME=$(basename $MODEL)
+OUTPUT_CSV="perf_${MODEL_NAME}.csv"
+mv $OUTPUT_CSV ../

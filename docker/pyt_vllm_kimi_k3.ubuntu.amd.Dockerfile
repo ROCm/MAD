@@ -24,7 +24,12 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_8e124a7_20260722
+# Kimi K3 requires vLLM >= 0.27.0, which is not in a tagged vllm-openai-rocm
+# release yet; the model-specific :kimi-k3 image is the only ROCm build with the
+# KDA / Gated MLA / Stable LatentMoE support the checkpoint needs. Kept separate
+# from docker/pyt_vllm so the ~35 other vLLM entries stay on the tagged release.
+# Fold this back into docker/pyt_vllm once K3 lands in a vX.Y.Z ROCm image.
+ARG BASE_DOCKER=vllm/vllm-openai-rocm:kimi-k3
 FROM $BASE_DOCKER
 
 USER root
@@ -34,3 +39,6 @@ WORKDIR $WORKSPACE_DIR
 
 # record configuration for posterity
 RUN pip3 list
+
+# Specify entrypoint to override upstream
+ENTRYPOINT [""]
