@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/pytorch-xdit:v26.6
+ARG BASE_DOCKER=amdsiloai/pytorch-xdit:v26.7
 FROM ${BASE_DOCKER} AS base
 
 RUN apt-get update && apt install -y lshw && rm -rf /var/lib/apt/lists/*
