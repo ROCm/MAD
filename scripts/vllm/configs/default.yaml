@@ -92,6 +92,7 @@
   max_concurrency: 1 8 32 128
   env:
     VLLM_ROCM_USE_AITER: 1
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
   extra_args:
     --kv-cache-dtype: fp8
 
@@ -106,9 +107,12 @@
   max_concurrency: 1 8 32 128
   env:
     VLLM_ROCM_USE_AITER: 1
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+    VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT: 1
   extra_args:
     --block-size: 128
     --kv-cache-dtype: fp8
+    --attention-backend: TRITON_ATTN
 
 ## gpt-oss w4a8 is gfx950 only
 - benchmark: serving
