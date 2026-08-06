@@ -17,15 +17,22 @@ MI300X)** using PP2×TP8 (~102 GB/GPU per node). gfx942 also requires
   for MI325X, also runs MI300X. Override with `-e IMAGE=` if you have a newer tag.
 - **Model:** `moonshotai/Kimi-K3` (MXFP4). Place on local NVMe for fast load; pass via `MODEL_DIR`.
 
-## The three recipes
+## The recipes
 
 | Folder | Parallelism | Expert all2all | MoE path | Use when |
 |--------|-------------|----------------|----------|----------|
 | [`pp2xtp8/`](pp2xtp8/) | PP2×TP8, no EP | — | a16w4 | Simplest baseline; lowest single-user latency. |
 | [`wideep_int4_allgather/`](wideep_int4_allgather/) | PP2×TP8, EP8/node | `allgather_reducescatter` (generic) | a8w4 (`AITER_SITUV2_A8W4=1`) | Expert-parallel without MoRI kernels. |
 | [`wideep_int4_moriep/`](wideep_int4_moriep/) | PP2×TP8, EP8/node | `mori_low_latency` (**MoRI-EP**) | a8w4 (`AITER_SITUV2_A8W4=1`) | MoRI-EP all2all expert dispatch (intra-node EP group). |
+| [`wideep_disagg_2p2d/`](wideep_disagg_2p2d/) ⚠️ **WIP** | 2P/2D disagg, TP2×DP8 per pool, no PP | `mori_low_latency` (**MoRI-EP**) + **MoRIIO** KV/state transfer | MXFP4 | Prefill/decode disaggregation across 4 nodes. **Not production — see below.** |
 
-All three are colocated — no prefill/decode disaggregation.
+The first three are colocated (single-instance, no prefill/decode split).
+
+**`wideep_disagg_2p2d/` is WORK IN PROGRESS.** Its MoRIIO transport is byte-perfect
+and all connector-level bugs are fixed, but an open decode-side accuracy bug means
+exact long-context (NIAH) recall does **not** pass yet. It lands as reviewable infra
+plus an honest [`STATUS.md`](wideep_disagg_2p2d/STATUS.md) — not a working deployment.
+For serving today, use one of the three colocated recipes above.
 
 > **EP scope:** the 896 experts split **8-way across each node's 8 GPUs** (112 experts/GPU → `[EP Rank x/8]`), and that EP8 group is replicated on each of the 2 pipeline stages. The expert all2all (incl. MoRI-EP) therefore runs **intra-node**; the only cross-node traffic is the PP activation hand-off, over NCCL. ("16" is the GPU count, not the EP width.)
 
