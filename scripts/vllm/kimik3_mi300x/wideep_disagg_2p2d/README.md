@@ -125,10 +125,14 @@ IB_GID_INDEX=3 THOR2_BNXT_FIX=0 bash run_2p2d_launch.sh
 
 ## The connector fixes (folded into the vLLM source branch)
 
-These were developed here as runtime patchers and are now **folded into vLLM
-source** on branch `kimi-k3-wideep-disagg-fullsource` of `raviguptaamd/vllm`
-(one commit per fix). The image builds that branch directly; the patchers under
-[`patchers/`](patchers/) remain for reference / older images.
+The two root-cause fixes are **folded into vLLM source** on branch
+`kimi-k3-wideep-disagg-fullsource-v2` of `raviguptaamd/vllm` (the `-v2` = the
+base `fullsource` branch + these fixes baked in). The Dockerfile builds that
+branch (`VLLM_REF=kimi-k3-wideep-disagg-fullsource-v2`), so the **image has the
+fixes baked in**. The same fixes also ship as runtime patchers under
+[`patchers/`](patchers/); on a v2 image they detect "already applied" and no-op
+(idempotent) — so the recipe also works on an older/unfolded image. To rebuild
+the image from scratch see the [Image](#image) section.
 
 **The two root-cause fixes that make NIAH pass** (full write-up in
 [`STATUS.md`](STATUS.md)):
@@ -169,7 +173,7 @@ builds from a public base** — no gated images required:
   - **MoRI** `ROCm/mori @ v1.2.2` (gfx942, `BUILD_UMBP=OFF`) — the EP all2all kernels;
   - **AITER** `0.1.19` wheel + `flydsl 0.2.4`;
   - **vLLM** compiled from `VLLM_REPO`/`VLLM_REF` = `raviguptaamd/vllm` branch
-    `kimi-k3-wideep-disagg-fullsource` (the folded connector fixes above);
+    `kimi-k3-wideep-disagg-fullsource-v2` (the folded connector fixes above);
   - **vllm-router** (DP-rank round-robin + MoRIIO KV-notify) built in;
   - with `WITH_NIXL=1` (default): UCX + RIXL + rocSHMEM + DeepEP from source too.
 - **K3 AITER graft** (`PROVEN_K3_IMAGE`): `amdsiloai/vllm:kimi-k3-mi325x-release-v2`

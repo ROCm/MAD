@@ -183,7 +183,11 @@ RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER J
 # own fork/branch.
 ARG GH_TOKEN=""
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-ARG VLLM_REF=kimi-k3-wideep-disagg-fullsource
+# v2 branch = fullsource + the EP16 decode-recall fixes folded into source
+# (4-KV-group block routing + multi-chunk compute-progress gate). With this
+# branch the image has the fixes BAKED IN; the runtime patchers in the recipe's
+# patchers/ dir then detect "already applied" and no-op (idempotent).
+ARG VLLM_REF=kimi-k3-wideep-disagg-fullsource-v2
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
     MAX_JOBS=${MAX_JOBS}
