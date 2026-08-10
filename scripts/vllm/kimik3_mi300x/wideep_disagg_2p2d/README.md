@@ -75,7 +75,8 @@ python3 niah_probe.py --url http://<prefill-master-ip>:30000 --model kimi-k3 \
 | `K3_EXTRA_FIXES` | `1` | **Fix #2** — multi-chunk compute-progress gate + all-group accumulation. Required for recall past `max_num_batched_tokens`. |
 | `LOAD_STRATEGY` | `lazy` | `prefetch` double-loads RAM when the model is on tmpfs → decode OOM. |
 | `MAX_NUM_BATCHED_TOKENS` | `2048` | Best measured throughput; raising to 8192 did **not** cut latency and hurt throughput (compute-bound prefill). |
-| `MAX_MODEL_LEN` | `320000` | Needed for > 131K-token NIAH (default 131072 caps ~120K). |
+| `MAX_MODEL_LEN` | `320000` | Needed for > 131K-token NIAH (default 131072 caps ~120K). Raise to `1000000` for the full native ctx. |
+| `KV_CACHE_MEMORY_BYTES` | `8e9` | KV cache budget (pinned to skip a profile_run hang, NOT a mem limit). `8e9` = 542K tokens. **Raise to `40e9` (→ 2.84M tokens, ~72 GB/GPU free) for high throughput or single requests > ~600K.** See [OPTIMIZATION.md](OPTIMIZATION.md). |
 | `GPU_UTIL` | `0.85` | 0.88 razor-misses KV headroom on some nodes. |
 | `KV_CACHE_DTYPE` | `fp8` (default) | Transfer geometry assumes 1-byte elements; bf16 corrupts. |
 | `PREFILL_BACKEND` | `mori_low_latency` | V1 high_throughput dispatch warmup crashes on this stack. |

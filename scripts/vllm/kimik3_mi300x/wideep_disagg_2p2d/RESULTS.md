@@ -19,9 +19,24 @@ model in tmpfs. `MAX_MODEL_LEN=320000` for the ≥ 150K rows (131072 otherwise).
 | 150K             | 3/3 PASS   | ~84s                |
 | 200K             | 3/3 PASS   | ~88s                |
 | **300K**         | **3/3 PASS** | **~150s**         |
+| 500K             | 3/3 PASS   | ~301s               |
+| 750K             | not tested | —                   |
+| 900K             | **HANGS** (see note) | —         |
 
-Eval time ~linear, ~0.5 ms/token. 500K–900K achievable (native ctx 1M, KV holds
-~8M tokens) — longer prefill; not yet swept.
+Eval time ~linear through 500K (~0.6 ms/token). For ctx > ~120K you must raise
+`MAX_MODEL_LEN` (default 131072 caps ~120K), and for a single request > ~600K you
+must raise the KV cache: `KV_CACHE_MEMORY_BYTES=40e9` gives a 2.84M-token cache
+(the default `8e9` = 542K tokens is too small for one 600K+ request). See
+[OPTIMIZATION.md](OPTIMIZATION.md).
+
+**900K limit (honest):** a single 900K-token prefill does not complete — the
+prefill engine freezes (log timestamp stops, no scheduler ticks) while GPUs stay
+at 100% and no result returns. Killing the client recovers the serve cleanly, so
+it's confined to that one oversized request, not a serve crash. 500K passes
+cleanly, so the wall is between 500K and 900K. Suspected cause: the chunked-prefill
+path at ~440 chunks (batched=2048) through the MoRIIO connector, or an attention
+kernel that degrades past ~500–600K. Not a KV-capacity issue. Investigation
+pending.
 
 Reproduce:
 ```bash

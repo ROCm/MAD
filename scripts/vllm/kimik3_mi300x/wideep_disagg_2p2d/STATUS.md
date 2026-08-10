@@ -1,9 +1,16 @@
 # Status — Kimi-K3 MI300X 2P/2D EP16 MoRIIO disagg — **VALIDATED**
 
 **This recipe is validated.** Single-needle NIAH passes **deterministically
-through 300K tokens** (all depths) on the 2 prefill + 2 decode EP16 disagg serve.
-The decode-recall bug that previously blocked this is **fixed** (root cause + fix
-below).
+through 300K tokens** (all depths; 500K also passes) on the 2 prefill + 2 decode
+EP16 disagg serve. The decode-recall bug that previously blocked this is **fixed**
+(root cause + fix below).
+
+**Validated from a scratch build.** The two fixes are folded into vLLM source on
+`raviguptaamd/vllm` branch `kimi-k3-wideep-disagg-fullsource-v2`; the Dockerfile
+builds that branch, so the **image ships the fixes baked in**. A from-scratch
+image build was deployed and re-validated (NIAH 12/12 to 300K) with the runtime
+patchers all reporting "already applied" — i.e. the image is self-sufficient and
+the patchers are idempotent no-ops on it.
 
 ## Result
 
