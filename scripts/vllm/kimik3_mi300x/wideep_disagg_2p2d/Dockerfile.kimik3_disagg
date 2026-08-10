@@ -197,7 +197,8 @@ RUN rm -rf /tmp/vllm-src && \
     cd /tmp/vllm-src && git checkout "${VLLM_REF}" && \
     echo "VLLM_REF=${VLLM_REF}@$(git rev-parse HEAD)" >> /app/versions.txt && \
     pip uninstall -y vllm 2>/dev/null || true && \
-    pip install --no-deps --no-build-isolation -v . && \
+    MAX_JOBS="${MAX_JOBS:-32}" NVCC_THREADS="${NVCC_THREADS:-8}" \
+      pip install --no-deps --no-build-isolation -v . && \
     python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
     rm -rf /tmp/vllm-src
 
