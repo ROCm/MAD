@@ -35,6 +35,29 @@ MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}"
 # AITER_SITUV2_A8W4=1 + AITER PR#4471 (SiTUv2 in the int4 stage1 epilogue).
 QUANT_CONFIG="${QUANT_CONFIG:-{\"moe\":{\"weight\":\"int4_per_group_32\"}}}"
 GPU_UTIL="${GPU_UTIL:-0.88}"
+# --- RDMA fabric (OVERRIDABLE) -----------------------------------------------
+# Defaults are the validated Broadcom Thor2 (bnxt RoCE) values used on tus1-p3:
+# ibv device names rdma0..rdma7, host NIC eno0, GID index 3. On a DIFFERENT
+# fabric (e.g. Mellanox mlx5) override these, e.g.:
+#   NCCL_IB_HCA=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9 \
+#   RDMA_DEVICES=mlx5_0,mlx5_2,...  SOCKET_IFNAME=eth0  IB_GID_INDEX=3 THOR2_BNXT_FIX=0
+SOCKET_IFNAME="${SOCKET_IFNAME:-eno0}"
+NCCL_IB_HCA_VAL="${NCCL_IB_HCA:-rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7}"
+RDMA_DEVICES="${RDMA_DEVICES:-rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7}"
+IB_GID_INDEX="${IB_GID_INDEX:-3}"
+# Thor2 bnxt libibverbs ABI fix (host v34 driver vs image v59). Needed on Thor2;
+# harmless elsewhere but set THOR2_BNXT_FIX=0 to skip the two -v mounts.
+THOR2_BNXT_FIX="${THOR2_BNXT_FIX:-1}"
+THOR2_LIBIBVERBS_HOST="${THOR2_LIBIBVERBS_HOST:-/usr/lib/x86_64-linux-gnu/libibverbs.so.1.14.39.0}"
+THOR2_LIBIBVERBS_IMG="${THOR2_LIBIBVERBS_IMG:-/usr/lib/x86_64-linux-gnu/libibverbs.so.1.16.62.0}"
+THOR2_BNXT_HOST="${THOR2_BNXT_HOST:-/usr/local/lib/libbnxt_re-rdmav34.so}"
+THOR2_BNXT_IMG="${THOR2_BNXT_IMG:-/usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so}"
+if [ "${THOR2_BNXT_FIX}" = "1" ]; then
+  BNXT_MOUNTS="-v ${THOR2_LIBIBVERBS_HOST}:${THOR2_LIBIBVERBS_IMG}:ro -v ${THOR2_BNXT_HOST}:${THOR2_BNXT_IMG}:ro"
+else
+  BNXT_MOUNTS=""
+fi
+# -----------------------------------------------------------------------------
 # Skip the boot memory-profiling forward (profile_run) entirely by pinning KV
 # cache size — mirrors DeepSeek #181 (which used it for an AITER fp8 profiling
 # bug). profile_run's dummy forward hangs under tp8xDP2 + mori all2all (sampler
@@ -115,7 +138,7 @@ if true; then
   # returns N-1) instead of WRITE (prefill pushes, async, returns N). READ is the
   # more-tested vLLM disagg path; toggled for A/B against the WRITE decode-consume bug.
   READ_MODE_JSON=""; if [ "${MORIIO_READ_MODE:-0}" = "1" ]; then READ_MODE_JSON=",\"read_mode\":\"true\""; fi
-  KVCFG_JSON="{\"kv_connector\":\"MoRIIOConnector\",\"kv_role\":\"${KV_ROLE}\",\"kv_port\":\"9711\",\"kv_connector_extra_config\":{\"proxy_ip\":\"${PROXY_IP}\",\"proxy_port\":\"30000\",\"proxy_ping_port\":\"36367\",\"http_port\":\"${SERVE_PORT}\",\"local_ping_port\":\"61555\",\"handshake_port\":\"8405\",\"notify_port\":\"61005\",\"moriio_pod_hosts\":\"${PEER_POD_HOSTS}\"${READ_MODE_JSON}}}"
+  KVCFG_JSON="{\"kv_connector\":\"MoRIIOConnector\",\"kv_role\":\"${KV_ROLE}\",\"kv_port\":\"9711\",\"kv_connector_extra_config\":{\"proxy_ip\":\"${PROXY_IP}\",\"proxy_port\":\"30000\",\"proxy_ping_port\":\"36367\",\"http_port\":\"${SERVE_PORT}\",\"local_ping_port\":\"61555\",\"handshake_port\":\"8405\",\"notify_port\":\"61005\",\"moriio_pod_hosts\":\"${PEER_POD_HOSTS}\",\"post_batch_size\":${MORIIO_POST_BATCH_SIZE:--1},\"qp_per_transfer\":${MORIIO_QP_PER_TRANSFER:-1},\"num_workers\":${MORIIO_NUM_WORKERS:-1}${READ_MODE_JSON}}}"
   KVCFG_B64=$(printf '%s' "$KVCFG_JSON" | base64 -w0)
 fi
 # api-server ONLY on masters (headless workers must NOT bind an api-server).
@@ -142,9 +165,9 @@ docker run -d --name "$CONTAINER" \
   -e VLLM_USE_AITER_TRITON_SILU_MUL=0 -e VLLM_ROCM_USE_AITER_RMSNORM=1 \
   -e VLLM_ENGINE_READY_TIMEOUT_S=3600 \
   -e VLLM_SSM_CONV_STATE_LAYOUT=DS \
-  -e NCCL_SOCKET_IFNAME=eth0 -e GLOO_SOCKET_IFNAME=eth0 \
-  -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9 \
-  -e NCCL_IB_GID_INDEX=3 -e NCCL_IGNORE_CPU_AFFINITY=1 \
+  -e NCCL_SOCKET_IFNAME=${SOCKET_IFNAME} -e GLOO_SOCKET_IFNAME=${SOCKET_IFNAME} \
+  -e NCCL_IB_DISABLE=0 -e NCCL_IB_HCA=${NCCL_IB_HCA_VAL} -e MORI_RDMA_DEVICES=${RDMA_DEVICES} -e MORI_SOCKET_IFNAME=${SOCKET_IFNAME} \
+  -e NCCL_IB_GID_INDEX=${IB_GID_INDEX} -e NCCL_IGNORE_CPU_AFFINITY=1 \
   -e HSA_ENABLE_IPC_MODE_LEGACY=0 -e HSA_NO_SCRATCH_RECLAIM=1 \
   -e PYTORCH_ALLOC_CONF=expandable_segments:False -e PYTORCH_HIP_ALLOC_CONF=expandable_segments:False \
   -e MORIIO_SKIP_MAMBA="${MORIIO_SKIP_MAMBA:-0}" \
@@ -152,6 +175,13 @@ docker run -d --name "$CONTAINER" \
   -e K3_WRITE_FENCE="${K3_WRITE_FENCE:-}" \
   -e VLLM_BATCH_INVARIANT="${VLLM_BATCH_INVARIANT:-0}" \
   -e K3_MLA_SINGLE_SPLIT="${K3_MLA_SINGLE_SPLIT:-1}" \
+  -e K3_GROUP_ROUTING="${K3_GROUP_ROUTING:-1}" \
+  -e K3_EXTRA_FIXES="${K3_EXTRA_FIXES:-0}" \
+  -e K3_CHUNK_GATE_SLACK="${K3_CHUNK_GATE_SLACK:-2}" \
+  -e K3_CHUNK_GATE_DEBUG="${K3_CHUNK_GATE_DEBUG:-0}" \
+  -e K3_XFER_PROBE="${K3_XFER_PROBE:-0}" \
+  -e K3_MLA_FULL_PREFILL="${K3_MLA_FULL_PREFILL:-1}" \
+  -e K3_FORCE_PREFILL_KDA="${K3_FORCE_PREFILL_KDA:-0}" \
   -e K3_WRITE_FENCE_MS="${K3_WRITE_FENCE_MS:-20}" \
   -e K3_WRITE_DEVSYNC="${K3_WRITE_DEVSYNC:-0}" \
   -e K3_KDA_CONV_DEBUG="${K3_KDA_CONV_DEBUG:-0}" \
@@ -163,16 +193,17 @@ docker run -d --name "$CONTAINER" \
   -e K3_HS_BC="${K3_HS_BC:-0}" \
   -e K3_INPUTS_PROBE="${K3_INPUTS_PROBE:-0}" \
   -e AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}" -e AMD_LOG_LEVEL="${AMD_LOG_LEVEL:-0}" \
-  -e MORI_GPU_ARCHS=gfx942 -e MORI_IB_GID_INDEX=3 -e MORI_IB_ENABLE_RELAXED_ORDERING=1 \
+  -e MORI_GPU_ARCHS=gfx942 -e MORI_IB_GID_INDEX=${IB_GID_INDEX} -e MORI_IB_ENABLE_RELAXED_ORDERING=1 \
   -e MORI_NUM_QP_PER_PE=8 -e MORI_SHMEM_HEAP_SIZE=17179869184 \
   -e MORI_RDMA_TC=41 -e MORI_RDMA_SL=0 -e MORI_IO_SL=1 \
-  -e VLLM_MORIIO_QP_PER_TRANSFER=2 -e VLLM_MORIIO_NUM_WORKERS=4 \
+  -e VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-2}" -e VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}" \
   -e AITER_JIT_DIR=/opt/vllm_cache/aiter -e TRITON_CACHE_DIR=/opt/vllm_cache/triton \
   -e VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
   -e KVCFG_B64="$KVCFG_B64" \
   -e QUANT_CONFIG="$QUANT_CONFIG" \
   -v "$MODEL_DIR":/model:ro -v "$LOGHOST":/logs -v "$PATCHER_DIR":/patchers:ro \
   -v "$JIT_HOST":/opt/vllm_cache \
+  ${BNXT_MOUNTS} \
   --entrypoint bash \
   "$IMAGE" -c "
     set -e
@@ -243,6 +274,30 @@ docker run -d --name "$CONTAINER" \
     # Ports vLLM's own nixl/mooncake hybrid-PD handling. Load-bearing; always on.
     if [ -f /patchers/apply_kimik3_moriio_mamba_n1.py ] && [ -n \"\$VLLM_SP\" ]; then
       python3 /patchers/apply_kimik3_moriio_mamba_n1.py \"\$VLLM_SP\" || true
+    fi
+    if [ -f /patchers/apply_kimik3_moriio_group_routing.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_moriio_group_routing.py \"\$VLLM_SP\" || true
+    fi
+    if [ \"\${K3_EXTRA_FIXES:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_chunked_allgrp.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_chunked_allgrp.py \"\$VLLM_SP\" || true
+    fi
+    if [ \"\${K3_EXTRA_FIXES:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_chunk_gate_fix.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_chunk_gate_fix.py \"\$VLLM_SP\" || true
+    fi
+    if [ -f /patchers/apply_kimik3_xfer_probe.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_xfer_probe.py \"\$VLLM_SP\" || true
+    fi
+    # k3-mla-boundary: clamp final MLA block RDMA copy to valid slots (fix decode recall)
+    if [ \"\${K3_ENABLE_CLAMP:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_moriio_mla_boundary_clamp.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_moriio_mla_boundary_clamp.py \"\$VLLM_SP\" || true
+    fi
+    # k3-mla-full: the real fix (prefill computes N MLA / KDA stays N-1). Clamp above OFF by default.
+    if [ -f /patchers/apply_kimik3_mla_full_prefill.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_mla_full_prefill.py \"\$VLLM_SP\" || true
+    fi
+    # k3-force-prefill-kda: route disagg boundary token through prefill KDA kernel
+    if [ -f /patchers/apply_kimik3_force_prefill_kda.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_force_prefill_kda.py \"\$VLLM_SP\" || true
     fi
     # Force single-split TRITON_MLA decode (deterministic; avoids uninit-tail merge)
     if [ -f /patchers/apply_kimik3_mla_single_split.py ] && [ -n \"\$VLLM_SP\" ]; then
@@ -321,8 +376,8 @@ docker run -d --name "$CONTAINER" \
       --data-parallel-size ${DP_SIZE} --data-parallel-size-local ${DP_LOCAL} \
       --data-parallel-address ${DP_ADDR} --data-parallel-rpc-port ${RPC_PORT} ${START} ${HEADLESS} \
       --enable-expert-parallel --all2all-backend ${BACKEND} \
-      --trust-remote-code --reasoning-parser kimi_k3 --mm-encoder-tp-mode data \
-      --no-enable-prefix-caching --kv-cache-dtype ${KV_CACHE_DTYPE:-fp8} --block-size 16 \
+      --trust-remote-code --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy ${LOAD_STRATEGY:-prefetch} \
+      --no-enable-prefix-caching --kv-cache-dtype ${KV_CACHE_DTYPE:-fp8} --block-size ${BLOCK_SIZE:-16} \
       --kv-cache-memory-bytes ${KV_CACHE_MEMORY_BYTES} \
       --max-model-len ${MAX_MODEL_LEN} --max-num-seqs 8 --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS} --gpu-memory-utilization ${GPU_UTIL} \
       --distributed-timeout-seconds 7200 \

@@ -44,7 +44,11 @@ def main():
     ap.add_argument("--url", required=True)
     ap.add_argument("--model", default="kimi-k3")
     ap.add_argument("--ctx", type=int, default=8000, help="approx haystack words")
+    ap.add_argument("--ctx-list", default=None,
+                    help="comma list of sizes to sweep (overrides --ctx), e.g. "
+                         "10000,50000,100000,200000,300000")
     ap.add_argument("--depths", default="0.1,0.5,0.9")
+    ap.add_argument("--timeout", type=float, default=600, help="per-request seconds")
     args = ap.parse_args()
 
     print(f"== sanity ==")
@@ -54,19 +58,24 @@ def main():
     secret = "The secret passcode is HELIOTROPE-7492."
     question = ("\n\nQuestion: What is the secret passcode? "
                 "Answer with only the passcode.")
+    sizes = [int(x) for x in args.ctx_list.split(",")] if args.ctx_list else [args.ctx]
+    depths = [float(x) for x in args.depths.split(",")]
     passed = 0; total = 0
-    for depth in [float(x) for x in args.depths.split(",")]:
-        hay = make_haystack(args.ctx, secret, depth)
-        prompt = hay + question
-        try:
-            txt, usage, dt = chat(args.url, args.model, prompt, max_tokens=256)
-        except Exception as e:
-            print(f"  depth={depth}: ERROR {e}")
-            total += 1; continue
-        ok = "HELIOTROPE-7492" in txt.upper()
-        passed += ok; total += 1
-        print(f"  depth={depth:>4}: {'PASS' if ok else 'FAIL'} "
-              f"(prompt_tok={usage.get('prompt_tokens')}, {dt:.1f}s) resp={txt[:60]!r}")
+    for ctx in sizes:
+        for depth in depths:
+            hay = make_haystack(ctx, secret, depth)
+            prompt = hay + question
+            try:
+                txt, usage, dt = chat(args.url, args.model, prompt,
+                                      max_tokens=256, timeout=args.timeout)
+            except Exception as e:
+                print(f"  ctx={ctx:>7} depth={depth}: ERROR {e}", flush=True)
+                total += 1; continue
+            ok = "HELIOTROPE-7492" in txt.upper()
+            passed += ok; total += 1
+            print(f"  ctx={ctx:>7} depth={depth:>4}: {'PASS' if ok else 'FAIL'} "
+                  f"(prompt_tok={usage.get('prompt_tokens')}, {dt:.1f}s) "
+                  f"resp={txt[:50]!r}", flush=True)
     print(f"== NIAH {passed}/{total} passed ==")
 
 if __name__ == "__main__":

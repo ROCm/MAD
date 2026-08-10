@@ -24,15 +24,20 @@ MI300X)** using PP2×TP8 (~102 GB/GPU per node). gfx942 also requires
 | [`pp2xtp8/`](pp2xtp8/) | PP2×TP8, no EP | — | a16w4 | Simplest baseline; lowest single-user latency. |
 | [`wideep_int4_allgather/`](wideep_int4_allgather/) | PP2×TP8, EP8/node | `allgather_reducescatter` (generic) | a8w4 (`AITER_SITUV2_A8W4=1`) | Expert-parallel without MoRI kernels. |
 | [`wideep_int4_moriep/`](wideep_int4_moriep/) | PP2×TP8, EP8/node | `mori_low_latency` (**MoRI-EP**) | a8w4 (`AITER_SITUV2_A8W4=1`) | MoRI-EP all2all expert dispatch (intra-node EP group). |
-| [`wideep_disagg_2p2d/`](wideep_disagg_2p2d/) ⚠️ **WIP** | 2P/2D disagg, TP2×DP8 per pool, no PP | `mori_low_latency` (**MoRI-EP**) + **MoRIIO** KV/state transfer | MXFP4 | Prefill/decode disaggregation across 4 nodes. **Not production — see below.** |
+| [`wideep_disagg_2p2d/`](wideep_disagg_2p2d/) | 2P/2D disagg, TP2×DP8 per pool → EP16, no PP | `mori_low_latency` (**MoRI-EP**) + **MoRIIO** KV/state transfer | MXFP4 | Prefill/decode disaggregation across 4 nodes. Highest concurrent throughput; NIAH validated to 300K. |
 
-The first three are colocated (single-instance, no prefill/decode split).
+The first three are colocated (single-instance, no prefill/decode split); the
+fourth splits prefill and decode across two pools.
 
-**`wideep_disagg_2p2d/` is WORK IN PROGRESS.** Its MoRIIO transport is byte-perfect
-and all connector-level bugs are fixed, but an open decode-side accuracy bug means
-exact long-context (NIAH) recall does **not** pass yet. It lands as reviewable infra
-plus an honest [`STATUS.md`](wideep_disagg_2p2d/STATUS.md) — not a working deployment.
-For serving today, use one of the three colocated recipes above.
+**`wideep_disagg_2p2d/` is validated** — single-needle NIAH passes deterministically
+through **300K tokens** (all depths). Two root-cause fixes closed the decode-recall
+bug (4-KV-group block routing + multi-chunk prefill transfer); see its
+[`STATUS.md`](wideep_disagg_2p2d/STATUS.md) and
+[`RESULTS.md`](wideep_disagg_2p2d/RESULTS.md). **Pick by workload:** the colocated
+recipes give the lowest single-request latency (one request spans all 16 GPUs) —
+best for interactive / low-QPS; disagg gives **5.7× throughput at concurrency 8**
+(7.3× at 16) plus decode-latency isolation, at ~4× higher single-stream latency —
+best for batch / high-QPS.
 
 > **EP scope:** the 896 experts split **8-way across each node's 8 GPUs** (112 experts/GPU → `[EP Rank x/8]`), and that EP8 group is replicated on each of the 2 pipeline stages. The expert all2all (incl. MoRI-EP) therefore runs **intra-node**; the only cross-node traffic is the PP activation hand-off, over NCCL. ("16" is the GPU count, not the EP width.)
 

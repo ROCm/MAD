@@ -1,81 +1,87 @@
-# Status — Kimi-K3 MI300X 2P/2D EP16 MoRIIO disagg (WIP)
+# Status — Kimi-K3 MI300X 2P/2D EP16 MoRIIO disagg — **VALIDATED**
 
-**This recipe is WORK IN PROGRESS. It is not a validated production deployment.**
-The disaggregation *infrastructure and transport are correct*, but an open
-decode-side accuracy bug means exact long-context recall (NIAH) does **not** pass
-yet. Ship/scale on the colocated recipes (`../pp2xtp8`, `../wideep_int4_*`) until
-this is resolved.
+**This recipe is validated.** Single-needle NIAH passes **deterministically
+through 300K tokens** (all depths) on the 2 prefill + 2 decode EP16 disagg serve.
+The decode-recall bug that previously blocked this is **fixed** (root cause + fix
+below).
 
-## What works (verified)
+## Result
 
-- **Bring-up**: 2 prefill + 2 decode nodes, TP8×DP2 → **EP16 per pool** (MoRI-EP
-  all2all), **no pipeline parallelism**, joined by the MoRIIO connector for
-  prefill→decode KV + KDA state transfer. Both pools reach `Application startup
-  complete` and the router routes requests end to end.
-- **Transport is byte-perfect**. Element-wise probes (`patchers/diagnostics/`)
-  confirm that both the MLA attention KV **and** the KDA/mamba recurrent+conv state
-  arrive **byte-identical** on all 8 decode ranks at consume time. All connector-level
-  bugs are fixed (see the vLLM branch commits referenced in the README):
-  - mamba/KDA state routed by the mamba KV-cache group's block ids (not attention's);
-  - degenerate `remote_tp_size` normalized so writes fan out to **all** decode TP
-    ranks (not just rank 0);
-  - the mamba **N−1** prefill/decode boundary (producer computes h(N−1), decoder
-    recomputes token N) — ports vLLM's own nixl/mooncake hybrid-PD handling.
-- **Coherent generation works.** Short factual prompts return correct, coherent
-  output (e.g. "The capital of Germany is" → "Berlin. The currency is the euro"),
-  and single-token recall is correct and deterministic.
+Single-needle NIAH (needle = `HELIOTROPE-7492`, greedy `temperature=0`, depths
+0.1 / 0.5 / 0.9) — **3/3 PASS at every size 10K → 300K**, deterministic:
 
-## Known issue (open) — exact multi-token recall fails
+| ctx (tokens) | result | eval time / req |
+|--------------|--------|-----------------|
+| 10K  | 3/3 PASS | 5.3s  |
+| 50K  | 3/3 PASS | 19.5s |
+| 100K | 3/3 PASS | ~47s  |
+| 150K | 3/3 PASS | ~84s  |
+| 200K | 3/3 PASS | ~88s  |
+| **300K** | **3/3 PASS** | **~150s** |
 
-Exact needle recall over more than one token is wrong **and non-deterministic at
-greedy `temperature=0`**, while the *same request run colocated is deterministic and
-correct*. Non-determinism at greedy decode means the defect is in the forward pass
-(a memory/compute issue), not token sampling.
+Throughput (the point of DP disaggregation), 20K ctx, batched=2048:
+conc=1 → 0.062 req/s; conc=8 → **0.353 req/s (5.7×)**; conc=16 → **0.455 req/s
+(7.3×)**. See `RESULTS.md`.
 
-### Repro
+## Root cause (two independent bugs, both fixed)
 
-```bash
-# via the router (disagg) — non-deterministic + wrong
-for i in 1 2 3; do
-  curl -s http://<prefill-master-ip>:30000/v1/completions \
-    -H 'Content-Type: application/json' \
-    -d '{"model":"kimi-k3","prompt":"The number is 8241. The number is","max_tokens":3,"temperature":0}' \
-    | python3 -c 'import sys,json;print(repr(json.load(sys.stdin)["choices"][0]["text"]))'
-done
-# observed: ' 975.', ' 4. The', ' 975...'  (varies run to run)
+Kimi-K3's attention is hybrid — 24 MLA full-attention layers + 69 KDA
+(Kimi-Delta-Attention, recurrent) layers → vLLM allocates **4 KV-cache groups**
+(idx 0/1/2 = MambaSpec/KDA, 23 layers each; idx 3 = MLAAttentionSpec, 24 layers).
+Both bugs stem from this multi-group hybrid.
 
-# same prompt on a colocated engine (:20005 directly) — deterministic + correct
-#   -> ' 8241' every time
+### Fix #1 — 4-KV-cache-group block routing (`patchers/apply_kimik3_moriio_group_routing.py`)
+The shipped connector assumed 2 groups and hardcoded group indices `[0]`/`[1]`
+when computing RDMA transfer offsets, sending MLA KV (group 3) to *group-0
+(mamba)* block-ids. Decode read the group-3 blocks, which were never written →
+fluent but context-free output. Fix carries **all 4 groups' block-id lists
+end-to-end** and routes each layer's transfer by its own group index. Always on
+(`K3_GROUP_ROUTING=1`). This fixed short recall (≤ 1 block).
+
+### Fix #2 — multi-chunk prefill transfer (`apply_kimik3_chunk_gate_fix.py` + `apply_kimik3_chunked_allgrp.py`)
+A razor-sharp cliff: recall died at exactly `max_num_batched_tokens`. The
+connector detected the "final prefill chunk" by **block count**
+(`num_prompt_tokens > len(block_ids) * self.block_size`), but the padded scheduler
+block (~5760) holds a whole prompt in one block, so the KV transfer fired after
+**chunk 1** (only `max_num_batched_tokens` computed); tokens past chunk 1 (e.g. a
+needle at the end) were never transferred. When a prompt fits in ≤ 1 block,
+block-count can never detect chunk completion.
+
+Fix: gate on **compute progress** from fresh `scheduler_output`
+(`num_computed_tokens` + `num_scheduled_tokens`), not block count — applied at 4
+points: (A) build a per-step progress map, (B) entry defer, (C) accumulation
+final-detect, (D) post-loop sweep for the final-chunk-adds-no-new-block case
+(else the request deadlocks: `unmap MISS table_size=0`). `chunked_allgrp`
+accumulates every group's block-ids across chunks. `SLACK=2`
+(`K3_CHUNK_GATE_SLACK`) absorbs the mamba N-1 truncation. Enabled with
+`K3_EXTRA_FIXES=1`.
+
+Verified on a 2611-token prompt:
+```
+[k3-chunk-gate-entry] nblk=1 npt=2611 done=False prog=(0,2048)    # chunk 1 -> defer
+[k3-chunk-gate-sweep] nblk=1 npt=2611 done=True  prog=(2048,563)  # chunk 2 -> emit full blocks
 ```
 
-`niah_probe.py` fails on the router endpoint and passes colocated.
+## Known residual (does not block single-needle NIAH to 300K)
 
-### What has been ruled out (each tested, not assumed)
+An RDMA write-visibility race: `write_done` travels ZMQ/TCP, a different path than
+the RDMA write, and `wait_for_layer_load()` is a no-op — so at high context (many
+blocks) decode can occasionally read a block before its RDMA write is globally
+visible in decode HBM. Effect: the **stricter 10-needle** stress
+(`benchmark_niah.py`) dips to ~9/10 at ≥ 20K; **single-needle** NIAH is
+unaffected (deterministic to 300K). Sender-side mitigations (delay fence,
+`post_batch_size` split) don't help and add latency. Proper fix = a decode-side
+per-request KV-ready barrier before the model forward; tracked as future work.
 
-Transport corruption (byte-perfect); TP fan-out; mamba block-id group; the N−1
-boundary (on and off); fp8 KV scale (static/identical both engines); RoPE-in-cache
-and token positions (correct); block selection; KDA state content (byte-identical);
-sampling params (fixed seed does not stabilize → below the sampler); TRITON_MLA
-multi-split reduction (forcing a single split changes nothing); the MoRI-EP backend
-(`mori_low_latency` and `mori_high_throughput` both fail identically); sender
-write→notify timing (a 50 ms sender-side delay does nothing); and a local
-multi-stream write-vs-RDMA-read race (a full `torch.cuda.synchronize()` before the
-RDMA read does nothing).
-
-### Current best hypothesis
-
-With the KV bytes proven correct at consume time, the defect is **downstream of the
-KV read**, in the decode-side attention **compute/indexing** over a paged cache whose
-blocks were populated out-of-order by RDMA (vs a sequential local prefill). It is
-intermittent and multi-position-sensitive: single-token retrieval is reliable, a
-multi-token span hits it. Fixing it likely needs kernel-level instrumentation of the
-K3 dense-MLA decode path (`triton_mla` / aiter) and possibly an upstream vLLM/aiter
-change — outside what the connector patchers can reach.
+## Prior connector fixes (still required, pre-existing)
+mamba/KDA state routed by the mamba KV-cache group's block ids; degenerate
+`remote_tp_size` normalized so writes fan out to all decode TP ranks; mamba N-1
+prefill/decode boundary (producer computes h(N-1), decoder recomputes token N).
+These are load-bearing and remain in `patchers/`.
 
 ## Diagnostic knobs (opt-in, default OFF)
-
-The folded vLLM branch adds gated knobs used during this investigation
-(`K3_WRITE_FENCE`, `K3_WRITE_DEVSYNC`, `K3_MLA_SINGLE_SPLIT`) plus the
-`patchers/diagnostics/` element-wise probes (`K3_DECODE_RECV_PROBE`, `K3_WRITE_BC`,
-`K3_INPUTS_PROBE`, …). None change default behavior; they exist to continue the
-investigation. See each patcher's docstring.
+Gated knobs from the investigation remain available for debugging (turn up/down
+as needed): `K3_XFER_PROBE`, `K3_DECODE_RECV_PROBE`, `K3_KDA_STATE_PROBE`,
+`K3_WRITE_BC`, `K3_HS_BC`, `K3_INPUTS_PROBE`, `K3_CHUNK_GATE_DEBUG`,
+`K3_WRITE_FENCE`, `K3_ENABLE_CLAMP`. None change default behavior. See each
+patcher's docstring and the README "Debugging" section.
