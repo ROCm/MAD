@@ -64,4 +64,5 @@ capacity_factor: 1.25
 sparse_matmul: False
 sharding_tolerance: 0.05
 
-shardy: False
+max_segments_per_seq: 32
+shardy: True

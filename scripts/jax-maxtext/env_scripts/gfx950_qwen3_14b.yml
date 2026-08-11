@@ -58,4 +58,5 @@ per_device_batch_size: 4
 max_target_length: 8192
 dataset_type: "synthetic"
 tokenizer_path: "Qwen/Qwen3-14B"
-shardy: False
+max_segments_per_seq: 32
+shardy: True

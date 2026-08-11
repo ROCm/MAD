@@ -42,7 +42,11 @@ MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
 DP_MODE="${DP_MODE:-0}"
+
 # PARALLEL_MODE is derived strictly from DP_MODE for models.yaml (tp vs dp flags).
+# NOTE: DP_MODE=1 with yD>1 (e.g. 1P2D) was previously limited due to a sglang
+# detokenizer deadlock (multi-node disaggregated decode, nnodes=2, dp=16).
+# That guard is now lifted to re-validate — DeepSeek-V3/R1 only.
 if [[ "$DP_MODE" == "1" ]]; then
     PARALLEL_MODE=dp
 else
@@ -62,14 +66,11 @@ if [[ "$DP_MODE" == "1" ]] && ! mori_model_allows_dp_mode_one "$MODEL_NAME"; the
     exit 1
 fi
 
-if [[ "$DP_MODE" == "1" ]] && { [[ "${xP:-1}" -gt 1 ]] || [[ "${yD:-1}" -gt 1 ]]; }; then
-    echo "ERROR: DP_MODE=1 is not supported when xP>1 or yD>1 (got xP=${xP} yD=${yD}). Use DP_MODE=0 for multi-prefill or multi-decode (xPyD) topologies." >&2
-    exit 1
-fi
-
 IPADDRS="${IPADDRS:-localhost}"
 BARRIER_PORT="${BARRIER_PORT:-4342}"
-IB_DEVICES=${IB_DEVICES:-"mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9"}
+# IB_DEVICES controls --disaggregation-ib-device (RDMA NICs for KV-cache transfer).
+# Default is set in mori_ep_env.sh (sourced below). Override: set IB_DEVICES env var.
+# Note: CX7 rail NICs require same-rail nodes; mlx5_1 (mgmt NIC) is cross-rail safe.
 
 # =============================================================================
 # Dependencies and Environment Setup
@@ -79,12 +80,6 @@ pip install py-spy
 pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
 
-## Temporary workaround for OCI-CX7 to install latest RDMA core.
-git clone --branch v62.0 --depth 1 https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core && \
-    cd /tmp/rdma-core && \
-    mkdir -p build && cd build && \
-    cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr -DNO_MAN_PAGES=1 .. && \
-    ninja &&     ninja install &&     ldconfig &&     rm -rf /tmp/rdma-core
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
@@ -135,9 +130,10 @@ if [[ ! -f "$MODELS_YAML" ]]; then
     exit 1
 fi
 
-export MODELS_YAML MODEL_NAME PARALLEL_MODE
+export MODELS_YAML MODEL_NAME PARALLEL_MODE xP GPUS_PER_NODE
 eval "$(python3 - <<'PY'
 import os
+import re
 import shlex
 import sys
 import yaml
@@ -145,6 +141,8 @@ import yaml
 config_path = os.environ["MODELS_YAML"]
 model_name = os.environ["MODEL_NAME"]
 mode = os.environ["PARALLEL_MODE"]
+xP = int(os.environ.get("xP", "1"))
+gpus_per_node = int(os.environ.get("GPUS_PER_NODE", "8"))
 
 with open(config_path, "r", encoding="utf-8") as f:
     models = yaml.safe_load(f) or {}
@@ -162,10 +160,12 @@ def q(v):
     return shlex.quote(str(v if v is not None else ""))
 
 
+prefill_flags = prefill.get(mode, "") or ""
+
 exports = {
     "MODEL_BASE_FLAGS": cfg.get("base_flags", ""),
     "MODEL_MODE_FLAGS": cfg.get(f"{mode}_flags", ""),
-    "MODEL_PREFILL_FLAGS": prefill.get(mode, ""),
+    "MODEL_PREFILL_FLAGS": prefill_flags,
     "MODEL_DECODE_FLAGS": decode.get(mode, ""),
     "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
 }
@@ -184,12 +184,26 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
+# KV transfer backend: default mori, switchable to mooncake (Mooncake).
+# Kept out of models.yaml so model config is backend-agnostic.
+_TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
+PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
+DECODE_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
+export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
+
+if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then
+    echo "[override] Transfer backend: ${_TRANSFER_BACKEND}"
+fi
+
+
 # =============================================================================
 # Cluster Topology (dist-init endpoints)
 # =============================================================================
 
-IP_FIRST_PREFILL=$(echo "$IPADDRS" | awk -F',' '{print $2}')
-IP_FIRST_DECODE=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+2)}')
+# Proxy/router runs on NODE_RANK=0 (first prefill node); no extra proxy node needed.
+# IP layout: IP_ARRAY[0..xP-1] = prefill nodes, IP_ARRAY[xP..xP+yD-1] = decode nodes.
+IP_FIRST_PREFILL=$(echo "$IPADDRS" | awk -F',' '{print $1}')
+IP_FIRST_DECODE=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
 
 IFS=',' read -ra IP_ARRAY <<< "$IPADDRS"
 
@@ -200,28 +214,45 @@ PREFILL_DIST_INIT_ADDR="${IP_FIRST_PREFILL}:${DIST_INIT_PORT}"
 DECODE_DIST_INIT_ADDR="${IP_FIRST_DECODE}:${DIST_INIT_PORT}"
 
 if [[ "$DP_MODE" == "1" ]]; then
-    _expected_ip_slots=$((1 + xP + yD))
+    _expected_ip_slots=$((xP + yD))
     if [[ -z "$IP_FIRST_PREFILL" || -z "$IP_FIRST_DECODE" ]]; then
         echo "ERROR: DP_MODE=1 requires non-empty IP_FIRST_PREFILL and IP_FIRST_DECODE (from IPADDRS=${IPADDRS})" >&2
         exit 1
     fi
     if ((${#IP_ARRAY[@]} < _expected_ip_slots)); then
-        echo "ERROR: DP_MODE=1 expects at least ${_expected_ip_slots} comma-separated hosts in IPADDRS (1 router + xP=${xP} prefill + yD=${yD} decode); got ${#IP_ARRAY[@]}" >&2
+        echo "ERROR: DP_MODE=1 expects at least ${_expected_ip_slots} comma-separated hosts in IPADDRS (xP=${xP} prefill + yD=${yD} decode); got ${#IP_ARRAY[@]}" >&2
         exit 1
     fi
+    echo "[debug] DP_MODE=1 topology:"
+    echo "[debug]   xP=${xP} yD=${yD} GPUS_PER_NODE=${GPUS_PER_NODE}"
+    echo "[debug]   PREFILL_TP_SIZE=${PREFILL_TP_SIZE}  PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  PREFILL_EP_SIZE=${PREFILL_EP_SIZE}  PREFILL_NNODES=${PREFILL_NNODES}"
+    echo "[debug]   DECODE_TP_SIZE=${DECODE_TP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}  DECODE_EP_SIZE=${DECODE_EP_SIZE}  DECODE_NNODES=${DECODE_NNODES}"
+    echo "[debug]   PREFILL_DIST_INIT_ADDR=${PREFILL_DIST_INIT_ADDR}"
+    echo "[debug]   DECODE_DIST_INIT_ADDR=${DECODE_DIST_INIT_ADDR}"
+    echo "[debug]   IP_FIRST_PREFILL=${IP_FIRST_PREFILL}  IP_FIRST_DECODE=${IP_FIRST_DECODE}"
+    echo "[debug]   MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE}"
 fi
 
 PREFILL_ARGS=""
 DECODE_ARGS=""
 
-# Router (DP_MODE=0): one --prefill / --decode URL per worker (see sglang_disagg_server.sh).
-for ((i=1; i<=$xP && i<${#IP_ARRAY[@]}; i++)); do
-    PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:3000"
-done
-
-for ((i=$xP+1; i<${#IP_ARRAY[@]}; i++)); do
-    DECODE_ARGS+=" --decode http://${IP_ARRAY[$i]}:3000"
-done
+# Router backend URLs:
+# DP_MODE=0: each node is an independent HTTP worker → register all xP prefill and all yD decode nodes.
+# DP_MODE=1: only the master node (NODE_RANK=0 for prefill, NODE_RANK=xP for decode) exposes an HTTP
+#   server; secondary nodes are pure compute workers with a dummy health-check placeholder on port 3000
+#   that returns 404 on all real endpoints. Registering secondary nodes causes the proxy to mark them
+#   unhealthy and skip all traffic, so only the master IPs are registered.
+if [[ "$DP_MODE" == "1" ]]; then
+    PREFILL_ARGS=" --prefill http://${IP_ARRAY[0]}:3000"
+    DECODE_ARGS=" --decode http://${IP_ARRAY[$xP]}:3000"
+else
+    for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do
+        PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:3000"
+    done
+    for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do
+        DECODE_ARGS+=" --decode http://${IP_ARRAY[$i]}:3000"
+    done
+fi
 
 echo "PREFILL_ARGS: $PREFILL_ARGS"
 echo "DECODE_ARGS: $DECODE_ARGS"
@@ -243,9 +274,11 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
 # =============================================================================
 # Prepared sglang launch commands
 # =============================================================================
-# NODE_RANK 1..xP: prefill workers start first; NODE_RANK xP+1..xP+yD: decode workers.
-# NODE_RANK 0: DP_MODE=0 wait all worker logs; DP_MODE=1 wait master prefill/decode only; then router, benchmark_xPyD.sh, stop router.
-# Workers then sync on MASTER_ADDR:2322 and wait for proxy shutdown.
+# NODE_RANK 0        : first prefill node + router/proxy (co-located); supports xP>=1, yD>=1 for both DP_MODE=0 and DP_MODE=1.
+# NODE_RANK 1..xP-1  : remaining prefill workers (PREFILL_NODE_RANK = NODE_RANK).
+# NODE_RANK xP..xP+yD-1: decode workers (DECODE_NODE_RANK = NODE_RANK - xP).
+# NODE_RANK 0 (DP_MODE=0): waits for all worker logs; (DP_MODE=1): waits for master prefill (NODE 0) + master decode (NODE xP) only.
+# Workers sync on MASTER_ADDR:2322 and wait for proxy shutdown.
 
 cd /sgl-workspace/sglang || {
     echo "ERROR: cd /sgl-workspace/sglang failed"
@@ -262,62 +295,145 @@ setup_sglang_worker_env() {
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }
 
+# _dbg: timestamped debug trace (NODE_RANK + wall-clock prefix).
+_dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
+
+# _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]
+# Polls TCP connectivity; returns 0 when port is open, 1 on timeout.
+# Uses /dev/tcp; falls back to nc if available. Logs progress every 10s.
+_wait_for_tcp() {
+    local _host="$1" _port="$2"
+    local _timeout_s="${3:-120}"
+    local _label="${4:-${_host}:${_port}}"
+    local _start_ts _elapsed _last_log
+    _start_ts=$(date +%s)
+    _last_log=$(date +%s)
+    _dbg "_wait_for_tcp: checking ${_label} (timeout ${_timeout_s}s) ..."
+    while true; do
+        if bash -c "exec 3<>/dev/tcp/${_host}/${_port} 2>/dev/null && exec 3<&- && exec 3>&-" 2>/dev/null; then
+            _elapsed=$(( $(date +%s) - _start_ts ))
+            _dbg "_wait_for_tcp: ${_label} is reachable (${_elapsed}s elapsed)"
+            return 0
+        fi
+        _elapsed=$(( $(date +%s) - _start_ts ))
+        if (( _elapsed >= _timeout_s )); then
+            _dbg "ERROR: _wait_for_tcp: ${_label} not reachable after ${_elapsed}s" >&2
+            return 1
+        fi
+        if (( $(date +%s) - _last_log >= 10 )); then
+            _dbg "_wait_for_tcp: still waiting for ${_label} (${_elapsed}s / ${_timeout_s}s) ..."
+            _last_log=$(date +%s)
+        fi
+        sleep 2
+    done
+}
+
 if [[ "$NODE_RANK" -eq 0 ]]; then
-    echo "${host_name}:${host_ip} is Router / proxy (NODE_RANK=0)"
+    echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
 
     mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
 
-    # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 1..xP) and decode (NODE xP+1 .. xP+yD) log.
-    # DP_MODE=1: wait for master prefill NODE 1 + master decode NODE xP+1 only.
+    # --- Launch first prefill server on this node (co-located with router) ---
+    setup_sglang_worker_env
+    PREFILL_NODE_RANK=0
+
+    # DP_MODE=1 with dp-size>1: router must use follow_bootstrap_room so each
+    # request is pinned to the DP rank that owns its bootstrap slot, preventing
+    # KV-transfer rank mismatches that cause requests to hang indefinitely.
+    _prefill_lb_method="round_robin"
+    [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
+
+    _prefill_cmd="python3 -m sglang.launch_server \
+        --model-path ${MODEL_PATH} \
+        --disaggregation-mode prefill \
+        --load-balance-method ${_prefill_lb_method} \
+        --prefill-round-robin-balance \
+        --disaggregation-ib-device ${IB_DEVICES} \
+        --host ${host_ip} \
+        --port 3000 \
+        --trust-remote-code \
+        --tp-size ${PREFILL_TP_SIZE}"
+
+    if [[ "$DP_MODE" == "1" ]]; then
+        _prefill_cmd+=" \
+            --dp-size ${PREFILL_DP_SIZE} \
+            --ep-size ${PREFILL_EP_SIZE} \
+            --dist-init-addr ${PREFILL_DIST_INIT_ADDR} \
+            --nnodes ${PREFILL_NNODES} \
+            --node-rank ${PREFILL_NODE_RANK}"
+    fi
+
+    _prefill_cmd+=" \
+        --decode-log-interval 1 \
+        ${PREFILL_MODEL_CONFIG} \
+        --log-level-http warning"
+
+    export _prefill_cmd PREFILL_NODE_RANK
+
+    PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
+    {
+        echo "========== PREFILL_CMD (NODE_RANK=0, PREFILL_NODE_RANK=0, co-located with router) =========="
+        echo "$_prefill_cmd"
+        echo ""
+    } | tee "$PREFILL_LOG"
+    _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
+    set -x
+    eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    set +x
+    _node0_prefill_pid=$!
+    _dbg "prefill server started pid=${_node0_prefill_pid}"
+
+    # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
+    # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
     # Requires shared /run_logs across nodes.
     SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
     ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
     ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
-    SECONDS=0
+    _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"
 
     if [[ "$DP_MODE" == "0" ]]; then
         echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
-        for ((i = 1; i <= xP; i++)); do
+        for ((i = 0; i < xP; i++)); do
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if ((SECONDS >= ROUTER_READY_TIMEOUT_SECONDS)); then
-                    echo "ERROR: Timeout waiting for prefill NODE${i} (${LOG_FILE})" >&2
+                _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})" >&2
                     tail -n 40 "$LOG_FILE" 2>/dev/null || true
                     exit 1
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-                SECONDS=$((SECONDS + ROUTER_POLL_SLEEP_SECONDS))
             done
             echo "Prefill NODE${i} ready."
         done
-        for ((i = xP + 1; i <= xP + yD; i++)); do
+        for ((i = xP; i <= xP + yD - 1; i++)); do
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if ((SECONDS >= ROUTER_READY_TIMEOUT_SECONDS)); then
-                    echo "ERROR: Timeout waiting for decode NODE${i} (${LOG_FILE})" >&2
+                _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})" >&2
                     tail -n 40 "$LOG_FILE" 2>/dev/null || true
                     exit 1
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-                SECONDS=$((SECONDS + ROUTER_POLL_SLEEP_SECONDS))
             done
             echo "Decode NODE${i} ready."
         done
     else
-        _master_prefill_log="${_runlog}/prefill_NODE1.log"
-        _master_decode_log="${_runlog}/decode_NODE$((xP + 1)).log"
-        echo "Waiting for master prefill (NODE 1) + master decode (NODE $((xP + 1))) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
+        _master_prefill_log="${_runlog}/prefill_NODE0.log"
+        _master_decode_log="${_runlog}/decode_NODE${xP}.log"
+        echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
         for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if ((SECONDS >= ROUTER_READY_TIMEOUT_SECONDS)); then
-                    echo "ERROR: Timeout waiting for ${_log_label} (${LOG_FILE})" >&2
+                _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
                     tail -n 40 "$LOG_FILE" 2>/dev/null || true
                     exit 1
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-                SECONDS=$((SECONDS + ROUTER_POLL_SLEEP_SECONDS))
             done
             echo "${_log_label} ready (${LOG_FILE})."
         done
@@ -327,21 +443,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
 
     # Build and launch only after worker logs confirm servers are up (avoids the proxy probing backends too early).
     # 0.0.0.0 so bench_serving (--host 127.0.0.1 in benchmark_xPyD.sh) can connect; binding only ${host_ip} rejects loopback.
-    if [[ "$DP_MODE" == "1" ]]; then
-        ROUTER_CMD="python3 -m sglang_router.launch_router \
-            --pd-disaggregation \
-            --prefill http://${IP_FIRST_PREFILL}:3000 \
-            --decode http://${IP_FIRST_DECODE}:3000 \
-            --host 0.0.0.0 \
-            --port 2322"
-    else
-        ROUTER_CMD="python3 -m sglang_router.launch_router \
-            --pd-disaggregation \
-            ${PREFILL_ARGS} \
-            ${DECODE_ARGS} \
-            --host 0.0.0.0 \
-            --port 2322"
-    fi
+    # PREFILL_ARGS / DECODE_ARGS already contain --prefill/--decode for all xP/yD nodes.
+    # Use them for both DP_MODE=0 and DP_MODE=1 so xP>1 or yD>1 registers all backends.
+    ROUTER_CMD="python3 -m sglang_router.launch_router \
+        --pd-disaggregation \
+        ${PREFILL_ARGS} \
+        ${DECODE_ARGS} \
+        --host 0.0.0.0 \
+        --port 2322"
     export ROUTER_CMD
 
     echo "========== ROUTER_CMD (NODE_RANK=0, DP_MODE=${DP_MODE}) ==========" >&2
@@ -378,7 +487,32 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     #echo "Proxy ready for benchmarking on ${host_name}:${host_ip} (${_bench_host}:${_bench_port})"
     echo "Proxy ready for benchmarking on ${host_name}:${host_ip}"
 
-    sleep 90;
+    # Wait for proxy to register both prefill and decode workers before smoke test / benchmark.
+    # The proxy initializes workers in the background after startup — hitting it too early
+    # returns "No decode workers available" even though both SGLang servers are running.
+    # /v1/models returns 200 immediately (before workers activate), so we poll with a real
+    # completions request that exercises the full PD path.
+    _proxy_base="${ROUTER_HTTP_BASE:-http://127.0.0.1:2322}"
+    _proxy_wait_max=300
+    _proxy_waited=0
+    _proxy_interval=10
+    echo "Waiting up to ${_proxy_wait_max}s for proxy PD path to become ready ..."
+    while [[ ${_proxy_waited} -lt ${_proxy_wait_max} ]]; do
+        _probe=$(curl -sS --max-time 30 "${_proxy_base}/v1/completions" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"probe","prompt":"hi","max_tokens":1,"temperature":0}' 2>/dev/null || echo "")
+        # Success: response contains "choices" (actual completion). Failure: "error" with
+        # "No decode workers" or "No available prefill workers" or connection refused.
+        if echo "${_probe}" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'choices' in d else 1)" 2>/dev/null; then
+            echo "Proxy PD path ready after ${_proxy_waited}s"
+            break
+        fi
+        sleep "${_proxy_interval}"
+        _proxy_waited=$((_proxy_waited + _proxy_interval))
+    done
+    if [[ ${_proxy_waited} -ge ${_proxy_wait_max} ]]; then
+        echo "WARN: Proxy PD path not ready after ${_proxy_wait_max}s. Proceeding anyway." >&2
+    fi
 
     # Smoke test: OpenAI-compatible completions before bench_serving (skip with SKIP_CURL_TEST=1).
     if [[ "${SKIP_CURL_TEST:-0}" != "1" ]]; then
@@ -415,20 +549,26 @@ PY
     echo "Killing the proxy server (pid=${proxy_pid})"
     kill "${proxy_pid}"
 
-elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -le "$xP" ]]; then
+    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
+    kill "${_node0_prefill_pid}"
+
+elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"
-    PREFILL_NODE_RANK=$((NODE_RANK - 1))
+    # NODE_RANK 0..xP-1 map directly to PREFILL_NODE_RANK 0..xP-1 (proxy co-located on NODE_RANK=0).
+    PREFILL_NODE_RANK=$((NODE_RANK))
     setup_sglang_worker_env
     #if [[ "$DP_MODE" == "0" ]]; then
     #    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
     #    echo "DP_MODE=0 prefill SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
     #fi
 
+    _prefill_lb_method="round_robin"
+    [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
+
     PREFILL_CMD="python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
-        --disaggregation-transfer-backend mori \
-        --load-balance-method round_robin \
+        --load-balance-method ${_prefill_lb_method} \
         --prefill-round-robin-balance \
         --disaggregation-ib-device ${IB_DEVICES} \
         --host ${host_ip} \
@@ -452,6 +592,12 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -le "$xP" ]]; then
 
     export PREFILL_CMD PREFILL_NODE_RANK
 
+    # NOTE: do NOT gate PREFILL_NODE_RANK>=1 on port 5757 being open.
+    # Same rendezvous deadlock as decode: all prefill nodes must launch concurrently.
+    if [[ "$DP_MODE" == "1" ]] && (( PREFILL_NODE_RANK >= 1 )); then
+        _dbg "PREFILL_NODE_RANK=${PREFILL_NODE_RANK}: launching without gating on dist-init port (rendezvous requires all ranks concurrent)"
+    fi
+
     PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
     mkdir -p "$(dirname "$PREFILL_LOG")"
     {
@@ -459,11 +605,14 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -le "$xP" ]]; then
         echo "$PREFILL_CMD"
         echo ""
     } | tee "$PREFILL_LOG"
+    _dbg "launching prefill server (PREFILL_NODE_RANK=${PREFILL_NODE_RANK}, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
     set -x
     eval "$PREFILL_CMD" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
     set +x
     prefill_pid=$!
+    _dbg "prefill server started pid=${prefill_pid}"
 
+    _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
@@ -477,23 +626,36 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -le "$xP" ]]; then
     echo "Killing the prefill server"
     kill "${prefill_pid}"
 
-elif [[ "$NODE_RANK" -ge $((xP + 1)) && "$NODE_RANK" -le $((xP + yD)) ]]; then
+elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-default})"
-    DECODE_NODE_RANK=$((NODE_RANK - xP - 1))
+    DECODE_NODE_RANK=$((NODE_RANK - xP))
     setup_sglang_worker_env
+    _dbg "decode node: DECODE_NODE_RANK=${DECODE_NODE_RANK} DECODE_TP_SIZE=${DECODE_TP_SIZE} DECODE_DP_SIZE=${DECODE_DP_SIZE:-n/a} DECODE_EP_SIZE=${DECODE_EP_SIZE:-n/a}"
+    _dbg "DECODE_DIST_INIT_ADDR=${DECODE_DIST_INIT_ADDR} DECODE_NNODES=${DECODE_NNODES}"
 
     if [[ "$DP_MODE" == "1" ]]; then
         #export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
         #echo "DP_MODE=0 decode SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
         export SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD="${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD:-$((MORI_MAX_DISPATCH_TOKENS_DECODE * 2))}"
         export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_DECODE}"
+        _dbg "SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
+        _dbg "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD}"
+        _dbg "MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE}"
+
+        # NOTE: do NOT gate DECODE_NODE_RANK>=1 on port 5757 being open.
+        # torch init_process_group uses a rendezvous: rank 0 opens the port only
+        # AFTER all ranks have joined. Waiting for rank 0's port before launching
+        # rank 1 creates a permanent deadlock. All decode nodes must launch concurrently.
+        _dbg "DECODE_NODE_RANK=${DECODE_NODE_RANK}: launching without gating on dist-init port (rendezvous requires all ranks concurrent)"
     fi
+
+    _decode_lb_method="round_robin"
+    [[ "$DP_MODE" == "1" ]] && _decode_lb_method="follow_bootstrap_room"
 
     DECODE_CMD="python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode decode \
-        --disaggregation-transfer-backend mori \
-        --load-balance-method round_robin \
+        --load-balance-method ${_decode_lb_method} \
         --prefill-round-robin-balance \
         --disaggregation-ib-device ${IB_DEVICES} \
         --host ${host_ip} \
@@ -524,11 +686,14 @@ elif [[ "$NODE_RANK" -ge $((xP + 1)) && "$NODE_RANK" -le $((xP + yD)) ]]; then
         echo "$DECODE_CMD"
         echo ""
     } | tee "$DECODE_LOG"
+    _dbg "launching decode server (DECODE_NODE_RANK=${DECODE_NODE_RANK}, DECODE_TP_SIZE=${DECODE_TP_SIZE})"
     set -x
     eval "$DECODE_CMD" 2>&1 | tee -a "$DECODE_LOG" >/dev/null &
     set +x
     decode_pid=$!
+    _dbg "decode server started pid=${decode_pid}"
 
+    _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \

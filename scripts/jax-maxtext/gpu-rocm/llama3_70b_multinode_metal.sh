@@ -201,4 +201,4 @@ echo "Coordinator IP: \$JAX_COORDINATOR_IP"
 #python MaxText/train.py MaxText/configs/llama3_70b_gpu.yml base_output_directory=output 2>&1 |& tee -a llama3_70b.real.log"
 
 # Run the training
-python /workspace/maxtext/MaxText/train.py /workspace/maxtext/output/configs/llama3_70b_gpu.yml base_output_directory=${BASE_OUTPUT_DIRECTORY} 2>&1 | tee >(grep ".") > ${OUT_FILE_NAME}
+python -m maxtext.trainers.pre_train.train /workspace/maxtext/output/configs/llama3_70b_gpu.yml base_output_directory=${BASE_OUTPUT_DIRECTORY} 2>&1 | tee >(grep ".") > ${OUT_FILE_NAME}

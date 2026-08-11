@@ -34,13 +34,17 @@ WORKDIR $WORKSPACE_DIR
 # Install necessary system dependencies (if any, e.g., git, build-essential)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     numactl \
+    gnupg2 \
+    dirmngr \
+    wget \
     git && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    python3 -m pip install --upgrade pip
+    python3 -m pip install --no-cache-dir --upgrade "pip>=26.0,<26.2"  # This version is required for chai_lab installation
 
 # numpy is reinstalled because of pandas compatibility issues, remove the lines below once base image moves to numpy>1.20.3
 RUN pip3 install -U numpy
 RUN pip3 install -U scipy
+RUN pip3 install filelock requests #  predict_structure.py imports & runs
 
 # Install pip-tools to compile the requirements.in file into requirements.txt
 RUN pip install pip-tools
@@ -59,10 +63,14 @@ RUN locale-gen en_US.UTF-8
 # Clone the chai_lab repository
 # Modify requirements.in to exclude torch and compile dependencies
 # Install chai_lab without re-installing torch
+
+ARG CHAI_BRANCH=main
 RUN cd $WORKSPACE_DIR && \
-    git clone https://github.com/chaidiscovery/chai-lab chai-lab && \
+
+    git clone --branch ${CHAI_BRANCH} https://github.com/chaidiscovery/chai-lab chai-lab && \
     cd chai-lab && \
-    git checkout v0.4.4 && \
+
+    # Removing old branch v0.4.4, due to rdkit version incompatability
     sed '/torch/d' requirements.in > requirements.temp && \
     mv requirements.temp requirements.in && \
     pip-compile requirements.in && \

@@ -16,7 +16,7 @@ set -e
 # Arguments:
 #   config_file.yml - Required. Path to model config YAML file (absolute or relative)
 #                     Examples: llama2-7b.gpu.yml, /path/to/model.gpu.yml, ../configs/my-model.yml
-#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:maxtext-v26.3)
+#   docker_image    - Optional. Docker image to use (default: rocm/jax-training:latest)
 #
 # Examples:
 #   sbatch jax_maxtext_multinode_benchmark.sh llama2-7b.gpu.yml
@@ -323,7 +323,7 @@ echo "Starting MaxText training with model: \${MODEL_NAME}"
 echo "Output path: \${OUTPUT_PATH}"
 
 # Use config file path - if it's in a different directory, it will be mounted separately
-python3 -m MaxText.train /configs/${CONFIG_BASENAME} base_output_directory=\${OUTPUT_PATH}
+python3 -m maxtext.trainers.pre_train.train /configs/${CONFIG_BASENAME} base_output_directory=\${OUTPUT_PATH}
 INNER_SCRIPT_EOF
 }
 

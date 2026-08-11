@@ -1,0 +1,91 @@
+#################################################################################
+#
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+#################################################################################
+#
+# Kimi K3 on MI355X, tracking the AMD day-0 recipes in
+# https://github.com/sgl-project/sglang/issues/32548 (day-0 support: #32541).
+#
+# Two variants, selected with --variant because both serve the same model:
+#   nospec  the non speculative-decoding recipe
+#   dspark  the same server plus the DSpark draft checkpoint
+#
+# Sweep shape. The issue's tables do not state input/output lengths. They are
+# recovered from the tables themselves: (E2EL - TTFT) / TPOT + 1 lands on ~1024
+# output tokens for every row, and concurrency * (inp + out) / E2EL reproduces
+# the reported total throughput only at inp=8192 (e.g. concurrency 8:
+# 8 * 9216 / 31.297 s = 2355.8 vs 2356.21 reported). MAD's usual 1024/1024 would
+# produce numbers that cannot be compared against the tracking issue.
+#
+# max_concurrency is the shared K3 sweep used for vLLM/SGLang/ATOM as well
+# (1/4/8/16/32/64/128/256). It is a superset of the issue's rows except for
+# concurrency 2, so 4/8/16/32 remain directly comparable to the tables.
+#
+# --disable-radix-cache comes from the recipe itself, not from MAD benchmark
+# hygiene, and so is spelled out in extra_args rather than forced by the runner.
+#
+# The runner emits --tp-size, not the --tp shown in the issue: ServerArgs
+# declares tp_size with a single alias, --tensor-parallel-size, and there is no
+# --tp option. "--tp 8" only parses through argparse prefix matching, which any
+# future --tp* option would silently break.
+
+- benchmark: serving
+  variant: nospec
+  model: moonshotai/Kimi-K3
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: bfloat16
+  max_concurrency: 1 4 8 16 32 64 128 256
+  env: &k3_env
+    SGLANG_USE_AITER: 1
+    SGLANG_AITER_K3_OPT: 1
+    AITER_FLYDSL_FORCE: 1
+    # selects the AITER A8W4 MoE path for the natively-MXFP4 K3 weights
+    AITER_SITUV2_A8W4: 1
+  extra_args: &k3_extra_args
+    --attention-backend: triton
+    --mem-fraction-static: 0.85
+    --cuda-graph-max-bs-decode: 256
+    --disable-radix-cache: true
+    # K3 always thinks; these split reasoning and tool calls out of the answer
+    --reasoning-parser: kimi_k3
+    --tool-call-parser: kimi_k3
+
+# DSpark reuses the anchors above so the shared recipe has one definition. It is
+# reported separately in the issue because it also yields an accept-length
+# column, which the runner records when the server reports one.
+- benchmark: serving
+  variant: dspark
+  model: moonshotai/Kimi-K3
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: bfloat16
+  max_concurrency: 1 4 8 16 32 64 128 256
+  env: *k3_env
+  extra_args:
+    <<: *k3_extra_args
+    --speculative-draft-model-path: RadixArk/Kimi-K3-DSpark
+    --speculative-algorithm: DSPARK

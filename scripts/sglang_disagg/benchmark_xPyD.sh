@@ -16,14 +16,15 @@ python3 -m sglang.bench_serving \
            --dataset-name random \
            --random-input 1024 \
            --random-output 1024\
-           --random-range-ratio 1 \
+           --random-range-ratio 1.0 \
            --max-concurrency 512 \
            --num-prompt 1024 \
            --pd-separated \
 	   2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 echo ""
 CON="8 16 32 64 128 256 512"
-COMBINATIONS=("1024/1024" "8192/1024")
+# ISL/OSL combinations — override via BENCHMARK_COMBINATIONS env var (space-separated, e.g. "1024/1024 8192/1024")
+IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}"
 echo "Benchmarking iterations: $BENCHMARK_ITR" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 for i in {1..$BENCHMARK_ITR}; do
     sleep 60
@@ -44,7 +45,7 @@ for i in {1..$BENCHMARK_ITR}; do
            --dataset-name random \
            --random-input $isl \
            --random-output $osl \
-           --random-range-ratio 1 \
+           --random-range-ratio 1.0 \
            --max-concurrency $con \
            --num-prompt $p_con \
            --pd-separated \
@@ -55,4 +56,6 @@ for i in {1..$BENCHMARK_ITR}; do
     done
 done
 python3 parse_to_csv.py ${LOG}_CONCURRENCY.log  -o ${LOG}_CONCURRENCY.csv \
+	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
+	--model-name "${MODEL_NAME}" \
 	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=rocm/primus:v26.3
+ARG BASE_DOCKER=unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_8e124a7_20260722
 FROM $BASE_DOCKER
 
 USER root

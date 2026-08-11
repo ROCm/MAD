@@ -61,4 +61,5 @@ megablox: False
 capacity_factor: 1
 dataset_type: "synthetic"
 tokenizer_path: "Qwen/Qwen3-30B-A3B"
-shardy: False
+max_segments_per_seq: 32
+shardy: True

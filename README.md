@@ -11,10 +11,11 @@ Below are blueprints of supported models along with their documentation.
 
 | Blueprint | Description | Models |
 |-----------|-------------|--------|
+| [**Kimi-K3 inference (vLLM / SGLang / ATOM)**](benchmark/kimi_k3/README.md) | Kimi-K3 (2.8T) day-0 inference on MI350X/MI355X across three frameworks | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
 | [**xDiT diffusion inference**](benchmark/xdit/README.md) | Diffusion Transformer inference using xDiT | FLUX.1, FLUX.1 Kontext, FLUX.2, FLUX.2 Klein, HunyuanVideo, HunyuanVideo 1.5, LTX-2, Stable Diffusion 3.5, Wan 2.1, Wan 2.2, Z-Image Turbo |
 | [**JAX MaxText training**](benchmark/jax_maxtext/README.md) | Train LLMs on AMD Instinct GPUs using JAX MaxText | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Mixtral-8x7B |
-| [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
-| [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B |
+| [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Kimi-K3, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
+| [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B, Kimi-K3 |
 | [**PyTorch training**](benchmark/pytorch_train/README.md) | Train LLMs on AMD Instinct GPUs using AMD's Primus | Llama 2/3/3.1/3.2/3.3/4, GPT-OSS 20B/120B, Qwen2/2.5/3, Flux, SDXL, DLRM, and others |
 | [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, Janus-Pro-7B, HunyuanVideo |
 | [**Megatron-LM training**](benchmark/megatron_lm/README.md) | Train LLMs on AMD Instinct GPUs using ROCm Megatron-LM | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.3 70B, DeepSeek-V2-lite, DeepSeek-V3, Mixtral 8x7B/8x22B, Qwen 2.5 7B/72B |
@@ -22,7 +23,8 @@ Below are blueprints of supported models along with their documentation.
 | [**PyTorch PEFT/FSDP fine-tuning**](scripts/pytorch_train/HF_PEFT_FSDP/README.md) | Finetuning a HF model with LoRA approach & FSDP strategy | Llama-2-70b-chat-hf |
 | [**Large EP microbenchmark**](scripts/large-ep-benchmark/README.md) | MoE Large Expert Paralellism with MoRI-EP & DeepEP communication microbenchmarks | no specific models |
 | [**vLLM disaggregated P/D inference**](scripts/vllm_dissag/README.MD) | Distributed Inference P/D disaggregation with vLLM (Default, MoRI EP, DeepEP) | DeepSeek-R1, DeepSeek-V3, DeepSeek-V3-5layer, amd-Llama-3.3-70B-Instruct-FP8-KV, Llama-3.1-405B-Instruct-FP8-KV, gpt-oss-120b |
-| [**SGLang disaggregated P/D inference**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang | Qwen3-32B, Llama-3.1-8B-Instruct, Llama-3.3-70B-Instruct-FP8-KV, Llama-3.1-405B-Instruct-FP8-KV, DeepSeek-V3, Mixtral-8x7B-v0.1 |
+| [**SGLang disaggregated P/D inference**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang (MoRI IO, Mooncake) | Llama-3.1-8B, Qwen3-32B, Llama-3.3-70B-FP8, Llama-3.1-405B-FP8, Mixtral-8x7B, DeepSeek-V3, DeepSeek-R1 |
+| [**SGLang disaggregated P/D inference with WideEP/LargeEP**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang with WideEP/LargeEP | DeepSeek-V3, DeepSeek-R1 |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 | [**Primus pretrain**](#primus-pretrain) | LLM pretraining through the [Primus](https://github.com/AMD-AGI/Primus) launcher (Megatron, TorchTitan, MaxText, and other backends) | Config-driven; see `scripts/Primus/examples/` |
 

@@ -61,4 +61,5 @@ per_device_batch_size: 12
 dataset_type: "synthetic"
 tokenizer_path: "meta-llama/Llama-2-7b"
 
-shardy: False
+max_segments_per_seq: 32
+shardy: True

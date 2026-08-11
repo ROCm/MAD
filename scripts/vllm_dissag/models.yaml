@@ -1,0 +1,180 @@
+# Model catalog for vllm_disagg.sh (disaggregated PD).
+# -----------------------------------------------------------------------------
+# Selected by MODEL_NAME. PARALLEL_MODE is tp or dp, derived from WIDE_EP:
+#   WIDE_EP=0 -> PARALLEL_MODE=tp -> base_flags + tp_flags + prefill.tp / decode.tp
+#   WIDE_EP=1 -> PARALLEL_MODE=dp -> base_flags + dp_flags + prefill.dp / decode.dp
+#
+# Per model:
+#   base_flags          always applied (both roles, both modes)
+#   tp_flags / dp_flags mode-level, applied to BOTH roles (omit if empty)
+#   prefill/decode.<tp|dp>  role+mode specific flags
+#   experimental_flags  optional extra CLI flags
+#   env: {VAR: val}     per-model ENV. Exported BEFORE the connector's setup_env, so it
+#                       overrides connector defaults but still yields to a submit-time
+#                       `-e VAR=...` (which wins). This is the SINGLE HOME for the model
+#                       serving recipe (KV_BLOCK_SIZE, KV_CACHE_DTYPE, per-role
+#                       PREFILL/DECODE_CUDAGRAPH_MODE, *_MORI_BACKEND, GPU_MEMORY_UTILIZATION,
+#                       KV_CACHE_MEMORY_BYTES, VLLM_ROCM_USE_AITER_MLA, ...). The Docker image
+#                       ships NONE of these — it is a clean binary/library artifact, so the
+#                       same image serves any model/cluster. (Platform + MoRI fabric env lives
+#                       in connectors/<connector>.env; both are forwarded via `docker -e`.)
+#
+# BOUNDARY — the launcher/connector owns the wideEP parallelism DEGREE and transport:
+#   --data-parallel-size / --enable-expert-parallel / --all2all-backend /
+#   --kv-transfer-config / --port / transfer backend are emitted by the connector.
+# The tp: blocks DO carry --tensor-parallel-size (they reproduce the legacy
+#   vllm_disagg_server.sh declare -A maps, where the degree lived in the map). The
+#   moriio+TP path also emits its own --tensor-parallel-size, so it strips any
+#   duplicate from the yaml tp: string; the rixl+TP path takes the degree from the yaml.
+#
+# NOTE on wideEP (dp) models: the moriio(mori) and rixl(deepep) connectors emit the
+# validated wideEP serve flags (block-size, kv-cache-dtype, cudagraph, etc.) directly
+# today, so the dp: blocks below are intentionally empty — placeholders so per-model
+# dp: tuning can be added later without launcher edits (both connectors now append it).
+
+# ============================ Dense / TP-capable ============================
+
+Llama-3.1-405B-Instruct-FP8-KV:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_V1_USE_PREFILL_DECODE_ATTENTION: "1"
+    AMDGCN_USE_BUFFER_OPS: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_ROPE: "1"
+    TRITON_HIP_ASYNC_COPY_BYPASS_PERMUTE: "1"
+    TRITON_HIP_USE_ASYNC_COPY: "1"
+    TRITON_HIP_USE_BLOCK_PINGPONG: "1"
+    TRITON_HIP_ASYNC_FAST_SWIZZLE: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  prefill:
+    tp: "--tensor-parallel-size 8 --kv-cache-dtype fp8"
+  decode:
+    tp: "--tensor-parallel-size 8 --kv-cache-dtype fp8"
+
+amd-Llama-3.3-70B-Instruct-FP8-KV:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_V1_USE_PREFILL_DECODE_ATTENTION: "1"
+    AMDGCN_USE_BUFFER_OPS: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_ROPE: "1"
+    TRITON_HIP_ASYNC_COPY_BYPASS_PERMUTE: "1"
+    TRITON_HIP_USE_ASYNC_COPY: "1"
+    TRITON_HIP_USE_BLOCK_PINGPONG: "1"
+    TRITON_HIP_ASYNC_FAST_SWIZZLE: "1"
+    # Per-role cudagraph (validated moriio+TP recipe): prefill eager, decode PIECEWISE
+    # (the ITL win). Previously an image-level ENV default; now lives with the model.
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  prefill:
+    tp: "--tensor-parallel-size 8 --max-model-len 65536 --kv-cache-dtype fp8 --disable-custom-all-reduce"
+  decode:
+    tp: "--tensor-parallel-size 8 --max-model-len 65536 --kv-cache-dtype fp8 --disable-custom-all-reduce"
+
+gpt-oss-120b:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_TRITON_BF16_GEMM: "0"
+    VLLM_USE_AITER_UNIFIED_ATTENTION: "1"
+    VLLM_ROCM_USE_AITER_MHA: "0"
+    ROCM_TRITON_MOE_PRESHUFFLE_SCALES: "0"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  prefill:
+    tp: "--tensor-parallel-size 8"
+  decode:
+    tp: "--tensor-parallel-size 8"
+
+# Qwen3-32B: dense. Should serve like Llama (dense AITER path works on the
+# develop image; MoE GEMM path does not).
+Qwen3-32B:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  prefill:
+    tp: "--tensor-parallel-size 8"
+  decode:
+    tp: "--tensor-parallel-size 8"
+
+# Qwen3-30B-A3B: MoE (A3B = 3B active). Added to test whether the AITER
+# module_gemm_common failure that hits DeepSeek-V3 on the develop image is
+# DeepSeek-specific or affects all MoE. TP path; conservative AITER env.
+# RESULT: also fails (device_gemm unsupported) -> MoE needs a co-versioned image.
+Qwen3-30B-A3B:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  prefill:
+    tp: "--tensor-parallel-size 8"
+  decode:
+    tp: "--tensor-parallel-size 8"
+
+# ============================ MoE (TP + wideEP) ============================
+
+# DeepSeek-V3 family. The env: block encodes the validated MoRI-EP recipe knobs
+# (from MAD-private #324 DeepSeekV3_recipe.env). They are exported BEFORE the
+# connector's setup_env, so they define the wideEP recipe by default while still
+# yielding to a submit-time `-e` override. WIDE_EP=1 (wideEP) reads these; the
+# connector emits --block-size/--kv-cache-memory-bytes/--all2all-backend from them.
+# The tp: blocks are the TP-mode (WIDE_EP=0) flags (dense-style serving).
+#   - block=16 + AITER_MLA=0: block=1 + AITER-MLA fp8 decode kernel GPU-faults.
+#   - KV_CACHE_MEMORY_BYTES: skip the boot profiling forward (AITER eager fp8 quant
+#     aiter_tensor_t bug). PREFILL cudagraph NONE (capture deadlocks 16-way DP),
+#     DECODE PIECEWISE (ITL win). Per-role mori backends: prefill HT, decode LL.
+#   - MoRIIO disagg fixes (#39276 etc.) are committed in-source in the image's vLLM
+#     (Dockerfile VLLM_REF), so there is no runtime patcher to gate.
+_deepseek_recipe_env: &deepseek_recipe_env
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  VLLM_ROCM_USE_AITER_MLA: "0"
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "20000000000"
+  GPU_MEMORY_UTILIZATION: "0.80"
+  VLLM_CUDAGRAPH_MODE: "PIECEWISE"
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
+  TORCHINDUCTOR_BENCHMARK_KERNEL: "0"
+  VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+
+# DeepSeek family is wideEP-only (gated in run_xPyD_models.slurm: TP mode is rejected).
+# The dp: blocks are empty because the moriio(mori) connector emits the validated
+# wideEP serve flags (block-size, kv-cache-*, all2all, cudagraph) from the env: recipe
+# above. No tp: blocks — TP is unsupported for these models.
+DeepSeek-V3:
+  env: *deepseek_recipe_env
+  prefill:
+    dp: ""
+  decode:
+    dp: ""
+
+DeepSeek-V3-5layer:
+  env: *deepseek_recipe_env
+  prefill:
+    dp: ""
+  decode:
+    dp: ""
+
+DeepSeek-R1:
+  env: *deepseek_recipe_env
+  prefill:
+    dp: ""
+  decode:
+    dp: ""
