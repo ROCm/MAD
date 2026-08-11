@@ -113,6 +113,10 @@
     --block-size: 128
     --kv-cache-dtype: fp8
     --attention-backend: TRITON_ATTN
+  arch_overrides:
+    # No native MXFP8 MOE for MI300, can't fit 
+    gfx942:
+      tp: 8
 
 ## gpt-oss w4a8 is gfx950 only
 - benchmark: serving
