@@ -344,6 +344,12 @@ docker run -d --name "$CONTAINER" \
     if [ -f /patchers/apply_kimik3_kda_gather_guard.py ] && [ -n \"\$VLLM_SP\" ]; then
       python3 /patchers/apply_kimik3_kda_gather_guard.py \"\$VLLM_SP\" || true
     fi
+    # k3-kda-nosync: make the KDA gather OOB guard sync-free (unblocks + speeds up
+    # long context >500K; removes a per-KDA-layer device->CPU sync). No-op on a v3+
+    # image where it is already baked in.
+    if [ -f /patchers/apply_kimik3_kda_gather_nosync.py ] && [ -n \"\$VLLM_SP\" ]; then
+      python3 /patchers/apply_kimik3_kda_gather_nosync.py \"\$VLLM_SP\" || true
+    fi
     if [ -f /patchers/apply_kimik3_kda_conv_debug.py ] && [ -n \"\$VLLM_SP\" ]; then
       python3 /patchers/apply_kimik3_kda_conv_debug.py \"\$VLLM_SP\" || true
     fi

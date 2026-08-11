@@ -1,9 +1,10 @@
 # Status — Kimi-K3 MI300X 2P/2D EP16 MoRIIO disagg — **VALIDATED**
 
 **This recipe is validated.** Single-needle NIAH passes **deterministically
-through 300K tokens** (all depths; 500K also passes) on the 2 prefill + 2 decode
-EP16 disagg serve. The decode-recall bug that previously blocked this is **fixed**
-(root cause + fix below).
+across the full native context range 10K–900K** (all depths) on the 2 prefill +
+2 decode EP16 disagg serve. The decode-recall bug that previously blocked this is
+**fixed**, and the >500K prefill hang is **fixed** (KDA gather sync-free — see
+below + RESULTS.md).
 
 **Validated from a scratch build.** The two fixes are folded into vLLM source on
 `raviguptaamd/vllm` branch `kimi-k3-wideep-disagg-fullsource-v2`; the Dockerfile
@@ -15,16 +16,18 @@ the patchers are idempotent no-ops on it.
 ## Result
 
 Single-needle NIAH (needle = `HELIOTROPE-7492`, greedy `temperature=0`, depths
-0.1 / 0.5 / 0.9) — **3/3 PASS at every size 10K → 300K**, deterministic:
+0.1 / 0.5 / 0.9) — **PASS at every size 10K → 900K**, deterministic:
 
 | ctx (tokens) | result | eval time / req |
 |--------------|--------|-----------------|
 | 10K  | 3/3 PASS | 5.3s  |
 | 50K  | 3/3 PASS | 19.5s |
 | 100K | 3/3 PASS | ~47s  |
-| 150K | 3/3 PASS | ~84s  |
 | 200K | 3/3 PASS | ~88s  |
 | **300K** | **3/3 PASS** | **~150s** |
+| 500K | 3/3 PASS | ~301s |
+| 750K | PASS | ~542s |
+| **900K** | **PASS** | **~717s** |
 
 Throughput (the point of DP disaggregation), 20K ctx, batched=2048:
 conc=1 → 0.062 req/s; conc=8 → **0.353 req/s (5.7×)**; conc=16 → **0.455 req/s
@@ -68,6 +71,19 @@ Verified on a 2611-token prompt:
 [k3-chunk-gate-entry] nblk=1 npt=2611 done=False prog=(0,2048)    # chunk 1 -> defer
 [k3-chunk-gate-sweep] nblk=1 npt=2611 done=True  prog=(2048,563)  # chunk 2 -> emit full blocks
 ```
+
+### Fix #3 — KDA gather sync-free (`patchers/apply_kimik3_kda_gather_nosync.py`)
+Contexts above ~500K hung. Root-caused with py-spy: the DP rank holding the real
+request was stuck in `gather_initial_states` (the KDA recurrent-state gather)
+while all other DP ranks waited at the `coordinate_batch_across_dp` all_reduce.
+The native stack showed the block was a `bool((indices>=n).any())` device→CPU
+sync (`_local_scalar_dense` → `memcpy_and_sync`, a full stream drain) run purely
+to emit a diagnostic warning — **per KDA layer, per prefill chunk** (~25k drains
+at 750K). The index clamp above it already guarantees a valid GPU address, so the
+sync is pure overhead. Fix gates it behind `K3_KDA_GATHER_LOG=1` (default OFF);
+correctness is unchanged (indices still clamped). With this, 750K (542s) and 900K
+(717s) now pass where they previously hung indefinitely; 500K unchanged (301s),
+scaling sub-quadratically. Folded into vLLM branch `-v3`.
 
 ## Known residual (does not block single-needle NIAH to 300K)
 

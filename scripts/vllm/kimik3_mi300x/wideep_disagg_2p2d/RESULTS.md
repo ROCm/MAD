@@ -20,23 +20,32 @@ model in tmpfs. `MAX_MODEL_LEN=320000` for the ≥ 150K rows (131072 otherwise).
 | 200K             | 3/3 PASS   | ~88s                |
 | **300K**         | **3/3 PASS** | **~150s**         |
 | 500K             | 3/3 PASS   | ~301s               |
-| 750K             | not tested | —                   |
-| 900K             | **HANGS** (see note) | —         |
+| 750K             | PASS       | ~542s               |
+| 900K             | **PASS**   | **~717s**           |
 
-Eval time ~linear through 500K (~0.6 ms/token). For ctx > ~120K you must raise
-`MAX_MODEL_LEN` (default 131072 caps ~120K), and for a single request > ~600K you
-must raise the KV cache: `KV_CACHE_MEMORY_BYTES=40e9` gives a 2.84M-token cache
-(the default `8e9` = 542K tokens is too small for one 600K+ request). See
-[OPTIMIZATION.md](OPTIMIZATION.md).
+**Full native-context range (10K–900K) passes** with the KDA gather sync-free fix
+(vLLM branch `-v3`; see below). Eval time is sub-quadratic (500K 301s → 750K 542s
+→ 900K 717s). For ctx > ~120K raise `MAX_MODEL_LEN` (default 131072 caps ~120K,
+use `1000000` for full native); for a single request > ~600K raise the KV cache
+`KV_CACHE_MEMORY_BYTES=40e9` (2.84M-token cache; default `8e9` = 542K tokens is
+too small for one 600K+ request). See [OPTIMIZATION.md](OPTIMIZATION.md).
 
-**900K limit (honest):** a single 900K-token prefill does not complete — the
-prefill engine freezes (log timestamp stops, no scheduler ticks) while GPUs stay
-at 100% and no result returns. Killing the client recovers the serve cleanly, so
-it's confined to that one oversized request, not a serve crash. 500K passes
-cleanly, so the wall is between 500K and 900K. Suspected cause: the chunked-prefill
-path at ~440 chunks (batched=2048) through the MoRIIO connector, or an attention
-kernel that degrades past ~500–600K. Not a KV-capacity issue. Investigation
-pending.
+**The >500K unblock (KDA gather sync-free).** Contexts above ~500K previously
+hung: `gather_initial_states` ran a diagnostic `bool((indices>=n).any())` per KDA
+layer per prefill chunk, each forcing a device→CPU sync (full stream drain) —
+~25k drains at 750K, stalling so hard it looked like a deadlock (py-spy: the DP
+rank with real work stuck in that sync while the other DP ranks waited at the
+batch-coordination all_reduce). The fix gates that diagnostic behind
+`K3_KDA_GATHER_LOG=1` (default OFF); the index clamp still applies, so correctness
+is unchanged. Folded into vLLM branch `kimi-k3-wideep-disagg-fullsource-v3` (the
+Dockerfile builds it) and shipped as `patchers/apply_kimik3_kda_gather_nosync.py`.
+
+**One-time warmup:** a *fresh* serve pays a single aiter MLA-kernel JIT compile
+(`fmha_fwd_hd192x128`, ~15 min) on the first ≥ ~200K-token request; cached
+thereafter, so the per-request times above are the warm times.
+
+Note: `MAX_NUM_BATCHED_TOKENS=8192` was retested and still **corrupts generation**
+on this stack (garbage output) — keep the default `2048`.
 
 Reproduce:
 ```bash

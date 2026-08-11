@@ -48,11 +48,18 @@ fix = a decode-side per-request KV-ready barrier before the model forward
 (vLLM MoRIIO change, not a knob). Sender-side knobs (delay fence, `post_batch_size`
 split) were measured useless and add latency.
 
-## 900K prefill hang (open)
-A single 900K-token prefill freezes (GPUs 100%, no scheduler progress, no result);
-500K passes cleanly. Wall is between 500K and 900K. Candidates: the chunked-prefill
-path at ~440 chunks through the MoRIIO connector, or an attention kernel degrading
-past ~500–600K. Needs profiling. Not KV-capacity (2.84M-token cache holds 900K).
+## >500K prefill hang — FIXED (KDA gather sync-free)
+Contexts above ~500K used to hang (GPUs 100%, no progress). Root cause found with
+py-spy: `gather_initial_states` ran a `bool((indices>=n).any())` device→CPU sync
+per KDA layer per prefill chunk (~25k full stream drains at 750K) purely to log a
+warning; the index clamp above it already made the address safe. Gating that
+diagnostic behind `K3_KDA_GATHER_LOG=1` (default OFF) removed the drains:
+**750K and 900K now pass (542s / 717s), 500K unchanged (301s), sub-quadratic
+scaling.** Baked into vLLM branch `-v3`; also shipped as
+`patchers/apply_kimik3_kda_gather_nosync.py`. This was both the hang and a real
+perf drag (fewer syncs = faster). It also removed the biggest remaining
+high-context perf overhead, so no further prefill-latency lever is outstanding
+beyond the architectural O(n²) of attention itself.
 
 ## Build / durability
 - **Base image pin by digest for reproducibility.** The Dockerfile pins
