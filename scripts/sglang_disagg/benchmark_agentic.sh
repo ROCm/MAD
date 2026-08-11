@@ -36,6 +36,17 @@ RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 # MODEL_PREFIX feeds the trace-loader default; derive from MODEL_NAME if unset.
 : "${MODEL_PREFIX:=${MODEL_NAME:-}}"
 
+# Suite mode: a workloads config (AGENTIC_CONFIG) or a single-workload shorthand
+# (AGENTIC_WORKLOAD) runs the generic multi-workload driver. Without either, the
+# legacy single hf/inferencex replay below runs UNCHANGED (byte-identical).
+if [ -n "${AGENTIC_CONFIG:-}" ] || [ -n "${AGENTIC_WORKLOAD:-}" ]; then
+    _agentic_suite="$(dirname "$_agentic_lib")/benchmark_agentic_suite.sh"
+    [ -f "$_agentic_suite" ] || { echo "[agentic][ERROR] suite driver not found: $_agentic_suite" >&2; exit 1; }
+    # shellcheck source=/dev/null
+    source "$_agentic_suite"
+    exit $?
+fi
+
 if [ "${DRY_RUN:-0}" = "1" ]; then
     agentic_dry_run "$RESULT_DIR"
     exit 0

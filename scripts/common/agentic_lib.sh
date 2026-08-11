@@ -21,6 +21,17 @@
 #   WEKA_LOADER_OVERRIDE  pin a specific trace loader (optional)
 #   DRY_RUN=1             print the assembled command + resolved values, then exit 0
 #
+# Suite mode (scripts/common/benchmark_agentic_suite.sh) additionally consumes:
+#   AGENTIC_CONFIG        path to agentic.yaml (a serving block + workloads LIST)
+#   AGENTIC_WORKLOAD      single-workload shorthand (run just this named entry)
+#   SUITE_CORPUS_DIR      persistent per-node cache for generated profile corpora
+# Per-workload knobs the suite sets before build_replay_cmd (all default to the
+# legacy hf/inferencex behavior when unset, so the single-workload path is
+# unchanged / byte-identical):
+#   WL_SOURCE             hf (default) | profile
+#   CORPUS_DIR            for WL_SOURCE=profile: the generated corpus dir
+#   AGENTIC_MAX_CONTEXT_LENGTH  per-workload --max-context-length (else MAX_MODEL_LEN)
+#
 # Pins (Phase 0 blocker): concrete commits, overridable by env. Bump by editing
 # these defaults after re-validating against a fresh smoke run.
 INFERENCEX_REPO="${INFERENCEX_REPO:-https://github.com/SemiAnalysisAI/InferenceX.git}"
@@ -32,6 +43,11 @@ set -o pipefail
 agentic_log()  { echo "[agentic] $*"; }
 agentic_err()  { echo "[agentic][ERROR] $*" >&2; }
 agentic_die()  { agentic_err "$*"; exit 1; }
+
+# Location of the generic AgentX generator/verifier/loader + profiles.
+AGENTX_DIR="${AGENTX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agentx}"
+# Persistent per-node corpus cache (regenerate once per profile+seed).
+SUITE_CORPUS_DIR="${SUITE_CORPUS_DIR:-${TMPDIR:-/tmp}/agentx_corpora}"
 
 # --------------------------------------------------------------------------
 # Runtime install (isolated uv venv, pinned sources)
@@ -105,7 +121,16 @@ install_agentic_deps() {
 # Trace source resolution (loader name is pure; download is retried)
 # --------------------------------------------------------------------------
 # Sets TRACE_LOADER + TRACE_DATASET; does no I/O so DRY_RUN can call it.
+# For WL_SOURCE=profile the trace comes from a locally generated weka_trace
+# corpus (--custom-dataset-type weka_trace --input-file), NOT an HF download.
+# For WL_SOURCE=hf (default) the behavior is unchanged / byte-identical.
 resolve_trace_loader() {
+    if [ "${WL_SOURCE:-hf}" = "profile" ]; then
+        TRACE_LOADER=""
+        TRACE_DATASET=""
+        TRACE_SOURCE_FLAG="--custom-dataset-type weka_trace --input-file ${CORPUS_DIR}"
+        return
+    fi
     local default_loader
     case "${MODEL_PREFIX:-}" in
         dsv4*|deepseek*|DeepSeek*|glm5*|minimaxm3*)
@@ -141,6 +166,72 @@ resolve_trace_source() {
         [ "$i" -lt "$attempts" ] && { sleep "$backoff"; backoff=$((backoff * 2)); }
     done
     agentic_die "trace download failed after $attempts attempts ($TRACE_DATASET)"
+}
+
+# --------------------------------------------------------------------------
+# Profile corpus materialization (WL_SOURCE=profile) + context compatibility
+# --------------------------------------------------------------------------
+# Generate a weka_trace corpus for one workload profile into
+# $SUITE_CORPUS_DIR/<name> if absent, then verify it as a PRE-GATE (die unless
+# N/N axes within band). Sets CORPUS_DIR to the materialized corpus.
+#   $1 = workload name        $2 = resolved profile JSON file (WL_PROFILE_FILE)
+materialize_corpus() {
+    local name="$1" profile_json="$2"
+    local py="${AIPERF_PYTHON:-python3}"
+    [ -f "$profile_json" ] || agentic_die "materialize_corpus($name): profile JSON not found: $profile_json"
+    CORPUS_DIR="${SUITE_CORPUS_DIR}/${name}"
+    if [ -d "$CORPUS_DIR" ] && [ -n "$(ls -A "$CORPUS_DIR" 2>/dev/null)" ] && [ "${SUITE_CORPUS_FORCE:-0}" != "1" ]; then
+        agentic_log "corpus for '$name' already present at $CORPUS_DIR (SUITE_CORPUS_FORCE=1 to regen)"
+    else
+        agentic_log "generating corpus for '$name' -> $CORPUS_DIR"
+        rm -rf "$CORPUS_DIR"
+        "$py" "$AGENTX_DIR/gen_agentx_profile.py" --profile "$profile_json" --out-dir "$CORPUS_DIR" \
+            || agentic_die "corpus generation failed for '$name'"
+    fi
+    agentic_log "verifying corpus '$name' against its profile (pre-gate)"
+    local out
+    out="$("$py" "$AGENTX_DIR/verify_agentx_profile.py" --profile "$profile_json" --corpus "$CORPUS_DIR")" || {
+        echo "$out"; agentic_die "corpus '$name' failed conformance pre-gate (not N/N)"; }
+    echo "$out"
+}
+
+# Smallest power of two >= n (used to size --max-context-length from the ISL tail).
+_next_pow2() {
+    local n="$1" p=1
+    while [ "$p" -lt "$n" ]; do p=$((p * 2)); done
+    echo "$p"
+}
+
+# Compare the workload's ISL tail against the served max_model_len and set the
+# per-workload --max-context-length (AGENTIC_MAX_CONTEXT_LENGTH). WARNs (or skips
+# when AGENTIC_STRICT_CONTEXT=1) if the model window cannot hold the ISL tail.
+#   $1 = workload name   $2 = ISL tail (clamp-hi / P99)   $3 = served max_model_len
+# Sets AGENTIC_MAX_CONTEXT_LENGTH and CONTEXT_VERDICT (OK|WARN|SKIP).
+context_compat_check() {
+    local name="$1" tail="$2" mml="$3"
+    CONTEXT_VERDICT="OK"
+    if [ -z "$tail" ] || [ "$tail" = "0" ]; then
+        # hf workloads carry no profile tail; keep the served window as-is.
+        AGENTIC_MAX_CONTEXT_LENGTH="${mml:-0}"
+        agentic_log "context[$name]: hf trace, --max-context-length=${AGENTIC_MAX_CONTEXT_LENGTH}"
+        return 0
+    fi
+    local needed
+    needed="$(_next_pow2 "$tail")"
+    if [ -n "$mml" ] && [ "$mml" != "0" ] && [ "$needed" -gt "$mml" ]; then
+        CONTEXT_VERDICT="WARN"
+        AGENTIC_MAX_CONTEXT_LENGTH="$mml"
+        agentic_err "context[$name]: ISL tail $tail needs >= $needed but served max_model_len=$mml."
+        agentic_err "  Requests beyond $mml will be truncated. Serve with --max-model-len >= $needed for '$name'."
+        if [ "${AGENTIC_STRICT_CONTEXT:-0}" = "1" ]; then
+            CONTEXT_VERDICT="SKIP"
+            agentic_err "context[$name]: AGENTIC_STRICT_CONTEXT=1 -> SKIP"
+        fi
+    else
+        AGENTIC_MAX_CONTEXT_LENGTH="$needed"
+        agentic_log "context[$name]: ISL tail $tail -> --max-context-length=$needed (served max_model_len=${mml:-unset})"
+    fi
+    return 0
 }
 
 # --------------------------------------------------------------------------
@@ -197,12 +288,16 @@ build_replay_cmd() {
     REPLAY_CMD="$AIPERF_CLI profile --scenario inferencex-agentx-mvp"
     REPLAY_CMD+=" --url http://localhost:${AGENTIC_PORT}"
     REPLAY_CMD+=" --endpoint /v1/chat/completions --endpoint-type chat --streaming"
-    REPLAY_CMD+=" --model $MODEL"
+    REPLAY_CMD+=" --model ${MODEL:-auto}"
     REPLAY_CMD+=" --concurrency $conc"
     REPLAY_CMD+=" --benchmark-duration $duration"
     REPLAY_CMD+=" --random-seed 42"
     REPLAY_CMD+=" --failed-request-threshold $AIPERF_FAILED_REQUEST_THRESHOLD"
-    REPLAY_CMD+=" --trajectory-start-min-ratio 0.25 --trajectory-start-max-ratio 0.75"
+    # Trajectory start window: hf captured traces resume mid-conversation (0.25/0.75);
+    # generated profile corpora replay near-complete sessions (0.90/0.98).
+    local traj_min="0.25" traj_max="0.75"
+    if [ "${WL_SOURCE:-hf}" = "profile" ]; then traj_min="0.90"; traj_max="0.98"; fi
+    REPLAY_CMD+=" --trajectory-start-min-ratio $traj_min --trajectory-start-max-ratio $traj_max"
     REPLAY_CMD+=" --agentic-cache-warmup-duration $cache_warmup"
     REPLAY_CMD+=" --warmup-grace-period ${AGENTIC_WARMUP_GRACE_PERIOD:-1800}"
     REPLAY_CMD+=" --use-server-token-count --tokenizer-trust-remote-code"
@@ -210,9 +305,18 @@ build_replay_cmd() {
     if [ -n "${AGENTIC_SERVER_METRICS:-}" ]; then
         REPLAY_CMD+=" --server-metrics ${AGENTIC_SERVER_METRICS}"
     fi
-    REPLAY_CMD+=" --num-dataset-entries ${AGENTIC_NUM_DATASET_ENTRIES:-393}"
-    if [ -n "${MAX_MODEL_LEN:-}" ] && [ "${MAX_MODEL_LEN}" != "0" ]; then
-        REPLAY_CMD+=" --max-context-length $MAX_MODEL_LEN"
+    # --num-dataset-entries only applies to hf downloads (how many trace files to
+    # pull); a generated profile corpus is consumed whole.
+    if [ "${WL_SOURCE:-hf}" = "hf" ]; then
+        REPLAY_CMD+=" --num-dataset-entries ${AGENTIC_NUM_DATASET_ENTRIES:-393}"
+    fi
+    # Per-workload context length: context_compat_check sets AGENTIC_MAX_CONTEXT_LENGTH
+    # (profile ISL tail rounded up, capped at max_model_len). Falls back to
+    # MAX_MODEL_LEN for the legacy/hf path (byte-identical). This also fixes the
+    # #173 bug where Case-B was capped at 262144 instead of its required 524288.
+    local ctx_len="${AGENTIC_MAX_CONTEXT_LENGTH:-${MAX_MODEL_LEN:-}}"
+    if [ -n "$ctx_len" ] && [ "$ctx_len" != "0" ]; then
+        REPLAY_CMD+=" --max-context-length $ctx_len"
     fi
     REPLAY_CMD+=" --output-artifact-dir $result_dir/aiperf_artifacts"
     # The scenario enforces a 900s minimum; smoke runs opt into --unsafe-override

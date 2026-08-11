@@ -1,0 +1,34 @@
+# Case-A conformance profile (ROCm/MAD #173, generalized).
+# ExplainX Case-A targets. Regenerating with these params via
+# gen_agentx_profile.py reproduces #173's committed corpus byte-for-byte and
+# verifies 13/13 through verify_agentx_profile.py.
+name: caseA
+model_tag: GLM-5.2-MXFP4     # written into requests[].model + models[]; retag per served model
+id_prefix: caseA             # session-id salt; keep "caseA" to byte-match #173
+seed: 42
+n_sessions: 200
+block_size: 64
+
+# Distribution targets: P50 / P90 / P99
+isl_p:   [74000, 155000, 235000]   # input tokens per request
+osl_p:   [320, 3300, 17000]        # output tokens per request
+delay_p: [4, 31, 240]              # inter-turn think delay (seconds)
+
+# Turns-per-session discrete distribution (long-tail agentic).
+turns:
+  values:  [1, 2, 3, 4, 6, 10, 20, 45, 103]
+  weights: [22, 24, 20, 12, 6, 5, 6, 3, 2]
+
+# Per-turn prefix-reuse band -> ~88-90% prefix cache hit.
+cache_hit: [0.88, 0.90]
+
+# Sampling clamps (lo, hi).
+clamps:
+  isl:   [1200, 245000]
+  osl:   [8, 20000]
+  delay: [1, 600]
+
+# Verifier targets + tolerance bands (defaults match #173).
+verify:
+  turns_p: [3, 20, 103]        # Turns P50/P90/P99
+  cache_target: 89             # Cache-hit P50 %
