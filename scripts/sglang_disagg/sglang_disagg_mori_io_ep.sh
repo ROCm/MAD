@@ -76,10 +76,78 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # Dependencies and Environment Setup
 # =============================================================================
 
-pip install py-spy
-pip install --ignore-installed --force-reinstall flask
-pip install pyyaml
+# === Model-Specific Configuration from YAML ===
+GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
 
+if [[ ! -f "$MODELS_YAML" ]]; then
+    echo "ERROR: models.yaml not found at $MODELS_YAML"
+    exit 1
+fi
+
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+    echo "[stage_deps] PyYAML not found; installing at runtime (expected on the" >&2
+    echo "             base, non-overlay image) ..." >&2
+    python3 -m pip install --no-cache-dir --quiet pyyaml || true
+fi
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+    echo "ERROR: PyYAML is not installed and could not be installed at runtime," >&2
+    echo "       but is required to parse ${MODELS_YAML}. Use an image built" >&2
+    echo "       from docker/sglang_disagg_inference_full_overlay*.Dockerfile" >&2
+    echo "       (which installs pyyaml at build time), or ensure network" >&2
+    echo "       access for 'python3 -m pip install pyyaml'." >&2
+    exit 1
+fi
+
+export MODELS_YAML MODEL_NAME PARALLEL_MODE xP GPUS_PER_NODE
+eval "$(python3 - <<'PY'
+import os
+import re
+import shlex
+import sys
+import yaml
+
+config_path = os.environ["MODELS_YAML"]
+model_name = os.environ["MODEL_NAME"]
+mode = os.environ["PARALLEL_MODE"]
+xP = int(os.environ.get("xP", "1"))
+gpus_per_node = int(os.environ.get("GPUS_PER_NODE", "8"))
+
+
+def q(v):
+    return shlex.quote(str(v if v is not None else ""))
+
+
+with open(config_path, "r", encoding="utf-8") as f:
+    models = yaml.safe_load(f) or {}
+
+if model_name not in models:
+    # Quote the interpolated values: this string is eval'd by the shell, so an
+    # unescaped model_name / config_path could break the launcher or inject
+    # shell tokens.
+    msg = f"ERROR: Model {model_name} not found in {config_path}"
+    print(f"echo {q(msg)}; exit 1")
+    sys.exit(0)
+
+cfg = models[model_name] or {}
+prefill = cfg.get("prefill", {}) or {}
+decode = cfg.get("decode", {}) or {}
+
+
+prefill_flags = prefill.get(mode, "") or ""
+
+exports = {
+    "MODEL_BASE_FLAGS": cfg.get("base_flags", ""),
+    "MODEL_MODE_FLAGS": cfg.get(f"{mode}_flags", ""),
+    "MODEL_PREFILL_FLAGS": prefill_flags,
+    "MODEL_DECODE_FLAGS": decode.get(mode, ""),
+    "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
+}
+
+for key, value in exports.items():
+    print(f"{key}={q(value)}")
+PY
+)"
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
@@ -123,57 +191,6 @@ export PREFILL_TP_SIZE DECODE_TP_SIZE
 # Model-Specific Configuration from YAML
 # =============================================================================
 
-MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
-
-if [[ ! -f "$MODELS_YAML" ]]; then
-    echo "ERROR: models.yaml not found at $MODELS_YAML"
-    exit 1
-fi
-
-export MODELS_YAML MODEL_NAME PARALLEL_MODE xP GPUS_PER_NODE
-eval "$(python3 - <<'PY'
-import os
-import re
-import shlex
-import sys
-import yaml
-
-config_path = os.environ["MODELS_YAML"]
-model_name = os.environ["MODEL_NAME"]
-mode = os.environ["PARALLEL_MODE"]
-xP = int(os.environ.get("xP", "1"))
-gpus_per_node = int(os.environ.get("GPUS_PER_NODE", "8"))
-
-with open(config_path, "r", encoding="utf-8") as f:
-    models = yaml.safe_load(f) or {}
-
-if model_name not in models:
-    print(f'echo "ERROR: Model {model_name} not found in {config_path}"; exit 1')
-    sys.exit(0)
-
-cfg = models[model_name] or {}
-prefill = cfg.get("prefill", {}) or {}
-decode = cfg.get("decode", {}) or {}
-
-
-def q(v):
-    return shlex.quote(str(v if v is not None else ""))
-
-
-prefill_flags = prefill.get(mode, "") or ""
-
-exports = {
-    "MODEL_BASE_FLAGS": cfg.get("base_flags", ""),
-    "MODEL_MODE_FLAGS": cfg.get(f"{mode}_flags", ""),
-    "MODEL_PREFILL_FLAGS": prefill_flags,
-    "MODEL_DECODE_FLAGS": decode.get(mode, ""),
-    "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
-}
-
-for key, value in exports.items():
-    print(f"{key}={q(value)}")
-PY
-)"
 
 PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
@@ -184,9 +201,20 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
-# KV transfer backend: default mori, switchable to mooncake (Mooncake).
+# KV transfer backend: default mori, switchable to mooncake or nixl.
 # Kept out of models.yaml so model config is backend-agnostic.
 _TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mori}"
+
+# _TRANSFER_BACKEND is interpolated into an eval'd launch command below; restrict
+# it to known-good values to avoid invalid backends and shell-token injection.
+case "$_TRANSFER_BACKEND" in
+    mori|mooncake|nixl) ;;
+    *)
+        echo "ERROR: unsupported KV_TRANSFER_BACKEND='$_TRANSFER_BACKEND' (expected: mori|mooncake|nixl)" >&2
+        exit 1
+        ;;
+esac
+
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 DECODE_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
@@ -534,15 +562,17 @@ PY
         echo ""
     fi
 
+    benchmark_status=0
     if [[ "${SKIP_BENCHMARK:-0}" != "1" ]] && [[ -n "${MOONCAKE_COOKBOOK_PATH:-}" ]]; then
         if [[ -f "${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh" ]]; then
             echo "Running ${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh"
             (
                 cd "${MOONCAKE_COOKBOOK_PATH}" || exit 1
                 bash benchmark_xPyD.sh
-            )
+            ) || benchmark_status=$?
         else
             echo "WARN: benchmark_xPyD.sh not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
+            benchmark_status=1
         fi
     fi
 
@@ -551,6 +581,11 @@ PY
 
     echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
     kill "${_node0_prefill_pid}"
+
+    if [[ "${benchmark_status}" -ne 0 ]]; then
+        echo "ERROR: benchmark failed with status ${benchmark_status}" >&2
+        exit "${benchmark_status}"
+    fi
 
 elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"

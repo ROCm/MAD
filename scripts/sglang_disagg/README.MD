@@ -54,12 +54,56 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 
 | File | Description |
 |------|-------------|
-| `run_xPyD_models.slurm` | SLURM script to launch docker containers on all nodes via `sbatch` |
-| `sglang_disagg_mori_io_ep.sh` | Container entrypoint — starts prefill/decode servers, proxy, and benchmark |
+| `run.sh` | **madengine entrypoint** (models.json `scripts` target). Bridges madengine's `sglang-disagg` launcher env to the launchers below |
+| `run_xPyD_models.slurm` | Standalone SLURM script to launch docker containers on all nodes via `sbatch` |
+| `sglang_disagg_mori_io_ep.sh` | Unified container entrypoint (MoRI EP / Mooncake / NIXL, selected via `KV_TRANSFER_BACKEND`) — starts prefill/decode servers, proxy, and benchmark |
 | `models.yaml` | Model-specific CLI flags for all supported models |
 | `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
 | `benchmark_xPyD.sh` | Concurrency sweep benchmark using sglang bench_serving |
 | `benchmark_parser.py` | Log parser for CONCURRENCY benchmark logs |
+| `parse_to_csv.py` | Log parser for CONCURRENCY benchmark logs (emits summary CSV and madengine perf CSV) |
+
+## Running via madengine (`madengine run`)
+
+This workload is registered in `models.json` (e.g. `sglang-disagg-deepseek-r1-overlay`) and
+runs through madengine's built-in **`sglang-disagg`** launcher. The launcher runs one
+container per node and exports the cluster topology; `run.sh` maps it to the launchers
+above:
+
+| madengine env | bridged to |
+|---------------|-----------|
+| `SGLANG_NODE_RANK` | `NODE_RANK` (0=proxy, 1..xP=prefill, rest=decode) |
+| `SGLANG_DISAGG_PREFILL_NODES` / `..._DECODE_NODES` | `xP` / `yD` |
+| `SGLANG_NODE_IPS` | `IPADDRS` (+ `MASTER_ADDR` = rank-0 IP) |
+| `SGLANG_TP_SIZE` | `IO_EP_TP_SIZE` / per-server `--tp-size` |
+
+Model + transport come from deployment `env_vars` (or `args`): `MODEL_NAME` (short key
+in `models.yaml`), `MODEL_PATH` (mounted weights), `RUN_MORI` (1=MoRI EP default,
+0=Mooncake/NIXL), `DP_MODE` (1=DP-attention EP for DeepSeek-V3/R1 inter-node).
+
+Deploy with an additional-context config carrying `slurm` + `distributed.launcher:
+"sglang-disagg"` (+ `distributed.sglang_disagg.{prefill_nodes,decode_nodes}` for a
+custom split) + `env_vars`; see the Confluence package for a ready 5-node EP16 manifest.
+
+## Docker overlays (substitutable component versions)
+
+The base image (`docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`) bakes RCCL,
+MoRI and Mooncake/NIXL. To test *specific* versions of these components without
+rebuilding the base, use the merged full overlay, which layers RCCL, MoRI and the
+KV-transfer (Mooncake/NIXL) steps on top of `BASE_DOCKER` in a single image
+(`base -> rccl -> mori -> kvtransfer`):
+
+| Overlay Dockerfile | Substitutes | Key build args |
+|--------------------|-------------|----------------|
+| `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile` | RCCL + MoRI + Mooncake/NIXL (merged) | `RCCL_REPO/RCCL_BRANCH/RCCL_COMMIT`, `MORI_REPO/MORI_BRANCH/MORI_COMMIT` or `MORI_WHEEL_URL`, `MOONCAKE_VERSION`, `UCX_REPO/UCX_COMMIT` and `RIXL_REPO/RIXL_COMMIT` (the AMD "nixl" backend), `ENABLE_RDMA62` (set to `1` on hosts needing a newer rdma-core than the base image ships, to additionally build rdma-core v62 from source) |
+
+> **RCCL note:** a newer rocm-systems RCCL build links `librccl` without
+> the `librocm_smi64.so` `DT_NEEDED` the base carried. Since the overlay is first
+> on `LD_LIBRARY_PATH`, this would break `import torch`
+> (`libtorch_hip.so: undefined symbol: rsmi_init`). The overlay Dockerfile
+> re-adds the dependency (`patchelf --add-needed`) and sanity-checks `import
+> torch` with the overlay librccl resolved first, so the full
+> `base -> rccl -> mori -> kvtransfer` chain stays importable.
 
 ## Quick Start
 
@@ -72,6 +116,7 @@ export xP=1
 export yD=1
 export MODEL_NAME=Llama-3.1-8B-Instruct
 export RUN_MORI=1  # MoRI (default). Set RUN_MORI=0 for Mooncake (KV_TRANSFER_BACKEND=mooncake)
+export KV_TRANSFER_BACKEND=mori  # Validated/default. Use nixl only with an image that provides nixl._api.
 
 # num_nodes = xP + yD
 sbatch -N 2 -n 2 --nodelist=<node1,node2> run_xPyD_models.slurm
@@ -115,7 +160,7 @@ Logs are written to `${LOG_PATH}/${SLURM_JOB_ID}/`:
 
 Parse benchmark results:
 ```bash
-python3 benchmark_parser.py <log_path>/benchmark_XXX_CONCURRENCY.log
+python3 parse_to_csv.py <log_path>/benchmark_XXX_CONCURRENCY.log -o results.csv
 ```
 
 Smoke test from the proxy node:
