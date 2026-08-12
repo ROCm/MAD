@@ -87,6 +87,7 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "Hy3-preview" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -94,6 +95,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "Hy3-preview" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -427,11 +429,15 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   accuracy               -> HY_Accuracy_folder/benchmark_accuracy_hy3.sh
+#                            (known-answer + NIAH long-context; the correctness gate for
+#                             wideEP — perf benchmarks are BLIND to silent garbage output)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    accuracy)     BENCHMARK_SCRIPT_FILE="HY_Accuracy_folder/benchmark_accuracy_hy3.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, accuracy)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2

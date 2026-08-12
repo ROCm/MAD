@@ -178,3 +178,47 @@ DeepSeek-R1:
     dp: ""
   decode:
     dp: ""
+
+# ============================ Hunyuan-3.0 (Hy3) — GQA MoE, wideEP ============================
+# tencent/Hy3-preview: 80-layer GQA MoE, 192 routed experts (8/tok) + 1 shared, 256K ctx.
+# VALIDATED on CS-Austin MI308 (Thor2/bnxt) + the MoRI-EP fullsource stack:
+#   EP8  (1P/1D): known-answer 20/20, NIAH 9/9 incl 256K deep  -> PASS
+#   EP16 (2P/2D): known-answer 20/20, NIAH 9/9 incl 256K deep  -> PASS
+#   EP16 2P/1D & 1P/2D perf-validated (16/0). EP32 (4P/4D) hits the known MoRI-EP all2all
+#   >2-pod garbage bug (deferred; same as DeepSeek pre-fix) — use EP8/EP16 today.
+# Recipe deltas vs DeepSeek (MLA): Hy3 is GQA (head_size 128), so:
+#   - KV_CACHE_MEMORY_BYTES sized larger (GQA KV ~40 GiB @256K vs MLA's compressed KV).
+#   - VLLM_ROCM_USE_AITER_MLA=0 (no MLA path; also avoids the fp8 MLA decode kernel fault).
+#   - KV_BLOCK_SIZE=16 (block=1 has no valid ROCm attn backend under fp8 KV).
+# Per-role: prefill mori_high_throughput (InterNodeV1) + cudagraph NONE (capture deadlocks
+#   wide DP); decode mori_low_latency (InterNodeV1LL) + PIECEWISE cudagraph (ITL win).
+_hy3_recipe_env: &hy3_recipe_env
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_MLA: "0"
+  VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "48000000000"
+  GPU_MEMORY_UTILIZATION: "0.80"
+  VLLM_CUDAGRAPH_MODE: "PIECEWISE"
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
+  VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+
+# Hy3 is wideEP-only on this recipe (dp: blocks empty; moriio connector emits the
+# validated wideEP serve flags from env: above). No tp: blocks.
+Hy3-preview:
+  env: *hy3_recipe_env
+  prefill:
+    dp: ""
+  decode:
+    dp: ""
