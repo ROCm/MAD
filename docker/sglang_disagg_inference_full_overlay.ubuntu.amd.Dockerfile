@@ -12,14 +12,20 @@
 # sgl-kernel, MoRI, RIXL and Mooncake built for the right GPU target, so every
 # component stage below defaults to OFF and the image is the base plus rdma-core.
 # Each stage is a substitution knob: turn one on to A/B that component against
-# what the base ships. Pick the base tag whose suffix matches the GPUs
-# (`-mi35x` = gfx950/MI35x, `-mi30x` = gfx942/MI30x) and set BUILD_GPU_TARGETS
-# and MORI_GPU_ARCHS to match.
+# what the base ships.
+#
+# The target GPU is chosen in exactly two places: BASE_DOCKER, whose tag suffix
+# names the GPUs (`-mi35x` = gfx950/MI35x, `-mi30x` = gfx942/MI30x), and
+# BUILD_GPU_TARGETS, which every stage that compiles device code derives from
+# (MORI_GPU_ARCHS defaults to it). Set those two consistently and nothing else
+# needs touching.
 #
 # Stages, all gated by build args (override via --build-arg):
 #   rdma-core : RDMA_CORE_VERSION (default 63.0, the only stage ON by default)
 #               — see the stage comment; this is what makes queue-pair creation
-#               work on Broadcom Thor2 (bnxt_re).
+#               work on Broadcom Thor2 (bnxt_re). Pass an empty value
+#               (RDMA_CORE_VERSION=) to keep the base image's rdma-core: the fix
+#               is opt-out, not mandatory.
 #   RCCL      : ENABLE_RCCL_OVERLAY=1 → ROCm/rocm-systems develop @ RCCL_COMMIT
 #               (default 78e8ba0) + smifix
 #   MoRI      : ENABLE_MORI_OVERLAY=1 → ROCm/mori @ MORI_COMMIT
@@ -36,8 +42,9 @@
 #
 # To reproduce the pre-sgl-dev behaviour (build everything on a plain sglang
 # base), pass BASE_DOCKER=lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x
-# BUILD_GPU_TARGETS=gfx942 MORI_GPU_ARCHS=gfx942 and set the four ENABLE_* args
-# to 1.
+# BUILD_GPU_TARGETS=gfx942, set the four ENABLE_* args to 1, and pass an empty
+# RDMA_CORE_VERSION= — without that last one the old recipe still replaces the
+# base image's rdma-core, which the old file never did.
 ###############################################################################
 ARG BASE_DOCKER=rocm/sgl-dev:v0.5.16-rocm720-mi35x-20260807
 FROM $BASE_DOCKER
@@ -48,7 +55,7 @@ USER root
 ###############################################################################
 # 1) RCCL overlay — rebuild RCCL from source so the RCCL under test wins over
 #    the base image's librccl. (mirrors sglang_disagg_inference_rccl_overlay)
-#    OFF by default: the sgl-dev base already carries an librccl with the right
+#    OFF by default: the sgl-dev base already carries a librccl with the right
 #    code objects, and keeping it makes the base the control arm of the A/B.
 ###############################################################################
 ARG ENABLE_RCCL_OVERLAY=0
@@ -151,7 +158,9 @@ ARG MORI_REPO=https://github.com/ROCm/mori.git
 ARG MORI_BRANCH=main
 ARG MORI_COMMIT=a14e6992ffa95478e83127fe2672afff2840856f
 ARG MORI_WHEEL_URL=
-ARG MORI_GPU_ARCHS=gfx950
+# Derived, so the GPU target is set once via BUILD_GPU_TARGETS. Override only to
+# build MoRI for a different arch than the rest of the image.
+ARG MORI_GPU_ARCHS=${BUILD_GPU_TARGETS}
 ARG MORI_VERSION=1.2.0
 ARG MORI_SRC_DIR=/sgl-workspace/mori
 
@@ -179,6 +188,7 @@ RUN set -e; \
       pip install --no-cache-dir --force-reinstall "${MORI_WHEEL_URL}"; \
     else \
       echo "[mori-overlay] source build ${MORI_REPO}@${MORI_BRANCH}${MORI_COMMIT:+ (${MORI_COMMIT})} archs=${MORI_GPU_ARCHS}"; \
+      sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true; \
       apt-get -o Acquire::Retries=5 update; \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake ninja-build pkg-config make patch; \
@@ -338,6 +348,7 @@ ARG MOONCAKE_HIP_DMABUF=ON
 
 RUN if [[ "${ENABLE_MOONCAKE_OVERLAY}" == "1" ]]; then \
       set -e; \
+      sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true; \
       apt-get -o Acquire::Retries=5 update; \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git cmake ninja-build build-essential pkg-config patchelf; \
@@ -377,43 +388,18 @@ RUN ( set +e +o pipefail; \
       echo "MOONCAKE_CROSS_HOST_GUARD ${pkg:+$(grep -rls MC_DISABLE_HIP "$pkg" | tr '\n' ' ')}" )
 
 ###############################################################################
-# 5) rdma-core from source — the Broadcom Thor2 (bnxt_re) queue-pair fix.
-#
-# The bnxt_re provider shipped with rdma-core 39.0/50.0 corrupts the verbs
-# command buffer for work issued off worker threads, so the kernel rejects
-# ibv_create_qp with EFAULT (errno 14) and the KV-transfer backends lose their
-# queue pairs. Every backend hits it, each in its own way: mooncake logged 2604
-# creation failures over a 2P2D run, NIXL could not start at all because UCX
-# treats one failed interface QP as fatal, and MoRI built queue pairs that
-# reached RTS and then moved zero bytes.
-#
-# Measured on one node, one container, same kernel, 8 threads x 64 queue pairs,
-# only the userspace changing: 39.0 creates 33-66 of 512, and 63.0 creates 512
-# of 512. With 63.0 all three backends run a full 2P2D DeepSeek-R1 sweep with
-# zero queue-pair failures.
-#
-# ON by default (empty string keeps the base image's rdma-core), because the
-# defect is silent: nothing in the logs points at the provider, and each backend
-# fails differently enough to look like three unrelated bugs.
-#
-# Two things happen beyond the plain build. The distro packages are removed, so
-# exactly one libibverbs is left on disk instead of two of different vintages.
-# And the vendor bnxt_re provider that /etc/ld.so.conf.d puts on the loader path
-# is dropped: it advertises kernel uABI 7-8, and a host running the upstream
-# driver (uABI 1) has every device rejected with "Driver bnxt_re does not
-# support the kernel ABI of 1", after which RCCL finds no IB plugin at all.
-#
-# ORDERING IS LOAD-BEARING: the source rdma-core is installed by REPLACING the
-# distro libibverbs/librdmacm packages via `dpkg -r --force-all`, which leaves
-# still-installed dependents (libucx0, openmpi, ...) with dangling deps, so any
-# later apt command aborts with "Unmet dependencies". Every apt operation must
-# run before the dpkg removal; only dpkg and `ninja install` may follow it. This
-# is also why the stage is last.
+# 5) rdma-core RDMA_CORE_VERSION (default 63.0) from source, replacing the
+#    distro packages and dropping the vendor bnxt_re provider. Fixes
+#    ibv_create_qp EFAULT on Broadcom Thor2 (bnxt_re); pass an empty value to
+#    keep the base image's rdma-core. Keep this stage last and run every apt
+#    command before the `dpkg -r --force-all` below: the removal leaves
+#    dependents (libucx0, openmpi) with dangling deps and later apt aborts.
 ###############################################################################
 ARG RDMA_CORE_VERSION=63.0
 
 RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
       set -e; \
+      sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true; \
       apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git ca-certificates cmake ninja-build build-essential pkg-config make \
