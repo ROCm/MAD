@@ -7,8 +7,8 @@ yields fully-resolved, per-workload parameter sets to the bash suite driver.
 The config carries a `serving:` block (one served endpoint for the whole run), a
 `run:` block (default concurrency/duration), and a `workloads:` LIST. Each
 workload entry is either:
-  - source: profile  -> carries the distribution params inline, or `preset: caseA`
-                        to inherit scripts/common/agentx/profiles/caseA.yaml
+  - source: profile  -> carries the distribution params inline, or `preset: conformance_256k`
+                        to inherit scripts/common/agentx/profiles/conformance_256k.yaml
   - source: hf       -> carries a `loader` name (an aiperf --public-dataset id)
 
 Design notes:
@@ -21,7 +21,7 @@ Design notes:
         AGENTIC_PORT -> serving.port       AGENTIC_SERVER_METRICS -> serving.server_metrics
         AGENTIC_CONC -> run.concurrency    DURATION -> run.duration
   * Single-workload shorthand: AGENTIC_WORKLOAD=<name> restricts the run to that
-    one entry (a 1-entry list). With no --config, caseA/caseB/inferencex are
+    one entry (a 1-entry list). With no --config, conformance_256k/conformance_512k/inferencex are
     synthesized from the shipped presets so the shorthand works standalone.
 
 CLI:
@@ -41,6 +41,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILES_DIR = os.path.join(HERE, "profiles")
 
 _RUN_KEYS = ("concurrency", "duration")
+# Keys that steer resolution / run knobs but are NOT part of a generator profile
+# dict (so they are stripped when building the source=profile profile JSON).
+_CONTROL_KEYS = ("source", "preset", "loader", "filter",
+                 "num_dataset_entries", "trajectory") + _RUN_KEYS
 
 
 # --------------------------------------------------------------------------
@@ -220,18 +224,100 @@ def load_profile_file(path):
     return _load_file(path)
 
 
-def _resolve_profile_entry(entry):
-    """Return a full profile dict for a source=profile workload entry."""
-    profile = {}
-    preset = entry.get("preset")
-    if preset:
-        profile.update(load_profile_file(os.path.join(PROFILES_DIR, f"{preset}.yaml")))
+def _merge_preset(entry, _visited):
+    """Return `entry` merged over its `preset:` chain (entry keys win).
+
+    Works for any source: a profiles/<preset>.yaml may declare distribution
+    params (source=profile), an hf loader + Tier 1/Tier 2 knobs (source=hf),
+    and/or run knobs (concurrency/duration). Circular references raise.
+    """
+    name = entry.get("preset")
+    if not name:
+        return dict(entry)
+    if name in _visited:
+        raise ValueError(f"circular preset: {name}")
+    _visited.add(name)
+    base = _merge_preset(
+        load_profile_file(os.path.join(PROFILES_DIR, f"{name}.yaml")) or {}, _visited)
     for k, v in entry.items():
-        if k in ("source", "preset") or k in _RUN_KEYS:
+        if k == "preset":
             continue
-        profile[k] = v
-    profile.setdefault("name", entry.get("name", preset or "workload"))
+        base[k] = v
+    return base
+
+
+def _profile_from_merged(merged, name):
+    """Build a generator profile dict from a merged workload dict."""
+    profile = {k: v for k, v in merged.items() if k not in _CONTROL_KEYS}
+    profile.setdefault("name", name)
     return profile
+
+
+def _validate_tier1(name, nde, tmin, tmax):
+    if nde is not None and int(nde) < 1:
+        raise ValueError(f"workload '{name}': num_dataset_entries must be >= 1")
+    if tmin is not None or tmax is not None:
+        lo = 0.0 if tmin is None else float(tmin)
+        hi = 1.0 if tmax is None else float(tmax)
+        if not (0.0 <= lo <= hi <= 1.0):
+            raise ValueError(
+                f"workload '{name}': trajectory requires 0.0 <= min <= max <= 1.0 "
+                f"(got min={tmin}, max={tmax})")
+
+
+def _hf_isl_tail(loader):
+    """ISL tail (max input tokens) for an hf loader, for context gating.
+
+    Option A explicit matching: the `_256k` suffix is definitional and checked
+    FIRST (wins over the date substring); the full-corpus loaders use a
+    conservative HIGH default. The gate caps --max-context-length at the served
+    window, so over-estimation only over-WARNs. Override with AGENTIC_HF_ISL_TAIL.
+    """
+    env = os.environ.get("AGENTIC_HF_ISL_TAIL")
+    if env:
+        return int(env)
+    if loader.endswith("_256k"):
+        return 262144            # definitional: 256k cap
+    if "062126" in loader or "061526" in loader:
+        # full corpus: conservative ~1M. Measured max per-turn ISL is 989824 for
+        # both 062126 and 061526 (in-container, all sessions); 1048576 (2^20) is a
+        # safe over-estimate and rounds to the same power-of-two window as 989824.
+        return 1048576
+    return 1048576               # unknown loader -> conservative default (errs to WARN)
+
+
+def _resolve_workload_entry(entry, _visited=None):
+    """Merge a workload entry with its preset (any source) and resolve it."""
+    if _visited is None:
+        _visited = set()
+    merged = _merge_preset(entry, _visited)
+    src = merged.get("source", "profile")
+    name = entry.get("name") or entry.get("preset") or "workload"
+    nde = merged.get("num_dataset_entries")
+    traj = merged.get("trajectory") or {}
+    tmin = traj.get("min")
+    tmax = traj.get("max")
+    _validate_tier1(name, nde, tmin, tmax)
+    wl = {
+        "name": name,
+        "source": src,
+        "concurrency": _norm_concurrency(merged.get("concurrency")),
+        "duration": merged.get("duration"),
+        "num_dataset_entries": nde,
+        "traj_min": tmin,
+        "traj_max": tmax,
+    }
+    if src == "profile":
+        prof = _profile_from_merged(merged, name)
+        wl["profile"] = prof
+        wl["isl_tail"] = _isl_tail(prof)
+    elif src == "hf":
+        wl["loader"] = merged.get("loader", "")
+        wl["isl_tail"] = _hf_isl_tail(wl["loader"])
+        wl["filter"] = merged.get("filter") or {}
+    else:
+        raise ValueError(f"workload '{name}': unknown source '{src}'")
+    return wl
 
 
 def _isl_tail(profile):
@@ -276,23 +362,7 @@ def resolve_config(config):
 
     workloads = []
     for entry in config.get("workloads", []) or []:
-        src = entry.get("source", "profile")
-        wl = {
-            "name": entry.get("name", "workload"),
-            "source": src,
-            "concurrency": _norm_concurrency(entry.get("concurrency")),
-            "duration": entry.get("duration"),
-        }
-        if src == "profile":
-            prof = _resolve_profile_entry(entry)
-            wl["profile"] = prof
-            wl["isl_tail"] = _isl_tail(prof)
-        elif src == "hf":
-            wl["loader"] = entry.get("loader", "")
-            wl["isl_tail"] = 0
-        else:
-            raise ValueError(f"workload '{wl['name']}': unknown source '{src}'")
-        workloads.append(wl)
+        workloads.append(_resolve_workload_entry(entry))
 
     want = env.get("AGENTIC_WORKLOAD")
     if want:
@@ -354,18 +424,31 @@ def emit_workload_shell(resolved, name, profile_out):
     r = resolved["run"]
     conc = wl["concurrency"] or _norm_concurrency(r["concurrency"])
     dur = wl["duration"] if wl["duration"] is not None else r["duration"]
+    def _opt(v):
+        return "" if v is None else v
+
     out = [
         f"WL_NAME={_sh(wl['name'])}",
         f"WL_SOURCE={_sh(wl['source'])}",
         f"WL_CONCURRENCY={_sh(conc)}",
         f"WL_DURATION={_sh(dur)}",
         f"WL_ISL_TAIL={_sh(wl.get('isl_tail', 0))}",
+        f"WL_NUM_DATASET_ENTRIES={_sh(_opt(wl.get('num_dataset_entries')))}",
+        f"WL_TRAJ_MIN={_sh(_opt(wl.get('traj_min')))}",
+        f"WL_TRAJ_MAX={_sh(_opt(wl.get('traj_max')))}",
     ]
     if wl["source"] == "hf":
         out.append(f"WL_LOADER={_sh(wl.get('loader', ''))}")
+        f = wl.get("filter") or {}
+        out.append(f"WL_FILTER_MAX_ISL={_sh(_opt(f.get('max_isl')))}")
+        out.append(f"WL_FILTER_MAX_TURNS={_sh(_opt(f.get('max_turns')))}")
+        out.append(f"WL_FILTER_SAMPLE={_sh(_opt(f.get('sample')))}")
         out.append("WL_PROFILE_FILE=''")
     else:
         out.append("WL_LOADER=''")
+        out.append("WL_FILTER_MAX_ISL=''")
+        out.append("WL_FILTER_MAX_TURNS=''")
+        out.append("WL_FILTER_SAMPLE=''")
         if profile_out:
             with open(profile_out, "w") as f:
                 json.dump(wl["profile"], f)

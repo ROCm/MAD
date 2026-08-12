@@ -24,7 +24,7 @@ to a captured one of the same shape while guaranteeing the target distribution.
 
 Profile schema (JSON/dict):
   {
-    "name": "caseA",                # informational
+    "name": "conformance_256k",     # informational
     "model_tag": "GLM-5.2-MXFP4",   # written to requests[].model + models[]
     "id_prefix": "caseA",           # session-id salt prefix (keep "caseA" to
                                     #   byte-match #173, which used it for both)

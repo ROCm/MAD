@@ -3,7 +3,7 @@
 
 Generalization of ROCm/MAD #173's `verify_caseA.py` / `verify_caseB.py`: instead
 of hard-coding the Case-A/Case-B numbers, the targets come from the profile so
-any workload (caseA, caseB, or a user-defined custom case) verifies against its
+any workload (conformance_256k, conformance_512k, or a user-defined custom case) verifies against its
 own distribution. Prints a per-axis conformance table and "N/N axes within band".
 
 Targets read from the profile:

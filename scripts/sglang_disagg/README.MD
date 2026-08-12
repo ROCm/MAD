@@ -165,6 +165,17 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 
 Note: `AGENTIC_SERVER_METRICS` is set automatically by the launcher to the space-separated server metrics endpoints (`<prefill_ip>:3000 <decode_ip>:3000`) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
 
+### Running HF (weka) trace datasets on your own model
+
+The agentic suite (`scripts/common/agentx/`, driven by `benchmark_agentic_suite.sh` via an `AGENTIC_CONFIG=agentic.yaml`) can replay the SemiAnalysis HF weka corpora against *any* served model, not just the 256k/1M reference targets:
+
+- **Model-agnostic context gating.** Leave `serving.max_model_len` unset or `0` (or `MAX_MODEL_LEN=0`) and the suite auto-detects the served window from `/v1/models` (`data[0].max_model_len`, with a `/server_info` fallback). Each hf workload gets a loader-derived ISL tail (a `_256k` loader → 262144, a full corpus → a conservative ~1M, override with `AGENTIC_HF_ISL_TAIL`). If the tail exceeds the served window the suite **WARNs** and caps `--max-context-length` at the window; `AGENTIC_STRICT_CONTEXT=1` **SKIP**s that workload instead. An explicit `max_model_len` / `MAX_MODEL_LEN` always wins.
+- **Tier 1 replay knobs (per workload).** `num_dataset_entries` (how many trace sessions to pull) and `trajectory: {min, max}` (start-window ratio) are per-workload fields; unset keeps today's defaults (`393`, `0.25`/`0.75`).
+- **Tier 2 local trim (fit a smaller model).** Add a `filter: {max_isl, max_turns, sample}` block to an hf workload/preset: the corpus is downloaded once, trimmed locally (drop sessions with any turn over `max_isl`, truncate to `max_turns`, randomly `sample` with seed 42), and replayed through `--input-file` — no server-side changes.
+- **Reusable presets.** Drop a `source: hf` file in `scripts/common/agentx/profiles/` (see `profiles/inferencex_256k.yaml`) and reference it with `preset: <name>`; it can bundle the loader, Tier 1/Tier 2 knobs, and a concurrency sweep + duration. Entry fields override the preset; env (`AGENTIC_CONC`/`DURATION`/`MAX_MODEL_LEN`) still wins.
+
+See `scripts/common/agentx/agentic.example.yaml` for a worked config.
+
 ### Supported models and modes
 
 Agentic replay works for every model in the recipe allowlist. `DP_MODE=1` (MoRI wideEP) is only valid for the DeepSeek models; all others run `DP_MODE=0` (TP-only).

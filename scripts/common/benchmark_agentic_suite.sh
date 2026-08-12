@@ -75,6 +75,11 @@ else
     install_agentic_deps
     wait_for_router_ready
     if [ -z "${MODEL:-}" ] || [ "${MODEL:-}" = "auto" ]; then resolve_served_model_name; fi
+    # Auto-detect the served context window when not pinned (config value wins).
+    if [ -z "${MAX_MODEL_LEN:-}" ] || [ "${MAX_MODEL_LEN}" = "0" ]; then
+        MAX_MODEL_LEN="$(resolve_served_max_model_len)"
+        agentic_log "auto-detected served max_model_len: ${MAX_MODEL_LEN}"
+    fi
 fi
 
 # --------------------------------------------------------------------------
@@ -90,6 +95,8 @@ for name in $SUITE_WORKLOAD_NAMES; do
         || agentic_die "workload resolve failed: $name"
     # Resets WL_* for this iteration.
     WL_LOADER=""; WL_PROFILE_FILE=""; WL_MODEL_TAG=""
+    WL_NUM_DATASET_ENTRIES=""; WL_TRAJ_MIN=""; WL_TRAJ_MAX=""
+    WL_FILTER_MAX_ISL=""; WL_FILTER_MAX_TURNS=""; WL_FILTER_SAMPLE=""
     eval "$_wl_shell"
 
     # Per-workload trace source + env.
@@ -121,6 +128,14 @@ for name in $SUITE_WORKLOAD_NAMES; do
             _verify_out="$(materialize_corpus "$name" "$WL_PROFILE_FILE")"
             echo "$_verify_out"
         fi
+    elif [ "$WL_SOURCE" = "hf" ] && _hf_filter_active; then
+        # Tier 2: download + trim once into a deterministic filtered corpus dir.
+        if [ "$_is_dry" = "1" ]; then
+            CORPUS_DIR="${SUITE_CORPUS_DIR}/$(_hf_corpus_key "$WL_LOADER")"
+        else
+            materialize_hf_corpus "$name" "$WL_LOADER"
+        fi
+        export CORPUS_DIR
     fi
 
     resolve_trace_loader

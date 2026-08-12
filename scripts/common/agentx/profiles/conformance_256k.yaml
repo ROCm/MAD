@@ -2,7 +2,7 @@
 # ExplainX Case-A targets. Regenerating with these params via
 # gen_agentx_profile.py reproduces #173's committed corpus byte-for-byte and
 # verifies 13/13 through verify_agentx_profile.py.
-name: caseA
+name: conformance_256k
 model_tag: GLM-5.2-MXFP4     # written into requests[].model + models[]; retag per served model
 id_prefix: caseA             # session-id salt; keep "caseA" to byte-match #173
 seed: 42

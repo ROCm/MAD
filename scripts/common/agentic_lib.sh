@@ -146,7 +146,27 @@ resolve_trace_loader() {
         semianalysis_cc_traces_weka_061526_256k) TRACE_DATASET="semianalysisai/cc-traces-weka-061526-256k" ;;
         *) agentic_die "unknown WEKA_LOADER_OVERRIDE='$TRACE_LOADER' (see resolve_trace_loader)";;
     esac
-    TRACE_SOURCE_FLAG="--public-dataset $TRACE_LOADER"
+    # Tier 2: an hf workload with a local filter is trimmed once into a weka_trace
+    # dir and replayed through --input-file (like the profile path); without a
+    # filter, keep the byte-identical --public-dataset behavior.
+    if _hf_filter_active; then
+        TRACE_SOURCE_FLAG="--custom-dataset-type weka_trace --input-file ${CORPUS_DIR}"
+    else
+        TRACE_SOURCE_FLAG="--public-dataset $TRACE_LOADER"
+    fi
+}
+
+# True when a Tier 2 local filter is configured for the current hf workload.
+_hf_filter_active() {
+    [ -n "${WL_FILTER_MAX_ISL:-}" ] || [ -n "${WL_FILTER_MAX_TURNS:-}" ] || [ -n "${WL_FILTER_SAMPLE:-}" ]
+}
+
+# Deterministic cache-key dir name for a filtered hf corpus: hf_<loader>_<sha1(filter)[:8]>.
+_hf_corpus_key() {
+    local loader="$1" filter_json
+    filter_json="$(printf '{"max_isl": %s, "max_turns": %s, "sample": %s}' \
+        "${WL_FILTER_MAX_ISL:-null}" "${WL_FILTER_MAX_TURNS:-null}" "${WL_FILTER_SAMPLE:-null}")"
+    printf 'hf_%s_%s' "$loader" "$(printf '%s' "$filter_json" | sha1sum | cut -c1-8)"
 }
 
 # Download the dataset into the shared HF cache with retries (3 attempts,
@@ -195,6 +215,35 @@ materialize_corpus() {
     echo "$out"
 }
 
+# Tier 2: download an hf weka corpus once, filter/trim it locally to fit the
+# model, and materialize a per-session weka_trace dir for --input-file replay.
+# Sets CORPUS_DIR. Dies on download exhaustion or an empty (over-aggressive)
+# filter result.  $1 = workload name   $2 = resolved loader (WL_LOADER)
+materialize_hf_corpus() {
+    local name="$1" loader="$2"
+    local py="${AIPERF_PYTHON:-python3}"
+    CORPUS_DIR="${SUITE_CORPUS_DIR}/$(_hf_corpus_key "$loader")"
+    if [ -d "$CORPUS_DIR" ] && [ -n "$(ls -A "$CORPUS_DIR" 2>/dev/null)" ] && [ "${SUITE_CORPUS_FORCE:-0}" != "1" ]; then
+        agentic_log "filtered hf corpus for '$name' already present at $CORPUS_DIR (SUITE_CORPUS_FORCE=1 to regen)"
+        return 0
+    fi
+    agentic_log "downloading + filtering hf corpus for '$name' ($loader) -> $CORPUS_DIR"
+    resolve_trace_source   # 3x retry/backoff download into the shared HF cache; sets TRACE_DATASET
+    local raw
+    raw="$("$py" - "$TRACE_DATASET" <<'PY'
+import sys
+from huggingface_hub import snapshot_download
+print(snapshot_download(sys.argv[1], repo_type="dataset"))
+PY
+)" || agentic_die "could not locate downloaded corpus for $TRACE_DATASET"
+    rm -rf "$CORPUS_DIR"
+    "$py" "$AGENTX_DIR/filter_weka_corpus.py" --input "$raw" --out-dir "$CORPUS_DIR" \
+        ${WL_FILTER_MAX_ISL:+--max-isl "$WL_FILTER_MAX_ISL"} \
+        ${WL_FILTER_MAX_TURNS:+--max-turns "$WL_FILTER_MAX_TURNS"} \
+        ${WL_FILTER_SAMPLE:+--sample "$WL_FILTER_SAMPLE"} \
+        || agentic_die "filter too aggressive or corpus unreadable for '$name' (0 sessions?)"
+}
+
 # Smallest power of two >= n (used to size --max-context-length from the ISL tail).
 _next_pow2() {
     local n="$1" p=1
@@ -211,9 +260,11 @@ context_compat_check() {
     local name="$1" tail="$2" mml="$3"
     CONTEXT_VERDICT="OK"
     if [ -z "$tail" ] || [ "$tail" = "0" ]; then
-        # hf workloads carry no profile tail; keep the served window as-is.
+        # Genuine "unknown" fallback only (tail==0): no ISL estimate available, so
+        # keep the served window as-is. hf workloads now carry a loader-derived
+        # tail (>0) and flow through the WARN/SKIP/auto-size path below.
         AGENTIC_MAX_CONTEXT_LENGTH="${mml:-0}"
-        agentic_log "context[$name]: hf trace, --max-context-length=${AGENTIC_MAX_CONTEXT_LENGTH}"
+        agentic_log "context[$name]: unknown ISL tail, --max-context-length=${AGENTIC_MAX_CONTEXT_LENGTH}"
         return 0
     fi
     local needed
@@ -252,6 +303,27 @@ d=json.load(sys.stdin); print((d.get("data") or [{}])[0].get("id",""))' 2>/dev/n
     [ -n "$name" ] || agentic_die "could not resolve a served model name (set MODEL explicitly)"
     MODEL="$name"
     agentic_log "aiperf --model resolved to: $MODEL"
+}
+
+# Best-effort auto-detect of the served max_model_len (context window) so hf
+# gating works model-agnostically when serving.max_model_len / MAX_MODEL_LEN is
+# unset. SGLang (>=PR #4809) and vLLM both expose it in /v1/models
+# data[0].max_model_len; /server_info is the old-sglang fallback. Config value
+# always wins (caller only calls this when MAX_MODEL_LEN is empty/0). Retries 3x
+# (server may be warming); prints "0" + WARN if all attempts fail.
+resolve_served_max_model_len() {
+    local base="http://127.0.0.1:${AGENTIC_PORT}" i v=""
+    for i in 1 2 3; do
+        v="$(curl -sf "$base/v1/models" 2>/dev/null \
+             | "${AIPERF_PYTHON:-python3}" -c 'import sys,json;d=json.load(sys.stdin);print((d.get("data") or [{}])[0].get("max_model_len") or "")' 2>/dev/null)"
+        [ -n "$v" ] && { echo "$v"; return 0; }
+        v="$(curl -sf "$base/server_info" 2>/dev/null \
+             | "${AIPERF_PYTHON:-python3}" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("max_total_num_tokens") or d.get("context_length") or "")' 2>/dev/null)"
+        [ -n "$v" ] && { echo "$v"; return 0; }
+        sleep 2
+    done
+    agentic_err "could not auto-detect max_model_len from ${base}; set serving.max_model_len / MAX_MODEL_LEN"
+    echo "0"
 }
 
 wait_for_router_ready() {
@@ -294,9 +366,12 @@ build_replay_cmd() {
     REPLAY_CMD+=" --random-seed 42"
     REPLAY_CMD+=" --failed-request-threshold $AIPERF_FAILED_REQUEST_THRESHOLD"
     # Trajectory start window: hf captured traces resume mid-conversation (0.25/0.75);
-    # generated profile corpora replay near-complete sessions (0.90/0.98).
+    # generated profile corpora replay near-complete sessions (0.90/0.98). A
+    # workload may override via WL_TRAJ_MIN/MAX (Tier 1); unset keeps today's values.
     local traj_min="0.25" traj_max="0.75"
     if [ "${WL_SOURCE:-hf}" = "profile" ]; then traj_min="0.90"; traj_max="0.98"; fi
+    [ -n "${WL_TRAJ_MIN:-}" ] && traj_min="$WL_TRAJ_MIN"
+    [ -n "${WL_TRAJ_MAX:-}" ] && traj_max="$WL_TRAJ_MAX"
     REPLAY_CMD+=" --trajectory-start-min-ratio $traj_min --trajectory-start-max-ratio $traj_max"
     REPLAY_CMD+=" --agentic-cache-warmup-duration $cache_warmup"
     REPLAY_CMD+=" --warmup-grace-period ${AGENTIC_WARMUP_GRACE_PERIOD:-1800}"
@@ -306,9 +381,10 @@ build_replay_cmd() {
         REPLAY_CMD+=" --server-metrics ${AGENTIC_SERVER_METRICS}"
     fi
     # --num-dataset-entries only applies to hf downloads (how many trace files to
-    # pull); a generated profile corpus is consumed whole.
+    # pull); a generated profile corpus is consumed whole. Per-workload
+    # WL_NUM_DATASET_ENTRIES (Tier 1) wins, then the AGENTIC_* env, then 393.
     if [ "${WL_SOURCE:-hf}" = "hf" ]; then
-        REPLAY_CMD+=" --num-dataset-entries ${AGENTIC_NUM_DATASET_ENTRIES:-393}"
+        REPLAY_CMD+=" --num-dataset-entries ${WL_NUM_DATASET_ENTRIES:-${AGENTIC_NUM_DATASET_ENTRIES:-393}}"
     fi
     # Per-workload context length: context_compat_check sets AGENTIC_MAX_CONTEXT_LENGTH
     # (profile ISL tail rounded up, capped at max_model_len). Falls back to
