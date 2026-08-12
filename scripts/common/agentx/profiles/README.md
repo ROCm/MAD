@@ -138,6 +138,25 @@ then runs `verify_agentx_profile.py`, and **aborts the run** unless the corpus i
 cached at `SUITE_CORPUS_DIR/<name>` (default `/tmp/agentx_corpora`); editing a
 profile does not invalidate the cache, so regenerate with `SUITE_CORPUS_FORCE=1`.
 
+The verifier prints a `corpus=... profile=... sessions=... requests=...` header,
+then a per-axis table (columns: **measured** before **target**, then verdict),
+then the `N/N axes within band` summary. Below is `conformance_256k` (real
+targets from [conformance_256k.yaml](conformance_256k.yaml); the **measured**
+values are illustrative). A full run prints all 13 axes — only 4 are shown here:
+
+```
+corpus=/tmp/agentx_corpora/conformance_256k  profile=conformance_256k  sessions=200  requests=1180
+
+axis                    measured    target  verdict
+------------------------------------------------------
+Input ISL P50             73,842    74,000   PASS
+Input ISL P90            154,110   155,000   PASS
+Input ISL P99            233,900   235,000   PASS
+Cache hit P50 %               89        89   PASS
+------------------------------------------------------
+13/13 axes within band
+```
+
 ## Placement rule
 
 Drop the file at `profiles/<name>.yaml` so that `preset: <name>` (and the

@@ -63,6 +63,23 @@ auto`, `serving.max_model_len: 0` (auto-detect), `serving.port: auto`,
 `serving.server_metrics: auto`, `run.concurrency: 16`, and `run.duration: 900`.
 See [SCENARIOS.md](SCENARIOS.md) for copy-paste examples of every workload shape.
 
+### What to expect / run timing
+
+Per workload, wall-time is dominated by a **cache-warmup** phase followed by the
+**measured replay window**:
+
+- **Measured window** — `run.duration` (default `900`s = 15 min); this is the
+  aiperf `--benchmark-duration`.
+- **Cache warmup** — `--agentic-cache-warmup-duration` (default `60`s; `300`s
+  for large model families such as DeepSeek/Kimi/GLM) runs *before* measurement,
+  bounded by `--warmup-grace-period` (default `1800`s).
+- **Corpus generation** — for `source: profile` workloads this is a one-time
+  step cached under `SUITE_CORPUS_DIR` (fast; scales with `n_sessions`) and
+  reused on later runs unless `SUITE_CORPUS_FORCE=1`. `source: hf` workloads
+  download instead of generate.
+- **Concurrency sweeps** — a `concurrency` **list** runs each value in sequence,
+  so it multiplies wall-time (see [SCENARIOS.md](SCENARIOS.md)).
+
 ## Glossary
 
 - **Profile** — a set of distribution targets (`isl_p`, `osl_p`, `delay_p`,

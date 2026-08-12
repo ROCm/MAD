@@ -136,7 +136,9 @@ workloads:
 bundles `source: hf`, the loader, `concurrency: [2, 4, 8]`, `duration: 900`, and
 Tier 1 knobs (`num_dataset_entries: 393`, `trajectory: {min: 0.25, max: 0.75}`).
 Because `concurrency` is a **list**, the workload is swept and results land in
-per-concurrency subdirs.
+per-concurrency subdirs. The sweep runs the concurrency values **sequentially**
+(not in parallel), each into its own `conc<N>/` subdir, so total wall-time is
+roughly `N x (cache-warmup + duration)`.
 
 **Output tree:**
 
