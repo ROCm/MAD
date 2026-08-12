@@ -135,10 +135,11 @@ differ, the host path belongs on the value side.
   is a single full-overlay build
   (`docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile`): base
   SGLang + RCCL + MoRI + NIXL/Mooncake KV-transfer + Mooncake pip in one
-  Dockerfile (no base-image chaining). For hosts whose RDMA stack needs a
-  newer rdma-core than the base ships, build the same Dockerfile with
-  `--build-arg ENABLE_RDMA62=1` (bakes rdma-core v62 in, so no host `libibverbs`
-  bind-mounts are needed; unset/default skips that stage). The full overlay
+  Dockerfile (no base-image chaining). That build bakes in rdma-core
+  `RDMA_CORE_VERSION` (default `63.0`), which is what makes queue-pair creation
+  work on Broadcom Thor2 `bnxt_re` and removes the need for host `libibverbs`
+  bind-mounts; pass an empty `--build-arg RDMA_CORE_VERSION=` to keep the base
+  image's instead. The full overlay
   re-adds the `rocm_smi` `DT_NEEDED`
   (`patchelf --add-needed librocm_smi64.so.<N>`) so a newer RCCL on the rocm720
   base does not break `import torch` (see [gotchas.md](gotchas.md#sglang_disagg)).
