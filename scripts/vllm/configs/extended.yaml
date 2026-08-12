@@ -65,7 +65,7 @@
   model:
     MiniMaxAI/MiniMax-M2.7
     amd/MiniMax-M2.7-MXFP4
-  tp: 4 8
+  tp: 4
   inp: 1024
   out: 1024
   dtype: auto
