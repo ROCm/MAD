@@ -162,8 +162,18 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 | `AGENTIC_PORT` | `2322` | sglang router port aiperf targets |
 | `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
 | `ENABLE_RADIX_CACHE` | auto | `1` forces radix cache on i.e. strips `--disable-radix-cache` (auto-on for agentic) |
+| `AGENTIC_CONFIG` | (none) | Path to an `agentic.yaml`; runs the multi-workload suite driver. |
+| `AGENTIC_WORKLOAD` | (none) | Run one workload by name: a preset shorthand (no config) or a single entry selected from `AGENTIC_CONFIG`. |
+| `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
+| `AGENTIC_STRICT_CONTEXT` | `0` | Set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served context window. |
+| `AGENTIC_HF_ISL_TAIL` | (none) | Override the loader-derived ISL tail for hf-source workloads. |
 
 Note: `AGENTIC_SERVER_METRICS` is set automatically by the launcher to the space-separated server metrics endpoints (`<prefill_ip>:3000 <decode_ip>:3000`) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
+
+For config schema, profile authoring, and Tier 1/Tier 2 knobs, see:
+- [AgentX core README](../common/agentx/README.md)
+- [Profile authoring guide](../common/agentx/profiles/README.md)
+- [Config cookbook (SCENARIOS)](../common/agentx/SCENARIOS.md)
 
 ### Running HF (weka) trace datasets on your own model
 
@@ -191,6 +201,82 @@ Agentic replay works for every model in the recipe allowlist. `DP_MODE=1` (MoRI 
 | Llama-3.1-405B-Instruct-FP8-KV | 0 (TP) | Needs larger topology |
 
 Topology is `xP` prefill + `yD` decode + 1 router node (minimum 3 nodes, i.e. 1P/1D).
+
+### Invocation examples (agentic suite)
+
+**Note:** `AGENTIC_CONFIG` paths must be visible inside the container. The `$HOME:$HOME` bind mount means `$HOME/MAD/...` works if MAD is cloned at `$HOME/MAD`. Alternatively use `/opt/mooncake-cookbook/scripts/...` (the in-container `MOONCAKE_REPO_DIR` mount).
+
+#### 1. Multi-workload suite config
+
+```bash
+cd scripts/sglang_disagg
+
+export DOCKER_IMAGE_NAME=<mori-sglang-image>
+export AGENTIC=1
+export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
+
+sbatch -N 3 -n 3 -p amd-rccl --time=90 \
+  --nodelist=<router-node>,<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+#### 2. Single preset shorthand (no config file)
+
+```bash
+cd scripts/sglang_disagg
+
+export DOCKER_IMAGE_NAME=<mori-sglang-image>
+export AGENTIC=1
+export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export AGENTIC_WORKLOAD=conformance_256k   # config-less shorthand: runs just this preset
+
+sbatch -N 3 -n 3 -p amd-rccl --time=90 \
+  --nodelist=<router-node>,<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+#### 3. Longer-context baseline (Case-B 512k window)
+
+```bash
+cd scripts/sglang_disagg
+
+export DOCKER_IMAGE_NAME=<mori-sglang-image>
+export AGENTIC=1
+export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export AGENTIC_WORKLOAD=conformance_512k
+export MAX_MODEL_LEN=524288                # Case-B ISL tail needs the 512k window
+
+sbatch -N 3 -n 3 -p amd-rccl --time=90 \
+  --nodelist=<router-node>,<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+#### 4. Single entry selected from a config (smaller model)
+
+```bash
+cd scripts/sglang_disagg
+
+export DOCKER_IMAGE_NAME=<mori-sglang-image>
+export AGENTIC=1
+export RUN_MORI=1 DP_MODE=0 xP=1 yD=1 MODEL_NAME=Llama-3.1-8B-Instruct
+export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
+export AGENTIC_WORKLOAD=inferencex_small   # preset bundles filter: {max_isl, max_turns, sample}
+
+sbatch -N 3 -n 3 -p amd-rccl --time=90 \
+  --nodelist=<router-node>,<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+#### 5. DRY_RUN preview from the login node (no server)
+
+```bash
+cd $HOME/MAD
+
+# Prints the resolved N-workload plan + per-workload commands + context verdicts; no server needed.
+DRY_RUN=1 AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml \
+  bash scripts/common/benchmark_agentic_suite.sh
+```
 
 ### Output files
 
