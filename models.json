@@ -368,6 +368,145 @@
      "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
   },
   {
+    "name": "pyt_vllm_disagg_mori_kimi-k3",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
+    "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_disagg",
+      "mori_ep",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "distributed": {
+      "launcher": "slurm_multi"
+    },
+    "env_vars": {
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
+      "MODEL_NAME": "Kimi-K3",
+      "xP": "2",
+      "yD": "2",
+      "TP_SIZE": "2",
+      "RUN_MORI": "1",
+      "WIDE_EP": "1",
+      "BENCHMARK_SCRIPT": "niah",
+      "NIAH_WORDS": "10000,50000,100000,200000"
+    },
+    "args": "-N 4 -n 4"
+  },
+  {
+    "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
+    "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_multinode",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "distributed": {
+      "launcher": "slurm_multi"
+    },
+    "env_vars": {
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
+      "MODEL_NAME": "Kimi-K3",
+      "TP_SIZE": "8",
+      "PP_SIZE": "2",
+      "ENABLE_EP": "0",
+      "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048",
+      "BENCHMARK_SCRIPT": "niah",
+      "NIAH_WORDS": "10000,50000,100000,200000"
+    },
+    "args": "-N 2 -n 2"
+  },
+  {
+    "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
+    "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_multinode",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "distributed": {
+      "launcher": "slurm_multi"
+    },
+    "env_vars": {
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
+      "MODEL_NAME": "Kimi-K3",
+      "TP_SIZE": "8",
+      "PP_SIZE": "2",
+      "ENABLE_EP": "1",
+      "ALL2ALL_BACKEND": "allgather_reducescatter",
+      "AITER_SITUV2_A8W4": "1",
+      "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'",
+      "BENCHMARK_SCRIPT": "niah",
+      "NIAH_WORDS": "10000,50000,100000,200000"
+    },
+    "args": "-N 2 -n 2"
+  },
+  {
+    "name": "pyt_vllm_kimi-k3_mi300x_wideep_moriep",
+    "url": "",
+    "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
+    "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Kimi-K3.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_multinode",
+      "mori_ep",
+      "inference"
+    ],
+    "timeout": -1,
+    "skip_gpu_arch": "gfx950",
+    "distributed": {
+      "launcher": "slurm_multi"
+    },
+    "env_vars": {
+      "DOCKER_IMAGE_NAME": "<supply-your-image>",
+      "MODEL_NAME": "Kimi-K3",
+      "TP_SIZE": "8",
+      "PP_SIZE": "2",
+      "ENABLE_EP": "1",
+      "ALL2ALL_BACKEND": "mori_low_latency",
+      "AITER_SITUV2_A8W4": "1",
+      "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'",
+      "BENCHMARK_SCRIPT": "niah",
+      "NIAH_WORDS": "10000,50000,100000,200000"
+    },
+    "args": "-N 2 -n 2"
+  },
+  {
     "name": "pyt_vllm_llama-3.1-8b",
     "url": "",
     "dockerfile": "docker/pyt_vllm",

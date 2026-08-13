@@ -25,4 +25,12 @@ NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
 NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
   python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
 
+# Emit the madengine perf.csv so an accuracy run reports a metric like a
+# throughput run does (one row per context size, needles found /10). Without
+# this, BENCHMARK_SCRIPT=niah produces logs only and the model's
+# multiple_results CSV is never written.
+python3 "${DIR}/parse_to_csv.py" "${LOG}" --niah \
+        --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" \
+        --model-name "${MODEL_NAME}" 2>&1 | tee -a "${LOG}"
+
 echo "NIAH results -> ${LOG}"

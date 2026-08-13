@@ -655,3 +655,17 @@ docker run --rm \
 '
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 
+# Publish the perf CSV where madengine collects it. benchmark_xPyD.sh /
+# benchmark_niah.sh write /run_logs/$SLURM_JOB_ID/perf.csv inside the container
+# (= $LOG_PATH on the host), but madengine resolves a model's `multiple_results`
+# against the JOB DIRECTORY it launched us from - so copy it there under the
+# declared name. Harmless for entries that do not declare multiple_results.
+_PERF_SRC="${LOG_PATH}/${SLURM_JOB_ID}/perf.csv"
+_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"
+if [ -f "$_PERF_SRC" ]; then
+    cp "$_PERF_SRC" "$_PERF_DST"
+    echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
+else
+    echo "WARNING: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+fi
+
