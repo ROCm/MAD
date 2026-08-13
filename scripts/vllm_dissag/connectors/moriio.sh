@@ -235,7 +235,7 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
-                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
+                    "${exec_args[@]}" "${model_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
             WORKER_PID=0; return 0
         fi
 
@@ -256,6 +256,7 @@ connector_launch_worker() {
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
             "${exec_args[@]}" \
+            "${model_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
             2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &

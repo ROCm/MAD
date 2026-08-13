@@ -178,3 +178,71 @@ DeepSeek-R1:
     dp: ""
   decode:
     dp: ""
+
+# ============================ Kimi-K3 (MXFP4) on MI300X / gfx942 ============================
+# wideEP-only, and the first entry that needs TP>1 on the wideEP path.
+#
+# WHY TP2. K3 is ~2.8T params / 896 experts with a hybrid MLA + Kimi-Delta-Attention
+# stack. On MI300X (192 GB/GPU) the REPLICATED (attn + shared-expert) weight is
+# 106.5 GiB. At TP1/DP16 that lands 190.7 GiB/GPU before KV cache or the MoRI heap
+# -> does not fit. TP2 shards it to 53.3 GiB/GPU; with 84.2 GiB of expert shard that
+# is 137.5 GiB + 16 GiB MoRI heap, leaving room for KV. So the pool is TP2 x DP8 =
+# EP16 over 16 GPUs (2 nodes), i.e. xP=2 yD=2 TP_SIZE=2 (see models.json).
+#
+# gfx942 specifics:
+#   - VLLM_ROCM_USE_AITER_MLA=0 is REQUIRED: the AITER MLA kernel is gfx950-only.
+#   - gfx942 has no scaled-MXFP4 MFMA and the a16w4 SiTUv2 heuristic FlyDSL kernel
+#     cannot codegen there, so the MoE is requantized to packed-int4 and run through
+#     SiTUv2 (AITER_SITUV2_A8W4=1 + the --quantization-config below).
+#   - MAX_NUM_BATCHED_TOKENS stays at 2048: 8192 corrupts generation on this stack,
+#     and the giant profiling shape at 16384 crashes LLVM codegen in the heuristic
+#     FlyDSL kernel.
+#   - KV_CACHE_MEMORY_BYTES=40e9 gives a 2.84M-token GPU KV cache, required for
+#     single requests beyond ~600K tokens. It also skips the boot profiling forward.
+_kimi_k3_recipe_env: &kimi_k3_recipe_env
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_MLA: "0"          # REQUIRED on gfx942 (AITER MLA is gfx950-only)
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  AITER_SITUV2_A8W4: "1"                # a8w4 (fp8-act x int4-wt) SiTU MoE path
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"      # KDA (Kimi-Delta-Attention) conv state layout
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "40000000000"  # 2.84M-token KV cache; needed for >600K ctx
+  GPU_MEMORY_UTILIZATION: "0.88"        # 0.88 leaves the 16 GiB MoRI shmem heap
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+  MORI_NUM_QP_PER_PE: "8"
+  VLLM_MORIIO_QP_PER_TRANSFER: "2"
+  VLLM_MORIIO_NUM_WORKERS: "4"
+  VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+  DISTRIBUTED_TIMEOUT_SECONDS: "7200"
+
+# Serve flags the connector does not already emit. --max-model-len 1000000 is K3's
+# full native context; drop it to 10240 for a quick smoke run.
+#
+# NOTE: these strings are word-split by the launcher via `eval "model_args=(...)"`,
+# so any value containing JSON must carry its OWN shell quotes - otherwise shell
+# quote-removal strips the JSON's double quotes and vLLM gets invalid JSON.
+_kimi_k3_dp_flags: &kimi_k3_dp_flags >-
+  --reasoning-parser kimi_k3
+  --mm-encoder-tp-mode data
+  --safetensors-load-strategy prefetch
+  --max-model-len 1000000
+  --max-num-seqs 8
+  --max-num-batched-tokens 2048
+  --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
+
+Kimi-K3:
+  env: *kimi_k3_recipe_env
+  prefill:
+    dp: *kimi_k3_dp_flags
+  decode:
+    dp: *kimi_k3_dp_flags
