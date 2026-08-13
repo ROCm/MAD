@@ -241,6 +241,156 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
 
+## Agentic Replay Benchmark
+
+The agentic replay benchmark replays real Claude Code agentic coding traces using the `inferencex-agentx-mvp` scenario from [SemiAnalysisAI aiperf](https://github.com/SemiAnalysisAI/aiperf), driven against the vLLM router/proxy. This workload is highly prefix-repetitive (each turn re-sends the accumulated context), so it exercises the vLLM prefix cache and reports a **measured** `gpu_cache_hit_rate` alongside the dataset's theoretical ceiling. It shares the endpoint-agnostic harness (`scripts/common/agentic_lib.sh` + the AgentX suite driver) with the [sglang integration](../sglang_disagg/README.MD#agentic-replay-benchmark).
+
+It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic` (or the `AGENTIC=1` shorthand). No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
+
+**vLLM specifics.** aiperf targets `AGENTIC_PORT`, which the launcher auto-resolves to the proxy/router port `BENCHMARK_PORT` (set by `connector_start_proxy`: `ROUTER_PORT` for `vllm_router`, `PROXY_PORT` for the toy proxy). Because the vLLM PD router 503s on `GET /v1/models` under MoRIIO service discovery (empty HTTP worker registry) while the shared harness gates readiness/served-model on `/v1/models`, the launcher starts a tiny stdlib shim (`agentic_models_shim.py`) on `BENCHMARK_PORT+1` that answers `/v1/models` (gated on the router's `/health`) and stream-proxies everything else; `AGENTIC_PORT` is then pointed at the shim. Both are byte-for-byte no-ops for the default sweep (guarded by `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`).
+
+### Quick start (canonical DeepSeek-V3 1P/1D, MoRI-EP)
+
+```bash
+cd scripts/vllm_dissag
+
+export DOCKER_IMAGE_NAME=<mori-vllm-image>
+export AGENTIC=1                                       # shorthand: BENCHMARK_SCRIPT=agentic
+export RUN_MORI=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000
+
+# 3 nodes with the model on local NVMe (router+prefill co-located on node 0, decode on node 1)
+sbatch -N 2 -n 2 -p amd-rccl --time=90 \
+  --nodelist=<prefill-node>,<decode-node> \
+  run_xPyD_models.slurm
+```
+
+`AGENTIC=1` sets `BENCHMARK_SCRIPT=agentic` (→ `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`); the connectors then auto-enable server-side Prometheus metrics and strip `--no-enable-prefix-caching` (prefix cache ON). You can equivalently set `BENCHMARK_SCRIPT=agentic` directly.
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENTIC` | `0` | `1` = shorthand for `BENCHMARK_SCRIPT=agentic` |
+| `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep`, `long_context`, `agentic`) |
+| `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
+| `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
+| `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
+| `MAX_MODEL_LEN` | auto-detected | Max context length passed to aiperf (`--max-context-length`); pin if autodetect returns 0 |
+| `AGENTIC_PORT` | `${BENCHMARK_PORT}` | Endpoint aiperf targets (auto-resolved to the proxy/router port, then the shim port) |
+| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
+| `ENABLE_PREFIX_CACHE` | auto | `1` forces prefix cache on i.e. strips `--no-enable-prefix-caching` (auto-on for agentic) |
+| `AGENTIC_CONFIG` | (none) | Path to an `agentic.yaml`; runs the multi-workload suite driver. |
+| `AGENTIC_WORKLOAD` | (none) | Run one workload by name: a preset shorthand (no config) or a single entry selected from `AGENTIC_CONFIG`. |
+| `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
+| `AGENTIC_STRICT_CONTEXT` | `0` | Set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served context window. |
+| `AGENTIC_HF_ISL_TAIL` | (none) | Override the loader-derived ISL tail for hf-source workloads. |
+
+Note: `AGENTIC_SERVER_METRICS` is set automatically by the connector to the space-separated backend server `/metrics` endpoints (`<prefill_ip>:<SERVE_PORT> <decode_ip>:<SERVE_PORT>`, e.g. `:20005` for moriio, `:2584`/`SERVER_PORT` for rixl) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
+
+For config schema, profile authoring, and Tier 1/Tier 2 knobs, see:
+- [AgentX core README](../common/agentx/README.md)
+- [Profile authoring guide](../common/agentx/profiles/README.md)
+- [Config cookbook (SCENARIOS)](../common/agentx/SCENARIOS.md)
+
+### Supported models and modes
+
+Agentic replay works for every model in the recipe allowlist, in the same combos each model supports (see **Supported models** above). The DeepSeek family is wideEP-only; dense/MoE models such as Qwen3-32B run TP.
+
+| Model | Combos | Notes |
+|-------|--------|-------|
+| DeepSeek-V3 | 3, 4 (wideEP) | Canonical agentic target |
+| DeepSeek-R1 | 3, 4 (wideEP) | Same path as DeepSeek-V3 |
+| Qwen3-32B | 1, 2 (TP) | Ships a chat_template; good smoke target |
+| Qwen3-30B-A3B | 1, 2 (TP) | MoE, needs a co-versioned AITER image |
+| amd-Llama-3.3-70B-Instruct-FP8-KV | 1, 2 (TP) | |
+| Llama-3.1-405B-Instruct-FP8-KV | 1, 2 (TP) | Needs larger topology |
+
+> aiperf drives `/v1/chat/completions`, so the served model must ship a `chat_template` in its `tokenizer_config.json` (Qwen2.5/Qwen3-Instruct do; base Llama-3.1-8B does not).
+
+### Invocation examples (agentic suite)
+
+**Note:** `AGENTIC_CONFIG` paths must be visible inside the container. The `$HOME:$HOME` bind mount means `$HOME/MAD/...` works if MAD is cloned at `$HOME/MAD`. Alternatively use the in-container `NIXL_COOKBOOK_PATH` mount (`$NIXL_REPO_DIR` on the host).
+
+#### 1. Multi-workload suite config
+
+```bash
+cd scripts/vllm_dissag
+
+export DOCKER_IMAGE_NAME=<mori-vllm-image>
+export AGENTIC=1 RUN_MORI=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
+
+sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slurm
+```
+
+#### 2. Single preset shorthand (no config file)
+
+```bash
+cd scripts/vllm_dissag
+
+export DOCKER_IMAGE_NAME=<vllm-image>
+export AGENTIC=1 CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
+export AGENTIC_WORKLOAD=conformance_256k   # config-less shorthand: runs just this preset
+
+sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slurm
+```
+
+#### 3. Single entry selected from a config (smaller model, Tier-2 filter)
+
+```bash
+cd scripts/vllm_dissag
+
+export DOCKER_IMAGE_NAME=<vllm-image>
+export AGENTIC=1 CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
+export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
+export AGENTIC_WORKLOAD=inferencex_small   # preset bundles filter: {max_isl, max_turns, sample}
+
+sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slurm
+```
+
+#### 4. DRY_RUN preview from the login node (no server)
+
+```bash
+cd $HOME/MAD
+
+# Prints the resolved N-workload plan + per-workload commands + context verdicts; no server needed.
+DRY_RUN=1 AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml \
+  bash scripts/common/benchmark_agentic_suite.sh
+```
+
+### Output files
+
+Written to `/run_logs/$SLURM_JOB_ID/` (host `LOG_PATH/<jobid>/`):
+
+```
+agentic_<jobid>_xP<n>_yD<n>_<model>.json   # single-replay aggregate (validate_agentic_result.sh)
+suite_summary.json                         # multi-workload suite roll-up (workloads[])
+<workload>/[conc<N>/]                       # per-workload (and per-concurrency) result dirs
+aiperf_artifacts/                          # per-request logs, timeslices, server_metrics_export.{csv,json}
+agentic_models_shim_NODE0.log              # side-port /v1/models shim log
+```
+
+Key fields in the aggregate JSON:
+- `request_metrics.cache.theoretical_cache_hit_rate` — dataset-derived ceiling.
+- `server_metrics.present` / `server_metrics.cache.gpu_cache_hit_rate` — **measured** runtime GPU cache hit rate.
+- `request_accounting` — `records_profiled` vs `records_error_dropped` (error rate is computed over measured requests, excluding warmup).
+
+The suite roll-up (`suite_summary.json`) has a `workloads[]` array; each entry carries `workload`, `result_dir`, `status`, `theoretical_cache_hit_rate`, `gpu_cache_hit_rate`, and `error_rate`. A workload that exits non-zero is marked `INVALID` (with a `RUN_INVALID.json` sidecar in its dir) and the suite **continues** to the next workload.
+
+### Validation
+
+`scripts/common/validate_agentic_result.sh` runs automatically at the end of the agentic benchmark and prints, e.g.:
+
+```
+[validate] requests: 70/72 ok  error_rate=2.8%
+[validate] gpu_cache_hit_rate: 32.4%
+[validate] throughput_per_gpu: 6247 tok/s
+[validate][PASS] error_rate within 10%
+```
+
+Thresholds: `AGENTIC_MAX_ERROR_RATE` (default `0.10`, gates PASS/WARN) and `AGENTIC_MIN_CACHE_HIT` (default `0.30`, warn-only). A low cache hit rate on `xP>1` usually indicates the router is not keeping a conversation's turns on the worker holding its prefix (session-affinity).
+
 ## Testing the launcher (no GPUs)
 
 Offline suites validate the launcher without a cluster — run after any change to the

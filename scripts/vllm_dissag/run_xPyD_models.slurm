@@ -427,11 +427,20 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   agentic                -> benchmark_agentic.sh      (aiperf agentic trace replay)
+# Agentic replay shorthand: AGENTIC=1 selects the aiperf agentic trace-replay hook.
+# The launcher/connectors then auto-enable prefix caching + server /metrics for
+# BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh.
+if [[ "${AGENTIC:-0}" == "1" ]]; then
+    BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-agentic}"
+    echo "AGENTIC=1: BENCHMARK_SCRIPT=${BENCHMARK_SCRIPT} (prefix cache + server metrics auto-enabled)"
+fi
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -564,6 +573,27 @@ docker run --rm \
     -e MASTER_PORT=$MASTER_PORT \
     -e MODEL_PATH=$MODEL_PATH \
     -e NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH \
+    -e NIXL_REPO_DIR=$NIXL_REPO_DIR \
+    ${AGENTIC_CONC:+-e AGENTIC_CONC=$AGENTIC_CONC} \
+    ${DURATION:+-e DURATION=$DURATION} \
+    ${AGENTIC_PORT:+-e AGENTIC_PORT=$AGENTIC_PORT} \
+    ${MODEL_PREFIX:+-e MODEL_PREFIX=$MODEL_PREFIX} \
+    ${WEKA_LOADER_OVERRIDE:+-e WEKA_LOADER_OVERRIDE=$WEKA_LOADER_OVERRIDE} \
+    ${AIPERF_UNSAFE_OVERRIDE:+-e AIPERF_UNSAFE_OVERRIDE=$AIPERF_UNSAFE_OVERRIDE} \
+    ${AGENTIC_CACHE_WARMUP_DURATION:+-e AGENTIC_CACHE_WARMUP_DURATION=$AGENTIC_CACHE_WARMUP_DURATION} \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${AGENTIC_CONFIG:+-e AGENTIC_CONFIG=$AGENTIC_CONFIG} \
+    ${AGENTIC_WORKLOAD:+-e AGENTIC_WORKLOAD=$AGENTIC_WORKLOAD} \
+    ${SUITE_CORPUS_DIR:+-e SUITE_CORPUS_DIR=$SUITE_CORPUS_DIR} \
+    ${SUITE_CORPUS_FORCE:+-e SUITE_CORPUS_FORCE=$SUITE_CORPUS_FORCE} \
+    ${AGENTIC_STRICT_CONTEXT:+-e AGENTIC_STRICT_CONTEXT=$AGENTIC_STRICT_CONTEXT} \
+    ${AGENTIC_HF_ISL_TAIL:+-e AGENTIC_HF_ISL_TAIL=$AGENTIC_HF_ISL_TAIL} \
+    ${AIPERF_PIN:+-e AIPERF_PIN=$AIPERF_PIN} \
+    ${AGENTIC_UTILS_PIN:+-e AGENTIC_UTILS_PIN=$AGENTIC_UTILS_PIN} \
+    ${HF_HOME:+-e HF_HOME=$HF_HOME} \
+    ${ENABLE_SERVER_METRICS:+-e ENABLE_SERVER_METRICS=$ENABLE_SERVER_METRICS} \
+    ${ENABLE_PREFIX_CACHE:+-e ENABLE_PREFIX_CACHE=$ENABLE_PREFIX_CACHE} \
+    ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
     -e xP=$xP \
     -e yD=$yD \
     -e USER_NAME=$USER_NAME \
