@@ -9,9 +9,11 @@ single-stream NIAH.
 Usage: concurrency_bench.py <ctx_tokens> <concurrency> [max_out]
   e.g. concurrency_bench.py 20000 8 64
 """
-import sys, json, time, urllib.request, concurrent.futures as cf
+import os, sys, json, time, urllib.request, concurrent.futures as cf
 
-ROUTER = "http://10.32.82.3:30000/v1/completions"
+# Router endpoint. Override with ROUTER_URL, e.g.
+#   ROUTER_URL=http://<prefill-master-ip>:30000/v1/completions
+ROUTER = os.environ.get("ROUTER_URL", "http://127.0.0.1:30000/v1/completions")
 FILLER = ("The quick brown fox jumps over the lazy dog near the riverbank while "
           "the morning sun rises over the distant mountains and birds sing. ")
 

@@ -215,7 +215,7 @@
       <ul class="tight">
         <li><b>NIC firmware/driver:</b> brought all Thor2 NICs to <b>fw 237.1.148.0 / bnxt_re 237.1.137.0</b> and confirmed MoRI-EP works natively on it (no 235 downgrade — the older PR#191 workaround does <em>not</em> apply to this newer Thor2).</li>
         <li><b>MoRI-EP + MoRI-IO validation:</b> both <code>v1</code> (VRAM atomics) and <code>async_ll</code> EP kernels pass across the fabric; MoRI-IO ~48.5 GB/s; RDMA mesh 347–382 Gb/s on all pairs.</li>
-        <li><b>Docker daemon fix (g27):</b> a rogue snap dockerd was shadowing the system daemon with an AppArmor-confined data-root → caused the MoRI symmetric-memory illegal-access. Restored system docker (<code>/var/lib/docker</code>).</li>
+        <li><b>Docker daemon fix (worker node):</b> a rogue snap dockerd was shadowing the system daemon with an AppArmor-confined data-root → caused the MoRI symmetric-memory illegal-access. Restored system docker (<code>/var/lib/docker</code>).</li>
         <li><b>GPU recovery (g32):</b> a GPU that fell off the PCI bus recovered via BMC hard reboot → back to 8/8.</li>
         <li><b>Model staging:</b> Kimi-K3-MXFP4 (1.5 TB, 96 shards) downloaded to WekaFS <code>/it-share-prj2-1</code>, readable ~1.5 GB/s/node, mounted into the serve container.</li>
         <li><b>Context raise:</b> relaunched at <code>--max-model-len 900000</code> (recipe default 10240) to enable the long-context sweep.</li>
@@ -261,7 +261,7 @@
   <!-- ===================== REPRO ===================== -->
   <h2>Reproduce</h2>
   <div class="card">
-    <p>Adapted recipe at <code>~/mori_session/k3_thor2/run_k3_thor2.sh</code> (g25). Launch <b>worker first, then head</b>:</p>
+    <p>Adapted recipe <code>run.sh</code> on the head node. Launch <b>worker first, then head</b>:</p>
     <div class="mono-block"># worker (rank 1) on node B — FIRST
 MODEL_DIR=/it-share-prj2-1/models/Kimi-K3-MXFP4 ROLE=worker \
   MASTER=&lt;head eno0 IP&gt; MAX_MODEL_LEN=900000 bash run_k3_thor2.sh
@@ -278,7 +278,7 @@ python3 niah_sweep.py --url http://&lt;head IP&gt;:8000 --model kimi-k3 \
   </div>
 
   <div class="foot">
-    Generated for the tus1-p3 MI325X + Thor2 cluster · Kimi-K3 MXFP4 wide-EP via MoRI-EP · base recipe ROCm/MAD PR #193 (<code>wideep_int4_moriep</code>). All figures measured on the live serve; NIAH needle <code>HELIOTROPE-7492</code>, greedy decode.
+    Generated on an MI325X + Thor2 cluster · Kimi-K3 MXFP4 wide-EP via MoRI-EP · base recipe ROCm/MAD PR #193 (<code>wideep_int4_moriep</code>). All figures measured on the live serve; NIAH needle <code>HELIOTROPE-7492</code>, greedy decode.
   </div>
 
 </div>

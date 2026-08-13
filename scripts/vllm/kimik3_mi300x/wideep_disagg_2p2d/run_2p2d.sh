@@ -36,7 +36,7 @@ MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}"
 QUANT_CONFIG="${QUANT_CONFIG:-{\"moe\":{\"weight\":\"int4_per_group_32\"}}}"
 GPU_UTIL="${GPU_UTIL:-0.88}"
 # --- RDMA fabric (OVERRIDABLE) -----------------------------------------------
-# Defaults are the validated Broadcom Thor2 (bnxt RoCE) values used on tus1-p3:
+# Defaults are validated Broadcom Thor2 (bnxt RoCE) values:
 # ibv device names rdma0..rdma7, host NIC eno0, GID index 3. On a DIFFERENT
 # fabric (e.g. Mellanox mlx5) override these, e.g.:
 #   NCCL_IB_HCA=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9 \
