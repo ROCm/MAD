@@ -2,7 +2,7 @@
   "built_images": {
     "sglang-disagg-deepseek-r1-overlay": {
       "model": "sglang-disagg-deepseek-r1-overlay",
-      "docker_image": "<FILL_TAG  single full-overlay image tag, e.g. sglang-v0512post1-overlay:rccl-<sha>smifix-mori-<sha>-rixl-<sha>-mooncake<ver>-gfx942 (append -rdma62 when built with --build-arg ENABLE_RDMA62=1)>",
+      "docker_image": "<FILL_TAG  single full-overlay image tag, e.g. sglang-v0512post1-overlay:rccl-<sha>smifix-mori-<sha>-rixl-<sha>-mooncake<ver>-gfx<arch> (name the rdma-core in the tag too, e.g. -rdma63, since RDMA_CORE_VERSION defaults to 63.0)>",
       "dockerfile": "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile",
       "base_docker": "lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x",
       "build_duration": 0,
@@ -42,7 +42,7 @@
       "KV_TRANSFER_BACKEND": "nixl",
       "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
       "MORI_SHMEM_HEAP_SIZE": "17179869184",
-      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  shared-FS rdma-core build cache; only used when the image was built with --build-arg ENABLE_RDMA62=1, e.g. /shared_inference/rdma-core-cache>",
+      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  shared-FS rdma-core build cache; legacy, only for images that build rdma-core at job start, e.g. /shared_inference/rdma-core-cache>",
       "NCCL_DEBUG": "WARN",
       "NCCL_DEBUG_SUBSYS": "INIT,NET",
       "NCCL_IB_DISABLE": "0",
@@ -124,7 +124,7 @@
       "KV_TRANSFER_BACKEND": "nixl",
       "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
       "MORI_SHMEM_HEAP_SIZE": "17179869184",
-      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  same as context.docker_env_vars; only used when built with --build-arg ENABLE_RDMA62=1>",
+      "RDMA_CORE_CACHE": "<FILL_RDMA_CORE_CACHE  same as context.docker_env_vars; legacy, only for images that build rdma-core at job start>",
       "NCCL_DEBUG": "WARN",
       "NCCL_IB_DISABLE": "0",
       "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  same value as context.docker_env_vars>",

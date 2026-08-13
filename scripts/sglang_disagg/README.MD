@@ -89,13 +89,24 @@ custom split) + `env_vars`; see the Confluence package for a ready 5-node EP16 m
 
 The base image (`docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`) bakes RCCL,
 MoRI and Mooncake/NIXL. To test *specific* versions of these components without
-rebuilding the base, use the merged full overlay, which layers RCCL, MoRI and the
-KV-transfer (Mooncake/NIXL) steps on top of `BASE_DOCKER` in a single image
-(`base -> rccl -> mori -> kvtransfer`):
+rebuilding the base, use the merged full overlay.
+
+Its default base is a `rocm/sgl-dev` tag that already carries all of them, so the
+component stages are **off by default** and the image is the base plus rdma-core.
+Turn a stage on with its `ENABLE_*` arg to A/B that one component against what the
+base ships. The target GPU is chosen in two places only: the `BASE_DOCKER` tag
+suffix (`-mi35x` = gfx950, `-mi30x` = gfx942) and `BUILD_GPU_TARGETS`, which
+`MORI_GPU_ARCHS` derives from.
 
 | Overlay Dockerfile | Substitutes | Key build args |
 |--------------------|-------------|----------------|
-| `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile` | RCCL + MoRI + Mooncake/NIXL (merged) | `RCCL_REPO/RCCL_BRANCH/RCCL_COMMIT`, `MORI_REPO/MORI_BRANCH/MORI_COMMIT` or `MORI_WHEEL_URL`, `MOONCAKE_VERSION`, `UCX_REPO/UCX_COMMIT` and `RIXL_REPO/RIXL_COMMIT` (the AMD "nixl" backend), `ENABLE_RDMA62` (set to `1` on hosts needing a newer rdma-core than the base image ships, to additionally build rdma-core v62 from source) |
+| `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile` | rdma-core, and optionally RCCL + MoRI + Mooncake/NIXL | `BASE_DOCKER`, `BUILD_GPU_TARGETS`; `RDMA_CORE_VERSION` (default `63.0`, built from source — the Broadcom Thor2 `bnxt_re` queue-pair fix; pass an empty value to keep the base image's rdma-core); `ENABLE_RCCL_OVERLAY=1` with `RCCL_REPO/RCCL_BRANCH/RCCL_COMMIT`; `ENABLE_MORI_OVERLAY=1` with `MORI_REPO/MORI_BRANCH/MORI_COMMIT` or `MORI_WHEEL_URL`; `ENABLE_NIXL_OVERLAY=1` with `UCX_REPO/UCX_COMMIT` and `RIXL_REPO/RIXL_COMMIT` (the AMD "nixl" backend); `ENABLE_MOONCAKE_OVERLAY=1` with `MOONCAKE_REF` (default `v0.3.12.post1`, the first release with the cross-host HIP guard) |
+
+> **rdma-core note:** the `bnxt_re` provider in rdma-core 39.0/50.0 corrupts the
+> verbs command buffer for work issued off worker threads, so `ibv_create_qp`
+> fails with EFAULT and the KV-transfer backends lose their queue pairs. That is
+> why `RDMA_CORE_VERSION` defaults to `63.0` rather than being opt-in, and why
+> the stage also drops the vendor `bnxt_re` provider.
 
 > **RCCL note:** a newer rocm-systems RCCL build links `librccl` without
 > the `librocm_smi64.so` `DT_NEEDED` the base carried. Since the overlay is first
