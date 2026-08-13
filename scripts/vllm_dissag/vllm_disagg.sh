@@ -79,7 +79,7 @@ NNODES="${NNODES:-1}"
 MODEL_NAME="${MODEL_NAME:-}"
 xP="${xP:-1}"
 yD="${yD:-1}"
-echo "[vllm_disagg] topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD)))"
+echo "[vllm_disagg] topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD))) TP_SIZE=${TP_SIZE:-1}"
 IPADDRS="${IPADDRS:-localhost}"
 IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 
@@ -92,14 +92,49 @@ host_name=$(hostname)
 # =============================================================================
 # Topology math
 # =============================================================================
+# TP_SIZE is the tensor-parallel degree WITHIN each DP rank on the wideEP path.
+# Historically this path was TP1 (one DP rank per GPU), so TP_SIZE defaults to 1
+# and every pre-existing model resolves to exactly the old numbers.
+#
+# TP>1 is needed when the REPLICATED (non-expert) weights do not fit one GPU:
+# e.g. Kimi-K3 on MI300X has 106.5 GiB of replicated attn + shared-expert weight,
+# so TP1/DP16 would need 190.7 GiB/GPU (> 192 GB HBM once the MoRI heap and KV
+# cache are counted). TP2 halves that to 53.3 GiB/GPU and the model fits.
+#
+#   dp_per_node = GPUS_PER_NODE / TP_SIZE      (DP ranks hosted on one node)
+#   pool DP size = nodes_in_pool * dp_per_node (EP width = pool DP size * TP_SIZE)
 _GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-PREFILL_DP_SIZE=$((xP * _GPUS_PER_NODE))
-DECODE_DP_SIZE=$((yD * _GPUS_PER_NODE))
-DP_PARALLEL_SIZE_LOCAL=${_GPUS_PER_NODE}
-PREFILL_DP_START_RANK=$(( NODE_RANK * _GPUS_PER_NODE ))
+TP_SIZE="${TP_SIZE:-1}"
+if ! [[ "$TP_SIZE" =~ ^[0-9]+$ ]] || [ "$TP_SIZE" -lt 1 ]; then
+    echo "Error: invalid TP_SIZE='${TP_SIZE}' (expected a positive integer)." >&2; exit 1
+fi
+if [ $(( _GPUS_PER_NODE % TP_SIZE )) -ne 0 ]; then
+    echo "Error: TP_SIZE=${TP_SIZE} does not divide GPUS_PER_NODE=${_GPUS_PER_NODE}." >&2; exit 1
+fi
+_DP_PER_NODE=$(( _GPUS_PER_NODE / TP_SIZE ))
+PREFILL_DP_SIZE=$((xP * _DP_PER_NODE))
+DECODE_DP_SIZE=$((yD * _DP_PER_NODE))
+DP_PARALLEL_SIZE_LOCAL=${_DP_PER_NODE}
+PREFILL_DP_START_RANK=$(( NODE_RANK * _DP_PER_NODE ))
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
-DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _GPUS_PER_NODE ))
+DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _DP_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
+export TP_SIZE
+
+# Peer-pool node IPs, ordered by pod index (= global_dp_rank / dp_per_node).
+# A pool that spans MORE THAN ONE node must advertise every peer node to the KV
+# connector: otherwise the connector falls back to the peer pool's MASTER only,
+# and KV writes/notifies aimed at DP ranks living on a peer CHILD node silently
+# miss -> those ranks decode with no context. Single-node pools (xP=1 && yD=1,
+# the historical case) do not need this, so it stays empty there and the emitted
+# command line is unchanged.
+PREFILL_POD_HOSTS=""
+DECODE_POD_HOSTS=""
+if [ "$xP" -gt 1 ] || [ "$yD" -gt 1 ]; then
+    PREFILL_POD_HOSTS=$(printf '%s\n' "${IP_ARRAY[@]:0:$xP}" | paste -sd, -)
+    DECODE_POD_HOSTS=$(printf '%s\n' "${IP_ARRAY[@]:$xP:$yD}" | paste -sd, -)
+fi
+export PREFILL_POD_HOSTS DECODE_POD_HOSTS
 
 # =============================================================================
 # Driver helper functions (shared by all connectors)
@@ -214,7 +249,9 @@ echo "-----------------------------Printing node specific details --------------
 echo "IPADDRS = ${IPADDRS}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
+echo "TP_SIZE=${TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * TP_SIZE)) decode=$((DECODE_DP_SIZE * TP_SIZE)))"
 echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MASTER_ADDR}"
+[ -n "${PREFILL_POD_HOSTS}" ] && echo "PREFILL_POD_HOSTS=${PREFILL_POD_HOSTS}  DECODE_POD_HOSTS=${DECODE_POD_HOSTS}"
 
 # =============================================================================
 # Container barrier + runtime patches (skipped under DRY_RUN)

@@ -247,8 +247,12 @@ export DOCKER_IMAGE_NAME
 NIXL_REPO_DIR=$(pwd)
 LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
-xP="${xP:-1}" #-> Number of Prefill Servers
-yD="${yD:-1}" #-> Number of Decode Servers
+xP="${xP:-1}" #-> Number of Prefill NODES (a pool may span >1 node)
+yD="${yD:-1}" #-> Number of Decode  NODES (a pool may span >1 node)
+# Tensor-parallel degree within each DP rank on the wideEP path. Default 1 keeps
+# the historical one-DP-rank-per-GPU layout; set >1 only when the replicated
+# (non-expert) weights do not fit a single GPU. See vllm_disagg.sh topology math.
+TP_SIZE="${TP_SIZE:-1}"
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
@@ -328,6 +332,8 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+echo "Parallelism: TP_SIZE=$TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$TP_SIZE"
+export TP_SIZE
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -427,11 +433,13 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   niah                   -> benchmark_niah.sh         (long-context retrieval/accuracy)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -566,6 +574,8 @@ docker run --rm \
     -e NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH \
     -e xP=$xP \
     -e yD=$yD \
+    ${TP_SIZE:+-e TP_SIZE=$TP_SIZE} \
+    ${GPUS_PER_NODE:+-e GPUS_PER_NODE=$GPUS_PER_NODE} \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
@@ -590,6 +600,9 @@ docker run --rm \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${NIAH_WORDS:+-e NIAH_WORDS="$NIAH_WORDS"} \
+    ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
+    ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \

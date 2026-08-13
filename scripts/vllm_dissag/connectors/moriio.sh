@@ -120,7 +120,15 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # Peer-pool node list. A kv_producer (prefill) handshakes the DECODE pool, a
+    # kv_consumer (decode) notifies the PREFILL pool. The driver leaves both empty
+    # for single-node pools (xP=1 && yD=1), in which case the key is omitted and
+    # the emitted config is byte-identical to the historical one.
+    local _peer=""
+    if [[ "${kv_role}" == "kv_producer" ]]; then _peer="${DECODE_POD_HOSTS:-}"; else _peer="${PREFILL_POD_HOSTS:-}"; fi
+    local _pod_hosts=""
+    [[ -n "${_peer}" ]] && _pod_hosts=',"moriio_pod_hosts":"'"${_peer}"'"'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}"'}}'
 }
 
 connector_runtime_patch() {
@@ -184,7 +192,15 @@ connector_launch_worker() {
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then
-            extra_args+=(--api-server-count=${_GPUS_PER_NODE})
+            # api-server-count MUST be <= data-parallel-size: the frontend DP
+            # load-balancer round-robins over data_parallel_rank [0, count), so a
+            # count above dp_size sends requests to ranks that do not exist. At
+            # TP1 dp_size >= GPUS_PER_NODE and this resolves to GPUS_PER_NODE
+            # exactly as before; at TP>1 (dp_size = GPUS_PER_NODE/TP per node) it
+            # correctly clamps down.
+            local _api_servers="${_GPUS_PER_NODE}"
+            [ "${dp_size}" -lt "${_api_servers}" ] && _api_servers="${dp_size}"
+            extra_args+=(--api-server-count=${_api_servers})
             local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
             kv_args+=(--kv-transfer-config "${kv_config}")
         else
@@ -204,7 +220,7 @@ connector_launch_worker() {
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
                 vllm serve "${MODEL_PATH}" \
-                    -tp 1 \
+                    -tp "${TP_SIZE:-1}" \
                     --data-parallel-size "${dp_size}" \
                     --data-parallel-size-local "${DP_PARALLEL_SIZE_LOCAL}" \
                     --data-parallel-address "${dp_addr}" \
@@ -224,7 +240,7 @@ connector_launch_worker() {
         fi
 
         vllm serve ${MODEL_PATH} \
-            -tp 1 \
+            -tp "${TP_SIZE:-1}" \
             --data-parallel-size "${dp_size}" \
             --data-parallel-size-local ${DP_PARALLEL_SIZE_LOCAL} \
             --data-parallel-address "${dp_addr}" \
