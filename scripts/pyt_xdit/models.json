@@ -104,7 +104,7 @@
         "multiple_results": "results.csv"
     },
     {
-        "name": "pyt_xdit_ltx_2",
+        "name": "pyt_xdit_ltx_2_3",
         "dockerfile": "../../docker/pyt_xdit",
         "scripts": "run.sh",
         "n_gpus": "8",
@@ -113,11 +113,11 @@
         "tags": [
             "inference",
             "diffusion",
-            "t2v",
+            "t2av",
             "pyt",
             "xdit"
         ],
-        "args": "--workload ltx2",
+        "args": "--workload ltx2_3",
         "multiple_results": "results.csv"
     },
     {
