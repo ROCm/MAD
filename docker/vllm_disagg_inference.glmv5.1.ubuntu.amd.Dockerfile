@@ -89,16 +89,16 @@ FROM ${BASE_IMAGE}
 ENTRYPOINT []
 WORKDIR /app
 
-ARG GFX_COMPILATION_ARCH="gfx942"
-ARG PYTORCH_ROCM_ARCH="gfx942"
-ARG MAX_JOBS=32
+ARG GFX_COMPILATION_ARCH="gfx950"
+ARG BUILD_ROCM_ARCH="gfx950"
+ARG BUILD_MAX_JOBS=32
 # NIXL/RIXL transport for the rixl connector. GLM-5.1 is served over MoRI-EP + MoRI-IO,
 # so the UCX/RIXL/rocSHMEM/DeepEP stack is dead weight here: it lengthens the build and
 # ships transports this recipe never selects. Default 0 => lean MoRI-EP-only image, which
 # is also exactly how the validated image (glm5.1-vllm027-b8) was built. Set
 # --build-arg WITH_NIXL=1 only if you need the rixl connector from this same Dockerfile.
 ARG WITH_NIXL=0
-ARG NIC_COMPILATION_ARCH="cx7"
+ARG NIC_COMPILATION_ARCH="ionic"
 
 # -----------------------------------------------------------------------------
 # 1. MoRI: replace the base's bundled MoRI with the validated ROCm/MoRI @ v1.2.1
@@ -119,7 +119,11 @@ ARG MORI_REPO=https://github.com/ROCm/mori.git
 # base's bundled mori for debugging.
 ARG WITH_MORI_BUILD=1
 ARG MORI_REF=42e895472b08
-ENV MORI_GPU_ARCHS=gfx942
+ENV MORI_GPU_ARCHS=gfx950
+# AAC MI355X: Pensando Ionic (AINIC). Pin device-side IBGDA dispatch to the ionic
+# provider. Auto-detect would also work (8x rocep*s0 -> driver readlink -> ionic,
+# libionic.so.1.1.54.0-184 present), but pin it so the JIT path is deterministic.
+ENV MORI_DEVICE_NIC=ionic
 # Newer MoRI added the UMBP subsystem which requires gRPC (grpcpp/grpcpp.h) not
 # present in this base; UMBP is unrelated to the EP dispatch/combine kernels, so
 # disable it to avoid pulling in a gRPC build dependency.
@@ -196,35 +200,34 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # disagg long-ctx). NIAH-validated 1P/1D + 2P/1D + 1P/2D, 2k-35k, decode PIECEWISE.
 ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
 ENV VLLM_TARGET_DEVICE=rocm \
-    PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
-    MAX_JOBS=${MAX_JOBS}
+    PYTORCH_ROCM_ARCH=${BUILD_ROCM_ARCH} \
+    MAX_JOBS=${BUILD_MAX_JOBS}
 RUN rm -rf /tmp/vllm-src && \
     git clone "${VLLM_REPO}" /tmp/vllm-src && \
     cd /tmp/vllm-src && git checkout "${VLLM_REF}" && \
     echo "VLLM_REF=${VLLM_REF}@$(git rev-parse HEAD)" >> /app/versions.txt && \
     pip uninstall -y vllm 2>/dev/null || true && \
     pip install --no-deps --no-build-isolation -v . && \
-    python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
+    python3 -c "import importlib.metadata as m, pathlib; d=m.distribution('vllm'); print('vLLM', d.version, 'from', pathlib.Path(d.locate_file('vllm')))" && \
     rm -rf /tmp/vllm-src
 
 # Cross-check MoRI + AITER survived the vLLM install (no silent downgrade).
-RUN python3 - <<'PYEOF'
-from importlib.metadata import version as v, PackageNotFoundError
-def get(names):
-    for n in names:
-        try: return v(n)
-        except PackageNotFoundError: pass
-    return None
-av = get(("amd-aiter", "amd_aiter", "aiter"))
-# Verify the aiter install survived the vLLM install (present, not silently downgraded
-# to a base-bundled wheel). We pin aiter by commit (e03fa6040), whose reported version
-# string varies by build, so assert presence rather than a hardcoded commit substring. Do NOT
-# `import aiter` here: it pulls torch->amdsmi->libamd_smi.so, not loadable in the no-GPU
-# build sandbox (same reason the Stage-2 verify reads mla.py from disk instead).
-assert av, "AITER missing after vLLM install (expected bundled 0.1.19 or source-built ref)"
-import mori, mori.io, mori.ops
-print("Post-vLLM check OK: AITER", av, "present + MoRI importable")
-PYEOF
+RUN python3 -c "$(printf '%s\n' \
+  'from importlib.metadata import version as v, PackageNotFoundError' \
+  'def get(names):' \
+  '    for n in names:' \
+  '        try: return v(n)' \
+  '        except PackageNotFoundError: pass' \
+  '    return None' \
+  'av = get(("amd-aiter", "amd_aiter", "aiter"))' \
+  '# Verify the aiter install survived the vLLM install (present, not silently downgraded' \
+  '# to a base-bundled wheel). We pin aiter by commit (e03fa6040), whose reported version' \
+  '# string varies by build, so assert presence rather than a hardcoded commit substring. Do NOT' \
+  '# `import aiter` here: it pulls torch->amdsmi->libamd_smi.so, not loadable in the no-GPU' \
+  '# build sandbox (same reason the Stage-2 verify reads mla.py from disk instead).' \
+  'assert av, "AITER missing after vLLM install (expected bundled 0.1.19 or source-built ref)"' \
+  'import mori, mori.io, mori.ops' \
+  'print("Post-vLLM check OK: AITER", av, "present + MoRI importable")')"
 
 # -----------------------------------------------------------------------------
 # 4. vllm-router (DP-rank round-robin + MoRIIO connector) — built in, so NO
