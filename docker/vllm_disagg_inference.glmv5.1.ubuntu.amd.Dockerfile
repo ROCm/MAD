@@ -92,9 +92,12 @@ WORKDIR /app
 ARG GFX_COMPILATION_ARCH="gfx942"
 ARG PYTORCH_ROCM_ARCH="gfx942"
 ARG MAX_JOBS=32
-# NIXL/RIXL transport for the rixl connector. Default 1 => all connectors built
-# (UCX/RIXL/rocSHMEM/DeepEP). Set --build-arg WITH_NIXL=0 for a lean MoRI-EP-only image.
-ARG WITH_NIXL=1
+# NIXL/RIXL transport for the rixl connector. GLM-5.1 is served over MoRI-EP + MoRI-IO,
+# so the UCX/RIXL/rocSHMEM/DeepEP stack is dead weight here: it lengthens the build and
+# ships transports this recipe never selects. Default 0 => lean MoRI-EP-only image, which
+# is also exactly how the validated image (glm5.1-vllm027-b8) was built. Set
+# --build-arg WITH_NIXL=1 only if you need the rixl connector from this same Dockerfile.
+ARG WITH_NIXL=0
 ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------
