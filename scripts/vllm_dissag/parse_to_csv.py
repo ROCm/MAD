@@ -44,35 +44,45 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     current_concurrency = None
 
     for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in previous sections (from [RUNNING] line)
-        if i > 1:
-            prev_section = sections[i-1]
+        # Config for result i lives in sections[i-1]. That is TRUE FOR i==1 TOO:
+        # sections[0] is the preamble before the first result banner, and it holds
+        # the FIRST cell's [RUNNING] line. The old code guarded this with `if i > 1`
+        # -- which reads like a bounds check but is not one, since enumerate starts
+        # at 1 so i-1 is 0, a valid index. The effect was that every run silently
+        # lost its first (lowest-concurrency) cell: 21 [RUNNING] cells -> 20 rows.
+        prev_section = sections[i-1]
 
-            # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-            config_match = re.search(
-                r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
-                prev_section
-            )
-            # Fallback: extract from Namespace(...) in vllm bench serve output
-            if not config_match:
-                isl_m = re.search(r'random_input_len=(\d+)', prev_section)
-                osl_m = re.search(r'random_output_len=(\d+)', prev_section)
-                con_m = re.search(r'max_concurrency=(\d+)', prev_section)
-                if isl_m and osl_m and con_m:
-                    config_match = type('Match', (), {
-                        'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
-                    })()
-            if config_match:
-                current_input_seq_len = int(config_match.group(1))
-                current_output_seq_len = int(config_match.group(2))
-                current_concurrency = int(config_match.group(3))
+        # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
+        config_match = re.search(
+            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
+            prev_section
+        )
+        # Fallback: extract from Namespace(...) in vllm bench serve output
+        if not config_match:
+            isl_m = re.search(r'random_input_len=(\d+)', prev_section)
+            osl_m = re.search(r'random_output_len=(\d+)', prev_section)
+            con_m = re.search(r'max_concurrency=(\d+)', prev_section)
+            if isl_m and osl_m and con_m:
+                config_match = type('Match', (), {
+                    'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
+                })()
+        if config_match:
+            current_input_seq_len = int(config_match.group(1))
+            current_output_seq_len = int(config_match.group(2))
+            current_concurrency = int(config_match.group(3))
 
         # Extract Total token throughput (tok/s) from benchmark result section
         throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
         throughput = float(throughput_match.group(1)) if throughput_match else None
 
         # Only process if we have a valid configuration from [RUNNING] line and throughput
-        if current_input_seq_len and current_output_seq_len and current_concurrency and throughput is not None:
+        if not (current_input_seq_len and current_output_seq_len and current_concurrency
+                and throughput is not None):
+            # Never drop a measured result without saying so. The old silent drop
+            # made a parser bug look like a benchmark-loop bug.
+            print("Warning: benchmark result #%d has no parseable config/throughput "
+                  "-- row dropped" % i)
+        else:
             config_key = (current_input_seq_len, current_output_seq_len, current_concurrency)
 
             results[config_key]['concurrency'] = current_concurrency
@@ -121,13 +131,17 @@ def _get_run_metadata(pipeline: str = "vllm"):
     run_deepep = os.environ.get('RUN_DEEPEP', '0')
     gpus = os.environ.get('GPUS_PER_NODE', '8')
 
-    # Determine backend tag
+    # Determine backend tag. RUN_MORI/RUN_DEEPEP are the LEGACY flags; the current
+    # axes are CONNECTOR={rixl|moriio} x WIDE_EP x EP_BACKEND, resolved and exported
+    # by run_xPyD_models.slurm:188-237 (legacy flags are mapped onto them there).
+    # The fallback used to be hardcoded 'nixl', which mislabelled every run driven by
+    # CONNECTOR= rather than the legacy flags -- including all of the MoRIIO ones.
     if run_mori == '1':
         backend = 'mori'
     elif run_deepep == '1':
         backend = 'deepep'
     else:
-        backend = 'nixl'
+        backend = os.environ.get('CONNECTOR', 'moriio').lower()
 
     return {
         'pipeline': pipeline,
@@ -139,7 +153,12 @@ def _get_run_metadata(pipeline: str = "vllm"):
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        # Was hardcoded 'gfx942' (MI300X), so every MI355X run was filed under the
+        # wrong arch in perf.csv. This parser usually runs on the head/login node,
+        # which has no GPU, so it cannot reliably introspect the arch -- take it from
+        # the environment, defaulting to the arch this recipe targets.
+        #   gfx942 = MI300X/MI325X, gfx950 = MI355X.
+        'gpu_architecture': os.environ.get('GPU_ARCHITECTURE', 'gfx950'),
     }
 
 
