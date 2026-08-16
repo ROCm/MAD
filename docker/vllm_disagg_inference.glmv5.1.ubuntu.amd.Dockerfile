@@ -98,6 +98,14 @@ ARG MAX_JOBS=32
 # is also exactly how the validated image (glm5.1-vllm027-b8) was built. Set
 # --build-arg WITH_NIXL=1 only if you need the rixl connector from this same Dockerfile.
 ARG WITH_NIXL=0
+# NIC_COMPILATION_ARCH is consumed by exactly one build step -- DeepEP's
+# `setup.py --nic` -- which only runs under WITH_NIXL=1. On the default lean image
+# (WITH_NIXL=0) this ARG is inert. Values: "cx7" (Mellanox), "thor2" (Broadcom bnxt_re).
+# It does NOT select MoRI's NIC backend: MoRI is JIT-built and resolves the NIC at
+# runtime (/sys/class/infiniband -> lspci vendor -> verbs provider lib -> mlx5), and the
+# image ships libmlx5 / libbnxt_re / libionic, so one image serves CX7 and Thor2 alike.
+# Override only to force it: MORI_DEVICE_NIC=bnxt|ionic|mlx5 as a container env var.
+# Deliberately NOT baked in as ENV here -- that would pin this shared image to one fabric.
 ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------

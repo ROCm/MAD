@@ -244,15 +244,37 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # ---------------------------------------------------------------------------
 CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_ARGS=""
-if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
-  echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
+_load_connector_env() {   # $1 = env file
+  local _line _k _v
   while IFS= read -r _line; do
     [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
     _k="${_line%%=*}"; _v="${_line#*=}"
     CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
-  done < "$CONNECTOR_ENV_FILE"
+  done < "$1"
+}
+if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
+  echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
+  _load_connector_env "$CONNECTOR_ENV_FILE"
 else
   echo "WARN: connector env file not found: $CONNECTOR_ENV_FILE" >&2
+fi
+
+# Optional per-fabric profile: <connector>.<FABRIC_PROFILE>.env, layered AFTER the
+# base file. The base <connector>.env documents its RDMA values as cluster-specific
+# and meant to be overridden per fabric; this is that hook, without editing them.
+# Later `-e KEY=` wins in docker run, so the profile overrides the base — while a
+# submit-time export of the same name still beats both (same ${!_k:-$_v} rule).
+# Unset FABRIC_PROFILE => byte-identical behaviour to before (no second file).
+# Example: FABRIC_PROFILE=thor2 loads connectors/moriio.thor2.env (Broadcom bnxt_re).
+if [[ -n "${FABRIC_PROFILE:-}" ]]; then
+  FABRIC_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.${FABRIC_PROFILE}.env"
+  if [[ -f "$FABRIC_ENV_FILE" ]]; then
+    echo "Loading connector platform env: $FABRIC_ENV_FILE (FABRIC_PROFILE=${FABRIC_PROFILE})"
+    _load_connector_env "$FABRIC_ENV_FILE"
+  else
+    echo "Error: FABRIC_PROFILE=${FABRIC_PROFILE} set but ${FABRIC_ENV_FILE} not found." >&2
+    exit 1
+  fi
 fi
 
 if [[ -z "${DOCKER_IMAGE_NAME:-}" ]]; then
