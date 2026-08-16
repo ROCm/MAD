@@ -245,12 +245,21 @@ connector_launch_worker() {
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
+    # v0.27 MLA fix: the *_kv_cache_update op dispatches the STABLE-ABI concat_and_cache_mla
+    # whose boxed kernel does NOT compose inside the Dynamo-FX-partitioned compiled graph
+    # -> "RuntimeError: unknown parameter type" on the first real MLA decode (passes boot +
+    # warmup via the fake path, then crashes). splitting_ops-list membership alone doesn't
+    # cut the graph there. use_inductor_graph_partition=true moves partitioning to inductor
+    # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the KV-update so
+    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION (default 1).
+    local _igp_json=""
+    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-1}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
         local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
-        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
         exec_args+=(--cudagraph-capture-sizes ${_capture_sizes})
     else
-        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
     fi
 
     # Per-model flags from models.yaml (driver-exported; empty if none).
@@ -264,6 +273,25 @@ connector_launch_worker() {
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
+
+        # Per-role MoRI EP buffer width. VLLM_MORI_MAX_TOKENS_PER_RANK sizes the
+        # dispatch/combine buffer; unset (0) it inherits max_num_batched_tokens -- a
+        # chunked-prefill SCHEDULER knob (8192) -- so a decode instance moves an
+        # 8192-token-wide buffer every step, per layer: ~302ms vs ~88ms TPOT (3.4x).
+        # Prefill and decode want OPPOSITE values (prefill genuinely dispatches wide
+        # batches and must keep the large buffer), but models.yaml env: applies to BOTH
+        # roles -- so split it here, mirroring PREFILL/DECODE_MORI_BACKEND above.
+        if [[ "$log_prefix" == "decode" ]]; then
+            [[ -n "${DECODE_MORI_MAX_TOKENS_PER_RANK:-}" ]] && \
+                export VLLM_MORI_MAX_TOKENS_PER_RANK="${DECODE_MORI_MAX_TOKENS_PER_RANK}"
+            # Recv capacity must still cover vLLM's profiling dummy run (which pushes
+            # max_num_batched_tokens tokens) even though steady-state dispatch is narrow.
+            [[ -n "${DECODE_MORI_MAX_TOTAL_RECV_TOKENS:-}" ]] && \
+                export VLLM_MORI_MAX_TOTAL_RECV_TOKENS="${DECODE_MORI_MAX_TOTAL_RECV_TOKENS}"
+        else
+            export VLLM_MORI_MAX_TOKENS_PER_RANK="${PREFILL_MORI_MAX_TOKENS_PER_RANK:-0}"
+            export VLLM_MORI_MAX_TOTAL_RECV_TOKENS="${PREFILL_MORI_MAX_TOTAL_RECV_TOKENS:-0}"
+        fi
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then

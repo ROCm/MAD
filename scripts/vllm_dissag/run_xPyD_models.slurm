@@ -76,7 +76,7 @@ echo "Running from: $(pwd)"
 # model's own recipe — GLM-5.1 DSA needs block=1 + AITER MLA on), while a genuine
 # submit-time `-e VAR=...` still wins. Precedence: image-baked < models.yaml < submit -e.
 # Captured HERE (before the slurm sets any defaults) so it reflects user intent only.
-_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+_RECIPE_ENV_KEYS="VLLM_USE_V1 DECODE_MORI_MAX_TOTAL_RECV_TOKENS PREFILL_MORI_MAX_TOTAL_RECV_TOKENS DECODE_MORI_MAX_TOKENS_PER_RANK PREFILL_MORI_MAX_TOKENS_PER_RANK VLLM_MORI_MAX_TOKENS_PER_RANK VLLM_MORI_WARP_NUM_PER_BLOCK VLLM_MORI_BLOCK_NUM VLLM_MORI_RDMA_BLOCK_NUM VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
 MODELS_YAML_PROTECT=""
 for _k in $_RECIPE_ENV_KEYS; do
     [ -n "${!_k+x}" ] && MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT} ${_k}"
@@ -426,15 +426,22 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
+# Pick the routable fabric IP, not just hostname -I's first entry. These nodes expose
+# multiple NICs (e.g. a 10.224.x overlay listed BEFORE the routable 10.158.x fabric);
+# taking $1 blindly can advertise an unreachable addr -> prefill/decode barrier hangs
+# "Waiting for nodes" forever. Prefer FABRIC_SUBNET (default 10.158.), fall back to $1.
+FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+# From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
+_pick_fabric_ip() {
+    awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
+}
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | _pick_fabric_ip)
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
+    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I' | _pick_fabric_ip)
     IPS+=("$IP")
 done
 
@@ -549,7 +556,12 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        # Require a regular file AFTER symlink resolution: these mounts are built on
+        # ONE node but applied on ALL nodes, and vendor NIC libs (e.g. libionic.so.1)
+        # can be a DANGLING symlink on some nodes -> bind-mount fails "not a directory"
+        # -> container create exit 125. `-f` (follows symlink, requires regular file)
+        # skips those; the fabric in use (mlx5) is still mounted where present.
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 
@@ -578,6 +590,8 @@ docker run --rm \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     ${_JIT_CACHE_MOUNT} \
+    ${GLM_KERNEL_PATCH:+-v ${GLM_KERNEL_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py:ro} \
+    ${GLM_BACKEND_PATCH:+-v ${GLM_BACKEND_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py:ro} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \

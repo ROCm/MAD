@@ -235,6 +235,14 @@ DeepSeek-R1:
 GLM-5.1-FP8:
   env:
     VLLM_USE_V1: "1"
+    # v0.27: layer_name is wrapped in a torch OpaqueBase (LayerName) and passed through
+    # the unified_mla_kv_cache_update / unified_mla_attention custom ops. On this ROCm
+    # torch 2.12 build the opaque-type boxing FAILS -> "RuntimeError: unknown parameter
+    # type" at torch/_ops.py on the first real MLA decode forward (the fake/compile path
+    # returns early, so it passes boot+warmup then crashes on first request -> DP gloo
+    # cascade -> 0 prefill/0 decode). VLLM_USE_LAYERNAME=0 makes LayerNameType=str (the
+    # pre-2.11 path), so a plain string passes through the op. No image rebuild needed.
+    VLLM_USE_LAYERNAME: "0"
     VLLM_ROCM_USE_AITER: "1"
     VLLM_ROCM_USE_AITER_RMSNORM: "1"
     VLLM_ROCM_USE_AITER_MLA: "1"
@@ -248,6 +256,21 @@ GLM-5.1-FP8:
     VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
     PREFILL_MORI_BACKEND: "mori_high_throughput"
     DECODE_MORI_BACKEND: "mori_low_latency"
+    # MoRI EP dispatch/combine buffer width. Without this it inherits
+    # max_num_batched_tokens (8192) -- a chunked-prefill SCHEDULER setting -- so every
+    # decode step moves an 8192-token-wide buffer per layer x78 layers regardless of the
+    # real batch. That is a fixed ~300ms/step floor (~320x this model's HBM-bandwidth
+    # bound). Sizing it for the actual decode batch gives TPOT 302ms -> 88ms (3.4x),
+    # matching the published EP8 figure. Needs vLLM >= e8c186f71b.
+    # Prefill is unaffected (it genuinely dispatches wide batches).
+    # Per-role (moriio.sh -> VLLM_MORI_MAX_TOKENS_PER_RANK). MUST be >= max_num_seqs *
+    # num_experts_per_token (top-8 here): the value is also the RECV capacity
+    # (mori MaxNumTokensToRecv = worldSize * this). 512 tripped a device assert
+    # "Total recv token overflow". 2048 is safe and still 4x smaller than 8192. Decode wants
+    # the buffer sized to its real batch; prefill must KEEP the wide buffer (0 = inherit
+    # max_num_batched_tokens) because it genuinely dispatches 8192-token chunks.
+    # Recv capacity stays wide enough for the profiling dummy run (8192 tokens) and
+    # bursty top-8 routing: worldSize * ceil(65536/worldSize) >= 8192 for EP8..EP32.
     MORI_SHMEM_HEAP_SIZE: "17179869184"
     # DSA sparse-indexer logits-buffer cap (crash fix). The indexer prefill computes an
     # M*N fp32 logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim
@@ -275,4 +298,13 @@ GLM-5.1-FP8:
   prefill:
     dp: ""
   decode:
-    dp: ""
+    # PERF: the MoRI EP dispatch buffer width is max_num_batched_tokens (via
+    # FusedMoEConfig.max_num_tokens -> all2all.py max_num_inp_token_per_rank), so the
+    # decode role otherwise runs an 8192-token-wide all2all every step: ~302ms TPOT.
+    # mori bounds recv capacity BY the send width (MaxNumTokensToRecvPerRank returns
+    # min(ceil(maxTotalRecvTokens/ws), maxNumInpTokenPerRank)), so the buffer must still
+    # cover vLLM's profiling dummy run -- it cannot be shrunk via env alone. Lowering
+    # this knob on the DECODE role lowers both consistently.
+    # Value must stay >= typical prompt length: 512 gave 87.9ms TPOT but 13.1s TTFT
+    # (a 1024-token prompt could not be admitted in one step). 2048 keeps TTFT healthy.
+    dp: "--max-num-batched-tokens 2048"
