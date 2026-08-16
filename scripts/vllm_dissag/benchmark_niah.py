@@ -8,8 +8,13 @@
 #   NIAH_MODEL   model name/tag the server serves (required — the served path)
 #   NIAH_WORDS   comma list of context sizes in words (default 2000,8000,20000,35000)
 #   NIAH_MAXTOK  max_tokens for the answer (default 2048)
-#   NIAH_SEEDS   comma list of needle-layout seeds (default 0,1,2); summary reports
-#                mean/min/max across seeds to separate real accuracy from variance
+#   NIAH_SEEDS   comma list of layout seeds (default 0,1,2); summary reports
+#                mean/min/max across seeds to separate real accuracy from variance.
+#                Each seed varies BOTH the filler words and the needle offsets
+#                (seed 0 = the historical evenly-spaced layout, kept for
+#                comparability). Varying offsets is what gives coverage of
+#                position-dependent failures -- lost-in-the-middle, RoPE
+#                extrapolation, and corruption at prefill CHUNK BOUNDARIES.
 #   NIAH_TIMEOUT per-request timeout seconds (default 1800)
 #   NIAH_WARMUP  1 (default) = send one throwaway request per context length BEFORE
 #                scoring, so the first-hit JIT/kernel-autotune compile happens outside
@@ -53,7 +58,19 @@ def make_haystack(n_words, seed=0):
     words = [rng.choice(FILLER) for _ in range(n_words)]
     step = max(n_words // (len(ANIMALS) + 1), 1)
     for i, animal in enumerate(ANIMALS):
-        words[min((i + 1) * step, len(words) - 1)] = animal
+        base = (i + 1) * step
+        # Needle offsets must vary with the seed, or the seeds only reshuffle
+        # filler and every seed probes the SAME 10 positions. That hides exactly
+        # the failure mode this stack is suspected of: prefill splits at
+        # max_num_batched_tokens, and a needle pinned on a bad chunk boundary is
+        # then missed identically by all seeds and reported as a confident mean.
+        #
+        # seed 0 reproduces the historical evenly-spaced layout bit-for-bit so
+        # earlier seed-0 results stay comparable. Jitter is < step and slot i+1
+        # starts at (i+2)*step, so needles can never collide or reorder; all 10
+        # always survive.
+        off = 0 if seed == 0 else rng.randrange(step)
+        words[min(base + off, len(words) - 1)] = animal
     return " ".join(words)
 
 
@@ -123,19 +140,42 @@ def main():
     for n in WORDS:
         results[n] = [run(n, s) for s in SEEDS]
     print("=== NIAH summary (mean/min/max across %d seed(s)) ===" % len(SEEDS), flush=True)
+    # EXIT-CODE CONTRACT (benchmark_niah_perf.sh:64 gates the perf phase on this):
+    #   3 = some length had NO usable result at all (dead server / timeout)
+    #   4 = every length scored, but some mean < NIAH_MIN_SCORE (retrieval broken)
+    #   0 = all lengths scored >= NIAH_MIN_SCORE
+    # Previously main() always fell through to an implicit `return None` -> exit 0,
+    # so the gate could never fire and a dead server produced "0.00 tok/s SUCCESS".
+    min_score = float(os.environ.get("NIAH_MIN_SCORE", "8.0"))
+    any_noresult = False
+    any_lowscore = False
     for n in WORDS:
         scored = results[n]
         vals = [v for v in scored if v is not None]
         n_to = sum(1 for v in scored if v is None)  # timeouts/errors, excluded from mean
         if not vals:
+            any_noresult = True
             print("  words=%6d  NO-RESULT (%d/%d timed out or errored — likely cold compile; "
                   "raise NIAH_TIMEOUT or keep NIAH_WARMUP=1)" % (n, n_to, len(scored)), flush=True)
             continue
         mean = sum(vals) / len(vals)
         extra = ("  [%d timeout/err excluded]" % n_to) if n_to else ""
-        print("  words=%6d  mean=%.1f/10  min=%d  max=%d  (n=%d)%s"
-              % (n, mean, min(vals), max(vals), len(vals), extra), flush=True)
+        verdict = "" if mean >= min_score else "  <-- BELOW NIAH_MIN_SCORE=%.1f" % min_score
+        if mean < min_score:
+            any_lowscore = True
+        print("  words=%6d  mean=%.1f/10  min=%d  max=%d  (n=%d)%s%s"
+              % (n, mean, min(vals), max(vals), len(vals), extra, verdict), flush=True)
+    if any_noresult:
+        print("=== NIAH VERDICT: FAIL (no usable result at one or more lengths) ===",
+              flush=True)
+        return 3
+    if any_lowscore:
+        print("=== NIAH VERDICT: FAIL (retrieval below NIAH_MIN_SCORE=%.1f) ===" % min_score,
+              flush=True)
+        return 4
+    print("=== NIAH VERDICT: PASS (all lengths >= %.1f/10) ===" % min_score, flush=True)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
