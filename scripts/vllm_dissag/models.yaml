@@ -201,12 +201,21 @@ DeepSeek-R1:
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):
-#   - KV_BLOCK_SIZE=1        (DSA sparse indexer REQUIRES block-size 1; DS uses 16)
+#   - KV_BLOCK_SIZE=1        (DS uses 16. NOT a hard DSA requirement on ROCm -- an
+#     earlier revision of this comment claimed the sparse indexer "REQUIRES" 1, which
+#     inverts the actual constraint: rocm_aiter_mla_sparse.py:283 returns [1, 64] and
+#     indexer.py:137 returns `[1, 64] if current_platform.is_rocm() else [64]`, i.e.
+#     ROCm is the PERMISSIVE branch and it is non-ROCm that is locked to 64. Measured
+#     1 vs 64 on this stack: <2% either way, so 1 is kept as the validated default,
+#     but 64 is a legal experiment -- if you try it, see the block_size assert in
+#     moriio_connector.py, which may need to be relaxed to an override.)
 #   - VLLM_ROCM_USE_AITER_MLA=1  (GLM MLA path ON via AITER sparse; DS sets 0)
-#   - prefill EAGER (NONE), decode PIECEWISE  (prefill cudagraph capture deadlocks
-#     on this stack; decode PIECEWISE captures cleanly on DSA and is a ~3.7x ITL win
-#     (validated: ~69ms vs ~264ms eager). Global VLLM_CUDAGRAPH_MODE=NONE as the
-#     safe floor; per-role PREFILL=NONE / DECODE=PIECEWISE override it.)
+#   - prefill EAGER (NONE), decode FULL_AND_PIECEWISE  (prefill cudagraph capture
+#     deadlocks on this stack. Decode was PIECEWISE historically, but PIECEWISE splits
+#     the decode graph on the 3 DSA ops x 78 layers (~234 launch boundaries/step) --
+#     a batch-INDEPENDENT ~64ms floor. FULL_AND_PIECEWISE measured TPOT 104ms -> 34-40ms
+#     at concurrency 16/32/64. Global VLLM_CUDAGRAPH_MODE=NONE as the safe floor;
+#     per-role PREFILL=NONE / DECODE=FULL_AND_PIECEWISE override it.)
 # Note: block=1 + AITER_MLA=1 are ALREADY the moriio.sh connector defaults — GLM
 # keeps them; DeepSeek is the one that overrides them off. Set here explicitly so
 # the recipe is self-documenting and robust to connector default changes.
@@ -264,15 +273,39 @@ GLM-5.1-FP8:
     # matching the published EP8 figure. The knob is decode.dp below -- prefill is
     # unaffected (it genuinely dispatches wide 8192-token chunked-prefill batches).
     MORI_SHMEM_HEAP_SIZE: "17179869184"
-    # DSA sparse-indexer logits-buffer cap (crash fix). The indexer prefill computes an
-    # M*N fp32 logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim
-    # when M*N*4 > this budget. Default 512MB lets an 8192-token prefill build a single
-    # 268MB buffer + launch the fp8_mqa_logits kernel at grid=(8192,), which HARD-FAULTS
-    # the worker on gfx942 (silent GPU fault -> DP group collapse -> 503 at >=8k prompts).
-    # Capping at 64MB forces M-dim sub-chunking (~2k tokens/chunk) so the buffer and the
-    # kernel launch stay bounded. Root cause: vllm/v1/attention/ops/triton_fp8_mqa_logits.py
-    # fp8_mqa_logits_gfx942; chunking logic: mla/indexer.py split_indexer_prefill_chunks.
-    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "64"
+    # DSA sparse-indexer logits-buffer cap. The indexer prefill computes an M*N fp32
+    # logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim when
+    # M*N*4 > this budget.
+    #
+    # The 64MB value was a gfx942 (MI300X) CRASH WORKAROUND: there, a single 8192-token
+    # prefill built a 268MB buffer and launched fp8_mqa_logits at grid=(8192,), which
+    # hard-faulted the worker (silent GPU fault -> DP group collapse -> 503 at >=8k).
+    #
+    # THAT CRASH CANNOT HAPPEN ON gfx950 (MI355X). The vendored workaround kernel is
+    # behind a hard architecture gate: rocm_aiter_mla_sparse.py:591 dispatches
+    # fp8_mqa_logits_gfx942 only `if _ON_GFX942`. Verified live in-image on mi355-gpu-45:
+    # _ON_GFX942 = False, arch = gfx950:sramecc+:xnack-. We take AITER's mainline kernel.
+    # The gfx942 module even self-describes as "Temporary gfx942 fallback" for that
+    # part's 64 KiB LDS budget -- an MI300X constraint, not an MI355X one.
+    #
+    # Cost of keeping 64MB here: it is 8x TIGHTER than upstream's 512MB default, and the
+    # sub-chunk count is ISL-dependent. Simulated with vLLM's own
+    # split_indexer_prefill_chunks at ISL=28672 (1 request):
+    #     64MB -> 50 sub-chunks    512MB -> 7    2048MB -> 2    4096MB -> 1
+    # Each sub-chunk is a separate kernel chain over all 78 layers, so 64MB pays ~50x the
+    # per-chunk launch/setup overhead. Same failure CLASS as the decode-cudagraph finding
+    # (DECODE_CUDAGRAPH_MODE, section 44): work needlessly split into many small pieces,
+    # each paying fixed cost, showing up as a batch-independent latency floor.
+    #
+    # 2048MB -> 2 sub-chunks, peak logits buffer 2.00 GiB. We have ~31 GiB/GPU HBM idle
+    # (engine suggests --kv-cache-memory=126.47GiB vs 95.08GiB in use), so this is well
+    # inside headroom rather than scraping the last drop. NOT raised to 4096MB (1 chunk)
+    # deliberately: 2048 captures nearly all of the 50x reduction at half the peak memory.
+    #
+    # If a >=8k prefill ever faults after this change, this line is the first suspect --
+    # revert to "64" and re-test. Chunking logic: mla/indexer.py
+    # split_indexer_prefill_chunks; dispatch gate: ops/rocm_aiter_mla_sparse.py:591.
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "2048"
     # NCCL heartbeat watchdog: at long context (>~8k) a DP rank's sparse-MLA/MoE
     # all2all collective can exceed the default HeartbeatMonitor timeout ->
     # ProcessGroupNCCL::HeartbeatMonitor::runLoop() declares the rank dead and
@@ -289,6 +322,307 @@ GLM-5.1-FP8:
   dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
   prefill:
     dp: ""
+  decode:
+    # PERF: the MoRI EP dispatch buffer width is max_num_batched_tokens (via
+    # FusedMoEConfig.max_num_tokens -> all2all.py max_num_inp_token_per_rank), so the
+    # decode role otherwise runs an 8192-token-wide all2all every step: ~302ms TPOT.
+    # mori bounds recv capacity BY the send width (MaxNumTokensToRecvPerRank returns
+    # min(ceil(maxTotalRecvTokens/ws), maxNumInpTokenPerRank)), so the buffer must still
+    # cover vLLM's profiling dummy run -- it cannot be shrunk via env alone. Lowering
+    # this knob on the DECODE role lowers both consistently.
+    # Value must stay >= typical prompt length: 512 gave 87.9ms TPOT but 13.1s TTFT
+    # (a 1024-token prompt could not be admitted in one step). 2048 keeps TTFT healthy.
+    dp: "--max-num-batched-tokens 2048"
+
+
+# =============================================================================
+# GLM-5.2 (AIMODELS-1198). Weights are pre-staged on the AAC shared FS -- no HF
+# download: /shared/data/amd_int/models/GLM-5.2-FP8   (704G, 141 shards)
+#          /shared/data/amd_int/models/GLM-5.2-MXFP4 (408G, 282 shards)
+#
+# GLM-5.2 == GLM-5.1 architecturally (verified by diffing config.json):
+#   GlmMoeDsaForCausalLM, 78 layers (3 dense + 75 MoE), 256 routed + 1 shared expert,
+#   top-8, sigmoid+noaux_tc scale 2.5, index_topk=2048, first_k_dense_replace=3,
+#   max_position_embeddings=1048576.
+# Therefore the entire validated GLM-5.1-FP8 recipe below transfers unchanged. Both
+# entries are wideEP-only (add to WIDE_EP_ONLY_MODELS in run_xPyD_models.slurm).
+#
+# CARRY-OVER RISK to re-verify on the gfx950 image, NOT assumed fixed: the GLM-5.1
+# note above records ROCM_AITER_MLA_SPARSE prefill corruption beyond ~16-18k tokens on
+# the OLD mori-v1.2.1 / gfx942 image. Our 28k/1k target sits ABOVE that threshold. The
+# new image is a different vLLM ref (glm5.1-dsa-wideEP_on_vllm-v0.27) on gfx950, so the
+# bug may or may not be present -- this is precisely what the NIAH sweep must answer
+# BEFORE any 28k perf number is meaningful. Run NIAH first; a clean 20k+35k needle is
+# the gate for trusting the 28k/1k throughput run.
+# =============================================================================
+GLM-5.2-FP8:
+  env:
+    VLLM_USE_V1: "1"
+    # v0.27: layer_name is wrapped in a torch OpaqueBase (LayerName) and passed through
+    # the unified_mla_kv_cache_update / unified_mla_attention custom ops. On this ROCm
+    # torch 2.12 build the opaque-type boxing FAILS -> "RuntimeError: unknown parameter
+    # type" at torch/_ops.py on the first real MLA decode forward (the fake/compile path
+    # returns early, so it passes boot+warmup then crashes on first request -> DP gloo
+    # cascade -> 0 prefill/0 decode). VLLM_USE_LAYERNAME=0 makes LayerNameType=str (the
+    # pre-2.11 path), so a plain string passes through the op. No image rebuild needed.
+    VLLM_USE_LAYERNAME: "0"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "1"
+    KV_CACHE_DTYPE: "fp8"
+    GPU_MEMORY_UTILIZATION: "0.80"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    # PERF A/B 2026-08-16: PIECEWISE cuts the graph at every op in splitting_ops.
+    # For DSA that list holds THREE hot ops (unified_mla_attention_with_output,
+    # sparse_attn_indexer, rocm_aiter_sparse_attn_indexer) -> ~3 segments x 78 layers
+    # ~= 234 launch boundaries per decode step. That is a FIXED per-step cost, which
+    # matches the measured signature: TPOT flat at 103.8/104.3/104.9 ms across
+    # con=16/32/64, and only ~40ms of the ~104ms step is accounted for by compute.
+    # Both loaded backends (ROCMAiterMLASparseBackend rocm_aiter_mla_sparse.py:364 and
+    # the DSA indexer mla/indexer.py:462) declare AttentionCGSupport.UNIFORM_BATCH,
+    # which is exactly the level compilation.py requires for full DECODE-ONLY graphs;
+    # the downgrade cascade only forces PIECEWISE when support is NEVER. There is no
+    # mori guard in compilation.py (deepep_high_throughput IS force-disabled, mori is
+    # not), and mori dispatch/combine are sync-free (the .item()/.cpu()/synchronize()
+    # calls live in get_dispatch_src_token_pos, a debug helper).
+    # Verified in-image: resolve_cudagraph_mode_and_sizes(min_cg_support=UNIFORM_BATCH,
+    # backend=ROCMAiterMLASparseBackend, all2all=mori_low_latency, dp=8) returns
+    # FULL_AND_PIECEWISE UNCHANGED -> decode=FULL, mixed=PIECEWISE. Chosen over
+    # FULL_DECODE_ONLY because that one sets mixed=NONE (eager mixed batches);
+    # FULL_AND_PIECEWISE is a strict superset of today behaviour: decode gets full
+    # graphs, mixed keeps the piecewise graphs it already had. It is also the vLLM v1
+    # default. use_inductor_graph_partition MUST stay on -- it is what keeps the
+    # STABLE-ABI concat_and_cache_mla out of the compiled graph; without it the first
+    # real MLA decode dies with "unknown parameter type". Never express "no graphs" as
+    # bare --enforce-eager: that drops +quant_fp8 and hits an AITER
+    # dynamic_per_token_scaled_quant signature mismatch at engine init.
+    # Fallback order if capture fails or regresses: FULL_DECODE_ONLY, then PIECEWISE.
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
+    VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+    PREFILL_MORI_BACKEND: "mori_high_throughput"
+    DECODE_MORI_BACKEND: "mori_low_latency"
+    # MoRI EP dispatch/combine buffer width. Without this it inherits
+    # max_num_batched_tokens (8192) -- a chunked-prefill SCHEDULER setting -- so every
+    # decode step moves an 8192-token-wide buffer per layer x78 layers regardless of the
+    # real batch. That is a fixed ~300ms/step floor (~320x this model's HBM-bandwidth
+    # bound). Sizing it for the actual decode batch gives TPOT 302ms -> 88ms (3.4x),
+    # matching the published EP8 figure. The knob is decode.dp below -- prefill is
+    # unaffected (it genuinely dispatches wide 8192-token chunked-prefill batches).
+    MORI_SHMEM_HEAP_SIZE: "17179869184"
+    # DSA sparse-indexer logits-buffer cap. The indexer prefill computes an M*N fp32
+    # logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim when
+    # M*N*4 > this budget.
+    #
+    # The 64MB value was a gfx942 (MI300X) CRASH WORKAROUND: there, a single 8192-token
+    # prefill built a 268MB buffer and launched fp8_mqa_logits at grid=(8192,), which
+    # hard-faulted the worker (silent GPU fault -> DP group collapse -> 503 at >=8k).
+    #
+    # THAT CRASH CANNOT HAPPEN ON gfx950 (MI355X). The vendored workaround kernel is
+    # behind a hard architecture gate: rocm_aiter_mla_sparse.py:591 dispatches
+    # fp8_mqa_logits_gfx942 only `if _ON_GFX942`. Verified live in-image on mi355-gpu-45:
+    # _ON_GFX942 = False, arch = gfx950:sramecc+:xnack-. We take AITER's mainline kernel.
+    # The gfx942 module even self-describes as "Temporary gfx942 fallback" for that
+    # part's 64 KiB LDS budget -- an MI300X constraint, not an MI355X one.
+    #
+    # Cost of keeping 64MB here: it is 8x TIGHTER than upstream's 512MB default, and the
+    # sub-chunk count is ISL-dependent. Simulated with vLLM's own
+    # split_indexer_prefill_chunks at ISL=28672 (1 request):
+    #     64MB -> 50 sub-chunks    512MB -> 7    2048MB -> 2    4096MB -> 1
+    # Each sub-chunk is a separate kernel chain over all 78 layers, so 64MB pays ~50x the
+    # per-chunk launch/setup overhead. Same failure CLASS as the decode-cudagraph finding
+    # (DECODE_CUDAGRAPH_MODE, section 44): work needlessly split into many small pieces,
+    # each paying fixed cost, showing up as a batch-independent latency floor.
+    #
+    # 2048MB -> 2 sub-chunks, peak logits buffer 2.00 GiB. We have ~31 GiB/GPU HBM idle
+    # (engine suggests --kv-cache-memory=126.47GiB vs 95.08GiB in use), so this is well
+    # inside headroom rather than scraping the last drop. NOT raised to 4096MB (1 chunk)
+    # deliberately: 2048 captures nearly all of the 50x reduction at half the peak memory.
+    #
+    # If a >=8k prefill ever faults after this change, this line is the first suspect --
+    # revert to "64" and re-test. Chunking logic: mla/indexer.py
+    # split_indexer_prefill_chunks; dispatch gate: ops/rocm_aiter_mla_sparse.py:591.
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "2048"
+    # NCCL heartbeat watchdog: at long context (>~8k) a DP rank's sparse-MLA/MoE
+    # all2all collective can exceed the default HeartbeatMonitor timeout ->
+    # ProcessGroupNCCL::HeartbeatMonitor::runLoop() declares the rank dead and
+    # tears down the whole process group -> prefill EngineCore crashes -> 503.
+    # (Confirmed root cause of the 8k+ prefill crash; #338 EP-landmine.) Disable
+    # the monitor-triggered teardown and extend timeouts so long-ctx collectives
+    # complete instead of being watchdog-killed.
+    TORCH_NCCL_ENABLE_MONITORING: "0"
+    TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: "1800"
+    TORCH_NCCL_DUMP_ON_TIMEOUT: "0"
+    TORCH_NCCL_BLOCKING_WAIT: "0"
+    TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
+    NCCL_IB_TIMEOUT: "22"
+  dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
+  prefill:
+    # --gpu-memory-utilization here OVERRIDES the global one that
+    # connectors/moriio.sh emits at line 344, because model_args is appended LAST
+    # (line 355) and argparse takes the last occurrence. It is per-role
+    # (MODEL_CONFIG_PREFILL vs MODEL_CONFIG_DECODE, moriio.sh:275), so decode
+    # keeps 0.80. run_xPyD_models.slurm has no PREFILL_GPU_MEMORY_UTILIZATION.
+    #
+    # WHY: prefill OOMed in compile_or_warm_up_model -- AFTER the KV cache was
+    # already resident -- on the MLA chunked-prefill warm-up workspace
+    # (mla_attention.py:739):
+    #     65536 * 64 heads * (192 qk_nope + 256 v) * 2 B = 3.50 GiB
+    # Free at that moment: 3.39 GiB. Short by ~110 MiB, with 5.53 GiB already
+    # reserved-but-unallocated (fragmented), so no contiguous 3.50 GiB block.
+    #
+    # The 65536 is HARDCODED, not a batch-size effect:
+    #   determine_chunked_prefill_workspace_size (mla_attention.py:1935) =
+    #     min(max(8*max_model_len, 4*max_num_seqs*block_size), 64*1024)
+    #   max_model_len=1048576 -> first term 8M -> min clamps to 64k.
+    # So --max-num-batched-tokens CANNOT shrink it (and prefill is already capped
+    # at 8192 by default: "Chunked prefill is enabled with
+    # max_num_batched_tokens=8192"). The only lever is leaving room for it.
+    #
+    # 0.80 -> 0.72 reclaims 0.08 * 287.98 = 23.0 GiB. KV goes 76.58 -> ~54 GiB
+    # (~1.2M tokens at block_size 1), which is ample for 28k/1k at concurrency 64
+    # in a 1P/1D split where prefill streams KV out over MoRIIO instead of holding
+    # it. Decode stays 0.80 -- it boots clean and its pool is what bounds
+    # concurrency here.
+    #
+    # Prefill needs a lower budget than decode because its profiled activation
+    # peak is higher (8192-token chunked-prefill batches vs decode's 2048 cap):
+    # same 0.80 gave prefill 76.58 GiB KV but decode 95.08 GiB. ~23 GiB also sits
+    # outside torch accounting (MoRI's 16 GiB pinned symmetric heap +
+    # mori_high_throughput buffers): 253.43 GiB allocated vs a 230.4 GiB budget.
+    #
+    # NOT using PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (which the OOM
+    # message suggests and would probably work): it remaps GPU VA ranges while
+    # MoRIIO has the KV cache registered with the ionic NIC and MoRI holds a
+    # pinned symmetric heap. Silent KV corruption there would poison the NIAH
+    # accuracy run that comes next. Revisit only with a clean baseline in hand.
+    #
+    # If prefill-side preemption shows up later, raise toward 0.76 rather than
+    # reverting to 0.80.
+    dp: "--gpu-memory-utilization 0.72"
+  decode:
+    # PERF: the MoRI EP dispatch buffer width is max_num_batched_tokens (via
+    # FusedMoEConfig.max_num_tokens -> all2all.py max_num_inp_token_per_rank), so the
+    # decode role otherwise runs an 8192-token-wide all2all every step: ~302ms TPOT.
+    # mori bounds recv capacity BY the send width (MaxNumTokensToRecvPerRank returns
+    # min(ceil(maxTotalRecvTokens/ws), maxNumInpTokenPerRank)), so the buffer must still
+    # cover vLLM's profiling dummy run -- it cannot be shrunk via env alone. Lowering
+    # this knob on the DECODE role lowers both consistently.
+    # Value must stay >= typical prompt length: 512 gave 87.9ms TPOT but 13.1s TTFT
+    # (a 1024-token prompt could not be admitted in one step). 2048 keeps TTFT healthy.
+    dp: "--max-num-batched-tokens 2048"
+
+
+# GLM-5.2-MXFP4 (amd/GLM-5.2-MXFP4, Quark). OCP MXFP4 per_group g=32 with e8m0 scales --
+# native in gfx950/CDNA4 matrix cores, which is why this variant is a MI355X-specific
+# play (MI308X/gfx942 has no MXFP4 hardware path). 408G vs 704G leaves ~300G more HBM
+# for KV, i.e. materially more room at 80K-200K context.
+# Deltas vs the FP8 entry:
+#   - KV_CACHE_DTYPE stays fp8: MXFP4 quantizes WEIGHTS; the KV cache is separate and
+#     fp8 KV is the validated DSA path. Do not set kv-cache-dtype to fp4.
+#   - GPU_MEMORY_UTILIZATION raised 0.80 -> 0.90: weights are 42% smaller so the
+#     same fraction wastes ~120G/node. Back off to 0.80 if it OOMs during capture.
+# Everything else is identical -- same architecture, same DSA constraints.
+# STATUS: unvalidated on this stack. vLLM #51915 (open) is the MXFP4-on-deepseek_v32
+# enablement PR; if MXFP4 fails to load, that PR is the first place to look.
+GLM-5.2-MXFP4:
+  env:
+    VLLM_USE_V1: "1"
+    # v0.27: layer_name is wrapped in a torch OpaqueBase (LayerName) and passed through
+    # the unified_mla_kv_cache_update / unified_mla_attention custom ops. On this ROCm
+    # torch 2.12 build the opaque-type boxing FAILS -> "RuntimeError: unknown parameter
+    # type" at torch/_ops.py on the first real MLA decode forward (the fake/compile path
+    # returns early, so it passes boot+warmup then crashes on first request -> DP gloo
+    # cascade -> 0 prefill/0 decode). VLLM_USE_LAYERNAME=0 makes LayerNameType=str (the
+    # pre-2.11 path), so a plain string passes through the op. No image rebuild needed.
+    VLLM_USE_LAYERNAME: "0"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "1"
+    KV_CACHE_DTYPE: "fp8"
+    GPU_MEMORY_UTILIZATION: "0.90"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    # Same value and same reason as GLM-5.2-FP8 above: PIECEWISE splits the decode graph on
+    # the 3 DSA ops x 78 layers (~234 launch boundaries/step), a batch-INDEPENDENT ~64ms
+    # floor. FULL_AND_PIECEWISE measured TPOT 104ms -> 34-40ms on FP8. Quantisation does not
+    # change the decode graph topology, so the fix carries over unchanged.
+    # HARD CO-REQUISITE: use_inductor_graph_partition must stay ON (see the FP8 section) --
+    # otherwise boot and warmup both PASS and the first real MLA decode dies.
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
+    VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+    PREFILL_MORI_BACKEND: "mori_high_throughput"
+    DECODE_MORI_BACKEND: "mori_low_latency"
+    # MoRI EP dispatch/combine buffer width. Without this it inherits
+    # max_num_batched_tokens (8192) -- a chunked-prefill SCHEDULER setting -- so every
+    # decode step moves an 8192-token-wide buffer per layer x78 layers regardless of the
+    # real batch. That is a fixed ~300ms/step floor (~320x this model's HBM-bandwidth
+    # bound). Sizing it for the actual decode batch gives TPOT 302ms -> 88ms (3.4x),
+    # matching the published EP8 figure. The knob is decode.dp below -- prefill is
+    # unaffected (it genuinely dispatches wide 8192-token chunked-prefill batches).
+    MORI_SHMEM_HEAP_SIZE: "17179869184"
+    # DSA sparse-indexer logits-buffer cap. The indexer prefill computes an M*N fp32
+    # logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim when
+    # M*N*4 > this budget.
+    #
+    # The 64MB value was a gfx942 (MI300X) CRASH WORKAROUND: there, a single 8192-token
+    # prefill built a 268MB buffer and launched fp8_mqa_logits at grid=(8192,), which
+    # hard-faulted the worker (silent GPU fault -> DP group collapse -> 503 at >=8k).
+    #
+    # THAT CRASH CANNOT HAPPEN ON gfx950 (MI355X). The vendored workaround kernel is
+    # behind a hard architecture gate: rocm_aiter_mla_sparse.py:591 dispatches
+    # fp8_mqa_logits_gfx942 only `if _ON_GFX942`. Verified live in-image on mi355-gpu-45:
+    # _ON_GFX942 = False, arch = gfx950:sramecc+:xnack-. We take AITER's mainline kernel.
+    # The gfx942 module even self-describes as "Temporary gfx942 fallback" for that
+    # part's 64 KiB LDS budget -- an MI300X constraint, not an MI355X one.
+    #
+    # Cost of keeping 64MB here: it is 8x TIGHTER than upstream's 512MB default, and the
+    # sub-chunk count is ISL-dependent. Simulated with vLLM's own
+    # split_indexer_prefill_chunks at ISL=28672 (1 request):
+    #     64MB -> 50 sub-chunks    512MB -> 7    2048MB -> 2    4096MB -> 1
+    # Each sub-chunk is a separate kernel chain over all 78 layers, so 64MB pays ~50x the
+    # per-chunk launch/setup overhead. Same failure CLASS as the decode-cudagraph finding
+    # (DECODE_CUDAGRAPH_MODE, section 44): work needlessly split into many small pieces,
+    # each paying fixed cost, showing up as a batch-independent latency floor.
+    #
+    # 2048MB -> 2 sub-chunks, peak logits buffer 2.00 GiB. We have ~31 GiB/GPU HBM idle
+    # (engine suggests --kv-cache-memory=126.47GiB vs 95.08GiB in use), so this is well
+    # inside headroom rather than scraping the last drop. NOT raised to 4096MB (1 chunk)
+    # deliberately: 2048 captures nearly all of the 50x reduction at half the peak memory.
+    #
+    # If a >=8k prefill ever faults after this change, this line is the first suspect --
+    # revert to "64" and re-test. Chunking logic: mla/indexer.py
+    # split_indexer_prefill_chunks; dispatch gate: ops/rocm_aiter_mla_sparse.py:591.
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "2048"
+    # NCCL heartbeat watchdog: at long context (>~8k) a DP rank's sparse-MLA/MoE
+    # all2all collective can exceed the default HeartbeatMonitor timeout ->
+    # ProcessGroupNCCL::HeartbeatMonitor::runLoop() declares the rank dead and
+    # tears down the whole process group -> prefill EngineCore crashes -> 503.
+    # (Confirmed root cause of the 8k+ prefill crash; #338 EP-landmine.) Disable
+    # the monitor-triggered teardown and extend timeouts so long-ctx collectives
+    # complete instead of being watchdog-killed.
+    TORCH_NCCL_ENABLE_MONITORING: "0"
+    TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: "1800"
+    TORCH_NCCL_DUMP_ON_TIMEOUT: "0"
+    TORCH_NCCL_BLOCKING_WAIT: "0"
+    TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
+    NCCL_IB_TIMEOUT: "22"
+  dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
+  prefill:
+    # PREFILL ONLY. The MLA chunked-prefill workspace is sized from a hardcoded 64k-token
+    # clamp (determine_chunked_prefill_workspace_size, mla_attention.py:1935), NOT from
+    # max_num_batched_tokens, so it allocates 65536*64*(192+256)*2 = 3.50 GiB on top of the
+    # KV pool no matter how small the scheduler batch is -- and lazily, on the first real
+    # long prefill, i.e. AFTER boot and warmup have both reported healthy.
+    # On FP8 at 0.80 this OOM'd at mla_attention.py:739; 0.72 was the validated headroom.
+    # This variant runs GPU_MEMORY_UTILIZATION 0.90 (weights are 42% smaller), so it has
+    # LESS free HBM at the moment that 3.50 GiB lands, not more. Same 0.72 prefill clamp.
+    # NOTE: inferred from the FP8 failure, not measured here -- MXFP4 has not been booted.
+    dp: "--gpu-memory-utilization 0.72"
   decode:
     # PERF: the MoRI EP dispatch buffer width is max_num_batched_tokens (via
     # FusedMoEConfig.max_num_tokens -> all2all.py max_num_inp_token_per_rank), so the
