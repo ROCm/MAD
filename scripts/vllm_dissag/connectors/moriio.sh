@@ -140,7 +140,12 @@ connector_runtime_patch() {
     # The MoRI version is pinned by the Dockerfile MORI_REF (post-1.2.1 main with the
     # large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer MoRI is
     # needed, update MORI_REF and rebuild the image — no runtime library swap here.
-    [ "${MODEL_NAME:-}" = "GLM-5.1-FP8" ] || return 0
+    # GLM-5.1-FP8 and GLM-5.2-FP8 are the same DSA architecture (GlmMoeDsaForCausalLM)
+    # and need the identical patcher stack; gate on both.
+    case "${MODEL_NAME:-}" in
+        GLM-5.1-FP8|GLM-5.2-FP8) ;;
+        *) return 0 ;;
+    esac
     _glm_dsa_runtime_patch
 }
 
@@ -166,7 +171,7 @@ _glm_dsa_runtime_patch() {
         echo "Error: [glm] cannot locate vLLM install dir for DSA patchers. Aborting." >&2
         exit 1
     fi
-    echo "[glm] MODEL_NAME=GLM-5.1-FP8: applying DSA runtime patchers against ${_vllm_dir}"
+    echo "[glm] MODEL_NAME=${MODEL_NAME}: applying DSA runtime patchers against ${_vllm_dir}"
 
     # Ordered list of REQUIRED patchers (all abort on hard failure).
     # GLM_PERSIST_GATE=0 skips the persistent-MLA accuracy gate (debug only: to test

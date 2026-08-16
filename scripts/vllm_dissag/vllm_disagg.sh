@@ -208,12 +208,22 @@ if cfg is None:
     print(f"WARN: model {name!r} not in models.yaml; using empty flags", file=sys.stderr)
     raise SystemExit(0)
 prefill = cfg.get("prefill") or {}; decode = cfg.get("decode") or {}
+
+# Allow ${VAR} / ${VAR:-default} inside recipe flag strings, so a recipe can expose
+# a per-run knob (e.g. GLM_MAX_MODEL_LEN) that a run overrides by exporting the name
+# -- no yaml edit. Deliberately narrow: only those two forms, no command
+# substitution, no eval. A recipe with no ${...} is unaffected.
+import re
+_SUB = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+def expand(s):
+    return _SUB.sub(lambda mo: os.environ.get(mo.group(1)) or (mo.group(2) or ""), s)
+
 def compose(role):
-    return " ".join(x for x in [
+    return expand(" ".join(x for x in [
         cfg.get("base_flags",""), cfg.get(f"{mode}_flags",""),
         (role.get(mode,"") if isinstance(role,dict) else ""),
         cfg.get("experimental_flags",""),
-    ] if x).strip()
+    ] if x).strip())
 print(f'MODEL_CONFIG_PREFILL={shlex.quote(compose(prefill))}')
 print(f'MODEL_CONFIG_DECODE={shlex.quote(compose(decode))}')
 PY
