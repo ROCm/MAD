@@ -261,16 +261,8 @@ GLM-5.1-FP8:
     # decode step moves an 8192-token-wide buffer per layer x78 layers regardless of the
     # real batch. That is a fixed ~300ms/step floor (~320x this model's HBM-bandwidth
     # bound). Sizing it for the actual decode batch gives TPOT 302ms -> 88ms (3.4x),
-    # matching the published EP8 figure. Needs vLLM >= e8c186f71b.
-    # Prefill is unaffected (it genuinely dispatches wide batches).
-    # Per-role (moriio.sh -> VLLM_MORI_MAX_TOKENS_PER_RANK). MUST be >= max_num_seqs *
-    # num_experts_per_token (top-8 here): the value is also the RECV capacity
-    # (mori MaxNumTokensToRecv = worldSize * this). 512 tripped a device assert
-    # "Total recv token overflow". 2048 is safe and still 4x smaller than 8192. Decode wants
-    # the buffer sized to its real batch; prefill must KEEP the wide buffer (0 = inherit
-    # max_num_batched_tokens) because it genuinely dispatches 8192-token chunks.
-    # Recv capacity stays wide enough for the profiling dummy run (8192 tokens) and
-    # bursty top-8 routing: worldSize * ceil(65536/worldSize) >= 8192 for EP8..EP32.
+    # matching the published EP8 figure. The knob is decode.dp below -- prefill is
+    # unaffected (it genuinely dispatches wide 8192-token chunked-prefill batches).
     MORI_SHMEM_HEAP_SIZE: "17179869184"
     # DSA sparse-indexer logits-buffer cap (crash fix). The indexer prefill computes an
     # M*N fp32 logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim

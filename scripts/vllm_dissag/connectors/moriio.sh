@@ -274,24 +274,15 @@ connector_launch_worker() {
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
-        # Per-role MoRI EP buffer width. VLLM_MORI_MAX_TOKENS_PER_RANK sizes the
-        # dispatch/combine buffer; unset (0) it inherits max_num_batched_tokens -- a
-        # chunked-prefill SCHEDULER knob (8192) -- so a decode instance moves an
-        # 8192-token-wide buffer every step, per layer: ~302ms vs ~88ms TPOT (3.4x).
-        # Prefill and decode want OPPOSITE values (prefill genuinely dispatches wide
-        # batches and must keep the large buffer), but models.yaml env: applies to BOTH
-        # roles -- so split it here, mirroring PREFILL/DECODE_MORI_BACKEND above.
-        if [[ "$log_prefix" == "decode" ]]; then
-            [[ -n "${DECODE_MORI_MAX_TOKENS_PER_RANK:-}" ]] && \
-                export VLLM_MORI_MAX_TOKENS_PER_RANK="${DECODE_MORI_MAX_TOKENS_PER_RANK}"
-            # Recv capacity must still cover vLLM's profiling dummy run (which pushes
-            # max_num_batched_tokens tokens) even though steady-state dispatch is narrow.
-            [[ -n "${DECODE_MORI_MAX_TOTAL_RECV_TOKENS:-}" ]] && \
-                export VLLM_MORI_MAX_TOTAL_RECV_TOKENS="${DECODE_MORI_MAX_TOTAL_RECV_TOKENS}"
-        else
-            export VLLM_MORI_MAX_TOKENS_PER_RANK="${PREFILL_MORI_MAX_TOKENS_PER_RANK:-0}"
-            export VLLM_MORI_MAX_TOTAL_RECV_TOKENS="${PREFILL_MORI_MAX_TOTAL_RECV_TOKENS:-0}"
-        fi
+        # NOTE on MoRI EP buffer width: it is sized from max_num_batched_tokens
+        # (fused_moe/layer.py -> all2all.py max_num_inp_token_per_rank), so a decode
+        # instance otherwise runs an 8192-token-wide all2all every step (~302ms vs ~88ms
+        # TPOT). The fix is per-role `--max-num-batched-tokens` in models.yaml
+        # (decode.dp), NOT an env knob: mori derives recv capacity from the send width
+        # (MaxNumTokensToRecvPerRank returns min(ceil(maxTotalRecvTokens/ws),
+        # maxNumInpTokenPerRank)), so shrinking the width alone under-provisions recv and
+        # trips a device assert during vLLM's profiling dummy run. See
+        # skills_vllm_disagg.md for the measurements and the dead ends.
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then
