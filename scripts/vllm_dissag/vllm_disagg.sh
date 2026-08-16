@@ -86,7 +86,12 @@ IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
-host_ip=$(hostname -I | awk '{print $1}')
+# Prefer the routable fabric IP (FABRIC_SUBNET, default 10.158.) over hostname -I's
+# first entry: nodes with a 10.224.x overlay listed first would bind the socket_barrier
+# / advertise host_ip on an unreachable NIC -> prefill<->decode barrier hangs "Waiting
+# for nodes". Matches the IPADDRS selection in run_xPyD_models.slurm. Falls back to $1.
+FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+host_ip=$(hostname -I | awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}')
 host_name=$(hostname)
 
 # =============================================================================

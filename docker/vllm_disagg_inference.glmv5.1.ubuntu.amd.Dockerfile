@@ -53,18 +53,19 @@
 # the moriep all-to-all combine at EP32 scale -> deferred to future work. Use 1P/1D
 # and 2P/2D only. (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...)
 # =============================================================================
-# Reconstructs the validated v1.2.1 (mori121) runtime stack by applying the recipe's
-# component pins ON TOP of the open ROCm vLLM ci_base, cloning each source from
-# public Git (no local build-contexts). Mirrors dist-inf-cookbook
-# Dockerfile.vllm.mori121_shareable:
+# Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
+# purpose-built ROCm/vLLM/MoRI base, cloning each overridden source from public Git
+# (no local build-contexts):
 #
-#   - BASE: rocm/vllm-dev:ci_base-0fcd9b99... (open ROCm 7.2 / cp312 CI base).
-#   - MoRI  -> built from ROCm/MoRI @ v1.2.1 (BUILD_UMBP=OFF).
+#   - BASE: rocmshared/pytorch-private:vllm-rocm_07_22_2026_shikpate_mori1.2.3
+#     (ROCm + torch + a bundled vLLM/MoRI 1.2.3 stack). The stages below deliberately
+#     OVERRIDE the base's vLLM/MoRI/AITER with the pins we validate for GLM DSA.
+#   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
+#     (main LATEST 120d2de broke the connector KV-notify handshake -- see note at MORI_REF.)
 #   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
-#   - vLLM  -> COMPILED from shikamd123/vllm @
-#     vllm_2p2d_wide-ep_write_shikpate_test_06_29_customer (Wide-EP multi-pod PD, the
-#     connector/router reference for the 2P2D DP=EP=16 topology). Full compile: it is
+#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_shik_0721
+#     (Shiksha 7/21 WideEP base + GLM DSA edits + sparse-MLA guard fix). Full compile:
 #     a different commit than the base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
@@ -78,12 +79,11 @@
 # Build context = repo root:
 #   docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile -t <registry>/<tag> .
 #
-# BASE_IMAGE is the open rocm/vllm-dev ci_base pinned by the validated recipe
-# (dist-inf-cookbook Dockerfile.vllm.mori121_shareable). Override --build-arg
+# BASE_IMAGE is the purpose-built ROCm/vLLM/MoRI base above. Override --build-arg
 # BASE_IMAGE=... to build on a different ROCm base. vLLM compile is long (~30-60 min).
 # =============================================================================
 
-ARG BASE_IMAGE=rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491
+ARG BASE_IMAGE=rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03
 FROM ${BASE_IMAGE}
 
 ENTRYPOINT []
@@ -109,8 +109,12 @@ ARG NIC_COMPILATION_ARCH="cx7"
 #    backends produced a MoRI that deadlocked at the cross-node EP all-to-all init.
 # -----------------------------------------------------------------------------
 ARG MORI_REPO=https://github.com/ROCm/mori.git
-# 42e895472b08: MoRI main tip past v1.2.1, validated by MAD-private #338 for GLM-5.1
-# DSA WideEP disagg (v1.2.1 large-transfer notify path was insufficient at high EP).
+# 42e895472b08: validated MoRI tip for GLM DSA WideEP disagg. The v0.27 base bundles
+# amd_mori 1.0.0, but the bundled build regressed GLM DSA (b1: GPU fault on the aiter
+# DSA decode kernel), so we build MoRI from source at this pinned commit by DEFAULT
+# (WITH_MORI_BUILD=1). Set --build-arg WITH_MORI_BUILD=0 only to fall back to the
+# base's bundled mori for debugging.
+ARG WITH_MORI_BUILD=1
 ARG MORI_REF=42e895472b08
 ENV MORI_GPU_ARCHS=gfx942
 # Newer MoRI added the UMBP subsystem which requires gRPC (grpcpp/grpcpp.h) not
@@ -125,50 +129,49 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
         git build-essential cmake ninja-build ccache libssl-dev pkg-config curl ca-certificates && \
     pip install meson==0.64.0 "pybind11[global]" tqdm prettytable && \
-    pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true && \
-    rm -rf /tmp/mori-src && \
-    git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
-    cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
-    BUILD_UMBP=OFF pip install . && \
-    python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
-    mkdir -p /app && echo "MORI_REF=${MORI_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> /app/versions.txt && \
-    rm -rf /tmp/mori-src
+    mkdir -p /app && \
+    if [ "${WITH_MORI_BUILD}" != "1" ]; then \
+        python3 -c "import mori, mori.io, mori.ops; print('MoRI (bundled) OK at', mori.__path__[0])" && \
+        echo "MORI_REF=BUNDLED (base amd_mori, WITH_MORI_BUILD=0)" >> /app/versions.txt ; \
+    else \
+        pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true && \
+        rm -rf /tmp/mori-src && \
+        git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
+        cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
+        BUILD_UMBP=OFF pip install . && \
+        python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
+        echo "MORI_REF=${MORI_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> /app/versions.txt && \
+        rm -rf /tmp/mori-src ; \
+    fi
 
 # -----------------------------------------------------------------------------
-# 2. AITER: build STOCK upstream ROCm/aiter @ e03fa6040 from source (NO fork,
-#    NO gqa64-fold patch). Under vLLM #47766 the sparse-MLA persistent path stays
-#    ON, so GLM's gqa=64 decode hits aiter's PRE-EXISTING persistent gqa64->16 fold
-#    (aiter/mla.py: `nhead in range(32,128+1,16) and persistent_mode`); the fork's
-#    extra non-persistent fold is never exercised, so stock is sufficient.
-#    Validated by MAD-private #338: 1P/1D EP8 + 2P/2D EP16 NIAH PASS on this exact
-#    aiter tip under #47766. Pin the exact commit (the one tested), not the release
-#    wheel. Then invalidate the stale prewarmed JIT cache compiled against the old .so.
+# 2. AITER: the v0.27 base bundles amd-aiter 0.1.19 (+ flydsl 0.2.4), but bundled 0.1.19
+#    GPU-faults on the GLM DSA decode kernel mla_a8w8_qh64_gqaratio64_v3 (confirmed b1 on
+#    this v0.27 base, same regression as the old stack). So we build aiter from source at
+#    the validated commit e03fa6040 by DEFAULT (WITH_AITER_BUILD=1). aiter > e03fa6040
+#    reintroduces the fault; do not bump without re-running long-ctx NIAH. Set
+#    --build-arg WITH_AITER_BUILD=0 only to fall back to the bundled aiter for debugging.
 # -----------------------------------------------------------------------------
 ARG AITER_REPO=https://github.com/ROCm/aiter.git
+ARG WITH_AITER_BUILD=1
 ARG AITER_REF=e03fa6040
-RUN echo "Compiling STOCK AITER (no fork) from ${AITER_REPO}@${AITER_REF}" && \
-    rm -rf /tmp/aiter-src && \
-    git clone --recursive "${AITER_REPO}" /tmp/aiter-src && \
-    cd /tmp/aiter-src && git checkout "${AITER_REF}" && \
-    git submodule update --init --recursive && \
-    (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
-    pip install --no-build-isolation --no-deps -v . && \
-    pip install --no-deps -U "flydsl>=0.1.7,<0.1.9" && \
-    echo "AITER_REF=${AITER_REF}@$(git rev-parse HEAD) (stock ROCm/aiter, no fork)" >> /app/versions.txt && \
-    rm -rf /tmp/aiter-src && \
-    python3 - <<'PYEOF'
-# Verify aiter/mla.py installed + has the persistent gqa64 fold, WITHOUT importing
-# aiter/torch (torch->amdsmi->libamd_smi.so is not loadable at build: no GPU in sandbox).
-import glob, pathlib
-cands = glob.glob("/usr/local/lib/python*/dist-packages/aiter/mla.py") + \
-        glob.glob("/usr/lib/python*/dist-packages/aiter/mla.py")
-assert cands, "aiter/mla.py not found in site-packages after install"
-src = pathlib.Path(cands[0]).read_text()
-assert "persistent_mode" in src, f"AITER persistent fold path MISSING in {cands[0]}"
-print("STOCK AITER OK (persistent gqa64 fold path present):", cands[0])
-PYEOF
-RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache" && \
-    echo "AITER_REF=${AITER_REF} (stock)" >> /app/versions.txt
+RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
+        echo "AITER: using BUNDLED base aiter (WITH_AITER_BUILD=0)" && \
+        python3 -c "import importlib.metadata as m; print('aiter (bundled)', m.version('amd-aiter'))" && \
+        echo "AITER_REF=BUNDLED (base amd-aiter, WITH_AITER_BUILD=0)" >> /app/versions.txt ; \
+    else \
+        echo "Compiling STOCK AITER (no fork) from ${AITER_REPO}@${AITER_REF}" && \
+        rm -rf /tmp/aiter-src && \
+        git clone --recursive "${AITER_REPO}" /tmp/aiter-src && \
+        cd /tmp/aiter-src && git checkout "${AITER_REF}" && \
+        git submodule update --init --recursive && \
+        (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
+        pip install --no-build-isolation --no-deps -v . && \
+        pip install --no-deps -U "flydsl>=0.1.7,<0.1.9" && \
+        echo "AITER_REF=${AITER_REF}@$(git rev-parse HEAD) (stock ROCm/aiter, no fork)" >> /app/versions.txt && \
+        rm -rf /tmp/aiter-src && \
+        rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache" ; \
+    fi
 
 # -----------------------------------------------------------------------------
 # 3. vLLM: compile from source at the 06_29 validated Wide-EP WRITE-mode branch
@@ -181,7 +184,14 @@ RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER J
 # VLLM_REPO/REF are a PUBLIC GitHub repo + branch (the Wide-EP WRITE-mode vLLM the
 # dist-inf-cookbook mori121 image builds from). Override to your own vLLM fork/branch.
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-ARG VLLM_REF=glm5.1-dsa-wideEP_on_shik_latest
+# glm5.1-dsa-wideEP_on_vllm-v0.27 (HEAD cda3648602) = upstream v0.27 tip dedbf6be8b + 7
+# ROCm/DSA commits. Core 3: per-req-ctx metadata key (#47766), DSA indexer KV transfer
+# (reworked onto upstream's native MoRIIO connector), invalid-token sentinel. Plus 4
+# v0.27 fixes: concat_and_cache_mla positional (stable-ABI), splitting_ops out of the
+# compiled graph (MLA "unknown parameter type"), sparse-indexer bounds-guard, and the
+# decisive sentinel -1->0 (cda3648602 — aiter mla_decode_fwd derefs -1 -> GPU fault at
+# disagg long-ctx). NIAH-validated 1P/1D + 2P/1D + 1P/2D, 2k-35k, decode PIECEWISE.
+ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
     MAX_JOBS=${MAX_JOBS}
@@ -203,12 +213,14 @@ def get(names):
         except PackageNotFoundError: pass
     return None
 av = get(("amd-aiter", "amd_aiter", "aiter"))
-# Stock source build of ROCm/aiter@e03fa6040 reports 0.1.17.dev195+ge03fa6040.
-# Verify the aiter install survived the vLLM install (present + carries the e03fa6040
-# commit tag) rather than pinning a release version string.
-assert av and "e03fa6040" in av, f"AITER missing/downgraded (want e03fa6040 build): {av!r}"
+# Verify the aiter install survived the vLLM install (present, not silently downgraded
+# to a base-bundled wheel). We pin aiter by commit (e03fa6040), whose reported version
+# string varies by build, so assert presence rather than a hardcoded commit substring. Do NOT
+# `import aiter` here: it pulls torch->amdsmi->libamd_smi.so, not loadable in the no-GPU
+# build sandbox (same reason the Stage-2 verify reads mla.py from disk instead).
+assert av, "AITER missing after vLLM install (expected bundled 0.1.19 or source-built ref)"
 import mori, mori.io, mori.ops
-print("Post-vLLM check OK: AITER", av, "+ MoRI importable")
+print("Post-vLLM check OK: AITER", av, "present + MoRI importable")
 PYEOF
 
 # -----------------------------------------------------------------------------
