@@ -120,6 +120,39 @@ default. Added `VLLM_MORI_*` knobs for parity (all defaulting to current values)
 
 ---
 
+## 2b. Decode CUDA-graph mode: use FULL_AND_PIECEWISE, not PIECEWISE
+
+`DECODE_CUDAGRAPH_MODE=FULL_AND_PIECEWISE` captures a FULL graph for the uniform-decode
+shapes and falls back to PIECEWISE for everything else. Measured on MI300X, 1024/64, warm,
+after the max_num_batched_tokens fix in section 2:
+
+| | PIECEWISE | FULL_AND_PIECEWISE | gain |
+|---|---|---|---|
+| 1P/1D EP8  TPOT c8  | 88.0 ms | **41.8 ms** | 2.11x |
+| 1P/1D EP8  TPOT c16 | 91.5 ms | **45.8 ms** | 2.00x |
+| 2P/2D EP16 TPOT c8  | 94.1 ms | **55.4 ms** | 1.70x |
+| 2P/2D EP16 TPOT c16 | 96.2 ms | **60.3 ms** | 1.60x |
+| 1P/1D output c8     | 78.8 tok/s | **143.7** | 1.82x |
+| 2P/2D output c8     | 66.7 tok/s | **113.0** | 1.69x |
+
+Accuracy is unaffected: NIAH 2k-35k 51/60 (1P/1D) and 55/60 (2P/2D), both inside the
+PIECEWISE band (52-53 / 53), no length collapse, memfault=0.
+
+Three things to know before adopting it:
+- **The gain shrinks as EP widens** (2.11x at EP8 -> 1.70x at EP16). FULL captures the whole
+  decode step *including* the cross-node all2all, and that collective does not compress.
+  Do not extrapolate to EP32 without measuring.
+- **Capture cost:** ~92-94 s and ~3.0-3.5 GiB, versus ~5 s and 7.2 GiB for PIECEWISE -
+  fewer but larger graphs. Boot is correspondingly longer. Fine for a long-lived server,
+  notable for CI.
+- **FULL is much less cold-JIT sensitive.** Its warmup run already reads steady-state TPOT
+  (41.35 ms), where PIECEWISE's first post-boot run showed 13.7 s TTFT. The section-1 rule
+  (discard the first run) still applies, but the penalty is far smaller.
+
+Two code paths branch on `CUDAGraphMode.FULL` - `sparse_attn_indexer.py:411` and the MoRIIO
+connector's READ-mode barrier. Both are guards that *skip* host-side work under FULL, so
+enabling it is safe on this stack (the MoRIIO one is already a no-op in WRITE mode).
+
 ## 3. Accuracy: the DSA sparse-index sentinel landmine
 
 **Never set the invalid/OOB sentinel to `-1`** in
