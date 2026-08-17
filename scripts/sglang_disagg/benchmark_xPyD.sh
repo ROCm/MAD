@@ -60,6 +60,72 @@ run_serving_bench() {
         2>&1 | tee -a "$LOG_FILE" >/dev/null
 }
 
+# --- Optional torch-profiler capture (PROFILE_ENABLE=1) ----------------------
+# In PD mode sglang refuses to profile both roles at once: --profile-prefill-url
+# and --profile-decode-url are mutually exclusive, so one dedicated point runs per
+# role. The workers write the traces themselves, hence PROFILE_OUTPUT_DIR must be
+# on the shared /run_logs mount for a multi-node run, and each server must have
+# been launched with SGLANG_TORCH_PROFILER_DIR set or --profile is a no-op.
+# The point writes to its own log: parse_to_csv.py reads ${LOG}_CONCURRENCY.log,
+# so a profiled request stream never reaches the perf CSV.
+run_profile_point() {
+    local role="$1"
+    shift
+    local plog="${LOG}_PROFILE_${role}.log"
+    local con="${PROFILE_CONCURRENCY:-16}"
+    local extra=()
+    [[ -n "${PROFILE_START_STEP:-}" ]] && extra+=(--profile-start-step "${PROFILE_START_STEP}")
+
+    echo "INFO: profiling ${role} worker(s): $*" | tee -a "$plog" >/dev/null
+    python3 -m sglang.bench_serving \
+        --model "$MODEL_PATH" \
+        --backend sglang \
+        --host 127.0.0.1 \
+        --port 2322 \
+        --dataset-name random \
+        --random-input "${PROFILE_ISL:-1024}" \
+        --random-output "${PROFILE_OSL:-1024}" \
+        --random-range-ratio 1.0 \
+        --max-concurrency "$con" \
+        --num-prompt "${PROFILE_PROMPTS:-$((con * 2))}" \
+        --pd-separated \
+        --profile \
+        --profile-output-dir "${PROFILE_OUTPUT_DIR}" \
+        --profile-steps "${PROFILE_STEPS:-5}" \
+        "${extra[@]+"${extra[@]}"}" \
+        "--profile-${role}-url" "$@" \
+        2>&1 | tee -a "$plog" >/dev/null
+}
+
+profile_roles() {
+    PROFILE_OUTPUT_DIR="${PROFILE_OUTPUT_DIR:-${RUN_LOG_DIR}/torchprof}"
+    local port="${PROFILE_WORKER_PORT:-3000}"
+    local ips=() prefill_urls=() decode_urls=() urls=() role n
+
+    IFS=',' read -ra ips <<< "${IPADDRS:-127.0.0.1}"
+    if [[ "${#ips[@]}" -lt $((xP + yD)) ]]; then
+        log_msg "WARN: IPADDRS lists ${#ips[@]} host(s), need $((xP + yD)) for xP=${xP} yD=${yD}; profiling skipped"
+        return 0
+    fi
+    for ((n = 0; n < xP; n++)); do prefill_urls+=("http://${ips[$n]}:${port}"); done
+    for ((n = xP; n < xP + yD; n++)); do decode_urls+=("http://${ips[$n]}:${port}"); done
+
+    mkdir -p "${PROFILE_OUTPUT_DIR}" 2>/dev/null || true
+    log_msg "INFO: profiling enabled, traces -> ${PROFILE_OUTPUT_DIR}"
+    for role in ${PROFILE_ROLES:-prefill decode}; do
+        case "$role" in
+            prefill) urls=("${prefill_urls[@]}") ;;
+            decode)  urls=("${decode_urls[@]}") ;;
+            *) log_msg "WARN: unknown PROFILE_ROLES entry '${role}', skipped"; continue ;;
+        esac
+        if ! run_profile_point "$role" "${urls[@]}"; then
+            log_msg "ERROR: profiling point failed for role=${role} (see ${LOG}_PROFILE_${role}.log)"
+            [[ "${PROFILE_FAIL_FAST:-0}" == "1" ]] && return 1
+        fi
+    done
+    return 0
+}
+
 log_msg "==== Benchmark Serving Concurrency Sweep Test ${LOG} ====="
 log_msg "UTC Time: $(TZ=UTC date '+%Y-%m-%d %H:%M:%S %Z')"
 log_msg "PST Time: $(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')"
@@ -135,6 +201,14 @@ if ! python3 parse_to_csv.py "${LOG}_CONCURRENCY.log" -o "${LOG}_CONCURRENCY.csv
     log_msg "ERROR: parse_to_csv.py failed to produce ${PERF_CSV}"
 fi
 cp -f "${PERF_CSV}" "${RUN_LOG_DIR}/" 2>/dev/null || true
+
+# Profiling runs last: the perf CSV is already written, so a profiler hiccup can
+# no longer cost the sweep its results.
+if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
+    if ! profile_roles; then
+        benchmark_failures=$((benchmark_failures + 1))
+    fi
+fi
 
 if [[ "$benchmark_failures" -ne 0 ]]; then
     log_msg "ERROR: benchmark completed with ${benchmark_failures} failure(s)"

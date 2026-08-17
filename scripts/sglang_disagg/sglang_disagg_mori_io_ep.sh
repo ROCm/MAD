@@ -217,6 +217,29 @@ esac
 
 PREFILL_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 DECODE_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
+
+# A profiled run needs a measurable configuration, which differs from the tuned one on two counts,
+# and both belong here: node 0 assembles its prefill command separately from the other prefill
+# nodes, so anything added at a launch site lands on some nodes only -- job 25824 profiled three
+# nodes with RCCL and one without.
+#
+# --disable-custom-all-reduce: sglang does the intra-node TP exchange with its own all-reduce
+# kernel, which never enters torch.distributed, so it emits neither RCCL debug lines nor
+# record_param_comms events. Job 25815 profiled 1 call and 4 B per rank -- the startup barrier and
+# nothing else. Routing TP through RCCL makes that traffic visible and comparable with Primus.
+#
+# --disable-cuda-graph on decode: a replayed HIP graph dispatches one packet, so the collectives
+# captured inside it reach no profiler, and rocprofv3 aborts the capture itself with
+# HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (job 25806 died at bs=1). Prefill already runs graph-free
+# through models.yaml.
+#
+# Both cost performance, so throughput has to be read from a run without PROFILE_ENABLE.
+if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG+=" --disable-custom-all-reduce"
+    DECODE_MODEL_CONFIG+=" --disable-custom-all-reduce --disable-cuda-graph"
+    echo "[profile] measurement flags added: TP through RCCL, decode without HIP graphs"
+fi
+
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 
 if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then
@@ -325,6 +348,42 @@ setup_sglang_worker_env() {
 
 # _dbg: timestamped debug trace (NODE_RANK + wall-clock prefix).
 _dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
+
+# _shutdown_server PID [LABEL]
+# Stop a server and do not return until it is actually gone. SIGINT first, because sglang's
+# launch_server unwinds its scheduler subprocesses on it, which is what lets a profiler flush:
+# a bare `kill` returns immediately, this script exits, and madengine tears the container down
+# mid-write, which is why profiled runs produced empty rocprof directories while the logs showed
+# "[rocprofv3] finalizing after signal" (job 25815). Escalation keeps a wedged server from
+# hanging the job. Flushing kernel-trace stats takes far longer than a plain exit, hence the
+# wider budget while profiling.
+_shutdown_server() {
+    local _pid="$1" _label="${2:-server}" _grace _i
+    if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
+        _grace="${SHUTDOWN_GRACE_S:-300}"
+    else
+        _grace="${SHUTDOWN_GRACE_S:-30}"
+    fi
+
+    kill -INT "$_pid" 2>/dev/null || { _dbg "${_label} (pid=${_pid}) already gone"; return 0; }
+    for ((_i = 1; _i <= _grace; _i++)); do
+        if ! kill -0 "$_pid" 2>/dev/null; then
+            _dbg "${_label} (pid=${_pid}) exited on SIGINT after ${_i}s"
+            return 0
+        fi
+        sleep 1
+    done
+
+    _dbg "${_label} (pid=${_pid}) still alive after ${_grace}s, sending SIGTERM"
+    kill -TERM "$_pid" 2>/dev/null
+    for ((_i = 1; _i <= 30; _i++)); do
+        kill -0 "$_pid" 2>/dev/null || { _dbg "${_label} exited on SIGTERM"; return 0; }
+        sleep 1
+    done
+
+    _dbg "${_label} (pid=${_pid}) ignored SIGTERM, sending SIGKILL"
+    kill -KILL "$_pid" 2>/dev/null
+}
 
 # _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]
 # Polls TCP connectivity; returns 0 when port is open, 1 on timeout.
@@ -576,11 +635,11 @@ PY
         fi
     fi
 
-    echo "Killing the proxy server (pid=${proxy_pid})"
-    kill "${proxy_pid}"
+    echo "Stopping the proxy server (pid=${proxy_pid})"
+    _shutdown_server "${proxy_pid}" "proxy"
 
-    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
-    kill "${_node0_prefill_pid}"
+    echo "Stopping the co-located prefill server (pid=${_node0_prefill_pid})"
+    _shutdown_server "${_node0_prefill_pid}" "prefill NODE${NODE_RANK}"
 
     if [[ "${benchmark_status}" -ne 0 ]]; then
         echo "ERROR: benchmark failed with status ${benchmark_status}" >&2
@@ -658,8 +717,8 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
         --remote-ip "${MASTER_ADDR}" \
         --remote-port 2322
 
-    echo "Killing the prefill server"
-    kill "${prefill_pid}"
+    echo "Stopping the prefill server"
+    _shutdown_server "${prefill_pid}" "prefill NODE${NODE_RANK}"
 
 elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-default})"
@@ -739,8 +798,8 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
         --remote-ip "${MASTER_ADDR}" \
         --remote-port 2322
 
-    echo "Killing the decode server"
-    kill "${decode_pid}"
+    echo "Stopping the decode server"
+    _shutdown_server "${decode_pid}" "decode NODE${NODE_RANK}"
 
 else
     echo "ERROR: NODE_RANK=${NODE_RANK} out of range (expected 0..$((xP + yD))) for xP=${xP} yD=${yD}" >&2
