@@ -93,9 +93,40 @@ workloads:
 ```
 
 With no `serving:`/`run:` blocks, `resolve_config()` supplies `serving.model:
-auto`, `serving.max_model_len: 0` (auto-detect), `serving.port: auto`,
-`serving.server_metrics: auto`, `run.concurrency: 16`, and `run.duration: 900`.
-See [SCENARIOS.md](SCENARIOS.md) for copy-paste examples of every workload shape.
+auto`, `serving.max_model_len: 0` (auto-detect), `serving.port: auto` (`auto`
+resolves to the recipe default — `2322` for the sglang router — so `auto` and
+`2322` name the same port), `serving.server_metrics: auto`, `run.concurrency:
+16`, and `run.duration: 900`. See [SCENARIOS.md](SCENARIOS.md) for copy-paste
+examples of every workload shape.
+
+### Run it
+
+**Prerequisite:** an OpenAI-compatible endpoint must already be served on
+`AGENTIC_PORT` (default `2322`). This suite does **not** start a server — on a
+cluster the endpoint is brought up by the launcher recipe (below; see
+[../../sglang_disagg/README.MD](../../sglang_disagg/README.MD)), and for a
+direct run you must start or point to your own endpoint first. To wire up a new
+backend, see the integration guide at
+[./templates/README.md](./templates/README.md).
+
+```bash
+# Single preset, config-less (driver synthesizes a one-entry config)
+AGENTIC_WORKLOAD=conformance_256k bash scripts/common/benchmark_agentic_suite.sh
+
+# Multi-workload suite from a config
+AGENTIC_CONFIG=agentic.yaml bash scripts/common/benchmark_agentic_suite.sh
+
+# Preview first — no server needed (see "Preview / debug" below)
+DRY_RUN=1 AGENTIC_CONFIG=agentic.yaml bash scripts/common/benchmark_agentic_suite.sh
+```
+
+See [Preview / debug](#preview--debug) for what `DRY_RUN=1` prints.
+
+On a cluster you normally invoke the suite **indirectly** via `sbatch
+scripts/sglang_disagg/run_xPyD_models.slurm` (see
+[../../sglang_disagg/README.MD](../../sglang_disagg/README.MD)); run
+`benchmark_agentic_suite.sh` directly only for local or `DRY_RUN` use, and in
+that case set `RESULT_DIR` yourself since it is otherwise launcher-provided.
 
 ### What to expect / run timing
 
@@ -230,7 +261,9 @@ and any other name is treated as `preset: <name>` (so `conformance_256k` /
 
 The true minimum for each entry point — everything else auto-defaults (model
 `auto`, `max_model_len` auto-detect, port `2322`, concurrency `16`, duration
-`900`):
+`900`). Prerequisite in every case: an OpenAI-compatible endpoint must already be
+served on `AGENTIC_PORT` (default `2322`) — launcher-provided on a cluster, or
+your own for a direct run.
 
 - **Multi-workload suite** — point at a config, nothing else required:
 
@@ -249,6 +282,10 @@ AGENTIC_WORKLOAD=conformance_256k bash scripts/common/benchmark_agentic_suite.sh
 
 Every user-facing environment variable, grouped by role. Defaults shown are the
 values applied when the variable is unset.
+
+All variables are **optional** except that you must set exactly **one**
+entry-point variable (`AGENTIC_CONFIG` or `AGENTIC_WORKLOAD`) and have a served
+endpoint (see [Minimal required](#minimal-required)).
 
 ### Serving / selection
 
@@ -297,15 +334,15 @@ values applied when the variable is unset.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `AGENTIC_CONFIG` | (unset) | path to an `agentic.yaml`; runs the multi-workload suite driver |
-| `AGENTIC_WORKLOAD` | (unset) | run one workload by name: config-less preset shorthand, or select a single entry from `AGENTIC_CONFIG` |
+| `AGENTIC_CONFIG` | (unset) | Required (choose one of CONFIG/WORKLOAD): path to an `agentic.yaml`; runs the multi-workload suite driver |
+| `AGENTIC_WORKLOAD` | (unset) | Required (choose one of CONFIG/WORKLOAD): run one workload by name: config-less preset shorthand, or select a single entry from `AGENTIC_CONFIG` |
 | `DRY_RUN` | `0` | set `1` to print the resolved plan and each assembled aiperf command without contacting a server |
 
 ### Output / labeling
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RESULT_DIR` | (launcher-provided) | root for per-workload result dirs and `suite_summary.json` |
+| `RESULT_DIR` | `/run_logs/${SLURM_JOB_ID:-0}` | root for per-workload result dirs and `suite_summary.json`; the hooks and suite driver default it to `/run_logs/${SLURM_JOB_ID:-0}` (so a launcher supplies `SLURM_JOB_ID`). For a direct run without the launcher, set `RESULT_DIR` yourself (else results land in `/run_logs/0`). |
 | `AGENTIC_RESULT_FILENAME` | `agentic_${SLURM_JOB_ID}_xP..._yD..._${MODEL_NAME}` | aggregate result JSON basename |
 | `KV_OFFLOADING` | `none` | label threaded into result aggregation |
 
