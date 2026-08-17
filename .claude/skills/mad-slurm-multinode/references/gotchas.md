@@ -8,7 +8,9 @@ RCCL_AINIC_ROCE RDMAV_DRIVERS ionic,
 NCCL_IB_HCA mlx5 rdma per-cluster, perf.csv login-node aggregation,
 slurm.nodes distributed.nnodes nodelist world size,
 heterogeneous nodes NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME network_interface,
-routable interface eth0 eth1 IPv6 link-local fe80 gloo connect timeout subnet
+routable interface eth0 eth1 IPv6 link-local fe80 gloo connect timeout subnet,
+madengine --timeout 0 None sbatch template, -o output csv ignored classic slurm,
+docker commit ENTRYPOINT cat exit 126, NFS root_squash docker mount permission denied
 
 Cross-cutting and per-workload pitfalls observed in real runs. SKILL.md links
 here; this file is read before a run.
@@ -72,6 +74,35 @@ here; this file is read before a run.
   not a single node's file.
 - **`slurm.nodes` equals `distributed.nnodes`** and matches `--nodelist`
   cardinality, or sbatch/torchrun disagree on world size.
+- **Never pass `--timeout 0` to `madengine run`.** `cli/commands/run.py` maps `0`
+  to Python `None` and the SLURM job template renders it literally
+  (`{{ timeout | default(3600) }}` does not fire for `None`), so the in-job
+  `madengine run --timeout None` dies on argument parsing with exit code 2 —
+  after the allocation is already up. Always pass a positive number.
+- **`-o <file>` does not move the aggregation in the classic SLURM path.**
+  Results still land in cwd `perf.csv` / `perf_entry.csv`; only the reporter
+  reads the `-o` name, so a run ends with a cosmetic
+  `⚠️ Performance CSV not found: <file>` (`cli/utils.py`) while every metric was
+  in fact stored. Read `perf.csv` and treat that warning as noise, or leave `-o`
+  at its default. (The equivalent warning was fixed for `slurm_multi`, not for
+  the classic path.)
+- **A hand-built image handed to madengine must have no `ENTRYPOINT`.**
+  madengine keeps the container alive with `docker run -t -d <img> cat`, so a
+  baked `ENTRYPOINT ["bash"]` turns that into `bash cat` → exit 126 → the next
+  `docker exec ... whoami` fails with "container is not running". `docker commit`
+  of a `--entrypoint bash ... sleep infinity` debug container bakes exactly that,
+  and `docker commit --change 'ENTRYPOINT []'` does **not** clear it. Clear it
+  with a one-line overlay build
+  (`printf 'FROM <committed>\nENTRYPOINT []\nCMD []\n' | docker build -t <tag> -`)
+  and verify `docker image inspect <img> --format '{{json .Config.Entrypoint}}'`
+  returns `null`. Dockerfile-built images are unaffected.
+- **Docker cannot mount a host dir that squashed root cannot traverse.** The
+  docker daemon runs as root and NFS `root_squash` maps root to `nobody`, so a
+  data directory that is only group-readable (e.g. mode `drwxrws---` owned by a
+  developer group) fails every `-v` with
+  `error while creating mount source path ...: mkdir ...: permission denied`,
+  even though the user's own shell reads it fine. Stage run data under a path
+  whose whole chain is world-traversable (`o+x`), not just group-readable.
 - **Node environments can be heterogeneous across a cluster — don't trust a
   single detect probe.** The interface that carries the routable control-plane
   IP is not guaranteed to have the same name on every node (e.g. one node routes
@@ -281,3 +312,75 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   `context.docker_env_vars` and `deployment_config.env_vars`, like the other
   transport vars) to disable the plugin and let the bundled `librccl` drive the
   IB/RoCE net path directly. The primus template ships this key set to `none`.
+
+## pyt_mlperf_training (MLPerf Llama-3.1)
+
+Keywords: mlperf training llama-3.1-8b nemo megatron-core version pairing,
+requirements/manifest.json mcore pin, no_weight_decay_cond get_megatron_optimizer,
+dist_checkpointing strategies tensorstore ImportError, nemo_toolkit 2.7.3 py3.12
+py3.13 nvidia-modelopt numpy<2, nemo.collections.llm missing in NeMo 3.0,
+MLPERF_EXECUTION_MODE torchrun_in_alloc, NVTE_CK_JIT=0 clang++ -v undefined symbol
+main, nvidia-modelopt filter veto, preprocessed C4 85 GB mlc-r2-downloader,
+MLPERF_PEAK_BF16_TFLOPS mfu_pct, run_stop aborted NOT submittable, extract_perf.py.
+
+- **NeMo and megatron-core are a matched pair — take the version from NeMo, not
+  from "latest".** This is the expensive failure of this workload: the run
+  reaches `torchrun`, then every rank dies with
+  `TypeError: get_megatron_optimizer() got an unexpected keyword argument
+  'no_weight_decay_cond'` and `ImportError: cannot import name 'tensorstore' from
+  'megatron.core.dist_checkpointing.strategies'`. Both are version skew, not a
+  ROCm or transport problem, so no amount of base-image swapping fixes them. The
+  authoritative pin is in the NeMo tree itself:
+  `requirements/manifest.json` -> `vcs-dependencies["megatron-lm"].ref`, whose
+  `megatron/core/package_info.py` gives the version (NeMo 2.7.3 -> mcore
+  0.15.0rc8, hence `ROCm/Megatron-LM` branch `core_r0.15.0_rocm`). Check that
+  before changing `MEGATRON_COMMIT` in the Dockerfile.
+- **megatron-core is installed editable, so a version swap costs no
+  TransformerEngine rebuild.** Inside a built image:
+  `cd /workspace/deps/megatron_lm && git checkout <branch> &&
+  pip install --no-build-isolation --no-deps -e . &&
+  (cd megatron/core/datasets && make)`. Confirm the two API points before
+  spending an allocation on a real run:
+  `'no_weight_decay_cond' in inspect.signature(get_megatron_optimizer).parameters`
+  and `from megatron.core.dist_checkpointing.strategies import tensorstore`.
+- **The base image's Python version decides whether the NeMo stack is
+  installable at all.** On a py3.13 ROCm base, `nemo_toolkit[nlp]==2.7.3` cannot
+  resolve: `nvidia-modelopt==0.37.0` declares `requires_python <3.13`, and NeMo's
+  `numpy<2` (its `tensorstore` pin is compiled against the numpy 1.x ABI) has no
+  py3.13 candidate. `nemo_toolkit==3.0.0` does install on py3.13 but ships no
+  `nemo.collections.llm` / `nemo.lightning`, which is exactly the API the MLPerf
+  reference and the entrypoint are written against. So the template pins a
+  **py3.12** ROCm base; numpy 1.26.4 works fine with torch 2.10/2.12 there.
+- **`MLPERF_EXECUTION_MODE=torchrun_in_alloc` is the multi-node mode.**
+  NeMo-Run's own executors either assume a single node or want to submit their
+  own sbatch job, which collides with the allocation madengine already holds, so
+  `scripts/pyt_mlperf_training/mlperf_pretrain_entrypoint.py` builds the upstream
+  Fiddle recipe and runs it under `torchrun` in the existing allocation.
+- **Data is `run.sh`'s job, but it must land on shared FS and be mounted.** The
+  preprocessed C4 for the 8B benchmark is ~85 GB in 6 files
+  (`c4-train.en_6_text_document.bin` alone is 84 GB) pulled by plain `wget` under
+  the MLCommons downloader — budget over an hour and expect to resume a stall by
+  hand. The MLCommons *tokenizer* bundle, in contrast, is a full HF repo mirror
+  (~32 GB of safetensors) — fetch only `tokenizer.json`,
+  `tokenizer_config.json`, `special_tokens_map.json`, `config.json`,
+  `generation_config.json`. `TMP_NPY_INDEX` must be shared as well: the Megatron
+  data index is built once on rank 0 and read by every rank.
+- **`mfu_pct` is meaningless without `MLPERF_PEAK_BF16_TFLOPS`.**
+  `extract_perf.py` falls back to the MI325X peak (1307 TFLOP/s), which overstates
+  MFU by ~2x on MI355X (dense BF16 peak 2500 TFLOP/s). `run.sh` forwards the env
+  var to `--peak-bf16-tflops`; every other metric (step time, tokens/s, TFLOP/s)
+  is hardware-independent.
+- **`run_stop.status = aborted [NOT submittable]` is expected for a perf run.**
+  The run stops at `MLPERF_MAX_STEPS` rather than at the benchmark's convergence
+  target, so the headline `run_start -> run_stop` time is a throughput
+  measurement, not a submittable MLPerf result.
+- **Only when rebuilding the image:** `NVTE_CK_JIT=0` is load-bearing (the CK-JIT
+  path probes its compiler with `<compiler> -v` and demands exit 0, but ROCm's
+  `clang++.cfg` carries a linker flag that makes a bare `clang++ -v` attempt a
+  link and fail with `undefined symbol: main`), `nvidia-modelopt` must be exempt
+  from the requirement filter's `nvidia-` veto (`nemo.collections.llm.api`
+  imports it unconditionally), and `nvidia-resiliency-ext` must be importable
+  (`nemo/lightning/nemo_logger.py` dereferences it). Budget ~35 min for the
+  build, ~30 of which is the TransformerEngine compile — that fits inside a
+  4-hour interactive allocation but not much less. The image is ~55 GB, the
+  `MAD_DOCKER_BUILDS` tar ~15 GB.

@@ -143,6 +143,26 @@ differ, the host path belongs on the value side.
   (`patchelf --add-needed librocm_smi64.so.<N>`) so a newer RCCL on the rocm720
   base does not break `import torch` (see [gotchas.md](gotchas.md#sglang_disagg)).
   Perf lands in `perf_sglang-disagg-DeepSeek-R1.csv`, collected on rank 0 only.
+- **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
+  MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
+  `launcher: torchrun`, `scripts/pyt_mlperf_training/run.sh`, `nproc_per_node: 8`,
+  `multiple_results` = `perf_pyt_mlperf_training_llama-3.1-8b.csv`. Two templates:
+  `mlperf_training_llama-3.1-8b.template.json` (2 nodes, 100 steps, the perf run)
+  and `..._smoke.template.json` (1 node, 8 steps — run this first, it proves the
+  image and the data mounts in ~10 minutes instead of failing a 2-node
+  allocation). Knobs beyond the transport vars:
+  `MLPERF_EXECUTION_MODE=torchrun_in_alloc` (keep it — see
+  [gotchas.md](gotchas.md#pyt_mlperf_training-mlperf-llama-31)),
+  `MLPERF_TRAINING_REF` (the pinned `mlcommons/training` commit `run.sh` checks
+  out in-container), `MLPERF_GBS`/`MLPERF_MBS`/`MLPERF_MAX_STEPS`/
+  `MLPERF_WARMUP_STEPS`, and `MLPERF_PEAK_BF16_TFLOPS` (per-GPU dense BF16 peak;
+  without it `mfu_pct` is computed against an MI325X peak). Four data mounts are
+  required — `/preproc_data`, `/tokenizer`, `/continual`, `/npy_index` — all on
+  shared FS, and `<FILL_DATA_ROOT>` must be traversable by squashed root (see
+  gotchas). `base_docker` is deliberately a **py3.12** ROCm image: NeMo 2.7.3
+  cannot be installed on py3.13. `skip_gpus_directive: true` in the template
+  reflects the Broadcom-Thor2 cluster it was brought up on — drop the key on a
+  cluster whose partitions advertise GPU GRES normally.
 
 ## Scaling a manifest (e.g. 2-node -> 4-node)
 

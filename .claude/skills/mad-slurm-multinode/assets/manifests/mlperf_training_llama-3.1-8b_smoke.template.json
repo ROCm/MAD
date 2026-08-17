@@ -1,0 +1,136 @@
+{
+  "built_images": {
+    "rocm-mlperf-training-llama31-8b": {
+      "model": "pyt_mlperf_training_llama-3.1-8b",
+      "docker_image": "rocm/pyt_mlperf_training:<FILL_IMAGE_TAG e.g. rocm724-gfx950-nemo273>",
+      "dockerfile": "docker/pyt_mlperf_training.ubuntu.amd.Dockerfile",
+      "base_docker": "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0",
+      "build_duration": 0,
+      "local_image": true,
+      "registry_image": null,
+      "registry": null,
+      "gpu_vendor": "AMD"
+    }
+  },
+  "built_models": {
+    "rocm-mlperf-training-llama31-8b": {
+      "name": "pyt_mlperf_training_llama-3.1-8b",
+      "url": "https://github.com/mlcommons/training",
+      "dockerfile": "docker/pyt_mlperf_training",
+      "scripts": "scripts/pyt_mlperf_training/run.sh",
+      "n_gpus": "-1",
+      "owner": "mad.support@amd.com",
+      "training_precision": "bf16",
+      "multiple_results": "perf_pyt_mlperf_training_llama-3.1-8b.csv",
+      "tags": ["pyt", "mlperf", "training", "llama3.1-8b", "smoke"],
+      "timeout": -1,
+      "args": "--model_repo pyt_mlperf_training_llama-3.1-8b",
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 128G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro"
+    }
+  },
+  "context": {
+    "docker_env_vars": {
+      "MAD_SYSTEM_GPU_ARCHITECTURE": "<FILL_GPU_ARCH  gfx950 = MI355X, gfx942 = MI300X, see references/cluster-types.md>",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_NET": "IB",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  data-plane HCA list, see references/cluster-types.md>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "IBV_SHOW_WARNINGS": "1",
+      "MLPERF_EXECUTION_MODE": "torchrun_in_alloc",
+      "MLPERF_TRAINING_REF": "d15c39403c20786633aac6876c014b074a22feb9",
+      "MLPERF_GBS": "64",
+      "MLPERF_MBS": "1",
+      "MLPERF_MAX_STEPS": "8",
+      "MLPERF_WARMUP_STEPS": "1",
+      "MLPERF_EVAL_EVERY": "65536",
+      "MLPERF_TARGET_LOG_PPL": "3.3",
+      "MLPERF_PEAK_BF16_TFLOPS": "<FILL_PEAK_BF16  dense BF16 matrix peak of ONE GPU in TFLOP/s: 2500 = MI355X, 1307 = MI300X/MI325X; drives mfu_pct only>",
+      "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:True",
+      "PREPROCESSED_PATH": "/preproc_data",
+      "TOKENIZER_PATH": "/tokenizer",
+      "CONTINUAL_CKPT": "/continual",
+      "TMP_NPY_INDEX": "/npy_index"
+    },
+    "docker_mounts": {
+      "/dev/infiniband": "/dev/infiniband",
+      "/preproc_data": "<FILL_DATA_ROOT>/llama3_1_8b/preprocessed",
+      "/tokenizer": "<FILL_DATA_ROOT>/llama3_1_8b/tokenizer",
+      "/continual": "<FILL_DATA_ROOT>/llama3_1_8b/checkpoints",
+      "/npy_index": "<FILL_DATA_ROOT>/llama3_1_8b/npy_index"
+    },
+    "docker_build_arg": {
+      "BASE_DOCKER": "rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0",
+      "BUILD_GPU_TARGETS": "<FILL_GPU_ARCH  same value as MAD_SYSTEM_GPU_ARCHITECTURE>",
+      "MLPERF_BUILD_PROFILE": "full",
+      "RDMA_CORE_VERSION": "63.0"
+    },
+    "gpu_vendor": "AMD",
+    "guest_os": "UBUNTU",
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  },
+  "credentials_required": [],
+  "summary": {
+    "successful_builds": [],
+    "failed_builds": [],
+    "total_build_time": 0,
+    "successful_pushes": [],
+    "failed_pushes": []
+  },
+  "deployment_config": {
+    "target": "slurm",
+    "slurm": {
+      "partition": "<FILL_PARTITION>",
+      "account": "<FILL_ACCOUNT or remove if cluster has none>",
+      "qos": "<FILL_QOS or remove if cluster has none>",
+      "nodes": 1,
+      "gpus_per_node": 8,
+      "time": "01:30:00",
+      "output_dir": "./slurm_output",
+      "exclusive": true,
+      "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "skip_gpus_directive": true
+    },
+    "distributed": {
+      "launcher": "torchrun",
+      "backend": "nccl",
+      "port": 29500,
+      "nnodes": 1,
+      "nproc_per_node": 8
+    },
+    "env_vars": {
+      "HF_HOME": "${HF_HOME}",
+      "TORCH_HOME": "${TORCH_HOME}",
+      "XDG_CACHE_HOME": "${XDG_CACHE_HOME}",
+      "PIP_CACHE_DIR": "${PIP_CACHE_DIR}",
+      "MAD_DATAHOME": "${MAD_DATAHOME}",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_NET": "IB",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  same value as context.docker_env_vars>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "NCCL_TIMEOUT": "900",
+      "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+      "TORCH_NCCL_HIGH_PRIORITY": "1",
+      "OMP_NUM_THREADS": "8",
+      "MIOPEN_FIND_MODE": "1",
+      "MIOPEN_USER_DB_PATH": "${XDG_CACHE_HOME}/miopen",
+      "MLPERF_EXECUTION_MODE": "torchrun_in_alloc",
+      "MLPERF_TRAINING_REF": "d15c39403c20786633aac6876c014b074a22feb9"
+    },
+    "debug": false,
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  }
+}
