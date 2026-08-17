@@ -57,7 +57,7 @@ _resolve_script_dir() {
 SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
-REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
+REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env" "benchmark_customer_slo.sh" "gen_workload.py" "slo_report.py" "benchmark_avg_80K_ten.sh" "benchmark_avg_200K_ten.sh" "benchmark_niah_long.sh" "pool_workload.py")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
         echo "Error: Required file '$f' not found in $(pwd)." >&2
@@ -67,6 +67,22 @@ for f in "${REQUIRED_FILES[@]}"; do
     fi
 done
 echo "Running from: $(pwd)"
+
+# ------------------------------------------------------------------------------
+# models.yaml env precedence: capture which recipe knobs the USER explicitly set
+# at submit time. The driver (vllm_disagg.sh) uses this to let models.yaml `env:`
+# OVERRIDE image-baked ENV defaults (e.g. a DeepSeek-tuned image bakes
+# KV_BLOCK_SIZE=16 / VLLM_ROCM_USE_AITER_MLA=0, which would otherwise shadow a
+# model's own recipe — GLM-5.1 DSA needs block=1 + AITER MLA on), while a genuine
+# submit-time `-e VAR=...` still wins. Precedence: image-baked < models.yaml < submit -e.
+# Captured HERE (before the slurm sets any defaults) so it reflects user intent only.
+_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+MODELS_YAML_PROTECT=""
+for _k in $_RECIPE_ENV_KEYS; do
+    [ -n "${!_k+x}" ] && MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT} ${_k}"
+done
+export MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT# }"
+echo "models.yaml protect-list (submit-time overrides): '${MODELS_YAML_PROTECT}'"
 
 # ------------------------
 # Print current time in UTC and PST formats
@@ -87,6 +103,9 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "GLM-5.1-FP8" \
+    "GLM-5.2-FP8" \
+    "GLM-5.2-MXFP4" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -94,6 +113,9 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "GLM-5.1-FP8" \
+    "GLM-5.2-FP8" \
+    "GLM-5.2-MXFP4" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -179,7 +201,10 @@ WIDE_EP="${WIDE_EP:-0}"
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+# GLM-5.1-FP8 (GlmMoeDsaForCausalLM, MLA+DSA) is validated only under MoRI-EP
+# wideEP disagg (block=1, AITER sparse MLA on, per-role all2all). The moriio+TP
+# ("Stage B") path is untested for DSA, so reject WIDE_EP=0 for it too.
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.2-FP8" "GLM-5.2-MXFP4" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -219,7 +244,7 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # KEY=VALUE lines into CONNECTOR_ENV_ARGS as `-e KEY=${KEY:-VALUE}` pairs, so a
 # submit-time export of the same name still overrides. Forwarded in the docker run.
 # ---------------------------------------------------------------------------
-CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
+CONNECTOR_ENV_FILE="${CONNECTOR_ENV_FILE:-${SCRIPT_DIR}/connectors/${CONNECTOR}.env}"
 CONNECTOR_ENV_ARGS=""
 if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
   echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
@@ -227,6 +252,14 @@ if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
     [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
     _k="${_line%%=*}"; _v="${_line#*=}"
     CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
+    # Most keys here are container-runtime only, so `-e` is enough. A few are needed
+    # by THIS script, on the HOST, before any container starts -- those must also be
+    # exported into the host shell or setting them in the .env file is silently inert.
+    # Deliberately an allow-list: blanket-exporting the RDMA/HSA vars onto the host
+    # would also leak them into srun and every other host-side tool.
+    case "$_k" in
+      FABRIC_SUBNET) export "$_k=${!_k:-$_v}" ;;
+    esac
   done < "$CONNECTOR_ENV_FILE"
 else
   echo "WARN: connector env file not found: $CONNECTOR_ENV_FILE" >&2
@@ -250,6 +283,12 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
+# AAC MI355X: weights are pre-staged on the 100T /shared/data NFS export (visible on
+# every node), not on the OCI-style models_blog paths. The two checks above will miss,
+# and this third one resolves. Override MODEL_DIR at submit time for other sites.
+if [ -z "${MODEL_DIR:-}" ] && [ -d /shared/data/amd_int/models ]; then
+  MODEL_DIR=/shared/data/amd_int/models
+fi
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
 
@@ -405,15 +444,33 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
+# Pick the routable fabric IP, not just hostname -I's first entry. These nodes expose
+# multiple NICs (e.g. a 10.224.x overlay listed BEFORE the routable 10.158.x fabric);
+# taking $1 blindly can advertise an unreachable addr -> prefill/decode barrier hangs
+# "Waiting for nodes" forever. Prefer FABRIC_SUBNET (default 10.158.), fall back to $1.
+#
+# THIS DEFAULT IS CLUSTER-SPECIFIC AND YOU PROBABLY NEED TO OVERRIDE IT.
+# Known values:
+#     10.158.    MI300X cluster this recipe was originally developed on (the default)
+#     10.2.80.   AAC MI355X (gpu-44/45); set in connectors/moriio.env.aac
+# If it does not match, MASTER_ADDR silently becomes an unreachable address and the
+# launch barrier hangs at "Waiting for nodes" with no error. Check with:
+#     srun -N1 -w <node> hostname -I
+# and pick the prefix of the interface that is routable BETWEEN nodes -- note that on
+# AAC the public/default-route NIC answers ICMP but has TCP firewalled node-to-node,
+# so "the one that pings" is not a safe test; test the actual port.
+FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+# From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
+_pick_fabric_ip() {
+    awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
+}
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | _pick_fabric_ip)
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
+    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I' | _pick_fabric_ip)
     IPS+=("$IP")
 done
 
@@ -427,11 +484,43 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   keepalive              -> keepalive_bench.sh        (hold server up KEEPALIVE_MINS
+#                                                        for external accuracy probes)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    keepalive)    BENCHMARK_SCRIPT_FILE="keepalive_bench.sh" ;;
+    # NOTE: this case OVERWRITES any inherited BENCHMARK_SCRIPT_FILE (plain `=`,
+    # not `${VAR:-}`), so exporting BENCHMARK_SCRIPT_FILE=benchmark_niah.sh from a
+    # driver script is silently discarded -- several runs executed the default
+    # throughput sweep instead of NIAH before this was spotted. Select via
+    # BENCHMARK_SCRIPT instead; that is the knob this case actually keys on.
+    niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    # NIAH accuracy first, then the ISL/OSL perf sweep, against ONE booted server.
+    # Perf is SKIPPED if NIAH fails: a throughput number from a server that cannot
+    # retrieve a needle is not a result worth reporting.
+    niah_perf)    BENCHMARK_SCRIPT_FILE="benchmark_niah_perf.sh" ;;
+    # Customer SLO acceptance run: finite arrival rate, percentiles, --goodput, and a
+    # pass/fail exit code. Generates its own ISL distribution, so it also needs
+    # gen_workload.py and slo_report.py to be present (checked in REQUIRED_FILES).
+    customer_slo) BENCHMARK_SCRIPT_FILE="benchmark_customer_slo.sh" ;;
+    # The two customer rows, each as TEN runs at distinct seeds. These are thin wrappers
+    # over customer_slo that set RESAMPLE_PER_ITER=1 so the iterations draw fresh
+    # samples and pool (SE of the realised mean falls as 1/sqrt(iters)); a single run's
+    # mean is a property of its seed, not of the workload. They also invoke
+    # pool_workload.py at the end, so that file must be present too.
+    avg_80k_ten)  BENCHMARK_SCRIPT_FILE="benchmark_avg_80K_ten.sh" ;;
+    avg_200k_ten) BENCHMARK_SCRIPT_FILE="benchmark_avg_200K_ten.sh" ;;
+    # Long-context NIAH ladder in TOKENS to 950K, with per-needle depth reporting.
+    # Budget the wall clock before selecting this: prefill is ~quadratic here, so the
+    # 8-rung default ladder is ~3.3 h at one seed with no warmup and ~13 h at three
+    # seeds with warmup. See the header of benchmark_niah_long.sh.
+    niah_long)    BENCHMARK_SCRIPT_FILE="benchmark_niah_long.sh" ;;
+    # The valid-list here was stale -- it omitted niah/niah_perf, so a correct
+    # BENCHMARK_SCRIPT=niah_perf that hit an unrelated typo elsewhere produced an
+    # error message denying that its own value was legal. Keep this in sync.
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive, niah, niah_perf, customer_slo, avg_80k_ten, avg_200k_ten, niah_long)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -478,15 +567,27 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
+# Container runtime selection. AAC compute nodes deny the docker socket to normal
+# users (no `docker` group) but ship podman 4.7.1, which is CLI-compatible for every
+# flag used below (run/ps/rm/pull/image inspect/stop). Prefer docker when actually
+# usable, else podman. Override with CONTAINER_CLI=podman|docker at submit time.
+if [ -z "${CONTAINER_CLI:-}" ]; then
+  if docker info >/dev/null 2>&1; then CONTAINER_CLI=docker
+  elif command -v podman >/dev/null 2>&1; then CONTAINER_CLI=podman
+  else echo "Error: neither a usable docker daemon nor podman found." >&2; exit 1; fi
+fi
+export CONTAINER_CLI
+echo "[runtime] CONTAINER_CLI=$CONTAINER_CLI"
+
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
-docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
+$CONTAINER_CLI ps -q | xargs --no-run-if-empty $CONTAINER_CLI stop;
+$CONTAINER_CLI rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
 fuser -k 5000/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
-docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+$CONTAINER_CLI pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
@@ -501,13 +602,30 @@ mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
 # NOTE: this whole section runs inside a single-quoted `srun bash -c '...'`, so avoid
 # single quotes here; the image-id hash is extracted with tr, not sed.
 if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
-    _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
+    _IMG_RAW=$($CONTAINER_CLI image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
     _IMG_KEY="${_IMG_KEY:-noimg}";
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
-    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
-    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
-    echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
+    _JIT_CACHE_HOST="";
+    if [ -n "${JIT_CACHE_HOST:-}" ]; then
+        _JIT_CACHE_CANDS="${JIT_CACHE_HOST}";
+    elif [ -n "${JIT_CACHE_ROOT:-}" ]; then
+        _JIT_CACHE_CANDS="${JIT_CACHE_ROOT}/${USER}/vllm_jit_cache/${_IMG_KEY}";
+    else
+        _JIT_CACHE_CANDS="/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY} /media/NVME/${USER}/vllm_jit_cache/${_IMG_KEY} /tmp/${USER}/vllm_jit_cache/${_IMG_KEY} ${HOME}/.cache/vllm_jit/$(hostname -s)/${_IMG_KEY}";
+    fi
+    for _c in $_JIT_CACHE_CANDS; do
+        if mkdir -p "$_c"/aiter_jit "$_c"/triton "$_c"/vllm "$_c"/comgr 2>/dev/null && [ -w "$_c" ]; then
+            _JIT_CACHE_HOST="$_c"; break;
+        fi
+    done
+    if [ -n "$_JIT_CACHE_HOST" ]; then
+        _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
+        echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
+    else
+        _JIT_CACHE_MOUNT="";
+        echo "[jit-cache] WARNING: no writable cache root among: $_JIT_CACHE_CANDS";
+        echo "[jit-cache] falling back to in-container cache -- expect a slow cold compile";
+    fi
 else
     _JIT_CACHE_MOUNT="";
 fi
@@ -525,7 +643,12 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        # Require a regular file AFTER symlink resolution: these mounts are built on
+        # ONE node but applied on ALL nodes, and vendor NIC libs (e.g. libionic.so.1)
+        # can be a DANGLING symlink on some nodes -> bind-mount fails "not a directory"
+        # -> container create exit 125. `-f` (follows symlink, requires regular file)
+        # skips those; the fabric in use (mlx5) is still mounted where present.
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 
@@ -533,27 +656,58 @@ done
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 
-docker run --rm \
+# Optional site mounts: only bind paths that EXIST on this node. podman fails container
+# creation outright on a missing bind source (docker would auto-create a dir), and the
+# AAC cluster has neither /shared_inference nor /mnt/m2m_nobackup -- its weights are on
+# /shared/data and its scratch on /media/NVME.
+# Rootless podman drops supplementary groups, so a bind mount whose PARENT dir is
+# group-readable only (here /shared/data/amd_int is 0770 amd:QLE) fails to stat.
+# keep-groups retains them. Docker runs its daemon as root and does not need this.
+# keep-groups cannot be combined with any other --group-add, and it makes
+# --group-add video redundant (the user is already in video and render).
+if [ "${CONTAINER_CLI}" = "podman" ]; then
+    _GROUP_ADD_ARGS="--group-add keep-groups"
+else
+    _GROUP_ADD_ARGS="--group-add video"
+fi
+
+# --shm-size is incompatible with --ipc host under podman (docker ignores the
+# redundant pair, podman errors). With --ipc host the container uses the host
+# /dev/shm, so the shm-size request is a no-op anyway -- drop it for podman only.
+if [ "${CONTAINER_CLI}" = "podman" ]; then
+    _SHM_SIZE_ARG=""
+else
+    _SHM_SIZE_ARG="--shm-size ${DOCKER_SHM_SIZE:-256G}"
+fi
+
+_OPT_MOUNTS=""
+for _d in /shared_inference /mnt/m2m_nobackup /shared/data /shared/apps /media/NVME /it-share; do
+    [ -d "$_d" ] && _OPT_MOUNTS="$_OPT_MOUNTS -v $_d:$_d"
+done
+echo "[site-mounts] $_OPT_MOUNTS"
+
+$CONTAINER_CLI run --rm \
     --device /dev/dri \
     --device /dev/kfd \
     --device /dev/infiniband \
     --network host \
     --ipc host \
-    --group-add video \
+    ${_GROUP_ADD_ARGS} \
     --cap-add SYS_PTRACE \
     --security-opt seccomp=unconfined \
     --privileged \
     -v $HOME:$HOME \
-    -v /shared_inference:/shared_inference \
-    -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    ${_OPT_MOUNTS} \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size ${DOCKER_SHM_SIZE:-256G} \
+    ${_SHM_SIZE_ARG} \
     --ulimit nofile=524288:524288 \
     --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     ${_JIT_CACHE_MOUNT} \
+    ${GLM_KERNEL_PATCH:+-v ${GLM_KERNEL_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py:ro} \
+    ${GLM_BACKEND_PATCH:+-v ${GLM_BACKEND_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py:ro} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
@@ -571,10 +725,25 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
+    ${NIAH_WORDS:+-e NIAH_WORDS="$NIAH_WORDS"} \
+    ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
+    ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
+    ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
+    ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
+    ${NIAH_MIN_SCORE:+-e NIAH_MIN_SCORE=$NIAH_MIN_SCORE} \
+    ${NIAH_GATE:+-e NIAH_GATE=$NIAH_GATE} \
+    ${NIAH_TOKENS:+-e NIAH_TOKENS="$NIAH_TOKENS"} \
+    ${NIAH_TOKENIZER:+-e NIAH_TOKENIZER=$NIAH_TOKENIZER} \
+    ${NIAH_TOKENS_PER_WORD:+-e NIAH_TOKENS_PER_WORD=$NIAH_TOKENS_PER_WORD} \
+    ${NIAH_TIMEOUT_SCALE:+-e NIAH_TIMEOUT_SCALE=$NIAH_TIMEOUT_SCALE} \
+    ${PERF_CON:+-e PERF_CON="$PERF_CON"} \
+    ${PERF_COMBINATIONS:+-e PERF_COMBINATIONS="$PERF_COMBINATIONS"} \
+    ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
     ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
     ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
+    ${FABRIC_SUBNET:+-e FABRIC_SUBNET=$FABRIC_SUBNET} \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
@@ -583,6 +752,9 @@ docker run --rm \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
+    -e MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT:-}" \
+    ${GLM_PERSIST_GATE:+-e GLM_PERSIST_GATE=$GLM_PERSIST_GATE} \
+    ${GLM_SKIP_PATCHERS:+-e GLM_SKIP_PATCHERS=$GLM_SKIP_PATCHERS} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
@@ -590,6 +762,21 @@ docker run --rm \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${SCENARIOS:+-e SCENARIOS="$SCENARIOS"} \
+    ${SLO_ITERS:+-e SLO_ITERS=$SLO_ITERS} \
+    ${SLO_TTFT_MS:+-e SLO_TTFT_MS=$SLO_TTFT_MS} \
+    ${SLO_TPOT_MS:+-e SLO_TPOT_MS=$SLO_TPOT_MS} \
+    ${WORKLOAD_MODE:+-e WORKLOAD_MODE=$WORKLOAD_MODE} \
+    ${TAIL_FRAC:+-e TAIL_FRAC=$TAIL_FRAC} \
+    ${PREFIX_FRAC:+-e PREFIX_FRAC=$PREFIX_FRAC} \
+    ${MAX_PROMPTS:+-e MAX_PROMPTS=$MAX_PROMPTS} \
+    ${BURSTINESS:+-e BURSTINESS=$BURSTINESS} \
+    ${RESAMPLE_PER_ITER:+-e RESAMPLE_PER_ITER=$RESAMPLE_PER_ITER} \
+    ${SEED_BASE:+-e SEED_BASE=$SEED_BASE} \
+    ${DP_RANKS:+-e DP_RANKS=$DP_RANKS} \
+    ${TGT_PREFILL_TOK_S:+-e TGT_PREFILL_TOK_S=$TGT_PREFILL_TOK_S} \
+    ${TGT_DECODE_TOK_S:+-e TGT_DECODE_TOK_S=$TGT_DECODE_TOK_S} \
+    ${KEEPALIVE_MINS:+-e KEEPALIVE_MINS=$KEEPALIVE_MINS} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
@@ -613,6 +800,7 @@ docker run --rm \
     ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
     ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
     ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
+    ${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=$VLLM_MORIIO_POST_BATCH_SIZE} \
     -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
     ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
@@ -639,5 +827,5 @@ docker run --rm \
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
 '
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '$CONTAINER_CLI stop $DOCKER_CONT_NAME 2>/dev/null || true; $CONTAINER_CLI rm $DOCKER_CONT_NAME 2>/dev/null || true'
 

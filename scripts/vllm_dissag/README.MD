@@ -234,12 +234,30 @@ lengths and the model is scored on how many it retrieves. Select it in place of 
 sweep via the launcher's benchmark hook:
 
 ```bash
-export BENCHMARK_SCRIPT_FILE=benchmark_niah.sh
+export BENCHMARK_SCRIPT=niah                  # NOT BENCHMARK_SCRIPT_FILE -- see note below
 export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 ```
 
+> **`BENCHMARK_SCRIPT` is the knob, not `BENCHMARK_SCRIPT_FILE`.** The launcher's `case`
+> assigns `BENCHMARK_SCRIPT_FILE` with a plain `=`, so any inherited value is silently
+> discarded and the default throughput sweep runs instead. Earlier revisions of this README
+> documented the discarded form.
+
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
+
+### Long-context and customer-SLO benchmarks
+
+Three further benchmarks — the NIAH ladder to 950K in **tokens**, and the customer's two
+average-ISL SLO rows (80K/256K-ctx and 200K/1M-ctx) — are documented separately in
+**[BENCHMARKS.md](BENCHMARKS.md)**, including how to run each against any OpenAI-compatible
+server rather than through this launcher.
+
+```bash
+export BENCHMARK_SCRIPT=niah_long       # token-based NIAH ladder to 950K (~3.3 h)
+export BENCHMARK_SCRIPT=avg_80k_ten     # avg 80K / 256K ctx, 10 pooled seeds
+export BENCHMARK_SCRIPT=avg_200k_ten    # avg 200K / 1M ctx, 10 pooled seeds
+```
 
 ## Testing the launcher (no GPUs)
 

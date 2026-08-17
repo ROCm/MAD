@@ -86,7 +86,12 @@ IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
-host_ip=$(hostname -I | awk '{print $1}')
+# Prefer the routable fabric IP (FABRIC_SUBNET, default 10.158.) over hostname -I's
+# first entry: nodes with a 10.224.x overlay listed first would bind the socket_barrier
+# / advertise host_ip on an unreachable NIC -> prefill<->decode barrier hangs "Waiting
+# for nodes". Matches the IPADDRS selection in run_xPyD_models.slurm. Falls back to $1.
+FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+host_ip=$(hostname -I | awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}')
 host_name=$(hostname)
 
 # =============================================================================
@@ -160,17 +165,33 @@ MODEL_CONFIG_DECODE=""
 if [[ -n "$MODEL_NAME" && -f "$MODELS_YAML" ]]; then
     export MODELS_YAML MODEL_NAME PARALLEL_MODE
     # 1) Export per-model env: block FIRST (so connector ${VAR:-default} yields to it).
-    #    Only set a var that is NOT already in the environment, so a submit-time
-    #    `docker -e VAR=...` (already exported) WINS over the yaml value. Precedence:
-    #    connector default  <  models.yaml env:  <  submit-time -e.
+    #    Precedence: image-baked ENV  <  models.yaml env:  <  submit-time -e.
+    #    models.yaml MUST override image-baked ENV: a DeepSeek-tuned disagg image
+    #    bakes KV_BLOCK_SIZE=16 / VLLM_ROCM_USE_AITER_MLA=0 / VLLM_CUDAGRAPH_MODE=
+    #    PIECEWISE etc. as container ENV, which would otherwise shadow a model's own
+    #    recipe (GLM-5.1 DSA needs block=1 + AITER sparse MLA on). But a genuine
+    #    submit-time `-e VAR=...` must still win. The slurm can tell the two apart
+    #    (it runs on the host) and passes MODELS_YAML_PROTECT = the space-separated
+    #    list of keys the USER set at submit; the driver protects only those. When
+    #    MODELS_YAML_PROTECT is unset (script run directly, no slurm), fall back to
+    #    the old "skip if in env" behavior so nothing regresses.
     _yaml_env="$(python3 - <<'PY'
 import os, yaml, shlex
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
 cfg = m.get(os.environ["MODEL_NAME"]) or {}
+protect_raw = os.environ.get("MODELS_YAML_PROTECT")
+have_protect = protect_raw is not None
+protect = set((protect_raw or "").split())
 for k, v in (cfg.get("env") or {}).items():
-    # skip if already present in the environment (submit-time -e override wins)
-    if k in os.environ:
-        continue
+    if have_protect:
+        # 3-tier: yaml overrides baked ENV; only a user submit-time -e (in the
+        # protect-list) wins over yaml.
+        if k in protect:
+            continue
+    else:
+        # No protect-list (direct run): legacy behavior — any existing env wins.
+        if k in os.environ:
+            continue
     print(f'export {k}={shlex.quote(str(v))}')
 PY
 )"

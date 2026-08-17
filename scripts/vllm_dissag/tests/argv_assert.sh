@@ -52,7 +52,11 @@ echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
 S="$(cat "$SLURM")"
-_has "$S" 'CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"' "slurm sources connector .env"
+# Match the default, not the whole assignment: the path became overridable
+# (CONNECTOR_ENV_FILE="${CONNECTOR_ENV_FILE:-...}") so a site can point at its own
+# file, and this assertion still demanded the old unconditional form. What matters
+# is that the built-in default resolves per-connector, which is what is checked here.
+_has "$S" 'connectors/${CONNECTOR}.env' "slurm sources connector .env"
 _has "$S" '${CONNECTOR_ENV_ARGS}' "slurm forwards CONNECTOR_ENV_ARGS in docker run"
 for cf in moriio rixl; do
   F="$DIR/connectors/${cf}.env"
