@@ -83,6 +83,18 @@ ACC_SCORE_LOG="${LOG_DIR}/accuracy_score.txt"
 
 mkdir -p "${MLPERF_RESULTS_DIR}" "${LOG_DIR}"
 
+# Offline validity needs the run to last at least user.conf's min_duration, and
+# loadgen sizes its single coalesced query from target_qps alone. Left at the
+# upstream default of 1 the query is far too small and loadgen reports
+# "Min duration satisfied : NO", so the expected throughput has to be declared
+# here (set it at or above the measured samples/s).
+if [[ -n "${MLPERF_INF_OFFLINE_TARGET_QPS:-}" ]]; then
+  USER_CONF_OVERRIDE="${LOG_DIR}/user.conf"
+  cp "${MLPERF_HARNESS_DIR}/${MLPERF_INF_USER_CONF}" "${USER_CONF_OVERRIDE}"
+  echo "*.Offline.target_qps = ${MLPERF_INF_OFFLINE_TARGET_QPS}" >> "${USER_CONF_OVERRIDE}"
+  MLPERF_INF_USER_CONF="${USER_CONF_OVERRIDE}"
+fi
+
 echo "model,performance,metric" > "${RESULT_CSV}"
 echo "${MODEL_REPO},0,run_completed" >> "${RESULT_CSV}"
 
