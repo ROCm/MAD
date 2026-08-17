@@ -72,3 +72,7 @@ venv.bak/
 *.log
 *.out
 *.html
+
+# NFS silly-rename artifacts: created when a file is deleted or replaced while an NFS
+# client still holds it open. They are transient client-side state, never source.
+.nfs*

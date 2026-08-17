@@ -142,6 +142,20 @@ for _k in GLM_MAX_MODEL_LEN GLM_PREFILL_BATCHED_TOKENS GLM_DECODE_BATCHED_TOKENS
   [ -n "${!_k+x}" ] && RECIPE_ENV_ARGS+=" -e ${_k}='${!_k}'"
 done
 
+# Benchmark selection and its knobs. vllm_disagg.sh already honours
+# `${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}` when it invokes the benchmark, so the
+# selector exists -- it just had no way to cross the container boundary from the host.
+# Without this loop the NIAH harness can only be driven by hand (docker exec after the
+# fact), which is how a scored run ends up measuring a different configuration than the
+# one it claims to. Quoted for the same reason as the protect-list above: NIAH_WORDS and
+# BENCHMARK_COMBINATIONS carry commas and spaces that would otherwise split into extra
+# argv words when this command line is re-parsed by the remote shell over ssh.
+# All are unset by default, so behaviour is unchanged unless a caller opts in.
+for _k in BENCHMARK_SCRIPT_FILE BENCHMARK_PORT BENCHMARK_CON BENCHMARK_COMBINATIONS \
+          BENCHMARK_ITR NIAH_WORDS NIAH_SEEDS NIAH_MAXTOK NIAH_TIMEOUT NIAH_WARMUP; do
+  [ -n "${!_k+x}" ] && RECIPE_ENV_ARGS+=" -e ${_k}='${!_k}'"
+done
+
 _load_connector_env() {   # $1 = env file
   local _line _k _v
   while IFS= read -r _line; do
@@ -443,6 +457,7 @@ docker run -d --name $CNAME \
   -e SLURM_JOB_ID=${JOB_ID} -e NNODES=${NNODES} -e NODE_RANK=${rank} \
   -e MASTER_ADDR=${MASTER_ADDR} -e MASTER_PORT=${MASTER_PORT} \
   -e IPADDRS=${IPADDRS} -e xP=${xP} -e yD=${yD} \
+  -e FABRIC_SUBNET=${FABRIC_NET}. \
   -e MODEL_NAME=${MODEL_NAME} -e MODEL_PATH=${MODEL_PATH} \
   -e CONNECTOR=${CONNECTOR} -e WIDE_EP=${WIDE_EP} -e EP_BACKEND=${EP_BACKEND} \
   -e PROXY_PORT=${PROXY_PORT} -e NIXL_COOKBOOK_PATH=${COOKBOOK_IN_CTR} \
