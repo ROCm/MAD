@@ -29,7 +29,12 @@ connector_init() {
         # rixl/TP ports
         SERVER_PORT=2584; SERVE_PORT="${SERVER_PORT}"
         KV_PORT=14600
-        CONTAINER_BARRIER_PORT=5000
+        # Container-creation barrier port. Env-overridable (BARRIER_PORT) so it can
+        # be moved off the collision-prone default 5000: the launcher's `fuser -k`
+        # cleanup targets this port on the host (host networking), so a stale host
+        # service on 5000 would otherwise be killed. Residual risk: the host-side
+        # fuser still kills whatever holds this port for the launching user.
+        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-5000}"
     fi
 
     PROXY_TYPE="${PROXY_TYPE:-vllm_router}"

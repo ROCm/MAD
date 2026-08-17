@@ -491,7 +491,7 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
-fuser -k 5000/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
@@ -608,6 +608,7 @@ docker run --rm \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
+    ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \

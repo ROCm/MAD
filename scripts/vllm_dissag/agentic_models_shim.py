@@ -138,11 +138,27 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(err)
             conn.close()
             return
+        # The NIXL toy_proxy relays streamed SSE chunks but labels them
+        # Content-Type: application/json, so aiperf never strips the "data:" SSE
+        # framing and marks every request invalid. Force text/event-stream when the
+        # client asked for a stream (JSON body "stream": true) OR the upstream is
+        # already SSE; leave non-streaming JSON responses untouched.
+        want_stream = False
+        try:
+            want_stream = bool(json.loads(body or b"{}").get("stream"))
+        except Exception:
+            want_stream = False
+        up_ctype = (resp.getheader("Content-Type", "") or "").lower()
+        force_sse = want_stream or "text/event-stream" in up_ctype
         self.send_response(resp.status)
         for k, v in resp.getheaders():
             if k.lower() in _HOP:
                 continue
+            if force_sse and k.lower() == "content-type":
+                continue
             self.send_header(k, v)
+        if force_sse:
+            self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
