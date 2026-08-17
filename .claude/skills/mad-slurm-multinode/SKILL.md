@@ -257,8 +257,9 @@ bash "$SKILL_DIR/scripts/validate_manifest.sh" run_manifest_<workload>.json
 ```
 
 `validate_manifest.sh` is a read-only static check: JSON validity, leftover
-`<FILL_...>` placeholders, `NCCL_IB_HCA` set and equal in both env blocks,
-network-interface consistency, `slurm.nodes == distributed.nnodes` (+ nodelist
+`<FILL_...>` placeholders, `NCCL_IB_HCA` set and equal in both env blocks (skipped
+for single-node manifests, which carry no transport vars), network-interface
+consistency, `slurm.nodes == distributed.nnodes` (+ nodelist
 cardinality), no stray `MAD_SECRETS_HFTOKEN`, AINIC transport-var symmetry, and
 (with `mad.env` sourced) that the `dockerfile`/`run.sh` resolve under
 `$MODEL_DIR`. It exits non-zero on any FAIL.

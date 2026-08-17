@@ -164,6 +164,24 @@ differ, the host path belongs on the value side.
   cannot be installed on py3.13. `skip_gpus_directive: true` in the template
   reflects the Broadcom-Thor2 cluster it was brought up on — drop the key on a
   cluster whose partitions advertise GPU GRES normally.
+- **MLPerf Inference Llama-3.1-8B** (`pyt_mlperf_inference_llama-3.1-8b`): the
+  MLCommons reference llama3.1-8b harness (loadgen + vLLM SUT) summarising
+  CNN-DailyMail. `launcher: vllm`, `scripts/pyt_mlperf_inference/run.sh`,
+  `multiple_results` = `perf_pyt_mlperf_inference_llama-3.1-8b.csv`. **Single
+  node, and unlike every other workload here it needs no transport vars at all**
+  — one container, one vLLM process, no inter-node traffic. Two templates:
+  `mlperf_inference_llama-3.1-8b.template.json` (Offline, edge 5000 samples,
+  TP=8, performance + accuracy, ~50 min) and `..._smoke.template.json`
+  (200 samples, accuracy only, TP=1, ~6 min — run this first). Knobs:
+  `MLPERF_INF_OFFLINE_TARGET_QPS` (**required for a VALID performance result**,
+  see [gotchas.md](gotchas.md#pyt_mlperf_inference-mlperf-llama-31-inference)),
+  `MLPERF_INF_TOTAL_SAMPLE_COUNT` + `MLPERF_INF_LG_MODEL_NAME` (keep the pair in
+  step: `llama3_1-8b-edge` with 5000 vs `llama3_1-8b` with 13368, since the name
+  selects the ROUGE targets), `MLPERF_INF_TENSOR_PARALLEL_SIZE`,
+  `MLPERF_INF_RUN_PERFORMANCE` / `MLPERF_INF_RUN_ACCURACY`, `MLPERF_INF_SCENARIO`
+  (leave `Offline`; Server is untested). Two mounts: `/model` (the HF checkpoint)
+  and `/dataset`. `built_models.url` **must stay empty**, or madengine clones
+  mlcommons/inference into the container and dies in `git submodule update`.
 
 ## Scaling a manifest (e.g. 2-node -> 4-node)
 

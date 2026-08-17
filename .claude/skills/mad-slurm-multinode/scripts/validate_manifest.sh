@@ -64,16 +64,21 @@ denv  = dep.get("env_vars") or {}
 def is_ph(v):
     return isinstance(v, str) and ("<FILL" in v or v.strip() == "")
 
-# 3) NCCL_IB_HCA present + non-empty in both env blocks, and equal
+# 3) NCCL_IB_HCA present + non-empty in both env blocks, and equal. Single-node
+# runs carry no inter-node traffic, so they are allowed to omit the RDMA vars.
+multi_node = max(slurm.get("nodes") or 1, dist.get("nnodes") or 1) > 1
 hca_c, hca_d = ctx.get("NCCL_IB_HCA"), denv.get("NCCL_IB_HCA")
-if not hca_c or is_ph(hca_c):
-    fail("context.docker_env_vars.NCCL_IB_HCA missing/empty/placeholder")
+if not multi_node and not hca_c and not hca_d:
+    ok("single-node run: RDMA transport vars not required")
 else:
-    ok(f"NCCL_IB_HCA set ({hca_c})")
-if not hca_d or is_ph(hca_d):
-    fail("deployment_config.env_vars.NCCL_IB_HCA missing/empty/placeholder")
-if hca_c and hca_d and not is_ph(hca_c) and not is_ph(hca_d) and hca_c != hca_d:
-    fail(f"NCCL_IB_HCA differs between env blocks: {hca_c!r} vs {hca_d!r}")
+    if not hca_c or is_ph(hca_c):
+        fail("context.docker_env_vars.NCCL_IB_HCA missing/empty/placeholder")
+    else:
+        ok(f"NCCL_IB_HCA set ({hca_c})")
+    if not hca_d or is_ph(hca_d):
+        fail("deployment_config.env_vars.NCCL_IB_HCA missing/empty/placeholder")
+    if hca_c and hca_d and not is_ph(hca_c) and not is_ph(hca_d) and hca_c != hca_d:
+        fail(f"NCCL_IB_HCA differs between env blocks: {hca_c!r} vs {hca_d!r}")
 
 # 4) network interface consistent across the three places it is set
 ifaces = {
