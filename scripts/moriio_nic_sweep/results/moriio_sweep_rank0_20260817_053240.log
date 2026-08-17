@@ -1,0 +1,646 @@
+==============================================================
+ MoRI-IO block-size sweep -- 2 nodes x 8 ionic rails
+   host        : mi355-gpu-45   rank 0   oob 10.2.80.16
+   master      : 10.2.80.16:29511
+   devices     : rocep9s0,rocep25s0,rocep105s0,rocep121s0,rocep137s0,rocep153s0,rocep233s0,rocep249s0
+   gid index   : 1   nic: ionic
+   ctrl ifname : enp193s0f1np1   numa: 0
+   block sweep : 4096 .. 33554432 B (geometric x2)
+   op/mem      : write / gpu   iters: 10   batch: 64
+   qp/xfer     : 8   workers: 8
+   chunking    : 65536 B x max 64 (count saturates above 4194304 B)
+   devs        : 8 init x 8 target, rail-aligned (no offset)
+   alloc/gpu   : ~2048 MiB
+   mori repo   : /opt/mori
+==============================================================
+[preflight] rail state:
+  rocep9s0       state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep25s0      state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep105s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep121s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep137s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep153s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep233s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep249s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  ACTIVE rails: 8/8
+[preflight] visible GPUs: 8 (need >= 8)
+
+[warn] numactl absent -- NIC/CPU affinity left to the scheduler.
+[flags] this benchmark.py does not accept:
+[flags]   --mem-type (build transfers GPU memory unconditionally)
+[flags]   --max-chunks (planner uses its built-in cap)
+[flags] mori HEAD: 6ad812c [io] fix XGMI fallback (#316)
+[flags] Those knobs fall back to the build defaults; the sweep is still
+[flags] a real measurement, just not of those two axes.
+-------- block-size sweep --------
+[2026-08-17 05:32:46.128] [322] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.139] [324] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.216] [327] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.233] [326] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.254] [325] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.260] [328] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.270] [323] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.273] [321] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:52.384] [321] [io] [info] Create engine key INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [323] [io] [info] Create engine key INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [325] [io] [info] Create engine key INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [322] [io] [info] Create engine key INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [324] [io] [info] Create engine key INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [326] [io] [info] Create engine key INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [328] [io] [info] Create engine key INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.384] [327] [io] [info] Create engine key INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.470] [328] [io] [info] worker 0 enter main loop, running on core 147
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 2 enter main loop, running on core 63
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 1 enter main loop, running on core 167
+[2026-08-17 05:32:52.471] [328] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.471] [328] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 3 enter main loop, running on core 49
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 5 enter main loop, running on core 5
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 6 enter main loop, running on core 167
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 7 enter main loop, running on core 49
+[2026-08-17 05:32:52.471] [328] [io] [info] worker 4 enter main loop, running on core 25
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 0 enter main loop, running on core 149
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 3 enter main loop, running on core 95
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 1 enter main loop, running on core 6
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 2 enter main loop, running on core 167
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 5 enter main loop, running on core 167
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 4 enter main loop, running on core 55
+[2026-08-17 05:32:52.503] [321] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.504] [321] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.503] [321] [io] [info] worker 6 enter main loop, running on core 6
+[2026-08-17 05:32:52.504] [321] [io] [info] worker 7 enter main loop, running on core 25
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 2 enter main loop, running on core 6
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 1 enter main loop, running on core 167
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 3 enter main loop, running on core 22
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 0 enter main loop, running on core 233
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 4 enter main loop, running on core 199
+[2026-08-17 05:32:52.519] [326] [io] [info] worker 7 enter main loop, running on core 167
+[2026-08-17 05:32:52.518] [326] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 6 enter main loop, running on core 55
+[2026-08-17 05:32:52.519] [326] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.518] [326] [io] [info] worker 5 enter main loop, running on core 98
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 0 enter main loop, running on core 23
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 1 enter main loop, running on core 6
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 3 enter main loop, running on core 167
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 2 enter main loop, running on core 121
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 4 enter main loop, running on core 94
+[2026-08-17 05:32:52.521] [327] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.521] [327] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 5 enter main loop, running on core 199
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 7 enter main loop, running on core 6
+[2026-08-17 05:32:52.521] [327] [io] [info] worker 6 enter main loop, running on core 55
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 1 enter main loop, running on core 167
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 2 enter main loop, running on core 124
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 0 enter main loop, running on core 208
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 3 enter main loop, running on core 6
+[2026-08-17 05:32:52.528] [323] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 5 enter main loop, running on core 21
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 6 enter main loop, running on core 199
+[2026-08-17 05:32:52.528] [323] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 4 enter main loop, running on core 177
+[2026-08-17 05:32:52.528] [323] [io] [info] worker 7 enter main loop, running on core 177
+[2026-08-17 05:32:52.534] [322] [io] [info] worker 0 enter main loop, running on core 167
+[2026-08-17 05:32:52.534] [324] [io] [info] worker 0 enter main loop, running on core 199
+[2026-08-17 05:32:52.534] [322] [io] [info] worker 1 enter main loop, running on core 84
+[2026-08-17 05:32:52.535] [324] [io] [info] worker 3 enter main loop, running on core 125
+[2026-08-17 05:32:52.535] [322] [io] [info] worker 4 enter main loop, running on core 216
+[2026-08-17 05:32:52.534] [322] [io] [info] worker 2 enter main loop, running on core 22
+[2026-08-17 05:32:52.535] [324] [io] [info] worker 4 enter main loop, running on core 243
+[2026-08-17 05:32:52.535] [322] [io] [info] worker 3 enter main loop, running on core 199
+[2026-08-17 05:32:52.534] [324] [io] [info] worker 1 enter main loop, running on core 32
+[2026-08-17 05:32:52.534] [324] [io] [info] worker 2 enter main loop, running on core 6
+[2026-08-17 05:32:52.535] [322] [io] [info] worker 5 enter main loop, running on core 181
+[2026-08-17 05:32:52.535] [322] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.535] [324] [io] [info] worker 5 enter main loop, running on core 22
+[2026-08-17 05:32:52.535] [322] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.535] [322] [io] [info] worker 6 enter main loop, running on core 124
+[2026-08-17 05:32:52.535] [324] [io] [info] worker 6 enter main loop, running on core 6
+[2026-08-17 05:32:52.535] [324] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.535] [324] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.535] [324] [io] [info] worker 7 enter main loop, running on core 22
+[2026-08-17 05:32:52.535] [322] [io] [info] worker 7 enter main loop, running on core 221
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 1 enter main loop, running on core 199
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 0 enter main loop, running on core 84
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 4 enter main loop, running on core 84
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 2 enter main loop, running on core 254
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 5 enter main loop, running on core 147
+[2026-08-17 05:32:52.556] [325] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.556] [325] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 6 enter main loop, running on core 221
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 3 enter main loop, running on core 147
+[2026-08-17 05:32:52.556] [325] [io] [info] worker 7 enter main loop, running on core 84
+[2026-08-17 05:32:52.567] [321] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.567] [322] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.567] [321] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.567] [322] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.567] [323] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.567] [321] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [324] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [321] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [322] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [323] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [322] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [325] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [324] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [321] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [323] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [325] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [322] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [324] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [321] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [323] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [325] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [327] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [326] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [324] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [322] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [321] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [325] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [323] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [328] [io] [info] Register remote engine TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [322] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.568] [324] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [321] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [323] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [325] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [326] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [322] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [324] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [327] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [325] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [326] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [328] [io] [info] Register remote engine TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [327] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [323] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [324] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [326] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [328] [io] [info] Register remote engine TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [325] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [327] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [326] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [323] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [328] [io] [info] Register remote engine TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [324] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [327] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [326] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [325] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.569] [328] [io] [info] Register remote engine TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [327] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [326] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [328] [io] [info] Register remote engine TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [327] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [326] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [328] [io] [info] Register remote engine TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [327] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.570] [328] [io] [info] Register remote engine TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.674] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.689] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.698] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.705] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.717] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.719] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.720] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.723] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.730] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.730] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.736] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.748] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.748] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.751] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.751] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.754] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.761] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.762] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.767] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.779] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.781] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.782] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.783] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.785] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.793] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.794] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.798] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.811] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.812] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.813] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.815] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.817] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.824] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.826] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.828] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.844] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.844] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.846] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.846] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.848] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.856] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.857] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.860] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.875] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.875] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.877] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.878] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.879] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.887] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.888] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.891] [328] [io] [info] Built RdmaConn for engine TARGET-7 with topo local(7,2) remote(7,2)
+[2026-08-17 05:32:52.906] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.908] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.908] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.909] [324] [io] [info] Built RdmaConn for engine TARGET-3 with topo local(3,2) remote(3,2)
+[2026-08-17 05:32:52.911] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.917] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.919] [326] [io] [info] Built RdmaConn for engine TARGET-5 with topo local(5,2) remote(5,2)
+[2026-08-17 05:32:52.938] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:32:52.940] [327] [io] [info] Built RdmaConn for engine TARGET-6 with topo local(6,2) remote(6,2)
+[2026-08-17 05:32:52.940] [322] [io] [info] Built RdmaConn for engine TARGET-1 with topo local(1,2) remote(1,2)
+[2026-08-17 05:32:52.943] [321] [io] [info] Built RdmaConn for engine TARGET-0 with topo local(0,2) remote(0,2)
+[2026-08-17 05:32:52.948] [325] [io] [info] Built RdmaConn for engine TARGET-4 with topo local(4,2) remote(4,2)
+[2026-08-17 05:32:52.969] [323] [io] [info] Built RdmaConn for engine TARGET-2 with topo local(2,2) remote(2,2)
+[2026-08-17 05:34:20.733] [322] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.733] [321] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.733] [322] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.733] [322] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.733] [321] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.734] [322] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.734] [321] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.734] [322] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.734] [321] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.734] [322] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.734] [321] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.734] [322] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.734] [321] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.734] [322] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.734] [321] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.735] [321] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.745] [323] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.745] [323] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.745] [323] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.745] [323] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.746] [323] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.746] [323] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.746] [323] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.746] [323] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.751] [324] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.751] [324] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.751] [324] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.752] [324] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.752] [324] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.752] [324] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.752] [324] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.752] [324] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.762] [325] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.763] [325] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.763] [325] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.773] [326] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.773] [326] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.773] [326] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.774] [326] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.774] [326] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.774] [326] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.774] [326] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.774] [326] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.782] [327] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.783] [327] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.783] [327] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.804] [328] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.804] [328] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.804] [328] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.804] [328] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.804] [328] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.805] [328] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.805] [328] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.805] [328] [io] [info] worker 7 shutdown
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 37109
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 3
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 3                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      2.35     |      1.71     |    111.34    |    153.35    |
+|     8192    |     64    |      0.52      |      4.95     |      4.66     |    105.86    |    112.41    |
+|    16384    |     64    |      1.05      |      8.76     |      8.37     |    119.69    |    125.24    |
+|    32768    |     64    |      2.10      |     15.79     |     15.04     |    132.80    |    139.45    |
+|    65536    |     64    |      4.19      |     23.49     |     22.94     |    178.58    |    182.87    |
+|    131072   |     64    |      8.39      |     32.07     |     31.36     |    261.55    |    267.51    |
+|    262144   |     64    |     16.78      |     38.90     |     38.29     |    431.30    |    438.12    |
+|    524288   |     64    |     33.55      |     43.05     |     42.61     |    779.39    |    787.50    |
+|   1048576   |     64    |     67.11      |     45.63     |     45.31     |   1470.80    |   1481.18    |
+|   2097152   |     64    |     134.22     |     47.12     |     46.77     |   2848.15    |   2869.53    |
+|   4194304   |     64    |     268.44     |     47.65     |     47.26     |   5633.12    |   5679.80    |
+|   8388608   |     64    |     536.87     |     44.43     |     44.20     |   12082.82   |   12146.83   |
+|   16777216  |     64    |    1073.74     |     44.45     |     44.43     |   24153.95   |   24167.01   |
+|   33554432  |     64    |    2147.48     |     44.57     |     44.55     |   48186.06   |   48205.28   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 58617
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 0
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 0                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      1.85     |      1.27     |    141.62    |    205.80    |
+|     8192    |     64    |      0.52      |      4.09     |      3.23     |    128.27    |    162.12    |
+|    16384    |     64    |      1.05      |      7.95     |      6.33     |    131.85    |    165.72    |
+|    32768    |     64    |      2.10      |     13.62     |     12.12     |    154.02    |    172.97    |
+|    65536    |     64    |      4.19      |     21.88     |     20.98     |    191.69    |    199.94    |
+|    131072   |     64    |      8.39      |     30.81     |     29.77     |    272.27    |    281.79    |
+|    262144   |     64    |     16.78      |     37.91     |     36.78     |    442.50    |    456.19    |
+|    524288   |     64    |     33.55      |     42.30     |     41.86     |    793.22    |    801.66    |
+|   1048576   |     64    |     67.11      |     45.18     |     44.86     |   1485.35    |   1495.98    |
+|   2097152   |     64    |     134.22     |     46.90     |     46.54     |   2861.98    |   2884.20    |
+|   4194304   |     64    |     268.44     |     47.49     |     47.17     |   5652.19    |   5690.65    |
+|   8388608   |     64    |     536.87     |     44.42     |     44.21     |   12085.44   |   12144.14   |
+|   16777216  |     64    |    1073.74     |     44.52     |     44.48     |   24118.19   |   24140.98   |
+|   33554432  |     64    |    2147.48     |     44.67     |     44.65     |   48070.91   |   48091.89   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 33669
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 2
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 2                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      1.84     |      1.38     |    142.10    |    189.97    |
+|     8192    |     64    |      0.52      |      4.44     |      3.97     |    118.02    |    132.06    |
+|    16384    |     64    |      1.05      |      8.62     |      7.43     |    121.59    |    141.07    |
+|    32768    |     64    |      2.10      |     15.22     |     13.07     |    137.81    |    160.46    |
+|    65536    |     64    |      4.19      |     24.23     |     23.12     |    173.09    |    181.44    |
+|    131072   |     64    |      8.39      |     32.40     |     31.70     |    258.92    |    264.62    |
+|    262144   |     64    |     16.78      |     38.77     |     38.30     |    432.73    |    438.05    |
+|    524288   |     64    |     33.55      |     43.07     |     42.62     |    779.15    |    787.26    |
+|   1048576   |     64    |     67.11      |     45.59     |     45.22     |   1472.00    |   1483.89    |
+|   2097152   |     64    |     134.22     |     46.98     |     46.62     |   2856.97    |   2879.17    |
+|   4194304   |     64    |     268.44     |     47.41     |     47.08     |   5662.20    |   5701.59    |
+|   8388608   |     64    |     536.87     |     44.20     |     44.01     |   12146.95   |   12199.12   |
+|   16777216  |     64    |    1073.74     |     44.27     |     44.24     |   24254.80   |   24271.82   |
+|   33554432  |     64    |    2147.48     |     44.39     |     44.38     |   48374.18   |   48390.84   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 43559
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 1
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 1                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      2.22     |      1.61     |    118.02    |    162.63    |
+|     8192    |     64    |      0.52      |      4.68     |      4.45     |    112.06    |    117.80    |
+|    16384    |     64    |      1.05      |      8.51     |      8.20     |    123.26    |    127.82    |
+|    32768    |     64    |      2.10      |     15.24     |     14.71     |    137.57    |    142.60    |
+|    65536    |     64    |      4.19      |     23.46     |     22.43     |    178.81    |    186.99    |
+|    131072   |     64    |      8.39      |     32.28     |     31.55     |    259.88    |    265.88    |
+|    262144   |     64    |     16.78      |     38.58     |     38.02     |    434.88    |    441.27    |
+|    524288   |     64    |     33.55      |     42.95     |     42.50     |    781.30    |    789.43    |
+|   1048576   |     64    |     67.11      |     45.57     |     45.14     |   1472.71    |   1486.68    |
+|   2097152   |     64    |     134.22     |     46.98     |     46.64     |   2857.21    |   2877.81    |
+|   4194304   |     64    |     268.44     |     47.53     |     47.17     |   5647.66    |   5691.39    |
+|   8388608   |     64    |     536.87     |     44.43     |     44.28     |   12084.01   |   12125.04   |
+|   16777216  |     64    |    1073.74     |     44.51     |     44.49     |   24123.19   |   24132.20   |
+|   33554432  |     64    |    2147.48     |     44.62     |     44.61     |   48130.04   |   48142.29   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 35195
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 5
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 5                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      1.68     |      1.35     |    156.16    |    194.79    |
+|     8192    |     64    |      0.52      |      4.57     |      3.92     |    114.68    |    133.90    |
+|    16384    |     64    |      1.05      |      8.35     |      7.33     |    125.65    |    143.10    |
+|    32768    |     64    |      2.10      |     14.83     |     13.43     |    141.38    |    156.16    |
+|    65536    |     64    |      4.19      |     22.76     |     22.24     |    184.30    |    188.59    |
+|    131072   |     64    |      8.39      |     31.44     |     30.88     |    266.79    |    271.63    |
+|    262144   |     64    |     16.78      |     38.18     |     37.77     |    439.41    |    444.25    |
+|    524288   |     64    |     33.55      |     42.84     |     42.37     |    783.21    |    791.88    |
+|   1048576   |     64    |     67.11      |     45.53     |     45.09     |   1473.90    |   1488.30    |
+|   2097152   |     64    |     134.22     |     46.99     |     46.65     |   2856.49    |   2877.02    |
+|   4194304   |     64    |     268.44     |     47.66     |     47.16     |   5632.88    |   5691.62    |
+|   8388608   |     64    |     536.87     |     44.35     |     44.16     |   12106.42   |   12156.34   |
+|   16777216  |     64    |    1073.74     |     44.40     |     44.39     |   24183.03   |   24189.97   |
+|   33554432  |     64    |    2147.48     |     44.53     |     44.51     |   48225.40   |   48246.65   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 60135
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 6
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 6                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      2.01     |      1.47     |    130.65    |    178.67    |
+|     8192    |     64    |      0.52      |      4.04     |      3.68     |    129.70    |    142.60    |
+|    16384    |     64    |      1.05      |      7.54     |      6.83     |    139.00    |    153.64    |
+|    32768    |     64    |      2.10      |     13.98     |     13.14     |    149.97    |    159.55    |
+|    65536    |     64    |      4.19      |     22.35     |     21.32     |    187.64    |    196.77    |
+|    131072   |     64    |      8.39      |     30.81     |     30.31     |    272.27    |    276.78    |
+|    262144   |     64    |     16.78      |     37.89     |     37.29     |    442.74    |    449.94    |
+|    524288   |     64    |     33.55      |     42.35     |     41.94     |    792.26    |    800.04    |
+|   1048576   |     64    |     67.11      |     45.19     |     44.82     |   1485.11    |   1497.36    |
+|   2097152   |     64    |     134.22     |     46.99     |     46.61     |   2856.49    |   2879.86    |
+|   4194304   |     64    |     268.44     |     47.82     |     47.43     |   5613.09    |   5660.01    |
+|   8388608   |     64    |     536.87     |     44.26     |     44.06     |   12128.83   |   12184.64   |
+|   16777216  |     64    |    1073.74     |     44.30     |     44.27     |   24235.96   |   24252.63   |
+|   33554432  |     64    |    2147.48     |     44.42     |     44.41     |   48344.14   |   48359.85   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 42493
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 4
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 4                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      1.84     |      1.33     |    142.57    |    197.60    |
+|     8192    |     64    |      0.52      |      4.29     |      3.60     |    122.31    |    145.72    |
+|    16384    |     64    |      1.05      |      8.22     |      7.17     |    127.55    |    146.20    |
+|    32768    |     64    |      2.10      |     14.49     |     12.95     |    144.72    |    161.89    |
+|    65536    |     64    |      4.19      |     22.35     |     21.91     |    187.64    |    191.47    |
+|    131072   |     64    |      8.39      |     31.16     |     30.56     |    269.17    |    274.52    |
+|    262144   |     64    |     16.78      |     38.04     |     37.57     |    441.07    |    446.51    |
+|    524288   |     64    |     33.55      |     42.56     |     41.99     |    788.45    |    799.04    |
+|   1048576   |     64    |     67.11      |     45.32     |     45.00     |   1480.82    |   1491.31    |
+|   2097152   |     64    |     134.22     |     46.91     |     46.60     |   2861.02    |   2880.48    |
+|   4194304   |     64    |     268.44     |     47.68     |     47.37     |   5629.78    |   5666.76    |
+|   8388608   |     64    |     536.87     |     44.77     |     44.54     |   11992.22   |   12053.59   |
+|   16777216  |     64    |    1073.74     |     44.69     |     44.67     |   24026.39   |   24035.26   |
+|   33554432  |     64    |    2147.48     |     44.84     |     44.82     |   47888.52   |   47908.43   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.16
+  port: 40999
+  node_rank: 0
+  role: EngineRole.INITIATOR
+  role_rank: 7
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
++--------------------------------------------------------------------------------------------------------+
+|                                    RDMA Benchmark: Initiator Rank 7                                    |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+| MsgSize (B) | BatchSize | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+|     4096    |     64    |      0.26      |      1.73     |      1.30     |    151.63    |    201.20    |
+|     8192    |     64    |      0.52      |      4.03     |      3.38     |    129.94    |    155.26    |
+|    16384    |     64    |      1.05      |      7.65     |      6.48     |    137.09    |    161.74    |
+|    32768    |     64    |      2.10      |     13.53     |     12.23     |    154.97    |    171.47    |
+|    65536    |     64    |      4.19      |     22.94     |     21.49     |    182.87    |    195.19    |
+|    131072   |     64    |      8.39      |     31.36     |     30.83     |    267.51    |    272.06    |
+|    262144   |     64    |     16.78      |     37.98     |     37.15     |    441.79    |    451.64    |
+|    524288   |     64    |     33.55      |     42.58     |     42.14     |    787.97    |    796.32    |
+|   1048576   |     64    |     67.11      |     45.59     |     45.07     |   1472.00    |   1489.02    |
+|   2097152   |     64    |     134.22     |     47.14     |     46.76     |   2846.96    |   2870.08    |
+|   4194304   |     64    |     268.44     |     47.80     |     47.42     |   5615.71    |   5661.32    |
+|   8388608   |     64    |     536.87     |     44.47     |     44.27     |   12073.52   |   12128.23   |
+|   16777216  |     64    |    1073.74     |     44.44     |     44.42     |   24161.82   |   24173.21   |
+|   33554432  |     64    |    2147.48     |     44.53     |     44.50     |   48230.65   |   48254.37   |
++-------------+-----------+----------------+---------------+---------------+--------------+--------------+
+-------- block-size sweep exit=0 --------
+
+==== moriio sweep rank=0 exit=0 ====

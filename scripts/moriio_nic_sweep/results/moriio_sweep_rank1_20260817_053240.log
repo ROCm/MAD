@@ -1,0 +1,423 @@
+==============================================================
+ MoRI-IO block-size sweep -- 2 nodes x 8 ionic rails
+   host        : mi355-gpu-46   rank 1   oob 10.2.80.17
+   master      : 10.2.80.16:29511
+   devices     : rocep9s0,rocep25s0,rocep105s0,rocep121s0,rocep137s0,rocep153s0,rocep233s0,rocep249s0
+   gid index   : 1   nic: ionic
+   ctrl ifname : enp193s0f1np1   numa: 0
+   block sweep : 4096 .. 33554432 B (geometric x2)
+   op/mem      : write / gpu   iters: 10   batch: 64
+   qp/xfer     : 8   workers: 8
+   chunking    : 65536 B x max 64 (count saturates above 4194304 B)
+   devs        : 8 init x 8 target, rail-aligned (no offset)
+   alloc/gpu   : ~2048 MiB
+   mori repo   : /opt/mori
+==============================================================
+[preflight] rail state:
+  rocep9s0       state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep25s0      state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep105s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep121s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep137s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep153s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep233s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep249s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  ACTIVE rails: 8/8
+[preflight] rendezvous port not yet open (normal if rank 0 has not started)
+[preflight] visible GPUs: 8 (need >= 8)
+
+[warn] numactl absent -- NIC/CPU affinity left to the scheduler.
+[flags] this benchmark.py does not accept:
+[flags]   --mem-type (build transfers GPU memory unconditionally)
+[flags]   --max-chunks (planner uses its built-in cap)
+[flags] mori HEAD: 6ad812c [io] fix XGMI fallback (#316)
+[flags] Those knobs fall back to the build defaults; the sweep is still
+[flags] a real measurement, just not of those two axes.
+-------- block-size sweep --------
+[2026-08-17 05:32:46.283] [323] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.284] [327] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.285] [322] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.303] [329] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.309] [324] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.313] [326] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.315] [328] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:46.318] [325] [io] [info] Set MORI-IO log level to info
+[2026-08-17 05:32:52.382] [326] [io] [info] Create engine key TARGET-4 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.382] [329] [io] [info] Create engine key TARGET-7 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.382] [325] [io] [info] Create engine key TARGET-3 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.382] [322] [io] [info] Create engine key TARGET-0 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.383] [323] [io] [info] Create engine key TARGET-1 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.383] [327] [io] [info] Create engine key TARGET-5 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.383] [324] [io] [info] Create engine key TARGET-2 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.383] [328] [io] [info] Create engine key TARGET-6 node_id mi355-gpu-46 hostname mi355-gpu-46
+[2026-08-17 05:32:52.499] [327] [io] [info] worker 0 enter main loop, running on core 168
+[2026-08-17 05:32:52.499] [327] [io] [info] worker 1 enter main loop, running on core 236
+[2026-08-17 05:32:52.499] [327] [io] [info] worker 2 enter main loop, running on core 96
+[2026-08-17 05:32:52.499] [327] [io] [info] worker 3 enter main loop, running on core 196
+[2026-08-17 05:32:52.500] [327] [io] [info] worker 4 enter main loop, running on core 128
+[2026-08-17 05:32:52.500] [327] [io] [info] worker 5 enter main loop, running on core 140
+[2026-08-17 05:32:52.500] [327] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.500] [327] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.500] [327] [io] [info] worker 6 enter main loop, running on core 247
+[2026-08-17 05:32:52.500] [327] [io] [info] worker 7 enter main loop, running on core 96
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 0 enter main loop, running on core 129
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 1 enter main loop, running on core 137
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 4 enter main loop, running on core 90
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 5 enter main loop, running on core 169
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 3 enter main loop, running on core 145
+[2026-08-17 05:32:52.506] [325] [io] [info] worker 2 enter main loop, running on core 170
+[2026-08-17 05:32:52.507] [325] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.507] [325] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.507] [325] [io] [info] worker 7 enter main loop, running on core 138
+[2026-08-17 05:32:52.507] [325] [io] [info] worker 6 enter main loop, running on core 235
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 0 enter main loop, running on core 23
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 1 enter main loop, running on core 247
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 2 enter main loop, running on core 170
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 4 enter main loop, running on core 133
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 3 enter main loop, running on core 100
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 6 enter main loop, running on core 156
+[2026-08-17 05:32:52.508] [329] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 5 enter main loop, running on core 236
+[2026-08-17 05:32:52.508] [329] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.508] [329] [io] [info] worker 7 enter main loop, running on core 112
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 0 enter main loop, running on core 237
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 1 enter main loop, running on core 1
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 3 enter main loop, running on core 247
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 2 enter main loop, running on core 31
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 4 enter main loop, running on core 18
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 6 enter main loop, running on core 90
+[2026-08-17 05:32:52.510] [326] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.510] [326] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 5 enter main loop, running on core 45
+[2026-08-17 05:32:52.510] [326] [io] [info] worker 7 enter main loop, running on core 142
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 0 enter main loop, running on core 90
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 1 enter main loop, running on core 44
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 2 enter main loop, running on core 156
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 4 enter main loop, running on core 1
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 3 enter main loop, running on core 110
+[2026-08-17 05:32:52.512] [322] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 5 enter main loop, running on core 31
+[2026-08-17 05:32:52.512] [322] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 6 enter main loop, running on core 168
+[2026-08-17 05:32:52.512] [322] [io] [info] worker 7 enter main loop, running on core 145
+[2026-08-17 05:32:52.512] [322] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 0 enter main loop, running on core 168
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 1 enter main loop, running on core 109
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 2 enter main loop, running on core 253
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 3 enter main loop, running on core 142
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 5 enter main loop, running on core 168
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 4 enter main loop, running on core 153
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 6 enter main loop, running on core 18
+[2026-08-17 05:32:52.533] [324] [io] [info] worker 7 enter main loop, running on core 168
+[2026-08-17 05:32:52.533] [324] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.533] [324] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.533] [322] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.533] [322] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.534] [322] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 0 enter main loop, running on core 18
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 1 enter main loop, running on core 142
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 2 enter main loop, running on core 158
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 3 enter main loop, running on core 110
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 4 enter main loop, running on core 75
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 5 enter main loop, running on core 142
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 6 enter main loop, running on core 153
+[2026-08-17 05:32:52.535] [323] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.535] [323] [io] [info] worker 7 enter main loop, running on core 142
+[2026-08-17 05:32:52.535] [323] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.536] [323] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [324] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [323] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [325] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [324] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [323] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [324] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [326] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [325] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [323] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.536] [324] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [327] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [326] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [325] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [327] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [326] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [325] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [327] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [326] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.537] [327] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [322] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [322] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [323] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [324] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [322] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [325] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [323] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [326] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [324] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [323] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [322] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [327] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.555] [325] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [324] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [326] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [323] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [325] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [324] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [327] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [326] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [325] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [327] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [326] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.556] [327] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 0 enter main loop, running on core 31
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 2 enter main loop, running on core 77
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 1 enter main loop, running on core 122
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 3 enter main loop, running on core 188
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 4 enter main loop, running on core 235
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 5 enter main loop, running on core 153
+[2026-08-17 05:32:52.564] [328] [io] [info] RdmaBackend created with config: qpPerTransfer[8] postBatchSize[-1] numWorkerThreads[8] enableNotification[1] notifPerQp[1024] enableTransferChunking[0] chunkBytes[65536] maxChunksPerTransfer[64] numNicsPerTransfer[1] maxSendWr[0] maxCqeNum[0] maxMsgSge[0]
+[2026-08-17 05:32:52.564] [328] [io] [info] Create backend type 2
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 6 enter main loop, running on core 142
+[2026-08-17 05:32:52.564] [328] [io] [info] worker 7 enter main loop, running on core 153
+[2026-08-17 05:32:52.565] [328] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [329] [io] [info] Register remote engine INITIATOR-0 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [328] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [328] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [329] [io] [info] Register remote engine INITIATOR-1 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [329] [io] [info] Register remote engine INITIATOR-2 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [328] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [329] [io] [info] Register remote engine INITIATOR-3 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.565] [328] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [329] [io] [info] Register remote engine INITIATOR-4 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [328] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [329] [io] [info] Register remote engine INITIATOR-5 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [328] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [329] [io] [info] Register remote engine INITIATOR-6 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [328] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:32:52.566] [329] [io] [info] Register remote engine INITIATOR-7 node_id mi355-gpu-45 hostname mi355-gpu-45
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.801] [322] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.802] [322] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.812] [323] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.823] [324] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.823] [324] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.823] [324] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.823] [324] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.823] [324] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.824] [324] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.824] [324] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.824] [324] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.830] [325] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.830] [325] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.830] [325] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.830] [325] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.830] [325] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.831] [325] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.831] [325] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.831] [325] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.842] [326] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.842] [326] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.843] [326] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.852] [327] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.852] [327] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.852] [327] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.853] [327] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.853] [327] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.853] [327] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.853] [327] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.853] [327] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.860] [328] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.860] [328] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.860] [328] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.861] [328] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.861] [328] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 0 shutdown
+[2026-08-17 05:34:20.861] [328] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.861] [328] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 1 shutdown
+[2026-08-17 05:34:20.861] [328] [io] [info] worker 7 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 2 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 3 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 4 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 5 shutdown
+[2026-08-17 05:34:20.861] [329] [io] [info] worker 6 shutdown
+[2026-08-17 05:34:20.862] [329] [io] [info] worker 7 shutdown
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 40675
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 2
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 45799
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 3
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 42857
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 5
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 39895
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 1
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 47175
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 7
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 45837
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 0
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 40619
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 4
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+MORI-IO Benchmark Configurations:
+  backend: RDMA
+  op_type: write
+  host: 10.2.80.17
+  port: 42087
+  node_rank: 1
+  role: EngineRole.TARGET
+  role_rank: 6
+  num_initiator_dev: 8
+  num_target_dev: 8
+  num_qp_per_transfer: 8
+  num_worker_threads: 8
+  poll_cq_mode: PollCqMode.POLLING
+  buffer_size: 33554432 B
+  transfer_batch_size: 64
+  enable_batch_transfer: True
+  batch_contiguous: False
+  enable_sess: False
+  iters: 10
+
+-------- block-size sweep exit=0 --------
+
+==== moriio sweep rank=1 exit=0 ====

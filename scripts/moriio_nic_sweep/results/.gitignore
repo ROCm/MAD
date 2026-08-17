@@ -1,0 +1,12 @@
+# The repo root ignores *.log / *.json under "# Results" -- correct in general,
+# since most result files are transient job output nobody should commit.
+#
+# This directory is the exception: these logs ARE the deliverable. Every number
+# in ../README.md is parsed out of them, and a result table whose raw evidence
+# is not in the tree is a table you cannot re-check later. Un-ignore them here
+# rather than weakening the root rule for the whole repo.
+#
+# Keep this narrow. New runs land here by default; commit them deliberately,
+# and only when the README cites them.
+!*.log
+!*.json

@@ -1,0 +1,84 @@
+==============================================================
+ MoRI-IO block-size sweep -- 2 nodes x 8 ionic rails
+   host        : mi355-gpu-46   rank 1   oob 10.2.80.17
+   master      : 10.2.80.16:29511
+   devices     : rocep9s0,rocep25s0,rocep105s0,rocep121s0,rocep137s0,rocep153s0,rocep233s0,rocep249s0
+   gid index   : 1   nic: ionic
+   ctrl ifname : enp193s0f1np1   numa: 0
+   block sweep : 4096 .. 33554432 B (geometric x2)
+   op/mem      : write / gpu   iters: 10   batch: 64
+   qp/xfer     : 8   workers: 8
+   chunking    : 65536 B x max 64 (count saturates above 4194304 B)
+   devs        : 8 init x 8 target, rail-aligned (no offset)
+   alloc/gpu   : ~2048 MiB
+   mori repo   : /opt/mori
+==============================================================
+[preflight] rail state:
+  rocep9s0       state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep25s0      state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep105s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep121s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep137s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep153s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep233s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  rocep249s0     state=4: ACTIVE        rate=400 Gb/sec (4X NDR)
+  ACTIVE rails: 8/8
+[preflight] rendezvous port not yet open (normal if rank 0 has not started)
+[preflight] visible GPUs: 8 (need >= 8)
+
+[warn] numactl absent -- NIC/CPU affinity left to the scheduler.
+-------- block-size sweep --------
+usage: benchmark.py [-h] [--backend {rdma,xgmi}] [--host HOST]
+                    [--src-gpu SRC_GPU] [--dst-gpu DST_GPU]
+                    [--num-streams NUM_STREAMS] [--num-events NUM_EVENTS]
+                    [--xgmi-multiprocess] [--op-type {read,write}]
+                    [--buffer-size BUFFER_SIZE] [--all]
+                    [--sweep-start-size SWEEP_START_SIZE]
+                    [--sweep-max-size SWEEP_MAX_SIZE] [--all-batch]
+                    [--transfer-batch-size TRANSFER_BATCH_SIZE]
+                    [--enable-batch-transfer] [--batch-contiguous]
+                    [--enable-sess] [--num-initiator-dev NUM_INITIATOR_DEV]
+                    [--num-target-dev NUM_TARGET_DEV]
+                    [--num-qp-per-transfer NUM_QP_PER_TRANSFER]
+                    [--num-worker-threads NUM_WORKER_THREADS] [--iters ITERS]
+                    [--poll_cq_mode {polling,event}]
+                    [--max-send-wr MAX_SEND_WR] [--max-cqe-num MAX_CQE_NUM]
+                    [--max-msg-sge MAX_MSG_SGE]
+                    [--log-level {trace,debug,info,warning,error,critical}]
+benchmark.py: error: unrecognized arguments: --mem-type gpu --max-chunks 64 --sweep-step 0 --chunk-bytes 65536
+E0817 05:31:13.438000 123 torch/distributed/elastic/multiprocessing/api.py:988] failed (exitcode: 2) local_rank: 0 (pid: 188) of binary: /usr/bin/python3.12
+Traceback (most recent call last):
+  File "/usr/local/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 367, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 1016, in main
+    run(args)
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/run.py", line 1007, in run
+    elastic_launch(
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 191, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/distributed/launcher/api.py", line 371, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+tests.python.io.benchmark FAILED
+------------------------------------------------------------
+Failures:
+  <NO_OTHER_FAILURES>
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-08-17_05:31:13
+  host      : mi355-gpu-46
+  rank      : 1 (local_rank: 0)
+  exitcode  : 2 (pid: 188) 
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+-------- block-size sweep exit=1 --------
+
+==== moriio sweep rank=1 exit=1 ====
