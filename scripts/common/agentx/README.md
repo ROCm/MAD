@@ -26,6 +26,40 @@ model, the generate/verify tools, and the Tier 1 / Tier 2 knobs. The launcher /
 disaggregated-serving integration and the deep env/run-path reference are out of
 scope here (see [See also](#see-also)).
 
+## What AgentX adds on top of aiperf
+
+aiperf's `inferencex-agentx-mvp` scenario provides the base: an agentic trace
+replay engine, the `weka_trace` corpus format, HuggingFace loaders, and the core
+metrics (TTFT, E2E latency, throughput, cache-hit). It does **not** provide
+multi-workload orchestration, corpus generation, corpus verification, declarative
+config, or backend portability. AgentX is the orchestration + generation layer
+that closes those gaps by **wrapping** aiperf (not forking it).
+
+| Capability | aiperf (base) | AgentX adds |
+| --- | --- | --- |
+| Replay engine | Single-workload CLI | Multi-workload orchestration over one config |
+| Corpus source | HF captured traces only | HF traces + seed-deterministic generated profiles |
+| Corpus verification | None | 13-axis pre-gate, hard abort on drift |
+| Config format | CLI flags only | Declarative YAML (serving + workloads[]) |
+| Preset reuse | Copy-paste | Inheritance with per-entry override |
+| Context sizing | Hardcoded 256k/1M | Auto-detect from /v1/models, any window |
+| Corpus filtering | Download full corpus | Tier 2 trim (max_isl/max_turns/sample), cached |
+| Backend integration | vLLM-specific paths | OpenAI-API core, thin per-backend hook |
+| Multi-workload runs | N CLI calls | One config -> N result dirs + unified summary |
+| Preview | None | DRY_RUN=1, no server, sub-second |
+
+The nine additions, one line each:
+
+1. **Suite driver** (`benchmark_agentic_suite.sh`) — loops `workloads[]`, materializes each corpus, runs aiperf, writes one `suite_summary.json`.
+2. **Profile generator** (`gen_agentx_profile.py`) — distribution targets -> byte-identical corpus via fixed seed.
+3. **13-axis verifier** (`verify_agentx_profile.py`) — measures ISL/OSL/Turns/Delay P50/P90/P99 + Cache-hit P50 and aborts unless all axes pass.
+4. **Declarative config** (`agentx_config.py` + `agentic.yaml`) — serving / run / workloads[] blocks; add a workload in one entry.
+5. **Tier 1 / Tier 2 separation** — Tier 1 (concurrency, num_dataset_entries, trajectory) steers replay; Tier 2 (max_isl, max_turns, sample) produces a cached subset corpus.
+6. **Model-agnostic context gating** — auto-detect served window from `/v1/models`, cap `--max-context-length` at `min(next_pow2(ISL tail), window)`, WARN/cap or SKIP under `AGENTIC_STRICT_CONTEXT=1`.
+7. **Preset inheritance** — ship a shape once in `profiles/<name>.yaml`, reference via `preset:`, override per entry; circular chains raise `ValueError`.
+8. **Backend-agnostic core** (`agentic_lib.sh`, ~480 lines) — speaks only the OpenAI API; a new backend is a thin (~60-line) hook. Currently integrated: SGLang disaggregated (`scripts/sglang_disagg/benchmark_agentic.sh`, port 2322); vLLM/TRT-LLM/TGI are future hooks.
+9. **DRY_RUN preview** — `DRY_RUN=1` prints the resolved plan and every assembled aiperf command with no server/download/replay.
+
 ## File map
 
 ```
@@ -167,15 +201,119 @@ Environment variables override file values (applied in `resolve_config()`):
 - `AGENTIC_WORKLOAD=<name>` — restrict the run to that single named entry (also
   enables the config-less shorthand; see below).
 
+`AGENTIC_WORKLOAD` has **two distinct meanings** depending on whether
+`AGENTIC_CONFIG` is set — keep the two straight:
+
+**Config-less shorthand (true minimum, no `AGENTIC_CONFIG`).** `AGENTIC_WORKLOAD`
+*names the workload to synthesize*:
+
 ```bash
 AGENTIC_WORKLOAD=conformance_256k MAX_MODEL_LEN=262144 AGENTIC_CONC=4 \
-  AGENTIC_CONFIG=agentic.yaml bash scripts/common/benchmark_agentic_suite.sh
+  bash scripts/common/benchmark_agentic_suite.sh
+```
+
+**Filter an existing config to one entry (with `AGENTIC_CONFIG`).** Here
+`AGENTIC_WORKLOAD` *selects* the single entry named `quick` from the config
+(via `resolve_config()`); it does **not** use the shorthand:
+
+```bash
+AGENTIC_CONFIG=agentic.yaml AGENTIC_WORKLOAD=quick \
+  bash scripts/common/benchmark_agentic_suite.sh
 ```
 
 With no `--config`, `_synth_config_from_env()` synthesizes a one-entry config
 from `AGENTIC_WORKLOAD`: `inferencex` maps to the shipped hf loader (`_HF_PRESETS`),
 and any other name is treated as `preset: <name>` (so `conformance_256k` /
 `conformance_512k` resolve to their shipped profiles).
+
+### Minimal required
+
+The true minimum for each entry point — everything else auto-defaults (model
+`auto`, `max_model_len` auto-detect, port `2322`, concurrency `16`, duration
+`900`):
+
+- **Multi-workload suite** — point at a config, nothing else required:
+
+```bash
+AGENTIC_CONFIG=agentic.yaml bash scripts/common/benchmark_agentic_suite.sh
+```
+
+- **Single preset (config-less)** — name a preset; the driver synthesizes a
+  one-entry config from that name:
+
+```bash
+AGENTIC_WORKLOAD=conformance_256k bash scripts/common/benchmark_agentic_suite.sh
+```
+
+## Environment variable reference
+
+Every user-facing environment variable, grouped by role. Defaults shown are the
+values applied when the variable is unset.
+
+### Serving / selection
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MODEL` | `auto` | served model id (maps to `serving.model`; auto-discovers from `/v1/models`) |
+| `MAX_MODEL_LEN` | `0` (auto) | pin served context window; `0` = auto-detect (`serving.max_model_len`) |
+| `AGENTIC_PORT` | `2322` | endpoint/router port (`serving.port`) |
+| `AGENTIC_SERVER_METRICS` | `auto` | `--server-metrics` endpoints |
+
+### Run / replay
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENTIC_CONC` | `16` | replay concurrency (`run.concurrency`) |
+| `DURATION` | `900` | measured window in seconds (`run.duration`) |
+| `AGENTIC_NUM_DATASET_ENTRIES` | `393` | default `--num-dataset-entries` for hf workloads (global default; per-workload YAML `num_dataset_entries` overrides) |
+
+### Corpus & HuggingFace
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SUITE_CORPUS_DIR` | `${TMPDIR:-/tmp}/agentx_corpora` | corpus cache root |
+| `SUITE_CORPUS_FORCE` | `0` | set `1` to regenerate a cached corpus after editing a profile |
+| `WEKA_LOADER_OVERRIDE` | recipe default | override the hf trace loader id outside the YAML `loader:` path |
+| `AGENTIC_HF_ISL_TAIL` | derived from loader | override the loader-derived ISL tail used for context gating |
+| `AGENTIC_TRACE_DL_ATTEMPTS` | `3` | hf trace download retry count |
+| `AGENTIC_TRACE_DL_TIMEOUT` | `900` | per-attempt hf download timeout (seconds) |
+
+### Context gating
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENTIC_MAX_CONTEXT_LENGTH` | derived (falls back to `MAX_MODEL_LEN`) | force the `--max-context-length` cap |
+| `AGENTIC_STRICT_CONTEXT` | `0` | set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served window |
+
+### Timing / warmup
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENTIC_CACHE_WARMUP_DURATION` | `60` (`300` for DeepSeek/Kimi/GLM families) | `--agentic-cache-warmup-duration` |
+| `AGENTIC_WARMUP_GRACE_PERIOD` | `1800` | `--warmup-grace-period` |
+| `AGENTIC_ROUTER_READY_TIMEOUT` | `600` | seconds to wait for the router/endpoint to become ready before failing |
+
+### Entry points / preview
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AGENTIC_CONFIG` | (unset) | path to an `agentic.yaml`; runs the multi-workload suite driver |
+| `AGENTIC_WORKLOAD` | (unset) | run one workload by name: config-less preset shorthand, or select a single entry from `AGENTIC_CONFIG` |
+| `DRY_RUN` | `0` | set `1` to print the resolved plan and each assembled aiperf command without contacting a server |
+
+### Output / labeling
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `RESULT_DIR` | (launcher-provided) | root for per-workload result dirs and `suite_summary.json` |
+| `AGENTIC_RESULT_FILENAME` | `agentic_${SLURM_JOB_ID}_xP..._yD..._${MODEL_NAME}` | aggregate result JSON basename |
+| `KV_OFFLOADING` | `none` | label threaded into result aggregation |
+
+Advanced / maintainer overrides default to sane values and normally need no
+change: `AIPERF_PIN`, `AGENTIC_UTILS_PIN`, `INFERENCEX_REPO`,
+`AGENTIC_RUNTIME_DIR`, `INFMAX_WS`, `AIPERF_VENV`,
+`AIPERF_FAILED_REQUEST_THRESHOLD`, `AIPERF_UNSAFE_OVERRIDE`,
+`AGENTX_YAML_FALLBACK`, `AGENTIC_OUTPUT_DIR`, `AGENTIC_LIB`.
 
 ## `max_model_len` guidance
 
@@ -234,6 +372,8 @@ See [SCENARIOS.md](SCENARIOS.md#scenario-9-dry_run1-preview) for the exact
   Confirm the file exists under `profiles/`.
 
 ## See also
+
+- How/why the replay mechanism works + accuracy: [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
 
 Intentionally out of scope here (pointers only):
 
