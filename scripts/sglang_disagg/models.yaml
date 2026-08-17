@@ -27,6 +27,13 @@ Qwen3-32B:
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
 
+Llama-3.1-70B-Instruct:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
+  prefill:
+    tp: "--disable-cuda-graph"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+
 amd-Llama-3.3-70B-Instruct-FP8-KV:
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
   prefill:
@@ -86,8 +93,18 @@ DeepSeek-R1:
 # reason (see server_args.py comment: "aiter CK kernel doesn't support all
 # GEMM dimensions"); this makes GPT-OSS's mxfp4 MoE layer use that same,
 # already-proven-on-ROCm path instead of the broken aiter CK one.
+# --attention-backend triton for the same class of reason, on the attention side:
+# with aiter, prefill dies at the first attention call on gfx950 —
+# "no matching kernel found. page_size=1, num_pages=16530956, dtype=bf16 ... CDNA3+
+# GPU (MI300/MI350) is required" from aiter's CK dispatch
+# (csrc/py_itfs_ck/mha_batch_prefill_kernels.cu:826). A 288 GB MI355X gives an
+# 18M-page KV pool at page_size=1, whose offsets leave int32, and the variant that
+# handles that is only compiled for gfx942 in this aiter build. Decode is unaffected,
+# but this stays a whole-model setting so prefill and decode keep an identical KV
+# layout, which mooncake's chunk transfer needs. SGLANG_USE_AITER=0 does NOT cover
+# this: an explicit --attention-backend wins over the env toggle.
 GPT-OSS-120B:
-  base_flags: "--attention-backend aiter --moe-runner-backend triton --watchdog-timeout 1000000 --mem-fraction-static 0.73"
+  base_flags: "--attention-backend triton --moe-runner-backend triton --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
     tp: "--disable-cuda-graph"
   decode:
