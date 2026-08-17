@@ -124,13 +124,96 @@ _moriio_build_kv_transfer_config() {
 }
 
 connector_runtime_patch() {
-    # No-op: the MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL
-    # split, DP-rank hash-failsafe) are committed in-source in the vLLM the image is
-    # built from (see the Dockerfile VLLM_REF). There is no runtime .py patcher — that
-    # would be a drifting duplicate of fixes that already live upstream in the fork.
-    # If you ever run an image WITHOUT these fixes baked, use an image that has them
-    # (rebuild from the pinned VLLM_REF) rather than patching a stock image at runtime.
-    return 0
+    # MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL split,
+    # DP-rank hash-failsafe) are committed in-source in the vLLM the image is built
+    # from (Dockerfile VLLM_REF). There is no generic runtime .py patcher for those —
+    # that would be a drifting duplicate of fixes already upstream in the fork.
+    #
+    # EXCEPTION — GLM-5.1-FP8 (GlmMoeDsaForCausalLM, MLA + DSA sparse attention):
+    # DSA is a NEW attention family the MoRIIO connector was never built for. It adds
+    # a 2nd KV cache per layer (indexer) with a different geometry, which the
+    # single-geometry connector mis-handles -> disagg KV transfer stalls; plus a DSA
+    # invalid-token kernel bug (#45324) that produces `!!!`. These are model-specific
+    # code gaps, applied here as idempotent, anchor-based, self-skipping .py patchers
+    # (they no-op cleanly if the fix is native/refactored on the chosen image). Gated
+    # on MODEL_NAME so DeepSeek/other models are a pure no-op (byte-identical to before).
+    # The MoRI version is pinned by the Dockerfile MORI_REF (post-1.2.1 main with the
+    # large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer MoRI is
+    # needed, update MORI_REF and rebuild the image — no runtime library swap here.
+    [ "${MODEL_NAME:-}" = "GLM-5.1-FP8" ] || return 0
+    _glm_dsa_runtime_patch
+}
+
+# GLM-5.1 DSA patchers (see connector_runtime_patch). Ported from MAD-private #338.
+# Resolves the vLLM install dir, then applies the 4 required patchers in order,
+# aborting on a hard failure (a real failure means GLM emits garbage or stalls, so
+# failing at launch is correct). Patchers self-skip (rc 0) when their anchor is
+# absent, so an image that already carries or refactored a fix no-ops cleanly.
+_glm_dsa_runtime_patch() {
+    # GLM_SKIP_PATCHERS=1: the serving image already carries the GLM-5.1 DSA fixes
+    # in-source (e.g. the #47766 stack image built from raviguptaamd/vllm@
+    # glm5.1-dsa-wideEP_on_shikpate_06_29_customer). Skip ALL runtime patchers — they
+    # are redundant, and the persistent-gate/sampling-overlay patchers would actively
+    # REGRESS a baked image (turn persistent MLA off / overwrite stock aiter kernels).
+    if [ "${GLM_SKIP_PATCHERS:-0}" = "1" ]; then
+        echo "[glm] GLM_SKIP_PATCHERS=1: image carries DSA fixes in-source; skipping runtime patchers."
+        return 0
+    fi
+    local _patch_dir="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
+    local _vllm_dir
+    _vllm_dir="$(python3 -c 'import vllm, os; print(os.path.dirname(vllm.__file__))' 2>/dev/null || true)"
+    if [ -z "${_vllm_dir}" ] || [ ! -d "${_vllm_dir}" ]; then
+        echo "Error: [glm] cannot locate vLLM install dir for DSA patchers. Aborting." >&2
+        exit 1
+    fi
+    echo "[glm] MODEL_NAME=GLM-5.1-FP8: applying DSA runtime patchers against ${_vllm_dir}"
+
+    # Ordered list of REQUIRED patchers (all abort on hard failure).
+    # GLM_PERSIST_GATE=0 skips the persistent-MLA accuracy gate (debug only: to test
+    # whether the non-persistent kernel it routes to is what crashes disagg at >=8k).
+    local _gate_patcher="apply_glm_dsa_persistent_kernel_gate_fix.py"
+    [ "${GLM_PERSIST_GATE:-1}" = "0" ] && _gate_patcher=""
+    local _p
+    for _p in \
+        apply_glm_dsa_kernel_fix.py \
+        apply_glm_dsa_moriio_dualkv_fix.py \
+        apply_glm_dsa_moriio_engine_fix.py \
+        apply_glm_dsa_moriio_gate_fix.py \
+        apply_glm_moriio_abort_guard_fix.py \
+        ${_gate_patcher} \
+        apply_glm_aiter_sampling_oob_fix.py; do
+        local _py="${_patch_dir}/${_p}"
+        if [ ! -f "${_py}" ]; then
+            echo "Error: [glm] required patcher ${_py} not found. Aborting." >&2
+            exit 1
+        fi
+        echo "[glm] applying ${_p}"
+        python3 "${_py}" "${_vllm_dir}" 2>&1 || {
+            echo "Error: [glm] ${_p} failed — GLM-5.1 would emit garbage or stall. Aborting." >&2
+            exit 1
+        }
+    done
+
+    # Optional DSA indexer boot-warmup (GLM_INDEXER_WARMUP=1). Force-compiles the DSA
+    # indexer kernels at boot so they never JIT mid-inference. Opt-in because it drives a
+    # large (>=8k) prefill forward at boot: on stacks where that forward faults it makes
+    # the fault DETERMINISTIC at boot (useful for debugging) rather than on first request.
+    if [ "${GLM_INDEXER_WARMUP:-0}" = "1" ]; then
+        local _warm="${_patch_dir}/apply_glm_dsa_indexer_warmup_fix.py"
+        if [ -f "${_warm}" ]; then
+            echo "[glm] applying DSA indexer boot-warmup (GLM_INDEXER_WARMUP=1)"
+            python3 "${_warm}" "${_vllm_dir}" 2>&1 || echo "Warning: [glm] indexer-warmup patch failed (non-fatal)."
+        fi
+    fi
+
+    # Optional diagnostic instrumentation (GLM_INSTRUMENT=1). Non-fatal.
+    if [ "${GLM_INSTRUMENT:-0}" = "1" ]; then
+        local _instr="${_patch_dir}/apply_glm_dsa_moriio_instrument.py"
+        if [ -f "${_instr}" ]; then
+            echo "[glm] applying instrumentation (GLM_INSTRUMENT=1): apply_glm_dsa_moriio_instrument.py"
+            python3 "${_instr}" "${_vllm_dir}" 2>&1 || echo "Warning: [glm] instrumentation failed (non-fatal)."
+        fi
+    fi
 }
 
 # connector_launch_worker <role> <dp_size> <dp_addr> <kv_role> <log_prefix> [dp_start_rank]
@@ -162,12 +245,21 @@ connector_launch_worker() {
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
+    # v0.27 MLA fix: the *_kv_cache_update op dispatches the STABLE-ABI concat_and_cache_mla
+    # whose boxed kernel does NOT compose inside the Dynamo-FX-partitioned compiled graph
+    # -> "RuntimeError: unknown parameter type" on the first real MLA decode (passes boot +
+    # warmup via the fake path, then crashes). splitting_ops-list membership alone doesn't
+    # cut the graph there. use_inductor_graph_partition=true moves partitioning to inductor
+    # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the KV-update so
+    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION (default 1).
+    local _igp_json=""
+    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-1}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
         local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
-        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
         exec_args+=(--cudagraph-capture-sizes ${_capture_sizes})
     else
-        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
     fi
 
     # Per-model flags from models.yaml (driver-exported; empty if none).
@@ -181,6 +273,16 @@ connector_launch_worker() {
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
+
+        # NOTE on MoRI EP buffer width: it is sized from max_num_batched_tokens
+        # (fused_moe/layer.py -> all2all.py max_num_inp_token_per_rank), so a decode
+        # instance otherwise runs an 8192-token-wide all2all every step (~302ms vs ~88ms
+        # TPOT). The fix is per-role `--max-num-batched-tokens` in models.yaml
+        # (decode.dp), NOT an env knob: mori derives recv capacity from the send width
+        # (MaxNumTokensToRecvPerRank returns min(ceil(maxTotalRecvTokens/ws),
+        # maxNumInpTokenPerRank)), so shrinking the width alone under-provisions recv and
+        # trips a device assert during vLLM's profiling dummy run. See
+        # skills_vllm_disagg.md for the measurements and the dead ends.
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then
@@ -219,7 +321,7 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
-                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
+                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}" "${model_args[@]}"
             WORKER_PID=0; return 0
         fi
 
@@ -242,6 +344,7 @@ connector_launch_worker() {
             "${exec_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
+            "${model_args[@]}" \
             2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
         WORKER_PID=$!
         return 0

@@ -40,6 +40,32 @@ for i in $(seq 1 $BENCHMARK_ITR); do
     echo "Running the benchserving script for iter: $i" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
     for combo in "${COMBINATIONS[@]}"; do
        IFS="/" read -r isl osl <<< "$combo"
+       # Per-shape warmup at the REAL isl/osl, low concurrency. The global warmup above
+       # is isl=osl=32/con=1, which never exercises this shape's prefill path, its Triton/
+       # aiter kernel variants, or the decode cudagraph batch sizes -- so without this the
+       # FIRST measured cell of each shape absorbs all the residual JIT and reports a
+       # wildly inflated TPOT (observed 302ms vs ~89ms steady-state). Measured cells must
+       # start from a warm graph. Skip with SHAPE_WARMUP=0.
+       if [[ "${SHAPE_WARMUP:-1}" == "1" ]]; then
+           _w_con="${SHAPE_WARMUP_CON:-4}"
+           _w_prompts="${SHAPE_WARMUP_PROMPTS:-8}"
+           echo "[WARMUP] shape isl $isl osl $osl con ${_w_con} prompts ${_w_prompts}" \
+               | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+           timeout "${SHAPE_WARMUP_TIMEOUT:-2400}" vllm bench serve \
+               --model $MODEL_PATH \
+               --backend vllm \
+               --host 127.0.0.1 \
+               --port $BENCHMARK_PORT \
+               --dataset-name "random" \
+               --random-input-len $isl \
+               --random-output-len $osl \
+               --random-prefix-len 0 \
+               --num-prompts ${_w_prompts} \
+               --request-rate "inf" \
+               --ignore-eos \
+               --max-concurrency ${_w_con} \
+               2>&1 | tee -a ${LOG}_SHAPEWARMUP.log >/dev/null
+       fi
        for con in $CON; do
            p_con=$(($con * 2))
            if [ "$p_con" -lt 16 ]; then
