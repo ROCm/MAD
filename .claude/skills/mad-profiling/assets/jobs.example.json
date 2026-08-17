@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "A campaign: every job that should become a report, with the paths that differ between them.",
+    "Copy this next to a run directory as reports/jobs.json, edit, then run:",
+    "  scripts/regen_reports.py --catalog reports/jobs.json",
+    "Relative paths resolve against the catalog's parent's parent, i.e. the run directory it lives",
+    "in; pass --root to override. Fields left out fall back to defaults or to the engine's own.",
+    "Keys per entry: name (also the parse-cache file name), run_dir, out_dir, engine (auto),",
+    "phases, rocprof_dir, trace_root, torch_trace {phase: path}, no_auto_traces, max_msg_bytes,",
+    "max_nranks, top, note."
+  ],
+  "defaults": {
+    "parse_cache_dir": "reports/.parse-cache",
+    "top": 20
+  },
+  "reports": [
+    {
+      "name": "sgl_gptoss_2p2d_balanced",
+      "run_dir": "slurm_output/run_logs/25956",
+      "out_dir": "reports/sgl_gptoss_2p2d_balanced",
+      "phases": ["prefill", "decode"],
+      "note": "GPT-OSS-120B 2P2D, profiled without rocprofv3; the run where the proxy used both decode replicas evenly"
+    },
+    {
+      "name": "sgl_llama70b_2p2d",
+      "run_dir": "slurm_output/run_logs/25839",
+      "out_dir": "reports/sgl_llama70b_2p2d",
+      "phases": ["prefill", "decode"],
+      "note": "Llama-3.1-70B 2P2D, profiled with rocprofv3 attached"
+    },
+    {
+      "name": "primus_llama70b_4n",
+      "run_dir": "slurm_output/primus_pyt_megatron_lm_train_llama-3.1-70b_overlay/25577",
+      "out_dir": "reports/primus_llama70b_4n",
+      "rocprof_dir": "prof_llama70b_4n/rocprof",
+      "trace_root": "prof_llama70b_4n/primus_out",
+      "note": "Primus training, both datatype phases in one job; traces resolve per datatype from the tensorboard paths"
+    }
+  ]
+}

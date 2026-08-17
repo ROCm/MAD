@@ -1,0 +1,27 @@
+# Torch profiler for a Primus/Megatron-LM experiment.
+#
+# These keys go into the experiment YAML the run uses, under the same `modules.pre_trainer.overrides`
+# block that carries the model config -- not into the madengine manifest. The manifest's job is to
+# bind-mount this edited copy over the image's stock config and to point PRIMUS_WORKSPACE at shared
+# storage (see primus-megatron.overlay.json).
+#
+# Without these keys the RCCL log still gives message sizes for the whole run; what disappears is the
+# per-collective process-group attribution, which is the only channel that has it.
+
+# Tensorboard is off by default (primus_megatron_module.yaml), and Megatron's trace handler writes to
+# "${tensorboard_dir}/../torch_profile", so with it off the traces have nowhere to land.
+disable_tensorboard: false
+
+profile: true
+use_pytorch_profiler: true
+
+# A window of two steps in steady state. It is deliberately short: each traced rank writes hundreds
+# of MB, and the report reads sizes and process groups from it, not durations, so more steps buy
+# nothing. Keep the window past warmup -- the first iterations are not representative.
+profile_step_start: 10
+profile_step_end: 12
+
+# One rank per node, so every node contributes a trace. This is a 4-node x 8-GPU example; for N nodes
+# the list is [0, 8, 16, ... 8*(N-1)]. Profiling every rank multiplies the artifact size by eight and
+# adds nothing the per-rank symmetry check does not already show.
+profile_ranks: [0, 8, 16, 24]
