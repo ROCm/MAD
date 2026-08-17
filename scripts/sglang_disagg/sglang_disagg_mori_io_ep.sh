@@ -559,7 +559,7 @@ PY
     # separate port and lacks gpu_cache_hit_rate). Gated on the agentic path so
     # the default sweep is unaffected. AGENTIC_SERVER_METRICS is consumed by
     # scripts/common/agentic_lib.sh (build_replay_cmd -> aiperf --server-metrics).
-    if [[ "${AGENTIC_METRICS_ENABLED}" == "1" && "$DP_MODE" == "1" \
+    if [[ "${AGENTIC_METRICS_ENABLED}" == "1" \
           && -n "${IP_FIRST_PREFILL:-}" && -n "${IP_FIRST_DECODE:-}" ]]; then
         export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${IP_FIRST_PREFILL}:3000 ${IP_FIRST_DECODE}:3000}"
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
