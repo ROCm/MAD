@@ -1,0 +1,48 @@
+{
+  "_comment": "What an sglang PD-disaggregated manifest from mad-slurm-multinode needs added to become measurable. Merge into the base manifest, do not use standalone: `jq -s '.[0] * .[1]' base.json sglang-disagg.overlay.json > run_manifest_prof.json`. Fill every <FILL_...> first, and add the /run_logs bind by hand as the README describes -- it is an edit to a string the base manifest already has, which a merge cannot express. PROFILE_ENABLE=1 is the single switch: MAD's scripts/sglang_disagg/sglang_disagg_mori_io_ep.sh reads it and adds --disable-custom-all-reduce to both roles and --disable-cuda-graph to decode, in the MODEL_CONFIG strings every node interpolates. Setting those flags at a launch site instead profiled three nodes out of four (job 25824). Explanations live in _comment_* keys beside a block, never inside it: madengine turns each key of an env block into a variable.",
+  "context": {
+    "_comment_tools": "Kept for symmetry with the training overlay. On this cluster serving runs produced no rocprofv3 CSVs at all even with a graceful shutdown, so their reports are volume-only and expected to be; drop the block unless kernel durations are being chased. <FILL_PROF_ROOT> is a shared-FS directory for this run's profiling artifacts, e.g. /shared/rundir/prof_sgl_llama70b_2p2d.",
+    "tools": [
+      {
+        "name": "rocprofv3_communication",
+        "cmd": "bash -c 'set -o pipefail; host=$(hostname); local_dir=/tmp/rocprof_$host; out_dir=<FILL_PROF_ROOT>/rocprof/$host; mkdir -p \"$local_dir\" \"$out_dir\"; bash ../scripts/common/tools/rocprof_wrapper.sh --kernel-trace --rccl-trace --stats --output-format csv -d \"$local_dir\" -- \"$@\"; rc=$?; find \"$local_dir\" -name \"*_stats.csv\" -exec cp {} \"$out_dir/\" \\; ; rm -rf \"$local_dir\"; exit $rc' _"
+      },
+      {
+        "name": "gpu_info_power_profiler"
+      },
+      {
+        "name": "gpu_info_vram_profiler"
+      }
+    ],
+    "_comment_docker_env_vars": "The base template ships NCCL_DEBUG=WARN, which logs nothing to parse. SGLANG_TORCH_PROFILER_DIR is what makes /start_profile write anything: without it the profile point is a silent no-op. PROFILE_ROLES decides which reports exist, one per role, and the role's log is also where the tooling reads which trace directory belongs to which role. PROFILE_CONCURRENCY matches the benchmark point being characterised.",
+    "docker_env_vars": {
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
+      "RCCL_DEBUG": "INFO",
+      "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
+      "SGLANG_PROFILE_WITH_STACK": "False",
+      "PROFILE_ENABLE": "1",
+      "PROFILE_ROLES": "prefill decode",
+      "PROFILE_STEPS": "5",
+      "PROFILE_ISL": "1024",
+      "PROFILE_OSL": "1024",
+      "PROFILE_CONCURRENCY": "<FILL_CONCURRENCY>"
+    }
+  },
+  "deployment_config": {
+    "_comment_env_vars": "The same variables at launcher level: a value set only here never reaches the workload, and a value set only in the container block is missing from the sbatch environment.",
+    "env_vars": {
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
+      "RCCL_DEBUG": "INFO",
+      "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
+      "SGLANG_PROFILE_WITH_STACK": "False",
+      "PROFILE_ENABLE": "1",
+      "PROFILE_ROLES": "prefill decode",
+      "PROFILE_STEPS": "5",
+      "PROFILE_ISL": "1024",
+      "PROFILE_OSL": "1024",
+      "PROFILE_CONCURRENCY": "<FILL_CONCURRENCY>"
+    }
+  }
+}
