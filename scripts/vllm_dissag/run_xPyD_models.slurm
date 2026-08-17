@@ -57,7 +57,7 @@ _resolve_script_dir() {
 SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
-REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
+REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env" "benchmark_customer_slo.sh" "gen_workload.py" "slo_report.py" "benchmark_avg_80K_ten.sh" "benchmark_avg_200K_ten.sh" "benchmark_niah_long.sh" "pool_workload.py")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
         echo "Error: Required file '$f' not found in $(pwd)." >&2
@@ -501,7 +501,26 @@ case "$BENCHMARK_SCRIPT" in
     # Perf is SKIPPED if NIAH fails: a throughput number from a server that cannot
     # retrieve a needle is not a result worth reporting.
     niah_perf)    BENCHMARK_SCRIPT_FILE="benchmark_niah_perf.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive)" >&2; exit 1 ;;
+    # Customer SLO acceptance run: finite arrival rate, percentiles, --goodput, and a
+    # pass/fail exit code. Generates its own ISL distribution, so it also needs
+    # gen_workload.py and slo_report.py to be present (checked in REQUIRED_FILES).
+    customer_slo) BENCHMARK_SCRIPT_FILE="benchmark_customer_slo.sh" ;;
+    # The two customer rows, each as TEN runs at distinct seeds. These are thin wrappers
+    # over customer_slo that set RESAMPLE_PER_ITER=1 so the iterations draw fresh
+    # samples and pool (SE of the realised mean falls as 1/sqrt(iters)); a single run's
+    # mean is a property of its seed, not of the workload. They also invoke
+    # pool_workload.py at the end, so that file must be present too.
+    avg_80k_ten)  BENCHMARK_SCRIPT_FILE="benchmark_avg_80K_ten.sh" ;;
+    avg_200k_ten) BENCHMARK_SCRIPT_FILE="benchmark_avg_200K_ten.sh" ;;
+    # Long-context NIAH ladder in TOKENS to 950K, with per-needle depth reporting.
+    # Budget the wall clock before selecting this: prefill is ~quadratic here, so the
+    # 8-rung default ladder is ~3.3 h at one seed with no warmup and ~13 h at three
+    # seeds with warmup. See the header of benchmark_niah_long.sh.
+    niah_long)    BENCHMARK_SCRIPT_FILE="benchmark_niah_long.sh" ;;
+    # The valid-list here was stale -- it omitted niah/niah_perf, so a correct
+    # BENCHMARK_SCRIPT=niah_perf that hit an unrelated typo elsewhere produced an
+    # error message denying that its own value was legal. Keep this in sync.
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive, niah, niah_perf, customer_slo, avg_80k_ten, avg_200k_ten, niah_long)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -713,6 +732,10 @@ $CONTAINER_CLI run --rm \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
     ${NIAH_MIN_SCORE:+-e NIAH_MIN_SCORE=$NIAH_MIN_SCORE} \
     ${NIAH_GATE:+-e NIAH_GATE=$NIAH_GATE} \
+    ${NIAH_TOKENS:+-e NIAH_TOKENS="$NIAH_TOKENS"} \
+    ${NIAH_TOKENIZER:+-e NIAH_TOKENIZER=$NIAH_TOKENIZER} \
+    ${NIAH_TOKENS_PER_WORD:+-e NIAH_TOKENS_PER_WORD=$NIAH_TOKENS_PER_WORD} \
+    ${NIAH_TIMEOUT_SCALE:+-e NIAH_TIMEOUT_SCALE=$NIAH_TIMEOUT_SCALE} \
     ${PERF_CON:+-e PERF_CON="$PERF_CON"} \
     ${PERF_COMBINATIONS:+-e PERF_COMBINATIONS="$PERF_COMBINATIONS"} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
@@ -739,6 +762,20 @@ $CONTAINER_CLI run --rm \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${SCENARIOS:+-e SCENARIOS="$SCENARIOS"} \
+    ${SLO_ITERS:+-e SLO_ITERS=$SLO_ITERS} \
+    ${SLO_TTFT_MS:+-e SLO_TTFT_MS=$SLO_TTFT_MS} \
+    ${SLO_TPOT_MS:+-e SLO_TPOT_MS=$SLO_TPOT_MS} \
+    ${WORKLOAD_MODE:+-e WORKLOAD_MODE=$WORKLOAD_MODE} \
+    ${TAIL_FRAC:+-e TAIL_FRAC=$TAIL_FRAC} \
+    ${PREFIX_FRAC:+-e PREFIX_FRAC=$PREFIX_FRAC} \
+    ${MAX_PROMPTS:+-e MAX_PROMPTS=$MAX_PROMPTS} \
+    ${BURSTINESS:+-e BURSTINESS=$BURSTINESS} \
+    ${RESAMPLE_PER_ITER:+-e RESAMPLE_PER_ITER=$RESAMPLE_PER_ITER} \
+    ${SEED_BASE:+-e SEED_BASE=$SEED_BASE} \
+    ${DP_RANKS:+-e DP_RANKS=$DP_RANKS} \
+    ${TGT_PREFILL_TOK_S:+-e TGT_PREFILL_TOK_S=$TGT_PREFILL_TOK_S} \
+    ${TGT_DECODE_TOK_S:+-e TGT_DECODE_TOK_S=$TGT_DECODE_TOK_S} \
     ${KEEPALIVE_MINS:+-e KEEPALIVE_MINS=$KEEPALIVE_MINS} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
