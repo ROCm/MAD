@@ -103,6 +103,55 @@ The legacy launchers were deleted on this branch. To A/B live, check out the par
 
 ---
 
+## 2b. MI308X + Thor2 acceptance ladder (non-SLURM)
+
+Bringing a new *platform* up is a different problem from proving a launcher refactor is at
+par. There is no legacy launcher to A/B against, several axes interact, and the expensive
+configurations are the ones you least want to debug blind. This ladder is the procedure that
+was used for MI308X + Broadcom Thor2 and is the one to repeat on the next platform.
+
+**Two rules make it cheap.** *One axis at a time* — move a single knob per rung, so a
+regression has one candidate cause. *Cheap gate before expensive confirmation* — EP8 is two
+nodes and quick; EP16 is four nodes at 30–45 min per configuration. Settle a knob at EP8 and
+carry only the winner up.
+
+Constant unless the rung names it as the variable: `FABRIC_PROFILE=thor2`,
+`GPU_MEMORY_UTILIZATION=0.72` at EP16, prefill `--max-num-batched-tokens` above the longest
+prompt in the sweep.
+
+| # | Rung | Topology | Variable | Gate |
+|---|---|---|---|---|
+| 0 | `diag/run_ep_probe.sh` `NDEV=8` | 2-node | — | 0 QP errors. 40 s, versus finding out 40 min into a serve |
+| 1 | Serve sanity | EP8 (1P/1D) | — | both roles serve, `/health` OK, coherent completion |
+| 2 | NIAH baseline | EP8 | — | ≥ 9.3 mean at every rung 2k–35k — proves the synced tree is sound |
+| 3 | Perf baseline | EP8 | — | TPOT flat to con=128 |
+| 4 | Cudagraph gate | EP8 | `DECODE_CUDAGRAPH_MODE` | must **boot**, then beat #3 TPOT, then match #2 NIAH |
+| 5 | Bring-up | EP16 (2P/2D) | winner of #4 | serves; symmetric heap allocated; no OOM |
+| 6 | Decode batched-tokens | EP16 | `GLM_DECODE_BATCHED_TOKENS` | ≥ 3 reps each; report the **median** |
+| 7 | NIAH final | EP16 | winner of #6 | the number that ships |
+| 8 | Perf final | EP16 | winner of #6 | all three shapes: 1024/1024, 8192/1024, 1024/8192 |
+| 9 | Config-plumbing guard | either | — | `DRY_RUN=1`: profile env loads **twice**; profile values reach the container; `FABRIC_PROFILE=-` is byte-identical to base |
+
+### Notes that cost a run to learn
+
+- **On a cudagraph-mode change the real gate is capturability, not latency.** A wrongly
+  captured graph produces plausible garbage that a TPOT number will never reveal, which is
+  why rung 4 re-runs NIAH rather than just comparing milliseconds.
+- **Never benchmark a deployment that is still serving something else.** A second resident
+  load generator manufactured a fake regression once. Before every scored run,
+  `pgrep -f "vllm bench serve"` must be empty.
+- **Treat non-monotonic throughput as a harness bug until proven otherwise.**
+- **Score from the per-concurrency benchmark log, not the summary CSV.** The CSV has been
+  observed to drop a measured row silently and to report *total* rather than *output*
+  throughput. Anchor on the `[RUNNING] prompts N isl … con N` blocks; warm-up blocks are not
+  preceded by one and must not be scored.
+- **Read the logs on the node that wrote them.** The container is removed at sweep end, and
+  rank 0 holds relayed copies of every other node's log — globbing per-node logs across
+  hosts double-counts. Dedupe on rank, not on host.
+- **A `0 matches` grep looks exactly like a real failure.** During rung 9, a quoting mismatch
+  in the check (`KEY='104'` vs the emitted `KEY=104`) reported a passing config as broken.
+  Confirm against the raw `docker run` line before believing a negative.
+
 ## 3. Sign-off checklist
 
 - [ ] `tests/run_all.sh` green (offline: gate_check + argv_assert)
@@ -112,3 +161,12 @@ The legacy launchers were deleted on this branch. To A/B live, check out the par
 - [ ] Row 3 moriio-wideEP live: ITL within ~5% of baseline (vs OLD launcher A/B)
 - [ ] Row 4 deepep live: boots + benchmarks
 - [ ] Row 2 moriio-TP live: boots + benchmarks (NEW capability)
+
+**Per platform (§2b), additionally:**
+
+- [ ] rung 0 EP probe clean before any serve attempt
+- [ ] rungs 2 and 7 NIAH: EP16 **no worse than** EP8 — the cross-node combine is a *silent*
+      corruption class, so this is the correctness canary, not a nice-to-have
+- [ ] rung 9 config-plumbing guard green
+- [ ] health on every scored run: 0 preemptions, 0 memory-access faults, 0 kernel asserts,
+      0 engine deaths

@@ -70,7 +70,7 @@ docker run --rm \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size "${DOCKER_SHM_SIZE:-256G}" --ulimit nofile=524288:524288 --ulimit memlock=-1:-1 \
+    --ulimit nofile=524288:524288 --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \

@@ -68,6 +68,22 @@ for f in "${REQUIRED_FILES[@]}"; do
 done
 echo "Running from: $(pwd)"
 
+# ------------------------------------------------------------------------------
+# models.yaml env precedence: capture which recipe knobs the USER explicitly set
+# at submit time. The driver (vllm_disagg.sh) uses this to let models.yaml `env:`
+# OVERRIDE image-baked ENV defaults (e.g. a DeepSeek-tuned image bakes
+# KV_BLOCK_SIZE=16 / VLLM_ROCM_USE_AITER_MLA=0, which would otherwise shadow a
+# model's own recipe — GLM-5.1 DSA needs block=1 + AITER MLA on), while a genuine
+# submit-time `-e VAR=...` still wins. Precedence: image-baked < models.yaml < submit -e.
+# Captured HERE (before the slurm sets any defaults) so it reflects user intent only.
+_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+MODELS_YAML_PROTECT=""
+for _k in $_RECIPE_ENV_KEYS; do
+    [ -n "${!_k+x}" ] && MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT} ${_k}"
+done
+export MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT# }"
+echo "models.yaml protect-list (submit-time overrides): '${MODELS_YAML_PROTECT}'"
+
 # ------------------------
 # Print current time in UTC and PST formats
 # ------------------------
@@ -87,6 +103,8 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "GLM-5.1-FP8" \
+    "GLM-5.2-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -94,6 +112,8 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "GLM-5.1-FP8" \
+    "GLM-5.2-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -179,7 +199,10 @@ WIDE_EP="${WIDE_EP:-0}"
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+# GLM-5.1-FP8 / GLM-5.2-FP8 (GlmMoeDsaForCausalLM, MLA+DSA) are validated only
+# under MoRI-EP wideEP disagg (block=1, AITER sparse MLA on, per-role all2all). The
+# moriio+TP ("Stage B") path is untested for DSA, so reject WIDE_EP=0 for them too.
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.2-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -221,15 +244,37 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # ---------------------------------------------------------------------------
 CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_ARGS=""
-if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
-  echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
+_load_connector_env() {   # $1 = env file
+  local _line _k _v
   while IFS= read -r _line; do
     [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
     _k="${_line%%=*}"; _v="${_line#*=}"
     CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
-  done < "$CONNECTOR_ENV_FILE"
+  done < "$1"
+}
+if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
+  echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
+  _load_connector_env "$CONNECTOR_ENV_FILE"
 else
   echo "WARN: connector env file not found: $CONNECTOR_ENV_FILE" >&2
+fi
+
+# Optional per-fabric profile: <connector>.<FABRIC_PROFILE>.env, layered AFTER the
+# base file. The base <connector>.env documents its RDMA values as cluster-specific
+# and meant to be overridden per fabric; this is that hook, without editing them.
+# Later `-e KEY=` wins in docker run, so the profile overrides the base — while a
+# submit-time export of the same name still beats both (same ${!_k:-$_v} rule).
+# Unset FABRIC_PROFILE => byte-identical behaviour to before (no second file).
+# Example: FABRIC_PROFILE=thor2 loads connectors/moriio.thor2.env (Broadcom bnxt_re).
+if [[ -n "${FABRIC_PROFILE:-}" ]]; then
+  FABRIC_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.${FABRIC_PROFILE}.env"
+  if [[ -f "$FABRIC_ENV_FILE" ]]; then
+    echo "Loading connector platform env: $FABRIC_ENV_FILE (FABRIC_PROFILE=${FABRIC_PROFILE})"
+    _load_connector_env "$FABRIC_ENV_FILE"
+  else
+    echo "Error: FABRIC_PROFILE=${FABRIC_PROFILE} set but ${FABRIC_ENV_FILE} not found." >&2
+    exit 1
+  fi
 fi
 
 if [[ -z "${DOCKER_IMAGE_NAME:-}" ]]; then
@@ -405,15 +450,22 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
+# Pick the routable fabric IP, not just hostname -I's first entry. These nodes expose
+# multiple NICs (e.g. a 10.224.x overlay listed BEFORE the routable 10.158.x fabric);
+# taking $1 blindly can advertise an unreachable addr -> prefill/decode barrier hangs
+# "Waiting for nodes" forever. Prefer FABRIC_SUBNET (default 10.158.), fall back to $1.
+FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+# From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
+_pick_fabric_ip() {
+    awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
+}
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | _pick_fabric_ip)
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
+    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I' | _pick_fabric_ip)
     IPS+=("$IP")
 done
 
@@ -427,11 +479,14 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   keepalive              -> keepalive_bench.sh        (hold server up KEEPALIVE_MINS
+#                                                        for external accuracy probes)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    keepalive)    BENCHMARK_SCRIPT_FILE="keepalive_bench.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -525,7 +580,12 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        # Require a regular file AFTER symlink resolution: these mounts are built on
+        # ONE node but applied on ALL nodes, and vendor NIC libs (e.g. libionic.so.1)
+        # can be a DANGLING symlink on some nodes -> bind-mount fails "not a directory"
+        # -> container create exit 125. `-f` (follows symlink, requires regular file)
+        # skips those; the fabric in use (mlx5) is still mounted where present.
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 
@@ -547,13 +607,14 @@ docker run --rm \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
     -v $HOME/.ssh:/root/.ssh \
-    --shm-size ${DOCKER_SHM_SIZE:-256G} \
     --ulimit nofile=524288:524288 \
     --ulimit memlock=-1:-1 \
     -v ${LOG_PATH}:/run_logs \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     ${_JIT_CACHE_MOUNT} \
+    ${GLM_KERNEL_PATCH:+-v ${GLM_KERNEL_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py:ro} \
+    ${GLM_BACKEND_PATCH:+-v ${GLM_BACKEND_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py:ro} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
@@ -583,6 +644,9 @@ docker run --rm \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
+    -e MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT:-}" \
+    ${GLM_PERSIST_GATE:+-e GLM_PERSIST_GATE=$GLM_PERSIST_GATE} \
+    ${GLM_SKIP_PATCHERS:+-e GLM_SKIP_PATCHERS=$GLM_SKIP_PATCHERS} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
@@ -590,6 +654,7 @@ docker run --rm \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${KEEPALIVE_MINS:+-e KEEPALIVE_MINS=$KEEPALIVE_MINS} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
