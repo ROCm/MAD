@@ -37,17 +37,39 @@ instead of all 16. That trade is architectural, not a tuning defect.
 
 ## Quick start
 
+Run from a SLURM login node. Both steps need your image — the model cards carry
+`DOCKER_IMAGE_NAME: "<supply-your-image>"` as a fill-me-in marker, and madengine
+rejects it rather than trying to pull it (see [Image](#image)).
+
 ```sh
+IMG=<your-registry>/<repo>:<tag>
+
 # colocated, 2 nodes
-madengine run --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --keep-model-dir --live-output
+madengine build --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --use-image "$IMG"
+madengine run --manifest-file build_manifest.json --keep-model-dir --live-output
 
 # prefill/decode disaggregated, 4 nodes
-madengine run --tags pyt_vllm_disagg_mori_kimi-k3 --keep-model-dir --live-output
+madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --use-image "$IMG"
+madengine run --manifest-file build_manifest.json --keep-model-dir --live-output
 ```
 
-Both are `slurm_multi` models: madengine submits the launcher via sbatch with the
-node count from each entry's `args` (`-N 2` / `-N 4`). Supply your built image via
-the `DOCKER_IMAGE_NAME` env var (see [Image](#image)).
+To build and distribute the image instead of supplying a pre-built one, swap
+`--use-image "$IMG"` for `--registry <your-registry>`; the launcher then pulls it
+onto every node in parallel.
+
+Both are `slurm_multi` models. The allocation is sized from each entry's
+`distributed.nnodes` (2 or 4), which madengine turns into `#SBATCH --nodes`; the
+launcher then reads `SLURM_NNODES` for node discovery. Nothing is passed to the
+`.slurm` script on the command line — the topology travels entirely through
+`env_vars`.
+
+Alternatively, run inside an allocation you already hold, in which case madengine
+executes the launcher synchronously and the node count comes from the allocation:
+
+```sh
+salloc -N 4 --ntasks-per-node=1 --gres=gpu:8 -p <partition> -t 24:00:00
+madengine run --manifest-file build_manifest.json --live-output
+```
 
 ## Hardware requirements
 
@@ -160,6 +182,18 @@ All three land in madengine's `perf.csv` via `parse_to_csv.py`, so the NIAH numb
 above are a CI-visible metric rather than a table in a markdown file. A context size
 whose request errors is recorded as a `FAILURE` row with performance 0, so a
 pass→crash regression shows up instead of silently disappearing.
+
+The launcher copies that CSV to `perf_Kimi-K3.csv` beside itself, which is the name
+each entry declares as `multiple_results`; madengine resolves the declared name
+first and falls back to the conventional `/shared_inference/$USER/model_blog_logs/
+$SLURM_JOB_ID/perf.csv` path.
+
+Because the two launchers describe their topology differently, the colocated one
+states its own reporting identity — `PERF_DEPLOYMENT_TYPE=colocated_pp2xtp8` and
+`PERF_TAGS=vllm_multinode,colocated,…`, with node count from `NNODES`. The disagg
+launcher keeps deriving `disagg_<xP>P<yD>D` from its pool sizes. Without that split
+a colocated 2-node run reported itself as a 1-node `disagg_1P0D`, since it sets
+`xP=1 yD=0` only to keep the shared log filenames unique.
 
 ## Relationship to PR #193
 

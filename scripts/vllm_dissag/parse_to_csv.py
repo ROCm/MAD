@@ -113,7 +113,20 @@ def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
 
 
 def _get_run_metadata(pipeline: str = "vllm"):
-    """Collect run metadata from environment variables."""
+    """Collect run metadata from environment variables.
+
+    Two launchers share this parser, and they describe their topology differently:
+
+      * vllm_dissag  -> disaggregated, xP prefill + yD decode nodes.
+      * vllm_multinode -> COLOCATED, one instance spanning NNODES nodes. It exports
+        xP=1 yD=0 purely so the shared benchmark log filenames stay unique.
+
+    Deriving the topology from xP/yD is therefore only valid for the disagg path;
+    on the colocated path it reported a 2-node/16-GPU run as `disagg_1P0D` with
+    1 node and 8 GPUs. NNODES is exported by both launchers and is authoritative,
+    and a launcher whose shape is not "xP prefill + yD decode" states its own
+    deployment_type/tags via PERF_DEPLOYMENT_TYPE / PERF_TAGS.
+    """
     import os
     xP = os.environ.get('xP', '1')
     yD = os.environ.get('yD', '1')
@@ -129,17 +142,26 @@ def _get_run_metadata(pipeline: str = "vllm"):
     else:
         backend = 'nixl'
 
+    def _as_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    gpus_per_node = _as_int(gpus, 8)
+    nnodes = _as_int(os.environ.get('NNODES'), _as_int(xP, 1) + _as_int(yD, 1))
+
     return {
         'pipeline': pipeline,
-        'deployment_type': f'disagg_{xP}P{yD}D',
-        'tags': f'{pipeline}_disagg,{backend}',
-        'n_gpus': str(int(xP) * int(gpus) + int(yD) * int(gpus)),
-        'nnodes': str(int(xP) + int(yD)),
-        'gpus_per_node': gpus,
+        'deployment_type': os.environ.get('PERF_DEPLOYMENT_TYPE') or f'disagg_{xP}P{yD}D',
+        'tags': os.environ.get('PERF_TAGS') or f'{pipeline}_disagg,{backend}',
+        'n_gpus': str(nnodes * gpus_per_node),
+        'nnodes': str(nnodes),
+        'gpus_per_node': str(gpus_per_node),
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', 'gfx942'),
     }
 
 

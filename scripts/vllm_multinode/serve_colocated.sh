@@ -159,6 +159,20 @@ echo "[colocated] server ready after ${_elapsed}s"
 # in their log filenames; a colocated run reports as 1 instance, 0 decode pools.
 export BENCHMARK_PORT="${SERVE_PORT}"
 export xP="${xP:-1}" yD="${yD:-0}"
+
+# The shared harness assumes the disagg launcher's conventions. Override the two
+# that do not hold here, so a colocated run is benchmarked and reported as itself:
+#
+#   NIAH_MODEL          we pass --served-model-name, so the served tag is MODEL_NAME,
+#                       not MODEL_PATH. Without this every NIAH request 404s.
+#   PERF_DEPLOYMENT_TYPE/PERF_TAGS
+#                       xP/yD above are filename placeholders, not a topology; left
+#                       alone the CSV would label this 2-node run `disagg_1P0D`.
+export NIAH_MODEL="${MODEL_NAME:-model}"
+_ep_tag="$([ "${ENABLE_EP}" = "1" ] && echo "ep_${ALL2ALL_BACKEND:-default}" || echo "noep")"
+export PERF_DEPLOYMENT_TYPE="${PERF_DEPLOYMENT_TYPE:-colocated_pp${PP_SIZE}xtp${TP_SIZE}}"
+export PERF_TAGS="${PERF_TAGS:-vllm_multinode,colocated,${_ep_tag}}"
+
 bash "${SHARED_DIR}/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
 
 echo "[colocated] benchmark complete; stopping server"

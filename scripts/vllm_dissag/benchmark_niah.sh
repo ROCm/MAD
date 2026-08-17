@@ -17,9 +17,14 @@ echo "port=${BENCHMARK_PORT}  model=${MODEL_PATH}  sizes=${NIAH_WORDS:-2000,8000
 # Give the router a moment to be fully ready for chat completions.
 sleep 10
 
-# The server registers the model under its path (served_model_name = MODEL_PATH).
+# The model tag to request MUST equal the server's served_model_name, or every
+# request 404s and the whole sweep is recorded as FAILURE.
+#   * vllm_dissag passes no --served-model-name, so vLLM defaults it to MODEL_PATH.
+#   * vllm_multinode passes --served-model-name "$MODEL_NAME" and exports NIAH_MODEL
+#     to match.
+# Hence: honour NIAH_MODEL when the launcher sets it, else fall back to MODEL_PATH.
 NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}/v1/chat/completions" \
-NIAH_MODEL="${MODEL_PATH}" \
+NIAH_MODEL="${NIAH_MODEL:-${MODEL_PATH}}" \
 NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
 NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
 NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \

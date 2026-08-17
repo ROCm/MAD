@@ -387,7 +387,11 @@
     "timeout": -1,
     "skip_gpu_arch": "gfx950",
     "distributed": {
-      "launcher": "slurm_multi"
+      "launcher": "slurm_multi",
+      "nnodes": 4
+    },
+    "slurm": {
+      "time": "24:00:00"
     },
     "env_vars": {
       "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -400,7 +404,7 @@
       "BENCHMARK_SCRIPT": "niah",
       "NIAH_WORDS": "10000,50000,100000,200000"
     },
-    "args": "-N 4 -n 4"
+    "args": ""
   },
   {
     "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8",
@@ -421,7 +425,11 @@
     "timeout": -1,
     "skip_gpu_arch": "gfx950",
     "distributed": {
-      "launcher": "slurm_multi"
+      "launcher": "slurm_multi",
+      "nnodes": 2
+    },
+    "slurm": {
+      "time": "24:00:00"
     },
     "env_vars": {
       "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -433,7 +441,7 @@
       "BENCHMARK_SCRIPT": "niah",
       "NIAH_WORDS": "10000,50000,100000,200000"
     },
-    "args": "-N 2 -n 2"
+    "args": ""
   },
   {
     "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
@@ -454,7 +462,11 @@
     "timeout": -1,
     "skip_gpu_arch": "gfx950",
     "distributed": {
-      "launcher": "slurm_multi"
+      "launcher": "slurm_multi",
+      "nnodes": 2
+    },
+    "slurm": {
+      "time": "24:00:00"
     },
     "env_vars": {
       "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -468,7 +480,7 @@
       "BENCHMARK_SCRIPT": "niah",
       "NIAH_WORDS": "10000,50000,100000,200000"
     },
-    "args": "-N 2 -n 2"
+    "args": ""
   },
   {
     "name": "pyt_vllm_kimi-k3_mi300x_wideep_moriep",
@@ -490,7 +502,11 @@
     "timeout": -1,
     "skip_gpu_arch": "gfx950",
     "distributed": {
-      "launcher": "slurm_multi"
+      "launcher": "slurm_multi",
+      "nnodes": 2
+    },
+    "slurm": {
+      "time": "24:00:00"
     },
     "env_vars": {
       "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -504,7 +520,7 @@
       "BENCHMARK_SCRIPT": "niah",
       "NIAH_WORDS": "10000,50000,100000,200000"
     },
-    "args": "-N 2 -n 2"
+    "args": ""
   },
   {
     "name": "pyt_vllm_llama-3.1-8b",
