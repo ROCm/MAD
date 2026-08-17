@@ -221,6 +221,67 @@ flowchart TD
     note["Launcher owns: connector, transfer,\nparallelism DEGREE (--tensor/data-parallel-size,\n--all2all-backend, kv-transfer-config).\nyaml owns: model-tuning flags + env only."]
 ```
 
+### The third tier, and why it needs a protect-list
+
+`models.yaml`'s `env:` block is exported **inside** the container, after the submit-time
+`-e` values are already in the environment — so without help, the yaml would clobber a
+deliberate per-run override. That is backwards: a site override must win.
+
+`MODELS_YAML_PROTECT` fixes it. The submitting script walks a fixed key list
+(`_RECIPE_ENV_KEYS`) and, for each key **the operator actually set**, both forwards it with
+`-e` and appends its name to a space-separated protect-list. Inside the container, the yaml
+parser skips any key on that list.
+
+```mermaid
+flowchart LR
+    subgraph submit["Submit host"]
+        k["_RECIPE_ENV_KEYS\n(fixed allow-list)"] --> chk{"key set in\nthe environment?"}
+        chk -->|yes| fwd["-e KEY='val'\n+ append to MODELS_YAML_PROTECT"]
+        chk -->|no| skip["not forwarded"]
+    end
+    fwd --> cont
+    subgraph cont["Inside the container"]
+        parse["models.yaml env: parse"] --> pchk{"key in\nMODELS_YAML_PROTECT?"}
+        pchk -->|yes| keep["keep the -e value\n(submit-time wins)"]
+        pchk -->|no| apply["export the yaml value"]
+    end
+```
+
+Two consequences worth knowing before adding a knob:
+
+- **A key absent from `_RECIPE_ENV_KEYS` cannot be overridden at submit time.** The shell
+  accepts the `export`, nothing errors, and the yaml value is used — a silent no-op. Adding
+  a tunable means adding it to that list, not just to the yaml.
+- The list is **space-separated and passed as one `-e` value**, so every forwarded value is
+  single-quoted. The whole `docker run` is re-parsed by a remote shell, and an unquoted
+  multi-word value (`CUDAGRAPH_CAPTURE_SIZES="1 2 4 …"`, or the protect-list itself) would
+  split into extra argv words and corrupt the command line.
+
+### Per-fabric env layering (`FABRIC_PROFILE`)
+
+Fabric transport settings are a property of the *cluster*, not the model or the connector,
+so they form their own layer between the two. The non-SLURM launcher loads
+`connectors/<CONNECTOR>.env` and then, if `FABRIC_PROFILE` is set (default `thor2`),
+`connectors/<CONNECTOR>.<FABRIC_PROFILE>.env` over the top.
+
+```mermaid
+flowchart LR
+    base["connectors/moriio.env\n(base / CX7 defaults)"] --> prof["connectors/moriio.thor2.env\nMORI_RDMA_TC / _SL,\nNCCL_IB_TC / _SL,\nMORI_NUM_QP_PER_PE,\nMORI_SOCKET_IFNAME"]
+    prof --> live["live sysfs derivation\nMORI_RDMA_DEVICES, NCCL_IB_HCA\n(per node, by rail)"]
+    live --> dock["docker run -e …"]
+```
+
+The last hop is the subtle one. Two keys present in the profile file are **fallbacks that
+are expected to be overwritten**: the `bnxt_re` device↔rail mapping is not stable across
+reboots, so the device list is re-derived from `/sys/class/infiniband` at launch, per node.
+Docker applies `-e` last-wins, so those keys legitimately appear more than once on the
+command line and the *tail* value is the live one. Different rail orders on different nodes
+in the same run is the derivation working, not configuration drift.
+
+A missing profile file is a hard exit rather than a fallback to base — running a Thor2
+fabric with ConnectX defaults yields a slow, working, wrong result, which is worse than not
+starting. `FABRIC_PROFILE=-` is the explicit escape hatch to base-only.
+
 ---
 
 ## File map
@@ -228,6 +289,9 @@ flowchart TD
 | File | Role |
 |------|------|
 | `run_xPyD_models.slurm` | sbatch entry: node pick, validation, axis shim, `docker run` env plumb |
+| `launch_disagg_skyriver.sh` | non-SLURM entry: same job over an SSH+docker mesh (no scheduler, no shared FS) |
+| `connectors/moriio.thor2.env` | `FABRIC_PROFILE=thor2` overlay — Broadcom Thor2 RoCEv2 TC/SL/QP values |
+| `diag/{rail_routes,run_ep_probe,preflight_nodes,kv_capacity}.sh` | pre-flight + post-run probes (fabric reachability, EP handshake, node idle, KV pool) |
 | `vllm_disagg.sh` | **the launcher** — axis resolve, yaml parse, role branch, barrier/benchmark/cleanup |
 | `parallelism.sh` | TP-vs-wideEP shared helpers |
 | `connectors/rixl.sh` | NixlConnector profile (TP + DeepEP) |

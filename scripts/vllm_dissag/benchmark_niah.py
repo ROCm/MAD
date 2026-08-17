@@ -112,7 +112,20 @@ def main():
         print("NIAH_MODEL must be set (the served model path/name)", file=sys.stderr)
         sys.exit(2)
     print("=== NIAH retrieval test ===", flush=True)
-    print("url=%s  model=%s  sizes=%s  seeds=%s  warmup=%s" % (URL, MODEL, WORDS, SEEDS, WARMUP), flush=True)
+    print("url=%s  model=%s  sizes=%s  warmup=%s" % (URL, MODEL, WORDS, WARMUP), flush=True)
+    print("seeds=%s  ->  n=%d sample(s) per context length" % (SEEDS, len(SEEDS)), flush=True)
+    # NIAH_SEEDS is a comma list of seed VALUES, not a count. `NIAH_SEEDS=10` is a
+    # single run of seed #10, not ten runs -- an easy misread that silently produces a
+    # one-sample result. At n=1 each per-length mean is an integer (10 needles, integer
+    # hits), so a decimal gate such as ">= 9.3 mean" is UNREACHABLE BY CONSTRUCTION:
+    # the rung can only score 9.0 or 10.0. Warn loudly rather than emit a number that
+    # looks like a measurement.
+    if len(SEEDS) == 1:
+        print("  !! WARNING: n=1. NIAH_SEEDS is a comma list of seed VALUES, not a count "
+              "-- did you mean NIAH_SEEDS=0,1,2,...? With one seed the mean is an integer, "
+              "so fractional gates (e.g. >=9.3) cannot be met and single-needle variance is "
+              "indistinguishable from real accuracy loss. Use >=3 seeds for any scored run.",
+              flush=True)
     # Warmup pass: compile every shape once before scoring, so cold JIT never lands on a
     # scored/gated request (the common cause of false 0/10 or timeout on a fresh boot).
     if WARMUP:

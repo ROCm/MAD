@@ -201,7 +201,16 @@ DeepSeek-R1:
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):
-#   - KV_BLOCK_SIZE=1        (DSA sparse indexer REQUIRES block-size 1; DS uses 16)
+#   - KV_BLOCK_SIZE=1        (DS uses 16. Careful with the mechanism here: block=1 is
+#                             IMPOSED BY THE ATTENTION BACKEND from the actual KV tensor
+#                             shape, not requested by config. Setting 16 does not fail --
+#                             the engine accepts it, echoes it in `non-default args`, and
+#                             moriio_connector.py then logs at INFO "KV cache block_size=1
+#                             differs from config block_size=16; using actual tensor shape
+#                             (attention backend override)" and runs at 1 anyway. Measured:
+#                             a KV_BLOCK_SIZE=16 boot was an accidental A/A test. So the
+#                             value below is documentation of what the backend will do,
+#                             not a tunable; connectors/moriio.sh WARNs if you set it.)
 #   - VLLM_ROCM_USE_AITER_MLA=1  (GLM MLA path ON via AITER sparse; DS sets 0)
 #   - prefill EAGER (NONE), decode PIECEWISE  (prefill cudagraph capture deadlocks
 #     on this stack; decode PIECEWISE captures cleanly on DSA and is a ~3.7x ITL win
@@ -324,7 +333,24 @@ GLM-5.2-FP8:
     GPU_MEMORY_UTILIZATION: "0.80"
     VLLM_CUDAGRAPH_MODE: "NONE"
     PREFILL_CUDAGRAPH_MODE: "NONE"
-    DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+    # FULL_AND_PIECEWISE, not PIECEWISE (5.1 above still uses PIECEWISE -- this axis was
+    # only measured for 5.2). Measured on MI308X EP8, n>=3 per point, medians, IGP=0 in
+    # both arms. The win is a LOW-CONCURRENCY win and it decays:
+    #   con=1  -26.9%    con=16  -13.8%    con=32  -5.7%    con>=64  within noise
+    # It removes a FIXED per-decode-step kernel-launch cost, so the benefit halves with
+    # each doubling of concurrency and is gone by production-scale load. Do not quote a
+    # headline percentage without naming the concurrency -- "-27% TPOT" unqualified is
+    # misleading, and at con>=64 this flag buys approximately nothing.
+    #
+    # Defaulted ON anyway because it also costs approximately nothing: capture
+    # 86 s / 1.79 GiB vs 82 s / 1.77 GiB for PIECEWISE, and NIAH scored 120/120 under it
+    # (4 rungs x 3 seeds x 10 needles). A free win at low concurrency and a no-op at high
+    # concurrency is worth defaulting; it is not worth advertising as a throughput fix.
+    #
+    # Full capture is only safe here because USE_INDUCTOR_GRAPH_PARTITION now defaults 0
+    # (see connectors/moriio.sh) -- a wrongly captured graph yields plausible-looking
+    # wrong output, which is why this was gated on NIAH and not on TPOT alone.
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
     VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
     PREFILL_MORI_BACKEND: "mori_high_throughput"

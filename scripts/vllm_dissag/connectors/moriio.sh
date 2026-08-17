@@ -116,6 +116,46 @@ connector_setup_env() {
     export ROCSHMEM_MAX_NUM_CONTEXTS="${ROCSHMEM_MAX_NUM_CONTEXTS:-256}"
     # MoRI shmem heap: 4 GiB default too small for EP>=32; 16 GiB (matches #324).
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
+
+    _moriio_check_vram_budget
+}
+
+# MoRI's symmetric heap is allocated OUTSIDE PyTorch's caching allocator, so it is
+# entirely invisible to `gpu_memory_utilization`. vLLM sizes its KV pool to
+# util x capacity and never learns the heap exists. The two then compete for the same
+# physical VRAM and the loser is whichever allocates second — in practice a post-KV
+# warmup OOM, minutes into a boot, with a message that points at cudagraphs rather
+# than at the heap.
+#
+# Measured on MI308X (191.98 GiB): util 0.80 + a 32 GiB heap leaves 6.39 GiB and OOMs;
+# util 0.72 + 32 GiB leaves 21.75 GiB and boots. The arithmetic is fully knowable
+# before launch, so complaining here beats discovering it at minute nine.
+#
+# WARN only, never fail: capacity detection depends on rocm-smi being present and
+# parseable, and a wrong abort on a good node is worse than a warning on a bad one.
+# The hard gate lives in diag/preflight_nodes.sh, which the operator runs deliberately.
+_moriio_check_vram_budget() {
+    local _util="${GPU_MEMORY_UTILIZATION:-}"
+    [ -n "${_util}" ] || return 0
+    local _heap="${MORI_SHMEM_HEAP_SIZE:-0}"
+    [ "${_heap}" -gt 0 ] 2>/dev/null || return 0
+
+    # Total VRAM of GPU 0, in bytes. Any parse failure -> silently skip the check.
+    local _cap
+    _cap=$(rocm-smi --showmeminfo vram 2>/dev/null \
+             | grep -iE 'total memory' | awk '{print $NF}' | head -1)
+    [ -n "${_cap}" ] && [ "${_cap}" -gt 0 ] 2>/dev/null || return 0
+
+    awk -v u="${_util}" -v h="${_heap}" -v c="${_cap}" -v min="${MORI_VRAM_HEADROOM_MIN_GIB:-20}" 'BEGIN{
+      g=1073741824; cg=c/g; hg=h/g; pool=u*cg; head=cg-pool-hg;
+      if (head < min)
+        printf "WARNING [moriio]: VRAM budget is tight. GPU_MEMORY_UTILIZATION=%.4f reserves %.2f GiB\n" \
+               "         for the KV/model pool and MORI_SHMEM_HEAP_SIZE adds %.2f GiB OUTSIDE that pool,\n" \
+               "         leaving only %.2f GiB of %.2f GiB free (want >= %.0f GiB). The heap is invisible to\n" \
+               "         gpu_memory_utilization, so vLLM will not account for it and may OOM during\n" \
+               "         post-KV warmup. Lower GPU_MEMORY_UTILIZATION or shrink MORI_SHMEM_HEAP_SIZE.\n", \
+               u, pool, hg, head, cg, min;
+    }' >&2
 }
 
 _moriio_build_kv_transfer_config() {
@@ -256,9 +296,26 @@ connector_launch_worker() {
     # warmup via the fake path, then crashes). splitting_ops-list membership alone doesn't
     # cut the graph there. use_inductor_graph_partition=true moves partitioning to inductor
     # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the KV-update so
-    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION (default 1).
+    # it runs as an eager boundary.
+    #
+    # DEFAULT IS 0. The workaround above is real and is why this flag exists, but on
+    # v027-bnxt238 + GLM-5.2-FP8 + MoRI it is not needed AND it is expensive: measured on
+    # MI308X EP8, enabling it costs ~3.1-3.8x decode throughput (con=32: 143.96 tok/s @
+    # 216.31 ms TPOT with IGP=1 vs 482.67 @ 60.61 with IGP=0). Inductor-level partitioning
+    # drags other engine settings along with it (compile_ranges_endpoints,
+    # fuse_rope_kvcache_cat_mla), so the cost is not a single knob's worth.
+    #
+    # Defaulting it ON made every deployment pay for a crash that only some image/model
+    # combinations hit. Set USE_INDUCTOR_GRAPH_PARTITION=1 if you see
+    # "RuntimeError: unknown parameter type" on the first real MLA decode -- that is this
+    # bug, it passes boot and warmup via the fake path and only fires on real traffic, so
+    # a clean startup is not evidence you are safe from it.
+    #
+    # Correctness of the default was gated, not assumed: NIAH 2k-35k passes with IGP=0 on
+    # both EP8 and EP16 (>=9.6/10 every rung). A partitioning change is exactly the class
+    # that can produce plausible-looking wrong output, so latency alone was not accepted.
     local _igp_json=""
-    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-1}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
+    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-0}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
         local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
         exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
@@ -305,6 +362,29 @@ connector_launch_worker() {
         # quant, which has the aiter_tensor_t torch_guard bug -> engine-init crash).
         local _block="${KV_BLOCK_SIZE:-1}"
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
+
+        # KV_BLOCK_SIZE is DECORATIVE on GLM MLA+DSA: the engine accepts the value into its
+        # config and echoes it in `non-default args`, and then the attention backend silently
+        # forces the actual tensor geometry back to 1 --
+        #   moriio_connector.py:1739  KV cache block_size=1 differs from config block_size=16;
+        #                             using actual tensor shape (attention backend override)
+        # -- logged at INFO by all 8 DP workers, i.e. invisible in practice. Measured: a
+        # KV_BLOCK_SIZE=16 boot was bit-for-bit the same configuration as block=1 (it ran as
+        # an accidental A/A test). An operator can set this knob, see it confirmed in the
+        # engine args, and believe it took effect. Say so here, at submit time, where it is
+        # still actionable. WARN only -- the run is correct, just not what was asked for.
+        case "${MODEL_NAME:-}" in
+            GLM-5.*|glm-5.*)
+                if [[ "${_block}" != "1" ]]; then
+                    echo "WARNING [moriio]: KV_BLOCK_SIZE=${_block} will be SILENTLY OVERRIDDEN to 1." >&2
+                    echo "         GLM MLA+DSA's attention backend imposes block=1 from the actual tensor" >&2
+                    echo "         shape, regardless of config. The engine will still echo block_size=${_block}" >&2
+                    echo "         in its non-default args -- that echo is not evidence the knob took effect." >&2
+                    echo "         Block-size cannot be swept from this variable; it needs an attention-backend" >&2
+                    echo "         change. Proceeding with the run (behaviour is correct, just not tunable here)." >&2
+                fi
+                ;;
+        esac
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 

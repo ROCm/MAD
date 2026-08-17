@@ -118,7 +118,7 @@ CONNECTOR_ENV_ARGS=""
 # so e.g. `export GPU_MEMORY_UTILIZATION=0.72` for EP16 is silently dropped.
 # Captured BEFORE the connector .env files are loaded, so it reflects user intent
 # only -- a value that merely came from a connector .env must not be "protected".
-_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES USE_INDUCTOR_GRAPH_PARTITION VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
 MODELS_YAML_PROTECT=""
 RECIPE_ENV_ARGS=""
 # Values are single-quoted: the whole `docker run` is assembled into ONE string and
@@ -134,6 +134,28 @@ done
 MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT# }"
 RECIPE_ENV_ARGS+=" -e MODELS_YAML_PROTECT='${MODELS_YAML_PROTECT}'"
 echo "models.yaml protect-list (submit-time overrides): '${MODELS_YAML_PROTECT}'"
+
+# KV_BLOCK_SIZE is DECORATIVE on GLM MLA+DSA. connectors/moriio.sh warns about this too,
+# but that runs INSIDE the container and its stderr lands in a log file the operator is
+# not watching -- which is the same "you cannot see it, so it may as well not exist"
+# failure the knob itself has. Warn here, on the submitting terminal, where it is read.
+#
+# The engine ACCEPTS block_size=16 and echoes it in `non-default args`; the attention
+# backend then forces the tensor geometry back to 1 and says so only at INFO
+# (moriio_connector.py:1739, on all 8 DP workers). An operator can set this, see it
+# confirmed, and be wrong. Measured: a KV_BLOCK_SIZE=16 boot was an accidental A/A test.
+case "${MODEL_NAME}" in
+  GLM-5.*|glm-5.*)
+    if [ -n "${KV_BLOCK_SIZE+x}" ] && [ "${KV_BLOCK_SIZE}" != "1" ]; then
+      echo "WARNING: KV_BLOCK_SIZE=${KV_BLOCK_SIZE} will be SILENTLY OVERRIDDEN to 1 on ${MODEL_NAME}." >&2
+      echo "         GLM MLA+DSA's attention backend imposes block=1 from the actual KV tensor" >&2
+      echo "         shape regardless of config. The engine will still echo block_size=${KV_BLOCK_SIZE} in" >&2
+      echo "         its non-default args -- that echo is NOT evidence the value took effect." >&2
+      echo "         This is not a tunable axis from here; changing it needs an attention-backend" >&2
+      echo "         change. Launching anyway (the run is correct, just not the experiment asked for)." >&2
+    fi
+    ;;
+esac
 
 # Per-run recipe knobs that models.yaml exposes as ${VAR:-default} (expanded by
 # vllm_disagg.sh). Not in the protect-list -- they are flag-string substitutions,
@@ -522,3 +544,11 @@ echo "=================================================================="
 echo "Launched. Watch: ssh <node> 'docker logs -f disagg_${MODEL_NAME}_${JOB_ID}'"
 echo "Logs on each node under ${LOG_PATH}/"
 echo "Prefill master + proxy on NODE_RANK 0 = ${P_NODES[0]} (${MASTER_ADDR}:${PROXY_PORT})"
+# KV capacity is the metric that decides EP8 vs EP16 -- it is the ONE axis on which the
+# larger topology wins (measured: EP16 is 20-23% worse on TPOT and ~1.0x on throughput
+# for 2x the nodes, so capacity is the entire case for it). The engine prints it once per
+# DP worker at INFO during boot, buried in a per-node log, while throughput and latency
+# get a tidy end-of-sweep table. Point at the reporter here so the number is reachable
+# without knowing it exists. Read-only; safe to run against a live job once boot finishes.
+echo "KV capacity (the axis that decides topology):"
+echo "  ${HOST_SCRIPTS}/diag/kv_capacity.sh ${JOB_ID} ${ALL_NODES[*]}"

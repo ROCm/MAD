@@ -129,6 +129,88 @@ sbatch -N $((xP+yD)) -n $((xP+yD)) --nodelist=<nodes> run_xPyD_models.slurm
 
 Setting both `RUN_MORI=1` and `RUN_DEEPEP=1` exits with an error.
 
+## MI308X + Broadcom Thor2 (non-SLURM)
+
+`run_xPyD_models.slurm` assumes SLURM and a shared filesystem. Some clusters have neither.
+`launch_disagg_skyriver.sh` is the same launcher driven over an SSH + docker mesh instead:
+it picks nodes, resolves fabric IPs, and runs one container per node with the identical
+`-e` env plumb. `vllm_disagg.sh` and `connectors/moriio.sh` are reused **unchanged** — they
+are env-driven, so nothing below is a fork of the SLURM path.
+
+```bash
+PREFILL="node0,node1" DECODE="node2,node3" \
+MODEL_NAME=GLM-5.2-FP8 MODEL_PATH=/models/GLM-5.2-FP8 \
+GPU_MEMORY_UTILIZATION=0.72 \
+./launch_disagg_skyriver.sh                 # 2P/2D (EP16); one node each side = EP8
+```
+
+Add `DRY_RUN=1` to print the per-node `docker run` without executing — the fastest way to
+confirm a knob actually reaches the container.
+
+### `FABRIC_PROFILE` — per-fabric env overlay
+
+MoRI's RDMA settings (traffic class, service level, QPs per PE, socket interface) are
+fabric properties, not model properties, so they do not belong in `models.yaml`. The
+launcher loads them as a **second** env file layered over the connector's base:
+
+```
+connectors/${CONNECTOR}.env                      # always
+connectors/${CONNECTOR}.${FABRIC_PROFILE}.env    # then this, overriding
+```
+
+| `FABRIC_PROFILE` | Effect |
+|---|---|
+| `thor2` (default) | loads `connectors/moriio.thor2.env` — Broadcom Thor2 RoCEv2 values |
+| `-` | base `connectors/moriio.env` only (the pre-existing CX7 behaviour, byte-identical) |
+| anything else | loads `connectors/moriio.<name>.env`, or **exits** if that file is missing |
+
+A missing profile file is a hard exit, deliberately. Silently falling back to the base env
+would run a Thor2 fabric with ConnectX defaults and produce a slow, working, wrong result —
+the worst failure mode. `Loading connector platform env:` therefore prints **twice** on a
+profiled run; once is a bug.
+
+Two keys in that file are **fallbacks that are normally overwritten**:
+`MORI_RDMA_DEVICES` and `NCCL_IB_HCA` are re-derived from live sysfs at launch, per node,
+because the `bnxt_re` device↔rail mapping is not stable across reboots. Different nodes
+legitimately show different device orders in the same run — that is the derivation working,
+not drift.
+
+### Prerequisite a reboot wipes
+
+On a rail-per-NIC RoCEv2 fabric, MoRI builds an unconditional full QP mesh, so EP ranks form
+QPs **between different rails**. That needs two host-side things that are runtime-only:
+
+```bash
+diag/rail_routes.sh add  node0 node1 node2 node3     # per-source policy routes via .254
+diag/rail_routes.sh show node0 node1 node2 node3     # expect rules=8, rp_filter_all=2
+```
+
+Without both the per-source routes *and* `rp_filter=2` on the **receiver**, cross-rail QPs
+fail at `bnxt_re_resolve_eth_dmac: -110`. Strict reverse-path filtering drops the arriving
+frames silently, so the sender-side symptom is misleading. **`ip rule` and the sysctl do not
+survive a reboot** — re-run `add` after any node restart, before any multi-node run.
+`del` restores the rp_filter values it snapshotted at `add` time.
+
+### Pre-flight probes (`diag/`)
+
+| Script | Answers |
+|---|---|
+| `diag/rail_routes.sh {add,del,show}` | is cross-rail RDMA reachable? (see above) |
+| `diag/run_ep_probe.sh <image> <tag> <n0> <n1>` | does a 2-node MoRI EP handshake complete? ~40 s, instead of discovering it 40 min into a serve |
+| `diag/preflight_nodes.sh <nodes...>` | is the node idle, and does `util x capacity + MORI_SHMEM_HEAP_SIZE` leave headroom? |
+| `diag/kv_capacity.sh <job_id> [nodes...]` | what KV pool did a completed run actually get? |
+
+`kv_capacity.sh` exists because KV capacity is the metric that decides topology and the one
+metric the benchmark table never prints — it is emitted once per DP worker at INFO during
+boot and then scrolls away.
+
+### Memory budget on this platform
+
+MoRI's symmetric heap (`MORI_SHMEM_HEAP_SIZE`, 32 GiB for GLM-5.2) is allocated **outside**
+PyTorch's pool, so it is invisible to `gpu_memory_utilization`. On 192 GiB MI308X,
+`0.80` + a 32 GiB heap leaves ~6 GiB and OOMs during cudagraph warm-up; `0.72` is the
+working value at EP16. The launcher warns when the arithmetic does not clear ~20 GiB.
+
 ## Adding a new model (no launcher edits)
 
 1. Add an entry to `models.yaml`:
@@ -241,6 +323,30 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
 
+> **`NIAH_SEEDS` is a comma list of seed VALUES, not a count.** `NIAH_SEEDS=10` runs seed
+> #10 **once**, it does not run ten seeds. At n=1 each per-length mean is an integer, so a
+> fractional gate (`>= 9.3`) can never be met — the rung scores 9.0 or 10.0 and nothing
+> between. Use `NIAH_SEEDS="0,1,2"` (the default) or more for any scored run; the script
+> now prints `n=<count>` and warns when only one seed is given.
+
+### Pre-flight before a scored run
+
+```bash
+GPU_MEMORY_UTILIZATION=0.72 MORI_SHMEM_HEAP_SIZE=34359738368 \
+  bash diag/preflight_nodes.sh skyriver04 skyriver05 skyriver06 skyriver07
+```
+
+Two independent checks, because two unrelated things sink a run:
+
+- **static** — `util x capacity + MORI_SHMEM_HEAP_SIZE` must leave >= 20 GiB. MoRI's
+  symmetric heap is allocated *outside* PyTorch's pool, so it is invisible to
+  `gpu_memory_utilization`. `0.80` with a 32 GiB heap leaves 6.39 GiB and OOMs during
+  post-KV warmup — the arithmetic is knowable before launch, so check it there.
+- **dynamic** — the node must actually be idle. VRAM is sampled 3x with a settle delay and
+  the **minimum** is reported (a single sample taken during teardown reads ~50 % and
+  invents a phantom co-tenant), and an ABORT additionally requires a **KFD PID**: a running
+  container is *not* evidence it holds GPU memory.
+
 ## Testing the launcher (no GPUs)
 
 Offline suites validate the launcher without a cluster — run after any change to the
@@ -263,6 +369,20 @@ CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori DRY_RUN=1 NODE_RANK=0 \
 ```
 
 ## Caveats
+
+- **A huge `Estimated CUDA graph memory` means the node was busy, not that your cudagraph
+  config is wrong.** That number is a **measured free-memory delta**, not a computed size:
+  vLLM samples free VRAM, runs the capture-shape profile, samples again, and books the
+  difference against cudagraphs — then subtracts it from the KV budget. Anything else
+  taking VRAM during that ~20 s window is misattributed to your graphs, and the engine
+  then refuses to boot for lack of KV space. Two tells that a reading is spurious: it
+  **differs per rank** for identical shards (a real graph footprint is deterministic), and
+  it is wildly larger than the ~1.7–1.8 GiB this recipe normally reports (the estimator is
+  otherwise accurate to ~8 %). Fix the node, not the config — run
+  `diag/preflight_nodes.sh` before the launch. **Do not** set
+  `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` to make it go away: on a genuinely busy node,
+  refusing to boot is the correct behaviour, and disabling the estimator converts a clean
+  startup failure into an OOM later in the run.
 
 - **MoE models need a co-versioned AITER/vLLM image.** Dense models (Llama, Qwen3-32B) serve on the
   standard image. MoE models (DeepSeek-V3, Qwen3-30B-A3B) exercise AITER's MoE GEMM path, which can
