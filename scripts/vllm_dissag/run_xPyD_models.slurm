@@ -356,6 +356,19 @@ echo "SLURM_NTASKS: $SLURM_NTASKS"
 
 # Get the full nodelist and extract first NUM_NODES
 FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+
+# NUM_NODES comes from xP+yD, not from the allocation, so a short allocation used
+# to be truncated by the `head` below into a silently wrong topology: pools would
+# be built from nodes that were never allocated, and the run would fail much later
+# with a confusing connector timeout. Fail here instead, while the cause is obvious.
+_AVAILABLE_NODES=$(echo "$FULL_NODELIST" | grep -c .)
+if [ "$_AVAILABLE_NODES" -lt "$NUM_NODES" ]; then
+    echo "Error: topology needs ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but the allocation has ${_AVAILABLE_NODES}." >&2
+    echo "       Size the allocation to match: 'distributed.nnodes' in the model card," >&2
+    echo "       'sbatch -N ${NUM_NODES}', or 'salloc -N ${NUM_NODES}'." >&2
+    exit 1
+fi
+
 SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n $NUM_NODES)
 NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
 
