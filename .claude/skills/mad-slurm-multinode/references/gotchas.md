@@ -384,3 +384,64 @@ MLPERF_PEAK_BF16_TFLOPS mfu_pct, run_stop aborted NOT submittable, extract_perf.
   build, ~30 of which is the TransformerEngine compile — that fits inside a
   4-hour interactive allocation but not much less. The image is ~55 GB, the
   `MAD_DOCKER_BUILDS` tar ~15 GB.
+
+## pyt_mlperf_inference (MLPerf Llama-3.1 inference)
+
+Keywords: mlperf inference llama3.1-8b, loadgen mlperf_loadgen, SUT_VLLM.py,
+LLM.generate prompt_token_ids TypeError, TokensPrompt, Min duration satisfied NO,
+Result is INVALID, Offline target_qps, user.conf min_duration 600000,
+requirements.txt vllm==0.6.3 transformers==4.46.2, vllm serve ENTRYPOINT,
+built_models.url git submodule update --init --recursive, MAD_OUTPUT_CSV $PWD,
+np.int64 ast.literal_eval, cnn_eval.json sample_cnn_eval_5000.json, rouge1 target.
+
+- **There is no AMD harness to wrap for this benchmark — use the reference.**
+  AMD has never submitted llama3.1-8b: the public `rocm/amd-mlperf` inference
+  tags cover llama2-70b, gpt-oss-120b, wan2.2, llama3.1-405b, mixtral and sdxl,
+  and `inference_results_v5.1/closed/AMD/code` holds only llama2-70b-99(.9),
+  mixtral-8x7b and stable-diffusion-xl. So the thin-wrapper pattern of
+  MAD-internal's `pyt_mlperf_inf_mi355_llama2_70b_99` (3-line Dockerfile over a
+  prebuilt `/lab-mlperf-inference` image) has nothing to wrap here. The upstream
+  reference needs no ROCm-specific code changes — only the right base image.
+- **Never install the harness `requirements.txt` on a ROCm vLLM image.** It pins
+  `vllm==0.6.3` (a CUDA wheel that would replace the ROCm build the base image
+  exists for) and `transformers==4.46.2` (incompatible with modern vLLM). Only
+  three of its packages are actually missing from `vllm/vllm-openai-rocm`:
+  `nltk`, `rouge-score`, `absl-py`. The image's `transformers` 5.x runs the
+  harness fine.
+- **The Offline SUT still uses a vLLM API that no longer exists.**
+  `SUT_VLLM.py` calls `self.model.generate(prompt_token_ids=...)`, which modern
+  vLLM rejects with `TypeError: LLM.generate() got an unexpected keyword argument
+  'prompt_token_ids'` — after a clean model load, so it looks like a ROCm problem
+  and is not. The Server path in the same file already builds `TokensPrompt`;
+  the Dockerfile patches the Offline call site to match.
+- **A healthy Offline run is INVALID until you declare `target_qps`.** Loadgen
+  sizes its single coalesced Offline query from `target_qps`, left at 1 upstream,
+  so the run ends long before `user.conf`'s `min_duration` (600 s) and reports
+  `Result is : INVALID` / `Min duration satisfied : NO` next to a perfectly good
+  throughput number. Duration is `target_qps * min_duration / actual_qps`, so
+  `MLPERF_INF_OFFLINE_TARGET_QPS` must be **at or above** the achieved
+  samples/s — 40 held for one 8x MI355X node at TP=8. Raising it also raises the
+  reported throughput (a bigger query batches better): 33.7 -> 38.1 samples/s
+  between two otherwise identical runs.
+- **`built_models.url` must be empty.** madengine clones that url inside the
+  container and then runs `git submodule update --init --recursive`, which fails
+  on mlcommons/inference's unrelated bert / deepseek-r1 / wan-2.2 submodules and
+  kills the run before the script starts. The harness is baked into the image.
+- **Clear the base image `ENTRYPOINT`.** `vllm/vllm-openai-rocm` entrypoints to
+  `vllm serve`, which would swallow madengine's `docker run -t -d <image> cat`
+  keepalive.
+- **Write the results CSV to `$PWD`.** madengine runs the script as
+  `cd <model_dir> && bash run.sh` and then copies `<model_dir>/<multiple_results>`
+  to the workspace root; a CSV written anywhere else is reported as "declares
+  multiple_results but no such file was produced".
+- **Data is small — this is not the training workload.** The checkpoint is ~15 GB
+  of safetensors (skip `original/consolidated.00.pth`, a duplicate in Meta
+  format) and the eval sets are 95 MiB (edge, 5000 samples) and 254 MiB
+  (datacenter, 13368) via the MLCommons R2 downloader. Note the reference README
+  pins checkpoint revision `be673f32...`, which no longer exists on the Hub —
+  use `main`.
+- **Do not parse `evaluation.py`'s dict with `ast.literal_eval`.** numpy 2 prints
+  `gen_len` as `np.int64(3049739)`, which is a call node, not a literal.
+- Accuracy is the cheap correctness signal: a 200-sample pass already lands
+  within a few hundredths of the published BF16 ROUGE targets, so it validates
+  the whole tract (checkpoint, tokenizer, loadgen, scoring) in minutes.

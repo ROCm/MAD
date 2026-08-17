@@ -92,6 +92,18 @@ negative — the aggregation across nodes picks the non-empty result.
   fixed-step perf run (it means the run stopped at `MLPERF_MAX_STEPS`, not at the
   benchmark's convergence target). Iteration 0 is a cold outlier (tens of
   seconds) and is excluded from the aggregates by design.
+- MLPerf inference: read three things from
+  `perf_pyt_mlperf_inference_llama-3.1-8b.csv`. `tokens_per_s` / `samples_per_s`
+  are the throughput, but they only count as a measurement if `result_valid=1`
+  (loadgen's `Result is : VALID`); `result_valid=0` almost always means
+  `Min duration satisfied : NO`, i.e. `MLPERF_INF_OFFLINE_TARGET_QPS` was unset or
+  too low, and the throughput printed next to it is real but not a valid run.
+  `accuracy_pass=1` means the four ROUGE scores cleared 99% of the upstream BF16
+  targets for the selected dataset variant (and gen_len 90%, checked only when
+  the whole set was served). Reference numbers for one 8x MI355X node, Offline,
+  edge 5000 samples, TP=8: 38.1 samples/s, 4877 tokens/s, rouge1 39.07. Keep in
+  mind this is a single TP=8 instance — the reference's shape, not a competitive
+  one, since real submissions run 8 data-parallel TP=1 replicas.
 
 ## Quick failure triage
 
