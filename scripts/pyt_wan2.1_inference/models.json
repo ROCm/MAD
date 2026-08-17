@@ -1,0 +1,15 @@
+[
+    {
+        "name": "pyt_wan2.1_inference",
+        "dockerfile": "../../docker/pyt_wan2.1_inference",
+        "scripts": "run.sh",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "inference"
+        ],
+        "args": "--num_gpu 1"
+    }
+]
