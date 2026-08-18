@@ -129,32 +129,32 @@ connector_runtime_patch() {
     # from (Dockerfile VLLM_REF). There is no generic runtime .py patcher for those —
     # that would be a drifting duplicate of fixes already upstream in the fork.
     #
-    # EXCEPTION — GLM-5.1-FP8 (GlmMoeDsaForCausalLM, MLA + DSA sparse attention):
+    # EXCEPTION — GLM-5.* (GlmMoeDsaForCausalLM, MLA + DSA sparse attention):
     # DSA is a NEW attention family the MoRIIO connector was never built for. It adds
     # a 2nd KV cache per layer (indexer) with a different geometry, which the
-    # single-geometry connector mis-handles -> disagg KV transfer stalls; plus a DSA
-    # invalid-token kernel bug (#45324) that produces `!!!`. These are model-specific
+    # single-geometry connector mis-handles -> disagg KV transfer stalls. Model-specific
     # code gaps, applied here as idempotent, anchor-based, self-skipping .py patchers
     # (they no-op cleanly if the fix is native/refactored on the chosen image). Gated
     # on MODEL_NAME so DeepSeek/other models are a pure no-op (byte-identical to before).
     # The MoRI version is pinned by the Dockerfile MORI_REF (post-1.2.1 main with the
     # large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer MoRI is
     # needed, update MORI_REF and rebuild the image — no runtime library swap here.
-    [ "${MODEL_NAME:-}" = "GLM-5.1-FP8" ] || return 0
+    case "${MODEL_NAME:-}" in
+        GLM-5.*) ;;
+        *) return 0 ;;
+    esac
     _glm_dsa_runtime_patch
 }
 
-# GLM-5.1 DSA patchers (see connector_runtime_patch). Ported from MAD-private #338.
-# Resolves the vLLM install dir, then applies the 4 required patchers in order,
-# aborting on a hard failure (a real failure means GLM emits garbage or stalls, so
-# failing at launch is correct). Patchers self-skip (rc 0) when their anchor is
-# absent, so an image that already carries or refactored a fix no-ops cleanly.
+# GLM-5.* DSA patchers (see connector_runtime_patch). Ported from MAD-private #338.
+# Resolves the vLLM install dir, then applies the dual-KV / abort fallbacks in order,
+# aborting on a hard failure. Patchers self-skip (rc 0) when their anchor is absent.
+# Two patchers are OPT-IN because they crash the v0.27 GLM image (see below).
 _glm_dsa_runtime_patch() {
-    # GLM_SKIP_PATCHERS=1: the serving image already carries the GLM-5.1 DSA fixes
-    # in-source (e.g. the #47766 stack image built from raviguptaamd/vllm@
-    # glm5.1-dsa-wideEP_on_shikpate_06_29_customer). Skip ALL runtime patchers — they
-    # are redundant, and the persistent-gate/sampling-overlay patchers would actively
-    # REGRESS a baked image (turn persistent MLA off / overwrite stock aiter kernels).
+    # GLM_SKIP_PATCHERS=1: the serving image already carries the GLM DSA fixes
+    # in-source (vLLM #47766 cache-key + dual-KV). Skip ALL runtime patchers — they
+    # are redundant, and the persistent-gate/sentinel patchers would actively REGRESS
+    # a baked image (asm_mla.cu abort / hipErrorIllegalAddress).
     if [ "${GLM_SKIP_PATCHERS:-0}" = "1" ]; then
         echo "[glm] GLM_SKIP_PATCHERS=1: image carries DSA fixes in-source; skipping runtime patchers."
         return 0
@@ -166,22 +166,30 @@ _glm_dsa_runtime_patch() {
         echo "Error: [glm] cannot locate vLLM install dir for DSA patchers. Aborting." >&2
         exit 1
     fi
-    echo "[glm] MODEL_NAME=GLM-5.1-FP8: applying DSA runtime patchers against ${_vllm_dir}"
+    echo "[glm] MODEL_NAME=${MODEL_NAME}: applying DSA runtime patchers against ${_vllm_dir}"
 
-    # Ordered list of REQUIRED patchers (all abort on hard failure).
-    # GLM_PERSIST_GATE=0 skips the persistent-MLA accuracy gate (debug only: to test
-    # whether the non-persistent kernel it routes to is what crashes disagg at >=8k).
-    local _gate_patcher="apply_glm_dsa_persistent_kernel_gate_fix.py"
-    [ "${GLM_PERSIST_GATE:-1}" = "0" ] && _gate_patcher=""
+    # apply_glm_dsa_persistent_kernel_gate_fix.py ports vLLM #47567. OFF by default:
+    # #47766 superseded it, and forcing non-persistent MLA on this image aborts at
+    # asm_mla.cu:945 (fp8/fp8 gqa_ratio=64 has no non-persistent kernel). Set
+    # GLM_PERSIST_GATE=1 only on an image that predates #47766.
+    local _gate_patcher=""
+    [ "${GLM_PERSIST_GATE:-0}" = "1" ] && _gate_patcher="apply_glm_dsa_persistent_kernel_gate_fix.py"
+    # apply_glm_dsa_kernel_fix.py ports still-open vLLM #45324 (sentinel 0->-1). OFF
+    # by default: this image ships 0 deliberately because aiter mla_decode_fwd
+    # dereferences the index (-1 -> hipErrorIllegalAddress on short disagg decode).
+    # Set GLM_DSA_SENTINEL_FIX=1 only on an older image that genuinely has the #45324 bug.
+    local _dsa_sentinel_patcher=""
+    [ "${GLM_DSA_SENTINEL_FIX:-0}" = "1" ] && _dsa_sentinel_patcher="apply_glm_dsa_kernel_fix.py"
     local _p
     for _p in \
-        apply_glm_dsa_kernel_fix.py \
+        ${_dsa_sentinel_patcher} \
         apply_glm_dsa_moriio_dualkv_fix.py \
         apply_glm_dsa_moriio_engine_fix.py \
         apply_glm_dsa_moriio_gate_fix.py \
         apply_glm_moriio_abort_guard_fix.py \
         ${_gate_patcher} \
         apply_glm_aiter_sampling_oob_fix.py; do
+        [ -n "${_p}" ] || continue
         local _py="${_patch_dir}/${_p}"
         if [ ! -f "${_py}" ]; then
             echo "Error: [glm] required patcher ${_py} not found. Aborting." >&2
@@ -189,7 +197,7 @@ _glm_dsa_runtime_patch() {
         fi
         echo "[glm] applying ${_p}"
         python3 "${_py}" "${_vllm_dir}" 2>&1 || {
-            echo "Error: [glm] ${_p} failed — GLM-5.1 would emit garbage or stall. Aborting." >&2
+            echo "Error: [glm] ${_p} failed — ${MODEL_NAME} would emit garbage or stall. Aborting." >&2
             exit 1
         }
     done
@@ -281,8 +289,9 @@ connector_launch_worker() {
         # (decode.dp), NOT an env knob: mori derives recv capacity from the send width
         # (MaxNumTokensToRecvPerRank returns min(ceil(maxTotalRecvTokens/ws),
         # maxNumInpTokenPerRank)), so shrinking the width alone under-provisions recv and
-        # trips a device assert during vLLM's profiling dummy run. See
-        # skills_vllm_disagg.md for the measurements and the dead ends.
+        # trips a device assert during vLLM's profiling dummy run. Do not try to
+        # raise recv via VLLM_MORI_MAX_TOTAL_RECV_TOKENS — that knob is a min()
+        # clamp and can only LOWER capacity.
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then

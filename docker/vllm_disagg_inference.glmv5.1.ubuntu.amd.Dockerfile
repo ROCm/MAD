@@ -35,16 +35,16 @@
 #
 #   ALL connectors in one image: moriio (TP + MoRI-EP wideEP) + rixl (NIXL TP +
 #   DeepEP wideEP). = the fullsource MoRI stack, plus a UCX/RIXL/rocSHMEM/DeepEP
-#   transport layer gated by --build-arg WITH_NIXL (default 1 = everything).
+#   transport layer gated by --build-arg WITH_NIXL (default 0 = MoRI-EP only).
 #
 #   docker build -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile \
 #     -t <your-registry>/vllm-disagg:glmv5.1 .
 #   export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:glmv5.1
 #
-#   WITH_NIXL=1 (default) => builds UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from
-#     source, so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
+#   WITH_NIXL=0 (default) => MoRI-EP only (moriio TP/wideEP + deepep-from-base); lean.
+#   WITH_NIXL=1 => builds UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
+#     so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
 #     wideEP) are present (~+30-45 min build vs WITH_NIXL=0).
-#   WITH_NIXL=0 => MoRI-EP only (moriio TP/wideEP + deepep-from-base); lean, faster.
 #
 # STATUS (GLM-5.1-FP8 on this stack): 1P/1D EP8 + 2P/2D EP16 NIAH 2k-35k = 10/10,
 # no crash; long-context accuracy fixed via vLLM #47766 (persistent sparse-MLA kept
@@ -57,16 +57,16 @@
 # purpose-built ROCm/vLLM/MoRI base, cloning each overridden source from public Git
 # (no local build-contexts):
 #
-#   - BASE: rocmshared/pytorch-private:vllm-rocm_07_22_2026_shikpate_mori1.2.3
-#     (ROCm + torch + a bundled vLLM/MoRI 1.2.3 stack). The stages below deliberately
-#     OVERRIDE the base's vLLM/MoRI/AITER with the pins we validate for GLM DSA.
+#   - BASE: rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03
+#     (ROCm + torch nightly). The stages below OVERRIDE the base's vLLM/MoRI/AITER
+#     with the pins we validate for GLM DSA.
 #   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
 #     (main LATEST 120d2de broke the connector KV-notify handshake -- see note at MORI_REF.)
 #   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
-#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_shik_0721
-#     (Shiksha 7/21 WideEP base + GLM DSA edits + sparse-MLA guard fix). Full compile:
-#     a different commit than the base's, so a .py-only overlay would be ABI-mismatched.
+#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
+#     (upstream v0.27 + GLM DSA + #47766 metadata-key). Full compile: a different
+#     commit than the base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
 #     forwards it via docker -e. ROCm 7.2.3 cannot dmabuf-export VMM memory, else MoRI
@@ -254,9 +254,9 @@ RUN if ! command -v cargo >/dev/null 2>&1; then \
     rm -rf /tmp/vllm-router-src
 
 # -----------------------------------------------------------------------------
-# 4b. WITH_NIXL=1 (default): UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
-#     so the rixl connector (NIXL TP + DeepEP wideEP) is present. Single guarded RUN so
-#     WITH_NIXL=0 skips it entirely (no layers, no cost). Build-verified on ci_base.
+# 4b. WITH_NIXL=1: UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
+#     so the rixl connector (NIXL TP + DeepEP wideEP) is present. Default is 0
+#     (MoRI-EP only). Single guarded RUN so WITH_NIXL=0 skips it (no layers, no cost).
 # -----------------------------------------------------------------------------
 ENV _ROCM_DIR=/opt/rocm \
     _UCX_SOURCE=https://github.com/ROCm/ucx.git \

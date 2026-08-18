@@ -53,6 +53,7 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 | `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 1P/1D EP8 + 2P/2D EP16; EP32 known-broken |
 
 ## Prerequisites
 
@@ -234,7 +235,7 @@ lengths and the model is scored on how many it retrieves. Select it in place of 
 sweep via the launcher's benchmark hook:
 
 ```bash
-export BENCHMARK_SCRIPT_FILE=benchmark_niah.sh
+export BENCHMARK_SCRIPT=niah
 export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 ```
 

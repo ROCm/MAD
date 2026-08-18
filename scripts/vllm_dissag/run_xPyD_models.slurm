@@ -455,14 +455,13 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
-#   keepalive              -> keepalive_bench.sh        (hold server up KEEPALIVE_MINS
-#                                                        for external accuracy probes)
+#   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    keepalive)    BENCHMARK_SCRIPT_FILE="keepalive_bench.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive)" >&2; exit 1 ;;
+    niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -623,6 +622,7 @@ docker run --rm \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     -e MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT:-}" \
     ${GLM_PERSIST_GATE:+-e GLM_PERSIST_GATE=$GLM_PERSIST_GATE} \
+    ${GLM_DSA_SENTINEL_FIX:+-e GLM_DSA_SENTINEL_FIX=$GLM_DSA_SENTINEL_FIX} \
     ${GLM_SKIP_PATCHERS:+-e GLM_SKIP_PATCHERS=$GLM_SKIP_PATCHERS} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
@@ -631,7 +631,11 @@ docker run --rm \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
-    ${KEEPALIVE_MINS:+-e KEEPALIVE_MINS=$KEEPALIVE_MINS} \
+    ${NIAH_WORDS:+-e NIAH_WORDS=$NIAH_WORDS} \
+    ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
+    ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
+    ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
+    ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \

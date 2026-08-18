@@ -160,17 +160,10 @@ _deepseek_recipe_env: &deepseek_recipe_env
 # above. No tp: blocks — TP is unsupported for these models.
 DeepSeek-V3:
   env: *deepseek_recipe_env
-  # NEWER-BASE ADAPTATION (isolated to this model): Shiksha's newer vLLM base added
-  # TritonMLAMetadataBuilder._reserve_attn_logits_workspace(), which pre-reserves the
-  # decode split-KV logits workspace at WORST CASE
-  # (max_num_seqs x q_heads x max_kv_splits(max_model_len) x lse_dim x fp32). With
-  # DSV3's defaults (max_num_seqs=256, max_model_len~163k) this reserves ~128 GiB and
-  # OOMs at KV init. Cap max-num-seqs + max-model-len to bound the workspace. This is a
-  # per-model dp: flag (model_args), fully isolated -- does NOT touch GLM/other recipes.
   prefill:
-    dp: "--max-num-seqs 64 --max-model-len 32768"
+    dp: ""
   decode:
-    dp: "--max-num-seqs 64 --max-model-len 32768"
+    dp: ""
 
 DeepSeek-V3-5layer:
   env: *deepseek_recipe_env
