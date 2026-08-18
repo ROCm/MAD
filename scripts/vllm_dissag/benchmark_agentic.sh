@@ -31,6 +31,12 @@ done
 # shellcheck source=/dev/null
 source "$_agentic_lib"
 
+# Agentic benchmarking is an explicit opt-in path, so permit the pinned uv
+# install by default (overridable with AGENTIC_ALLOW_UV_INSTALL=0). Non-agentic
+# launcher paths keep the gate off.
+: "${AGENTIC_ALLOW_UV_INSTALL:=1}"
+export AGENTIC_ALLOW_UV_INSTALL
+
 : "${AGENTIC_PORT:=${BENCHMARK_PORT:-${PROXY_PORT:-8000}}}"  # vLLM router/proxy port (BENCHMARK_PORT at runtime)
 RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 # MODEL_PREFIX feeds the trace-loader default; derive from MODEL_NAME if unset.
