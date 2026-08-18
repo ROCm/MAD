@@ -112,8 +112,45 @@ def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
     print(f"Saved {len(results)} benchmark configurations to {output_file}")
 
 
+def _workload_config_columns():
+    """Descriptive columns naming the shape the benchmark ran at.
+
+    These are workload CONFIGURATION, not run metadata: madengine knows where a job
+    ran (nodes, GPUs, image, launcher) but not the parallelism the workload chose.
+    Path A's run_vllm.py carries the same kind of columns (tp, dtype, bs), so a
+    narrow CSV is the right home for them — unlike the topology fields that used to
+    be hand-written into deployment_type, which madengine owns.
+
+    Only non-empty values are emitted, so a launcher that does not set them produces
+    no stray columns.
+    """
+    import os
+    cols = {}
+    tp = os.environ.get('TP_SIZE')
+    pp = os.environ.get('PP_SIZE')
+    if tp:
+        cols['tp'] = tp
+    if pp:
+        cols['pp'] = pp
+    if os.environ.get('ENABLE_EP') == '1' or os.environ.get('WIDE_EP') == '1':
+        cols['ep_backend'] = (
+            os.environ.get('ALL2ALL_BACKEND')
+            or os.environ.get('VLLM_ALL2ALL_BACKEND')
+            or 'enabled'
+        )
+    xP, yD = os.environ.get('xP'), os.environ.get('yD')
+    if xP and yD and yD != '0':
+        cols['prefill_decode'] = f'{xP}P{yD}D'
+    return cols
+
+
 def _get_run_metadata(pipeline: str = "vllm"):
-    """Collect run metadata from environment variables.
+    """Collect run metadata from environment variables (LEGACY full-schema path).
+
+    Only used by save_perf_csv(narrow=False), i.e. by model cards that do not declare
+    `multiple_results` and whose CSV madengine reads directly with no metadata to
+    merge. Cards on the narrow contract get all of this from madengine instead, which
+    is authoritative; prefer migrating rather than extending this function.
 
     Two launchers share this parser, and they describe their topology differently:
 
@@ -166,10 +203,49 @@ def _get_run_metadata(pipeline: str = "vllm"):
 
 
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
-                  model_name: str = "", pipeline: str = "vllm"):
-    """Save results in madengine perf.csv format."""
+                  model_name: str = "", pipeline: str = "vllm", narrow: bool = False):
+    """Save throughput results for madengine.
+
+    Two schemas, selected by `narrow`:
+
+    * narrow=True  -- the preferred contract. The workload reports only what it
+      measured and madengine merges in the run metadata it already owns, via the
+      model card's `multiple_results` declaration. Same contract as the templated
+      launchers, so rows from different launchers stay comparable.
+    * narrow=False -- legacy, and still the default. Writes the full 29-column
+      perf.csv with metadata assembled from the environment by _get_run_metadata().
+      Required by the disagg model cards that do NOT declare `multiple_results`:
+      madengine reads their CSV directly from a conventional path, with no metadata
+      to merge, so a narrow CSV there would lose every descriptive column.
+
+    To migrate a model: declare `multiple_results` on its card and pass --narrow.
+    """
     if not results:
         print("No results to save to perf.csv.")
+        return
+
+    if narrow:
+        config_cols = _workload_config_columns()
+        fieldnames = (['model', 'benchmark', 'inp', 'out', 'max_concurrency',
+                       'performance', 'metric'] + list(config_cols))
+        with open(output_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for (input_tokens, output_tokens, concurrency), data in sorted(
+                results.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])
+            ):
+                row = {
+                    'model': model_name,
+                    'benchmark': 'throughput_sweep',
+                    'inp': data['input_tokens'],
+                    'out': data['output_tokens'],
+                    'max_concurrency': data['concurrency'],
+                    'performance': f"{data['max_throughput']:.2f}",
+                    'metric': 'tok/s',
+                }
+                row.update(config_cols)
+                writer.writerow(row)
+        print(f"Saved {len(results)} rows (narrow schema) to {output_file}")
         return
 
     meta = _get_run_metadata(pipeline)
@@ -229,26 +305,32 @@ def parse_niah_log(log_file: str):
 
 def save_niah_perf_csv(results, output_file: str, model_name: str = "",
                        pipeline: str = "vllm"):
-    """Save NIAH retrieval accuracy in madengine perf.csv format.
+    """Save NIAH retrieval accuracy as a NARROW madengine results CSV.
 
-    One row per context size; performance is needles found out of 10. A size that
-    errored is reported as FAILURE with performance 0 rather than dropped, so a
-    regression that turns a pass into a crash is visible instead of silent.
+    Narrow means the workload reports only what it measured — model, performance,
+    metric and outcome — and madengine merges that with the run metadata it already
+    owns (node/GPU counts, image, launcher, build provenance) via the model card's
+    `multiple_results` declaration. This is the same contract the templated
+    launchers use, so a gfx942 multi-node row and a gfx950 single-node row of the
+    same model land in perf.csv describing themselves the same way.
+
+    It replaces a full 29-column perf.csv that this script wrote by hand. Hand-written
+    metadata is how a colocated 2-node run came to report itself as `disagg_1P0D` on
+    1 node: the topology was inferred from xP/yD, which the colocated launcher only
+    sets to keep log filenames unique.
+
+    `status` is emitted explicitly because performance alone cannot express this
+    benchmark's failure mode: a context size whose request errored scores 0, which is
+    a real measurement, and deriving status from it would record the failure as a
+    SUCCESS and hide a pass->crash regression.
     """
     if not results:
         print("No NIAH results to save to perf.csv.")
         return
 
-    meta = _get_run_metadata(pipeline)
-    fieldnames = [
-        'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
-        'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
-        'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
-        'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
-        'build_duration', 'test_duration', 'dataname', 'data_provider_type',
-        'data_size', 'data_download_duration', 'build_number',
-        'additional_docker_run_options',
-    ]
+    config_cols = _workload_config_columns()
+    fieldnames = (['model', 'benchmark', 'context_words', 'performance', 'metric', 'status']
+                  + list(config_cols))
     with open(output_file, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -256,13 +338,15 @@ def save_niah_perf_csv(results, output_file: str, model_name: str = "",
             found = results[words]
             row = {
                 'model': model_name,
+                'benchmark': 'niah',
+                'context_words': words,
                 'performance': '0' if found is None else str(found),
                 'metric': f'needles found /10 (NIAH ctx={words} words)',
                 'status': 'FAILURE' if found is None else 'SUCCESS',
             }
-            row.update(meta)
+            row.update(config_cols)
             writer.writerow(row)
-    print(f"Saved {len(results)} NIAH rows to perf.csv: {output_file}")
+    print(f"Saved {len(results)} NIAH rows (narrow schema) to {output_file}")
 
 
 def main():
@@ -276,6 +360,10 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse a benchmark_niah.py log (retrieval accuracy) instead of a throughput sweep')
+    parser.add_argument('--narrow', action='store_true',
+                        help='Emit a narrow results CSV (model/performance/metric[/status]) for a model card '
+                             'declaring multiple_results, letting madengine supply the run metadata. '
+                             'Ignored with --niah, which is always narrow.')
 
     args = parser.parse_args()
 
@@ -311,7 +399,7 @@ def main():
     save_to_csv(results, output_file)
 
     if args.perf_csv:
-        save_perf_csv(results, args.perf_csv, args.model_name)
+        save_perf_csv(results, args.perf_csv, args.model_name, narrow=args.narrow)
 
     print(f"\nSummary:")
     print(f"  Total unique configurations: {len(results)}")

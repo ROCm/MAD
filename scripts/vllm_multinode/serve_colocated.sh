@@ -168,6 +168,9 @@ export xP="${xP:-1}" yD="${yD:-0}"
 #   PERF_DEPLOYMENT_TYPE/PERF_TAGS
 #                       xP/yD above are filename placeholders, not a topology; left
 #                       alone the CSV would label this 2-node run `disagg_1P0D`.
+#                       Only consulted on the LEGACY full-schema reporting path
+#                       (BENCHMARK_SCRIPT=sweep). With BENCHMARK_SCRIPT=niah the CSV
+#                       is narrow and madengine supplies these fields itself.
 export NIAH_MODEL="${MODEL_NAME:-model}"
 _ep_tag="$([ "${ENABLE_EP}" = "1" ] && echo "ep_${ALL2ALL_BACKEND:-default}" || echo "noep")"
 export PERF_DEPLOYMENT_TYPE="${PERF_DEPLOYMENT_TYPE:-colocated_pp${PP_SIZE}xtp${TP_SIZE}}"

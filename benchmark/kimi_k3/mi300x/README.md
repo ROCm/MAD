@@ -188,12 +188,32 @@ each entry declares as `multiple_results`; madengine resolves the declared name
 first and falls back to the conventional `/shared_inference/$USER/model_blog_logs/
 $SLURM_JOB_ID/perf.csv` path.
 
-Because the two launchers describe their topology differently, the colocated one
-states its own reporting identity — `PERF_DEPLOYMENT_TYPE=colocated_pp2xtp8` and
-`PERF_TAGS=vllm_multinode,colocated,…`, with node count from `NNODES`. The disagg
-launcher keeps deriving `disagg_<xP>P<yD>D` from its pool sizes. Without that split
-a colocated 2-node run reported itself as a 1-node `disagg_1P0D`, since it sets
-`xP=1 yD=0` only to keep the shared log filenames unique.
+### What the workload reports vs. what madengine reports
+
+The CSV is **narrow**: the benchmark reports only what it measured, and madengine
+merges in the run metadata it already owns. This is the same contract the templated
+launchers use, so these gfx942 multi-node rows and the gfx950 single-node rows in
+[`../README.md`](../README.md) describe themselves identically in `perf.csv`.
+
+| From the benchmark | From madengine |
+|---|---|
+| `model`, `performance`, `metric`, `status` | `nnodes`, `n_gpus`, `gpus_per_node`, `launcher` |
+| `benchmark`, `context_words` | `docker_image`, `base_docker`, `docker_sha` |
+| `tp`, `pp`, `ep_backend`, `prefill_decode` | tags, pipeline, build number, machine name |
+
+The right-hand column used to be hand-written by `parse_to_csv.py` from `xP`/`yD`,
+which is why a colocated 2-node/16-GPU run reported itself as a 1-node/8-GPU
+`disagg_1P0D` on a `nixl` backend it never used — the colocated launcher sets
+`xP=1 yD=0` only to keep the shared log filenames unique. A workload cannot reliably
+know its own topology; madengine can, so it does.
+
+`status` is reported explicitly because performance alone cannot express this
+benchmark's failure mode: a context size whose request errors scores 0, which is a
+real measurement, and deriving status from it would file the failure as a SUCCESS.
+
+> `BENCHMARK_SCRIPT=sweep` still uses the older full-schema CSV (the disagg model
+> cards that declare no `multiple_results` depend on it). Pass `--narrow` to
+> `parse_to_csv.py` to put a sweep on the same contract.
 
 ## Relationship to PR #193
 
