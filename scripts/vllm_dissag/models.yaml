@@ -185,14 +185,19 @@ DeepSeek-R1:
 # Sparse Attention (DSA). 78 layers (3 dense + 75 MoE), 256 routed experts top-8
 # + 1 shared, FP8 block 128. wideEP-only (see WIDE_EP_ONLY_MODELS in the slurm).
 #
-# Validated DOCKER_IMAGE_NAME (submit-time, not set here — #171 requires it explicit):
-#   rocmshared/pytorch-private:glm5.1-vllm027-b8
-# built from docker/vllm_disagg_inference.glmv5.1 (VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27).
-# It carries the DSA fixes in-source, so the card sets GLM_SKIP_PATCHERS=1 and NO runtime
-# patcher runs. Do NOT serve this recipe on a pre-v0.27 image: those predate vLLM #47766
-# and return empty/garbage completions here (NIAH 2k scored 0/10 on
-# rocm/pytorch-private:glm-dockerimage-built-09072026). The connectors/moriio.sh patchers
-# are a fallback for such older images only (GLM_SKIP_PATCHERS unset).
+# IMAGE CONTRACT: this recipe is config only — it carries NO vLLM source fixes.
+# The DSA enablement (per-req-ctx metadata key #47766, DSA indexer KV transfer over
+# the MoRIIO connector, invalid-token sentinel, sparse-indexer bounds guard) must be
+# IN-SOURCE in the image's vLLM. Build the per-model image from
+# docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose
+# VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27 IS the contract. An image built from an
+# older vLLM ref will boot and then produce garbage or stall the disagg KV transfer;
+# there are no runtime patchers to fall back on. Rebuild the image instead.
+# DOCKER_IMAGE_NAME is submit-time, not set here (#171 requires it explicit).
+# NOT SUPPORTED here: the earlier lab image
+#   rocmshared/pytorch-private:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
+# predates the in-source DSA fixes (it needed the invalid-token kernel fix #45324
+# applied at runtime), so it is only usable on a branch that still ships patchers.
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):
@@ -206,10 +211,11 @@ DeepSeek-R1:
 # keeps them; DeepSeek is the one that overrides them off. Set here explicitly so
 # the recipe is self-documenting and robust to connector default changes.
 #
-# DSA adds a 2nd KV cache per layer (indexer); the MoRIIO connector needs the GLM
-# DSA patchers (kernel #45324 + dual-KV geometry + per-layer offset + completion
-# gate) applied by connector_runtime_patch in connectors/moriio.sh (gated on this
-# MODEL_NAME). Those are code patches, not flags — nothing to add here for them.
+# DSA adds a 2nd KV cache per layer (indexer), which the single-geometry MoRIIO
+# connector had to learn (dual-KV geometry + per-layer offset + completion gate).
+# Those are vLLM code changes, not flags: they live in the image's vLLM at the
+# pinned VLLM_REF above. connector_runtime_patch in connectors/moriio.sh is a
+# deliberate no-op for every model — nothing to add here for them.
 #
 # dp_flags carry the GLM tool/reasoning parsers (AMD GLM recipe). They are applied
 # to BOTH roles by compose() in vllm_disagg.sh and reach `vllm serve` via the

@@ -124,104 +124,26 @@ _moriio_build_kv_transfer_config() {
 }
 
 connector_runtime_patch() {
+    # No runtime .py patching on the moriio path, for ANY model.
+    #
     # MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL split,
     # DP-rank hash-failsafe) are committed in-source in the vLLM the image is built
     # from (Dockerfile VLLM_REF). There is no generic runtime .py patcher for those —
     # that would be a drifting duplicate of fixes already upstream in the fork.
     #
-    # EXCEPTION — GLM-5.* (GlmMoeDsaForCausalLM, MLA + DSA sparse attention):
-    # DSA is a NEW attention family the MoRIIO connector was never built for. It adds
-    # a 2nd KV cache per layer (indexer) with a different geometry, which the
-    # single-geometry connector mis-handles -> disagg KV transfer stalls. Model-specific
-    # code gaps, applied here as idempotent, anchor-based, self-skipping .py patchers
-    # (they no-op cleanly if the fix is native/refactored on the chosen image). Gated
-    # on MODEL_NAME so DeepSeek/other models are a pure no-op (byte-identical to before).
-    # The MoRI version is pinned by the Dockerfile MORI_REF (post-1.2.1 main with the
-    # large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer MoRI is
-    # needed, update MORI_REF and rebuild the image — no runtime library swap here.
-    case "${MODEL_NAME:-}" in
-        GLM-5.*) ;;
-        *) return 0 ;;
-    esac
-    _glm_dsa_runtime_patch
-}
-
-# GLM-5.* DSA patchers (see connector_runtime_patch). Ported from MAD-private #338.
-# Resolves the vLLM install dir, then applies the dual-KV / abort fallbacks in order,
-# aborting on a hard failure. Patchers self-skip (rc 0) when their anchor is absent.
-# Two patchers are OPT-IN because they crash the v0.27 GLM image (see below).
-_glm_dsa_runtime_patch() {
-    # GLM_SKIP_PATCHERS=1: the serving image already carries the GLM DSA fixes
-    # in-source (vLLM #47766 cache-key + dual-KV). Skip ALL runtime patchers — they
-    # are redundant, and the persistent-gate/sentinel patchers would actively REGRESS
-    # a baked image (asm_mla.cu abort / hipErrorIllegalAddress).
-    if [ "${GLM_SKIP_PATCHERS:-0}" = "1" ]; then
-        echo "[glm] GLM_SKIP_PATCHERS=1: image carries DSA fixes in-source; skipping runtime patchers."
-        return 0
-    fi
-    local _patch_dir="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
-    local _vllm_dir
-    _vllm_dir="$(python3 -c 'import vllm, os; print(os.path.dirname(vllm.__file__))' 2>/dev/null || true)"
-    if [ -z "${_vllm_dir}" ] || [ ! -d "${_vllm_dir}" ]; then
-        echo "Error: [glm] cannot locate vLLM install dir for DSA patchers. Aborting." >&2
-        exit 1
-    fi
-    echo "[glm] MODEL_NAME=${MODEL_NAME}: applying DSA runtime patchers against ${_vllm_dir}"
-
-    # apply_glm_dsa_persistent_kernel_gate_fix.py ports vLLM #47567. OFF by default:
-    # #47766 superseded it, and forcing non-persistent MLA on this image aborts at
-    # asm_mla.cu:945 (fp8/fp8 gqa_ratio=64 has no non-persistent kernel). Set
-    # GLM_PERSIST_GATE=1 only on an image that predates #47766.
-    local _gate_patcher=""
-    [ "${GLM_PERSIST_GATE:-0}" = "1" ] && _gate_patcher="apply_glm_dsa_persistent_kernel_gate_fix.py"
-    # apply_glm_dsa_kernel_fix.py ports still-open vLLM #45324 (sentinel 0->-1). OFF
-    # by default: this image ships 0 deliberately because aiter mla_decode_fwd
-    # dereferences the index (-1 -> hipErrorIllegalAddress on short disagg decode).
-    # Set GLM_DSA_SENTINEL_FIX=1 only on an older image that genuinely has the #45324 bug.
-    local _dsa_sentinel_patcher=""
-    [ "${GLM_DSA_SENTINEL_FIX:-0}" = "1" ] && _dsa_sentinel_patcher="apply_glm_dsa_kernel_fix.py"
-    local _p
-    for _p in \
-        ${_dsa_sentinel_patcher} \
-        apply_glm_dsa_moriio_dualkv_fix.py \
-        apply_glm_dsa_moriio_engine_fix.py \
-        apply_glm_dsa_moriio_gate_fix.py \
-        apply_glm_moriio_abort_guard_fix.py \
-        ${_gate_patcher} \
-        apply_glm_aiter_sampling_oob_fix.py; do
-        [ -n "${_p}" ] || continue
-        local _py="${_patch_dir}/${_p}"
-        if [ ! -f "${_py}" ]; then
-            echo "Error: [glm] required patcher ${_py} not found. Aborting." >&2
-            exit 1
-        fi
-        echo "[glm] applying ${_p}"
-        python3 "${_py}" "${_vllm_dir}" 2>&1 || {
-            echo "Error: [glm] ${_p} failed — ${MODEL_NAME} would emit garbage or stall. Aborting." >&2
-            exit 1
-        }
-    done
-
-    # Optional DSA indexer boot-warmup (GLM_INDEXER_WARMUP=1). Force-compiles the DSA
-    # indexer kernels at boot so they never JIT mid-inference. Opt-in because it drives a
-    # large (>=8k) prefill forward at boot: on stacks where that forward faults it makes
-    # the fault DETERMINISTIC at boot (useful for debugging) rather than on first request.
-    if [ "${GLM_INDEXER_WARMUP:-0}" = "1" ]; then
-        local _warm="${_patch_dir}/apply_glm_dsa_indexer_warmup_fix.py"
-        if [ -f "${_warm}" ]; then
-            echo "[glm] applying DSA indexer boot-warmup (GLM_INDEXER_WARMUP=1)"
-            python3 "${_warm}" "${_vllm_dir}" 2>&1 || echo "Warning: [glm] indexer-warmup patch failed (non-fatal)."
-        fi
-    fi
-
-    # Optional diagnostic instrumentation (GLM_INSTRUMENT=1). Non-fatal.
-    if [ "${GLM_INSTRUMENT:-0}" = "1" ]; then
-        local _instr="${_patch_dir}/apply_glm_dsa_moriio_instrument.py"
-        if [ -f "${_instr}" ]; then
-            echo "[glm] applying instrumentation (GLM_INSTRUMENT=1): apply_glm_dsa_moriio_instrument.py"
-            python3 "${_instr}" "${_vllm_dir}" 2>&1 || echo "Warning: [glm] instrumentation failed (non-fatal)."
-        fi
-    fi
+    # The same rule now holds for GLM-5.* (GlmMoeDsaForCausalLM, MLA + DSA sparse
+    # attention): DSA adds a 2nd KV cache per layer (indexer) with its own geometry,
+    # and the connector/kernel fixes for it (per-req-ctx metadata key #47766, DSA
+    # indexer KV transfer, invalid-token sentinel, sparse-indexer bounds guard) are
+    # carried IN-SOURCE by the image. The required ref is the contract:
+    # docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile
+    # VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27. Serving GLM-5.* on an image built from
+    # an older ref is unsupported — rebuild the image; do not re-add runtime patchers.
+    #
+    # Likewise the MoRI version is pinned by the Dockerfile MORI_REF (42e895472b08,
+    # with the large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer
+    # MoRI is needed, update MORI_REF and rebuild — no runtime library swap here.
+    return 0
 }
 
 # connector_launch_worker <role> <dp_size> <dp_addr> <kv_role> <log_prefix> [dp_start_rank]

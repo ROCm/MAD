@@ -76,6 +76,14 @@
 #   - validated recipe knobs baked as ENV. The MoRIIO disagg fixes (#39276 notify,
 #     #41751 LL split, DP-rank hash-failsafe) are native in this vLLM (no runtime patcher).
 #
+# THIS IMAGE IS THE CONTRACT. The MAD side (scripts/vllm_dissag) is catalog/config only
+# and ships NO runtime .py patchers: connector_runtime_patch in connectors/moriio.sh is a
+# no-op for every model. So EVERY GLM DSA source fix must be carried in-source HERE, by
+# VLLM_REF below (glm5.1-dsa-wideEP_on_vllm-v0.27) plus the MoRI/AITER pins. Serving
+# GLM-5.1-FP8 from an image built off an older vLLM ref is unsupported: it boots, then
+# produces garbage output or stalls the disagg KV transfer, with nothing to fall back on.
+# If you need a fix, move the pin and rebuild — do not re-add runtime patchers to MAD.
+#
 # Build context = repo root:
 #   docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile -t <registry>/<tag> .
 #
@@ -180,9 +188,10 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
 # 3. vLLM: compile from source at the 06_29 validated Wide-EP WRITE-mode branch
 #    (matches the published dist-inf-cookbook mori121 image). Full source compile
 #    (the base ships a different commit). The MoRIIO disagg fixes (#39276 notify,
-#    #41751 LL split, DP-rank hash-failsafe) are native in this branch, so no runtime
-#    patcher is needed. Override VLLM_REF to rebuild a different commit; build only
-#    committed commits (no working-tree edits).
+#    #41751 LL split, DP-rank hash-failsafe) AND the GLM DSA fixes are native in this
+#    branch, so no runtime patcher is needed — and none exists in MAD, which is why
+#    this ref is a hard requirement rather than a preference. Override VLLM_REF to
+#    rebuild a different commit; build only committed commits (no working-tree edits).
 # -----------------------------------------------------------------------------
 # VLLM_REPO/REF are a PUBLIC GitHub repo + branch (the Wide-EP WRITE-mode vLLM the
 # dist-inf-cookbook mori121 image builds from). Override to your own vLLM fork/branch.

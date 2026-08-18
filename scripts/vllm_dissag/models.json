@@ -305,7 +305,6 @@
             "yD": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
-            "GLM_SKIP_PATCHERS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
         "args": "-N 2 -n 2"
