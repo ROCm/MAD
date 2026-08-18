@@ -32,8 +32,6 @@ done
 source "$_agentic_lib"
 
 : "${AGENTIC_PORT:=${BENCHMARK_PORT:-${PROXY_PORT:-8000}}}"  # vLLM router/proxy port (BENCHMARK_PORT at runtime)
-: "${AGENTIC_CONC:=16}"
-: "${DURATION:=120}"
 RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 # MODEL_PREFIX feeds the trace-loader default; derive from MODEL_NAME if unset.
 : "${MODEL_PREFIX:=${MODEL_NAME:-}}"

@@ -29,7 +29,6 @@ command -v "$SUITE_PY" >/dev/null 2>&1 || SUITE_PY="${AIPERF_PYTHON:-python3}"
 CONFIG_TOOL="$AGENTX_DIR/agentx_config.py"
 
 : "${AGENTIC_PORT:=2322}"
-: "${DURATION:=900}"
 RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 
 # Config arg: an explicit file, else rely on the AGENTIC_WORKLOAD synth.

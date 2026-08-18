@@ -41,6 +41,7 @@ AIPERF_PIN="${AIPERF_PIN:-0d2aa0572ac685943d38c580675c4a61023581d3}"            
 set -o pipefail
 
 agentic_log()  { echo "[agentic] $*"; }
+agentic_warn() { echo "[agentic][WARN] $*" >&2; }
 agentic_err()  { echo "[agentic][ERROR] $*" >&2; }
 agentic_die()  { agentic_err "$*"; exit 1; }
 
@@ -272,8 +273,8 @@ context_compat_check() {
     if [ -n "$mml" ] && [ "$mml" != "0" ] && [ "$needed" -gt "$mml" ]; then
         CONTEXT_VERDICT="WARN"
         AGENTIC_MAX_CONTEXT_LENGTH="$mml"
-        agentic_err "context[$name]: ISL tail $tail needs >= $needed but served max_model_len=$mml."
-        agentic_err "  Requests beyond $mml will be truncated. Serve with --max-model-len >= $needed for '$name'."
+        agentic_warn "context[$name]: ISL tail $tail needs >= $needed but served max_model_len=$mml."
+        agentic_warn "  Requests beyond $mml will be truncated. Serve with --max-model-len >= $needed for '$name'."
         if [ "${AGENTIC_STRICT_CONTEXT:-0}" = "1" ]; then
             CONTEXT_VERDICT="SKIP"
             agentic_err "context[$name]: AGENTIC_STRICT_CONTEXT=1 -> SKIP"
@@ -311,6 +312,10 @@ d=json.load(sys.stdin); print((d.get("data") or [{}])[0].get("id",""))' 2>/dev/n
 # data[0].max_model_len; /server_info is the old-sglang fallback. Config value
 # always wins (caller only calls this when MAX_MODEL_LEN is empty/0). Retries 3x
 # (server may be warming); prints "0" + WARN if all attempts fail.
+# NB: the /server_info fallback reads context_length ONLY. Do not fall back to
+# max_total_num_tokens -- that is the KV-cache token-pool budget (GPU mem / KV
+# size across all concurrent seqs), not the per-request context window, so it
+# would mis-gate the ISL tail (usually under-warn).
 resolve_served_max_model_len() {
     local base="http://127.0.0.1:${AGENTIC_PORT}" i v=""
     for i in 1 2 3; do
@@ -318,7 +323,7 @@ resolve_served_max_model_len() {
              | "${AIPERF_PYTHON:-python3}" -c 'import sys,json;d=json.load(sys.stdin);print((d.get("data") or [{}])[0].get("max_model_len") or "")' 2>/dev/null)"
         [ -n "$v" ] && { echo "$v"; return 0; }
         v="$(curl -sf "$base/server_info" 2>/dev/null \
-             | "${AIPERF_PYTHON:-python3}" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("max_total_num_tokens") or d.get("context_length") or "")' 2>/dev/null)"
+             | "${AIPERF_PYTHON:-python3}" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("context_length") or "")' 2>/dev/null)"
         [ -n "$v" ] && { echo "$v"; return 0; }
         sleep 2
     done
