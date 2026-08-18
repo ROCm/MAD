@@ -71,6 +71,35 @@ The hook calls these in order (defined in
    framework's OpenAI port and confirm `/v1/chat/completions` + `/v1/models`
    (add the shim if `/v1/models` is missing).
 
+## Disaggregated backends
+
+Disaggregated P/D front-ends (a router, proxy, or `/v1/models` shim) often do
+**not** advertise `max_model_len`, so the library's front-end auto-detect returns
+`0`. The template ships a `# === agentx:BEGIN resolve served context window
+(disagg) ===` block that instead probes the prefill **WORKER** for the served
+window. Wiring it up:
+
+1. **Point the probe at your worker.** The block reads the first `host:port` from
+   `AGENTIC_SERVER_METRICS` (`<prefill-host:port> [<decode-host:port> ...]`) — so
+   the first entry must be the real worker whose OpenAI server exposes the window.
+   On the shipped sglang/vLLM launchers the recipe auto-derives
+   `AGENTIC_SERVER_METRICS` in-container, so users normally never set it; a fresh
+   backend integrator must ensure their worker's `host:port` lands there.
+2. **Fill the `# CHANGE:` probe** for your framework: the generic default parses
+   `data[0].max_model_len` from the worker's `/v1/models`. If your framework
+   serves the window on a different or second endpoint, edit the endpoint/JSON
+   (a commented sglang-style `/get_server_info` fallback is included to enable).
+3. **Single-node / monolith backends can delete the whole block** — the library's
+   front-end `/v1/models` auto-detect already covers them.
+
+`AGENTIC_RESOLVE_ONLY=1` resolves the served `max_model_len`, prints it, and
+exits without running — a diagnostic for checking the probe. It is **not**
+forwarded through the launchers, so use it in a direct/local run of the hook.
+
+**Intentional probe divergence:** the sglang hook tries `/v1/models` **and**
+`/get_server_info` (older builds only expose it there), while the vLLM hook tries
+only `/v1/models`. This is deliberate — don't "unify" them or older sglang breaks.
+
 ## Required vs optional env
 
 Set exactly **one** entry-point variable — `AGENTIC_CONFIG` (a config path) or

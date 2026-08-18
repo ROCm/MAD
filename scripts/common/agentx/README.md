@@ -294,7 +294,7 @@ endpoint (see [Minimal required](#minimal-required)).
 | `MODEL` | `auto` | served model id (maps to `serving.model`; auto-discovers from `/v1/models`) |
 | `MAX_MODEL_LEN` | `0` (auto) | pin served context window; `0` = auto-detect (`serving.max_model_len`) |
 | `AGENTIC_PORT` | `2322` | endpoint/router port (`serving.port`) |
-| `AGENTIC_SERVER_METRICS` | `auto` | `--server-metrics` endpoints |
+| `AGENTIC_SERVER_METRICS` | `auto` | aiperf `--server-metrics` endpoints; on disaggregated serving its first `host:port` is also probed for the served `max_model_len` |
 
 ### Run / replay
 
@@ -337,6 +337,7 @@ endpoint (see [Minimal required](#minimal-required)).
 | `AGENTIC_CONFIG` | (unset) | Required (choose one of CONFIG/WORKLOAD): path to an `agentic.yaml`; runs the multi-workload suite driver |
 | `AGENTIC_WORKLOAD` | (unset) | Required (choose one of CONFIG/WORKLOAD): run one workload by name: config-less preset shorthand, or select a single entry from `AGENTIC_CONFIG` |
 | `DRY_RUN` | `0` | set `1` to print the resolved plan and each assembled aiperf command without contacting a server |
+| `AGENTIC_RESOLVE_ONLY` | `0` | set `1` to resolve the served `max_model_len` and exit without running; diagnostic |
 
 ### Output / labeling
 

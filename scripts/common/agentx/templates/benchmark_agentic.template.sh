@@ -47,6 +47,62 @@ RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"    # CHANGE for non-SLU
 # MODEL_PREFIX feeds the trace-loader default; derive from MODEL_NAME if unset.
 : "${MODEL_PREFIX:=${MODEL_NAME:-}}"
 
+# === agentx:BEGIN resolve served context window (disagg) ===
+# ONLY needed for DISAGGREGATED backends whose front-end (router/proxy/shim) does
+# not advertise max_model_len on /v1/models. When it doesn't, the library's
+# front-end auto-detect returns 0, so resolve the served window from the prefill
+# WORKER instead (first host:port in AGENTIC_SERVER_METRICS). Skipped when pinned
+# (MAX_MODEL_LEN>0) or DRY_RUN; when AGENTIC_SERVER_METRICS is unset (non-disagg)
+# it falls through to the library's front-end /v1/models auto-detect. Single-node
+# / monolith backends can DELETE this whole block — the front-end auto-detect in
+# the library already covers them.
+if [ "${DRY_RUN:-0}" != "1" ] && ! { [ -n "${MAX_MODEL_LEN:-}" ] && [ "${MAX_MODEL_LEN}" -gt 0 ] 2>/dev/null; }; then
+    _worker="${AGENTIC_SERVER_METRICS%% *}"
+    if [ -z "$_worker" ]; then
+        agentic_log "AGENTIC_SERVER_METRICS unset (non-disagg); skipping worker max_model_len auto-detect"
+    else
+        [[ "$_worker" =~ ^[^[:space:]]+:[0-9]+$ ]] \
+            || agentic_die "malformed worker endpoint '$_worker' (expected host:port); pin MAX_MODEL_LEN"
+        # CHANGE: worker max_model_len probe. The generic default below reads the
+        # OpenAI /v1/models ModelCard (data[0].max_model_len), which most
+        # frameworks expose on their real worker. Some backends need a DIFFERENT
+        # or a SECOND endpoint — e.g. older sglang builds serve the window only on
+        # /get_server_info, not /v1/models. Fill in your framework's endpoint/JSON
+        # here; the commented sglang-style second-endpoint fallback just below is
+        # a working example you can enable.
+        _mml=""
+        for _i in 1 2 3; do
+            _mml="$(curl -sf "http://${_worker}/v1/models" 2>/dev/null \
+                    | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    print(""); sys.exit()
+data=d.get("data") or []
+print((data[0].get("max_model_len") if data else "") or "")' 2>/dev/null)"
+            # CHANGE (optional) second-endpoint fallback example (older sglang):
+            # if [ -z "$_mml" ] || [ "$_mml" = "0" ]; then
+            #     _mml="$(curl -sf "http://${_worker}/get_server_info" 2>/dev/null \
+            #             | python3 -c 'import sys,json
+            # try:
+            #     d=json.load(sys.stdin)
+            # except Exception:
+            #     print(""); sys.exit()
+            # sa=d.get("server_args") or {}
+            # print((d.get("max_model_len") or d.get("context_length") or sa.get("max_model_len") or sa.get("context_length") or "") or "")' 2>/dev/null)"
+            # fi
+            if [ -n "$_mml" ] && [ "$_mml" != "0" ]; then break; fi
+            sleep 2
+        done
+        [ -n "$_mml" ] && [ "$_mml" != "0" ] \
+            || agentic_die "could not resolve served max_model_len from worker ${_worker} (/v1/models); pin MAX_MODEL_LEN"
+        export MAX_MODEL_LEN="$_mml"
+        agentic_log "resolved MAX_MODEL_LEN=${MAX_MODEL_LEN} from worker ${_worker} (/v1/models)"
+    fi
+fi
+[ "${AGENTIC_RESOLVE_ONLY:-0}" = "1" ] && { echo "MAX_MODEL_LEN=${MAX_MODEL_LEN:-}"; exit 0; }
+# === agentx:END resolve served context window ===
+
 # Suite mode: a workloads config (AGENTIC_CONFIG) or a single-workload shorthand
 # (AGENTIC_WORKLOAD) runs the generic multi-workload driver. Without either, the
 # legacy single hf/inferencex replay below runs UNCHANGED (byte-identical).

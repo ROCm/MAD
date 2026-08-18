@@ -276,7 +276,7 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 \
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
 | `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
 | `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
-| `MAX_MODEL_LEN` | auto-detected | Max context length passed to aiperf (`--max-context-length`); pin if autodetect returns 0 |
+| `MAX_MODEL_LEN` | auto-detected | Max context length passed to aiperf (`--max-context-length`). On this disaggregated serving the shim front-end may not advertise `max_model_len`, so the window is resolved from the prefill worker (the first `host:port` in `AGENTIC_SERVER_METRICS`, auto-derived by the recipe) via `/v1/models`; pin if autodetect returns 0 |
 | `AGENTIC_PORT` | `${BENCHMARK_PORT}` | Endpoint aiperf targets (auto-resolved to the proxy/router port, then the shim port) |
 | `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
 | `ENABLE_PREFIX_CACHE` | auto | `1` forces prefix cache on i.e. strips `--no-enable-prefix-caching` (auto-on for agentic) |
@@ -286,7 +286,7 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 \
 | `AGENTIC_STRICT_CONTEXT` | `0` | Set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served context window. |
 | `AGENTIC_HF_ISL_TAIL` | (none) | Override the loader-derived ISL tail for hf-source workloads. |
 
-Note: `AGENTIC_SERVER_METRICS` is set automatically by the connector to the space-separated backend server `/metrics` endpoints (`<prefill_ip>:<SERVE_PORT> <decode_ip>:<SERVE_PORT>`, e.g. `:20005` for moriio, `:2584`/`SERVER_PORT` for rixl) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
+Note: `AGENTIC_SERVER_METRICS` is set automatically by the connector to the space-separated backend server `/metrics` endpoints (`<prefill_ip>:<SERVE_PORT> <decode_ip>:<SERVE_PORT>`, e.g. `:20005` for moriio, `:2584`/`SERVER_PORT` for rixl) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle. Its first `host:port` (the prefill worker) is also probed for the served `max_model_len` when the front-end doesn't advertise it.
 
 For config schema, profile authoring, and Tier 1/Tier 2 knobs, see:
 - [AgentX core README](../common/agentx/README.md)
