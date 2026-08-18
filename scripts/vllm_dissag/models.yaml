@@ -197,7 +197,10 @@ DeepSeek-R1:
 # NOT SUPPORTED here: the earlier lab image
 #   rocmshared/pytorch-private:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
 # predates the in-source DSA fixes (it needed the invalid-token kernel fix #45324
-# applied at runtime), so it is only usable on a branch that still ships patchers.
+# applied at runtime). This branch ships no patchers, so that image cannot serve
+# GLM-5.1-FP8 at all. The one supported image is built from the glmv5.1 Dockerfile
+# at VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27; that is the image the numbers below
+# were measured on.
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):
@@ -223,16 +226,17 @@ DeepSeek-R1:
 # from the env: recipe above (the connector emits them), so the dp: blocks are
 # empty like the DeepSeek family.
 #
-# LONG-CONTEXT CAVEAT (vLLM #40018): the ROCM_AITER_MLA_SPARSE prefill indexer
-# corrupts output for prompts beyond ~16-18k tokens on this image (mori v1.2.1) —
-# coherent + correct needle retrieval up to 14k, garbage (repetition collapse,
-# unique-ratio ~0.1) at ~18.7k. This is an UPSTREAM kernel bug, not the MAD port.
-# TESTED: pinning --max-model-len 32768 does NOT move the threshold (workspace is
-# sized max_model_len*40 but the corruption onset is a fixed ~18k token count in
-# the gather/logits kernel, not a buffer-scaling artifact). So no config knob
-# helps; it needs the complete upstream prefill fix in a newer image. Left at the
-# native max_model_len (do not cap — capping gives no accuracy benefit and only
-# limits usable context). Serve prompts <~14k for correct output on this image.
+# LONG-CONTEXT HISTORY (vLLM issue #40018): on the earlier lab image named above
+# (mori v1.2.1) the ROCM_AITER_MLA_SPARSE prefill indexer corrupted output beyond
+# ~16-18k tokens — coherent + correct needle retrieval up to 14k, garbage (repetition
+# collapse, unique-ratio ~0.1) at ~18.7k — and no config knob moved it (TESTED:
+# pinning --max-model-len 32768 does NOT shift the threshold; the onset is a fixed
+# ~18k token count in the gather/logits kernel, not a buffer-scaling artifact).
+# The supported image carries the upstream fix in-source (vLLM #47766, sparse-MLA
+# persistent metadata keyed on per-request context lengths): NIAH 2k-35k retrieves
+# with no length collapse on both 1P/1D EP8 and 2P/2D EP16. Left at the native
+# max_model_len (do not cap — capping gives no accuracy benefit and only limits
+# usable context).
 GLM-5.1-FP8:
   env:
     VLLM_USE_V1: "1"

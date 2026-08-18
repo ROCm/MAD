@@ -140,9 +140,12 @@ connector_runtime_patch() {
     # VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27. Serving GLM-5.* on an image built from
     # an older ref is unsupported — rebuild the image; do not re-add runtime patchers.
     #
-    # Likewise the MoRI version is pinned by the Dockerfile MORI_REF (42e895472b08,
-    # with the large-transfer notify/mapping fixes #424/#436/#432 baked in); if a newer
-    # MoRI is needed, update MORI_REF and rebuild — no runtime library swap here.
+    # Likewise the MoRI version is pinned by the Dockerfile MORI_REF. That pin is
+    # 42e895472b08 = ROCm/mori#366 "fix(ep): mlx5 collapsed CQ + dedicated dispatch send
+    # buffer for internode-v1" (2026-06-05) — the tip GLM-5.1 DSA wideEP was validated on.
+    # It does NOT contain the later large-transfer notify/mapping fixes #424 (2026-06-26),
+    # #432 and #436 (2026-06-29): all three merged after the pin. If you need those,
+    # update MORI_REF and rebuild + re-validate — no runtime library swap here.
     return 0
 }
 
