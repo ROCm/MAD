@@ -1,0 +1,17 @@
+[
+    {
+        "name": "pyt_chai1_inference",
+        "dockerfile": "../../docker/pyt_chai1_inference",
+        "scripts": "run.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "inference",
+            "pyt"
+        ],
+        "timeout": 28800,
+        "args": "",
+        "multiple_results": "perf_pyt_chai1_inference.csv"
+    }
+]

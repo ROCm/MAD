@@ -1,0 +1,62 @@
+[
+    {
+        "name": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
+        "dockerfile": "../../docker/primus_megatron_train_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-8B.csv",
+        "tags": [
+            "pyt",
+            "pretrain",
+            "llama3",
+            "training",
+            "primus",
+            "scaleout"
+        ],
+        "timeout": -1,
+        "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-8b"
+    },
+    {
+        "name": "primus_pyt_megatron_lm_train_llama-3.1-70b_overlay",
+        "dockerfile": "../../docker/primus_megatron_train_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+        "tags": [
+            "pyt",
+            "pretrain",
+            "llama3",
+            "training",
+            "primus",
+            "scaleout"
+        ],
+        "timeout": -1,
+        "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-70b"
+    },
+    {
+        "name": "primus_pyt_megatron_lm_train_llama-3.1-405b_overlay",
+        "dockerfile": "../../docker/primus_megatron_train_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_primus-megatron-Llama-3.1-405B.csv",
+        "tags": [
+            "pyt",
+            "pretrain",
+            "llama3",
+            "training",
+            "primus",
+            "scaleout"
+        ],
+        "timeout": -1,
+        "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-405b"
+    }
+]
