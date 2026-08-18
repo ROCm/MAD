@@ -30,9 +30,11 @@ scope here (see [See also](#see-also)).
 
 New to AgentX? Follow this path:
 
-1. **Read the launcher entry point** — [sglang_disagg/README.MD](../../sglang_disagg/README.MD)
-   (the agentic-replay section) for how a real run is invoked end-to-end, then
-   this README for the config/profile model.
+1. **Read your launcher's entry point** — the agentic-replay section of
+   [sglang_disagg/README.MD](../../sglang_disagg/README.MD) or
+   [vllm_dissag/README.MD](../../vllm_dissag/README.MD) for how a real run is
+   invoked end-to-end (both share this same AgentX core), then this README for
+   the config/profile model.
 2. **Copy-paste a scenario** — [SCENARIOS.md](SCENARIOS.md) has a ready `agentic.yaml`
    for every workload shape. Start from the one closest to your goal.
 3. **Understand the mechanism** (optional) — [HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains

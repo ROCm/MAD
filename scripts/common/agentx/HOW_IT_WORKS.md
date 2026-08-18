@@ -49,20 +49,29 @@ does the same prefill and decode work whether the tokens spell real English or a
 synthetic. AgentX exploits this: each turn in the trace carries a **token count**
 (`in` / `out`) and a **hash_ids** list (the block-level structure that tells the
 engine which KV blocks are shared prefix vs new). The **actual token text** is not
-in the trace at all - the server generates it during replay, its timing is
-measured, and then it is discarded.
+in the trace at all. Two different actors materialize text at replay time:
+
+- **Input (prompt) text** is synthesized **client-side by aiperf**, not the server.
+  aiperf's `PromptGenerator` is keyed by the turn's `hash_ids` (shared ids emit the
+  **same** tokens across turns, new ids emit fresh tokens), so the prompt is
+  deterministic filler whose block structure matches the trace. This is what makes
+  prefix reuse real: identical `hash_ids` produce byte-identical prompt blocks the
+  engine can serve from KV cache.
+- **Output text** is produced by the **server** during decode; its timing is
+  measured (TTFT, inter-token latency) and then the text itself is discarded.
 
 ```mermaid
 flowchart TD
   turn["One turn in the trace"] --> count["Token COUNT (in / out)"]
   turn --> struct["hash_ids STRUCTURE (which blocks are shared vs new)"]
-  turn --> text["Actual token TEXT"]
   count --> fixed["Fixed and deterministic (from profile + seed)"]
   struct --> fixed
-  text --> server["Produced by the server at replay time"]
-  server --> measured["Measured for timing"]
-  measured --> discarded["Then discarded (never fed back into the trace)"]
   fixed --> cost["Determines prefill + decode + cache work"]
+  fixed --> inText["Input text: aiperf PromptGenerator synthesizes it client-side, keyed by hash_ids"]
+  inText --> sent["Sent to the server as the prompt (shared hash_ids -> identical blocks -> cache hit)"]
+  sent --> outText["Output text: produced by the server at replay time"]
+  outText --> measured["Measured for timing"]
+  measured --> discarded["Then discarded (never fed back into the trace)"]
 ```
 
 Because the parts that determine serving cost (counts + structure) are fixed
