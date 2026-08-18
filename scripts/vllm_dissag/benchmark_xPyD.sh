@@ -43,9 +43,11 @@ for i in $(seq 1 $BENCHMARK_ITR); do
        # Per-shape warmup at the REAL isl/osl, low concurrency. The global warmup above
        # is isl=osl=32/con=1, which never exercises this shape's prefill path, its Triton/
        # aiter kernel variants, or the decode cudagraph batch sizes -- so without this the
-       # FIRST measured cell of each shape absorbs all the residual JIT and reports a
-       # wildly inflated TPOT (observed 302ms vs ~89ms steady-state). Measured cells must
-       # start from a warm graph. Skip with SHAPE_WARMUP=0.
+       # FIRST measured cell of each shape absorbs all the residual JIT and reports an
+       # inflated TPOT. Measured cells must start from a warm graph. Skip with
+       # SHAPE_WARMUP=0. (Do not confuse this with the ~302ms -> ~88ms TPOT figure in the
+       # GLM-5.1-FP8 recipe: that one is the over-wide MoRI EP all2all buffer, fixed by
+       # --max-num-batched-tokens, not by warmup.)
        if [[ "${SHAPE_WARMUP:-1}" == "1" ]]; then
            _w_con="${SHAPE_WARMUP_CON:-4}"
            _w_prompts="${SHAPE_WARMUP_PROMPTS:-8}"

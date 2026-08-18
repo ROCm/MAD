@@ -46,8 +46,10 @@
 #     so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
 #     wideEP) are present (~+30-45 min build vs WITH_NIXL=0).
 #
-# STATUS (GLM-5.1-FP8 on this stack): 1P/1D EP8 + 2P/2D EP16 NIAH 2k-35k = 10/10,
-# no crash; long-context accuracy fixed via vLLM #47766 (persistent sparse-MLA kept
+# STATUS (GLM-5.1-FP8 on this stack): NIAH 2k-35k retrieves with no length collapse
+# and no crash on 1P/1D EP8 (51/60) and 2P/2D EP16 (55/60) — see the GLM-5.1-FP8
+# recipe in scripts/vllm_dissag/models.yaml for the full measurements;
+# long-context accuracy fixed via vLLM #47766 (persistent sparse-MLA kept
 # ON). 4P/4D EP32 is a KNOWN OPEN DEFECT: token corruption at ALL context lengths
 # (garbage output even at 2k), distinct from the long-context bug; prime suspect is
 # the moriep all-to-all combine at EP32 scale -> deferred to future work. Use 1P/1D
@@ -61,7 +63,9 @@
 #     (ROCm + torch nightly). The stages below OVERRIDE the base's vLLM/MoRI/AITER
 #     with the pins we validate for GLM DSA.
 #   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
-#     (main LATEST 120d2de broke the connector KV-notify handshake -- see note at MORI_REF.)
+#     = ROCm/mori#366 (2026-06-05), 32 commits BEHIND tag v1.2.1 (2026-06-25); see the
+#     note at MORI_REF for what that pin does and does not contain. (main LATEST
+#     120d2de broke the connector KV-notify handshake, hence a pin, not main.)
 #   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
 #   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
@@ -85,7 +89,7 @@
 # If you need a fix, move the pin and rebuild — do not re-add runtime patchers to MAD.
 #
 # Build context = repo root:
-#   docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile -t <registry>/<tag> .
+#   docker build -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile -t <registry>/<tag> .
 #
 # BASE_IMAGE is the purpose-built ROCm/vLLM/MoRI base above. Override --build-arg
 # BASE_IMAGE=... to build on a different ROCm base. vLLM compile is long (~30-60 min).
@@ -109,12 +113,14 @@ ARG WITH_NIXL=0
 ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------
-# 1. MoRI: replace the base's bundled MoRI with the validated ROCm/MoRI @ v1.2.1
-#    (the version for the 06_29 mori121 image, dist-inf-cookbook
-#    Dockerfile.vllm.mori121_shareable). v1.2.1 carries the EP/RDMA correctness fixes
-#    plus the ROCm-7.2.3 dmabuf registration path used by the connector .env
-#    (expandable_segments:False). MoRI is JIT-built, so this swaps the JIT sources the
-#    kernels compile from at runtime.
+# 1. MoRI: replace the base's bundled MoRI with the commit GLM-5.1 DSA wideEP was
+#    validated on, ROCm/MoRI @ 42e895472b08 (= ROCm/mori#366, 2026-06-05). NOTE this
+#    is NOT tag v1.2.1 (e31d426a, 2026-06-25) that the base vllm_disagg_inference
+#    Dockerfile pins, and it is not the MoRI in the older mori121 lab image — it is
+#    32 commits older than v1.2.1. It carries the EP/RDMA correctness fixes this
+#    recipe needs plus the ROCm-7.2.3 dmabuf registration path used by the connector
+#    .env (expandable_segments:False). MoRI is JIT-built, so this swaps the JIT
+#    sources the kernels compile from at runtime.
 #    BUILD CONFIG: match the cookbook build — MORI_GPU_ARCHS=gfx942, BUILD_UMBP=OFF,
 #    DEFAULT NIC backends. Do NOT pass USE_IONIC=OFF / USE_BNXT=OFF: disabling NIC
 #    backends produced a MoRI that deadlocked at the cross-node EP all-to-all init.
@@ -132,7 +138,8 @@ ENV MORI_GPU_ARCHS=gfx942
 # present in this base; UMBP is unrelated to the EP dispatch/combine kernels, so
 # disable it to avoid pulling in a gRPC build dependency.
 ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
-# Build/install matches dist-inf-cookbook Dockerfile.vllm.mori121_shareable for v1.2.1:
+# Build/install COMMAND (not the version) matches dist-inf-cookbook
+# Dockerfile.vllm.mori121_shareable:
 # `BUILD_UMBP=OFF pip install .` (default build isolation). apt/pip build tooling kept
 # for bases that lack it; harmless where already present.
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
@@ -185,24 +192,35 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
     fi
 
 # -----------------------------------------------------------------------------
-# 3. vLLM: compile from source at the 06_29 validated Wide-EP WRITE-mode branch
-#    (matches the published dist-inf-cookbook mori121 image). Full source compile
-#    (the base ships a different commit). The MoRIIO disagg fixes (#39276 notify,
-#    #41751 LL split, DP-rank hash-failsafe) AND the GLM DSA fixes are native in this
-#    branch, so no runtime patcher is needed — and none exists in MAD, which is why
-#    this ref is a hard requirement rather than a preference. Override VLLM_REF to
-#    rebuild a different commit; build only committed commits (no working-tree edits).
+# 3. vLLM: compile from source at the GLM-5.1 DSA wideEP branch. This is NOT the
+#    06_29 Wide-EP WRITE-mode vLLM that the base vllm_disagg_inference Dockerfile and
+#    the dist-inf-cookbook mori121 image build from — that vLLM predates the in-source
+#    DSA fixes and cannot serve GLM-5.1-FP8 (see models.yaml). Full source compile (the
+#    base ships a different commit). The MoRIIO disagg fixes (#39276 notify, #41751 LL
+#    split, DP-rank hash-failsafe) AND the GLM DSA fixes are native in this branch, so
+#    no runtime patcher is needed — and none exists in MAD, which is why this ref is a
+#    hard requirement rather than a preference. Override VLLM_REF to rebuild a
+#    different commit; build only committed commits (no working-tree edits).
 # -----------------------------------------------------------------------------
-# VLLM_REPO/REF are a PUBLIC GitHub repo + branch (the Wide-EP WRITE-mode vLLM the
-# dist-inf-cookbook mori121 image builds from). Override to your own vLLM fork/branch.
+# VLLM_REPO/REF are a PUBLIC GitHub repo + branch. Override to your own vLLM fork/branch.
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-# glm5.1-dsa-wideEP_on_vllm-v0.27 (HEAD cda3648602) = upstream v0.27 tip dedbf6be8b + 7
-# ROCm/DSA commits. Core 3: per-req-ctx metadata key (#47766), DSA indexer KV transfer
-# (reworked onto upstream's native MoRIIO connector), invalid-token sentinel. Plus 4
-# v0.27 fixes: concat_and_cache_mla positional (stable-ABI), splitting_ops out of the
-# compiled graph (MLA "unknown parameter type"), sparse-indexer bounds-guard, and the
-# decisive sentinel -1->0 (cda3648602 — aiter mla_decode_fwd derefs -1 -> GPU fault at
-# disagg long-ctx). NIAH-validated 1P/1D + 2P/1D + 1P/2D, 2k-35k, decode PIECEWISE.
+# REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — the branch has
+# already advanced once since GLM-5.1 was validated (cda3648602 on 2026-08-10 -> the
+# MoRI EP sizing commits e8c186f71/d723eb305 on 2026-08-15). `docker build` resolves it
+# to whatever the tip is on the day you build, which is NOT what "the image is the
+# contract" should mean. For an auditable rebuild, pass the exact commit:
+#   --build-arg VLLM_REF=<sha>
+# and record it — /app/versions.txt in the built image captures the resolved sha.
+#
+# glm5.1-dsa-wideEP_on_vllm-v0.27 = upstream v0.27 tip dedbf6be8b + 9 ROCm commits
+# (tip d723eb305 as of 2026-08-18). Core DSA 3: per-req-ctx metadata key (#47766), DSA
+# indexer KV transfer (reworked onto upstream's native MoRIIO connector), invalid-token
+# sentinel. Plus 4 v0.27 fixes: concat_and_cache_mla positional (stable-ABI),
+# splitting_ops out of the compiled graph (MLA "unknown parameter type"),
+# sparse-indexer bounds-guard, and the decisive sentinel -1->0 (cda3648602 — aiter
+# mla_decode_fwd derefs -1 -> GPU fault at disagg long-ctx). Plus 2 MoRI EP sizing
+# commits. NIAH-validated 1P/1D EP8 + 2P/2D EP16, 2k-35k; see the models.yaml recipe
+# for the per-role cudagraph modes actually used (decode FULL_AND_PIECEWISE).
 ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
