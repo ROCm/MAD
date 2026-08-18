@@ -36,6 +36,14 @@ DEFAULT_BANDS = {
 }
 
 
+def _argval(it, flag):
+    try:
+        return next(it)
+    except StopIteration:
+        sys.stderr.write(f"[verify_agentx_profile] {flag} requires a value\n")
+        raise SystemExit(2)
+
+
 def p(a, q):
     a = sorted(a)
     return a[min(len(a) - 1, int(q * len(a)))] if a else 0
@@ -62,7 +70,9 @@ def _weighted_percentiles(values, weights, qs):
 def measure(corpus):
     ai = []; oa = []; tu = []; dl = []; hit = []
     for f in glob.glob(os.path.join(corpus, "*.json")):
-        b = json.load(open(f)); r = b["requests"]; seen = set(); tu.append(len(r))
+        with open(f) as fh:
+            b = json.load(fh)
+        r = b["requests"]; seen = set(); tu.append(len(r))
         for x in r:
             if x.get("in"): ai.append(x["in"])
             if x.get("out"): oa.append(x["out"])
@@ -81,6 +91,11 @@ def verify(profile, corpus):
         bands[k] = tuple(v)
     overrides = verify_cfg.get("band_overrides", {}) or {}
 
+    missing = [k for k in ("isl_p", "osl_p", "delay_p") if k not in profile]
+    if missing:
+        raise SystemExit(
+            "[verify_agentx_profile] profile missing required field(s): "
+            + ", ".join(missing))
     isl_p = profile["isl_p"]
     osl_p = profile["osl_p"]
     delay_p = profile["delay_p"]
@@ -137,11 +152,11 @@ def main(argv):
     it = iter(argv)
     for a in it:
         if a in ("--profile", "-p"):
-            profile = _load_profile(next(it))
+            profile = _load_profile(_argval(it, a))
         elif a == "--profile-json":
-            profile = json.loads(next(it))
+            profile = json.loads(_argval(it, a))
         elif a in ("--corpus", "-c"):
-            corpus = next(it)
+            corpus = _argval(it, a)
         elif a in ("-h", "--help"):
             print(__doc__)
             return 0

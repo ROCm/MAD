@@ -42,6 +42,14 @@ import json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROFILES_DIR = os.path.join(HERE, "profiles")
 
+
+def _argval(it, flag):
+    try:
+        return next(it)
+    except StopIteration:
+        sys.stderr.write(f"[agentx_config] {flag} requires a value\n")
+        raise SystemExit(2)
+
 _RUN_KEYS = ("concurrency", "duration")
 # Keys that steer resolution / run knobs but are NOT part of a generator profile
 # dict (so they are stripped when building the source=profile profile JSON).
@@ -349,6 +357,9 @@ def _isl_tail(profile):
     clamps = profile.get("clamps", {}) or {}
     if "isl" in clamps:
         return int(clamps["isl"][1])
+    if "isl_p" not in profile:
+        raise ValueError(
+            "profile missing 'isl_p' (or clamps.isl) required to derive ISL tail")
     return int(profile["isl_p"][2])
 
 
@@ -514,13 +525,13 @@ def main(argv):
     it = iter(argv)
     for a in it:
         if a == "--config":
-            config_path = next(it)
+            config_path = _argval(it, a)
         elif a == "--profile":
-            profile_path = next(it)
+            profile_path = _argval(it, a)
         elif a == "--workload":
-            workload = next(it)
+            workload = _argval(it, a)
         elif a == "--profile-out":
-            profile_out = next(it)
+            profile_out = _argval(it, a)
         elif a in ("--emit-json", "--emit-config-shell", "--emit-workload-shell", "--dump-json"):
             mode = a
         elif a in ("-h", "--help"):

@@ -27,6 +27,14 @@ Pure Python stdlib only (json/os/sys/random/glob).
 import json, os, sys, random, glob
 
 
+def _argval(it, flag):
+    try:
+        return next(it)
+    except StopIteration:
+        sys.stderr.write(f"[filter_weka_corpus] {flag} requires a value\n")
+        raise SystemExit(2)
+
+
 def _iter_file(path):
     if path.endswith(".jsonl"):
         with open(path) as fh:
@@ -83,15 +91,15 @@ def main(argv):
     it = iter(argv)
     for a in it:
         if a == "--input":
-            inp = next(it)
+            inp = _argval(it, a)
         elif a == "--out-dir":
-            out_dir = next(it)
+            out_dir = _argval(it, a)
         elif a == "--max-isl":
-            max_isl = int(next(it))
+            max_isl = int(_argval(it, a))
         elif a == "--max-turns":
-            max_turns = int(next(it))
+            max_turns = int(_argval(it, a))
         elif a == "--sample":
-            sample = int(next(it))
+            sample = int(_argval(it, a))
         elif a in ("-h", "--help"):
             print(__doc__)
             return 0

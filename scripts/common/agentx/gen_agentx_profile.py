@@ -54,6 +54,24 @@ DEFAULT_MODEL_TAG = "GLM-5.2-MXFP4"
 DEFAULT_ID_PREFIX = "caseA"   # #173 used the literal "caseA" salt for BOTH cases
 DEFAULT_BLOCK = 64
 
+REQUIRED_PROFILE_FIELDS = ("isl_p", "osl_p", "delay_p", "turns", "cache_hit")
+
+
+def _require_fields(profile):
+    missing = [k for k in REQUIRED_PROFILE_FIELDS if k not in profile]
+    if missing:
+        raise SystemExit(
+            "[gen_agentx_profile] profile missing required field(s): "
+            + ", ".join(missing))
+
+
+def _argval(it, flag):
+    try:
+        return next(it)
+    except StopIteration:
+        sys.stderr.write(f"[gen_agentx_profile] {flag} requires a value\n")
+        raise SystemExit(2)
+
 
 def lognorm_from_p(p50, p90, p99):
     """Return (mu, sigma) of a lognormal matched to a (P50,P90,P99) triple.
@@ -73,6 +91,7 @@ def generate_corpus(profile, out_dir):
     reuse uniform [t>0], delay gauss [t>0]) is identical to #173 so preset
     profiles reproduce the committed corpora byte-for-byte. Returns n_sessions.
     """
+    _require_fields(profile)
     seed = int(profile.get("seed", 42))
     n = int(profile.get("n_sessions", 200))
     block = int(profile.get("block_size", DEFAULT_BLOCK))
@@ -145,7 +164,8 @@ def generate_corpus(profile, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     for i in range(n):
         s = make_session(i)
-        json.dump(s, open(os.path.join(out_dir, f"session_{i:05d}.json"), "w"))
+        with open(os.path.join(out_dir, f"session_{i:05d}.json"), "w") as fh:
+            json.dump(s, fh)
     return n
 
 
@@ -161,21 +181,21 @@ def main(argv):
     it = iter(argv)
     for a in it:
         if a in ("--profile", "-p"):
-            profile = _load_profile(next(it))
+            profile = _load_profile(_argval(it, a))
         elif a == "--profile-json":
-            profile = json.loads(next(it))
+            profile = json.loads(_argval(it, a))
         elif a in ("--out-dir", "-o"):
-            out_dir = next(it)
+            out_dir = _argval(it, a)
         elif a == "--n-sessions":
-            overrides["n_sessions"] = int(next(it))
+            overrides["n_sessions"] = int(_argval(it, a))
         elif a == "--seed":
-            overrides["seed"] = int(next(it))
+            overrides["seed"] = int(_argval(it, a))
         elif a == "--model-tag":
-            overrides["model_tag"] = next(it)
+            overrides["model_tag"] = _argval(it, a)
         elif a == "--id-prefix":
-            overrides["id_prefix"] = next(it)
+            overrides["id_prefix"] = _argval(it, a)
         elif a == "--block-size":
-            overrides["block_size"] = int(next(it))
+            overrides["block_size"] = int(_argval(it, a))
         elif a in ("-h", "--help"):
             print(__doc__)
             return 0
