@@ -12,28 +12,67 @@ from collprof.core.phase import (DAMAGE_MSG_CAP, DAMAGE_NO_TAIL, DAMAGE_NRANKS_R
                                  DAMAGE_RANK_RANGE, DAMAGE_TOPO_TRANSPORT, DAMAGE_TWO_RECORDS,
                                  DAMAGE_UNKNOWN_COLL)
 from collprof.core.rccl_log import discover_logs, log_stem, parse_run, transport_scope
+from collprof.core.spec import LOG_PER_RANK, LOG_SHARED
 from collprof.engines import primus, sglang_disagg
 
 
 def test_discovery_takes_node_and_role_from_the_file_name(sglang_run: Path):
     found = discover_logs(sglang_run, sglang_disagg.SPEC)
-    assert {(node, phase) for _log, node, phase in found} == {
+    assert {(node, phase) for _log, node, phase, _layout in found} == {
         ("prefill_NODE0", "prefill"), ("prefill_NODE1", "prefill"),
         ("decode_NODE2", "decode"), ("decode_NODE3", "decode")}
 
 
 def test_discovery_takes_node_from_the_parent_directory(primus_run: Path):
     found = discover_logs(primus_run, primus.SPEC)
-    assert {node for _log, node, _phase in found} == {"node_0", "node_1"}
+    assert {node for _log, node, _phase, _layout in found} == {"node_0", "node_1"}
     # Primus announces phases in the log, so discovery leaves the phase open.
-    assert {phase for _log, _node, phase in found} == {None}
+    assert {phase for _log, _node, phase, _layout in found} == {None}
 
 
 def test_a_gzipped_log_gives_the_same_node_and_role(tmp_path: Path):
     write(tmp_path / "decode_NODE2.log.gz", [coll_line()], compress=True)
-    (log, node, phase), = discover_logs(tmp_path, sglang_disagg.SPEC)
+    (log, node, phase, _layout), = discover_logs(tmp_path, sglang_disagg.SPEC)
     assert (node, phase) == ("decode_NODE2", "decode")
     assert log_stem(log) == "decode_NODE2"
+
+
+def test_per_rank_files_are_read_beside_the_shared_log(sglang_run: Path):
+    """`NCCL_DEBUG_FILE` gives each server process its own file; the role and node stay the same."""
+    for rank in range(8):
+        write(sglang_run / "rccl" / f"prefill_NODE0.worker0.{2000 + rank}.log",
+              [coll_line(count=4096, grank=rank, pid=2000 + rank)] * 5)
+    phase = parse_run(sglang_run, sglang_disagg.SPEC)["prefill"]
+    assert phase.nodes == {"prefill_NODE0", "prefill_NODE1"}
+    assert phase.per_rank[("prefill_NODE0", "0")] == [7, 5 * 4096 * 2 + 2 * 1024 * 2]
+    assert phase.writers == {LOG_SHARED, LOG_PER_RANK}
+
+
+def test_per_rank_files_alone_carry_the_whole_phase(tmp_path: Path):
+    """A run measured only through NCCL_DEBUG_FILE has nothing in the shared log to fall back on."""
+    write(tmp_path / "decode_NODE2.log", ["starting decode server"])
+    for rank in range(8):
+        write(tmp_path / "rccl" / f"decode_NODE2.worker1.{3000 + rank}.log",
+              [coll_line(count=256, grank=rank, pid=3000 + rank)] * 4)
+    phase = parse_run(tmp_path, sglang_disagg.SPEC)["decode"]
+    assert phase.collective_totals()["AllReduce"]["calls"] == 32
+    assert len(phase.per_rank) == 8
+    assert phase.writers == {LOG_PER_RANK}
+
+
+def test_a_training_phase_comes_from_the_file_name_and_its_metrics_from_stdout(primus_run: Path,
+                                                                               tmp_path: Path):
+    """The two sources carry different halves: RCCL in the files, markers and timings in stdout."""
+    rccl = tmp_path / "rccl"
+    for rank in range(8):
+        write(rccl / f"BF16.node_0.host0.{4000 + rank}.log",
+              [coll_line(count=512, grank=rank, pid=4000 + rank)] * 2)
+    phases = parse_run(primus_run, primus.SPEC, rccl_dir=rccl)
+    assert phases["BF16"].nodes == {"node_0", "node_1"}
+    assert phases["BF16"].metric("iter_ms") == [250.5]
+    # Eight ranks from the files plus the two the fixture's stdout logs on each of two nodes.
+    assert len(phases["BF16"].per_rank) == 10
+    assert phases["FP8"].writers == {LOG_SHARED}, "the files named only BF16"
 
 
 def test_a_gzipped_log_is_parsed_like_a_plain_one(tmp_path: Path):

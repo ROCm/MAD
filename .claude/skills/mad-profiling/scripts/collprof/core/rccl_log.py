@@ -106,25 +106,32 @@ def log_stem(log: Path) -> str:
     return Path(name).stem
 
 
-def discover_logs(run_dir: Path, spec: EngineSpec) -> list:
-    """Find the per-node logs of a job and say which node and phase each one belongs to.
+def discover_logs(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> list:
+    """Find the logs of a job and say which node, phase and writer each one belongs to.
 
-    Returns ``(path, node_label, phase_or_None)`` triples; the phase is None when the engine
+    Returns ``(path, node_label, phase_or_None, layout)`` tuples; the phase is None when the engine
     announces phases inside the log, in which case parsing picks them up from the markers.
-    """
-    layout = spec.logs
-    logs = [p for pattern in layout.globs for p in sorted(run_dir.glob(pattern))]
-    if not logs:
-        raise FileNotFoundError(
-            f"no {' / '.join(layout.globs)} under {run_dir} (engine {spec.name})")
 
-    out = []
-    for log in sorted(set(logs)):
-        node = log.parent.name if layout.node_from == NODE_FROM_PARENT else log_stem(log)
-        phase = None if layout.phase_from == PHASE_FROM_MARKER else layout.phase_of_name(
-            log_stem(log))
-        out.append((log, node, phase))
-    return out
+    A run measured with ``NCCL_DEBUG_FILE`` has two sets: the shared stdout the engine always
+    writes, and one file per process under ``rccl_dir`` (the run directory unless the files live
+    elsewhere, as they do for training, where they land beside the traces). Both are read, since
+    only the first carries the phase markers and the framework's own metrics.
+    """
+    found: list = []
+    for layout, root in ((spec.logs, run_dir), (spec.rccl_logs, rccl_dir or run_dir)):
+        if layout is None:
+            continue
+        for log in sorted({p for pattern in layout.globs for p in root.glob(pattern)}):
+            stem = log_stem(log)
+            node = log.parent.name if layout.node_from == NODE_FROM_PARENT else layout.node_of_name(
+                stem)
+            phase = None if layout.phase_from == PHASE_FROM_MARKER else layout.phase_of_name(stem)
+            found.append((log, node, phase, layout))
+
+    if not found:
+        raise FileNotFoundError(
+            f"no {' / '.join(spec.logs.globs)} under {run_dir} (engine {spec.name})")
+    return found
 
 
 def log_has_record_tails(log: Path) -> bool:
@@ -162,18 +169,16 @@ def damage_reason(m: re.Match, tail: re.Match | None, max_nranks: int) -> str | 
     return None
 
 
-def parse_run(run_dir: Path, spec: EngineSpec) -> dict:
-    """Parse every node log of a run into ``{phase name: Phase}``."""
+def parse_run(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> dict:
+    """Parse every log of a run into ``{phase name: Phase}``."""
     limits = spec.limits
-    layout = spec.logs
     phases: dict = {}
 
     def phase_named(name: str) -> Phase:
         return phases.setdefault(name, Phase(name, spec.name))
 
-    marker_guard = layout.marker_guard if layout.phase_marker else ""
-
-    for log, node, log_phase in discover_logs(run_dir, spec):
+    for log, node, log_phase, layout in discover_logs(run_dir, spec, rccl_dir):
+        marker_guard = layout.marker_guard if layout.phase_marker else ""
         current = phase_named(log_phase) if log_phase else None
         strict_tail = log_has_record_tails(log)
         with open_log(log) as fh:
@@ -189,6 +194,7 @@ def parse_run(run_dir: Path, spec: EngineSpec) -> dict:
 
                 m = RE_COLL.match(line) if "opCount" in line else None
                 if m:
+                    current.writers.add(layout.written_by)
                     tail = RE_COLL_TAIL.search(line) if strict_tail else None
                     reason = damage_reason(m, tail, limits.max_nranks)
                     if reason is None and strict_tail and tail is None:

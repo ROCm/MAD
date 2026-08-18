@@ -114,7 +114,7 @@ follows: RCCL debug logs (message sizes for the whole run), torch profiler trace
 [references/measurement-setup.md](references/measurement-setup.md).
 
 **Guard:**
-- **If the logs hold no `NCCL INFO` collective lines** → the run was not configured for it; the report would be empty. Fix the run's env (`NCCL_DEBUG=INFO`, `NCCL_DEBUG_SUBSYS` including `COLL`) and rerun the job, rather than parsing harder.
+- **If the logs hold no `NCCL INFO` collective lines** → either the run was not configured for it (fix `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS` including `COLL`, then rerun the job rather than parsing harder), or it was launched with `RCCL_LOG_DIR` and the records are in per-rank files somewhere else; point `--rccl-dir` at them.
 - **If no engine recognises the directory** → the tool says what it looked for. Either pass `--engine`, or add an engine ([references/engines.md](references/engines.md)).
 
 ### Step 2 — One report per phase
@@ -138,6 +138,11 @@ Worth knowing before the first run:
 - **Traces are found automatically.** `--torch-trace PHASE=PATH` pins them explicitly
   when needed; `--no-auto-traces` skips them, which is the fast path when only the
   log-derived numbers are wanted.
+- **Per-rank RCCL logs are read as well.** A run launched with `RCCL_LOG_DIR` wrote one
+  file per process (`NCCL_DEBUG_FILE`) instead of interleaving eight ranks in a node's
+  stdout. They are picked up under the run directory by default and with `--rccl-dir`
+  when they live elsewhere, which is the training case. The header of every report says
+  which stream its records came from.
 - **Parse one job at a time.** Two parsers on the same shared filesystem slow each
   other down about fivefold.
 

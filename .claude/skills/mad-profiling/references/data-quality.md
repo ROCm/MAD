@@ -8,6 +8,13 @@ decode volume, and torn prefixes invented ranks 12 and 22 on an eight-GPU node.
 
 Expected rate on these runs: **0.5% to 0.9%** of collective records.
 
+The checks below are what makes such a log usable, but they are a second line of defence.
+The first is not to share the stream: `RCCL_LOG_DIR` makes the launcher set
+`NCCL_DEBUG_FILE` and every process writes its own file, which nothing else can overwrite
+(see [measurement-setup.md](measurement-setup.md)). A report says which of the two it read.
+On a run measured that way, damage counted here is not tearing and should be looked at
+rather than accepted as background noise.
+
 ## How a record is judged
 
 In order, cheapest first (`core/rccl_log.py`):

@@ -48,6 +48,9 @@ class Phase:
     edges: dict = field(default_factory=lambda: defaultdict(set))
     nodes: set = field(default_factory=set)
     ranks: set = field(default_factory=set)
+    #: Which kinds of stream the collective records came from (see ``LOG_*`` in spec.py). A phase
+    #: read from per-rank files may not be told it tore because its ranks shared a stdout.
+    writers: set = field(default_factory=set)
     #: Rejection reason -> count. See the DAMAGE_* constants.
     damage: Counter = field(default_factory=Counter)
     #: Same, for the topology lines behind ``edges``. Kept apart so the discarded share of
@@ -119,7 +122,8 @@ class Phase:
                 "per_node": dict(self.per_node), "per_rank": dict(self.per_rank),
                 "metrics": {k: dict(v) for k, v in self.metrics.items()},
                 "edges": dict(self.edges), "nodes": self.nodes, "ranks": self.ranks,
-                "damage": dict(self.damage), "topo_damage": dict(self.topo_damage)}
+                "writers": self.writers, "damage": dict(self.damage),
+                "topo_damage": dict(self.topo_damage)}
 
     @classmethod
     def from_state(cls, state: dict) -> "Phase":
@@ -131,6 +135,7 @@ class Phase:
             phase.metrics[key].update(by_node)
         phase.edges.update(state["edges"])
         phase.nodes, phase.ranks = state["nodes"], state["ranks"]
+        phase.writers = set(state.get("writers", ()))
         phase.damage.update(state["damage"])
         phase.topo_damage.update(state.get("topo_damage", {}))
         return phase

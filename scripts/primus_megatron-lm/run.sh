@@ -188,6 +188,26 @@ fi
 # datatypes=("FP8")
 # Loop through supported combinations
 for datatype in "${datatypes[@]}"; do
+  # Give each rank its own RCCL log, when the deployment asked for one by setting RCCL_LOG_DIR to a
+  # shared mount. Two things come with it: the ranks stop overwriting each other's records in the
+  # shared stdout, and every rank is logged rather than the few torchrun's --local-ranks-filter
+  # lets through. The datatype and the node go in the name because these files hold nothing but
+  # RCCL: the phase markers Megatron prints, and the throughput lines, stay in stdout.
+  #
+  # A directory RCCL cannot write to is worse than none: it drops the output instead of falling
+  # back to stdout, and the run finishes with no RCCL data at all. The container writes as a root
+  # squashed to nobody on NFS, so the directory has to be world-writable; when it is not, say so
+  # and leave the logs in stdout.
+  if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
+    if mkdir -p "${RCCL_LOG_DIR}" 2>/dev/null && [[ -w "${RCCL_LOG_DIR}" ]]; then
+      export NCCL_DEBUG_FILE="${RCCL_LOG_DIR}/${datatype}.node_${NODE_RANK:-0}.%h.%p.log"
+      echo "RCCL logs for ${datatype} go to ${NCCL_DEBUG_FILE} (one file per rank)"
+    else
+      unset NCCL_DEBUG_FILE
+      echo "WARNING: RCCL_LOG_DIR=${RCCL_LOG_DIR} is not writable from the container" >&2
+      echo "         (chmod 0777 it on the host); RCCL keeps logging to stdout" >&2
+    fi
+  fi
   if [[ "$TRAIN_MODE" == "posttrain" && ${#posttrain_types[@]} -gt 0 ]]; then
     for pt_type in "${posttrain_types[@]}"; do
       echo "Running: $model - $datatype - $TRAIN_MODE - $pt_type"

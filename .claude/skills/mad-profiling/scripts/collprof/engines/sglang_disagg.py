@@ -15,8 +15,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..core.spec import (NODE_FROM_STEM, PHASE_FROM_FILENAME, EngineSpec, LogLayout, ReportNotes,
-                         SanityLimits, TraceLayout)
+from ..core.spec import (LOG_PER_RANK, NODE_FROM_STEM, PHASE_FROM_FILENAME, EngineSpec, LogLayout,
+                         ReportNotes, SanityLimits, TraceLayout)
 
 #: `benchmark_<job>_..._PROFILE_<role>.log`, written once per profile point by bench_serving.
 RE_PROFILE_LOG = re.compile(r"_PROFILE_(\w+)\.log$")
@@ -76,6 +76,17 @@ SPEC = EngineSpec(
         phase_from=PHASE_FROM_FILENAME,
         node_from=NODE_FROM_STEM,
         phase_of_name=lambda stem: stem.split("_")[0],
+    ),
+    # `rccl/prefill_NODE0.<host>.<pid>.log`, one per server process, written when the launcher was
+    # given RCCL_LOG_DIR. The role and node label are the ones the shared logs already use, so a
+    # report reads the same whichever way the run was measured.
+    rccl_logs=LogLayout(
+        globs=("rccl/*_NODE*.log", "rccl/*_NODE*.log.gz"),
+        phase_from=PHASE_FROM_FILENAME,
+        node_from=NODE_FROM_STEM,
+        phase_of_name=lambda stem: stem.split("_")[0],
+        node_of_name=lambda stem: stem.split(".")[0],
+        written_by=LOG_PER_RANK,
     ),
     traces=TraceLayout(
         dir_glob="torchprof/*",

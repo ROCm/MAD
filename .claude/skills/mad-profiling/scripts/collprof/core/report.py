@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .phase import BOUND_DAMAGE, Phase
 from .rccl_log import transport_scope
-from .spec import EngineSpec
+from .spec import LOG_SHARED, EngineSpec
 from .units import LATENCY_BOUND_BYTES, MIB, fmt_bytes, fmt_per_rank_calls
 from .workbook import write_workbook
 
@@ -83,6 +83,9 @@ class PhaseView:
     grand_calls: int = field(init=False)
     grand_bytes: int = field(init=False)
     per_rank_bytes: float = field(init=False)
+    #: Whether any of these records came off a stream several ranks shared. What an engine says
+    #: about torn records and about ranks missing from stdout only holds for those.
+    shared_logs: bool = field(init=False)
 
     def __post_init__(self):
         self.totals = self.phase.collective_totals()
@@ -95,6 +98,7 @@ class PhaseView:
         self.grand_calls = sum(r["calls"] for r in self.totals.values())
         self.grand_bytes = sum(r["bytes"] for r in self.totals.values())
         self.per_rank_bytes = self.grand_bytes / self.reps
+        self.shared_logs = LOG_SHARED in self.phase.writers or not self.phase.writers
 
 
 # -- CSV tables ----------------------------------------------------------------------------------
@@ -185,7 +189,10 @@ def section_header(view: PhaseView, ctx: ReportContext) -> list:
         f"Ranks present in the log: {len(phase.per_rank)} "
         f"({', '.join(f'{n}: {c}' for n, c in sorted(ranks_per_node.items()))})"
         + (f", of which {view.reps} carried traffic" if view.idle else "")
-        + (f" — {notes.rank_coverage}  " if notes.rank_coverage else "  "),
+        + (f" — {notes.rank_coverage}  " if notes.rank_coverage and view.shared_logs else "  "),
+        "RCCL records read from: "
+        + ("a stream shared by the ranks of a node"
+           if view.shared_logs else "one file per process (`NCCL_DEBUG_FILE`)"),
         f"Communicator size seen: nranks={phase.nranks}"
         + (f", {notes.communicator.format(nranks=phase.nranks)}" if notes.communicator else ""),
     ]
@@ -255,8 +262,12 @@ def section_data_quality(view: PhaseView, ctx: ReportContext) -> list:
              f"({share:.2%}), broken down in `discarded_records.csv`:"]
     for reason, count in phase.damage.most_common():
         lines.append(f"  - {reason}: {count}")
-    if ctx.spec.notes.damage_cause:
+    if ctx.spec.notes.damage_cause and view.shared_logs:
         lines.append(f"  {ctx.spec.notes.damage_cause}")
+    elif not view.shared_logs:
+        lines.append("  These came out of per-rank files, where nothing interleaves, so tearing "
+                     "is not the explanation: look at the records themselves before trusting the "
+                     "volume.")
 
     if share >= limits.damage_warn_fraction:
         lines.append(f"- **Warning: {share:.1%} of records were discarded**, above the "
@@ -564,7 +575,8 @@ def section_connectivity(view: PhaseView, ctx: ReportContext, tables: dict) -> l
              "lines that RCCL emits while building each communicator. Only ranks whose log "
              "survived contribute rows"
              + (f", so coverage follows the same limit as everything else: "
-                f"{ctx.spec.notes.rank_coverage}." if ctx.spec.notes.rank_coverage else "."), "",
+                f"{ctx.spec.notes.rank_coverage}."
+                if ctx.spec.notes.rank_coverage and view.shared_logs else "."), "",
              "| scope | (pair, transport) rows | channels |", "|---|---:|---:|"]
     for scope, (conns, channels) in sorted(by_scope.items()):
         lines.append(f"| {scope} | {conns} | {channels} |")

@@ -35,6 +35,14 @@ PHASE_FROM_FILENAME = "filename"
 NODE_FROM_PARENT = "parent"
 NODE_FROM_STEM = "stem"
 
+#: What wrote the records of a log, which decides what may be said about their damage.
+#:
+#: ``SHARED``   -- many ranks share one stream, so records tear and a fraction is unusable.
+#: ``PER_RANK`` -- ``NCCL_DEBUG_FILE`` gave each process its own line-buffered file, so nothing
+#:                interleaves and a torn record means something else went wrong.
+LOG_SHARED = "shared"
+LOG_PER_RANK = "per-rank"
+
 
 @dataclass(frozen=True)
 class LogLayout:
@@ -56,6 +64,11 @@ class LogLayout:
     marker_guard: str = ""
     #: Turns a matched log path into the phase name, when ``phase_from`` is ``FILENAME``.
     phase_of_name: Callable[[str], str] = lambda stem: stem.split("_")[0]
+    #: Turns a matched log path into the node label, when ``node_from`` is ``STEM``. A per-rank file
+    #: names the process as well as the node, and the report wants the node.
+    node_of_name: Callable[[str], str] = lambda stem: stem
+    #: Whether ranks shared this stream. Only :data:`LOG_SHARED` may be blamed for torn records.
+    written_by: str = LOG_SHARED
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,11 @@ class EngineSpec:
     summary: str
     logs: LogLayout
     notes: ReportNotes
+    #: Where ``NCCL_DEBUG_FILE`` puts one log per process, when a run was measured that way. Read in
+    #: addition to ``logs``, because the two carry different things: the per-rank files hold every
+    #: collective of every rank untorn, while the shared stdout keeps the phase markers and the
+    #: throughput lines the framework prints. A run without those files is unaffected.
+    rccl_logs: LogLayout | None = None
     metrics: tuple[LogMetric, ...] = ()
     #: Key of the metric whose values count iterations, when the engine has iterations at all.
     #: With it the report divides volume per rank by iteration count; without it -- serving has no

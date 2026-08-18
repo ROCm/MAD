@@ -240,6 +240,38 @@ if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
     echo "[profile] measurement flags added: TP through RCCL, decode without HIP graphs"
 fi
 
+# Give each server process its own RCCL log instead of eight of them interleaving in the node's
+# stdout. RCCL_LOG_DIR is set by the deployment (a shared mount, since the analysis runs outside the
+# container); without it nothing changes and RCCL keeps writing to stdout.
+#
+# At NCCL_DEBUG=INFO the ranks of a node overwrite each other mid-record: about 0.5% of collective
+# records and a good part of the topology lines arrive spliced, and every one of them has to be
+# detected and discarded downstream. NCCL_DEBUG_FILE takes the interleaving away at the source --
+# %h is the host and %p the pid, and each file is line buffered.
+#
+# Set here rather than at a launch site: node 0 assembles its prefill command separately from the
+# other prefill nodes and decode has a third site, which is how job 25824 ended up with three nodes
+# profiled and one not.
+#
+# RCCL_LOG_DIR=auto puts them beside this job's server logs, which is where the analysis looks by
+# default; a manifest cannot spell that path itself, since it does not know the job id.
+#
+# A directory RCCL cannot write to is worse than none: it drops the output instead of falling back
+# to stdout, and the run finishes with no RCCL data at all. Check before trusting it.
+if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
+    [[ "${RCCL_LOG_DIR}" == "auto" ]] && RCCL_LOG_DIR="/run_logs/${SLURM_JOB_ID:-local}/rccl"
+    if (( NODE_RANK < xP )); then _rccl_role="prefill"; else _rccl_role="decode"; fi
+    mkdir -p "${RCCL_LOG_DIR}" 2>/dev/null && chmod 0777 "${RCCL_LOG_DIR}" 2>/dev/null
+    if [[ -w "${RCCL_LOG_DIR}" ]]; then
+        export NCCL_DEBUG_FILE="${RCCL_LOG_DIR}/${_rccl_role}_NODE${NODE_RANK}.%h.%p.log"
+        echo "[profile] RCCL logs go to ${NCCL_DEBUG_FILE} (one file per process)"
+    else
+        unset NCCL_DEBUG_FILE
+        echo "[profile] WARNING: RCCL_LOG_DIR=${RCCL_LOG_DIR} is not writable from the container;" >&2
+        echo "[profile]          RCCL keeps logging to stdout" >&2
+    fi
+fi
+
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 
 if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then

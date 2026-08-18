@@ -79,6 +79,40 @@ def test_a_dropped_topology_line_is_admitted_where_the_connectivity_table_is(sgl
     assert "Discarded as unusable" not in text
 
 
+def test_per_rank_logs_are_stated_and_not_blamed_on_a_shared_stdout(tmp_path: Path):
+    """Torn records in a per-rank file mean something else, so the engine's excuse must not run."""
+    run = tmp_path / "run"
+    write(run / "decode_NODE2.log", ["starting decode server"])
+    for rank in range(8):
+        write(run / "rccl" / f"decode_NODE2.host.{3000 + rank}.log",
+              [coll_line(grank=rank, pid=3000 + rank)] * 20)
+    write(run / "rccl" / "decode_NODE2.host.3999.log", [coll_line(coll="prllReduce")])
+    text = build(run, tmp_path / "out")["decode"]
+    assert "one file per process (`NCCL_DEBUG_FILE`)" in text
+    assert "unknown collective name: 1" in text
+    assert "share one stdout" not in text
+    assert "per-rank files, where nothing interleaves" in text
+
+
+def test_a_rank_coverage_caveat_is_dropped_where_every_rank_logged(tmp_path: Path):
+    """`--local-ranks-filter` decides who reaches stdout; it decides nothing about per-rank files.
+
+    This is the shape of a real run measured with NCCL_DEBUG_FILE: the stdout keeps the phase
+    marker and the iteration line and holds no RCCL record at all.
+    """
+    run = tmp_path / "26615"
+    write(run / "node_0" / "stdout.out",
+          ["INFO exp: /workspace/configs/llama3.1_70B-BF16-pretrain.yaml loaded",
+           " iteration 1/10 | elapsed time per iteration (ms): 250.5 |"])
+    rccl = tmp_path / "rccl"
+    for rank in range(8):
+        write(rccl / f"BF16.node_0.host0.{4000 + rank}.log",
+              [coll_line(grank=rank, pid=4000 + rank), topo_line(rank, (rank + 1) % 8)])
+    text = build(run, tmp_path / "out", ["--rccl-dir", str(rccl)])["BF16"]
+    assert "local-ranks-filter" not in text
+    assert "Iterations per rank: 1" in text, "the metrics still come from the shared stdout"
+
+
 def test_an_engine_that_claims_no_cause_of_damage_has_none_stated(sglang_run: Path, tmp_path: Path):
     """Why records tore is a claim about one engine's logging, not something the core may assume."""
     spec = dataclasses.replace(

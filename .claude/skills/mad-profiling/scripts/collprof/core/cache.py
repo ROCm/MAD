@@ -13,7 +13,7 @@ from pathlib import Path
 
 #: Bumped whenever parsing or validation changes, so caches built by the previous logic are not
 #: reused. Raising a sanity bound counts: it changes which records are kept.
-PARSE_VERSION = 8
+PARSE_VERSION = 9
 
 
 def file_signature(paths: list) -> list:

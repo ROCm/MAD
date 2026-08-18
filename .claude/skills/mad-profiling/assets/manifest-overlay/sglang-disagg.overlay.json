@@ -14,11 +14,12 @@
         "name": "gpu_info_vram_profiler"
       }
     ],
-    "_comment_docker_env_vars": "The base template ships NCCL_DEBUG=WARN, which logs nothing to parse. SGLANG_TORCH_PROFILER_DIR is what makes /start_profile write anything: without it the profile point is a silent no-op. PROFILE_ROLES decides which reports exist, one per role, and the role's log is also where the tooling reads which trace directory belongs to which role. PROFILE_CONCURRENCY matches the benchmark point being characterised.",
+    "_comment_docker_env_vars": "The base template ships NCCL_DEBUG=WARN, which logs nothing to parse. SGLANG_TORCH_PROFILER_DIR is what makes /start_profile write anything: without it the profile point is a silent no-op. RCCL_LOG_DIR gives each server process its own RCCL file (NCCL_DEBUG_FILE) instead of eight ranks overwriting each other in one stdout, which is where the torn records and the invented topology edges come from; it must sit under /run_logs so the analysis outside the container can read it. PROFILE_ROLES decides which reports exist, one per role, and the role's log is also where the tooling reads which trace directory belongs to which role. PROFILE_CONCURRENCY matches the benchmark point being characterised.",
     "docker_env_vars": {
       "NCCL_DEBUG": "INFO",
       "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
       "RCCL_DEBUG": "INFO",
+      "RCCL_LOG_DIR": "auto",
       "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
       "SGLANG_PROFILE_WITH_STACK": "False",
       "PROFILE_ENABLE": "1",
@@ -35,6 +36,7 @@
       "NCCL_DEBUG": "INFO",
       "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
       "RCCL_DEBUG": "INFO",
+      "RCCL_LOG_DIR": "auto",
       "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
       "SGLANG_PROFILE_WITH_STACK": "False",
       "PROFILE_ENABLE": "1",

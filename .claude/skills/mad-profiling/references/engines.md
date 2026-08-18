@@ -12,6 +12,7 @@ touched — that is the whole point of the split, and the reason it is worth kee
 |---|---|---|
 | `name`, `summary` | what the report header says it profiled | `sglang-disagg` |
 | `logs` (`LogLayout`) | where the per-node logs are and what a phase is | `prefill_NODE*.log`, phase from the file name |
+| `rccl_logs` (`LogLayout`) | where `NCCL_DEBUG_FILE` put one log per process, if the engine's launcher can be asked for them | `rccl/prefill_NODE0.<host>.<pid>.log` |
 | `metrics` (`LogMetric`) | which scalars the log prints that the report should carry | `elapsed time per iteration (ms): 250.5` |
 | `iteration_metric` | whether the engine has iterations to divide by | `iter_ms` for training, empty for serving |
 | `traces` (`TraceLayout`) | how trace files are named and which phase each belongs to | `-TP-3.trace.json.gz`, role from the profile-point log |
@@ -42,6 +43,19 @@ produces a plausible report full of false statements.
      literal the line always contains — logs reach gigabytes and every regex is guarded
      by a cheap substring check.
    - `PHASE_FROM_FILENAME`: each log belongs to one phase. Supply `phase_of_name`.
+
+   The node label works the same way: `NODE_FROM_PARENT` for a per-node directory,
+   `NODE_FROM_STEM` with `node_of_name` when the name carries more than the node, as a
+   per-rank file does.
+
+3a. **Add `rccl_logs` if the engine can write one RCCL log per process.** It is a second
+   `LogLayout` with `written_by=LOG_PER_RANK`, read in addition to `logs`, and it is worth
+   having: it removes the torn records instead of detecting them, and for a launcher that
+   filters which ranks reach stdout it is the only way to see all of them. The phase has to
+   be readable from the file name, since these files hold nothing but RCCL — the markers and
+   the metrics stay in the shared log, which is why both are read. What sets the variable is
+   the engine's launch script; see `RCCL_LOG_DIR` in
+   [measurement-setup.md](measurement-setup.md).
 
 4. **Declare the metrics** rather than adding them to the parse loop. Each is a
    `guard` substring, a pattern whose group 1 is the value, and a `label` with a

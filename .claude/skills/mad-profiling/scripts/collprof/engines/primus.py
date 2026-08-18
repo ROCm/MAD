@@ -13,8 +13,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..core.spec import (NODE_FROM_PARENT, PHASE_FROM_MARKER, EngineSpec, LogLayout, LogMetric,
-                         ReportNotes, SanityLimits, TraceLayout)
+from ..core.spec import (LOG_PER_RANK, NODE_FROM_PARENT, NODE_FROM_STEM, PHASE_FROM_FILENAME,
+                         PHASE_FROM_MARKER, EngineSpec, LogLayout, LogMetric, ReportNotes,
+                         SanityLimits, TraceLayout)
 
 #: The Primus experiment config picked by MAD's dtype loop. The model part varies per workload
 #: (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so only the dtype and the suffix are anchored.
@@ -50,6 +51,19 @@ SPEC = EngineSpec(
         node_from=NODE_FROM_PARENT,
         phase_marker=RE_PHASE,
         marker_guard="-pretrain.yaml",
+    ),
+    # `BF16.node_1.<host>.<pid>.log`, one per rank per datatype, written when MAD's dtype loop was
+    # given RCCL_LOG_DIR. The datatype has to be in the name: the markers that separate the phases
+    # are printed to stdout, and these files hold nothing but RCCL. They also carry every rank
+    # rather than the few `--local-ranks-filter` lets through, so this is the layout that sees all
+    # of them. The shared stdout is still read, for the phase markers and Megatron's own metrics.
+    rccl_logs=LogLayout(
+        globs=("*.node_*.log", "*.node_*.log.gz"),
+        phase_from=PHASE_FROM_FILENAME,
+        node_from=NODE_FROM_STEM,
+        phase_of_name=lambda stem: stem.split(".")[0],
+        node_of_name=lambda stem: stem.split(".")[1],
+        written_by=LOG_PER_RANK,
     ),
     metrics=(
         LogMetric("iter_ms", "iteration", RE_ITER_MS, "median iteration {value:.1f} ms"),

@@ -21,7 +21,7 @@ from .core.phase import Phase
 from .core.rccl_log import discover_logs, parse_run
 from .core.report import ReportContext, emit_phase
 from .core.rocprof import parse_rocprof
-from .core.spec import EngineSpec
+from .core.spec import LOG_PER_RANK, EngineSpec
 from .core.torch_trace import parse_traces, trace_files
 from .core.units import fmt_bytes
 
@@ -41,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "serving (prefill, decode). Default: every phase that logged collectives")
     ap.add_argument("--rocprof-dir", type=Path,
                     help="directory with rocprofv3 <pid>_rccl_api_stats.csv / _domain_stats.csv")
+    ap.add_argument("--rccl-dir", type=Path,
+                    help="where NCCL_DEBUG_FILE wrote one RCCL log per process (default: the run "
+                         "directory). Serving keeps them beside the server logs, training beside "
+                         "the traces, since its run directory is madengine's and not writable "
+                         "from the container")
     ap.add_argument("--trace-root", type=Path,
                     help="where to look for torch profiler traces (default: the run directory). "
                          "The engine maps what it finds to phases")
@@ -135,11 +140,16 @@ def main(argv: list | None = None) -> None:
     spec = apply_limit_overrides(spec, args)
 
     cache = ParseCache(args.parse_cache)
-    logs = [log for log, _node, _phase in discover_logs(args.run_dir, spec)]
+    found = discover_logs(args.run_dir, spec, args.rccl_dir)
+    per_rank = [log for log, _n, _p, layout in found if layout.written_by == LOG_PER_RANK]
+    if per_rank:
+        print(f"{len(per_rank)} per-rank RCCL log(s) from NCCL_DEBUG_FILE under "
+              f"{args.rccl_dir or args.run_dir}")
     phases = cache.get(
         f"logs of {args.run_dir}",
-        file_signature(logs) + [spec.name, spec.limits.max_msg_bytes, spec.limits.max_nranks],
-        partial(parse_run, args.run_dir, spec),
+        file_signature([log for log, _n, _p, _l in found])
+        + [spec.name, spec.limits.max_msg_bytes, spec.limits.max_nranks],
+        partial(parse_run, args.run_dir, spec, args.rccl_dir),
         encode=lambda ps: {name: p.to_state() for name, p in ps.items()},
         decode=lambda st: {name: Phase.from_state(s) for name, s in st.items()},
     )

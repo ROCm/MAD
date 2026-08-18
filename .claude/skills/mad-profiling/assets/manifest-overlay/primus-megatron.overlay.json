@@ -14,12 +14,13 @@
         "name": "gpu_info_vram_profiler"
       }
     ],
-    "_comment_docker_env_vars": "COLL in the subsystem list is the addition that matters: the base template ships NCCL_DEBUG_SUBSYS=INIT,NET, which records communicator setup and no collectives, so the run succeeds and the report comes out empty. PRIMUS_WORKSPACE puts the experiment root, and with it the torch traces, on shared storage. <FILL_PROF_ROOT> is a shared-FS directory for this run's profiling artifacts, e.g. /shared/rundir/prof_llama70b_4n.",
+    "_comment_docker_env_vars": "COLL in the subsystem list is the addition that matters: the base template ships NCCL_DEBUG_SUBSYS=INIT,NET, which records communicator setup and no collectives, so the run succeeds and the report comes out empty. PRIMUS_WORKSPACE puts the experiment root, and with it the torch traces, on shared storage. RCCL_LOG_DIR makes MAD's dtype loop give each rank its own RCCL file (NCCL_DEBUG_FILE) instead of interleaving eight of them in the node's stdout: it removes the torn records the parser would otherwise have to detect, and it logs every rank rather than the few torchrun's --local-ranks-filter admits. Point the analysis at it with `--rccl-dir <FILL_PROF_ROOT>/rccl`. <FILL_PROF_ROOT> is a shared-FS directory for this run's profiling artifacts, e.g. /shared/rundir/prof_llama70b_4n.",
     "docker_env_vars": {
       "NCCL_DEBUG": "INFO",
       "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
       "RCCL_DEBUG": "INFO",
-      "PRIMUS_WORKSPACE": "<FILL_PROF_ROOT>/primus_out"
+      "PRIMUS_WORKSPACE": "<FILL_PROF_ROOT>/primus_out",
+      "RCCL_LOG_DIR": "<FILL_PROF_ROOT>/rccl"
     },
     "_comment_docker_mounts": "Keys are container paths, values are host paths; madengine renders -v <value>:<key>. The profiling root is mounted at the same path on both sides so PRIMUS_WORKSPACE means one thing inside the container and out, and it must be on shared FS because every node writes into it. The second entry replaces one of the image's stock experiment configs with the profiler-enabled copy; repeat it per datatype phase being measured (e.g. BF16 and FP8), since each phase is one YAML and becomes one report.",
     "docker_mounts": {
@@ -28,7 +29,7 @@
     }
   },
   "deployment_config": {
-    "_comment_env_vars": "The same variables again, because context.docker_env_vars reaches the container while deployment_config.env_vars stops at the SLURM launcher, and a profiled run needs both to agree. PRIMUS_WORKSPACE is deliberately absent here: it names a container-side path.",
+    "_comment_env_vars": "The same variables again, because context.docker_env_vars reaches the container while deployment_config.env_vars stops at the SLURM launcher, and a profiled run needs both to agree. PRIMUS_WORKSPACE and RCCL_LOG_DIR are deliberately absent here: both name container-side paths.",
     "env_vars": {
       "NCCL_DEBUG": "INFO",
       "NCCL_DEBUG_SUBSYS": "INIT,NET,COLL",
