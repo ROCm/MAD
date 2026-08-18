@@ -97,6 +97,11 @@ files with `--rccl-dir` when they are not under the run directory:
 collective_report.py --run-dir <run> --rccl-dir <prof-root>/rccl --out-dir reports/<name>
 ```
 
+Budget the disk for it: nothing is filtered away any more, so a 4-node serving job leaves about
+8 GB of RCCL text and a training job with two datatype phases about half a gigabyte per phase.
+The lines repeat, so `gzip` takes an inference run's 8 GB down to under 100 MB in seconds, and the
+parser reads `.log.gz` as readily as `.log` — compress them once the run is done.
+
 ## Log volume is a capacity question
 
 `NCCL_DEBUG=INFO` writes a line per collective. A decode node produces about 2 GB per

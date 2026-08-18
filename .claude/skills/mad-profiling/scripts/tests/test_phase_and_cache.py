@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from conftest import coll_line, write
 
 from collprof.core.cache import PARSE_VERSION, ParseCache, file_signature
@@ -84,3 +85,32 @@ def test_caching_off_still_parses(tmp_path: Path):
     cache = ParseCache(None)
     assert cache.get("k", [1], lambda: "value") == "value"
     cache.flush()
+
+
+def test_a_truncated_cache_costs_a_reparse_and_not_the_run(tmp_path: Path, capsys):
+    """A disk that filled up mid-write left a 0-byte pickle, and every later run died on it."""
+    cache_path = tmp_path / "cache.pkl"
+    cache_path.write_bytes(b"")
+
+    cache = ParseCache(cache_path)
+    assert cache.get("logs", [1], lambda: "parsed") == "parsed"
+    assert "ignoring unreadable parse cache" in capsys.readouterr().out
+    cache.flush()
+    assert ParseCache(cache_path).store["logs"]["data"] == "parsed"
+
+
+def test_a_failed_write_leaves_the_previous_cache_intact(tmp_path: Path, monkeypatch):
+    cache_path = tmp_path / "cache.pkl"
+    cache = ParseCache(cache_path)
+    cache.get("logs", [1], lambda: "first")
+    cache.flush()
+    good = cache_path.read_bytes()
+
+    cache = ParseCache(cache_path)
+    cache.get("logs", [2], lambda: "second")
+    monkeypatch.setattr("collprof.core.cache.pickle.dump",
+                        lambda *_, **__: (_ for _ in ()).throw(OSError("Disk quota exceeded")))
+    with pytest.raises(OSError):
+        cache.flush()
+    assert cache_path.read_bytes() == good
+    assert not list(tmp_path.glob("*.tmp")), "the temporary file must not be left behind"

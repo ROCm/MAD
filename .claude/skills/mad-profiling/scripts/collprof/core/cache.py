@@ -8,7 +8,9 @@ and stale logic are reparsed rather than trusted.
 
 from __future__ import annotations
 
+import os
 import pickle
+import tempfile
 from pathlib import Path
 
 #: Bumped whenever parsing or validation changes, so caches built by the previous logic are not
@@ -27,8 +29,19 @@ class ParseCache:
 
     def __init__(self, path: Path | None):
         self.path = path
-        self.store = pickle.loads(path.read_bytes()) if path and path.exists() else {}
+        self.store = self._load(path)
         self.dirty = False
+
+    @staticmethod
+    def _load(path: Path | None) -> dict:
+        """A cache is an optimisation: anything unreadable is a reparse, never an error."""
+        if not path or not path.exists():
+            return {}
+        try:
+            return pickle.loads(path.read_bytes())
+        except Exception as exc:
+            print(f"ignoring unreadable parse cache {path}: {exc}")
+            return {}
 
     def get(self, key: str, signature: list, compute, encode=None, decode=None):
         entry = self.store.get(key)
@@ -42,6 +55,15 @@ class ParseCache:
         return value
 
     def flush(self) -> None:
-        if self.path and self.dirty:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_bytes(pickle.dumps(self.store))
+        """Write through a temporary file: a full disk must not leave a truncated cache behind."""
+        if not (self.path and self.dirty):
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=self.path.name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                pickle.dump(self.store, f)
+            os.replace(tmp, self.path)
+        except Exception:
+            Path(tmp).unlink(missing_ok=True)
+            raise
