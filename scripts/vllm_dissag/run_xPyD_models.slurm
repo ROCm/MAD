@@ -76,7 +76,25 @@ echo "Running from: $(pwd)"
 # model's own recipe — GLM-5.1 DSA needs block=1 + AITER MLA on), while a genuine
 # submit-time `-e VAR=...` still wins. Precedence: image-baked < models.yaml < submit -e.
 # Captured HERE (before the slurm sets any defaults) so it reflects user intent only.
-_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES USE_INDUCTOR_GRAPH_PARTITION VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+# This list MUST cover every key any models.yaml `env:` block can set. A key that is
+# missing here can never enter MODELS_YAML_PROTECT, so the recipe silently overrides
+# the operator's `-e` for it — which would break the precedence stated above (and in
+# ARCHITECTURE.md) for whichever model owns that key. Keep in sync with models.yaml.
+_RECIPE_ENV_KEYS="\
+VLLM_USE_V1 VLLM_USE_LAYERNAME \
+VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES \
+USE_INDUCTOR_GRAPH_PARTITION TORCHINDUCTOR_BENCHMARK_KERNEL \
+KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION \
+VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA \
+VLLM_ROCM_USE_AITER_MHA VLLM_ROCM_USE_AITER_PAGED_ATTN VLLM_ROCM_USE_AITER_TRITON_BF16_GEMM \
+VLLM_USE_AITER_TRITON_ROPE VLLM_USE_AITER_TRITON_SILU_MUL VLLM_USE_AITER_UNIFIED_ATTENTION \
+VLLM_V1_USE_PREFILL_DECODE_ATTENTION VLLM_SPARSE_INDEXER_MAX_LOGITS_MB \
+AMDGCN_USE_BUFFER_OPS ROCM_TRITON_MOE_PRESHUFFLE_SCALES \
+TRITON_HIP_ASYNC_COPY_BYPASS_PERMUTE TRITON_HIP_ASYNC_FAST_SWIZZLE \
+TRITON_HIP_USE_ASYNC_COPY TRITON_HIP_USE_BLOCK_PINGPONG \
+VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE \
+TORCH_NCCL_ENABLE_MONITORING TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC TORCH_NCCL_DUMP_ON_TIMEOUT \
+TORCH_NCCL_BLOCKING_WAIT TORCH_NCCL_ASYNC_ERROR_HANDLING NCCL_IB_TIMEOUT"
 MODELS_YAML_PROTECT=""
 for _k in $_RECIPE_ENV_KEYS; do
     [ -n "${!_k+x}" ] && MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT} ${_k}"
@@ -426,14 +444,18 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-# Pick the routable fabric IP, not just hostname -I's first entry. These nodes expose
-# multiple NICs (e.g. a 10.224.x overlay listed BEFORE the routable 10.158.x fabric);
+# Optionally pick the routable fabric IP instead of hostname -I's first entry. Some
+# clusters expose multiple NICs (e.g. an overlay listed BEFORE the routable fabric);
 # taking $1 blindly can advertise an unreachable addr -> prefill/decode barrier hangs
-# "Waiting for nodes" forever. Prefer FABRIC_SUBNET (default 10.158.), fall back to $1.
-FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
+# "Waiting for nodes" forever. OPT-IN, and cluster-specific: set FABRIC_SUBNET to your
+# fabric's address prefix (e.g. `-e FABRIC_SUBNET=10.158.`) to select it. UNSET (the
+# default) = take $1, i.e. unchanged behaviour for every existing model/cluster. No
+# subnet is hardcoded here because the right one is a property of the site, not of MAD.
+FABRIC_SUBNET="${FABRIC_SUBNET:-}"
 # From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
 _pick_fabric_ip() {
-    awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
+    awk -v pfx="$FABRIC_SUBNET" \
+        '{f=$1; if (pfx != "") for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
 }
 MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | _pick_fabric_ip)
 MASTER_PORT=39566  # Choose an open port
@@ -555,11 +577,12 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        # Require a regular file AFTER symlink resolution: these mounts are built on
-        # ONE node but applied on ALL nodes, and vendor NIC libs (e.g. libionic.so.1)
-        # can be a DANGLING symlink on some nodes -> bind-mount fails "not a directory"
-        # -> container create exit 125. `-f` (follows symlink, requires regular file)
-        # skips those; the fabric in use (mlx5) is still mounted where present.
+        # Require a regular file AFTER symlink resolution. `-e` accepts anything the
+        # path resolves to, including a directory (or a symlink to one) that happens to
+        # match a vendor NIC lib glob; docker then bind-mounts a directory onto a file
+        # target -> "not a directory" -> container create exit 125. `-f` also follows
+        # symlinks but additionally requires a regular file, so those are skipped; the
+        # fabric in use (mlx5) is still mounted where present.
         [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
@@ -589,8 +612,6 @@ docker run --rm \
     -v $NIXL_REPO_DIR:$NIXL_COOKBOOK_PATH \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     ${_JIT_CACHE_MOUNT} \
-    ${GLM_KERNEL_PATCH:+-v ${GLM_KERNEL_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py:ro} \
-    ${GLM_BACKEND_PATCH:+-v ${GLM_BACKEND_PATCH}:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py:ro} \
     $_RDMA_MOUNTS \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
@@ -621,6 +642,7 @@ docker run --rm \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     -e MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT:-}" \
+    ${FABRIC_SUBNET:+-e FABRIC_SUBNET=$FABRIC_SUBNET} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \

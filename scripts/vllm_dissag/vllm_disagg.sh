@@ -86,12 +86,14 @@ IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
-# Prefer the routable fabric IP (FABRIC_SUBNET, default 10.158.) over hostname -I's
-# first entry: nodes with a 10.224.x overlay listed first would bind the socket_barrier
-# / advertise host_ip on an unreachable NIC -> prefill<->decode barrier hangs "Waiting
-# for nodes". Matches the IPADDRS selection in run_xPyD_models.slurm. Falls back to $1.
-FABRIC_SUBNET="${FABRIC_SUBNET:-10.158.}"
-host_ip=$(hostname -I | awk -v pfx="$FABRIC_SUBNET" '{f=$1; for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}')
+# Optionally prefer the routable fabric IP over hostname -I's first entry: on a node
+# whose overlay NIC is listed first, binding socket_barrier / advertising host_ip on
+# that NIC hangs the prefill<->decode barrier at "Waiting for nodes". Opt-in via
+# FABRIC_SUBNET (the slurm forwards it via docker -e, so both sides pick the same
+# NIC); unset = take $1, unchanged. Matches the IPADDRS selection in the slurm.
+FABRIC_SUBNET="${FABRIC_SUBNET:-}"
+host_ip=$(hostname -I | awk -v pfx="$FABRIC_SUBNET" \
+    '{f=$1; if (pfx != "") for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}')
 host_name=$(hostname)
 
 # =============================================================================
@@ -166,7 +168,8 @@ if [[ -n "$MODEL_NAME" && -f "$MODELS_YAML" ]]; then
     export MODELS_YAML MODEL_NAME PARALLEL_MODE
     # 1) Export per-model env: block FIRST (so connector ${VAR:-default} yields to it).
     #    Precedence: image-baked ENV  <  models.yaml env:  <  submit-time -e.
-    #    models.yaml MUST override image-baked ENV: a DeepSeek-tuned disagg image
+    #    models.yaml MUST override image-baked ENV: MAD's own Dockerfiles deliberately
+    #    bake no recipe env, but a site- or lab-built DeepSeek-tuned disagg image often
     #    bakes KV_BLOCK_SIZE=16 / VLLM_ROCM_USE_AITER_MLA=0 / VLLM_CUDAGRAPH_MODE=
     #    PIECEWISE etc. as container ENV, which would otherwise shadow a model's own
     #    recipe (GLM-5.1 DSA needs block=1 + AITER sparse MLA on). But a genuine
