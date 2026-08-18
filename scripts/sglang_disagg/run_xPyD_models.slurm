@@ -311,14 +311,31 @@ MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE
 # Prefer the 10.158.x fabric IP: nodes are multi-homed and picking the first
 # hostname -I address can land on a different subnet, which hangs the socket
 # barrier on mixed-subnet coordination. Cluster-specific (OCI useocpm2m fabric).
-MASTER_ADDR=$(echo "$MASTER_ADDR" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+# Fall back to the first address if no 10.158.x is present; fail fast if empty.
+MASTER_ADDR_RAW="$MASTER_ADDR"
+MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+if [ -z "$MASTER_ADDR" ]; then
+    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | awk '{print $1}')
+fi
+if [ -z "$MASTER_ADDR" ]; then
+    echo "ERROR: could not resolve MASTER_ADDR for node '$MASTER_NODE' from 'hostname -I' output: '$MASTER_ADDR_RAW'" >&2
+    exit 1
+fi
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
     IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+    IP_RAW="$IP"
+    IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+    if [ -z "$IP" ]; then
+        IP=$(echo "$IP_RAW" | awk '{print $1}')
+    fi
+    if [ -z "$IP" ]; then
+        echo "ERROR: could not resolve IP for node '$NODE' from 'hostname -I' output: '$IP_RAW'" >&2
+        exit 1
+    fi
     IPS+=("$IP")
 done
 

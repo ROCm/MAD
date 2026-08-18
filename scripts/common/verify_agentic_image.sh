@@ -101,7 +101,11 @@ fi
 #    `from mooncake.engine import TransferEngine` (see
 #    sglang/srt/distributed/device_communicators/mooncake_transfer_engine.py and
 #    MAD-private scripts/kvcache_transfer_bench/backends/mooncake/*.py).
-if docker run --rm --entrypoint bash "$IMG" -lc \
+#    RUN_MORI=1 uses the MoRI IO backend (matches the launcher's RUN_MORI gate),
+#    which does not require Mooncake, so skip this check there.
+if [[ "${RUN_MORI:-0}" == "1" ]]; then
+    echo "[verify][note] RUN_MORI=1 (MoRI IO backend): skipping Mooncake import check"
+elif docker run --rm --entrypoint bash "$IMG" -lc \
      'python3 -c "from mooncake.engine import TransferEngine" 2>/dev/null'; then
     ok "Mooncake transfer backend importable (mooncake.engine.TransferEngine)"
 else

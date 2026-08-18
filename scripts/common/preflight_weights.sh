@@ -24,12 +24,23 @@ target="$MODEL_DIR/$MODEL_NAME"
 echo "[preflight] checking $target on: $NODELIST"
 
 # One task per node; each prints PRESENT/MISSING with its hostname.
+# Do NOT mask srun's stderr: a failed srun (or empty output) must be a hard
+# failure, otherwise "no MISSING lines" would falsely PASS.
 out="$(srun -p "$PARTITION" --nodelist="$NODELIST" \
         --ntasks-per-node=1 --gres=gpu:1 --time=3 --overcommit bash -c \
         "if [ -d '$target' ] && [ -n \"\$(ls -A '$target' 2>/dev/null)\" ]; then \
-            echo \"\$(hostname) PRESENT\"; else echo \"\$(hostname) MISSING\"; fi" 2>/dev/null)"
+            echo \"\$(hostname) PRESENT\"; else echo \"\$(hostname) MISSING\"; fi")"
+rc=$?
 
 echo "$out" | sort
+if [ "$rc" -ne 0 ]; then
+    echo "[preflight][FAIL] srun failed (exit $rc) while checking $target on $NODELIST; cannot confirm weights." >&2
+    exit 1
+fi
+if [ -z "${out//[[:space:]]/}" ]; then
+    echo "[preflight][FAIL] srun produced no output checking $target on $NODELIST; cannot confirm weights." >&2
+    exit 1
+fi
 if echo "$out" | grep -q MISSING; then
     echo "[preflight][FAIL] some nodes lack $target. Pick from the confirmed set (008 030 038 083 087 099 119 122) or use MODEL_DIR=/shared_inference/models_blog (NFS, uniform)." >&2
     exit 1

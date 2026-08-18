@@ -132,6 +132,9 @@ def generate_corpus(profile, out_dir):
         for turn in range(n_turns):
             isl = samp(ISL_mu, ISL_sig, isl_lo, isl_hi)
             osl = samp(OSL_mu, OSL_sig, osl_lo, osl_hi)
+            # Floor division is deliberate: it keeps generated corpora byte-for-byte
+            # identical to the #173 committed corpora / pre-gate verify. Do NOT
+            # change to rounding/ceil — it would break reproducibility.
             total_blocks = max(1, isl // block)
             if turn == 0:
                 new_blocks = total_blocks

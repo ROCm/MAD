@@ -64,6 +64,11 @@ AIPERF_HF_CLI="${AIPERF_VENV}/bin/hf"
 AIPERF_DEPS_READY=0
 AIPERF_FAILED_REQUEST_THRESHOLD="${AIPERF_FAILED_REQUEST_THRESHOLD:-0.10}"
 
+# Pin the uv release rather than tracking "latest", and gate the remote install
+# behind an explicit opt-in (supply chain: don't silently pipe an unpinned
+# installer into sh). An already-installed uv on PATH is always preferred.
+AGENTIC_UV_VERSION="${AGENTIC_UV_VERSION:-0.5.11}"
+
 ensure_agentic_uv() {
     if command -v uv >/dev/null 2>&1; then
         AIPERF_UV_BIN="$(command -v uv)"
@@ -71,8 +76,11 @@ ensure_agentic_uv() {
     fi
     AIPERF_UV_BIN="${AIPERF_UV_INSTALL_DIR}/uv"
     if [ ! -x "$AIPERF_UV_BIN" ]; then
+        if [ "${AGENTIC_ALLOW_UV_INSTALL:-0}" != "1" ]; then
+            agentic_die "uv not found on PATH and no cached uv at $AIPERF_UV_BIN. Install uv (>= $AGENTIC_UV_VERSION) or set AGENTIC_ALLOW_UV_INSTALL=1 to permit the pinned remote install."
+        fi
         mkdir -p "$AIPERF_UV_INSTALL_DIR"
-        curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$AIPERF_UV_INSTALL_DIR" sh
+        curl -LsSf "https://astral.sh/uv/${AGENTIC_UV_VERSION}/install.sh" | UV_INSTALL_DIR="$AIPERF_UV_INSTALL_DIR" sh
     fi
     [ -x "$AIPERF_UV_BIN" ] || agentic_die "uv installation did not create $AIPERF_UV_BIN"
 }
