@@ -98,6 +98,38 @@ because both are actively harmful here: a C++ abort at `asm_mla.cu:945`, and a
 `hipErrorIllegalAddress` from the sentinel 0 -> -1 change respectively. Both are correct on
 older images — the gate is by image, not by model.
 
+**Sharing a node with another tenant: use a `models.yaml` overlay, don't edit the tracked
+file.** `MODEL_CONFIG_PREFILL`/`MODEL_CONFIG_DECODE` are composed from `models.yaml` alone
+(`vllm_disagg.sh:200-223`), so per-role flags like `--gpu-memory-utilization` and
+`--max-model-len` cannot be injected at submit time — only the protect-listed env keys can.
+Copy `models.yaml` to e.g. `models.tenant.yaml` beside it, edit the two `dp:` lines, and
+point `MODELS_YAML` at the **container-side** path: `$NIXL_REPO_DIR` is bind-mounted at
+`/opt/nixl-vllm-cookbook` (`run_xPyD_models.slurm:706`), so
+`MODELS_YAML=/opt/nixl-vllm-cookbook/models.tenant.yaml` resolves in-container while the
+tracked recipe stays clean. A host path silently fails. Verify from the flags echo, not the
+CLI you typed.
+
+**`--gpu-memory-utilization` is a fraction of TOTAL card capacity (287.98 GiB), not of free
+memory, and it cannot shrink the weights floor** (~107.8 GiB/rank here). Two different util
+values printing an identical `... GiB is allocated by PyTorch` means you are reading the
+floor, not a budget. With a co-tenant, vLLM's profiler counts the tenant's bytes as
+consumed, so `Available KV cache memory` can go **negative** while the startup check still
+demands `free >= util * total` — those two constraints become unsatisfiable and no util
+value boots. Wait for the node rather than tuning. Probe every card
+(`/sys/class/drm/card*/device/mem_info_vram_{used,total}`; note `card0` does not exist) in
+the same breath as the launch — occupancy here moved 300 GB -> 82 GB within minutes, and
+per-GPU.
+
+**Budget the first boot for AITER JIT.** `module_gemm_a8w8_blockscale_cktile` takes ~5 min
+of `hipcc` while every other worker prints `waiting for baton release`; a killed run leaves
+a 0-byte lock with an empty build dir and no compiler alive, which looks identical. Check
+`ps -eo etime,comm | grep hipcc` and the lock mtime. Do **not** delete the build dir under
+live workers — they race past the lock into `No module named
+'module_gemm_a8w8_blockscale_cktile'`. The cache is keyed by hostname
+(`~/.cache/vllm_jit/<host>/<image-hash>/aiter_jit/`), so check both nodes; the `.so` is
+portable between identical nodes and can just be copied. A peer dying with gloo
+`Connection closed by peer` while the other compiles is collateral, not the bug.
+
 ---
 
 ## 5. What this recipe does **not** fix
