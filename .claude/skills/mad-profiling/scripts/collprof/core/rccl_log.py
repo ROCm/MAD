@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 from .phase import (DAMAGE_MSG_CAP, DAMAGE_NO_TAIL, DAMAGE_NRANKS_RANGE, DAMAGE_RANK_RANGE,
-                    DAMAGE_TWO_RECORDS, DAMAGE_UNKNOWN_COLL, Phase)
+                    DAMAGE_TOPO_TRANSPORT, DAMAGE_TWO_RECORDS, DAMAGE_UNKNOWN_COLL, Phase)
 from .spec import NODE_FROM_PARENT, PHASE_FROM_MARKER, EngineSpec
 from .units import datatype
 
@@ -44,8 +44,38 @@ RE_COLL_TAIL = re.compile(
 # logged by rank 15 for `7 -> 15` still means data flows from 7 to 15.
 RE_TOPO = re.compile(
     r"NCCL INFO Channel (?P<channel>\d+)/\d+ : (?P<src>\d+)\[[0-9a-f]+\] -> "
-    r"(?P<dst>\d+)\[[0-9a-f]+\](?: \[(?P<dir>\w+)\])? via (?P<transport>[A-Za-z0-9/]+)"
+    r"(?P<dst>\d+)\[[0-9a-f]+\](?: \[(?P<dir>\w+)\])? via (?P<transport>[A-Za-z0-9/ ]+?)"
+    # Stop at the record tail, at the first character no transport name contains, or at the end of
+    # the line. Spaces are inside the name (`P2P/direct pointer`), so the end cannot be a space --
+    # and a torn line has to keep matching here, or it would be dropped without being counted.
+    r"(?= comm 0x|[^A-Za-z0-9/ ]|\s*$)"
 )
+
+#: Transports RCCL can name on a topology line, and which side of the node boundary each one is.
+#: These lines tear like every other line of a shared stdout, and the transport is where the damage
+#: shows: one serving report carried 20 edges over `PCCL`, `P50` and `localRank`, every one of them
+#: counted as inter-node on a role that has no inter-node communicator at all.
+TRANSPORT_SCOPES = (
+    (re.compile(r"^P2P/(?:IPC|CUMEM|direct pointer|indirect)(?:/read)?$"), "intra-node"),
+    (re.compile(r"^SHM(?:/\w+){0,2}$"), "intra-node"),
+    (re.compile(r"^LOC$"), "intra-node"),
+    (re.compile(r"^NET/\w+/\d+(?:/GDRDMA)?(?:/Shared)?$"), "inter-node"),
+    (re.compile(r"^COLLNET(?:/\w+)*$"), "inter-node"),
+    (re.compile(r"^(?:MNNVL|NVLS)(?:/\w+)*$"), "inter-node"),
+)
+
+
+def transport_scope(transport: str) -> str | None:
+    """``intra-node`` / ``inter-node`` for a transport RCCL can print, None for a torn one.
+
+    Anything unrecognised is treated as damage rather than as an unknown-but-real transport: the
+    strings arriving here are spliced prefixes of the real ones (``P2P/IPCrank``, ``P2P/Iproxy``),
+    so a prefix match would let most of them through.
+    """
+    for pattern, scope in TRANSPORT_SCOPES:
+        if pattern.match(transport):
+            return scope
+    return None
 
 #: Collective names RCCL can print. Anything else on an ``opCount`` line means the record was
 #: damaged in flight, which happens because a role's eight ranks share one stdout: a 2.7M-line
@@ -194,8 +224,11 @@ def parse_run(run_dir: Path, spec: EngineSpec) -> dict:
                 if " via " in line:
                     topo = RE_TOPO.search(line)
                     if topo:
-                        key = (int(topo.group("src")), int(topo.group("dst")),
-                               topo.group("transport"))
+                        transport = topo.group("transport")
+                        if transport_scope(transport) is None:
+                            current.topo_damage[DAMAGE_TOPO_TRANSPORT] += 1
+                            continue
+                        key = (int(topo.group("src")), int(topo.group("dst")), transport)
                         current.edges[key].add(int(topo.group("channel")))
                         continue
 

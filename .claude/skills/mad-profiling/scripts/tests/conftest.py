@@ -32,9 +32,15 @@ def coll_line(coll: str = "AllReduce", count: int = 1024, dtype: int = 9, nranks
     return line
 
 
-def topo_line(src: int = 0, dst: int = 1, channel: int = 0, transport: str = "P2P/IPC") -> str:
+def topo_line(src: int = 0, dst: int = 1, channel: int = 0, transport: str = "P2P/IPC",
+              nranks: int = 8) -> str:
+    """One connection RCCL prints while building a communicator, tail included.
+
+    The `comm 0x.. nRanks N` tail is what a real line carries; keeping it here means a torn-line
+    fixture is torn the way real ones are.
+    """
     return (f"worker:1:2 [{src}] NCCL INFO Channel {channel:02d}/02 : "
-            f"{src}[a0] -> {dst}[b1] via {transport}")
+            f"{src}[a0] -> {dst}[b1] via {transport} comm 0xabc nRanks {nranks:02d}")
 
 
 def trace_event(coll: str = "allreduce", nin: int = 512, nout: int = 512, group: int = 8,

@@ -21,6 +21,10 @@ DAMAGE_TWO_RECORDS = "two records spliced into one line"
 DAMAGE_NO_TAIL = "record tail missing where the log has them"
 DAMAGE_MSG_CAP = "message larger than the size cap"
 
+#: Topology lines tear the same way collective records do, and are counted separately because they
+#: feed a different table: a rejected one costs an edge, not volume.
+DAMAGE_TOPO_TRANSPORT = "topology line with an unknown transport"
+
 #: Rejections that mean "this bound may be too low for this run" rather than "the log is torn".
 BOUND_DAMAGE = (DAMAGE_MSG_CAP, DAMAGE_NRANKS_RANGE)
 
@@ -46,6 +50,9 @@ class Phase:
     ranks: set = field(default_factory=set)
     #: Rejection reason -> count. See the DAMAGE_* constants.
     damage: Counter = field(default_factory=Counter)
+    #: Same, for the topology lines behind ``edges``. Kept apart so the discarded share of
+    #: collective records stays a share of collective records.
+    topo_damage: Counter = field(default_factory=Counter)
 
     # -- metrics ---------------------------------------------------------------------------------
 
@@ -64,6 +71,10 @@ class Phase:
     @property
     def damaged(self) -> int:
         return sum(self.damage.values())
+
+    @property
+    def topo_damaged(self) -> int:
+        return sum(self.topo_damage.values())
 
     @property
     def nranks(self) -> int:
@@ -108,7 +119,7 @@ class Phase:
                 "per_node": dict(self.per_node), "per_rank": dict(self.per_rank),
                 "metrics": {k: dict(v) for k, v in self.metrics.items()},
                 "edges": dict(self.edges), "nodes": self.nodes, "ranks": self.ranks,
-                "damage": dict(self.damage)}
+                "damage": dict(self.damage), "topo_damage": dict(self.topo_damage)}
 
     @classmethod
     def from_state(cls, state: dict) -> "Phase":
@@ -121,4 +132,5 @@ class Phase:
         phase.edges.update(state["edges"])
         phase.nodes, phase.ranks = state["nodes"], state["ranks"]
         phase.damage.update(state["damage"])
+        phase.topo_damage.update(state.get("topo_damage", {}))
         return phase

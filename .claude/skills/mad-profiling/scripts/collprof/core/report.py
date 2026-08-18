@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .phase import BOUND_DAMAGE, Phase
+from .rccl_log import transport_scope
 from .spec import EngineSpec
 from .units import LATENCY_BOUND_BYTES, MIB, fmt_bytes, fmt_per_rank_calls
 from .workbook import write_workbook
@@ -137,7 +138,7 @@ def write_tables(view: PhaseView, sink: CsvSink, ctx: ReportContext) -> dict:
 
     edge_rows, matrix_cells = [], defaultdict(int)
     for (src, dst, transport), channels in sorted(phase.edges.items()):
-        scope = "intra-node" if transport.startswith("P2P") else "inter-node"
+        scope = transport_scope(transport)
         edge_rows.append([src, dst, transport, scope, len(channels),
                           ",".join(str(c) for c in sorted(channels))])
         matrix_cells[(src, dst)] += len(channels)
@@ -567,6 +568,11 @@ def section_connectivity(view: PhaseView, ctx: ReportContext, tables: dict) -> l
              "| scope | (pair, transport) rows | channels |", "|---|---:|---:|"]
     for scope, (conns, channels) in sorted(by_scope.items()):
         lines.append(f"| {scope} | {conns} | {channels} |")
+    if view.phase.topo_damaged:
+        lines += ["", f"A further {view.phase.topo_damaged} topology line(s) named no transport "
+                      "RCCL can print and were dropped as torn, so this table understates the "
+                      "connectivity rather than inventing edges. Before that check, their spliced "
+                      "transports counted as connections in their own right."]
     lines += ["", "This is measured **connectivity**, not measured traffic: RCCL logs which peers "
                   "a rank connects to and over which transport, but never how many bytes crossed "
                   "each edge. Per-edge volume can only be modelled from the ring or tree "

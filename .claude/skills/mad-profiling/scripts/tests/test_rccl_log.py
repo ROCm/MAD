@@ -9,8 +9,9 @@ import pytest
 from conftest import coll_line, topo_line, write
 
 from collprof.core.phase import (DAMAGE_MSG_CAP, DAMAGE_NO_TAIL, DAMAGE_NRANKS_RANGE,
-                                 DAMAGE_RANK_RANGE, DAMAGE_TWO_RECORDS, DAMAGE_UNKNOWN_COLL)
-from collprof.core.rccl_log import discover_logs, log_stem, parse_run
+                                 DAMAGE_RANK_RANGE, DAMAGE_TOPO_TRANSPORT, DAMAGE_TWO_RECORDS,
+                                 DAMAGE_UNKNOWN_COLL)
+from collprof.core.rccl_log import discover_logs, log_stem, parse_run, transport_scope
 from collprof.engines import primus, sglang_disagg
 
 
@@ -70,10 +71,56 @@ def test_declared_metrics_are_harvested_without_the_core_knowing_them(primus_run
 
 def test_topology_lines_become_edges(tmp_path: Path):
     write(tmp_path / "prefill_NODE0.log",
-          [coll_line(), topo_line(0, 1, 0), topo_line(0, 1, 1), topo_line(0, 7, 0, "IB/0")])
+          [coll_line(), topo_line(0, 1, 0), topo_line(0, 1, 1),
+           topo_line(0, 7, 0, "NET/IB/0/GDRDMA/Shared")])
     phase = parse_run(tmp_path, sglang_disagg.SPEC)["prefill"]
     assert phase.edges[(0, 1, "P2P/IPC")] == {0, 1}
-    assert phase.edges[(0, 7, "IB/0")] == {0}
+    assert phase.edges[(0, 7, "NET/IB/0/GDRDMA/Shared")] == {0}
+
+
+@pytest.mark.parametrize("transport, scope", [
+    ("P2P/IPC", "intra-node"),
+    ("P2P/direct pointer/read", "intra-node"),
+    ("SHM/direct/direct", "intra-node"),
+    ("LOC", "intra-node"),
+    ("NET/IB/3/GDRDMA/Shared", "inter-node"),
+    ("NET/Socket/0", "inter-node"),
+    # Every one of these reached a report as a transport before the whitelist, and each is a
+    # spliced prefix of a real name, which is why the match has to be exact.
+    ("P2P/IPCrank", None),
+    ("P2P/Iproxy", None),
+    ("PCCL", None),
+    ("P50", None),
+    ("localRank", None),
+])
+def test_only_transports_rccl_can_print_are_recognised(transport: str, scope: str | None):
+    assert transport_scope(transport) == scope
+
+
+def test_a_torn_topology_line_is_counted_instead_of_becoming_an_edge(tmp_path: Path):
+    """20 such lines once made a prefill report claim inter-node links it could not have."""
+    write(tmp_path / "prefill_NODE0.log",
+          [coll_line(), topo_line(0, 1, 0), topo_line(0, 3, 1, "P2P/IPCrank"),
+           topo_line(0, 5, 2, "PCCL")])
+    phase = parse_run(tmp_path, sglang_disagg.SPEC)["prefill"]
+    assert list(phase.edges) == [(0, 1, "P2P/IPC")]
+    assert phase.topo_damage[DAMAGE_TOPO_TRANSPORT] == 2
+    # Topology damage says nothing about the volume, so it stays out of the record share.
+    assert not phase.damage
+
+
+def test_a_topology_line_torn_mid_transport_is_still_counted(tmp_path: Path):
+    """The overwriting write brings punctuation with it, which must not end the match early.
+
+    A transport pattern that gave up at the first `:` or `[` left these lines matching nothing at
+    all -- neither an edge nor a rejection -- which is the one outcome the damage counters exist to
+    prevent. Twelve lines of one real prefill log disappeared that way.
+    """
+    torn = topo_line(0, 3, 1).split(" comm ")[0] + "rank 3 worker:1:2 [4] NCCL INFO Channel 07/0"
+    write(tmp_path / "prefill_NODE0.log", [coll_line(), topo_line(0, 1, 0), torn])
+    phase = parse_run(tmp_path, sglang_disagg.SPEC)["prefill"]
+    assert list(phase.edges) == [(0, 1, "P2P/IPC")]
+    assert phase.topo_damage[DAMAGE_TOPO_TRANSPORT] == 1
 
 
 def test_the_rank_comes_from_globalrank_not_from_the_pid(tmp_path: Path):

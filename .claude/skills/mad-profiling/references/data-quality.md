@@ -33,6 +33,22 @@ that prefix is the part tearing corrupts most often.
 Every rejection is counted by reason, listed in the report and written to
 `discarded_records.csv`.
 
+## Topology lines are judged too
+
+The `NCCL INFO Channel .. : src -> dst via ..` lines behind the connectivity table tear the
+same way, and there the damage lands in the transport name. The transport must match a name
+RCCL can print exactly (`P2P/IPC`, `NET/IB/3/GDRDMA/Shared`, `SHM/direct/direct`, `LOC`, ...);
+a prefix match is not enough, because the spliced strings are prefixes of the real ones —
+`P2P/IPCrank`, `P2P/Iproxy`, `PCCL`, `P50`, `localRank` all reached a report as transports
+before the check existed, and a scope rule of "anything not starting with `P2P` is inter-node"
+turned 20 of them into inter-node links on a prefill role that has no inter-node communicator
+at all.
+
+Rejected topology lines are counted separately from collective records — a lost one costs an
+edge, not volume — and the connectivity section says how many, so a short table is not read as
+a sparse fabric. Whether a real transport is intra- or inter-node comes from the same table
+(`transport_scope()` in `core/rccl_log.py`), not from a guess about its name.
+
 ## When a bound rejects real records
 
 The bounds are properties of a run's scale, not of the parser:

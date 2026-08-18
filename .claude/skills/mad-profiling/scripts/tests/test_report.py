@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
-from conftest import coll_line, trace_event, write
+from conftest import coll_line, topo_line, trace_event, write
 
 from collprof import engines
 from collprof.cli import main
@@ -66,6 +66,17 @@ def test_discarded_records_are_broken_down_by_reason(sglang_run: Path, tmp_path:
     assert "Discarded as unusable: 1 of" in text
     assert "unknown collective name: 1" in text
     assert "share one stdout" in text, "the cause of the damage comes from the engine's notes"
+
+
+def test_a_dropped_topology_line_is_admitted_where_the_connectivity_table_is(sglang_run: Path,
+                                                                             tmp_path: Path):
+    """The reader of that table has to know it is short, or a missing edge reads as no edge."""
+    log = sglang_run / "prefill_NODE0.log"
+    log.write_text(log.read_text() + topo_line(0, 5, 3, "PCCL") + "\n")
+    text = build(sglang_run, tmp_path / "out")["prefill"]
+    assert "1 topology line(s) named no transport RCCL can print" in text
+    # The share of discarded collective records is about collective records only.
+    assert "Discarded as unusable" not in text
 
 
 def test_an_engine_that_claims_no_cause_of_damage_has_none_stated(sglang_run: Path, tmp_path: Path):
