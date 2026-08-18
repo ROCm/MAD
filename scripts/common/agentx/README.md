@@ -26,6 +26,37 @@ model, the generate/verify tools, and the Tier 1 / Tier 2 knobs. The launcher /
 disaggregated-serving integration and the deep env/run-path reference are out of
 scope here (see [See also](#see-also)).
 
+## Onboarding new users
+
+New to AgentX? Follow this path:
+
+1. **Read the launcher entry point** — [sglang_disagg/README.MD](../../sglang_disagg/README.MD)
+   (the agentic-replay section) for how a real run is invoked end-to-end, then
+   this README for the config/profile model.
+2. **Copy-paste a scenario** — [SCENARIOS.md](SCENARIOS.md) has a ready `agentic.yaml`
+   for every workload shape. Start from the one closest to your goal.
+3. **Understand the mechanism** (optional) — [HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains
+   why the replay is reproducible and how each knob maps to prefill/decode/cache.
+
+Two commands to try first:
+
+- **Preview with no server** — resolve the plan and print every assembled aiperf
+  command in under a second, without contacting a server, downloading, or replaying:
+
+```bash
+DRY_RUN=1 AGENTIC_CONFIG=agentic.yaml bash scripts/common/benchmark_agentic_suite.sh
+```
+
+- **Fast smoke run** — `AGENTIC_WORKLOAD=small` uses the shipped
+  [profiles/small.yaml](profiles/small.yaml): a generated corpus with tiny ISL
+  (`2k-6k` tokens) so it materializes, verifies, and replays quickly. Note it is
+  still 200 sessions (fast because the prompts are small, not because the corpus
+  is tiny):
+
+```bash
+AGENTIC_WORKLOAD=small bash scripts/common/benchmark_agentic_suite.sh
+```
+
 ## What AgentX adds on top of aiperf
 
 aiperf's `inferencex-agentx-mvp` scenario provides the base: an agentic trace
