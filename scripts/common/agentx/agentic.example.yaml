@@ -23,6 +23,7 @@ serving:
 run:
   concurrency: [2, 4, 8]   # scalar or list; >=2 (warmup-credit floor). Swept per workload.
   duration: 900            # measured window (s); scenario minimum is 900 for a valid submission
+  scenario: inferencex-agentx-mvp   # aiperf --scenario; override per run (or env AGENTIC_SCENARIO)
 
 workloads:
   # Case-A: generated conformance corpus (ExplainX targets), inherits the shipped preset.
@@ -57,6 +58,16 @@ workloads:
       max_isl: 200000            # drop sessions with any turn over 200k input tokens
       max_turns: 40              # truncate each session to its first 40 turns
       sample: 100                # randomly keep 100 sessions (seed=42)
+
+  # Replay an EXISTING on-disk weka_trace corpus as-is (no generate, no download).
+  # `input_dir` must be a directory of session_XXXXX.json files. Uncomment a
+  # `preset:` (or inline distribution fields) to run verify_agentx_profile.py as
+  # an optional pre-gate; with none, the corpus is replayed without verification.
+  - name: my_corpus
+    source: corpus
+    input_dir: /tmp/agentx_corpora/conformance_256k
+    # preset: conformance_256k      # optional: verify the corpus against this profile
+    # isl_tail: 262144              # optional: override the context-gating ISL tail
 
   # A user-added custom case, defined inline (no preset). Copy profiles/custom.example.yaml
   # fields here, or reference your own profile via `preset: <name>` after dropping it in profiles/.

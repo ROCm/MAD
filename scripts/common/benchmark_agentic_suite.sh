@@ -51,6 +51,7 @@ if [ "${SUITE_SERVING_MODEL}" != "auto" ]; then MODEL="${MODEL:-$SUITE_SERVING_M
 if [ "${SUITE_PORT}" != "auto" ]; then AGENTIC_PORT="$SUITE_PORT"; fi
 if [ "${SUITE_SERVER_METRICS}" != "auto" ]; then AGENTIC_SERVER_METRICS="$SUITE_SERVER_METRICS"; fi
 MAX_MODEL_LEN="${SUITE_MAX_MODEL_LEN}"
+export AGENTIC_SCENARIO="$SUITE_SCENARIO"
 
 _is_dry=0
 [ "${DRY_RUN:-0}" = "1" ] && _is_dry=1
@@ -67,6 +68,7 @@ if [ "$_is_dry" = "1" ]; then
   serving.server_metrics : ${SUITE_SERVER_METRICS}
   run.concurrency        : ${SUITE_CONCURRENCY}
   run.duration           : ${SUITE_DURATION}
+  run.scenario           : ${SUITE_SCENARIO}
   workloads (${SUITE_WORKLOAD_NAMES})
   RESULT_DIR             : ${RESULT_DIR}
   SUITE_CORPUS_DIR       : ${SUITE_CORPUS_DIR}
@@ -97,12 +99,25 @@ for name in $SUITE_WORKLOAD_NAMES; do
     WL_LOADER=""; WL_PROFILE_FILE=""; WL_MODEL_TAG=""
     WL_NUM_DATASET_ENTRIES=""; WL_TRAJ_MIN=""; WL_TRAJ_MAX=""
     WL_FILTER_MAX_ISL=""; WL_FILTER_MAX_TURNS=""; WL_FILTER_SAMPLE=""
+    WL_INPUT_DIR=""; WL_SCENARIO=""
     eval "$_wl_shell"
+
+    # Scenario: suite default, overridden per-workload (re-derived each iteration
+    # so a per-workload override doesn't leak into the next one).
+    AGENTIC_SCENARIO="$SUITE_SCENARIO"
+    [ -n "$WL_SCENARIO" ] && AGENTIC_SCENARIO="$WL_SCENARIO"
+    export AGENTIC_SCENARIO
 
     # Per-workload trace source + env.
     CORPUS_DIR=""
     if [ "$WL_SOURCE" = "hf" ]; then
         WEKA_LOADER_OVERRIDE="$WL_LOADER"
+    elif [ "$WL_SOURCE" = "corpus" ]; then
+        CORPUS_DIR="$WL_INPUT_DIR"
+        if [ "$_is_dry" != "1" ]; then
+            { [ -n "$CORPUS_DIR" ] && [ -d "$CORPUS_DIR" ] && [ -n "$(ls -A "$CORPUS_DIR" 2>/dev/null)" ]; } \
+                || agentic_die "[$name] source=corpus input_dir not found or empty: $CORPUS_DIR"
+        fi
     fi
     export WL_SOURCE CORPUS_DIR
 
@@ -136,6 +151,16 @@ for name in $SUITE_WORKLOAD_NAMES; do
             materialize_hf_corpus "$name" "$WL_LOADER"
         fi
         export CORPUS_DIR
+    elif [ "$WL_SOURCE" = "corpus" ]; then
+        # Existing on-disk corpus replayed as-is (CORPUS_DIR already set above).
+        # Optional pre-gate: verify only if the entry supplied a profile/preset.
+        if [ "$_is_dry" != "1" ] && [ -n "$WL_PROFILE_FILE" ]; then
+            agentic_log "verifying corpus '$name' against supplied profile (pre-gate)"
+            _verify_out="$("${AIPERF_PYTHON:-python3}" "$AGENTX_DIR/verify_agentx_profile.py" \
+                --profile "$WL_PROFILE_FILE" --corpus "$CORPUS_DIR")" || {
+                echo "$_verify_out"; agentic_die "corpus '$name' failed conformance pre-gate (not N/N)"; }
+            echo "$_verify_out"
+        fi
     fi
 
     resolve_trace_loader
@@ -156,6 +181,7 @@ for name in $SUITE_WORKLOAD_NAMES; do
             cat <<EOF
 
 [agentic][DRY_RUN] workload='${name}' source='${WL_SOURCE}' conc=${conc} duration=${DURATION}
+  scenario               : ${AGENTIC_SCENARIO}
   context verdict        : ${CONTEXT_VERDICT} (--max-context-length ${AGENTIC_MAX_CONTEXT_LENGTH})
   trace source           : ${TRACE_SOURCE_FLAG}
   result dir             : ${_rdir}

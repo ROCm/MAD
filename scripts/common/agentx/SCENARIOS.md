@@ -309,7 +309,10 @@ aiperf profile --scenario inferencex-agentx-mvp --url http://localhost:2322 --en
 
 Notes: `source: profile` replays near-complete sessions
 (`--trajectory-start-*-ratio 0.90/0.98`); hf workloads default to `0.25/0.75`.
-The leading `aiperf` is the isolated venv's aiperf CLI path at run time.
+The leading `aiperf` is the isolated venv's aiperf CLI path at run time. The
+`--scenario` value defaults to `inferencex-agentx-mvp` and is configurable via
+`run.scenario` (or the `AGENTIC_SCENARIO` env, with an optional per-workload
+`scenario:` override).
 
 ---
 

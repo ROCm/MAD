@@ -10,6 +10,8 @@ workload entry is either:
   - source: profile  -> carries the distribution params inline, or `preset: conformance_256k`
                         to inherit scripts/common/agentx/profiles/conformance_256k.yaml
   - source: hf       -> carries a `loader` name (an aiperf --public-dataset id)
+  - source: corpus   -> replays an existing on-disk weka_trace corpus (`input_dir`)
+                        as-is; optional profile/preset enables a verify pre-gate
 
 Design notes:
   * Runs in the aiperf venv. Uses PyYAML if importable; otherwise falls back to a
@@ -44,7 +46,8 @@ _RUN_KEYS = ("concurrency", "duration")
 # Keys that steer resolution / run knobs but are NOT part of a generator profile
 # dict (so they are stripped when building the source=profile profile JSON).
 _CONTROL_KEYS = ("source", "preset", "loader", "filter",
-                 "num_dataset_entries", "trajectory") + _RUN_KEYS
+                 "num_dataset_entries", "trajectory",
+                 "input_dir", "isl_tail", "scenario") + _RUN_KEYS
 
 
 # --------------------------------------------------------------------------
@@ -306,6 +309,7 @@ def _resolve_workload_entry(entry, _visited=None):
         "num_dataset_entries": nde,
         "traj_min": tmin,
         "traj_max": tmax,
+        "scenario": merged.get("scenario"),
     }
     if src == "profile":
         prof = _profile_from_merged(merged, name)
@@ -315,6 +319,27 @@ def _resolve_workload_entry(entry, _visited=None):
         wl["loader"] = merged.get("loader", "")
         wl["isl_tail"] = _hf_isl_tail(wl["loader"])
         wl["filter"] = merged.get("filter") or {}
+    elif src == "corpus":
+        input_dir = merged.get("input_dir")
+        if not input_dir:
+            raise ValueError(f"workload '{name}': source=corpus requires input_dir")
+        wl["input_dir"] = input_dir
+        # Optional verification profile: build one only if the entry supplies
+        # distribution fields (inline) or inherited a preset. Otherwise replay
+        # the corpus as-is with no pre-gate.
+        prof = _profile_from_merged(merged, name)
+        has_profile = any(k != "name" for k in prof) or bool(entry.get("preset"))
+        if has_profile:
+            wl["profile"] = prof
+        # ISL tail (context gating): explicit key > profile-derived > conservative
+        # default (same fallback the hf-unknown path uses; the gate caps to the
+        # served window, so over-estimation only over-WARNs).
+        if merged.get("isl_tail") is not None:
+            wl["isl_tail"] = int(merged["isl_tail"])
+        elif has_profile:
+            wl["isl_tail"] = _isl_tail(prof)
+        else:
+            wl["isl_tail"] = 1048576
     else:
         raise ValueError(f"workload '{name}': unknown source '{src}'")
     return wl
@@ -352,6 +377,8 @@ def resolve_config(config):
         run["concurrency"] = env["AGENTIC_CONC"]
     if env.get("DURATION"):
         run["duration"] = int(env["DURATION"])
+    if env.get("AGENTIC_SCENARIO"):
+        run["scenario"] = env["AGENTIC_SCENARIO"]
 
     serving.setdefault("model", "auto")
     serving.setdefault("max_model_len", 0)
@@ -359,6 +386,7 @@ def resolve_config(config):
     serving.setdefault("server_metrics", "auto")
     run.setdefault("concurrency", 16)
     run.setdefault("duration", 900)
+    run.setdefault("scenario", "inferencex-agentx-mvp")
 
     workloads = []
     for entry in config.get("workloads", []) or []:
@@ -413,6 +441,7 @@ def emit_config_shell(resolved):
     out.append(f"SUITE_SERVER_METRICS={_sh(s['server_metrics'])}")
     out.append(f"SUITE_CONCURRENCY={_sh(_norm_concurrency(r['concurrency']))}")
     out.append(f"SUITE_DURATION={_sh(r['duration'])}")
+    out.append(f"SUITE_SCENARIO={_sh(r['scenario'])}")
     out.append(f"SUITE_WORKLOAD_NAMES={_sh(' '.join(names))}")
     return "\n".join(out)
 
@@ -436,6 +465,7 @@ def emit_workload_shell(resolved, name, profile_out):
         f"WL_NUM_DATASET_ENTRIES={_sh(_opt(wl.get('num_dataset_entries')))}",
         f"WL_TRAJ_MIN={_sh(_opt(wl.get('traj_min')))}",
         f"WL_TRAJ_MAX={_sh(_opt(wl.get('traj_max')))}",
+        f"WL_SCENARIO={_sh(_opt(wl.get('scenario')))}",
     ]
     if wl["source"] == "hf":
         out.append(f"WL_LOADER={_sh(wl.get('loader', ''))}")
@@ -444,11 +474,27 @@ def emit_workload_shell(resolved, name, profile_out):
         out.append(f"WL_FILTER_MAX_TURNS={_sh(_opt(f.get('max_turns')))}")
         out.append(f"WL_FILTER_SAMPLE={_sh(_opt(f.get('sample')))}")
         out.append("WL_PROFILE_FILE=''")
+        out.append("WL_INPUT_DIR=''")
+    elif wl["source"] == "corpus":
+        out.append("WL_LOADER=''")
+        out.append("WL_FILTER_MAX_ISL=''")
+        out.append("WL_FILTER_MAX_TURNS=''")
+        out.append("WL_FILTER_SAMPLE=''")
+        out.append(f"WL_INPUT_DIR={_sh(wl['input_dir'])}")
+        # Only write/point at a profile JSON if the entry supplied one (optional
+        # verification pre-gate); otherwise replay the corpus as-is.
+        if profile_out and wl.get("profile"):
+            with open(profile_out, "w") as f:
+                json.dump(wl["profile"], f)
+            out.append(f"WL_PROFILE_FILE={_sh(profile_out)}")
+        else:
+            out.append("WL_PROFILE_FILE=''")
     else:
         out.append("WL_LOADER=''")
         out.append("WL_FILTER_MAX_ISL=''")
         out.append("WL_FILTER_MAX_TURNS=''")
         out.append("WL_FILTER_SAMPLE=''")
+        out.append("WL_INPUT_DIR=''")
         if profile_out:
             with open(profile_out, "w") as f:
                 json.dump(wl["profile"], f)

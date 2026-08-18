@@ -28,8 +28,8 @@
 # Per-workload knobs the suite sets before build_replay_cmd (all default to the
 # legacy hf/inferencex behavior when unset, so the single-workload path is
 # unchanged / byte-identical):
-#   WL_SOURCE             hf (default) | profile
-#   CORPUS_DIR            for WL_SOURCE=profile: the generated corpus dir
+#   WL_SOURCE             hf (default) | profile | corpus
+#   CORPUS_DIR            for WL_SOURCE=profile/corpus: the weka_trace corpus dir
 #   AGENTIC_MAX_CONTEXT_LENGTH  per-workload --max-context-length (else MAX_MODEL_LEN)
 #
 # Pins (Phase 0 blocker): concrete commits, overridable by env. Bump by editing
@@ -125,7 +125,7 @@ install_agentic_deps() {
 # corpus (--custom-dataset-type weka_trace --input-file), NOT an HF download.
 # For WL_SOURCE=hf (default) the behavior is unchanged / byte-identical.
 resolve_trace_loader() {
-    if [ "${WL_SOURCE:-hf}" = "profile" ]; then
+    if [ "${WL_SOURCE:-hf}" = "profile" ] || [ "${WL_SOURCE:-hf}" = "corpus" ]; then
         TRACE_LOADER=""
         TRACE_DATASET=""
         TRACE_SOURCE_FLAG="--custom-dataset-type weka_trace --input-file ${CORPUS_DIR}"
@@ -357,7 +357,7 @@ build_replay_cmd() {
     export AIPERF_DATASET_CONFIGURATION_TIMEOUT=1800
     export AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800
 
-    REPLAY_CMD="$AIPERF_CLI profile --scenario inferencex-agentx-mvp"
+    REPLAY_CMD="$AIPERF_CLI profile --scenario ${AGENTIC_SCENARIO:-inferencex-agentx-mvp}"
     REPLAY_CMD+=" --url http://localhost:${AGENTIC_PORT}"
     REPLAY_CMD+=" --endpoint /v1/chat/completions --endpoint-type chat --streaming"
     REPLAY_CMD+=" --model ${MODEL:-auto}"
