@@ -181,9 +181,14 @@ connector_launch_worker() {
     # warmup via the fake path, then crashes). splitting_ops-list membership alone doesn't
     # cut the graph there. use_inductor_graph_partition=true moves partitioning to inductor
     # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the KV-update so
-    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION (default 1).
+    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION.
+    # DEFAULT OFF: only MLA models that hit that boxing failure need it (today just
+    # GLM-5.1-FP8, which sets USE_INDUCTOR_GRAPH_PARTITION=1 in its models.yaml env:).
+    # Defaulting it ON would change --compilation-config for EVERY model on this
+    # connector (DeepSeek-V3/-5layer/-R1, Llama-70B, gpt-oss-120b) — an unrelated
+    # compile-path change for recipes that are already validated without it.
     local _igp_json=""
-    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-1}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
+    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-0}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
         local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
         exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
