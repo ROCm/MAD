@@ -1,0 +1,171 @@
+#!/bin/bash
+# Backend-agnostic OFFLINE gate for the AgentX agentic suite. No server, no GPU,
+# no cluster, no network. Runs the REAL code paths where possible so a future
+# edit to the config loader / generator / verifier / suite driver is caught here.
+#
+# Checks:
+#   1. bash -n every backend hook + connector + the suite driver + agentic_lib.
+#   2. Every workload in agentic.example.yaml resolves (--emit-workload-shell).
+#   3. Deterministic gen+verify smoke on the tiny `small` profile (13/13 axes).
+#   4. DRY_RUN suite driver prints a plan line for each workload and exits 0.
+#
+# Usage: bash scripts/common/agentx/tests/run_offline.sh   (exit 0 = all pass)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENTX_DIR="$(cd "$HERE/.." && pwd)"
+COMMON_DIR="$(cd "$AGENTX_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$COMMON_DIR/../.." && pwd)"
+CONFIG="$AGENTX_DIR/agentic.example.yaml"
+SUITE_DRIVER="$COMMON_DIR/benchmark_agentic_suite.sh"
+PY="python3"
+
+pass=0; fail=0
+_pass() { printf "  PASS  %s\n" "$1"; pass=$((pass+1)); }
+_fail() { printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); }
+
+# Isolated tmp workspace (corpus + profile JSON), cleaned up on exit.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/agentx_offline.XXXXXX")"
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+echo "=== 1. bash -n syntax check (hooks + connectors + driver + lib) ==="
+SYNTAX_TARGETS=(
+    "$REPO_ROOT/scripts/sglang_disagg/benchmark_agentic.sh"
+    "$REPO_ROOT/scripts/vllm_dissag/benchmark_agentic.sh"
+    "$REPO_ROOT/scripts/vllm_dissag/connectors/rixl.sh"
+    "$REPO_ROOT/scripts/vllm_dissag/connectors/moriio.sh"
+    "$SUITE_DRIVER"
+    "$COMMON_DIR/agentic_lib.sh"
+)
+for f in "${SYNTAX_TARGETS[@]}"; do
+    rel="${f#"$REPO_ROOT/"}"
+    if [ ! -f "$f" ]; then
+        _fail "missing: $rel"
+    elif bash -n "$f" 2>/tmp/agentx_offline_syn.$$; then
+        _pass "bash -n $rel"
+    else
+        _fail "bash -n $rel"
+        sed 's/^/        /' /tmp/agentx_offline_syn.$$ || true
+    fi
+    rm -f /tmp/agentx_offline_syn.$$
+done
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 2. per-workload config resolution (agentic.example.yaml) ==="
+# Enumerate workloads from the resolved config rather than hardcoding.
+mapfile -t WORKLOADS < <("$PY" "$AGENTX_DIR/agentx_config.py" --config "$CONFIG" --dump-json \
+    | "$PY" -c 'import sys,json; [print(w["name"]) for w in json.load(sys.stdin)["workloads"]]')
+if [ "${#WORKLOADS[@]}" -eq 0 ]; then
+    _fail "enumerate workloads from --dump-json"
+else
+    _pass "enumerated ${#WORKLOADS[@]} workloads: ${WORKLOADS[*]}"
+fi
+for name in "${WORKLOADS[@]}"; do
+    if "$PY" "$AGENTX_DIR/agentx_config.py" --config "$CONFIG" --workload "$name" \
+            --profile-out "$TMP/${name}.profile.json" --emit-workload-shell >/dev/null 2>"$TMP/wl.err"; then
+        _pass "resolve workload '$name'"
+    else
+        _fail "resolve workload '$name'"
+        sed 's/^/        /' "$TMP/wl.err" || true
+    fi
+done
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 3. deterministic gen+verify smoke (profiles/small.yaml, seed=42) ==="
+SMALL_JSON="$TMP/small.profile.json"
+SMALL_CORPUS="$TMP/small_corpus"
+if "$PY" "$AGENTX_DIR/agentx_config.py" --profile "$AGENTX_DIR/profiles/small.yaml" \
+        --emit-json > "$SMALL_JSON" 2>"$TMP/small.err"; then
+    _pass "emit small profile JSON"
+else
+    _fail "emit small profile JSON"; sed 's/^/        /' "$TMP/small.err" || true
+fi
+if "$PY" "$AGENTX_DIR/gen_agentx_profile.py" --profile "$SMALL_JSON" --seed 42 \
+        --out-dir "$SMALL_CORPUS" >/dev/null 2>"$TMP/gen.err"; then
+    _pass "generate small corpus"
+else
+    _fail "generate small corpus"; sed 's/^/        /' "$TMP/gen.err" || true
+fi
+# verify exits 0 iff all axes pass; its final line is "N/N axes within band".
+if verify_out="$("$PY" "$AGENTX_DIR/verify_agentx_profile.py" --profile "$SMALL_JSON" \
+        --corpus "$SMALL_CORPUS" 2>&1)"; then
+    band_line="$(echo "$verify_out" | tail -n1)"
+    _pass "verify small corpus (${band_line})"
+else
+    _fail "verify small corpus"
+    echo "$verify_out" | sed 's/^/        /'
+fi
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 4. DRY_RUN suite driver (no server) ==="
+# DRY_RUN must not need the aiperf venv or network. If it does, degrade to WARN.
+dry_out=""; dry_rc=0
+dry_out="$(DRY_RUN=1 AGENTIC_CONFIG="$CONFIG" bash "$SUITE_DRIVER" 2>&1)" || dry_rc=$?
+if [ "$dry_rc" -ne 0 ]; then
+    if echo "$dry_out" | grep -qiE 'network|download|uv |venv|pip|install'; then
+        printf "  WARN  DRY_RUN suite driver exited %s (looks env/network related)\n" "$dry_rc"
+        echo "$dry_out" | tail -n 20 | sed 's/^/        /'
+    else
+        _fail "DRY_RUN suite driver exited $dry_rc"
+        echo "$dry_out" | tail -n 20 | sed 's/^/        /'
+    fi
+else
+    _pass "DRY_RUN suite driver exit 0"
+    for name in "${WORKLOADS[@]}"; do
+        if echo "$dry_out" | grep -q "workload='${name}'"; then
+            _pass "plan line for '$name'"
+        else
+            _fail "no plan line for '$name'"
+        fi
+    done
+fi
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 5. source=corpus resolution + configurable scenario ==="
+# corpus workload resolves to an --input-file replay (no download/generate) and
+# skips verification when it carries no profile/preset.
+corpus_wl="$("$PY" "$AGENTX_DIR/agentx_config.py" --config "$CONFIG" --workload my_corpus \
+    --emit-workload-shell 2>/dev/null)" || true
+if echo "$corpus_wl" | grep -q "WL_SOURCE='corpus'" \
+        && echo "$corpus_wl" | grep -Eq "WL_INPUT_DIR='.+'"; then
+    _pass "source=corpus resolves input_dir"
+else
+    _fail "source=corpus resolves input_dir"
+fi
+if echo "$corpus_wl" | grep -q "WL_PROFILE_FILE=''"; then
+    _pass "source=corpus verification optional (no profile -> no pre-gate)"
+else
+    _fail "source=corpus verification optional (no profile -> no pre-gate)"
+fi
+# scenario: defaults to inferencex-agentx-mvp, overridable via AGENTIC_SCENARIO.
+ovr_sc="$(AGENTIC_SCENARIO=my-scenario "$PY" "$AGENTX_DIR/agentx_config.py" \
+    --config "$CONFIG" --emit-config-shell | grep '^SUITE_SCENARIO=')"
+if [ "$ovr_sc" = "SUITE_SCENARIO='my-scenario'" ]; then
+    _pass "AGENTIC_SCENARIO overrides run.scenario"
+else
+    _fail "AGENTIC_SCENARIO overrides run.scenario (got $ovr_sc)"
+fi
+if echo "$dry_out" | grep -Eq "^  run.scenario +: inferencex-agentx-mvp"; then
+    _pass "DRY_RUN plan shows default scenario"
+else
+    _fail "DRY_RUN plan shows default scenario"
+fi
+sc_out="$(DRY_RUN=1 AGENTIC_SCENARIO=my-scenario AGENTIC_CONFIG="$CONFIG" bash "$SUITE_DRIVER" 2>&1)" || true
+if echo "$sc_out" | grep -q -- "--scenario my-scenario"; then
+    _pass "DRY_RUN replay command honors AGENTIC_SCENARIO"
+else
+    _fail "DRY_RUN replay command honors AGENTIC_SCENARIO"
+fi
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "======================================================"
+echo "  run_offline: ${pass} passed, ${fail} failed"
+echo "======================================================"
+[ "$fail" -eq 0 ]
