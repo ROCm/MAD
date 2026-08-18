@@ -448,6 +448,8 @@ docker run --rm \
     -e ENABLE_SERVER_METRICS="${ENABLE_SERVER_METRICS:-}" \
     -e ENABLE_RADIX_CACHE="${ENABLE_RADIX_CACHE:-}" \
     -e DRY_RUN="${DRY_RUN:-}" \
+    -e AGENTIC_ALLOW_UV_INSTALL="${AGENTIC_ALLOW_UV_INSTALL:-}" \
+    -e AGENTIC_UV_VERSION="${AGENTIC_UV_VERSION:-}" \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
