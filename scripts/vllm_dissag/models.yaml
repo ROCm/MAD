@@ -186,11 +186,13 @@ DeepSeek-R1:
 # + 1 shared, FP8 block 128. wideEP-only (see WIDE_EP_ONLY_MODELS in the slurm).
 #
 # Validated DOCKER_IMAGE_NAME (submit-time, not set here — #171 requires it explicit):
-#   rocmshared/pytorch-private:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
-# On this image the DSA patchers self-adapt: only the invalid-token kernel fix
-# (#45324) applies; the MoRIIO dual-KV geometry + completion-gate fixes are NATIVE
-# (moriio_layout.py per-layer geometry + engine sealed writes_expected), so those
-# patchers cleanly no-op. On the older b10a9f7a image all 4 patchers apply.
+#   rocmshared/pytorch-private:glm5.1-vllm027-b8
+# built from docker/vllm_disagg_inference.glmv5.1 (VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27).
+# It carries the DSA fixes in-source, so the card sets GLM_SKIP_PATCHERS=1 and NO runtime
+# patcher runs. Do NOT serve this recipe on a pre-v0.27 image: those predate vLLM #47766
+# and return empty/garbage completions here (NIAH 2k scored 0/10 on
+# rocm/pytorch-private:glm-dockerimage-built-09072026). The connectors/moriio.sh patchers
+# are a fallback for such older images only (GLM_SKIP_PATCHERS unset).
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):
