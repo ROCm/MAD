@@ -192,17 +192,21 @@ DeepSeek-R1:
 # docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose
 # VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27 IS the contract. That ref is a BRANCH and
 # therefore mutable — for an auditable rebuild pass the exact commit as a build arg
-# (see the REPRODUCIBILITY note at VLLM_REF in that Dockerfile). An image built from an
-# older vLLM ref will boot and then produce garbage or stall the disagg KV transfer;
-# there are no runtime patchers to fall back on. Rebuild the image instead.
+# (see the REPRODUCIBILITY note at VLLM_REF in that Dockerfile). That build is published
+# as rocmshared/pytorch-private:glm5.1-vllm027-b8, and it is the image every number
+# below was measured on. The glmv5.1 Dockerfile names the same tag and the same pins.
 # DOCKER_IMAGE_NAME is submit-time, not set here (#171 requires it explicit).
-# NOT SUPPORTED here: the earlier lab image
+#
+# NOT SUPPORTED here — older GLM images, which predate the in-source DSA fixes:
+#   rocm/pytorch-private:glm-dockerimage-built-09072026
+#     measured on the 1P/1D EP8 OCI smoke: NIAH 2k retrieval 0/10 (slurm job 216847).
 #   rocmshared/pytorch-private:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
-# predates the in-source DSA fixes (it needed the invalid-token kernel fix #45324
-# applied at runtime). This branch ships no patchers, so that image cannot serve
-# GLM-5.1-FP8 at all. The one supported image is built from the glmv5.1 Dockerfile
-# at VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27; that is the image the numbers below
-# were measured on.
+#     the mori121 lab build; it needed the invalid-token kernel fix #45324 applied at
+#     runtime. The glmv5.1 Dockerfile says the same at its vLLM stage: the vLLM that
+#     image builds from cannot serve GLM-5.1-FP8.
+# This branch ships NO runtime patchers, so there is no fallback and no error to key
+# on: an unsupported image boots, serves, and returns silently wrong output (or stalls
+# the disagg KV transfer). Rebuild the image at the pinned VLLM_REF instead.
 #
 # GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
 # is DSA-sparse):

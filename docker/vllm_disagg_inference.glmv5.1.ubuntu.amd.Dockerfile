@@ -86,6 +86,11 @@
 # VLLM_REF below (glm5.1-dsa-wideEP_on_vllm-v0.27) plus the MoRI/AITER pins. Serving
 # GLM-5.1-FP8 from an image built off an older vLLM ref is unsupported: it boots, then
 # produces garbage output or stalls the disagg KV transfer, with nothing to fall back on.
+# That failure is silent, and it has been measured: the pre-v0.27 lab image
+# rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH 2k 0/10 on the 1P/1D
+# EP8 smoke (slurm job 216847). The supported build of this Dockerfile is published as
+# rocmshared/pytorch-private:glm5.1-vllm027-b8; scripts/vllm_dissag/models.yaml names the
+# same tag and lists the unsupported older images.
 # If you need a fix, move the pin and rebuild — do not re-add runtime patchers to MAD.
 #
 # Build context = repo root:
