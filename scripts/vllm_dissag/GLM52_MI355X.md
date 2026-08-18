@@ -32,15 +32,18 @@ the RDMA device list, `MORI_SOCKET_IFNAME`, and `FABRIC_SUBNET` (§4).
 
 ## 2. Measured
 
-FP8, ISL/OSL 28,672/1,024, EP8, 1P/1D:
+FP8, ISL/OSL 28,672/1,024, EP8, 1P/1D. Two independent runs on different node
+pairs (gpu-44/45, then gpu-41/45), 0 failed requests in either:
 
-| concurrency | TPOT (ms) | note |
-|---|---|---|
-| 16 | 33.7 | |
-| 32 | 36.4 | |
-| 64 | 40.2 | |
+| concurrency | TPOT (ms) | TPOT rerun (ms) | TTFT mean (s) | total tok/s |
+|---|---|---|---|---|
+| 16 | 33.7 | 33.2 | 11.6 | 9,978 |
+| 32 | 36.4 | 34.7 | 16.3 | 16,559 |
+| 64 | 40.2 | 38.6 | 27.5 | 24,298 |
 
-TPOT target for AIMODELS-1198 is 50 ms avg — **met with margin at all three points.**
+TPOT target for AIMODELS-1198 is 50 ms avg — **met with margin at all three
+points, and reproducible across node pairs.** TTFT is the axis that misses (§5);
+it is drain time under concurrency, so it responds to xP and not to decode tuning.
 
 Prefill throughput measures **6,135–8,359 tok/s/rank** against a 34,000 tok/s/rank target,
 i.e. **~4–5x short**, and that is the binding constraint. See §5.
