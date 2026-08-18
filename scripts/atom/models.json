@@ -1,0 +1,21 @@
+[
+    {
+        "name": "pyt_atom_kimi-k3",
+        "dockerfile": "../../docker/pyt_atom_kimi_k3",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "atom",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
+    }
+]
