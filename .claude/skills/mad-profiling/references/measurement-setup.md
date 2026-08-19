@@ -99,8 +99,16 @@ collective_report.py --run-dir <run> --rccl-dir <prof-root>/rccl --out-dir repor
 
 Budget the disk for it: nothing is filtered away any more, so a 4-node serving job leaves about
 8 GB of RCCL text and a training job with two datatype phases about half a gigabyte per phase.
-The lines repeat, so `gzip` takes an inference run's 8 GB down to under 100 MB in seconds, and the
-parser reads `.log.gz` as readily as `.log` — compress them once the run is done.
+The lines repeat, so gzip takes an inference run's 8 GB down to under 100 MB in seconds, and the
+parser reads `.log.gz` as readily as `.log`. Once the job has finished:
+
+```bash
+compress_logs.py --run-dir <run> [--rccl-dir <prof-root>/rccl]
+```
+
+It compresses what the engine's globs call a log and nothing else, verifies each copy by digest
+before dropping the plain one, and refuses to touch a log that already sits beside its own `.gz`,
+because the parser's globs match both and that node's records would be counted twice.
 
 ## Log volume is a capacity question
 

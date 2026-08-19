@@ -1,6 +1,6 @@
 ---
 name: mad-profiling
-description: Profile the collective communication of a madengine run and turn the artifacts into reports. Use when the user wants to see which collectives a workload issues, how large its messages are, how balanced its ranks are, or what a profiled run costs -- for a training engine (primus/Megatron-LM) or a disaggregated inference engine (sglang PD-disagg), and for engines not yet supported, which are added as one module under scripts/collprof/engines/. Covers what a run must set to be measurable at all (NCCL_DEBUG, torch profiler points, rocprofv3, and the flags that stop a framework from bypassing every profiler), how to build per-phase reports with scripts/collective_report.py, how to rebuild a whole campaign from a catalog with scripts/regen_reports.py, and how to read the numbers without overstating them (references/interpretation.md).
+description: Profile the collective communication of a madengine run and turn the artifacts into reports. Use when the user wants to see which collectives a workload issues, how large its messages are, how balanced its ranks are, or what a profiled run costs -- for a training engine (primus/Megatron-LM) or a disaggregated inference engine (sglang PD-disagg), and for engines not yet supported, which are added as one module under scripts/collprof/engines/. Covers what a run must set to be measurable at all (NCCL_DEBUG, torch profiler points, rocprofv3, and the flags that stop a framework from bypassing every profiler), how to build per-phase reports with scripts/collective_report.py, how to rebuild a whole campaign from a catalog with scripts/regen_reports.py, how to leave a finished run's logs compressed with scripts/compress_logs.py, and how to read the numbers without overstating them (references/interpretation.md).
 compatibility: Requires python 3.10+ for the report tooling, standard library only except openpyxl, which adds profile.xlsx and is installed with `python3 -m pip install openpyxl` into the same interpreter that runs the scripts. Profiling a run additionally requires a cluster run configured through the mad-slurm-multinode skill, RCCL/NCCL with debug output, and optionally rocprofv3 from ROCm.
 metadata:
   author: mkuznet1 (mikhail.kuznetsov@amd.com)
@@ -18,7 +18,8 @@ Two halves, usable independently:
    [assets/manifest-overlay/](assets/manifest-overlay/), one per engine, applied with
    `jq -s '.[0] * .[1]' base.json <engine>.overlay.json`.
 2. **Turn the artifacts into reports** — `scripts/collective_report.py` for one job,
-   `scripts/regen_reports.py` for a campaign.
+   `scripts/regen_reports.py` for a campaign, `scripts/compress_logs.py` to leave the
+   run's logs on disk in the form the parsers read anyway.
 
 > **Skill paths — read first.** When this skill activates you are given the absolute
 > path to its directory (the folder containing this `SKILL.md`). All `scripts/`,
@@ -152,7 +153,28 @@ Worth knowing before the first run:
 - **If a discovered capture directory holds no traces** → it is named in the warning and in the report, and the rest of the phase is still built. An idle replica captures nothing, so check whether that process did any work before treating it as a coverage gap. A path pinned with `--torch-trace` stays strict and fails.
 - **If the run warns that `openpyxl` is missing** → `report.md` and the CSVs hold every number, only `profile.xlsx` was skipped, and the warning names the interpreter that lacks the package. Install it into that same interpreter (`"$PY" -m pip install openpyxl`) and rerun; the parse cache makes the second pass seconds rather than minutes. Installing is the normal course of action, not a decision to bring to the user.
 
-### Step 3 — A campaign from a catalog
+### Step 3 — Compress the logs
+
+```bash
+"$PY" "$SKILL_DIR/scripts/compress_logs.py" --run-dir "$RUN_DIR" [--rccl-dir <prof-root>/rccl]
+```
+
+The logs are the largest artifact a measured run leaves, and with `RCCL_LOG_DIR` nothing is
+filtered out of them: about 8 GB for a 4-node serving job, half a gigabyte per datatype
+phase of a training one. The text repeats, so gzip takes an inference run's 8 GB under
+100 MB, and every parser here reads `.log.gz` as readily as `.log`. This is not a tidying
+step to do eventually — a shared home directory filling up has truncated a file mid-write,
+marked a finished job FAILED at teardown, and cost a parse cache.
+
+The engine's globs decide what counts as a log, so exactly the set
+`collective_report.py` reads is compressed and nothing else. Each file is verified by
+digest before its plain copy is dropped, and the run is left untouched on any failure.
+
+**Guard:**
+- **If it reports a log sitting beside its own `.gz`** → both match the parser's globs, so that node's records would be counted twice. It compresses nothing and names the pair; keep whichever copy is complete and delete the other.
+- **If the job is still running** → do not run this yet. Whatever a log receives after the copy is made would be lost.
+
+### Step 4 — A campaign from a catalog
 
 ```bash
 cp "$SKILL_DIR/assets/jobs.example.json" reports/jobs.json    # edit: one entry per job
@@ -165,7 +187,7 @@ entry rather than an edited script, and rebuilding everything after a tooling ch
 is one command. Runs are sequential on purpose; one failing job does not stop the rest
 and the failures are listed at the end.
 
-### Step 4 — Cross-run comparison, if asked
+### Step 5 — Cross-run comparison, if asked
 
 A report describes one phase of one job. Comparing runs or models is a written
 document, and the templates in [reports_template/](reports_template/) exist so that
