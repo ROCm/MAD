@@ -5,7 +5,7 @@
 # ROOT CAUSE (confirmed by measurement 2026-08-15 -- read this before editing)
 # ============================================================================
 # MoRI builds an unconditional full QP mesh (context.cpp:408,:464), so EP16 across
-# 2 nodes forms QPs between DIFFERENT rails, e.g. 192.168.200.52 -> 192.168.205.105.
+# 2 nodes forms QPs between DIFFERENT rails, e.g. <nodeA-fabric-ip> -> <nodeB-fabric-ip>.
 # Those failed with:
 #   bnxt_re_resolve_eth_dmac: Failed to resolve gid dmac: -110
 #   -> mori bnxt.cpp:417 ModifyInit2Rtr: Assertion `!status' failed
@@ -19,13 +19,13 @@
 #
 #   (2) rp_filter ON THE RECEIVER.  net.ipv4.conf.all.rp_filter=1 and the kernel
 #       takes max(all, per-dev), so strict RPF applied on every bond even though
-#       each per-dev knob read 0. A packet from 192.168.200.52 arriving on bond5
+#       each per-dev knob read 0. A packet from <nodeA-fabric-ip> arriving on bond5
 #       reverse-resolves to bond0, not bond5 -> silently dropped.
 #       PROOF: nstat TcpExtIPReversePathFilter on the receiver incremented 1:1
 #       with pings sent (11->16 for 5 pings, 16->25 for 9). The frames were
 #       arriving the whole time; the host was discarding them.
 #
-#   After BOTH: 05:192.168.200.52 -> 06:192.168.205.105 = 0% loss, 0.220 ms.
+#   After BOTH: node1:<nodeA-fabric-ip> -> node2:<nodeB-fabric-ip> = 0% loss, 0.220 ms.
 #
 # SUPERSEDED THEORIES (do not re-derive):
 #   - "rails are isolated L2, cross-rail impossible"          -- WRONG, it routes.
@@ -33,7 +33,7 @@
 #     That came from a bad test: `ping -I bond0 <dst>` uses an INTERFACE NAME, which
 #     is SO_BINDTODEVICE. It bypasses the policy rule and makes the kernel ARP for the
 #     DESTINATION on-link (neigh -> INCOMPLETE). Always test with the SOURCE ADDRESS
-#     form: `ping -I 192.168.200.52 <dst>`.
+#     form: `ping -I <nodeA-fabric-ip> <dst>`.
 #   - MORI_RDMA_TC/SL 104/3 vs 41/0 -- QoS marking, cannot create reachability. No effect.
 #
 # WHY POLICY TABLES AND NOT `main`:

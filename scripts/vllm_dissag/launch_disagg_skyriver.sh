@@ -1,17 +1,17 @@
 #!/bin/bash
 ###############################################################################
-# launch_disagg_skyriver.sh — non-SLURM driver for MAD vllm_dissag on skyRiver.
+# launch_disagg_skyriver.sh — non-SLURM driver for MAD vllm_dissag on a non-SLURM cluster.
 #
 # Replicates what run_xPyD_models.slurm does (node pick, IP resolve, per-node
-# `docker run` env plumb) but over our SSH+docker mesh — skyRiver has no SLURM.
+# `docker run` env plumb) but over our SSH+docker mesh — the cluster has no SLURM.
 # Reuses vllm_disagg.sh + connectors/moriio.sh UNCHANGED (they are env-driven).
 #
-# Usage:
-#   PREFILL="skyriver04" DECODE="skyriver07" \
+# Usage (node0..nodeN are YOUR hostnames -- pass the real ones from your cluster):
+#   PREFILL="node0" DECODE="node1" \
 #   MODEL_NAME=GLM-5.2-FP8 MODEL_PATH=/models/GLM-5.2-FP8 \
 #   ./launch_disagg_skyriver.sh
 #
-#   PREFILL="skyriver04,skyriver05" DECODE="skyriver06,skyriver07" ...   # 2P/2D
+#   PREFILL="node0,node1" DECODE="node2,node3" ...   # 2P/2D
 #
 # Env:
 #   PREFILL / DECODE   comma-lists of node hostnames (order = NODE_RANK order:
@@ -63,7 +63,7 @@ MASTER_PORT="${MASTER_PORT:-23731}"
 PROXY_PORT="${PROXY_PORT:-8000}"
 COOKBOOK_IN_CTR="/workspace/vllm_dissag"          # where we mount the scripts inside the container
 HOST_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"   # this dir on the host (per node via /models/common)
-JOB_ID="skyriver_$(date +%Y%m%d_%H%M%S)"
+JOB_ID="${JOB_PREFIX:-disagg}_$(date +%Y%m%d_%H%M%S)"
 LOG_PATH="/models/common/logs/${JOB_ID}"
 
 IFS=',' read -ra P_NODES <<< "$PREFILL"
@@ -77,7 +77,7 @@ NNODES=$(( xP + yD ))
 # The MoRI symmetric heap lives OUTSIDE vLLM's gpu_memory_utilization pool, so the two
 # must be sized together per topology. models.yaml carries the EP16 pair (32 GiB heap,
 # util 0.72); inheriting that at EP8 leaves only ~6 GiB free and every DP rank OOMs on
-# its KV allocation at boot (observed 2026-08-17, job skyriver_20260818_143307: all 8
+# its KV allocation at boot (observed 2026-08-17, an EP8 boot on the reference cluster: all 8
 # ranks "Tried to allocate 40.00 GiB ... 36 GiB free"). Decode-node count is the
 # authoritative topology signal: yD=1 -> EP8 (1 decode node), yD>=2 -> EP16.
 # Values are the probe_context_ceiling.sh columns, which are what actually booted.
@@ -98,7 +98,14 @@ echo "   VRAM defaults (${_EP_TOPO}, ${xP}P/${yD}D): GPU_MEMORY_UTILIZATION=${GP
 # rather than from a hostname->octet table: a table goes stale the moment a node is
 # re-addressed or a different set of machines is used, and it silently hands the wrong
 # IP to MASTER_ADDR/IPADDRS. OCT below is only a fallback for a node we cannot reach.
-declare -A OCT=( [skyriver04]=55 [skyriver05]=52 [skyriver06]=105 [skyriver07]=61 )
+#
+# The fallback map is EMPTY by default (live lookup is authoritative). For a cluster
+# where some nodes may be unreachable at launch, seed it via FABRIC_OCT_MAP as a
+# space-separated "hostname=octet" list, e.g.:
+#   FABRIC_OCT_MAP="node0=55 node1=52 node2=105 node3=61" ./launch_disagg_skyriver.sh
+# Each octet is the last byte of that node's FABRIC_NET.x address.
+declare -A OCT=()
+for _pair in ${FABRIC_OCT_MAP:-}; do OCT["${_pair%%=*}"]="${_pair##*=}"; done
 IPS=()
 for n in "${ALL_NODES[@]}"; do
   ip4="$(ssh -n -o ConnectTimeout=5 "$n" \
@@ -115,7 +122,7 @@ IPADDRS=$(IFS=,; echo "${IPS[*]}")
 MASTER_ADDR="${IPS[0]}"
 
 echo "=================================================================="
-echo " skyRiver disagg launch: ${MODEL_NAME}  (${xP}P/${yD}D, ${CONNECTOR}/WIDE_EP=${WIDE_EP}/${EP_BACKEND})"
+echo " disagg launch: ${MODEL_NAME}  (${xP}P/${yD}D, ${CONNECTOR}/WIDE_EP=${WIDE_EP}/${EP_BACKEND})"
 echo "   prefill nodes: ${P_NODES[*]}   decode nodes: ${D_NODES[*]}"
 echo "   IPADDRS=${IPADDRS}  MASTER_ADDR=${MASTER_ADDR}  image=${IMAGE}"
 echo "   logs: ${LOG_PATH} (per node)"
@@ -123,7 +130,7 @@ echo "=================================================================="
 
 # Source connector .env -> -e KEY=VALUE args, then layer the per-fabric profile
 # ${CONNECTOR}.${FABRIC_PROFILE}.env on top (thor2 = Broadcom bnxt_re; that is what
-# skyRiver is, hence the default). Same two rules as run_xPyD_models.slurm, and they
+# this reference cluster is, hence the default). Same two rules as run_xPyD_models.slurm, and they
 # matter: `-e KEY=` given twice means the LAST one wins in docker run, so the profile
 # overrides the base file -- while `${!_k:-$_v}` means an export in THIS shell beats
 # both. A raw `-e ${line}` passthrough (what this script used to do) silently ignored
@@ -247,7 +254,7 @@ fi
 #   * The container's rdma-core is 62 (libibverbs.so.1.16.62.0 = IBVERBS_PRIVATE_59).
 #     It loads providers as lib<vendor>-rdmav59.so from /usr/lib/x86_64-linux-gnu/libibverbs/
 #     and NEVER consults /usr/local/lib -> the old libbnxt_re mounts were INERT.
-#   * skyriver hosts run MLNX OFED (rdma-core-58mlnx43, libibverbs.so.1.14.43.0 =
+#   * the reference hosts run MLNX OFED (rdma-core-58mlnx43, libibverbs.so.1.14.43.0 =
 #     IBVERBS_PRIVATE_34) and ship NO bnxt provider. Mounting the host libibverbs over
 #     the container's would DOWNGRADE ABI 59 -> 34 and break every MoRI/vLLM .so
 #     (libmori_io/libmori_shmem/libmori_pybinds all link the ABI-59 libibverbs).
@@ -258,7 +265,7 @@ RDMA_MOUNTS=""
 
 # --- Cross-rail reachability (REQUIRED for EP>8; added 2026-08-15) -----------------
 # MoRI builds a full QP mesh, so any multi-node EP forms QPs BETWEEN rails, e.g.
-# 192.168.200.52 -> 192.168.205.105. Those need (a) a per-source policy route via the
+# <fabric>.A.x -> <fabric>.B.y (a cross-rail pair). Those need (a) a per-source policy route via the
 # rail gateway .254 and (b) rp_filter=2 on the receiver, else the QP dies with
 # "resolve gid dmac: -110" / bnxt.cpp:417 ModifyInit2Rtr assert.
 # This state is RUNTIME ONLY -- the ifcfg-bond* files carry no GATEWAY= and there are no
@@ -300,7 +307,7 @@ if [ "${SKIP_JIT_LOCK_CLEAN:-0}" != "1" ] && [ "${DRY_RUN:-0}" != "1" ]; then
   for n in "${ALL_NODES[@]}"; do
     ssh -n "$n" '
       # aiter uses TWO lock shapes and an early version of this sweep only matched the
-      # first, which let a nested orphan hang skyriver06 a second time (2026-08-16):
+      # first, which let a nested orphan hang node2 a second time (2026-08-16):
       #   .../aiter/build/lock_module_<name>          <- outer, taken by build_module
       #   .../aiter/build/module_<name>/build/lock    <- inner, taken during the compile
       # Match both with find, not a glob.
@@ -366,15 +373,15 @@ for n in "${ALL_NODES[@]}"; do
   # (An earlier note here claimed the rails were isolated L2 with no gateway. That was
   # WRONG. It came from a bad test: `ping -I bond0 <dst>` is SO_BINDTODEVICE, which
   # bypasses the policy rule and ARPs for the destination on-link. Always test
-  # cross-rail with the SOURCE-ADDRESS form: `ping -I 192.168.200.52 <dst>`.)
+  # cross-rail with the SOURCE-ADDRESS form: `ping -I <node-fabric-ip> <dst>`.)
   #
   # Rail-ordering the device list is STILL REQUIRED — not for reachability now, but
   # because MoRI pairs peers positionally (below) and NCCL cannot coordinate rails
   # across nodes. Ordering is a correctness/perf property, independent of the fix.
   #
   # The bnxt_re_bond<N> name<->rail mapping is SCRAMBLED, DIFFERENT per node, AND IT
-  # MOVES ACROSS REBOOTS. e.g. rail .200 was bnxt_re_bond4 on skyriver04 and
-  # bnxt_re_bond1 on skyriver07; after a reboot on 2026-08-16 those became bond6 and
+  # MOVES ACROSS REBOOTS. e.g. rail .200 was bnxt_re_bond4 on node0 and
+  # bnxt_re_bond1 on node3; after a reboot on 2026-08-16 those became bond6 and
   # bond4. The device name also does NOT match the bondN interface name. Never
   # hardcode it, never carry it over from a doc. Only sysfs is authoritative:
   #   /sys/class/infiniband/<dev>/device/net/<slave> -> bond master -> IPv4.
@@ -536,9 +543,9 @@ done
 # until it greps "Application startup complete." out of BOTH
 #   /run_logs/$JOB/prefill_NODE0.log      (local to rank0 — fine)
 #   /run_logs/$JOB/decode_NODE${xP}.log   (written on the DECODE node — NOT fine)
-# On SLURM clusters those live on one shared filesystem. On skyRiver
-# /models/common is a LOCAL disk per node (verified: /dev/md127 on skyriver04 vs
-# /dev/nvme3n1p1 on skyriver07), so rank0 can never see the decode log, never
+# On SLURM clusters those live on one shared filesystem. On a non-shared-FS cluster
+# /models/common is a LOCAL disk per node (verified: /dev/md127 on node0 vs
+# /dev/nvme3n1p1 on node3), so rank0 can never see the decode log, never
 # starts the proxy/router, and both sides hang forever ("Waiting for prefill &
 # decode servers to be ready..." on rank0, "Waiting for nodes. . ." on rank1).
 #

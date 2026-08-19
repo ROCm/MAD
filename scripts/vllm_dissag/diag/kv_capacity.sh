@@ -21,7 +21,7 @@
 #
 # USAGE
 #   diag/kv_capacity.sh <job_id> [node ...]
-#   diag/kv_capacity.sh skyriver_20260817_101940 skyriver04 skyriver05 skyriver06 skyriver07
+#   diag/kv_capacity.sh <job_id> node0 node1 node2 node3
 #
 # Reads /models/common/logs/<job_id>/ on each node. Nodes default to the four skyRiver
 # hosts. Read-only: greps logs, changes nothing, safe to run against a live job.
@@ -34,7 +34,7 @@ if [ -z "$JOB" ]; then
 fi
 shift || true
 NODES=("$@")
-[ "${#NODES[@]}" -eq 0 ] && NODES=(skyriver04 skyriver05 skyriver06 skyriver07)
+[ "${#NODES[@]}" -eq 0 ] && NODES=(${DIAG_NODES:-node0 node1 node2 node3})
 
 LOG_ROOT="${LOG_ROOT:-/models/common/logs}"
 
@@ -49,7 +49,7 @@ found_any=0
 # other node's log -- see the CROSS-NODE LOG RELAY block in launch_disagg_skyriver.sh,
 # which copies decode_NODE<n>.log onto rank 0 because /models/common is a local disk per
 # node and the upstream driver assumes a shared FS. So globbing decode_NODE*.log on
-# skyriver04 returns skyriver06's and skyriver07's logs too. Summing per-node
+# node0 returns node2's and node3's logs too. Summing per-node
 # double-counted a 2P/2D job as 5.47M tokens when the true figure is 2.74M -- exactly the
 # kind of number that would have looked plausible in a customer document.
 #

@@ -333,7 +333,7 @@ Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoin
 
 ```bash
 GPU_MEMORY_UTILIZATION=0.72 MORI_SHMEM_HEAP_SIZE=34359738368 \
-  bash diag/preflight_nodes.sh skyriver04 skyriver05 skyriver06 skyriver07
+  bash diag/preflight_nodes.sh node0 node1 node2 node3
 ```
 
 Two independent checks, because two unrelated things sink a run:
