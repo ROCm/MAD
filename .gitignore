@@ -76,3 +76,6 @@ venv.bak/
 *.log
 *.out
 *.html
+
+# Skill manifest templates are checked in despite *.json above
+!.claude/skills/mad-slurm-multinode/assets/manifests/*.template.json
