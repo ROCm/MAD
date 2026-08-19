@@ -73,6 +73,27 @@ xP=${#P_NODES[@]}
 yD=${#D_NODES[@]}
 NNODES=$(( xP + yD ))
 
+# --- EP-conditional VRAM defaults (repro safety) -------------------------------
+# The MoRI symmetric heap lives OUTSIDE vLLM's gpu_memory_utilization pool, so the two
+# must be sized together per topology. models.yaml carries the EP16 pair (32 GiB heap,
+# util 0.72); inheriting that at EP8 leaves only ~6 GiB free and every DP rank OOMs on
+# its KV allocation at boot (observed 2026-08-17, job skyriver_20260818_143307: all 8
+# ranks "Tried to allocate 40.00 GiB ... 36 GiB free"). Decode-node count is the
+# authoritative topology signal: yD=1 -> EP8 (1 decode node), yD>=2 -> EP16.
+# Values are the probe_context_ceiling.sh columns, which are what actually booted.
+# Only DEFAULTED here -- an explicit export from the operator still wins.
+if [ "$yD" -le 1 ]; then
+  : "${GPU_MEMORY_UTILIZATION:=0.80}"
+  : "${MORI_SHMEM_HEAP_SIZE:=17179869184}"   # 16 GiB, EP8
+  _EP_TOPO="EP8"
+else
+  : "${GPU_MEMORY_UTILIZATION:=0.72}"
+  : "${MORI_SHMEM_HEAP_SIZE:=34359738368}"   # 32 GiB, EP16
+  _EP_TOPO="EP16"
+fi
+export GPU_MEMORY_UTILIZATION MORI_SHMEM_HEAP_SIZE
+echo "   VRAM defaults (${_EP_TOPO}, ${xP}P/${yD}D): GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION} MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE} ($(( MORI_SHMEM_HEAP_SIZE / 1073741824 )) GiB heap)"
+
 # Resolve each node's fabric IP LIVE (the address it holds on the FABRIC_NET rail),
 # rather than from a hostname->octet table: a table goes stale the moment a node is
 # re-addressed or a different set of machines is used, and it silently hands the wrong
@@ -118,7 +139,7 @@ CONNECTOR_ENV_ARGS=""
 # so e.g. `export GPU_MEMORY_UTILIZATION=0.72` for EP16 is silently dropped.
 # Captured BEFORE the connector .env files are loaded, so it reflects user intent
 # only -- a value that merely came from a connector .env must not be "protected".
-_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES USE_INDUCTOR_GRAPH_PARTITION VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
+_RECIPE_ENV_KEYS="VLLM_USE_V1 VLLM_USE_LAYERNAME VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA VLLM_ROCM_USE_AITER_FP8BMM KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES USE_INDUCTOR_GRAPH_PARTITION VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE"
 MODELS_YAML_PROTECT=""
 RECIPE_ENV_ARGS=""
 # Values are single-quoted: the whole `docker run` is assembled into ONE string and
@@ -160,7 +181,8 @@ esac
 # Per-run recipe knobs that models.yaml exposes as ${VAR:-default} (expanded by
 # vllm_disagg.sh). Not in the protect-list -- they are flag-string substitutions,
 # not env: keys -- but they still have to cross into the container to take effect.
-for _k in GLM_MAX_MODEL_LEN GLM_PREFILL_BATCHED_TOKENS GLM_DECODE_BATCHED_TOKENS; do
+for _k in GLM_MAX_MODEL_LEN GLM_PREFILL_BATCHED_TOKENS GLM_DECODE_BATCHED_TOKENS \
+          GLM_PERSIST_GATE GLM_SKIP_PATCHERS GLM_INDEXER_WARMUP GLM_INSTRUMENT; do
   [ -n "${!_k+x}" ] && RECIPE_ENV_ARGS+=" -e ${_k}='${!_k}'"
 done
 
@@ -173,8 +195,22 @@ done
 # BENCHMARK_COMBINATIONS carry commas and spaces that would otherwise split into extra
 # argv words when this command line is re-parsed by the remote shell over ssh.
 # All are unset by default, so behaviour is unchanged unless a caller opts in.
-for _k in BENCHMARK_SCRIPT_FILE BENCHMARK_PORT BENCHMARK_CON BENCHMARK_COMBINATIONS \
-          BENCHMARK_ITR NIAH_WORDS NIAH_SEEDS NIAH_MAXTOK NIAH_TIMEOUT NIAH_WARMUP; do
+#
+# The list is grouped by which script consumes it. A key missing from here is not a
+# loud failure: the export succeeds on the host, the container never sees it, and the
+# script runs its built-in default while the log still shows the value you exported.
+# That is how a run ends up reporting the MI355X default scenario set under the name
+# of the one you asked for -- so add new knobs HERE in the same commit that adds them.
+for _k in \
+  BENCHMARK_SCRIPT_FILE BENCHMARK_PORT BENCHMARK_CON BENCHMARK_COMBINATIONS \
+  BENCHMARK_ITR BENCHMARK_PROMPTS_PER_CON \
+  NIAH_WORDS NIAH_SEEDS NIAH_MAXTOK NIAH_TIMEOUT NIAH_WARMUP \
+  NIAH_TOKENS NIAH_TOKENIZER NIAH_TOKENS_PER_WORD NIAH_TIMEOUT_SCALE NIAH_GATE \
+  SCENARIOS SLO_ITERS SLO_WARMUP_ITERS SEED_BASE RESAMPLE_PER_ITER SLO_PROMPTS_PER_CON SLO_REQUEST_RATE \
+  WORKLOAD_MODE WORKLOAD_DIR KV_BYTES_PER_TOKEN \
+  MAX_PROMPTS PREFIX_FRAC TAIL_FRAC BURSTINESS RESULT_DIR \
+  BENCH_BACKEND BENCH_EXTRA_ARGS IGNORE_EOS \
+  SLO_TTFT_MS SLO_TPOT_MS TGT_PREFILL_TOK_S TGT_DECODE_TOK_S DP_RANKS; do
   [ -n "${!_k+x}" ] && RECIPE_ENV_ARGS+=" -e ${_k}='${!_k}'"
 done
 

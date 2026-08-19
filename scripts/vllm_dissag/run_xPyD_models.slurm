@@ -481,12 +481,26 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
 #   keepalive              -> keepalive_bench.sh        (hold server up KEEPALIVE_MINS
 #                                                        for external accuracy probes)
+#   niah                   -> benchmark_niah.sh         (retrieval gate, word-based rungs)
+#   niah_long              -> benchmark_niah_long.sh    (token-based ladder to 950K)
+#   niah_perf              -> benchmark_niah_perf.sh    (NIAH, then perf only if it passed)
+#   customer_slo           -> benchmark_customer_slo.sh (SLO engine, SCENARIOS-driven)
+#   avg_80k                -> benchmark_avg_80K.sh      (customer row 1: 80K avg / 256K ctx)
+#   avg_200k               -> benchmark_avg_200K.sh     (customer row 2: 200K avg / 1M ctx)
+# See BENCHMARKS.md. The avg_* rows need GLM_MAX_MODEL_LEN raised past the 65536 default
+# or every over-length request is 400'd, which reads as a suspiciously GOOD result.
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     keepalive)    BENCHMARK_SCRIPT_FILE="keepalive_bench.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive)" >&2; exit 1 ;;
+    niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    niah_long)    BENCHMARK_SCRIPT_FILE="benchmark_niah_long.sh" ;;
+    niah_perf)    BENCHMARK_SCRIPT_FILE="benchmark_niah_perf.sh" ;;
+    customer_slo) BENCHMARK_SCRIPT_FILE="benchmark_customer_slo.sh" ;;
+    avg_80k)      BENCHMARK_SCRIPT_FILE="benchmark_avg_80K.sh" ;;
+    avg_200k)     BENCHMARK_SCRIPT_FILE="benchmark_avg_200K.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive, niah, niah_long, niah_perf, customer_slo, avg_80k, avg_200k)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2

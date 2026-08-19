@@ -409,20 +409,31 @@ GLM-5.2-FP8:
   # i.e. ~46.6 KiB of KV per token (consistent with 46.58 GiB @ 1,048,576). At 65536
   # ONE max-length request costs 2.91 GiB of the 34 GiB -> still ~11.7x concurrency,
   # and it admits a ~45k-token prompt, which is what a 2k->35k NIAH sweep needs.
-  # --- prefill --max-num-batched-tokens 40960 (CRASH FIX, not a tuning knob) ---
-  # rocm_aiter_mla_sparse.py deliberately disables the persistent sparse-MLA kernel
-  # for any batch containing a chunked-prefill continuation (query_len>1 AND
-  # seq_len>query_len) -- the persistent path is numerically wrong there (aiter #4076
-  # / vLLM #47567). But asm_mla.cu:945 makes NON-persistent fp8/fp8 at gqa_ratio=64 a
-  # hard AITER_CHECK(false), which SIGKILLs the worker; its DP peers then die in gloo
-  # all_reduce and the whole prefill server goes down (503s at the router).
-  #   => any prompt LONGER than max-num-batched-tokens is FATAL, not merely slow.
-  #   Observed exactly: 2000 words (~2,197 tok) < 8192 default -> passes;
-  #                     8000 words (~8,857 tok) > 8192 -> abort.
-  # So the chunk budget must EXCEED the longest prompt served. 40960 clears the
-  # 35k-word NIAH rung (~38,603 tok) with headroom and stays under max-model-len.
-  # Cost is a wider prefill activation buffer, not KV. Lowering it below the longest
-  # prompt re-arms the crash.
+  # --- LONG-CONTEXT (>=65K) CRASH + THE FIX: GLM_PERSIST_GATE=0 (2026-08-19) ---
+  # apply_glm_dsa_persistent_kernel_gate_fix.py forces the NON-persistent sparse-MLA
+  # path for any chunked-prefill continuation, because the persistent path was
+  # numerically wrong there on OLD aiter (aiter #4076 / vLLM #47567). BUT asm_mla.cu:945
+  # makes non-persistent fp8/fp8 at gqa_ratio=64 a hard AITER_CHECK(false) -> SIGABRT ->
+  # gloo cascade -> server down. So on a long prompt (which MUST chunk -> becomes a
+  # continuation) the gate and the kernel collide: gate says non-persistent, kernel says
+  # persistent-only -> abort. Root-caused via coredump (Signal 6 ABRT) + captured stderr.
+  #   THE FIX on an image whose aiter has the #4076 kernel fix (this v027-bnxt238 image
+  #   does): set GLM_PERSIST_GATE=0. That SKIPS the now-obsolete gate patcher, so the
+  #   persistent kernel runs -- which is both LEGAL (kernel requires it) and CORRECT (the
+  #   bug it guarded is fixed). Verified: NIAH 65K->256K PASS, 10/10 at 65K, no crash, no
+  #   rebuild. See docs/niah_longcontext_glm52_mi308x.html.
+  #   !! DO NOT set GLM_PERSIST_GATE=0 on an OLDER image without the #4076 fix -- there the
+  #      persistent path is numerically wrong for chunked prefill and the gate is required
+  #      (leave the default GLM_PERSIST_GATE=1). This is image-specific, not a blanket flip.
+  #   With GLM_PERSIST_GATE=0 the prefill batch no longer needs to exceed the prompt to
+  #   avoid the abort (16384 is fine at any context); it only affects activation size then.
+  #
+  # --- prefill --max-num-batched-tokens 40960 (legacy crash-avoidance w/ gate ON) ---
+  # With the gate ON (GLM_PERSIST_GATE=1, older images), the ONLY way to avoid the abort
+  # is to keep every prompt in ONE prefill chunk, i.e. max-num-batched-tokens >= prompt
+  # length. 40960 clears the 35k-word NIAH rung (~38,603 tok). Below the longest prompt
+  # re-arms the crash. Cost is a wider prefill activation buffer, not KV. On a fixed image
+  # (gate OFF) this reverts to a pure throughput/activation knob -- see the 16384 note.
   # --- and why the two roles differ ---
   # On this image --max-num-batched-tokens ALSO sizes the MoRI EP dispatch buffer
   # (fused_moe/config.py moe.max_num_tokens -> all2all_utils.py

@@ -67,7 +67,12 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                2>&1 | tee -a ${LOG}_SHAPEWARMUP.log >/dev/null
        fi
        for con in $CON; do
-           p_con=$(($con * 2))
+           # Prompts per cell. The default 2 is the historical value, so an unset
+           # BENCHMARK_PROMPTS_PER_CON leaves every existing sweep byte-identical.
+           # It is settable because low-concurrency cells are the SMALLEST samples in
+           # the whole sweep -- con=16 sends 32 prompts, where one slow request moves
+           # the median -- and the fix is more prompts, not more iterations.
+           p_con=$(( con * ${BENCHMARK_PROMPTS_PER_CON:-2} ))
            if [ "$p_con" -lt 16 ]; then
                p_con=16
            fi
