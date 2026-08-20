@@ -79,3 +79,6 @@ venv.bak/
 
 # Skill manifest templates are checked in despite *.json above
 !.claude/skills/mad-slurm-multinode/assets/manifests/*.template.json
+!.claude/skills/mad-profiling/assets/**/*.json
+__pycache__/
+.pytest_cache/

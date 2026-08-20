@@ -533,5 +533,26 @@
         ],
         "timeout": 14400,
         "args": ""
+    },
+    {
+        "name": "sglang-disagg-gpt-oss-120b-overlay",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-GPT-OSS-120B.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "gpt-oss",
+            "moe",
+            "tp-only"
+        ],
+        "timeout": 14400,
+        "args": ""
     }
 ]

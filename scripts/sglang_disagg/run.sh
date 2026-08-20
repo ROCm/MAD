@@ -148,6 +148,16 @@ else
     export KV_TRANSFER_BACKEND="${KV_TRANSFER_BACKEND:-mooncake}"
 fi
 
+# GPT-OSS's mxfp4 MoE must be driven by one stack end to end. models.yaml pins
+# --moe-runner-backend triton because aiter's CK MXFP4 GEMM is not in this build, but with
+# aiter still enabled sglang's mxfp4 layer hands that triton runner an AiterMoeQuantInfo and
+# the first forward dies with "'AiterMoeQuantInfo' object has no attribute 'use_mxfp8'"
+# (srt/layers/moe/moe_runner/triton.py:183, job 25796). Pairing it here rather than in the
+# manifest means a run cannot be launched having forgotten one half; still overridable.
+if [[ "$MODEL_NAME" == GPT-OSS-* ]]; then
+    export SGLANG_USE_AITER="${SGLANG_USE_AITER:-0}"
+fi
+
 # Helper scripts (socket_barrier.py, set_env_vars.sh, benchmark_xPyD.sh, ...)
 # live alongside this script; point the Mooncake-path lookups at them.
 export MOONCAKE_COOKBOOK_PATH="${MOONCAKE_COOKBOOK_PATH:-$SCRIPT_DIR}"
@@ -178,7 +188,9 @@ if ! _weights_complete; then
     if [[ -z "${_MODEL_REPO}" ]]; then
         case "${MODEL_NAME}" in
             DeepSeek-R1)    _MODEL_REPO="deepseek-ai/DeepSeek-R1-0528" ;;
+            Llama-3.1-70B-Instruct) _MODEL_REPO="meta-llama/Llama-3.1-70B-Instruct" ;;
             Qwen3-Next-80B) _MODEL_REPO="Qwen/Qwen3-Next-80B-A3B-Instruct" ;;
+            GPT-OSS-120B)   _MODEL_REPO="openai/gpt-oss-120b" ;;
             *) echo "ERROR: weights missing at ${MODEL_PATH}; set MODEL_REPO for ${MODEL_NAME}" >&2; exit 1 ;;
         esac
     fi
@@ -212,6 +224,7 @@ echo " SGLang Disaggregated (madengine bridge)"
 echo "   MODEL_NAME=$MODEL_NAME  MODEL_PATH=$MODEL_PATH"
 echo "   NODE_RANK=$NODE_RANK  xP=$xP  yD=$yD  TP=$IO_EP_TP_SIZE"
 echo "   RUN_MORI=$RUN_MORI  DP_MODE=$DP_MODE  KV_TRANSFER_BACKEND=$KV_TRANSFER_BACKEND"
+echo "   SGLANG_USE_AITER=${SGLANG_USE_AITER:-<unset, defaults to 1 downstream>}"
 echo "   MASTER_ADDR=$MASTER_ADDR  IPADDRS=$IPADDRS"
 echo "=============================================================="
 

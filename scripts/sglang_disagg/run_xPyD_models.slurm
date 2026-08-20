@@ -57,6 +57,7 @@ MORI_EP_VALID_MODELS=( \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
+    "GPT-OSS-120B" \
 )
 
 # Define valid model names
@@ -68,6 +69,7 @@ VALID_MODELS=( \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
+    "GPT-OSS-120B" \
 )
 
 model_allows_mori_ep() {
