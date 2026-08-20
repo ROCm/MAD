@@ -65,7 +65,7 @@ _submit_cell() {
 
     local slurm_dir image jobname
     local -a envs
-    envs=(AGENTIC=1 "MODEL_NAME=${MODEL_NAME}" "AGENTIC_WORKLOAD=${workload}" "MAX_MODEL_LEN=${mml}")
+    envs=(BENCHMARK_SCRIPT=agentic "MODEL_NAME=${MODEL_NAME}" "AGENTIC_WORKLOAD=${workload}" "MAX_MODEL_LEN=${mml}")
 
     case "$backend" in
         sglang)

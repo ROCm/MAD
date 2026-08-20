@@ -133,7 +133,7 @@ The agentic replay benchmark replays real Claude Code agentic coding traces usin
 
 It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic`. No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
 
-> **Breaking change:** the legacy `AGENTIC=1` shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
+> **Breaking change:** the legacy `AGENTIC` env shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
 
 The four validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
 

@@ -12,8 +12,8 @@ hook.
    your launcher's script dir as `benchmark_agentic.sh`.
 2. Fill the three `# CHANGE:` fields (see below).
 3. Wire it into the launcher: it is selected via
-   `export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` (some launchers accept an
-   `AGENTIC=1` shorthand for the same thing).
+   `export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` (typically exposed to users
+   as `BENCHMARK_SCRIPT=agentic`).
 4. Preview with `DRY_RUN=1` (no server needed), then run against a live endpoint.
 
 Two working, integrated hooks to copy from:
