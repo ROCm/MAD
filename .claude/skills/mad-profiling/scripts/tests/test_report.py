@@ -102,7 +102,8 @@ def test_a_rank_coverage_caveat_is_dropped_where_every_rank_logged(tmp_path: Pat
     """
     run = tmp_path / "26615"
     write(run / "node_0" / "stdout.out",
-          ["INFO exp: /workspace/configs/llama3.1_70B-BF16-pretrain.yaml loaded",
+          ["[INFO] [main] Executing: bash runner/primus-cli-direct.sh -- train pretrain "
+           "--config examples/megatron/configs/MI355X/llama3.1_70B-BF16-pretrain.yaml",
            " iteration 1/10 | elapsed time per iteration (ms): 250.5 |"])
     rccl = tmp_path / "rccl"
     for rank in range(8):

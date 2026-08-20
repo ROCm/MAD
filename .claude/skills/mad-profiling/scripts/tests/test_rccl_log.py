@@ -125,6 +125,25 @@ def test_phases_come_from_the_markers_in_a_shared_log(primus_run: Path):
     assert phases["BF16"].nodes == {"node_0", "node_1"}
 
 
+def test_a_line_naming_two_configs_does_not_decide_the_phase(tmp_path: Path):
+    """The mount list and the `docker run` name both datatypes; only `--config` says which one runs.
+
+    Unanchored, the phase would be handed to whichever config the mount order put first, and every
+    record until the next marker would be filed under it.
+    """
+    write(tmp_path / "node_0" / "stdout.out", [
+        "  /host/configs/llama3.1_70B-FP8-pretrain.yaml:/workspace/configs/x-FP8-pretrain.yaml",
+        "docker run -v /host/configs/llama3.1_70B-FP8-pretrain.yaml:/workspace/y.yaml "
+        "-v /host/configs/llama3.1_70B-BF16-pretrain.yaml:/workspace/z.yaml img",
+        "[INFO] Executing: primus-cli -- train pretrain --config configs/llama3.1_70B-BF16-"
+        "pretrain.yaml",
+        coll_line(count=2048),
+    ])
+    phases = parse_run(tmp_path, primus.SPEC)
+    assert sorted(phases) == ["BF16"]
+    assert phases["BF16"].collective_totals()["AllReduce"]["calls"] == 1
+
+
 def test_declared_metrics_are_harvested_without_the_core_knowing_them(primus_run: Path):
     phase = parse_run(primus_run, primus.SPEC)["FP8"]
     assert phase.metric("iter_ms") == [250.5]

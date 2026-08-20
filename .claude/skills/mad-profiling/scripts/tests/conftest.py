@@ -93,8 +93,17 @@ def primus_run(tmp_path: Path) -> Path:
     run = tmp_path / "25577"
     for node in (0, 1):
         lines = []
+        # The mount list and the `docker run` line name both configs before either phase starts;
+        # only the launcher's `--config` says which one the run is on.
+        lines += [f"  /host/primus_configs/llama3.1_70B-{d}-pretrain.yaml:"
+                  f"/workspace/configs/llama3.1_70B-{d}-pretrain.yaml" for d in ("FP8", "BF16")]
+        lines.append("DOCKER RUN OPERATION: docker run -t -d "
+                     "-v /host/primus_configs/llama3.1_70B-FP8-pretrain.yaml:/workspace/x.yaml "
+                     "-v /host/primus_configs/llama3.1_70B-BF16-pretrain.yaml:/workspace/y.yaml img")
         for dtype in ("BF16", "FP8"):
-            lines.append(f"INFO exp: /workspace/configs/llama3.1_70B-{dtype}-pretrain.yaml loaded")
+            lines.append("[INFO] [main] Executing: bash runner/primus-cli-direct.sh -- train "
+                         f"pretrain --config examples/megatron/configs/MI355X/"
+                         f"llama3.1_70B-{dtype}-pretrain.yaml")
             for rank in range(2):
                 lines += [coll_line(count=2048, grank=rank, pid=3000 + rank)] * 3
             lines.append(" iteration 1/10 | elapsed time per iteration (ms): 250.5 |")

@@ -17,9 +17,13 @@ from ..core.spec import (LOG_PER_RANK, NODE_FROM_PARENT, NODE_FROM_STEM, PHASE_F
                          PHASE_FROM_MARKER, EngineSpec, LogLayout, LogMetric, ReportNotes,
                          SanityLimits, TraceLayout)
 
-#: The Primus experiment config picked by MAD's dtype loop. The model part varies per workload
-#: (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so only the dtype and the suffix are anchored.
-RE_PHASE = re.compile(r"[A-Za-z0-9._]+-(BF16|FP8|MXFP8|MXFP4)-pretrain\.yaml")
+#: The Primus experiment config picked by MAD's dtype loop, read off the ``--config`` the launcher
+#: passes. The model part varies per workload (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so only
+#: the dtype and the suffix are anchored. The ``--config`` is load-bearing rather than decoration: a
+#: config path is also printed by lines that name both datatypes at once -- the mount list and the
+#: `docker run` that carries every `-v` -- and those would hand the phase to whichever config the
+#: mount order put first, before the run has even started.
+RE_PHASE = re.compile(r"--config\s+\S*-(BF16|FP8|MXFP8|MXFP4)-pretrain\.yaml")
 
 #: Same anchor on a trace path: `.../llama3.1_70B-BF16-pretrain/tensorboard`.
 RE_TRACE_PHASE = re.compile(r"-(BF16|FP8|MXFP8|MXFP4)-pretrain")
@@ -50,7 +54,7 @@ SPEC = EngineSpec(
         phase_from=PHASE_FROM_MARKER,
         node_from=NODE_FROM_PARENT,
         phase_marker=RE_PHASE,
-        marker_guard="-pretrain.yaml",
+        marker_guard="--config",
     ),
     # `BF16.node_1.<host>.<pid>.log`, one per rank per datatype, written when MAD's dtype loop was
     # given RCCL_LOG_DIR. The datatype has to be in the name: the markers that separate the phases
