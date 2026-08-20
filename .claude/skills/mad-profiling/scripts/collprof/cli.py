@@ -27,8 +27,8 @@ from .core.units import fmt_bytes
 
 
 #: The script that owns the arguments below, and the only name a reader can rerun them with. A
-#: caller passing ``argv`` -- regen_reports.py walking a campaign catalog -- runs under its own name,
-#: whose parser knows none of these flags.
+#: caller passing ``argv`` -- regen_reports.py walking a catalog -- runs under its own name, whose
+#: parser knows none of these flags.
 ENTRY_POINT = "collective_report.py"
 
 

@@ -98,8 +98,8 @@ def primus_run(tmp_path: Path) -> Path:
         lines += [f"  /host/primus_configs/llama3.1_70B-{d}-pretrain.yaml:"
                   f"/workspace/configs/llama3.1_70B-{d}-pretrain.yaml" for d in ("FP8", "BF16")]
         lines.append("DOCKER RUN OPERATION: docker run -t -d "
-                     "-v /host/primus_configs/llama3.1_70B-FP8-pretrain.yaml:/workspace/x.yaml "
-                     "-v /host/primus_configs/llama3.1_70B-BF16-pretrain.yaml:/workspace/y.yaml img")
+                     "-v /host/configs/llama3.1_70B-FP8-pretrain.yaml:/workspace/x.yaml "
+                     "-v /host/configs/llama3.1_70B-BF16-pretrain.yaml:/workspace/y.yaml img")
         for dtype in ("BF16", "FP8"):
             lines.append("[INFO] [main] Executing: bash runner/primus-cli-direct.sh -- train "
                          f"pretrain --config examples/megatron/configs/MI355X/"

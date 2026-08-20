@@ -120,5 +120,4 @@ SPEC = EngineSpec(
                       "steps the profile point requested. Compare the mix and the sizes, not the "
                       "totals."),
     ),
-    fingerprints=("perf_sglang-disagg-*.csv", "proxy_NODE*.log"),
 )

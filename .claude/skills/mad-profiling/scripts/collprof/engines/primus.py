@@ -18,8 +18,8 @@ from ..core.spec import (LOG_PER_RANK, NODE_FROM_PARENT, NODE_FROM_STEM, PHASE_F
                          SanityLimits, TraceLayout)
 
 #: The Primus experiment config picked by MAD's dtype loop, read off the ``--config`` the launcher
-#: passes. The model part varies per workload (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so only
-#: the dtype and the suffix are anchored. The ``--config`` is load-bearing rather than decoration: a
+#: passes. The model part varies per workload (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so
+#: only the dtype and the suffix are anchored. The ``--config`` is load-bearing, not decoration: a
 #: config path is also printed by lines that name both datatypes at once -- the mount list and the
 #: `docker run` that carries every `-v` -- and those would hand the phase to whichever config the
 #: mount order put first, before the run has even started.
@@ -88,5 +88,4 @@ SPEC = EngineSpec(
                       "records overwrite each other mid-write and cannot be attributed; under a "
                       "percent is normal."),
     ),
-    fingerprints=("node_*/stdout.out",),
 )

@@ -120,9 +120,10 @@ def one_copy_per_log(logs: list) -> list:
     if doubled:
         shown = ", ".join(str(log.with_suffix("")) for log in doubled[:4])
         more = f", and {len(doubled) - 4} more" if len(doubled) > 4 else ""
-        print(f"warning: {len(doubled)} log(s) are present both compressed and not ({shown}{more}). "
-              "Reading the plain file and ignoring the .gz, so nothing is counted twice; delete one "
-              "of each pair to silence this. compress_logs.py never leaves both.")
+        print(f"warning: {len(doubled)} log(s) are present both compressed and not "
+              f"({shown}{more}). Reading the plain file and ignoring the .gz, so nothing is "
+              "counted twice; delete one of each pair to silence this. compress_logs.py never "
+              "leaves both.")
     return kept
 
 

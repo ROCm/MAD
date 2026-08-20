@@ -179,6 +179,3 @@ class EngineSpec:
     iteration_metric: str = ""
     traces: TraceLayout = field(default_factory=TraceLayout)
     limits: SanityLimits = field(default_factory=SanityLimits)
-    #: Extra ways to recognise a run of this engine beyond its log globs, e.g. a benchmark CSV.
-    #: Used only to explain a detection, never to override it.
-    fingerprints: tuple[str, ...] = ()

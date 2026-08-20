@@ -104,7 +104,7 @@ def write_workbook(out_dir: Path, report_lines: list) -> Path | None:
         from openpyxl.utils import get_column_letter
         from openpyxl.worksheet.table import Table, TableStyleInfo
     except ImportError:
-        print(f"warning: openpyxl is not installed in {Path(sys.executable).name}, so "
+        print(f"warning: openpyxl is not installed in {sys.executable}, so "
               f"{out_dir}/profile.xlsx was skipped; report.md and the CSVs still hold every "
               "number. `pip install openpyxl` and rerun to get the workbook.")
         return None

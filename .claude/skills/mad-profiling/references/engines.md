@@ -18,7 +18,6 @@ touched — that is the whole point of the split, and the reason it is worth kee
 | `traces` (`TraceLayout`) | how trace files are named and which phase each belongs to | `-TP-3.trace.json.gz`, role from the profile-point log |
 | `limits` (`SanityLimits`) | the scale at which a record stops being plausible | 512 MiB per message, 64 ranks per communicator |
 | `notes` (`ReportNotes`) | what a reader must be told to not misread the numbers | the scope of a measurement configuration |
-| `fingerprints` | other artifacts that corroborate a detection | `perf_sglang-disagg-*.csv` |
 
 `notes` is the field to take seriously. Every sentence in it is a claim about how one
 engine was measured, and it is inserted into the report as written. A new engine that
