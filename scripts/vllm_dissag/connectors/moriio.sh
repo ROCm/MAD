@@ -124,28 +124,13 @@ _moriio_build_kv_transfer_config() {
 }
 
 connector_runtime_patch() {
-    # No runtime .py patching on the moriio path, for ANY model.
-    #
-    # MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL split,
-    # DP-rank hash-failsafe) are committed in-source in the vLLM the image is built
-    # from (Dockerfile VLLM_REF). There is no generic runtime .py patcher for those —
-    # that would be a drifting duplicate of fixes already upstream in the fork.
-    #
-    # The same rule now holds for GLM-5.* (GlmMoeDsaForCausalLM, MLA + DSA sparse
-    # attention): DSA adds a 2nd KV cache per layer (indexer) with its own geometry,
-    # and the connector/kernel fixes for it (per-req-ctx metadata key #47766, DSA
-    # indexer KV transfer, invalid-token sentinel, sparse-indexer bounds guard) are
-    # carried IN-SOURCE by the image. The required ref is the contract:
-    # docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile
-    # VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27. Serving GLM-5.* on an image built from
-    # an older ref is unsupported — rebuild the image; do not re-add runtime patchers.
-    #
-    # Likewise the MoRI version is pinned by the Dockerfile MORI_REF. That pin is
-    # 42e895472b08 = ROCm/mori#366 "fix(ep): mlx5 collapsed CQ + dedicated dispatch send
-    # buffer for internode-v1" (2026-06-05) — the tip GLM-5.1 DSA wideEP was validated on.
-    # It does NOT contain the later large-transfer notify/mapping fixes #424 (2026-06-26),
-    # #432 and #436 (2026-06-29): all three merged after the pin. If you need those,
-    # update MORI_REF and rebuild + re-validate — no runtime library swap here.
+    # No-op: the MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL
+    # split, DP-rank hash-failsafe) are committed in-source in the vLLM the image is
+    # built from (see the Dockerfile VLLM_REF). There is no runtime .py patcher — that
+    # would be a drifting duplicate of fixes that already live upstream in the fork.
+    # If you ever run an image WITHOUT these fixes baked, use an image that has them
+    # (rebuild from the pinned VLLM_REF) rather than patching a stock image at runtime.
+    # Same rule for GLM-5.* DSA: those fixes are in-source too (see models.yaml).
     return 0
 }
 
