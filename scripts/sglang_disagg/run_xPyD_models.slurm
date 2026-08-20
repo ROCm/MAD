@@ -308,12 +308,23 @@ echo ""
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
 MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-# Prefer the 10.158.x fabric IP: nodes are multi-homed and picking the first
+# Prefer the fabric-subnet IP: nodes are multi-homed and picking the first
 # hostname -I address can land on a different subnet, which hangs the socket
-# barrier on mixed-subnet coordination. Cluster-specific (OCI useocpm2m fabric).
-# Fall back to the first address if no 10.158.x is present; fail fast if empty.
+# barrier on mixed-subnet coordination. The preferred subnet prefix is
+# overridable via FABRIC_SUBNET_PREFIX (default "10.158." for the OCI
+# useocpm2m fabric); setting it empty is not intended (an empty prefix would
+# match every address), so when it is empty we skip the prefix match and go
+# straight to the first-address fallback. Fall back to the first address if no
+# matching address is present; fail fast if empty.
+FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
+# Escape regex-special chars so the prefix is matched literally, anchored at start.
+FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
 MASTER_ADDR_RAW="$MASTER_ADDR"
-MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
+    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
+else
+    MASTER_ADDR=""
+fi
 if [ -z "$MASTER_ADDR" ]; then
     MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | awk '{print $1}')
 fi
@@ -328,7 +339,11 @@ IPS=()
 for NODE in $SELECTED_NODES; do
     IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
     IP_RAW="$IP"
-    IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E '^10\.158\.' | head -1)
+    if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
+        IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
+    else
+        IP=""
+    fi
     if [ -z "$IP" ]; then
         IP=$(echo "$IP_RAW" | awk '{print $1}')
     fi
