@@ -113,9 +113,11 @@ if [[ ! -f "${MLPERF_INF_DATASET_PATH}" ]]; then
 fi
 
 echo "=== environment ==="
-python3 -c "import torch, vllm; \
+python3 -c "import sys, torch, vllm; \
 print('vllm', vllm.__version__, '| torch', torch.__version__, '| hip', torch.version.hip); \
-print('gpus', torch.cuda.device_count(), torch.cuda.get_device_properties(0).gcnArchName)"
+n = torch.cuda.device_count(); \
+sys.exit('no GPU visible to the container: pass the devices through docker_gpus') if not n else None; \
+print('gpus', n, torch.cuda.get_device_properties(0).gcnArchName)"
 
 cd "${MLPERF_HARNESS_DIR}"
 

@@ -163,8 +163,12 @@ ensure_mlperf_data() {
       fi
       echo "[data-fetch] rank=0 downloading meta-llama/Llama-3.1-8B tokenizer -> ${TOKENIZER_PATH}"
       rm -f "${tokenizer_sentinel}"
+      # Only the tokenizer is needed; without --include this pulls the whole
+      # repo, ~16 GB of weights, to reach a few MB of vocabulary.
       HF_TOKEN="${hf_token}" huggingface-cli download \
         meta-llama/Llama-3.1-8B \
+        --include "tokenizer*" "special_tokens_map.json" "config.json" \
+                  "generation_config.json" \
         --local-dir "${TOKENIZER_PATH}" \
         --local-dir-use-symlinks False
       set -x
@@ -318,9 +322,8 @@ NNODES="${NNODES:-1}"
 
 # GPU-per-node resolution:
 #   1. Explicit manifest override wins (MLPERF_GPUS_PER_NODE).
-#   2. Autodetect from visible render nodes inside the container; madengine
-#      plumbs exactly the GPUs listed in docker_gpus, so /dev/dri/renderD*
-#      is an authoritative count regardless of what NPROC_PER_NODE contains.
+#   2. Autodetect the GPUs actually usable by this process, which is
+#      authoritative regardless of what NPROC_PER_NODE contains.
 #   3. Legacy env fallbacks (kept for single-node/local runs).
 detect_local_gpu_count() {
   # torch.cuda.device_count() respects HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES
@@ -355,7 +358,7 @@ if [[ -n "${MLPERF_GPUS_PER_NODE:-}" ]]; then
   echo "[gpu-detect] using MLPERF_GPUS_PER_NODE override = ${GPUS_PER_NODE}"
 elif DETECTED_GPUS=$(detect_local_gpu_count); then
   GPUS_PER_NODE="${DETECTED_GPUS}"
-  echo "[gpu-detect] detected ${GPUS_PER_NODE} local GPU(s) via /dev/dri/renderD*"
+  echo "[gpu-detect] detected ${GPUS_PER_NODE} local GPU(s) via torch.cuda.device_count()"
   if [[ -n "${NPROC_PER_NODE:-}" && "${NPROC_PER_NODE}" != "${GPUS_PER_NODE}" ]]; then
     echo "[gpu-detect] WARNING: env NPROC_PER_NODE=${NPROC_PER_NODE} differs from detected ${GPUS_PER_NODE}; using detected value."
   fi

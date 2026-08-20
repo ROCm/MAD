@@ -214,6 +214,16 @@ def main() -> None:
         flush=True,
     )
 
+    # --tensor_parallel_size exists to mirror the reference argument list, but
+    # neither the reference nor this entrypoint feeds it to the trainer strategy:
+    # it is only read back for the MLLOG DP figure. Reject anything but 1 rather
+    # than let the flag silently mean nothing.
+    if args.tensor_parallel_size not in (None, 1):
+        raise RuntimeError(
+            f"--tensor_parallel_size={args.tensor_parallel_size} is not applied to "
+            "the trainer; the 8B recipe runs tp=pp=cp=1. Drop the flag."
+        )
+
     # GBS / DP / MBS divisibility check: matches what NeMo's MegatronStrategy
     # asserts later, but produces a much clearer error before we touch CUDA.
     dp = world_size  # tp=pp=cp=1 for the 8B recipe
@@ -248,6 +258,11 @@ def main() -> None:
 
     eval_every_n_batches = math.ceil(args.eval_every / args.gbs)
     eval_batches = math.ceil(args.eval_tokens / args.gbs)
+    # Reads as inverted, and is: a non-zero --start_eval_at is discarded in favour
+    # of eval_every_n_batches, while zero divides zero. Kept verbatim from the
+    # reference (mlcommons/training, llama31/pretrain_llama31.py: the
+    # `if args.start_eval_at == 0` block) — the evaluation schedule is part of
+    # the benchmark, so it must not diverge here.
     start_eval_at = (
         math.ceil(args.start_eval_at / args.gbs) if args.start_eval_at == 0 else eval_every_n_batches
     )

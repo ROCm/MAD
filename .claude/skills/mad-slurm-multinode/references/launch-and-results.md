@@ -85,10 +85,13 @@ negative — the aggregation across nodes picks the non-empty result.
   rank-0 `:::MLLOG` stream plus the `train_step_timing` lines on node 0 and
   writes the whole metric set (`step_time_{mean,p50,p95,stdev}_s`,
   `cluster_tokens_per_s`, `per_gpu_tokens_per_s`, `per_gpu_tflops_bf16`,
-  `mfu_pct`, `time_to_train_min`). The same numbers are printed human-readably in
+  `mfu_pct`, `peak_bf16_tflops`, `time_to_train_min`). The same numbers are
+  printed human-readably in
   `slurm_output/madengine-*_<jobid>_node_0.out` — grep `Per-iteration perf`. Read
   step time and tokens/s; `mfu_pct` is only valid if
-  `MLPERF_PEAK_BF16_TFLOPS` was set, and `run_stop_aborted=1` is normal for a
+  `MLPERF_PEAK_BF16_TFLOPS` was set, which is why the peak it was divided by is
+  written next to it — a `peak_bf16_tflops` that does not match the accelerator
+  invalidates the MFU and nothing else. `run_stop_aborted=1` is normal for a
   fixed-step perf run (it means the run stopped at `MLPERF_MAX_STEPS`, not at the
   benchmark's convergence target). Iteration 0 is a cold outlier (tens of
   seconds) and is excluded from the aggregates by design.

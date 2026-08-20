@@ -94,6 +94,9 @@ RUN git clone --recursive "${MEGATRON_REPO}" megatron_lm && \
     cd megatron/core/datasets && \
     make
 
+# Assigned, not appended: the ROCm base image leaves PYTHONPATH unset, so there
+# is nothing to preserve, and `...megatron_lm:${PYTHONPATH}` would leave a
+# trailing colon — an empty entry that puts the run directory on sys.path.
 ENV PYTHONPATH="${DEPS_DIR}/megatron_lm"
 
 # The ROCm base ships its own torch/torchvision/torchaudio/triton builds. Pin
@@ -372,9 +375,12 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
       echo "RDMA_CORE_VERSION empty — keeping distro rdma-core"; \
     fi
 
+# The bnxt_re provider is the whole reason rdma-core is built from source, so it
+# is a gate, not a print: without it RCCL falls back and the Thor2 queue-pair fix
+# is silently absent from the image.
 RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
       readelf -d /usr/lib/x86_64-linux-gnu/libibverbs.so.1 | grep SONAME && \
-      { ls /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav*.so 2>/dev/null | head || true; }; \
+      ls /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav*.so; \
     fi && \
     python3 -c "import torch; print('torch', torch.__version__, 'hip', torch.version.hip)"
 

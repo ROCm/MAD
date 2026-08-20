@@ -427,6 +427,10 @@ def _compute_result_dict(
             result["per_gpu_tflops_bf16"] = tflops
             if peak_bf16_tflops:
                 result["mfu_pct"] = 100.0 * tflops / peak_bf16_tflops
+                # Recorded alongside mfu_pct: the percentage is meaningless
+                # without the peak it was divided by, and the default is only
+                # right for one accelerator.
+                result["peak_bf16_tflops"] = peak_bf16_tflops
 
     return result
 
@@ -452,6 +456,7 @@ MAD_CSV_KEYS: list[tuple[str, str]] = [
     ("per_gpu_tokens_per_s", "per_gpu_tokens_per_s"),
     ("per_gpu_tflops_bf16", "per_gpu_tflops_bf16"),
     ("mfu_pct", "mfu_pct"),
+    ("peak_bf16_tflops", "peak_bf16_tflops"),
 ]
 
 
@@ -486,9 +491,9 @@ def _write_mad_csv(
 
     # Keep the legacy status marker so MAD's existing ``torchrun_launch_success``
     # detection still sees a green signal even when the perf numbers are the
-    # primary value. Also include the submittable/status flag from MLLOG.
-    status_marker = "torchrun_launch_success" if result.get("submittable") is not None else "launch_success"
-    rows.append(("1", status_marker))
+    # primary value. It reports that the launch worked, not that the run met the
+    # convergence target — that verdict is the ``run_stop_<status>`` row below.
+    rows.append(("1", "torchrun_launch_success"))
     run_status = result.get("run_stop_status")
     if run_status:
         rows.append(("1", f"run_stop_{run_status}"))

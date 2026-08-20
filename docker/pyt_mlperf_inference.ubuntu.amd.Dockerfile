@@ -54,12 +54,19 @@ RUN pip install "${MLPERF_INFERENCE_DIR}/loadgen" && \
 # The harness `requirements.txt` pins `vllm==0.6.3` and `transformers==4.46.2`;
 # installing it would replace the ROCm vLLM build that this base image exists
 # for. Only the imports the base image is actually missing are added here.
-RUN pip install nltk rouge-score absl-py
+# `evaluate` is listed even though the base image happens to ship it: the
+# accuracy pass imports it, and that should not depend on a base-image detail.
+RUN pip install nltk rouge-score absl-py evaluate
 
 # Pre-seed what the accuracy pass would otherwise fetch mid-run: nltk's sentence
 # tokenizer and the `rouge` metric module from the Hub. HF_MODULES_CACHE is set
 # explicitly so a run-time HF_HOME override cannot invalidate the warm cache.
-RUN python3 -c "import nltk; nltk.download('punkt', download_dir='${NLTK_DATA}'); nltk.download('punkt_tab', download_dir='${NLTK_DATA}')" && \
+# nltk.download() reports failure by returning False rather than raising, so a
+# transient network error would otherwise bake an empty cache as a success and
+# only surface mid-run, when the accuracy pass reaches for the tokenizer.
+RUN python3 -c "import nltk, sys; \
+missing = [p for p in ('punkt', 'punkt_tab') if not nltk.download(p, download_dir='${NLTK_DATA}')]; \
+sys.exit('nltk.download failed for: ' + ', '.join(missing) if missing else 0)" && \
     python3 -c "import evaluate; print('rouge metric', evaluate.load('rouge').name)"
 
 RUN cd "${MLPERF_HARNESS_DIR}" && \
