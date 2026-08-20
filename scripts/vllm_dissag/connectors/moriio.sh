@@ -130,7 +130,6 @@ connector_runtime_patch() {
     # would be a drifting duplicate of fixes that already live upstream in the fork.
     # If you ever run an image WITHOUT these fixes baked, use an image that has them
     # (rebuild from the pinned VLLM_REF) rather than patching a stock image at runtime.
-    # Same rule for GLM-5.* DSA: those fixes are in-source too (see models.yaml).
     return 0
 }
 
