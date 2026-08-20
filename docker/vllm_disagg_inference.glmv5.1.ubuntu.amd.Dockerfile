@@ -68,10 +68,9 @@
 #     120d2de broke the connector KV-notify handshake, hence a pin, not main.)
 #   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
-#   - vLLM  -> COMPILED from raviguptaamd/vllm @ d723eb305e (tip of
-#     glm5.1-dsa-wideEP_on_vllm-v0.27 when validated; GLM DSA + #47766 metadata-key).
-#     Full compile: a different commit than the base's, so a .py-only overlay would be
-#     ABI-mismatched.
+#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
+#     (validated at tip d723eb305e; GLM DSA + #47766 metadata-key). Full compile: a
+#     different commit than the base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
 #     forwards it via docker -e. ROCm 7.2.3 cannot dmabuf-export VMM memory, else MoRI
@@ -84,7 +83,7 @@
 # THIS IMAGE IS THE CONTRACT. The MAD side (scripts/vllm_dissag) is catalog/config only
 # and ships NO runtime .py patchers: connector_runtime_patch in connectors/moriio.sh is a
 # no-op for every model. So EVERY GLM DSA source fix must be carried in-source HERE, by
-# VLLM_REF below (d723eb305e) plus the MoRI/AITER pins. Serving
+# VLLM_REF below (glm5.1-dsa-wideEP_on_vllm-v0.27) plus the MoRI/AITER pins. Serving
 # GLM-5.1-FP8 from an image built off an older vLLM ref is unsupported: it boots, then
 # produces garbage output or stalls the disagg KV transfer, with nothing to fall back on.
 # That failure is silent, and it has been measured: the pre-v0.27 lab image
@@ -208,19 +207,20 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
 #    hard requirement rather than a preference. Override VLLM_REF to rebuild a
 #    different commit; build only committed commits (no working-tree edits).
 # -----------------------------------------------------------------------------
-# VLLM_REPO/REF are a PUBLIC GitHub repo + commit. Override to your own vLLM fork/ref.
+# VLLM_REPO/REF are a PUBLIC GitHub repo + branch. Override to your own vLLM fork/branch.
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-# REPRODUCIBILITY: pinned to a SHA, not the branch name, because the branch is mutable
-# and has already advanced once since GLM-5.1 was validated (cda3648602 on 2026-08-10 ->
-# the MoRI EP sizing commits e8c186f71/d723eb305 on 2026-08-15). A branch name would make
-# `docker build` resolve to whatever the tip is on the day you build, which is not what
-# "the image is the contract" can mean. The sha below is the tip of
-# glm5.1-dsa-wideEP_on_vllm-v0.27 that every number in models.yaml was measured on.
-# To move the pin, pass --build-arg VLLM_REF=<sha> and re-validate; /app/versions.txt in
-# the built image records the resolved sha either way.
+# REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — the branch has
+# already advanced once since GLM-5.1 was validated (cda3648602 on 2026-08-10 -> the
+# MoRI EP sizing commits e8c186f71/d723eb305 on 2026-08-15). `docker build` resolves it
+# to whatever the tip is on the day you build, so two builds of this Dockerfile can ship
+# different engines. Tracked separately; until that is settled, build auditably by
+# passing the exact commit:
+#   --build-arg VLLM_REF=d723eb305eb78d1bda0ed357b2b54cc29487221f
+# which is the tip every number in models.yaml was measured on. /app/versions.txt in the
+# built image records whichever sha was resolved.
 #
-# d723eb305e = the base image's vLLM commit dedbf6be8b + exactly 9 ROCm commits (verified
-# with the GitHub compare API: 9 ahead, 0 behind). dedbf6be8b is vllm-project/vllm MAIN of
+# Branch tip d723eb305e = the base image's vLLM commit dedbf6be8b + exactly 9 ROCm
+# commits (GitHub compare API: 9 ahead, 0 behind). dedbf6be8b is vllm-project/vllm MAIN of
 # 2026-08-09, i.e. 270 commits AFTER the v0.27.0 tag and 17 behind the releases/v0.27.0
 # branch — the "v0.27" in the branch name is a label for this line of work, not a
 # checkout of the v0.27 release. Core DSA 3: per-req-ctx metadata key (#47766), DSA
@@ -231,7 +231,7 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # mla_decode_fwd derefs -1 -> GPU fault at disagg long-ctx). Plus 2 MoRI EP sizing
 # commits. NIAH-validated 1P/1D EP8 + 2P/2D EP16, 2k-35k; see the models.yaml recipe
 # for the per-role cudagraph modes actually used (decode FULL_AND_PIECEWISE).
-ARG VLLM_REF=d723eb305eb78d1bda0ed357b2b54cc29487221f
+ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
     MAX_JOBS=${MAX_JOBS}

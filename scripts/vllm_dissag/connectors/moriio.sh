@@ -137,7 +137,7 @@ connector_runtime_patch() {
     # indexer KV transfer, invalid-token sentinel, sparse-indexer bounds guard) are
     # carried IN-SOURCE by the image. The required ref is the contract:
     # docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile
-    # VLLM_REF=d723eb305e. Serving GLM-5.* on an image built from
+    # VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27. Serving GLM-5.* on an image built from
     # an older ref is unsupported — rebuild the image; do not re-add runtime patchers.
     #
     # Likewise the MoRI version is pinned by the Dockerfile MORI_REF. That pin is

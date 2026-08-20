@@ -190,9 +190,9 @@ DeepSeek-R1:
 # the MoRIIO connector, invalid-token sentinel, sparse-indexer bounds guard) must be
 # IN-SOURCE in the image's vLLM. Build the per-model image from
 # docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose
-# VLLM_REF=d723eb305e IS the contract. That ref is pinned to a commit, not a branch
-# name, so a rebuild is auditable and cannot drift (see the REPRODUCIBILITY note at
-# VLLM_REF in that Dockerfile). That build is published
+# VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27 IS the contract. That ref is a BRANCH and
+# therefore mutable — for an auditable rebuild pass the exact commit as a build arg
+# (see the REPRODUCIBILITY note at VLLM_REF in that Dockerfile). That build is published
 # as rocmshared/pytorch-private:glm5.1-vllm027-b8, and it is the image every number
 # below was measured on. The glmv5.1 Dockerfile names the same tag and the same pins.
 # DOCKER_IMAGE_NAME is submit-time, not set here (#171 requires it explicit).
