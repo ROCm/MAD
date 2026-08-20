@@ -16,9 +16,9 @@
     "rocm-primus-gptoss120b": {
       "name": "primus_pyt_megatron_lm_train_gpt-oss-120b_overlay",
       "url": "",
-      "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd",
+      "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
       "dockercontext": "./docker",
-      "scripts": "scripts/primus/megatron-lm/run.sh",
+      "scripts": "scripts/primus_megatron-lm/run.sh",
       "n_gpus": "-1",
       "owner": "mad.support@amd.com",
       "training_precision": "",
@@ -81,7 +81,7 @@
       "output_dir": "./slurm_output",
       "exclusive": true,
       "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
-      "nodelist": "<OPTIONAL  pin to specific nodes, e.g. node-a,node-b; remove to let SLURM schedule>"
+      "nodelist": "<FILL_NODELIST optional: pin to specific nodes, e.g. node-a,node-b; delete this key to let SLURM schedule>"
     },
     "distributed": {
       "launcher": "torchrun",
