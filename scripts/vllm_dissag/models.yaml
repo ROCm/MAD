@@ -280,12 +280,13 @@ GLM-5.1-FP8:
     # server, but notable for CI. Set PIECEWISE to fall back.
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
-    # v0.27 MLA compile fix, GLM-only. The *_kv_cache_update op dispatches the STABLE-ABI
-    # concat_and_cache_mla, whose boxed kernel does not compose inside the Dynamo-FX
-    # partitioned graph -> "RuntimeError: unknown parameter type" on the first real MLA
-    # decode. This moves partitioning to inductor codegen so the KV-update becomes an
-    # eager boundary. The connector default is OFF (see connectors/moriio.sh) so no other
-    # model's --compilation-config changes; GLM opts in here.
+    # Moves graph partitioning to inductor codegen so the MLA KV-update becomes an eager
+    # boundary. GLM-only: the connector default is OFF (see connectors/moriio.sh), so no
+    # other model's --compilation-config changes. Adopted against an earlier build that
+    # raised "RuntimeError: unknown parameter type" on the first real MLA decode without
+    # it; that does NOT reproduce on the pinned image (A/B slurm 217352.91 vs .108: NIAH
+    # 2k 10/10 both ways, TPOT within ~1%). Kept ON because it is what every number below
+    # was measured with — not a correctness requirement on this image.
     USE_INDUCTOR_GRAPH_PARTITION: "1"
     VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
     PREFILL_MORI_BACKEND: "mori_high_throughput"

@@ -162,18 +162,21 @@ connector_launch_worker() {
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
-    # v0.27 MLA fix: the *_kv_cache_update op dispatches the STABLE-ABI concat_and_cache_mla
-    # whose boxed kernel does NOT compose inside the Dynamo-FX-partitioned compiled graph
-    # -> "RuntimeError: unknown parameter type" on the first real MLA decode (passes boot +
-    # warmup via the fake path, then crashes). splitting_ops-list membership alone doesn't
-    # cut the graph there. use_inductor_graph_partition=true moves partitioning to inductor
-    # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the KV-update so
-    # it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION.
-    # DEFAULT OFF: only MLA models that hit that boxing failure need it (today just
-    # GLM-5.1-FP8, which sets USE_INDUCTOR_GRAPH_PARTITION=1 in its models.yaml env:).
-    # Defaulting it ON would change --compilation-config for EVERY model on this
-    # connector (DeepSeek-V3/-5layer/-R1, Llama-70B, gpt-oss-120b) — an unrelated
-    # compile-path change for recipes that are already validated without it.
+    # use_inductor_graph_partition=true moves graph partitioning from Dynamo/FX to inductor
+    # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the MLA KV-update
+    # so it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION.
+    # It was adopted for GLM against an earlier build where the *_kv_cache_update op's
+    # STABLE-ABI concat_and_cache_mla boxed kernel failed to compose in the Dynamo-FX
+    # partitioned graph ("RuntimeError: unknown parameter type" on the first real MLA
+    # decode). That failure does NOT reproduce on the pinned image: an A/B on 1P/1D EP8
+    # (slurm 217352.91 vs .108) scored NIAH 2k 10/10 both with and without the flag, and a
+    # matched 1024/1024 con=8 sweep put mean TPOT within ~1% (42.6 vs 42.1 ms). GLM keeps
+    # it ON because that is the configuration every published number was measured with,
+    # not because it is required.
+    # DEFAULT OFF here: turning it on for the connector would change --compilation-config
+    # for EVERY model (DeepSeek-V3/-5layer/-R1, Llama-70B, gpt-oss-120b) — an unrelated
+    # compile-path change for recipes already validated without it. GLM opts in via its
+    # models.yaml env:.
     local _igp_json=""
     [[ "${USE_INDUCTOR_GRAPH_PARTITION:-0}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
