@@ -118,6 +118,12 @@ differ, the host path belongs on the value side.
   `rccl_overlay` Dockerfile; `launcher: torchrun`, `nproc_per_node: 8`.
   `multiple_results` = `perf_primus-megatron-Llama-3.1-{8B,70B}.csv`. 70B is
   heavier — give it more walltime / more nodes.
+- **Primus GPT-OSS-120B** (`primus_pyt_megatron_lm_train_gpt-oss-120b_overlay`):
+  same `rccl_overlay` Dockerfile/`torchrun` shape as the Llama-3.1 templates.
+  Verified working at 2 nodes (TP1 x PP2 x VP2 x EP8 = 16 GPU parallelism) with
+  `timeout: 14400` (4h) — the CLI default (7200s/2h) times out on this model;
+  keep the explicit 14400. `multiple_results` =
+  `perf_primus-megatron-GPT-OSS-120B.csv`.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.
   `launcher: sglang-disagg`, `scripts/sglang_disagg/run.sh` entrypoint,
@@ -144,6 +150,29 @@ differ, the host path belongs on the value side.
   (`patchelf --add-needed librocm_smi64.so.<N>`) so a newer RCCL on the rocm720
   base does not break `import torch` (see [gotchas.md](gotchas.md#sglang_disagg)).
   Perf lands in `perf_sglang-disagg-DeepSeek-R1.csv`, collected on rank 0 only.
+- **sglang_disagg GPT-OSS-120B** (`sglang-disagg-gpt-oss-120b-overlay`): same
+  disaggregated prefill/decode shape as DeepSeek-R1, but TP-only
+  (`RUN_MORI=0`, `DP_MODE=0` — this model's MoE fits on a single 8-GPU TP=8
+  replica per prefill/decode node, no cross-node EP needed), `mooncake`
+  KV-transfer. Verified working at 4 nodes (xP=2, yD=2) on gfx942 (MI300X)
+  with `base_docker: lmsysorg/sglang:v0.5.14-rocm720-mi30x`. This exact
+  combo (GPT-OSS native mxfp4 checkpoint + gfx942) needs **all three** of:
+  1. the Dockerfile's `mxfp_supported()` gfx942 patch (already baked into
+     `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile`,
+     no manifest action needed — just rebuild the image against it);
+  2. `--moe-runner-backend triton` (already baked into
+     `scripts/sglang_disagg/models.yaml`'s `GPT-OSS-120B.base_flags`, no
+     manifest action needed);
+  3. `"SGLANG_USE_AITER": "0"` in **both** `context.docker_env_vars` and
+     `deployment_config.env_vars` (set in the template) — sglang's
+     `Mxfp4MoEMethod.apply()` ignores the CLI `--moe-runner-backend` and
+     always builds an aiter-specific quant-info object when
+     `SGLANG_USE_AITER` is truthy, crashing the triton runner with
+     `AttributeError: 'AiterMoeQuantInfo' object has no attribute
+     'use_mxfp8'`. This does not disable `--attention-backend aiter`
+     (attention backend selection is CLI-driven, independent of this env
+     var).
+  `multiple_results` = `perf_sglang-disagg-GPT-OSS-120B.csv`.
 - **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
   MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
   `launcher: torchrun`, `scripts/pyt_mlperf_training/run.sh`, `nproc_per_node: 8`,

@@ -147,11 +147,36 @@ for k in ("RCCL_AINIC_ROCE", "RDMAV_DRIVERS", "IBV_DRIVERS"):
         fail(f"{k} set in only one env block (context={inc}, env_vars={ind}); "
              "transport vars must be in BOTH")
 
+# 7b) A var the workload reads has to be in context.docker_env_vars: that is the block madengine
+# turns into `docker -e`, while deployment_config.env_vars only reaches the SLURM launcher on the
+# host. Putting a knob in the latter alone looks right in the manifest and silently does nothing
+# inside the container (job 25802: SGLANG_USE_AITER=0 there, server still started with aiter on).
+# Launcher-only plumbing is expected to be host-side, so it is not reported.
+LAUNCHER_ONLY = ("SLURM_", "MAD_", "BARRIER_", "IP_SYNC_")
+host_only = sorted(k for k in denv
+                   if k not in ctx and not k.startswith(LAUNCHER_ONLY))
+if host_only:
+    warn("only in deployment_config.env_vars, so the container never sees them: "
+         + ", ".join(host_only))
+else:
+    ok("every env_vars key also reaches the container via context.docker_env_vars")
+
 # 8) dockerfile / run.sh resolve under MODEL_DIR (if available)
+# "N/A (local image mode)" is not a path: madengine reads that literal as "this image
+# is not mine to build", which also skips its Dockerfile-content staleness check, so a
+# cached MAD_DOCKER_BUILDS tar survives an unrelated edit to the Dockerfile.
+LOCAL_IMAGE_MODE = "N/A (local image mode)"
 asset_paths = []
 for v in (m.get("built_images") or {}).values():
-    if isinstance(v, dict) and v.get("dockerfile"):
-        asset_paths.append(("dockerfile", v["dockerfile"]))
+    if not isinstance(v, dict) or not v.get("dockerfile"):
+        continue
+    if v["dockerfile"] == LOCAL_IMAGE_MODE:
+        if v.get("local_image"):
+            ok(f"dockerfile in local image mode, no build: {v.get('docker_image', '?')}")
+        else:
+            fail(f"{LOCAL_IMAGE_MODE} requires local_image: true")
+        continue
+    asset_paths.append(("dockerfile", v["dockerfile"]))
 for v in (m.get("built_models") or {}).values():
     if isinstance(v, dict) and v.get("scripts"):
         asset_paths.append(("scripts", v["scripts"]))

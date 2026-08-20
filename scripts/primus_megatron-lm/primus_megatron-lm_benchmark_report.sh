@@ -976,17 +976,41 @@ elif [ "$MODEL_REPO" == "GPT-OSS-20B" ]; then
 elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   SEQ_LEN=4096
-  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
-    export EXP=examples/megatron/configs/MI355X/gpt_oss_120B-$DATATYPE-pretrain.yaml
+  # Upstream Primus ships only the MI355X config for this model, so gfx942 reuses
+  # it and gets the memory-tuned values as CLI overrides below. Parallelism is
+  # TP1 x PP2 x VP2 x EP8 = 16 GPUs, so a 2-node scaleout run saturates 2x8 GPUs.
+  GPT_OSS_CONFIG_DEVICE="$CONFIG_DEVICE"
+  if [[ "$CONFIG_DEVICE" == "MI300X" || "$CONFIG_DEVICE" == "MI325X" ]]; then
+    GPT_OSS_CONFIG_DEVICE="MI355X"
+    echo "[INFO] No $CONFIG_DEVICE config for $MODEL_REPO upstream, using MI355X config"
+  fi
+  export EXP=examples/megatron/configs/$GPT_OSS_CONFIG_DEVICE/gpt_oss_120B-$DATATYPE-pretrain.yaml
+  if [[ ! -f "$EXP" ]]; then
+    echo "Error: Config file not found: $EXP"
+    echo "Hint: add gpt_oss_120B-$DATATYPE-pretrain.yaml for $GPT_OSS_CONFIG_DEVICE in Primus configs."
+  else
     MBS=$(grep -E '^\s*micro_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
     GBS=$(grep -E '^\s*global_batch_size:' $EXP | head -n1 | awk '{print $2}' | tr -d '\r')
     echo "[INFO] Extracted MBS=$MBS, GBS=$GBS from config: $EXP"
-    bash runner/primus-cli direct \
-      --log_file /tmp/primus_$MODEL_REPO.log \
-      -- train pretrain \
-      --config $EXP 2>&1 | tee -a $TRAIN_LOG
-  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    echo "Error: $MODEL_REPO is not supported on $DEVICE. Only MI355X is supported."
+    # The MI355X config (mbs 8, recompute_num_layers 4) is tuned for 288GB HBM
+    # and OOMs on 192GB MI300X/MI325X: at mbs 8 and 4 in the MoE grouped GEMM and
+    # in the last-stage fp32 cross-entropy logits buffer, and at mbs 2 with FP8,
+    # whose extra scale/transpose buffers leave ~1 GiB free per rank. Recomputing
+    # every layer of a virtual chunk (36 layers / (PP2 * VP2) = 9) buys the rest
+    # of the headroom. Keyed on the real DEVICE, not CONFIG_DEVICE, so the
+    # overrides follow the hardware.
+    MEM_OVERRIDE=""
+    if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+      if [[ "$DATATYPE" == "FP8" ]]; then
+        MBS=1
+      else
+        MBS=2
+      fi
+      MEM_OVERRIDE="--micro_batch_size $MBS --recompute_num_layers 9"
+      echo "[INFO] $DEVICE memory overrides: $MEM_OVERRIDE"
+    fi
+    GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+    run_primus "$EXP" $MEM_OVERRIDE $GBS_OVERRIDE
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
