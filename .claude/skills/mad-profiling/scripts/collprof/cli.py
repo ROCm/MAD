@@ -26,6 +26,19 @@ from .core.torch_trace import parse_traces, trace_files
 from .core.units import fmt_bytes
 
 
+#: The script that owns the arguments below, and the only name a reader can rerun them with. A
+#: caller passing ``argv`` -- regen_reports.py walking a campaign catalog -- runs under its own name,
+#: whose parser knows none of these flags.
+ENTRY_POINT = "collective_report.py"
+
+
+def recorded_command(argv: list | None) -> str:
+    """The command the report claims a reader can rerun to reproduce it."""
+    if argv is not None:
+        return shlex.join([ENTRY_POINT] + argv)
+    return shlex.join([Path(sys.argv[0]).name] + sys.argv[1:])
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -167,7 +180,7 @@ def main(argv: list | None = None) -> None:
 
     ctx = ReportContext(spec=spec, run_dir=args.run_dir, top=args.top, rocprof=rocprof,
                         rocprof_dir=args.rocprof_dir,
-                        command=shlex.join([Path(sys.argv[0]).name] + (argv or sys.argv[1:])),
+                        command=recorded_command(argv),
                         parse_version=PARSE_VERSION)
 
     produced = []

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
+import shlex
 from pathlib import Path
 
 from conftest import coll_line, topo_line, trace_event, write
 
 from collprof import engines
-from collprof.cli import main
+from collprof.cli import build_parser, main
 from collprof.core.rccl_log import parse_run
 from collprof.core.report import ReportContext, emit_phase
 from collprof.core.spec import (NODE_FROM_STEM, PHASE_FROM_FILENAME, EngineSpec, LogLayout,
@@ -38,6 +39,19 @@ def test_the_report_records_the_engine_and_how_it_was_produced(sglang_run: Path,
     text = build(sglang_run, tmp_path / "out")["prefill"]
     assert "Engine: **sglang-disagg**" in text
     assert "--run-dir" in text and "parser version" in text
+
+
+def test_the_recorded_command_is_one_the_parser_accepts(sglang_run: Path, tmp_path: Path):
+    """The report says rerunning that command reproduces the file, so it has to be runnable.
+
+    Built through regen_reports.py the arguments arrive as an explicit argv while sys.argv[0] is the
+    campaign driver, whose own parser knows none of these flags.
+    """
+    text = build(sglang_run, tmp_path / "out")["prefill"]
+    line = next(ln for ln in text.splitlines() if ln.startswith("> Produced by"))
+    command = shlex.split(line.split("`")[1])
+    assert command[0] == "collective_report.py"
+    build_parser().parse_args(command[1:])
 
 
 def test_per_rank_figures_divide_by_the_ranks_that_carried_traffic(sglang_run: Path,
