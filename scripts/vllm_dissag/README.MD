@@ -247,9 +247,26 @@ The agentic replay benchmark replays real Claude Code agentic coding traces usin
 
 > **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [scenarios](../common/agentx/SCENARIOS.md); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
 
-It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic` (or the `AGENTIC=1` shorthand). No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
+It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic`. No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
 
-**vLLM specifics.** aiperf targets `AGENTIC_PORT`, which the launcher auto-resolves to the proxy/router port `BENCHMARK_PORT` (set by `connector_start_proxy`: `ROUTER_PORT` for `vllm_router`, `PROXY_PORT` for the toy proxy). Because the vLLM PD router 503s on `GET /v1/models` under MoRIIO service discovery (empty HTTP worker registry) while the shared harness gates readiness/served-model on `/v1/models`, the launcher starts a tiny stdlib shim (`agentic_models_shim.py`) on `BENCHMARK_PORT+1` that answers `/v1/models` (gated on the router's `/health`) and stream-proxies everything else; `AGENTIC_PORT` is then pointed at the shim. Both are byte-for-byte no-ops for the default sweep (guarded by `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`).
+> **Breaking change:** the legacy `AGENTIC=1` shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
+
+The four validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
+
+```bash
+madengine run --tags agentic
+```
+
+#### Validated agentic configurations
+
+| Backend | Model | Connector | Entry Name |
+|---------|-------|-----------|------------|
+| sglang | Qwen3-32B | mori_io | `pyt_sglang_disagg_mori_io_agentic_qwen3-32b` |
+| sglang | DeepSeek-V3 | mori_dp | `pyt_sglang_disagg_mori_dp_agentic_deepseek-v3` |
+| vllm | DeepSeek-V3 | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3` |
+| vllm | DeepSeek-V3-5layer | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` |
+
+**vLLM specifics.** aiperf targets `AGENTIC_PORT`, which the launcher auto-resolves to the proxy/router port `BENCHMARK_PORT` (set by `connector_start_proxy`: `ROUTER_PORT` for `vllm_router`, `PROXY_PORT` for the toy proxy). Because the vLLM PD router 503s on `GET /v1/models` under MoRIIO service discovery (empty HTTP worker registry) while the shared harness gates readiness/served-model on `/v1/models`, the launcher starts a tiny stdlib shim (`agentic_models_shim.py`) on `BENCHMARK_PORT+1` that answers `/v1/models` (gated on the router's `/health`) and stream-proxies everything else; `AGENTIC_PORT` is then pointed at the shim. Both are byte-for-byte no-ops for the default sweep (guarded by `BENCHMARK_SCRIPT=agentic`).
 
 ### Quick start (canonical DeepSeek-V3 1P/1D, MoRI-EP)
 
@@ -257,7 +274,7 @@ It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep
 cd scripts/vllm_dissag
 
 export DOCKER_IMAGE_NAME=<mori-vllm-image>
-export AGENTIC=1                                       # shorthand: BENCHMARK_SCRIPT=agentic
+export BENCHMARK_SCRIPT=agentic                        # selects benchmark_agentic.sh
 export RUN_MORI=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000
 
@@ -267,13 +284,12 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 \
   run_xPyD_models.slurm
 ```
 
-`AGENTIC=1` sets `BENCHMARK_SCRIPT=agentic` (→ `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`); the connectors then auto-enable server-side Prometheus metrics and strip `--no-enable-prefix-caching` (prefix cache ON). You can equivalently set `BENCHMARK_SCRIPT=agentic` directly.
+`BENCHMARK_SCRIPT=agentic` selects `benchmark_agentic.sh`; the connectors then auto-enable server-side Prometheus metrics and strip `--no-enable-prefix-caching` (prefix cache ON).
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTIC` | `0` | `1` = shorthand for `BENCHMARK_SCRIPT=agentic` |
 | `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep`, `long_context`, `agentic`) |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
 | `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
@@ -320,7 +336,7 @@ Agentic replay works for every model in the recipe allowlist, in the same combos
 cd scripts/vllm_dissag
 
 export DOCKER_IMAGE_NAME=<mori-vllm-image>
-export AGENTIC=1 RUN_MORI=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
+export BENCHMARK_SCRIPT=agentic RUN_MORI=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
 
 sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slurm
@@ -332,7 +348,7 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slur
 cd scripts/vllm_dissag
 
 export DOCKER_IMAGE_NAME=<vllm-image>
-export AGENTIC=1 CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
+export BENCHMARK_SCRIPT=agentic CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
 export AGENTIC_WORKLOAD=conformance_256k   # config-less shorthand: runs just this preset
 
 sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slurm
@@ -344,7 +360,7 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 --nodelist=<2-nodes> run_xPyD_models.slur
 cd scripts/vllm_dissag
 
 export DOCKER_IMAGE_NAME=<vllm-image>
-export AGENTIC=1 CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
+export BENCHMARK_SCRIPT=agentic CONNECTOR=rixl WIDE_EP=0 xP=1 yD=1 MODEL_NAME=Qwen3-32B
 export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
 export AGENTIC_WORKLOAD=inferencex_small   # preset bundles filter: {max_isl, max_turns, sample}
 

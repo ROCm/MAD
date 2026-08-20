@@ -284,7 +284,7 @@ _rixl_launch_deepep() {
     # STRIPS that flag so prefix caching is ON. Gated so the default (non-agentic)
     # sweep argv is byte-for-byte unchanged.
     local _prefix_cache_flag="--no-enable-prefix-caching"
-    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
         _prefix_cache_flag=""
     fi
 
@@ -376,7 +376,7 @@ connector_start_proxy() {
     # Agentic replay: point aiperf at the backend vLLM servers' /metrics (SERVER_PORT)
     # for prefill+decode masters. Gated on the agentic path so the default sweep is
     # unaffected. Consumed by scripts/common/agentic_lib.sh (aiperf --server-metrics).
-    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
         export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVER_PORT} ${DECODE_MASTER_ADDR}:${SERVER_PORT}}"
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
     fi

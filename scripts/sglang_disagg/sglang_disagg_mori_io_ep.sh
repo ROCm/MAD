@@ -185,14 +185,14 @@ echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE}
 # on the radix prefix cache and server-side Prometheus metrics. This keeps the
 # default path byte-for-byte unchanged.
 AGENTIC_METRICS_ENABLED=0
-if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
     AGENTIC_METRICS_ENABLED=1
 fi
 SERVER_METRICS_FLAGS=""
 if [[ "${AGENTIC_METRICS_ENABLED}" == "1" ]]; then
     SERVER_METRICS_FLAGS="--enable-metrics --enable-metrics-for-all-schedulers"
 fi
-if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_RADIX_CACHE:-0}" == "1" ]]; then
+if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_RADIX_CACHE:-0}" == "1" ]]; then
     PREFILL_MODEL_CONFIG="${PREFILL_MODEL_CONFIG//--disable-radix-cache/}"
     DECODE_MODEL_CONFIG="${DECODE_MODEL_CONFIG//--disable-radix-cache/}"
     echo "[radix] radix prefix cache ENABLED (stripped --disable-radix-cache) for agentic/ENABLE_RADIX_CACHE"

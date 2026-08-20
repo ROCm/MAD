@@ -260,7 +260,7 @@ if [ "$NODE_RANK" -eq 0 ]; then
     # to the router, then point AGENTIC_PORT at the shim. Byte-for-byte no-op for the
     # default sweep (guarded by BENCHMARK_SCRIPT_FILE).
     _agentic_shim_pid=""
-    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" ]]; then
         _shim_port="${AGENTIC_SHIM_PORT:-$((BENCHMARK_PORT + 1))}"
         _shim_model="${MODEL:-${MODEL_PATH}}"
         _shim_prefill="${AGENTIC_SERVER_METRICS%% *}"

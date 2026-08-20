@@ -114,13 +114,19 @@ DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp f
 SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
 SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
 
-# Agentic replay shorthand: AGENTIC=1 selects the agentic benchmark hook. The
-# in-container launcher (sglang_disagg_mori_io_ep.sh) then auto-enables server
-# metrics + radix prefix cache for BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh.
-if [[ "${AGENTIC:-0}" == "1" ]]; then
-    export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE:-benchmark_agentic.sh}"
-    echo "AGENTIC=1: BENCHMARK_SCRIPT_FILE=${BENCHMARK_SCRIPT_FILE} (server metrics + radix cache auto-enabled)"
-fi
+# Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
+#   sweep   (default) -> benchmark_xPyD.sh    (random ISL/OSL concurrency sweep)
+#   agentic           -> benchmark_agentic.sh (aiperf agentic trace replay)
+# The in-container launcher (sglang_disagg_mori_io_ep.sh) auto-enables server
+# metrics + radix prefix cache when BENCHMARK_SCRIPT=agentic.
+BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
+case "$BENCHMARK_SCRIPT" in
+  sweep)   BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
+  agentic) BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
+  *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, agentic)" >&2; exit 1 ;;
+esac
+export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
+echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 
 MODEL_NAME="${MODEL_NAME:-None}"
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
@@ -441,6 +447,7 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \
     ${AGENTIC_CONC:+-e AGENTIC_CONC=$AGENTIC_CONC} \
