@@ -476,12 +476,20 @@ elif [[ "${MLPERF_EXECUTION_MODE}" == "torchrun_in_alloc" ]]; then
   # metrics. Node 0's post-run extract_perf.py invocation overwrites this.
   write_results "${MODEL_NAME}" "1" "torchrun_launch_success" "${NNODES}" "requested_nodes" "${GPUS_PER_NODE}" "gpus_per_node"
   TORCHRUN_EXIT=0
+  # Static rendezvous keeps its own deadline (torch's static_tcp_rendezvous
+  # defaults to well under an hour) and madengine's TORCH_ELASTIC_RDZV_TIMEOUT
+  # does not reach it. Nodes reach this point only after loading a ~15 GB image
+  # tar, and at 4 nodes reading the same tar off shared storage they arrive tens
+  # of minutes apart, so the early nodes would give up on the late ones.
+  RDZV_TIMEOUT="${MLPERF_RDZV_TIMEOUT:-3600}"
+  echo "[rendezvous] static rendezvous timeout=${RDZV_TIMEOUT}s for ${NNODES} node(s)"
   python3 -m torch.distributed.run \
     --nnodes="${NNODES}" \
     --nproc_per_node="${GPUS_PER_NODE}" \
     --node_rank="${NODE_RANK_VAL}" \
     --master_addr="${MASTER_ADDR}" \
     --master_port="${MASTER_PORT}" \
+    --rdzv-conf "timeout=${RDZV_TIMEOUT}" \
     mlperf_pretrain_entrypoint.py \
       --size "${SIZE}" \
       --gbs "${GBS}" \
