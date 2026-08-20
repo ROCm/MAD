@@ -4,8 +4,8 @@
 #
 # Copy this file into your launcher's script dir as benchmark_agentic.sh, fill
 # in the three `# CHANGE:` fields below, and wire it in (the launcher selects it
-# via `export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`, or an `AGENTIC=1`
-# shorthand where supported). It replays real agentic traces via aiperf's
+# via `export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`, typically exposed to
+# users as `BENCHMARK_SCRIPT=agentic`). It replays real agentic traces via aiperf's
 # inferencex-agentx-mvp scenario against an OpenAI-compatible endpoint on
 # AGENTIC_PORT and writes aiperf artifacts + an aggregate JSON + plots.
 #

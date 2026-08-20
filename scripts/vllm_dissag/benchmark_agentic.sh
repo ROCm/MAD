@@ -6,7 +6,7 @@
 # inferencex-agentx-mvp scenario against the vLLM router/proxy (BENCHMARK_PORT)
 # and writes aiperf artifacts + an aggregate JSON + plots. Selected by the
 # launcher via
-#   export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh   (AGENTIC=1 shorthand)
+#   export BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh   (BENCHMARK_SCRIPT=agentic)
 #
 # Testable standalone (Phase 1/2) against a running server, and with DRY_RUN=1
 # without any server. Env knobs are documented in scripts/common/agentic_lib.sh.

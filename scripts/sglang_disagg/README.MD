@@ -131,7 +131,24 @@ The agentic replay benchmark replays real Claude Code agentic coding traces usin
 
 > **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [scenarios](../common/agentx/SCENARIOS.md); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
 
-It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` (or the `AGENTIC=1` shorthand). No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
+It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic`. No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
+
+> **Breaking change:** the legacy `AGENTIC` env shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
+
+The four validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
+
+```bash
+madengine run --tags agentic
+```
+
+#### Validated agentic configurations
+
+| Backend | Model | Connector | Entry Name |
+|---------|-------|-----------|------------|
+| sglang | Qwen3-32B | mori_io | `pyt_sglang_disagg_mori_io_agentic_qwen3-32b` |
+| sglang | DeepSeek-V3 | mori_dp | `pyt_sglang_disagg_mori_dp_agentic_deepseek-v3` |
+| vllm | DeepSeek-V3 | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3` |
+| vllm | DeepSeek-V3-5layer | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` |
 
 ### Quick start (canonical DeepSeek-V3 1P/1D)
 
@@ -139,7 +156,7 @@ It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep
 cd scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<mori-sglang-image>          # e.g. rocm/pytorch-private:sglang-...-mori-YYYYMMDD
-export AGENTIC=1                                       # shorthand: selects benchmark_agentic.sh
+export BENCHMARK_SCRIPT=agentic                        # selects benchmark_agentic.sh
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000
 
@@ -149,14 +166,13 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
   run_xPyD_models.slurm
 ```
 
-`AGENTIC=1` sets `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh`; the in-container launcher then auto-enables server-side Prometheus metrics and strips `--disable-radix-cache` (cache ON). You can equivalently set `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` directly.
+`BENCHMARK_SCRIPT=agentic` selects `benchmark_agentic.sh`; the in-container launcher then auto-enables server-side Prometheus metrics and strips `--disable-radix-cache` (cache ON).
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AGENTIC` | `0` | `1` = shorthand for `BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh` |
-| `BENCHMARK_SCRIPT_FILE` | `benchmark_xPyD.sh` | Set to `benchmark_agentic.sh` to run the agentic replay |
+| `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep` -> `benchmark_xPyD.sh`, `agentic` -> `benchmark_agentic.sh`) |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
 | `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
 | `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
@@ -214,7 +230,7 @@ Topology is `xP` prefill + `yD` decode + 1 router node (minimum 3 nodes, i.e. 1P
 cd scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<mori-sglang-image>
-export AGENTIC=1
+export BENCHMARK_SCRIPT=agentic
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
 
@@ -229,7 +245,7 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 cd scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<mori-sglang-image>
-export AGENTIC=1
+export BENCHMARK_SCRIPT=agentic
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export AGENTIC_WORKLOAD=conformance_256k   # config-less shorthand: runs just this preset
 
@@ -244,7 +260,7 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 cd scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<mori-sglang-image>
-export AGENTIC=1
+export BENCHMARK_SCRIPT=agentic
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export AGENTIC_WORKLOAD=conformance_512k
 export MAX_MODEL_LEN=524288                # Case-B ISL tail needs the 512k window
@@ -260,7 +276,7 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 cd scripts/sglang_disagg
 
 export DOCKER_IMAGE_NAME=<mori-sglang-image>
-export AGENTIC=1
+export BENCHMARK_SCRIPT=agentic
 export RUN_MORI=1 DP_MODE=0 xP=1 yD=1 MODEL_NAME=Llama-3.1-8B-Instruct
 export AGENTIC_CONFIG=$HOME/MAD/scripts/common/agentx/agentic.example.yaml
 export AGENTIC_WORKLOAD=inferencex_small   # preset bundles filter: {max_isl, max_turns, sample}

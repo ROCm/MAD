@@ -181,7 +181,7 @@ connector_launch_worker() {
     # ENABLE_PREFIX_CACHE=1 — STRIPS that flag so prefix caching is ON. Gated so the
     # default (non-agentic) sweep argv is byte-for-byte unchanged.
     local _prefix_cache_flag="--no-enable-prefix-caching"
-    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
         _prefix_cache_flag=""
     fi
 
@@ -327,7 +327,7 @@ connector_start_proxy() {
     # for prefill+decode masters so it can scrape gpu cache-hit / throughput. Gated on
     # the agentic path so the default sweep is unaffected. Consumed by
     # scripts/common/agentic_lib.sh (build_replay_cmd -> aiperf --server-metrics).
-    if [[ "${BENCHMARK_SCRIPT_FILE:-}" == "benchmark_agentic.sh" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
         export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVE_PORT} ${DECODE_MASTER_ADDR}:${SERVE_PORT}}"
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
     fi

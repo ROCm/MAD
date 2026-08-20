@@ -15,9 +15,10 @@
 # Radix prefix cache: base_flags below carry "--disable-radix-cache" for the default
 # xPyD performance sweeps (clean, cache-free throughput). The agentic replay benchmark
 # needs the cache ON, so the launcher (sglang_disagg_mori_io_ep.sh) STRIPS
-# "--disable-radix-cache" from PREFILL/DECODE configs when
-# BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh (or ENABLE_RADIX_CACHE=1). Do not remove it
-# here, or the perf sweeps lose their cache-free baseline.
+# "--disable-radix-cache" from PREFILL/DECODE configs when BENCHMARK_SCRIPT=agentic
+# (or ENABLE_RADIX_CACHE=1). That strip is exercised only by the agentic-tagged
+# models.json entries (BENCHMARK_SCRIPT=agentic), not by any perf-sweep entry. Do not
+# remove it here, or the perf sweeps lose their cache-free baseline.
 
 # --- Dense Llama / Qwen ---
 

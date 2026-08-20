@@ -428,13 +428,8 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
 #   agentic                -> benchmark_agentic.sh      (aiperf agentic trace replay)
-# Agentic replay shorthand: AGENTIC=1 selects the aiperf agentic trace-replay hook.
-# The launcher/connectors then auto-enable prefix caching + server /metrics for
-# BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh.
-if [[ "${AGENTIC:-0}" == "1" ]]; then
-    BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-agentic}"
-    echo "AGENTIC=1: BENCHMARK_SCRIPT=${BENCHMARK_SCRIPT} (prefix cache + server metrics auto-enabled)"
-fi
+# The launcher/connectors auto-enable prefix caching + server /metrics when
+# BENCHMARK_SCRIPT=agentic.
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
@@ -479,6 +474,7 @@ export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 export BENCHMARK_ITR=$BENCHMARK_ITR
 export BENCHMARK_CON="${BENCHMARK_CON}"
 export BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}"
+export BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT}"
 export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE}"
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
@@ -620,6 +616,7 @@ docker run --rm \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
+    ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
