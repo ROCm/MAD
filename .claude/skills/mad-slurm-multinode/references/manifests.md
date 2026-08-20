@@ -151,7 +151,9 @@ differ, the host path belongs on the value side.
   `mlperf_training_llama-3.1-8b.template.json` (2 nodes, 100 steps, the perf run)
   and `..._smoke.template.json` (1 node, 8 steps — run this first, it proves the
   image and the data mounts in ~10 minutes instead of failing a 2-node
-  allocation). Knobs beyond the transport vars:
+  allocation; being single-node it carries no RDMA transport vars, so scaling it
+  past one node means adding them back — see below). Knobs beyond the transport
+  vars:
   `MLPERF_EXECUTION_MODE=torchrun_in_alloc` (keep it — see
   [gotchas.md](gotchas.md#pyt_mlperf_training-mlperf-llama-31)),
   `MLPERF_TRAINING_REF` (the pinned `mlcommons/training` commit `run.sh` checks
@@ -188,3 +190,12 @@ differ, the host path belongs on the value side.
 Change `slurm.nodes`, `distributed.nnodes`, and the `nodelist` cardinality
 together. Everything else (env, mounts, image) stays the same. Real examples
 exist at 2 and 4 nodes for primus and sglang_disagg.
+
+Scaling a *single-node* template past one node is the one case that needs more
+than the node count: the RDMA transport block is absent by design, so copy
+`NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_NET`, `NCCL_IB_DISABLE`,
+`RDMAV_DRIVERS`, `IBV_DRIVERS` (and `RCCL_AINIC_ROCE` where the archetype needs
+it) from the multi-node template of the same workload into **both** env blocks.
+`validate_manifest.sh` enforces this: it only waives the transport vars while
+every node-count source it can read — `slurm.nodes`, `distributed.nnodes` and the
+`nodelist` cardinality — says one node.

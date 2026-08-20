@@ -64,9 +64,28 @@ denv  = dep.get("env_vars") or {}
 def is_ph(v):
     return isinstance(v, str) and ("<FILL" in v or v.strip() == "")
 
+def nodelist_min_count(nl):
+    # Lower bound on the node count implied by slurm.nodelist, or None when the
+    # key carries nothing usable. A bracket range ("node[01-04]") is not
+    # expanded, but it is reported as >1: guessing single-node there would waive
+    # the transport checks on what is almost certainly a multi-node run.
+    if not isinstance(nl, str) or is_ph(nl) or not nl.strip():
+        return None
+    if "[" in nl:
+        return 2
+    n = len([x for x in nl.split(",") if x.strip()])
+    return n or None
+
 # 3) NCCL_IB_HCA present + non-empty in both env blocks, and equal. Single-node
 # runs carry no inter-node traffic, so they are allowed to omit the RDMA vars.
-multi_node = max(slurm.get("nodes") or 1, dist.get("nnodes") or 1) > 1
+# The node count has three possible sources and a manifest may set only the
+# nodelist, so consider all of them before relaxing the check.
+node_counts = [
+    slurm.get("nodes"),
+    dist.get("nnodes"),
+    nodelist_min_count(slurm.get("nodelist")),
+]
+multi_node = max([n for n in node_counts if isinstance(n, int)] or [1]) > 1
 hca_c, hca_d = ctx.get("NCCL_IB_HCA"), denv.get("NCCL_IB_HCA")
 if not multi_node and not hca_c and not hca_d:
     ok("single-node run: RDMA transport vars not required")

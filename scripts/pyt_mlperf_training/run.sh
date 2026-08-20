@@ -150,8 +150,14 @@ ensure_mlperf_data() {
     if _tokenizer_present; then
       echo "[data-fetch] rank=0 tokenizer already present at ${TOKENIZER_PATH}"
     else
+      # `set -x` traces expanded command lines, so every command that mentions
+      # the token — the assignment, the emptiness test and the download itself —
+      # would put its value in the run log. Trace off for all three; the
+      # enclosing group keeps the `set +x` line itself out of the trace.
+      { set +x; } 2>/dev/null
       local hf_token="${MAD_SECRETS_HFTOKEN:-${HF_TOKEN:-}}"
       if [[ -z "${hf_token}" ]]; then
+        set -x
         echo "[data-fetch] ERROR: tokenizer missing at ${TOKENIZER_PATH} and no HF token provided (MAD_SECRETS_HFTOKEN/HF_TOKEN)."
         return 1
       fi
@@ -161,6 +167,11 @@ ensure_mlperf_data() {
         meta-llama/Llama-3.1-8B \
         --local-dir "${TOKENIZER_PATH}" \
         --local-dir-use-symlinks False
+      set -x
+      if ! _tokenizer_present; then
+        echo "[data-fetch] ERROR: download finished but no tokenizer under ${TOKENIZER_PATH}"
+        return 1
+      fi
     fi
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "${tokenizer_sentinel}.tmp"
     mv -f "${tokenizer_sentinel}.tmp" "${tokenizer_sentinel}"
@@ -173,10 +184,25 @@ ensure_mlperf_data() {
       echo "[data-fetch] rank=0 downloading MLCommons preprocessed C4 dataset -> ${PREPROCESSED_PATH}"
       echo "[data-fetch] URI=${dataset_uri}"
       rm -f "${dataset_sentinel}"
+      # Fetch the downloader to a file first: `bash <(curl ...)` hides a failed
+      # curl behind bash's exit 0 (an empty script), which `set -e` accepts and
+      # which would publish the sentinel below over a missing dataset.
+      local downloader
+      downloader="$(mktemp)"
+      if ! curl -fsSL "${downloader_url}" -o "${downloader}" || [[ ! -s "${downloader}" ]]; then
+        echo "[data-fetch] ERROR: could not fetch the MLCommons downloader from ${downloader_url}"
+        rm -f "${downloader}"
+        return 1
+      fi
       (
         cd "${PREPROCESSED_PATH}"
-        bash <(curl -fsSL "${downloader_url}") -d "${PREPROCESSED_PATH}" "${dataset_uri}"
+        bash "${downloader}" -d "${PREPROCESSED_PATH}" "${dataset_uri}"
       )
+      rm -f "${downloader}"
+      if ! _dataset_present; then
+        echo "[data-fetch] ERROR: downloader finished but no C4 shards under ${PREPROCESSED_PATH}"
+        return 1
+      fi
     fi
     date -u +"%Y-%m-%dT%H:%M:%SZ" > "${dataset_sentinel}.tmp"
     mv -f "${dataset_sentinel}.tmp" "${dataset_sentinel}"
