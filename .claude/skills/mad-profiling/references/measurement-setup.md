@@ -107,8 +107,10 @@ compress_logs.py --run-dir <run> [--rccl-dir <prof-root>/rccl]
 ```
 
 It compresses what the engine's globs call a log and nothing else, verifies each copy by digest
-before dropping the plain one, and refuses to touch a log that already sits beside its own `.gz`,
-because the parser's globs match both and that node's records would be counted twice.
+before dropping the plain one, and refuses to touch a log that already sits beside its own `.gz`.
+Such a pair is what `gzip -k` or an interrupted gzip leaves behind; the engine's globs match both
+halves, so discovery keeps the plain file, ignores the `.gz` and says which logs it found doubled.
+Delete one of each pair to silence that warning.
 
 ## Log volume is a capacity question
 

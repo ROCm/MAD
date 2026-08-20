@@ -106,6 +106,26 @@ def log_stem(log: Path) -> str:
     return Path(name).stem
 
 
+def one_copy_per_log(logs: list) -> list:
+    """Keep one file per log, and say so when a run holds both ``x.log`` and ``x.log.gz``.
+
+    Compressing a finished run replaces its logs; it does not add to them. A pair left behind by
+    ``gzip -k``, by a hand-rolled copy, or by a gzip that died halfway would otherwise be read twice
+    and would double every number that rank contributes, silently. The plain file is the one kept:
+    of the two, a half-written ``.gz`` is the likelier one to be short.
+    """
+    plain = {log for log in logs if log.suffix != ".gz"}
+    kept = [log for log in logs if log.suffix != ".gz" or log.with_suffix("") not in plain]
+    doubled = [log for log in logs if log not in kept]
+    if doubled:
+        shown = ", ".join(str(log.with_suffix("")) for log in doubled[:4])
+        more = f", and {len(doubled) - 4} more" if len(doubled) > 4 else ""
+        print(f"warning: {len(doubled)} log(s) are present both compressed and not ({shown}{more}). "
+              "Reading the plain file and ignoring the .gz, so nothing is counted twice; delete one "
+              "of each pair to silence this. compress_logs.py never leaves both.")
+    return kept
+
+
 def discover_logs(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> list:
     """Find the logs of a job and say which node, phase and writer each one belongs to.
 
@@ -121,7 +141,8 @@ def discover_logs(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None)
     for layout, root in ((spec.logs, run_dir), (spec.rccl_logs, rccl_dir or run_dir)):
         if layout is None:
             continue
-        for log in sorted({p for pattern in layout.globs for p in root.glob(pattern)}):
+        for log in one_copy_per_log(
+                sorted({p for pattern in layout.globs for p in root.glob(pattern)})):
             stem = log_stem(log)
             node = log.parent.name if layout.node_from == NODE_FROM_PARENT else layout.node_of_name(
                 stem)

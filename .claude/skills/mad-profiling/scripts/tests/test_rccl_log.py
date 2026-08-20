@@ -81,6 +81,30 @@ def test_a_gzipped_log_is_parsed_like_a_plain_one(tmp_path: Path):
     assert phases["decode"].collective_totals()["AllReduce"]["calls"] == 5
 
 
+def test_a_log_left_in_both_forms_is_counted_once(tmp_path: Path):
+    """`gzip -k`, or a gzip that died halfway, must not double the numbers of that rank."""
+    write(tmp_path / "decode_NODE2.log", [coll_line(count=64)] * 5)
+    write(tmp_path / "decode_NODE2.log.gz", [coll_line(count=64)] * 5, compress=True)
+    found = discover_logs(tmp_path, sglang_disagg.SPEC)
+    assert [log.name for log, _n, _p, _l in found] == ["decode_NODE2.log"]
+    assert parse_run(tmp_path, sglang_disagg.SPEC)["decode"].collective_totals(
+    )["AllReduce"]["calls"] == 5
+
+
+def test_a_doubled_log_is_reported_rather_than_dropped_quietly(tmp_path: Path, capsys):
+    write(tmp_path / "decode_NODE2.log", [coll_line()])
+    write(tmp_path / "decode_NODE2.log.gz", [coll_line()], compress=True)
+    discover_logs(tmp_path, sglang_disagg.SPEC)
+    warning = capsys.readouterr().out
+    assert "decode_NODE2.log" in warning and "compressed and not" in warning
+
+
+def test_the_same_name_on_two_nodes_is_not_a_duplicate(primus_run: Path):
+    """Both nodes write `stdout.out`; only a `.gz` beside its own plain file is a doubled log."""
+    found = discover_logs(primus_run, primus.SPEC)
+    assert len(found) == 2
+
+
 def test_discovery_says_what_it_looked_for(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="prefill_NODE"):
         discover_logs(tmp_path, sglang_disagg.SPEC)
