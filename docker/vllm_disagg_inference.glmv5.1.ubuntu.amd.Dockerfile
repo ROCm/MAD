@@ -219,8 +219,11 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # To move the pin, pass --build-arg VLLM_REF=<sha> and re-validate; /app/versions.txt in
 # the built image records the resolved sha either way.
 #
-# glm5.1-dsa-wideEP_on_vllm-v0.27 = upstream v0.27 tip dedbf6be8b + 9 ROCm commits
-# (tip d723eb305 as of 2026-08-18). Core DSA 3: per-req-ctx metadata key (#47766), DSA
+# d723eb305e = the base image's vLLM commit dedbf6be8b + exactly 9 ROCm commits (verified
+# with the GitHub compare API: 9 ahead, 0 behind). dedbf6be8b is vllm-project/vllm MAIN of
+# 2026-08-09, i.e. 270 commits AFTER the v0.27.0 tag and 17 behind the releases/v0.27.0
+# branch — the "v0.27" in the branch name is a label for this line of work, not a
+# checkout of the v0.27 release. Core DSA 3: per-req-ctx metadata key (#47766), DSA
 # indexer KV transfer (reworked onto upstream's native MoRIIO connector), invalid-token
 # sentinel. Plus 4 v0.27 fixes: concat_and_cache_mla positional (stable-ABI),
 # splitting_ops out of the compiled graph (MLA "unknown parameter type"),
