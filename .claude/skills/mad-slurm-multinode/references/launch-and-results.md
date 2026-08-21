@@ -81,6 +81,32 @@ negative — the aggregation across nodes picks the non-empty result.
 - Primus: report tok/s/gpu and TFLOPS/gpu (from the aggregated CSV / rank-last
   `.out` throughput banner).
 - sglang_disagg: request throughput / latency from the disagg benchmark CSV.
+- MLPerf training: `scripts/pyt_mlperf_training/extract_perf.py` parses the
+  rank-0 `:::MLLOG` stream plus the `train_step_timing` lines on node 0 and
+  writes the whole metric set (`step_time_{mean,p50,p95,stdev}_s`,
+  `cluster_tokens_per_s`, `per_gpu_tokens_per_s`, `per_gpu_tflops_bf16`,
+  `mfu_pct`, `peak_bf16_tflops`, `time_to_train_min`). The same numbers are
+  printed human-readably in
+  `slurm_output/madengine-*_<jobid>_node_0.out` — grep `Per-iteration perf`. Read
+  step time and tokens/s; `mfu_pct` is only valid if
+  `MLPERF_PEAK_BF16_TFLOPS` was set, which is why the peak it was divided by is
+  written next to it — a `peak_bf16_tflops` that does not match the accelerator
+  invalidates the MFU and nothing else. `run_stop_aborted=1` is normal for a
+  fixed-step perf run (it means the run stopped at `MLPERF_MAX_STEPS`, not at the
+  benchmark's convergence target). Iteration 0 is a cold outlier (tens of
+  seconds) and is excluded from the aggregates by design.
+- MLPerf inference: read three things from
+  `perf_pyt_mlperf_inference_llama-3.1-8b.csv`. `tokens_per_s` / `samples_per_s`
+  are the throughput, but they only count as a measurement if `result_valid=1`
+  (loadgen's `Result is : VALID`); `result_valid=0` almost always means
+  `Min duration satisfied : NO`, i.e. `MLPERF_INF_OFFLINE_TARGET_QPS` was unset or
+  too low, and the throughput printed next to it is real but not a valid run.
+  `accuracy_pass=1` means the four ROUGE scores cleared 99% of the upstream BF16
+  targets for the selected dataset variant (and gen_len 90%, checked only when
+  the whole set was served). Reference numbers for one 8x MI355X node, Offline,
+  edge 5000 samples, TP=8: 38.1 samples/s, 4877 tokens/s, rouge1 39.07. Keep in
+  mind this is a single TP=8 instance — the reference's shape, not a competitive
+  one, since real submissions run 8 data-parallel TP=1 replicas.
 
 ## Quick failure triage
 
@@ -102,3 +128,11 @@ negative — the aggregation across nodes picks the non-empty result.
   path is the value (see manifests.md "docker_mounts direction").
 - `MODEL_PATH is missing` -> wrong model host path; the model
   resolves at `$MODEL_DIR/$MODEL_NAME` inside the container.
+- The launcher starts, every rank then dies on a `TypeError` about an unexpected
+  keyword argument or an `ImportError` for a submodule of a framework the image
+  built fine -> a version skew baked into the image, not a cluster problem. Do
+  not swap the base image; find the framework's own pin (for NeMo:
+  `requirements/manifest.json`) and match it. See
+  [gotchas.md](gotchas.md#pyt_mlperf_training-mlperf-llama-31).
+- The run reports SUCCESS rows but the `-o` CSV "not found" -> cosmetic; the
+  classic SLURM path aggregates into `perf.csv` regardless of `-o` (gotchas.md).

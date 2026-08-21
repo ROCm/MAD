@@ -3,7 +3,8 @@
 Keywords: CX7 Mellanox mlx5 RoCE, AMD AINIC Pollara ionic rdma, Broadcom
 Thor2 bnxt_re RoCE, gfx942 gfx950, NCCL_IB_HCA, NCCL_SOCKET_IFNAME,
 NCCL_IB_GID_INDEX, RCCL_AINIC_ROCE, RDMAV_DRIVERS, IBV_DRIVERS, eth0 eno0 fenic0,
-show_gids, ibv_devices, skip_gpus_directive
+show_gids, ibv_devices, skip_gpus_directive, rdma-core 63.0 ibv_create_qp EFAULT,
+GDRDMA NET/IB transport confirmation
 
 Three archetypes seen in practice. The differences below decide whether the run
 exercises the intended RDMA transport. Values are archetype-*typical* and are
@@ -102,6 +103,16 @@ the bnxt_re provider, but the host `/etc/libibverbs.d` is mounted to be safe):
 `"/etc/libibverbs.d": "/etc/libibverbs.d"` to `context.docker_mounts`. Confirm
 the device list with `ibv_devices` (expect `bnxt_re*`) and the RoCEv2 GID with
 `show_gids` (commonly index 3).
+
+**3. What the image must carry.** An in-image rdma-core built from source (63.0,
+`--build-arg RDMA_CORE_VERSION=63.0`) is what actually fixes `ibv_create_qp`
+EFAULT here; every image validated on this archetype carries that stage. A second
+data point worth knowing: the MLPerf training image, which carries it, came up on
+GDRDMA (`via NET/IB/<n>/GDRDMA` in the NCCL log) across 2 nodes with only the HCA
+list, `NCCL_IB_GID_INDEX=3` and `RDMAV_DRIVERS`/`IBV_DRIVERS=bnxt_re` set — the
+conservative QP profile above was not needed for that workload. Treat that
+profile as the thing to reach for when a run hangs or falls back, not as a
+mandatory preamble, and confirm the transport in the log either way.
 
 ## MIOpen first-run compile time on gfx950 (AINIC)
 

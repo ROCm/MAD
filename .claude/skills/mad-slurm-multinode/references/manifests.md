@@ -173,9 +173,66 @@ differ, the host path belongs on the value side.
      (attention backend selection is CLI-driven, independent of this env
      var).
   `multiple_results` = `perf_sglang-disagg-GPT-OSS-120B.csv`.
+- **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
+  MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
+  `launcher: torchrun`, `scripts/pyt_mlperf_training/run.sh`, `nproc_per_node: 8`,
+  `multiple_results` = `perf_pyt_mlperf_training_llama-3.1-8b.csv`. Two templates:
+  `mlperf_training_llama-3.1-8b.template.json` (2 nodes, 100 steps, the perf run)
+  and `..._smoke.template.json` (1 node, 8 steps — run this first, it proves the
+  image and the data mounts in ~10 minutes instead of failing a 2-node
+  allocation; being single-node it carries no RDMA transport vars, so scaling it
+  past one node means adding them back — see below). Knobs beyond the transport
+  vars:
+  `MLPERF_EXECUTION_MODE=torchrun_in_alloc` (keep it — see
+  [gotchas.md](gotchas.md#pyt_mlperf_training-mlperf-llama-31)),
+  `MLPERF_TRAINING_REF` (the pinned `mlcommons/training` commit `run.sh` checks
+  out in-container), `MLPERF_GBS`/`MLPERF_MBS`/`MLPERF_MAX_STEPS`/
+  `MLPERF_WARMUP_STEPS`, and `MLPERF_PEAK_BF16_TFLOPS` (per-GPU dense BF16 peak;
+  without it `mfu_pct` is computed against an MI325X peak). Four data mounts are
+  required — `/preproc_data`, `/tokenizer`, `/continual`, `/npy_index` — all on
+  shared FS, and `<FILL_DATA_ROOT>` must be traversable by squashed root (see
+  gotchas). `base_docker` is deliberately a **py3.12** ROCm image: NeMo 2.7.3
+  cannot be installed on py3.13. `skip_gpus_directive: true` in the template
+  reflects the Broadcom-Thor2 cluster it was brought up on — drop the key on a
+  cluster whose partitions advertise GPU GRES normally.
+- **MLPerf Inference Llama-3.1-8B** (`pyt_mlperf_inference_llama-3.1-8b`): the
+  MLCommons reference llama3.1-8b harness (loadgen + vLLM SUT) summarising
+  CNN-DailyMail. `launcher: vllm`, `scripts/pyt_mlperf_inference/run.sh`,
+  `multiple_results` = `perf_pyt_mlperf_inference_llama-3.1-8b.csv`. **Single
+  node, and unlike every other workload here it needs no transport vars at all**
+  — one container, one vLLM process, no inter-node traffic. Two templates:
+  `mlperf_inference_llama-3.1-8b.template.json` (Offline, edge 5000 samples,
+  TP=8, performance + accuracy, ~50 min) and `..._smoke.template.json`
+  (200 samples, accuracy only, TP=1, ~6 min — run this first). Knobs:
+  `MLPERF_INF_OFFLINE_TARGET_QPS` (**required for a VALID performance result**,
+  see [gotchas.md](gotchas.md#pyt_mlperf_inference-mlperf-llama-31-inference)),
+  `MLPERF_INF_TOTAL_SAMPLE_COUNT` + `MLPERF_INF_LG_MODEL_NAME` (keep the pair in
+  step: `llama3_1-8b-edge` with 5000 vs `llama3_1-8b` with 13368, since the name
+  selects the ROUGE targets), `MLPERF_INF_TENSOR_PARALLEL_SIZE`,
+  `MLPERF_INF_RUN_PERFORMANCE` / `MLPERF_INF_RUN_ACCURACY`, `MLPERF_INF_SCENARIO`
+  (leave `Offline`; Server is untested). Two mounts: `/model` (the HF checkpoint)
+  and `/dataset`. `built_models.url` **must stay empty**, or madengine clones
+  mlcommons/inference into the container and dies in `git submodule update`.
 
 ## Scaling a manifest (e.g. 2-node -> 4-node)
 
 Change `slurm.nodes`, `distributed.nnodes`, and the `nodelist` cardinality
 together. Everything else (env, mounts, image) stays the same. Real examples
 exist at 2 and 4 nodes for primus and sglang_disagg.
+
+Scaling a *single-node* template past one node is the one case that needs more
+than the node count: the RDMA transport block is absent by design, so copy
+`NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_NET`, `NCCL_IB_DISABLE`,
+`RDMAV_DRIVERS`, `IBV_DRIVERS` (and `RCCL_AINIC_ROCE` where the archetype needs
+it) from the multi-node template of the same workload into **both** env blocks.
+`validate_manifest.sh` only partly backs this up, so do not read a green run as
+proof the transport is right. `NCCL_IB_HCA` is the one var it hard-fails on —
+missing, placeholder, or present in a single env block — and it waives even that
+only while every node-count source it can read (`slurm.nodes`,
+`distributed.nnodes`, `nodelist` cardinality) says one node. For the rest it can
+check symmetry between the two blocks and two outright contradictions
+(`NCCL_IB_DISABLE=1` or `NCCL_NET=Socket` alongside an HCA list), because which
+vars a given fabric needs is archetype-specific. Copying `NCCL_IB_HCA` alone
+therefore validates with a WARN rather than a FAIL: confirm in the NCCL log that
+the run actually used `NET/IB` (see [cluster-types.md](cluster-types.md)), since
+a fallback to the socket transport still finishes and still reports a number.
