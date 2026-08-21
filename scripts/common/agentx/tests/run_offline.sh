@@ -38,6 +38,7 @@ SYNTAX_TARGETS=(
     "$REPO_ROOT/scripts/vllm_dissag/connectors/moriio.sh"
     "$SUITE_DRIVER"
     "$COMMON_DIR/agentic_lib.sh"
+    "$HERE/resolve_ctx_offline.sh"
 )
 for f in "${SYNTAX_TARGETS[@]}"; do
     rel="${f#"$REPO_ROOT/"}"
@@ -51,6 +52,18 @@ for f in "${SYNTAX_TARGETS[@]}"; do
     fi
     rm -f /tmp/agentx_offline_syn.$$
 done
+# The shared ctx-resolve stub is Python, so py_compile it (bash -n won't do).
+STUB_PY="$HERE/_stub_server.py"
+stub_rel="${STUB_PY#"$REPO_ROOT/"}"
+if [ ! -f "$STUB_PY" ]; then
+    _fail "missing: $stub_rel"
+elif "$PY" -m py_compile "$STUB_PY" 2>/tmp/agentx_offline_pyc.$$; then
+    _pass "py_compile $stub_rel"
+else
+    _fail "py_compile $stub_rel"
+    sed 's/^/        /' /tmp/agentx_offline_pyc.$$ || true
+fi
+rm -f /tmp/agentx_offline_pyc.$$
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -161,6 +174,26 @@ if echo "$sc_out" | grep -q -- "--scenario my-scenario"; then
     _pass "DRY_RUN replay command honors AGENTIC_SCENARIO"
 else
     _fail "DRY_RUN replay command honors AGENTIC_SCENARIO"
+fi
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 6. offline ctx-window resolver (stub server) ==="
+# Runs the shared backend-looped resolver test once (sglang + vllm x 4 paths).
+# Guard the invocation so its non-zero exit doesn't abort us under `set -e`.
+CTX_TEST="$HERE/resolve_ctx_offline.sh"
+ctx_rc=0
+ctx_out="$(bash "$CTX_TEST" 2>&1)" || ctx_rc=$?
+echo "$ctx_out" | sed 's/^/        /'
+for bk in sglang vllm; do
+    if echo "$ctx_out" | grep -q "^---- \[$bk\] summary: ALL PASS"; then
+        _pass "ctx resolver [$bk] all paths"
+    else
+        _fail "ctx resolver [$bk] all paths"
+    fi
+done
+if [ "$ctx_rc" -ne 0 ]; then
+    echo "        (resolve_ctx_offline.sh exited $ctx_rc)"
 fi
 
 # ---------------------------------------------------------------------------
