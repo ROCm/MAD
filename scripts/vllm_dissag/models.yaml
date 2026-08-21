@@ -185,78 +185,34 @@ DeepSeek-R1:
 # Sparse Attention (DSA). 78 layers (3 dense + 75 MoE), 256 routed experts top-8
 # + 1 shared, FP8 block 128. wideEP-only (see WIDE_EP_ONLY_MODELS in the slurm).
 #
-# IMAGE CONTRACT: this recipe is config only — it carries NO vLLM source fixes.
-# The DSA enablement (per-req-ctx metadata key #47766, DSA indexer KV transfer over
-# the MoRIIO connector, invalid-token sentinel, sparse-indexer bounds guard) must be
-# IN-SOURCE in the image's vLLM. Build the per-model image from
-# docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose
-# VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27 IS the contract. That ref is a BRANCH and
-# therefore mutable — for an auditable rebuild pass the exact commit as a build arg
-# (see the REPRODUCIBILITY note at VLLM_REF in that Dockerfile). That build is published
-# as rocmshared/pytorch-private:glm5.1-vllm027-b8, and it is the image every number
-# below was measured on. The glmv5.1 Dockerfile names the same tag and the same pins.
-# DOCKER_IMAGE_NAME is submit-time, not set here (#171 requires it explicit).
+# IMAGE CONTRACT: config only, NO vLLM source fixes. The DSA enablement (upstream
+# #47766, DSA indexer KV transfer over MoRIIO) must be IN-SOURCE in the image's vLLM.
+# Build from docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose VLLM_REF
+# pin IS the contract. DOCKER_IMAGE_NAME is submit-time, not set here.
 #
-# NOT SUPPORTED here — older GLM images, which predate the in-source DSA fixes:
-#   rocm/pytorch-private:glm-dockerimage-built-09072026
-#     measured on the 1P/1D EP8 OCI smoke: NIAH 2k retrieval 0/10 (slurm job 216847).
-#   rocmshared/pytorch-private:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
-#     the mori121 lab build; it needed the invalid-token kernel fix #45324 applied at
-#     runtime. The glmv5.1 Dockerfile says the same at its vLLM stage: the vLLM that
-#     image builds from cannot serve GLM-5.1-FP8.
-# This branch ships NO runtime patchers, so there is no fallback and no error to key
-# on: an unsupported image boots, serves, and returns silently wrong output (or stalls
-# the disagg KV transfer). Rebuild the image at the pinned VLLM_REF instead.
+# NOT SUPPORTED: images predating the in-source DSA fixes boot and serve but return
+# silently wrong output (rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH
+# 2k 0/10). There is no runtime patcher and no fallback — rebuild at the pinned VLLM_REF.
 #
-# GLM differs from DeepSeek in 3 recipe-defining ways (both are MLA MoE, but GLM
-# is DSA-sparse):
-#   - KV_BLOCK_SIZE=1        (DSA sparse indexer REQUIRES block-size 1; DS uses 16)
-#   - VLLM_ROCM_USE_AITER_MLA=1  (GLM MLA path ON via AITER sparse; DS sets 0)
-#   - prefill EAGER (NONE), decode FULL_AND_PIECEWISE  (prefill cudagraph capture
-#     deadlocks on this stack; decode captures cleanly on DSA. PIECEWISE was already
-#     a ~3.7x ITL win over eager (~69ms vs ~264ms); FULL_AND_PIECEWISE is a further
-#     2.11x at EP8 / 1.70x at EP16 on top of PIECEWISE -- measured TPOT in the
-#     DECODE_CUDAGRAPH_MODE note below. Global VLLM_CUDAGRAPH_MODE=NONE as the safe
-#     floor; per-role PREFILL=NONE / DECODE=FULL_AND_PIECEWISE override it.)
-# Note: block=1 + AITER_MLA=1 are ALREADY the moriio.sh connector defaults — GLM
-# keeps them; DeepSeek is the one that overrides them off. Set here explicitly so
-# the recipe is self-documenting and robust to connector default changes.
+# GLM vs DeepSeek (both MLA MoE; GLM is DSA-sparse):
+#   - KV_BLOCK_SIZE=1            DSA sparse indexer REQUIRES block-size 1 (DS uses 16)
+#   - VLLM_ROCM_USE_AITER_MLA=1  AITER sparse MLA path ON (DS sets 0)
+#   - prefill cudagraph NONE     capture deadlocks on this stack; decode captures fine
+# block=1 and AITER_MLA=1 are already the moriio.sh defaults; set explicitly so the
+# recipe survives a connector default change.
 #
-# DSA adds a 2nd KV cache per layer (indexer), which the single-geometry MoRIIO
-# connector had to learn (dual-KV geometry + per-layer offset + completion gate).
-# Those are vLLM code changes, not flags: they live in the image's vLLM at the
-# pinned VLLM_REF above. connector_runtime_patch in connectors/moriio.sh is a
-# deliberate no-op for every model — nothing to add here for them.
+# dp_flags carry the GLM tool/reasoning parsers and apply to both roles; the dp: blocks
+# stay empty like the DeepSeek family because the recipe comes from env:.
 #
-# dp_flags carry the GLM tool/reasoning parsers (AMD GLM recipe). They are applied
-# to BOTH roles by compose() in vllm_disagg.sh and reach `vllm serve` via the
-# connector's model_args. block-size / kv-cache-dtype / all2all / cudagraph come
-# from the env: recipe above (the connector emits them), so the dp: blocks are
-# empty like the DeepSeek family.
-#
-# LONG-CONTEXT HISTORY (vLLM issue #40018 -- filed against gfx950 while this stack is
-# gfx942, so it is the same class of bug, not the same report): on the earlier lab
-# image named above
-# (mori v1.2.1) the ROCM_AITER_MLA_SPARSE prefill indexer corrupted output beyond
-# ~16-18k tokens — coherent + correct needle retrieval up to 14k, garbage (repetition
-# collapse, unique-ratio ~0.1) at ~18.7k — and no config knob moved it (TESTED:
-# pinning --max-model-len 32768 does NOT shift the threshold; the onset is a fixed
-# ~18k token count in the gather/logits kernel, not a buffer-scaling artifact).
-# The supported image carries the upstream fix in-source (vLLM #47766, sparse-MLA
-# persistent metadata keyed on per-request context lengths): NIAH 2k-35k retrieves
-# with no length collapse on both 1P/1D EP8 and 2P/2D EP16. Left at the native
-# max_model_len (do not cap — capping gives no accuracy benefit and only limits
-# usable context).
+# Long-context: the earlier ~18k collapse is fixed in-source (#47766 persistent sparse-MLA
+# metadata), not by config. Left at native max_model_len; capping was tested, no benefit.
 GLM-5.1-FP8:
   env:
     VLLM_USE_V1: "1"
-    # v0.27: layer_name is wrapped in a torch OpaqueBase (LayerName) and passed through
-    # the unified_mla_kv_cache_update / unified_mla_attention custom ops. On this ROCm
-    # torch 2.12 build the opaque-type boxing FAILS -> "RuntimeError: unknown parameter
-    # type" at torch/_ops.py on the first real MLA decode forward (the fake/compile path
-    # returns early, so it passes boot+warmup then crashes on first request -> DP gloo
-    # cascade -> 0 prefill/0 decode). VLLM_USE_LAYERNAME=0 makes LayerNameType=str (the
-    # pre-2.11 path), so a plain string passes through the op. No image rebuild needed.
+    # v0.27 wraps layer_name in a torch OpaqueBase for the unified MLA custom ops, and
+    # the boxing FAILS on this ROCm torch build -> "RuntimeError: unknown parameter type"
+    # on the first real MLA decode (the compile path returns early, so it passes
+    # boot+warmup then crashes on the first request). 0 restores the plain-string path.
     VLLM_USE_LAYERNAME: "0"
     VLLM_ROCM_USE_AITER: "1"
     VLLM_ROCM_USE_AITER_RMSNORM: "1"
@@ -266,79 +222,54 @@ GLM-5.1-FP8:
     GPU_MEMORY_UTILIZATION: "0.80"
     VLLM_CUDAGRAPH_MODE: "NONE"
     PREFILL_CUDAGRAPH_MODE: "NONE"
-    # PERF: FULL_AND_PIECEWISE captures a FULL graph for the uniform-decode shapes and
-    # falls back to PIECEWISE for everything else. Measured on MI300X (1024/64, warm),
-    # against the previous PIECEWISE setting:
-    #     1P/1D EP8   TPOT  88.0 -> 41.8 ms (2.11x), outTP  78.8 -> 143.7 tok/s
-    #     2P/2D EP16  TPOT  94.1 -> 55.4 ms (1.70x), outTP  66.7 -> 113.0 tok/s
-    # Accuracy is unaffected (NIAH 2k-35k: 1P/1D 51/60, 2P/2D 55/60 - both in the
-    # PIECEWISE band, no length collapse, memfault=0). The gain shrinks as EP widens
-    # (2.11x at EP8 -> 1.70x at EP16) because the cross-node all2all inside the captured
-    # step does not compress; do NOT assume this scales to EP32 without measuring.
-    # Cost: graph capture ~92-94 s and ~3.0-3.5 GiB (PIECEWISE was ~5 s / 7.2 GiB - fewer
-    # but larger graphs) and a correspondingly longer boot. Irrelevant for a long-lived
-    # server, but notable for CI. Set PIECEWISE to fall back.
+    # PERF: FULL graph for the uniform-decode shapes, PIECEWISE for everything else.
+    # vs PIECEWISE on MI300X (1024/64, warm): EP8 TPOT 88.0 -> 41.8 ms, EP16 94.1 ->
+    # 55.4 ms. The gain shrinks as EP widens because the cross-node all2all inside the
+    # captured step does not compress — do NOT assume it holds at EP32 without measuring.
+    # Cost: capture ~92-94 s and ~3.0-3.5 GiB (PIECEWISE was ~5 s / 7.2 GiB), so a longer
+    # boot; notable for CI. Set PIECEWISE to fall back.
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
-    # Moves graph partitioning to inductor codegen so the MLA KV-update becomes an eager
-    # boundary. GLM-only: the connector default is OFF (see connectors/moriio.sh), so no
-    # other model's --compilation-config changes. Adopted against an earlier build that
-    # raised "RuntimeError: unknown parameter type" on the first real MLA decode without
-    # it; that does NOT reproduce on the pinned image (A/B slurm 217352.91 vs .108: NIAH
-    # 2k 10/10 both ways, TPOT within ~1%). Kept ON because it is what every number below
-    # was measured with — not a correctness requirement on this image.
+    # Moves graph partitioning to inductor codegen (MLA KV-update becomes an eager
+    # boundary). The connector default is OFF, so GLM opts in here and no other model's
+    # --compilation-config changes. NOT a correctness requirement on the pinned image
+    # (A/B: NIAH 2k 10/10 both ways, TPOT within ~1%) — kept ON because it is what every
+    # number here was measured with.
     USE_INDUCTOR_GRAPH_PARTITION: "1"
     VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
     PREFILL_MORI_BACKEND: "mori_high_throughput"
     DECODE_MORI_BACKEND: "mori_low_latency"
-    # MoRI EP dispatch/combine buffer width. Without this it inherits
-    # max_num_batched_tokens (8192) -- a chunked-prefill SCHEDULER setting -- so every
-    # decode step moves an 8192-token-wide buffer per layer x78 layers regardless of the
-    # real batch. That is a fixed ~300ms/step floor (~320x this model's HBM-bandwidth
-    # bound). Sizing it for the actual decode batch gives TPOT 302ms -> 88ms (3.4x),
-    # matching the published EP8 figure. The knob is decode.dp below -- prefill is
-    # unaffected (it genuinely dispatches wide 8192-token chunked-prefill batches).
+    # MoRI EP shared-memory heap (16 GiB). The dispatch/combine width itself is set by
+    # decode.dp below, not by this.
     MORI_SHMEM_HEAP_SIZE: "17179869184"
-    # DSA sparse-indexer logits-buffer cap (crash fix). The indexer prefill computes an
-    # M*N fp32 logits buffer; split_indexer_prefill_chunks only sub-chunks the query dim
-    # when M*N*4 > this budget. Default 512MB lets an 8192-token prefill build a single
-    # 268MB buffer + launch the fp8_mqa_logits kernel at grid=(8192,), which HARD-FAULTS
-    # the worker on gfx942 (silent GPU fault -> DP group collapse -> 503 at >=8k prompts).
-    # Capping at 64MB forces M-dim sub-chunking (~2k tokens/chunk) so the buffer and the
-    # kernel launch stay bounded. Root cause: vllm/v1/attention/ops/triton_fp8_mqa_logits.py
-    # fp8_mqa_logits_gfx942; chunking logic: mla/indexer.py split_indexer_prefill_chunks.
+    # DSA sparse-indexer logits-buffer cap (crash fix). The indexer only sub-chunks the
+    # query dim when M*N*4 exceeds this budget; the 512MB default lets an 8192-token
+    # prefill launch fp8_mqa_logits at grid=(8192,), which HARD-FAULTS the worker on
+    # gfx942 (silent GPU fault -> DP group collapse -> 503 at >=8k prompts). 64MB forces
+    # M-dim sub-chunking (~2k tokens/chunk) so the buffer and launch stay bounded.
     VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "64"
-    # NCCL heartbeat watchdog: at long context (>~8k) a DP rank's sparse-MLA/MoE
-    # all2all collective can exceed the default HeartbeatMonitor timeout ->
-    # ProcessGroupNCCL::HeartbeatMonitor::runLoop() declares the rank dead and
-    # tears down the whole process group -> prefill EngineCore crashes -> 503.
-    # (Confirmed root cause of the 8k+ prefill crash; #338 EP-landmine.) Disable
-    # the monitor-triggered teardown and extend timeouts so long-ctx collectives
-    # complete instead of being watchdog-killed.
+    # NCCL heartbeat watchdog: at long context (>~8k) a DP rank's sparse-MLA/MoE all2all
+    # can exceed the default HeartbeatMonitor timeout, so the monitor declares the rank
+    # dead and tears down the whole process group -> prefill EngineCore crash -> 503.
+    # Disable the monitor-triggered teardown and extend the timeouts.
     TORCH_NCCL_ENABLE_MONITORING: "0"
     TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: "1800"
     TORCH_NCCL_DUMP_ON_TIMEOUT: "0"
     TORCH_NCCL_BLOCKING_WAIT: "0"
     TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
     NCCL_IB_TIMEOUT: "22"
-    # Per-shape warmup in benchmark_xPyD.sh before each measured isl/osl cell. The sweep's
-    # global warmup is 32/32 con=1, which never compiles this stack's real prefill shape,
-    # aiter/Triton variants or decode cudagraph batches, so the first measured cell of a
-    # shape otherwise absorbs the residual JIT and reports an inflated TPOT. GLM-only: the
-    # script default is OFF (see benchmark_xPyD.sh), so no other model's sweep changes.
-    # Every latency figure quoted above was measured with this on.
+    # Per-shape warmup before each measured isl/osl cell: the sweep's global 32/32 con=1
+    # warmup never compiles this stack's real prefill shape or decode cudagraph batches,
+    # so the first cell of each shape otherwise reports an inflated TPOT. The script
+    # default is OFF, so no other model's sweep changes.
     SHAPE_WARMUP: "1"
   dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
   prefill:
     dp: ""
   decode:
-    # PERF: the MoRI EP dispatch buffer width is max_num_batched_tokens (via
-    # FusedMoEConfig.max_num_tokens -> all2all.py max_num_inp_token_per_rank), so the
-    # decode role otherwise runs an 8192-token-wide all2all every step: ~302ms TPOT.
-    # mori bounds recv capacity BY the send width (MaxNumTokensToRecvPerRank returns
-    # min(ceil(maxTotalRecvTokens/ws), maxNumInpTokenPerRank)), so the buffer must still
-    # cover vLLM's profiling dummy run -- it cannot be shrunk via env alone. Lowering
-    # this knob on the DECODE role lowers both consistently.
-    # Value must stay >= typical prompt length: 512 gave 87.9ms TPOT but 13.1s TTFT
-    # (a 1024-token prompt could not be admitted in one step). 2048 keeps TTFT healthy.
+    # PERF: the MoRI EP dispatch width comes from max_num_batched_tokens, so the decode
+    # role otherwise runs an 8192-token-wide all2all every step (~302ms TPOT). It cannot
+    # be shrunk via env: mori derives recv capacity from the send width, so the buffer
+    # must still cover vLLM's profiling dummy run. Keep >= typical prompt length: 512
+    # gave 87.9ms TPOT but 13.1s TTFT; 2048 keeps TTFT healthy.
     dp: "--max-num-batched-tokens 2048"

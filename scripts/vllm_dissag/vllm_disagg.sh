@@ -86,11 +86,9 @@ IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
-# Optionally prefer the routable fabric IP over hostname -I's first entry: on a node
-# whose overlay NIC is listed first, binding socket_barrier / advertising host_ip on
-# that NIC hangs the prefill<->decode barrier at "Waiting for nodes". Opt-in via
-# FABRIC_SUBNET (the slurm forwards it via docker -e, so both sides pick the same
-# NIC); unset = take $1, unchanged. Matches the IPADDRS selection in the slurm.
+# Prefer the routable fabric IP over hostname -I's first entry when FABRIC_SUBNET is set
+# (the slurm forwards it, so both sides pick the same NIC); unset = take $1, unchanged.
+# See the FABRIC_SUBNET note in run_xPyD_models.slurm.
 FABRIC_SUBNET="${FABRIC_SUBNET:-}"
 host_ip=$(hostname -I | awk -v pfx="$FABRIC_SUBNET" \
     '{f=$1; if (pfx != "") for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}')

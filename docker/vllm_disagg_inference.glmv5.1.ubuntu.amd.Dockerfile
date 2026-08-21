@@ -46,14 +46,11 @@
 #     so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
 #     wideEP) are present (~+30-45 min build vs WITH_NIXL=0).
 #
-# STATUS (GLM-5.1-FP8 on this stack): NIAH 2k-35k retrieves with no length collapse
-# and no crash on 1P/1D EP8 (51/60) and 2P/2D EP16 (55/60) — see the GLM-5.1-FP8
-# recipe in scripts/vllm_dissag/models.yaml for the full measurements;
-# long-context accuracy fixed via vLLM #47766 (persistent sparse-MLA kept
-# ON). 4P/4D EP32 is a KNOWN OPEN DEFECT: token corruption at ALL context lengths
-# (garbage output even at 2k), distinct from the long-context bug; prime suspect is
-# the moriep all-to-all combine at EP32 scale -> deferred to future work. Use 1P/1D
-# and 2P/2D only. (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...)
+# STATUS (GLM-5.1-FP8 on this stack): validated on 1P/1D EP8 and 2P/2D EP16 — NIAH
+# 2k-35k retrieves with no length collapse and no crash (long-context accuracy fixed
+# via vLLM #47766). 4P/4D EP32 is a KNOWN OPEN DEFECT: token corruption at ALL context
+# lengths, garbage even at 2k. Use 1P/1D and 2P/2D only.
+# (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...)
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
 # purpose-built ROCm/vLLM/MoRI base, cloning each overridden source from public Git
@@ -63,14 +60,12 @@
 #     (ROCm + torch nightly). The stages below OVERRIDE the base's vLLM/MoRI/AITER
 #     with the pins we validate for GLM DSA.
 #   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
-#     = ROCm/mori#366 (2026-06-05), 32 commits BEHIND tag v1.2.1 (2026-06-25); see the
-#     note at MORI_REF for what that pin does and does not contain. (main LATEST
-#     120d2de broke the connector KV-notify handshake, hence a pin, not main.)
+#     A pin, not main: main at 120d2de broke the connector KV-notify handshake.
 #   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
 #   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
-#     (validated at tip d723eb305e; GLM DSA + #47766 metadata-key). Full compile: a
-#     different commit than the base's, so a .py-only overlay would be ABI-mismatched.
+#     (GLM DSA + #47766 metadata-key). Full compile: a different commit than the
+#     base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
 #     forwards it via docker -e. ROCm 7.2.3 cannot dmabuf-export VMM memory, else MoRI
@@ -81,16 +76,11 @@
 #     #41751 LL split, DP-rank hash-failsafe) are native in this vLLM (no runtime patcher).
 #
 # THIS IMAGE IS THE CONTRACT. The MAD side (scripts/vllm_dissag) is catalog/config only
-# and ships NO runtime .py patchers: connector_runtime_patch in connectors/moriio.sh is a
-# no-op for every model. So EVERY GLM DSA source fix must be carried in-source HERE, by
-# VLLM_REF below (glm5.1-dsa-wideEP_on_vllm-v0.27) plus the MoRI/AITER pins. Serving
-# GLM-5.1-FP8 from an image built off an older vLLM ref is unsupported: it boots, then
-# produces garbage output or stalls the disagg KV transfer, with nothing to fall back on.
-# That failure is silent, and it has been measured: the pre-v0.27 lab image
-# rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH 2k 0/10 on the 1P/1D
-# EP8 smoke (slurm job 216847). The supported build of this Dockerfile is published as
-# rocmshared/pytorch-private:glm5.1-vllm027-b8; scripts/vllm_dissag/models.yaml names the
-# same tag and lists the unsupported older images.
+# and ships NO runtime .py patchers, so EVERY GLM DSA source fix must be carried
+# in-source HERE, by VLLM_REF below plus the MoRI/AITER pins. Serving GLM-5.1-FP8 from an
+# image built off an older vLLM ref is unsupported and fails SILENTLY: it boots, then
+# produces garbage output or stalls the disagg KV transfer, with nothing to fall back on
+# (measured: rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH 2k 0/10).
 # If you need a fix, move the pin and rebuild — do not re-add runtime patchers to MAD.
 #
 # Build context = repo root:
@@ -109,33 +99,27 @@ WORKDIR /app
 ARG GFX_COMPILATION_ARCH="gfx942"
 ARG PYTORCH_ROCM_ARCH="gfx942"
 ARG MAX_JOBS=32
-# NIXL/RIXL transport for the rixl connector. GLM-5.1 is served over MoRI-EP + MoRI-IO,
-# so the UCX/RIXL/rocSHMEM/DeepEP stack is dead weight here: it lengthens the build and
-# ships transports this recipe never selects. Default 0 => lean MoRI-EP-only image, which
-# is also exactly how the validated image (glm5.1-vllm027-b8) was built. Set
-# --build-arg WITH_NIXL=1 only if you need the rixl connector from this same Dockerfile.
+# NIXL/RIXL transport for the rixl connector. GLM-5.1 is served over MoRI-EP, so this
+# stack is dead weight here. Default 0 => lean MoRI-EP-only image, which is how the
+# validated image was built. Set --build-arg WITH_NIXL=1 to get the rixl connector.
 ARG WITH_NIXL=0
 ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------
 # 1. MoRI: replace the base's bundled MoRI with the commit GLM-5.1 DSA wideEP was
-#    validated on, ROCm/MoRI @ 42e895472b08 (= ROCm/mori#366, 2026-06-05). NOTE this
-#    is NOT tag v1.2.1 (e31d426a, 2026-06-25) that the base vllm_disagg_inference
-#    Dockerfile pins, and it is not the MoRI in the older mori121 lab image — it is
-#    32 commits older than v1.2.1. It carries the EP/RDMA correctness fixes this
-#    recipe needs plus the ROCm-7.2.3 dmabuf registration path used by the connector
-#    .env (expandable_segments:False). MoRI is JIT-built, so this swaps the JIT
-#    sources the kernels compile from at runtime.
+#    validated on, ROCm/MoRI @ 42e895472b08. NOTE this is NOT tag v1.2.1 that the base
+#    vllm_disagg_inference Dockerfile pins. It carries the EP/RDMA correctness fixes
+#    this recipe needs plus the ROCm-7.2.3 dmabuf registration path used by the
+#    connector .env (expandable_segments:False). MoRI is JIT-built, so this swaps the
+#    JIT sources the kernels compile from at runtime.
 #    BUILD CONFIG: match the cookbook build — MORI_GPU_ARCHS=gfx942, BUILD_UMBP=OFF,
 #    DEFAULT NIC backends. Do NOT pass USE_IONIC=OFF / USE_BNXT=OFF: disabling NIC
 #    backends produced a MoRI that deadlocked at the cross-node EP all-to-all init.
 # -----------------------------------------------------------------------------
 ARG MORI_REPO=https://github.com/ROCm/mori.git
-# 42e895472b08: validated MoRI tip for GLM DSA WideEP disagg. The v0.27 base bundles
-# amd_mori 1.0.0, but the bundled build regressed GLM DSA (b1: GPU fault on the aiter
-# DSA decode kernel), so we build MoRI from source at this pinned commit by DEFAULT
-# (WITH_MORI_BUILD=1). Set --build-arg WITH_MORI_BUILD=0 only to fall back to the
-# base's bundled mori for debugging.
+# 42e895472b08: validated MoRI tip for GLM DSA WideEP disagg. The base's bundled
+# amd_mori regressed GLM DSA (GPU fault on the aiter DSA decode kernel), so we build
+# from source at this pinned commit by DEFAULT; WITH_MORI_BUILD=0 falls back for debug.
 ARG WITH_MORI_BUILD=1
 ARG MORI_REF=42e895472b08
 ENV MORI_GPU_ARCHS=gfx942
@@ -168,10 +152,9 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     fi
 
 # -----------------------------------------------------------------------------
-# 2. AITER: the v0.27 base bundles amd-aiter 0.1.19 (+ flydsl 0.2.4), but bundled 0.1.19
-#    GPU-faults on the GLM DSA decode kernel mla_a8w8_qh64_gqaratio64_v3 (confirmed b1 on
-#    this v0.27 base, same regression as the old stack). So we build aiter from source at
-#    the validated commit e03fa6040 by DEFAULT (WITH_AITER_BUILD=1). aiter > e03fa6040
+# 2. AITER: the v0.27 base bundles amd-aiter 0.1.19, which GPU-faults on the GLM DSA
+#    decode kernel mla_a8w8_qh64_gqaratio64_v3, so we build aiter from source at the
+#    validated commit e03fa6040 by DEFAULT (WITH_AITER_BUILD=1). aiter > e03fa6040
 #    reintroduces the fault; do not bump without re-running long-ctx NIAH. Set
 #    --build-arg WITH_AITER_BUILD=0 only to fall back to the bundled aiter for debugging.
 # -----------------------------------------------------------------------------
@@ -197,40 +180,27 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
     fi
 
 # -----------------------------------------------------------------------------
-# 3. vLLM: compile from source at the GLM-5.1 DSA wideEP branch. This is NOT the
-#    06_29 Wide-EP WRITE-mode vLLM that the base vllm_disagg_inference Dockerfile and
-#    the dist-inf-cookbook mori121 image build from — that vLLM predates the in-source
-#    DSA fixes and cannot serve GLM-5.1-FP8 (see models.yaml). Full source compile (the
-#    base ships a different commit). The MoRIIO disagg fixes (#39276 notify, #41751 LL
-#    split, DP-rank hash-failsafe) AND the GLM DSA fixes are native in this branch, so
-#    no runtime patcher is needed — and none exists in MAD, which is why this ref is a
-#    hard requirement rather than a preference. Override VLLM_REF to rebuild a
-#    different commit; build only committed commits (no working-tree edits).
+# 3. vLLM: compile from source at the GLM-5.1 DSA wideEP branch. Full source compile
+#    (the base ships a different commit). The MoRIIO disagg fixes (#39276 notify,
+#    #41751 LL split, DP-rank hash-failsafe) AND the GLM DSA fixes are native in this
+#    branch, so no runtime patcher is needed — and none exists in MAD, which is why
+#    this ref is a hard requirement rather than a preference. Override VLLM_REF to
+#    rebuild a different commit; build only committed commits (no working-tree edits).
 # -----------------------------------------------------------------------------
 # VLLM_REPO/REF are a PUBLIC GitHub repo + branch. Override to your own vLLM fork/branch.
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-# REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — the branch has
-# already advanced once since GLM-5.1 was validated (cda3648602 on 2026-08-10 -> the
-# MoRI EP sizing commits e8c186f71/d723eb305 on 2026-08-15). `docker build` resolves it
-# to whatever the tip is on the day you build, so two builds of this Dockerfile can ship
-# different engines. Tracked separately; until that is settled, build auditably by
-# passing the exact commit:
+# REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — `docker build`
+# resolves it to whatever the tip is on the day you build, and two builds can ship
+# different engines. For an auditable rebuild pass the exact commit:
 #   --build-arg VLLM_REF=d723eb305eb78d1bda0ed357b2b54cc29487221f
 # which is the tip every number in models.yaml was measured on. /app/versions.txt in the
 # built image records whichever sha was resolved.
 #
-# Branch tip d723eb305e = the base image's vLLM commit dedbf6be8b + exactly 9 ROCm
-# commits (GitHub compare API: 9 ahead, 0 behind). dedbf6be8b is vllm-project/vllm MAIN of
-# 2026-08-09, i.e. 270 commits AFTER the v0.27.0 tag and 17 behind the releases/v0.27.0
-# branch — the "v0.27" in the branch name is a label for this line of work, not a
-# checkout of the v0.27 release. Core DSA 3: per-req-ctx metadata key (#47766), DSA
-# indexer KV transfer (reworked onto upstream's native MoRIIO connector), invalid-token
-# sentinel. Plus 4 v0.27 fixes: concat_and_cache_mla positional (stable-ABI),
-# splitting_ops out of the compiled graph (MLA "unknown parameter type"),
-# sparse-indexer bounds-guard, and the decisive sentinel -1->0 (cda3648602 — aiter
-# mla_decode_fwd derefs -1 -> GPU fault at disagg long-ctx). Plus 2 MoRI EP sizing
-# commits. NIAH-validated 1P/1D EP8 + 2P/2D EP16, 2k-35k; see the models.yaml recipe
-# for the per-role cudagraph modes actually used (decode FULL_AND_PIECEWISE).
+# What the ref carries: the 3 core DSA changes (per-req-ctx metadata key #47766, DSA
+# indexer KV transfer over upstream's native MoRIIO connector, invalid-token sentinel)
+# on top of the base image's vLLM plus 9 ROCm commits. NOTE the base is upstream MAIN of
+# 2026-08-09, so the "v0.27" in the branch name labels this line of work — it is not a
+# checkout of the v0.27 release.
 ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
@@ -253,11 +223,9 @@ def get(names):
         except PackageNotFoundError: pass
     return None
 av = get(("amd-aiter", "amd_aiter", "aiter"))
-# Verify the aiter install survived the vLLM install (present, not silently downgraded
-# to a base-bundled wheel). We pin aiter by commit (e03fa6040), whose reported version
-# string varies by build, so assert presence rather than a hardcoded commit substring. Do NOT
-# `import aiter` here: it pulls torch->amdsmi->libamd_smi.so, not loadable in the no-GPU
-# build sandbox (same reason the Stage-2 verify reads mla.py from disk instead).
+# Assert presence, not a version string: we pin aiter by commit and the reported version
+# varies by build. Do NOT `import aiter` here — it pulls torch->amdsmi->libamd_smi.so,
+# which is not loadable in the no-GPU build sandbox.
 assert av, "AITER missing after vLLM install (expected bundled 0.1.19 or source-built ref)"
 import mori, mori.io, mori.ops
 print("Post-vLLM check OK: AITER", av, "present + MoRI importable")

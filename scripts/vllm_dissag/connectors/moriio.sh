@@ -162,21 +162,10 @@ connector_launch_worker() {
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
-    # use_inductor_graph_partition=true moves graph partitioning from Dynamo/FX to inductor
-    # codegen (after all passes), splitting at cudagraph_unsafe ops incl. the MLA KV-update
-    # so it runs as an eager boundary. Toggle via USE_INDUCTOR_GRAPH_PARTITION.
-    # It was adopted for GLM against an earlier build where the *_kv_cache_update op's
-    # STABLE-ABI concat_and_cache_mla boxed kernel failed to compose in the Dynamo-FX
-    # partitioned graph ("RuntimeError: unknown parameter type" on the first real MLA
-    # decode). That failure does NOT reproduce on the pinned image: an A/B on 1P/1D EP8
-    # (slurm 217352.91 vs .108) scored NIAH 2k 10/10 both with and without the flag, and a
-    # matched 1024/1024 con=8 sweep put mean TPOT within ~1% (42.6 vs 42.1 ms). GLM keeps
-    # it ON because that is the configuration every published number was measured with,
-    # not because it is required.
-    # DEFAULT OFF here: turning it on for the connector would change --compilation-config
-    # for EVERY model (DeepSeek-V3/-5layer/-R1, Llama-70B, gpt-oss-120b) — an unrelated
-    # compile-path change for recipes already validated without it. GLM opts in via its
-    # models.yaml env:.
+    # use_inductor_graph_partition=true moves graph partitioning from Dynamo/FX to
+    # inductor codegen, splitting at cudagraph_unsafe ops (incl. the MLA KV-update) so
+    # they run as eager boundaries. Default OFF: enabling it here would change
+    # --compilation-config for EVERY model. GLM opts in via its models.yaml env:.
     local _igp_json=""
     [[ "${USE_INDUCTOR_GRAPH_PARTITION:-0}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
@@ -198,17 +187,6 @@ connector_launch_worker() {
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
-
-        # NOTE on MoRI EP buffer width: it is sized from max_num_batched_tokens
-        # (fused_moe/layer.py -> all2all.py max_num_inp_token_per_rank), so a decode
-        # instance otherwise runs an 8192-token-wide all2all every step (~302ms vs ~88ms
-        # TPOT). The fix is per-role `--max-num-batched-tokens` in models.yaml
-        # (decode.dp), NOT an env knob: mori derives recv capacity from the send width
-        # (MaxNumTokensToRecvPerRank returns min(ceil(maxTotalRecvTokens/ws),
-        # maxNumInpTokenPerRank)), so shrinking the width alone under-provisions recv and
-        # trips a device assert during vLLM's profiling dummy run. Do not try to
-        # raise recv via VLLM_MORI_MAX_TOTAL_RECV_TOKENS — that knob is a min()
-        # clamp and can only LOWER capacity.
 
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then

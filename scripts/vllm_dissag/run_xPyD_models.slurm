@@ -181,9 +181,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
-# GLM-5.1-FP8 (GlmMoeDsaForCausalLM, MLA+DSA) is validated only under MoRI-EP
-# wideEP disagg (block=1, AITER sparse MLA on, per-role all2all). The moriio+TP
-# ("Stage B") path is untested for DSA, so reject WIDE_EP=0 for it too.
+# GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
 WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
@@ -410,13 +408,11 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-# Optionally pick the routable fabric IP instead of hostname -I's first entry. Some
-# clusters expose multiple NICs (e.g. an overlay listed BEFORE the routable fabric);
-# taking $1 blindly can advertise an unreachable addr -> prefill/decode barrier hangs
-# "Waiting for nodes" forever. OPT-IN, and cluster-specific: set FABRIC_SUBNET to your
-# fabric's address prefix (e.g. `-e FABRIC_SUBNET=10.158.`) to select it. UNSET (the
-# default) = take $1, i.e. unchanged behaviour for every existing model/cluster. No
-# subnet is hardcoded here because the right one is a property of the site, not of MAD.
+# Optionally pick the routable fabric IP instead of hostname -I's first entry: some
+# clusters list an overlay NIC BEFORE the routable fabric, and advertising it hangs the
+# prefill/decode barrier at "Waiting for nodes" forever. OPT-IN and site-specific: set
+# FABRIC_SUBNET to your fabric's address prefix (e.g. `-e FABRIC_SUBNET=10.158.`).
+# UNSET (the default) = take $1, i.e. unchanged for every existing model/cluster.
 FABRIC_SUBNET="${FABRIC_SUBNET:-}"
 # From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
 _pick_fabric_ip() {
@@ -543,12 +539,9 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        # Require a regular file AFTER symlink resolution. `-e` accepts anything the
-        # path resolves to, including a directory (or a symlink to one) that happens to
-        # match a vendor NIC lib glob; docker then bind-mounts a directory onto a file
-        # target -> "not a directory" -> container create exit 125. `-f` also follows
-        # symlinks but additionally requires a regular file, so those are skipped; the
-        # fabric in use (mlx5) is still mounted where present.
+        # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
+        # matching one of these globs, and docker then bind-mounts a directory onto a
+        # file target -> "not a directory" -> container create exit 125.
         [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
