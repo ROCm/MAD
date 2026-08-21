@@ -68,40 +68,6 @@ for f in "${REQUIRED_FILES[@]}"; do
 done
 echo "Running from: $(pwd)"
 
-# ------------------------------------------------------------------------------
-# models.yaml env precedence: capture which recipe knobs the USER explicitly set
-# at submit time. The driver (vllm_disagg.sh) uses this to let models.yaml `env:`
-# OVERRIDE image-baked ENV defaults (e.g. a DeepSeek-tuned image bakes
-# KV_BLOCK_SIZE=16 / VLLM_ROCM_USE_AITER_MLA=0, which would otherwise shadow a
-# model's own recipe — GLM-5.1 DSA needs block=1 + AITER MLA on), while a genuine
-# submit-time `-e VAR=...` still wins. Precedence: image-baked < models.yaml < submit -e.
-# Captured HERE (before the slurm sets any defaults) so it reflects user intent only.
-# This list MUST cover every key any models.yaml `env:` block can set. A key that is
-# missing here can never enter MODELS_YAML_PROTECT, so the recipe silently overrides
-# the operator's `-e` for it — which would break the precedence stated above (and in
-# ARCHITECTURE.md) for whichever model owns that key. Keep in sync with models.yaml.
-_RECIPE_ENV_KEYS="\
-VLLM_USE_V1 VLLM_USE_LAYERNAME \
-VLLM_CUDAGRAPH_MODE PREFILL_CUDAGRAPH_MODE DECODE_CUDAGRAPH_MODE CUDAGRAPH_CAPTURE_SIZES \
-USE_INDUCTOR_GRAPH_PARTITION TORCHINDUCTOR_BENCHMARK_KERNEL \
-KV_BLOCK_SIZE KV_CACHE_DTYPE KV_CACHE_MEMORY_BYTES GPU_MEMORY_UTILIZATION \
-VLLM_ROCM_USE_AITER VLLM_ROCM_USE_AITER_RMSNORM VLLM_ROCM_USE_AITER_MLA \
-VLLM_ROCM_USE_AITER_MHA VLLM_ROCM_USE_AITER_PAGED_ATTN VLLM_ROCM_USE_AITER_TRITON_BF16_GEMM \
-VLLM_USE_AITER_TRITON_ROPE VLLM_USE_AITER_TRITON_SILU_MUL VLLM_USE_AITER_UNIFIED_ATTENTION \
-VLLM_V1_USE_PREFILL_DECODE_ATTENTION VLLM_SPARSE_INDEXER_MAX_LOGITS_MB \
-AMDGCN_USE_BUFFER_OPS ROCM_TRITON_MOE_PRESHUFFLE_SCALES \
-TRITON_HIP_ASYNC_COPY_BYPASS_PERMUTE TRITON_HIP_ASYNC_FAST_SWIZZLE \
-TRITON_HIP_USE_ASYNC_COPY TRITON_HIP_USE_BLOCK_PINGPONG \
-VLLM_ALL2ALL_BACKEND PREFILL_MORI_BACKEND DECODE_MORI_BACKEND MORI_SHMEM_HEAP_SIZE \
-TORCH_NCCL_ENABLE_MONITORING TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC TORCH_NCCL_DUMP_ON_TIMEOUT \
-TORCH_NCCL_BLOCKING_WAIT TORCH_NCCL_ASYNC_ERROR_HANDLING NCCL_IB_TIMEOUT"
-MODELS_YAML_PROTECT=""
-for _k in $_RECIPE_ENV_KEYS; do
-    [ -n "${!_k+x}" ] && MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT} ${_k}"
-done
-export MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT# }"
-echo "models.yaml protect-list (submit-time overrides): '${MODELS_YAML_PROTECT}'"
-
 # ------------------------
 # Print current time in UTC and PST formats
 # ------------------------
@@ -641,7 +607,6 @@ docker run --rm \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
-    -e MODELS_YAML_PROTECT="${MODELS_YAML_PROTECT:-}" \
     ${FABRIC_SUBNET:+-e FABRIC_SUBNET=$FABRIC_SUBNET} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
