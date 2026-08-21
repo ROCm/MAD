@@ -666,6 +666,70 @@ The leading `aiperf` is the isolated venv's aiperf CLI path at run time. The
 `run.scenario` (or the `AGENTIC_SCENARIO` env, with an optional per-workload
 `scenario:` override).
 
+### Verify a corpus by hand (`verify_agentx_profile.py`)
+
+The suite runs the 13-axis verifier automatically as a pre-gate
+(`materialize_corpus()`), but you can also run it directly against an
+already-materialized corpus — handy after a `DRY_RUN` plan, when triaging a
+`not N/N` abort, or when byte-matching a corpus. The verifier consumes the
+**resolved profile JSON** (not the YAML), so first emit the JSON with
+`agentx_config.py`, then point `--corpus` at the generated `weka_trace` dir under
+`SUITE_CORPUS_DIR/<name>`:
+
+```bash
+# 1. resolve the YAML profile to the JSON the verifier consumes
+python3 agentx_config.py --profile profiles/conformance_256k.yaml --emit-json \
+  > /tmp/conformance_256k.json
+
+# 2. verify a materialized corpus against that profile
+python3 verify_agentx_profile.py --profile /tmp/conformance_256k.json \
+  --corpus /tmp/agentx_corpora/conformance_256k
+```
+
+**Success** — every axis lands within its band, the footer reads `13/13 axes
+within band`, and the exit code is `0` (values below are illustrative):
+
+```
+corpus=/tmp/agentx_corpora/conformance_256k  profile=conformance_256k  sessions=200  requests=1974
+
+axis                    measured    target    verdict
+------------------------------------------------------
+Input ISL P50             73,984    74,000   PASS
+Input ISL P90            156,000   155,000   PASS
+Input ISL P99            232,000   235,000   PASS
+Output OSL P50               315       320   PASS
+Output OSL P90             3,280     3,300   PASS
+Output OSL P99            16,500    17,000   PASS
+Turns P50                      3         3   PASS
+Turns P90                     19        20   PASS
+Turns P99                    103       103   PASS
+Delay P50 (s)                  4         4   PASS
+Delay P90 (s)                 30        31   PASS
+Delay P99 (s)                236       240   PASS
+Cache hit P50 %               89        89   PASS
+------------------------------------------------------
+13/13 axes within band
+```
+
+**Failure** — any axis outside its band prints `off`, the footer reports fewer
+than `13/13`, and the exit code is `1`. For example, an OSL P99 that drifts high:
+
+```
+Output OSL P99            25,600    17,000   off
+------------------------------------------------------
+12/13 axes within band
+```
+
+Inside the suite this same non-`N/N` result aborts the run before any server
+contact: `materialize_corpus()` prints the table, then
+`corpus 'conformance_256k' failed conformance pre-gate (not N/N)`. Two other
+validation errors the verifier emits directly: a profile missing distribution
+fields fails with `[verify_agentx_profile] profile missing required field(s):
+isl_p, osl_p, delay_p` (exit `2`), and omitting an argument prints `usage:
+verify_agentx_profile.py --profile P.json --corpus DIR` (exit `2`). See
+[Troubleshooting](#troubleshooting) for what to change when a real corpus fails
+the pre-gate.
+
 ### Scenario 10: anti-pattern — circular preset
 
 ```yaml
@@ -739,6 +803,36 @@ See [Scenario 9: `DRY_RUN=1` preview](#scenario-9-dry_run1-preview) for the exac
 - **Unknown preset name.** `preset: <name>` loads `profiles/<name>.yaml`; a
   missing/misspelled name yields an empty base merge (or a `FileNotFoundError`).
   Confirm the file exists under `profiles/`.
+- **`AGENTIC_CONFIG` (or a profile/corpus path) not found inside the container.**
+  On a cluster the launcher runs the suite **inside a container** and only
+  bind-mounts a fixed set of host paths — `$HOME`, `/shared_inference`,
+  `/mnt/m2m_nobackup`, the log dir (as `/run_logs`), and the repo checkout (as
+  `/opt/mooncake-cookbook`) — while passing `AGENTIC_CONFIG` straight through as
+  an env var (see `scripts/sglang_disagg/run_xPyD_models.slurm`). If the value
+  points at a host path outside those mounts, the file does not exist in the
+  container and the suite driver aborts early with `AGENTIC_CONFIG not found:
+  <path>` (the same applies to a `source: corpus` `input_dir`). **Fix:** put the
+  config on a mounted path — typically under `$HOME`, e.g.
+  `$HOME/MAD/scripts/common/agentx/agentic.example.yaml`, exactly as the
+  `models.json` agentic entries reference it.
+
+### Error reference
+
+Common failure modes across the AgentX layer and its launcher hook, with the
+message you will see and the fix. Only failures substantiated by the current
+scripts are listed.
+
+| Symptom / message | Cause | Fix |
+| --- | --- | --- |
+| `AGENTIC_CONFIG not found: <path>` (in-container) | config/corpus path is outside the container bind mounts | put it under a mounted path (`$HOME/MAD/...`, `/shared_inference`, `/mnt/m2m_nobackup`); see the entry above |
+| `corpus '<name>' failed conformance pre-gate (not N/N)` | generated/edited corpus drifts outside a verify band | check `verify.turns_p` / `cache_target` / `band_overrides`; after editing a profile regenerate with `SUITE_CORPUS_FORCE=1` |
+| `could not resolve a served model name (set MODEL explicitly)`; or every request 404s | `--model` doesn't match the server's registered served-model id (`/v1/models` not advertising an id) | let `resolve_served_model_name()` auto-detect, or set `MODEL` / `serving.model` to the exact served id |
+| `could not auto-detect max_model_len from <base>; set serving.max_model_len / MAX_MODEL_LEN` (or, disagg: `could not resolve served max_model_len from sglang worker ...`) | endpoint doesn't expose the context window (e.g. router front-end / vLLM shim) | pin `MAX_MODEL_LEN` / `serving.max_model_len` (see [`max_model_len` guidance](#max_model_len-guidance)) |
+| `uv not found on PATH and no cached uv ... set AGENTIC_ALLOW_UV_INSTALL=1 to permit the pinned remote install` | the isolated aiperf venv can't be built because `uv` is missing and the remote install is gated off | install `uv` (>= the pinned version) or set `AGENTIC_ALLOW_UV_INSTALL=1` (the agentic hook already opts in by default) |
+| `endpoint not ready after <N>s at <base>` | no OpenAI-compatible endpoint is up on `AGENTIC_PORT` before the suite runs | start/point to the server first; raise `AGENTIC_ROUTER_READY_TIMEOUT` if it is merely warming |
+| `trace download failed after <N> attempts (<dataset>)` | hf trace corpus could not be fetched | check network/HF auth; raise `AGENTIC_TRACE_DL_ATTEMPTS` / `AGENTIC_TRACE_DL_TIMEOUT`, or pin a different `WEKA_LOADER_OVERRIDE` |
+| `filter too aggressive or corpus unreadable for '<name>' (0 sessions?)` | a Tier 2 `filter:` (`max_isl`/`max_turns`/`sample`) removed every session | relax the filter thresholds so at least one session survives |
+| `✗ FATAL ERROR: Model '<name>' not found on ALL allocated nodes ...` (launcher) | model weights are missing from the expected paths on the allocated nodes | stage weights under `/mnt/m2m_nobackup/models_blog/<name>` or `/shared_inference/models_blog/<name>` (or set `MODEL_DIR`) on every node |
 
 ## See also
 
