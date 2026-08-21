@@ -99,6 +99,26 @@ else:
     if hca_c and hca_d and not is_ph(hca_c) and not is_ph(hca_d) and hca_c != hca_d:
         fail(f"NCCL_IB_HCA differs between env blocks: {hca_c!r} vs {hca_d!r}")
 
+# 3b) NCCL_IB_HCA alone does not buy RDMA. Naming HCAs and then switching the
+# transport off is a contradiction and always wrong; the companion vars merely
+# missing is not, since a true-IB fabric needs none of them and only the RoCE
+# archetypes do. But "HCA copied, rest forgotten" is exactly the shape that
+# falls back to the socket transport and still finishes with a plausible-looking
+# number, so say so instead of passing silently.
+IB_COMPANIONS = ("NCCL_NET", "NCCL_IB_DISABLE", "NCCL_IB_GID_INDEX",
+                 "RDMAV_DRIVERS", "IBV_DRIVERS")
+if multi_node and hca_c and not is_ph(hca_c):
+    if str(ctx.get("NCCL_IB_DISABLE", "0")).strip() == "1":
+        fail("NCCL_IB_HCA is set but NCCL_IB_DISABLE=1: RDMA is off")
+    if str(ctx.get("NCCL_NET", "")).strip().lower() == "socket":
+        fail("NCCL_IB_HCA is set but NCCL_NET=Socket: RDMA is bypassed")
+    absent = [k for k in IB_COMPANIONS if k not in ctx and k not in denv]
+    if absent:
+        warn("NCCL_IB_HCA set but neither env block has "
+             + ", ".join(absent)
+             + "; only the HCA list is enforced, so confirm the run really used "
+               "NET/IB and did not fall back to sockets (cluster-types.md)")
+
 # 4) network interface consistent across the three places it is set
 ifaces = {
     "context.NCCL_SOCKET_IFNAME": ctx.get("NCCL_SOCKET_IFNAME"),
@@ -139,8 +159,11 @@ if "MAD_SECRETS_HFTOKEN" in ctx or "MAD_SECRETS_HFTOKEN" in denv:
 else:
     ok("no MAD_SECRETS_HFTOKEN key in manifest")
 
-# 7) AINIC transport vars must be symmetric across both env blocks
-for k in ("RCCL_AINIC_ROCE", "RDMAV_DRIVERS", "IBV_DRIVERS"):
+# 7) transport vars must be symmetric across both env blocks. Symmetry is all
+# this can check: which of them a fabric needs is archetype-specific, but a var
+# set in one block only is wrong on every archetype.
+for k in ("RCCL_AINIC_ROCE", "RDMAV_DRIVERS", "IBV_DRIVERS",
+          "NCCL_NET", "NCCL_IB_DISABLE", "NCCL_IB_GID_INDEX"):
     inc = (k in ctx) and not is_ph(ctx.get(k))
     ind = (k in denv) and not is_ph(denv.get(k))
     if inc != ind:

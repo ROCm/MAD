@@ -225,6 +225,14 @@ than the node count: the RDMA transport block is absent by design, so copy
 `NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `NCCL_NET`, `NCCL_IB_DISABLE`,
 `RDMAV_DRIVERS`, `IBV_DRIVERS` (and `RCCL_AINIC_ROCE` where the archetype needs
 it) from the multi-node template of the same workload into **both** env blocks.
-`validate_manifest.sh` enforces this: it only waives the transport vars while
-every node-count source it can read — `slurm.nodes`, `distributed.nnodes` and the
-`nodelist` cardinality — says one node.
+`validate_manifest.sh` only partly backs this up, so do not read a green run as
+proof the transport is right. `NCCL_IB_HCA` is the one var it hard-fails on —
+missing, placeholder, or present in a single env block — and it waives even that
+only while every node-count source it can read (`slurm.nodes`,
+`distributed.nnodes`, `nodelist` cardinality) says one node. For the rest it can
+check symmetry between the two blocks and two outright contradictions
+(`NCCL_IB_DISABLE=1` or `NCCL_NET=Socket` alongside an HCA list), because which
+vars a given fabric needs is archetype-specific. Copying `NCCL_IB_HCA` alone
+therefore validates with a WARN rather than a FAIL: confirm in the NCCL log that
+the run actually used `NET/IB` (see [cluster-types.md](cluster-types.md)), since
+a fallback to the socket transport still finishes and still reports a number.
