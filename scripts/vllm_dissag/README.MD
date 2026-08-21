@@ -245,7 +245,7 @@ Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoin
 
 The agentic replay benchmark replays real Claude Code agentic coding traces using the `inferencex-agentx-mvp` scenario from [SemiAnalysisAI aiperf](https://github.com/SemiAnalysisAI/aiperf), driven against the vLLM router/proxy. This workload is highly prefix-repetitive (each turn re-sends the accumulated context), so it exercises the vLLM prefix cache and reports a **measured** `gpu_cache_hit_rate` alongside the dataset's theoretical ceiling. It shares the endpoint-agnostic harness (`scripts/common/agentic_lib.sh` + the AgentX suite driver) with the [sglang integration](../sglang_disagg/README.MD#agentic-replay-benchmark).
 
-> **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [scenarios](../common/agentx/SCENARIOS.md); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
+> **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [examples](../common/agentx/README.md#examples); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
 
 It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic`. No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
 
@@ -288,28 +288,31 @@ sbatch -N 2 -n 2 -p amd-rccl --time=90 \
 
 ### Environment variables
 
+Full AgentX env reference: [scripts/common/agentx/README.md#environment-variable-reference](../common/agentx/README.md#environment-variable-reference).
+The table below lists only the launcher-specific knobs; the shared AgentX
+variables (`AGENTIC_CONC`, `AGENTIC_CACHE_WARMUP_DURATION`, `MAX_MODEL_LEN`,
+`AGENTIC_CONFIG`, `AGENTIC_WORKLOAD`, `AGENTIC_STRICT_CONTEXT`,
+`AGENTIC_HF_ISL_TAIL`, …) are documented centrally. On this disaggregated
+serving the shim front-end may not advertise `max_model_len`, so the window is
+resolved from the prefill worker (the first `host:port` in
+`AGENTIC_SERVER_METRICS`, auto-derived by the recipe) via `/v1/models`; pin
+`MAX_MODEL_LEN` if autodetect returns 0.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep`, `long_context`, `agentic`) |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
-| `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
-| `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
-| `MAX_MODEL_LEN` | auto-detected | Max context length passed to aiperf (`--max-context-length`). On this disaggregated serving the shim front-end may not advertise `max_model_len`, so the window is resolved from the prefill worker (the first `host:port` in `AGENTIC_SERVER_METRICS`, auto-derived by the recipe) via `/v1/models`; pin if autodetect returns 0 |
 | `AGENTIC_PORT` | `${BENCHMARK_PORT}` | Endpoint aiperf targets (auto-resolved to the proxy/router port, then the shim port) |
 | `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
 | `ENABLE_PREFIX_CACHE` | auto | `1` forces prefix cache on i.e. strips `--no-enable-prefix-caching` (auto-on for agentic) |
-| `AGENTIC_CONFIG` | (none) | Path to an `agentic.yaml`; runs the multi-workload suite driver. |
-| `AGENTIC_WORKLOAD` | (none) | Run one workload by name: a preset shorthand (no config) or a single entry selected from `AGENTIC_CONFIG`. |
 | `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
-| `AGENTIC_STRICT_CONTEXT` | `0` | Set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served context window. |
-| `AGENTIC_HF_ISL_TAIL` | (none) | Override the loader-derived ISL tail for hf-source workloads. |
 
 Note: `AGENTIC_SERVER_METRICS` is set automatically by the connector to the space-separated backend server `/metrics` endpoints (`<prefill_ip>:<SERVE_PORT> <decode_ip>:<SERVE_PORT>`, e.g. `:20005` for moriio, `:2584`/`SERVER_PORT` for rixl) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle. Its first `host:port` (the prefill worker) is also probed for the served `max_model_len` when the front-end doesn't advertise it.
 
 For config schema, profile authoring, and Tier 1/Tier 2 knobs, see:
 - [AgentX core README](../common/agentx/README.md)
 - [Profile authoring guide](../common/agentx/profiles/README.md)
-- [Config cookbook (SCENARIOS)](../common/agentx/SCENARIOS.md)
+- [Config examples cookbook](../common/agentx/README.md#examples)
 
 ### Supported models and modes
 

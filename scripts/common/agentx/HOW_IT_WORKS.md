@@ -5,7 +5,7 @@ different questions:
 
 - [README.md](README.md) - the config schema and Tier 1 / Tier 2 knobs.
 - [profiles/README.md](profiles/README.md) - how to author a profile/preset.
-- [SCENARIOS.md](SCENARIOS.md) - copy-paste `agentic.yaml` recipes.
+- [README.md Examples](README.md#examples) - copy-paste `agentic.yaml` recipes.
 
 This doc explains the **mechanism**: what the trace actually contains, why a
 synthetic corpus measures a real engine faithfully, and how each knob moves

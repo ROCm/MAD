@@ -129,7 +129,7 @@ curl -X POST http://127.0.0.1:2322/generate \
 
 The agentic replay benchmark replays real Claude Code agentic coding traces using the `inferencex-agentx-mvp` scenario from [SemiAnalysisAI aiperf](https://github.com/SemiAnalysisAI/aiperf), driven against the sglang router (`:2322`). This workload is highly prefix-repetitive (each turn re-sends the accumulated context), so it exercises the radix prefix cache and reports a **measured** `gpu_cache_hit_rate` alongside the dataset's theoretical ceiling.
 
-> **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [scenarios](../common/agentx/SCENARIOS.md); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
+> **New to AgentX? Start here:** [scripts/common/agentx/README.md](../common/agentx/README.md) has the onboarding path, config schema, and copy-paste [examples](../common/agentx/README.md#examples); [HOW_IT_WORKS.md](../common/agentx/HOW_IT_WORKS.md) explains the replay mechanism.
 
 It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep, selected via `BENCHMARK_SCRIPT=agentic`. No GitHub Actions / CI is involved — it runs through the same `run_xPyD_models.slurm` entrypoint as the other benchmarks.
 
@@ -170,28 +170,27 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 
 ### Environment variables
 
+Full AgentX env reference: [scripts/common/agentx/README.md#environment-variable-reference](../common/agentx/README.md#environment-variable-reference).
+The table below lists only the launcher-specific knobs; the shared AgentX
+variables (`AGENTIC_CONC`, `AGENTIC_CACHE_WARMUP_DURATION`, `MAX_MODEL_LEN`,
+`AGENTIC_CONFIG`, `AGENTIC_WORKLOAD`, `AGENTIC_STRICT_CONTEXT`,
+`AGENTIC_HF_ISL_TAIL`, …) are documented centrally.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep` -> `benchmark_xPyD.sh`, `agentic` -> `benchmark_agentic.sh`) |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
-| `AGENTIC_CONC` | `16` | Concurrency (parallel agent chains) |
-| `AGENTIC_CACHE_WARMUP_DURATION` | `300` (DeepSeek/Kimi/GLM), else `60` | Cache warmup seconds before the measured window |
-| `MAX_MODEL_LEN` | model-dependent | Max context length passed to aiperf (`--max-context-length`) |
 | `AGENTIC_PORT` | `2322` | sglang router port aiperf targets |
 | `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
 | `ENABLE_RADIX_CACHE` | auto | `1` forces radix cache on i.e. strips `--disable-radix-cache` (auto-on for agentic) |
-| `AGENTIC_CONFIG` | (none) | Path to an `agentic.yaml`; runs the multi-workload suite driver. |
-| `AGENTIC_WORKLOAD` | (none) | Run one workload by name: a preset shorthand (no config) or a single entry selected from `AGENTIC_CONFIG`. |
 | `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
-| `AGENTIC_STRICT_CONTEXT` | `0` | Set `1` to SKIP (instead of WARN/cap) a workload whose ISL tail exceeds the served context window. |
-| `AGENTIC_HF_ISL_TAIL` | (none) | Override the loader-derived ISL tail for hf-source workloads. |
 
 Note: `AGENTIC_SERVER_METRICS` is set automatically by the launcher to the space-separated server metrics endpoints (`<prefill_ip>:3000 <decode_ip>:3000`) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
 
 For config schema, profile authoring, and Tier 1/Tier 2 knobs, see:
 - [AgentX core README](../common/agentx/README.md)
 - [Profile authoring guide](../common/agentx/profiles/README.md)
-- [Config cookbook (SCENARIOS)](../common/agentx/SCENARIOS.md)
+- [Config examples cookbook](../common/agentx/README.md#examples)
 
 ### Running HF (weka) trace datasets on your own model
 
