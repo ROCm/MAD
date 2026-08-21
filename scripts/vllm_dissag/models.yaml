@@ -223,11 +223,16 @@ GLM-5.1-FP8:
     VLLM_CUDAGRAPH_MODE: "NONE"
     PREFILL_CUDAGRAPH_MODE: "NONE"
     # PERF: FULL graph for the uniform-decode shapes, PIECEWISE for everything else.
-    # vs PIECEWISE on MI300X (1024/64, warm): EP8 TPOT 88.0 -> 41.8 ms, EP16 94.1 ->
-    # 55.4 ms. The gain shrinks as EP widens because the cross-node all2all inside the
-    # captured step does not compress — do NOT assume it holds at EP32 without measuring.
-    # Cost: capture ~92-94 s and ~3.0-3.5 GiB (PIECEWISE was ~5 s / 7.2 GiB), so a longer
-    # boot; notable for CI. Set PIECEWISE to fall back.
+    # Measured on MI300X (1024/64, warm) against the previous PIECEWISE setting. These
+    # rows are the verification baseline for the upstream DSA PRs and stay until those
+    # merge:
+    #     1P/1D EP8   TPOT  88.0 -> 41.8 ms (2.11x), outTP  78.8 -> 143.7 tok/s
+    #     2P/2D EP16  TPOT  94.1 -> 55.4 ms (1.70x), outTP  66.7 -> 113.0 tok/s
+    # Accuracy unaffected (NIAH 2k-35k: 1P/1D 51/60, 2P/2D 55/60, no length collapse,
+    # memfault=0). The gain shrinks as EP widens because the cross-node all2all inside
+    # the captured step does not compress — do NOT assume it holds at EP32 without
+    # measuring. Cost: capture ~92-94 s and ~3.0-3.5 GiB (PIECEWISE was ~5 s / 7.2 GiB),
+    # so a longer boot; notable for CI. Set PIECEWISE to fall back.
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
     # Moves graph partitioning to inductor codegen (MLA KV-update becomes an eager
