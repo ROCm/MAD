@@ -12,6 +12,7 @@ SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "Kimi-K2-Instruct"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -374,6 +375,16 @@ setup_sglang_worker_env() {
     export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
+    # Kimi-K2 (64 attn heads) MLA: the fused decode-MLA path rejects head counts
+    # outside {16,128}; disable it ONLY for Kimi-K2 so the runtime picks a supported
+    # MLA backend (avoids the ROCm "ForwardMetadata" unpack crash on Kimi K2 /
+    # K2-Thinking). Other MLA models (e.g. DeepSeek) keep the fused path. An explicit
+    # SGLANG_ROCM_FUSED_DECODE_MLA in the environment always wins.
+    if [[ -z "${SGLANG_ROCM_FUSED_DECODE_MLA:-}" ]]; then
+        case "${MODEL_NAME:-}" in
+            *Kimi-K2*|*kimi-k2*) export SGLANG_ROCM_FUSED_DECODE_MLA=0 ;;
+        esac
+    fi
     export SGLANG_MORI_FP8_DISP="${SGLANG_MORI_FP8_DISP:-True}"
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }

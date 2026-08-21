@@ -80,6 +80,24 @@ DeepSeek-R1:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
     dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
 
+# Kimi K2 Instruct (0905): 1T MLA + MoE, native FP8 (block-fp8, non-thinking).
+# FP8 uses the mature Fp8MoEMethod runner, which has the DeepEP-style pre-permute
+# registered, so this runs the full MoRI expert all-to-all plus CUDA graphs -- the
+# same proven path as DeepSeek-R1. The only Kimi-specific server flag is
+# --tool-call-parser kimi_k2 (no reasoning parser: Instruct is reflex-grade).
+# --dist-timeout 3600 absorbs NFS weight-load skew across nodes at this size.
+# SGLANG_ROCM_FUSED_DECODE_MLA=0, set by the launcher for any Kimi-K2 model,
+# still applies: 64 attention heads are outside the fused decode-MLA range.
+Kimi-K2-Instruct:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73 --dist-timeout 3600 --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
+  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3)"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
+
 # GPT-OSS-120B is small enough (~117B total / ~5.1B active) that a single
 # 8-GPU node holds the full model at TP=8; no cross-node EP/MoRI needed (same
 # as pyt_vllm_disagg_nixl_gpt-oss-120b in models.json, which also runs RUN_MORI=0).

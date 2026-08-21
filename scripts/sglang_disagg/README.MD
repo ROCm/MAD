@@ -10,6 +10,7 @@ MoE Models
 - DeepSeek-V3 (https://huggingface.co/deepseek-ai/DeepSeek-V3)
 - DeepSeek-R1 (https://huggingface.co/deepseek-ai/DeepSeek-R1)
 - Mixtral-8x7B-v0.1 (https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)
+- Kimi-K2-Instruct (https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) — 1T MLA + MoE, native FP8
 
 This repository contains scripts and documentation to launch PD Disaggregation for above models. You will find setup instructions, node assignment details and benchmarking commands.
 
@@ -79,7 +80,8 @@ above:
 
 Model + transport come from deployment `env_vars` (or `args`): `MODEL_NAME` (short key
 in `models.yaml`), `MODEL_PATH` (mounted weights), `RUN_MORI` (1=MoRI EP default,
-0=Mooncake/NIXL), `DP_MODE` (1=DP-attention EP for DeepSeek-V3/R1 inter-node).
+0=Mooncake/NIXL), `DP_MODE` (1=DP-attention EP for DeepSeek-V3/R1 and
+Kimi-K2-Instruct inter-node).
 
 Deploy with an additional-context config carrying `slurm` + `distributed.launcher:
 "sglang-disagg"` (+ `distributed.sglang_disagg.{prefill_nodes,decode_nodes}` for a
@@ -151,10 +153,10 @@ The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation 
 | `DP_MODE` | `PARALLEL_MODE` | Flags applied | Supported models |
 |-----------|-----------------|---------------|------------------|
 | `0` (default) | `tp` | `base_flags` + `tp_flags` + `prefill.tp` / `decode.tp` | All models |
-| `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1 only |
+| `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1, Kimi-K2-Instruct only |
 
 - `DP_MODE=1` enables MoRI expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO).
-- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any other model with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for all non-DeepSeek models.
+- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any model outside that allowlist with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for everything else.
 
 ## Log Files
 

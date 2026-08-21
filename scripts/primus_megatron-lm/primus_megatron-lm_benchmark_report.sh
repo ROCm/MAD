@@ -45,7 +45,7 @@ POSTTRAIN_TYPE="lora"
 usage() {
   echo "Usage: $0 -m <model_repo> -p <datatype> -t <mode> -f <posttrain_type>"
   echo "\nOptions:"
-  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
+  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Kimi-K2-Thinking, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
   echo "  -p <datatype>        Precision type (FP8, BF16, MXFP8, or MXFP4). MXFP8/MXFP4 only supported on MI355X/MI350X."
   echo "  -t <mode>            Training mode (pretrain or posttrain, default: pretrain)"
   echo "  -f <posttrain_type>  Post-training type (sft or lora, default: lora). Only used when mode is posttrain."
@@ -598,6 +598,56 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS $DEEPEP_ARGS 2>&1 | tee $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  # Kimi-K2-Thinking: 1T-total / 27B-active MLA + MoE (61 layers, 384 experts),
+  # EP=8 intra-node, TP=1. Both the model YAML and this BF16 experiment YAML are
+  # injected into the Primus tree by the rccl_overlay Dockerfile -- unlike every
+  # other model here, they do not ship inside the rocm/primus base image.
+  #
+  # This is a throughput benchmark, not a training run: the experiment YAML sets
+  # mock_data and train_iters: 50 unconditionally and saves no checkpoint.
+  # PRIMUS_SANITY_TRAIN_ITERS additionally drops it to 3 layers for CI/build
+  # sanity; leave it unset for a representative full-depth measurement.
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/kimi_k2_thinking-$DATATYPE-pretrain.yaml
+  SEQ_LEN=4096
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+        MBS=1; GBS=32
+        run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+      else
+        # MBS/GBS already match the experiment YAML, so no CLI override is needed.
+        MBS=4; GBS=128
+        run_primus "$EXP"
+      fi
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+        MBS=1; GBS=32
+        run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+      else
+        MBS=2; GBS=32
+        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
+      fi
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then

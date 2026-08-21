@@ -30,6 +30,7 @@ echo ""
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "Kimi-K2-Instruct"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -58,6 +59,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
+    "Kimi-K2-Instruct" \
 )
 
 # Define valid model names
@@ -70,6 +72,7 @@ VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
+    "Kimi-K2-Instruct" \
 )
 
 model_allows_mori_ep() {
