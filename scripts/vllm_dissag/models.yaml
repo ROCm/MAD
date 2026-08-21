@@ -321,6 +321,13 @@ GLM-5.1-FP8:
     TORCH_NCCL_BLOCKING_WAIT: "0"
     TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
     NCCL_IB_TIMEOUT: "22"
+    # Per-shape warmup in benchmark_xPyD.sh before each measured isl/osl cell. The sweep's
+    # global warmup is 32/32 con=1, which never compiles this stack's real prefill shape,
+    # aiter/Triton variants or decode cudagraph batches, so the first measured cell of a
+    # shape otherwise absorbs the residual JIT and reports an inflated TPOT. GLM-only: the
+    # script default is OFF (see benchmark_xPyD.sh), so no other model's sweep changes.
+    # Every latency figure quoted above was measured with this on.
+    SHAPE_WARMUP: "1"
   dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
   prefill:
     dp: ""
