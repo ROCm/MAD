@@ -32,6 +32,7 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 echo "=== 1. bash -n syntax check (hooks + connectors + driver + lib) ==="
 SYNTAX_TARGETS=(
+    "$COMMON_DIR/benchmark_agentic.sh"
     "$REPO_ROOT/scripts/sglang_disagg/benchmark_agentic.sh"
     "$REPO_ROOT/scripts/vllm_dissag/benchmark_agentic.sh"
     "$REPO_ROOT/scripts/vllm_dissag/connectors/rixl.sh"
