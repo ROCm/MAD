@@ -28,10 +28,8 @@
 # vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile
 #   GLM-5.1-FP8 (MLA + DeepSeek Sparse Attention) MoRI-EP WideEP disagg image.
 #   PER-MODEL image, isolated from the base vllm_disagg_inference Dockerfile
-#   (which stays pinned to the DeepSeek-V3 / R1 stack). This split lets each model
-#   pin its own vLLM/AITER/MoRI without disturbing the others -- add a new
-#   vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile per future model
-#   (e.g. Kimi-2.6) rather than repinning the shared DSV3 image.
+#   (which stays pinned to the DeepSeek-V3 / R1 stack), so each model can pin its
+#   own vLLM/AITER/MoRI without disturbing the others.
 #
 #   ALL connectors in one image: moriio (TP + MoRI-EP wideEP) + rixl (NIXL TP +
 #   DeepEP wideEP). = the fullsource MoRI stack, plus a UCX/RIXL/rocSHMEM/DeepEP
@@ -41,16 +39,11 @@
 #     -t <your-registry>/vllm-disagg:glmv5.1 .
 #   export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:glmv5.1
 #
-#   WITH_NIXL=0 (default) => MoRI-EP only (moriio TP/wideEP + deepep-from-base); lean.
-#   WITH_NIXL=1 => builds UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
-#     so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
-#     wideEP) are present (~+30-45 min build vs WITH_NIXL=0).
-#
 # STATUS (GLM-5.1-FP8 on this stack): validated on 1P/1D EP8 and 2P/2D EP16 — NIAH
 # 2k-35k retrieves with no length collapse and no crash (long-context accuracy fixed
 # via vLLM #47766). 4P/4D EP32 is a KNOWN OPEN DEFECT: token corruption at ALL context
 # lengths, garbage even at 2k. Use 1P/1D and 2P/2D only.
-# (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...)
+# (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...; vLLM compile ~30-60 min.)
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
 # purpose-built ROCm/vLLM/MoRI base, cloning each overridden source from public Git
@@ -72,8 +65,7 @@
 #     RegisterRdmaMemoryRegion EFAULTs (errno 14) on the first disagg WRITE.
 #   - vllm-router (vllm-project/router PR#181 = DP-rank round-robin + 2P2D KV-notify
 #     dpfix) built in -> no external router binary needed.
-#   - validated recipe knobs baked as ENV. The MoRIIO disagg fixes (#39276 notify,
-#     #41751 LL split, DP-rank hash-failsafe) are native in this vLLM (no runtime patcher).
+#   - MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native.
 #
 # THIS IMAGE IS THE CONTRACT. The MAD side (scripts/vllm_dissag) is catalog/config only
 # and ships NO runtime .py patchers, so EVERY GLM DSA source fix must be carried
@@ -82,12 +74,6 @@
 # produces garbage output or stalls the disagg KV transfer, with nothing to fall back on
 # (measured: rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH 2k 0/10).
 # If you need a fix, move the pin and rebuild — do not re-add runtime patchers to MAD.
-#
-# Build context = repo root:
-#   docker build -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile -t <registry>/<tag> .
-#
-# BASE_IMAGE is the purpose-built ROCm/vLLM/MoRI base above. Override --build-arg
-# BASE_IMAGE=... to build on a different ROCm base. vLLM compile is long (~30-60 min).
 # =============================================================================
 
 ARG BASE_IMAGE=rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03
