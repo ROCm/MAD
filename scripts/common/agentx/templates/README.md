@@ -107,4 +107,4 @@ Set exactly **one** entry-point variable — `AGENTIC_CONFIG` (a config path) or
 `AGENTIC_PORT`. Everything else is optional and auto-defaults. See the core
 [env reference](../README.md#environment-variable-reference) and
 [Minimal required](../README.md#minimal-required), and
-[../SCENARIOS.md](../SCENARIOS.md) for copy-paste configs.
+[../README.md#examples](../README.md#examples) for copy-paste configs.

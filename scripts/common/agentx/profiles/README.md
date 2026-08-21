@@ -6,7 +6,7 @@ A **profile** is ~6 distribution targets plus a `seed` and a session count.
 **no per-case code** — you add a workload by adding a profile file here.
 
 - New to the core concepts? Start at [../README.md](../README.md).
-- Want worked, copy-paste examples? See [../SCENARIOS.md](../SCENARIOS.md).
+- Want worked, copy-paste examples? See [../README.md#examples](../README.md#examples).
 
 ## Anatomy of a profile
 
