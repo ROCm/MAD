@@ -45,7 +45,7 @@ POSTTRAIN_TYPE="lora"
 usage() {
   echo "Usage: $0 -m <model_repo> -p <datatype> -t <mode> -f <posttrain_type>"
   echo "\nOptions:"
-  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
+  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-4-Scout-17B-16E, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
   echo "  -p <datatype>        Precision type (FP8, BF16, MXFP8, or MXFP4). MXFP8/MXFP4 only supported on MI355X/MI350X."
   echo "  -t <mode>            Training mode (pretrain or posttrain, default: pretrain)"
   echo "  -f <posttrain_type>  Post-training type (sft or lora, default: lora). Only used when mode is posttrain."
@@ -495,6 +495,53 @@ elif [ "$MODEL_REPO" == "Llama-2-70B" ]; then
         --log_file /tmp/primus_$MODEL_REPO.log \
         -- train pretrain \
         --config $EXP 2>&1 | tee -a $TRAIN_LOG
+    fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Llama-4-Scout-17B-16E" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  # Llama-4-Scout-17B-16E MoE (48 layers, 16 experts). The shipped config uses
+  # EP=8 (intra-node experts) with TP=1/PP=1, so scaleout grows by pure data
+  # parallelism across nodes; tune via PRIMUS_TP/PRIMUS_PP/PRIMUS_EP if needed.
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama4_17B16E-$DATATYPE-pretrain.yaml
+  SEQ_LEN=4096
+  # One micro-batch per data-parallel rank. Set before the datatype switch so the
+  # fallback PERF_LOG (emitted when TRAIN_LOG is missing, e.g. FP8/unsupported
+  # device) still records a well-formed batch_size instead of an empty field.
+  MBS=1
+  GBS=$(normalize_global_batch_size "$MBS" "8" "$NUM_GPUS")
+  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" || "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [ "$DATATYPE" == "FP8" ]; then
+      echo "Error: Datatype FP8 is not yet enabled for $MODEL_REPO. Only BF16 is supported."
+    elif [ "$DATATYPE" == "BF16" ]; then
+      # The shipped config points tokenizer_model at the gated meta-llama repo.
+      # Default to a non-gated mirror so the run does not depend on a per-account
+      # Llama-4 license grant; override with SCOUT_HF_TOKENIZER (e.g. the official
+      # meta-llama/Llama-4-Scout-17B-16E once access is granted).
+      SCOUT_HF_TOKENIZER="${SCOUT_HF_TOKENIZER:-unsloth/Llama-4-Scout-17B-16E}"
+      # MoE token dispatcher: the recommended 'alltoall' dispatcher works on RCCL
+      # develop f1be5f14; the earlier candidate build c67fbe4956 (2.29.7) hung in
+      # the MoE ALLTOALL_BASE collective (EXPERT_MODEL_PARALLEL_GROUP). Override
+      # with SCOUT_MOE_DISPATCHER=allgather to avoid all-to-all on a broken RCCL.
+      SCOUT_MOE_DISPATCHER="${SCOUT_MOE_DISPATCHER:-alltoall}"
+      # moe_shared_expert_overlap (on in the shipped config) overlaps shared-expert
+      # compute with the all-to-all dispatch and is only valid for the 'alltoall'
+      # dispatcher; disable it for any other dispatcher or Primus aborts.
+      SCOUT_DISPATCHER_ARGS=(--moe_token_dispatcher_type "$SCOUT_MOE_DISPATCHER")
+      [ "$SCOUT_MOE_DISPATCHER" != "alltoall" ] && SCOUT_DISPATCHER_ARGS+=(--moe_shared_expert_overlap false)
+      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
+        --tokenizer_model "$SCOUT_HF_TOKENIZER" \
+        "${SCOUT_DISPATCHER_ARGS[@]}"
     fi
   fi
   if [ -f "$TRAIN_LOG" ]; then

@@ -109,3 +109,16 @@ GPT-OSS-120B:
     tp: "--disable-cuda-graph"
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+
+# Llama 4 Scout: 17Bx16E MoE, bf16. triton attention + triton moe-runner avoid the
+# AITER MoE kernels that segfault on gfx950 during warmup (harmless/generic on gfx942).
+# --disable-custom-all-reduce: the custom all-reduce kernel SIGSEGVs on gfx950 during
+# the embedding all-reduce in warmup; fall back to plain RCCL all-reduce. Context 131072.
+# Arch-agnostic registration only: validated on gfx942/Mellanox. The additional
+# gfx950 kernel and RDMA workarounds are not part of this entry.
+Llama-4-Scout-17B-16E-Instruct:
+  base_flags: "--attention-backend triton --moe-runner-backend triton --disable-custom-all-reduce --watchdog-timeout 1000000 --mem-fraction-static 0.8 --context-length 131072"
+  prefill:
+    tp: "--disable-cuda-graph"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"

@@ -1,0 +1,122 @@
+{
+  "built_images": {
+    "rocm-primus-llama4scout": {
+      "model": "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay",
+      "docker_image": "rocm/primus:v26.3-<FILL_RCCL_TAG e.g. rccl-7.2.1 or rccl-develop-<sha7>>",
+      "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
+      "base_docker": "rocm/primus:v26.3",
+      "build_duration": 0,
+      "local_image": true,
+      "registry_image": null,
+      "registry": null,
+      "gpu_vendor": "AMD"
+    }
+  },
+  "built_models": {
+    "rocm-primus-llama4scout": {
+      "name": "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay",
+      "url": "",
+      "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
+      "dockercontext": "./docker",
+      "scripts": "scripts/primus_megatron-lm/run.sh",
+      "n_gpus": "-1",
+      "owner": "mad.support@amd.com",
+      "training_precision": "",
+      "multiple_results": "perf_primus-megatron-Llama-4-Scout-17B-16E.csv",
+      "tags": ["pyt", "pretrain", "llama-4-scout", "moe", "training"],
+      "timeout": 14400,
+      "args": "--model_repo primus_pyt_megatron_lm_train_llama-4-scout-17b-16e",
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro <FILL_AINIC_MOUNTS if fabric needs host ibverbs/ionic libs, e.g. -v /etc/libibverbs.d:/etc/libibverbs.d:ro -v /usr/lib/x86_64-linux-gnu/libionic.so:...:ro; delete if not needed, see references/cluster-types.md>"
+    }
+  },
+  "context": {
+    "docker_env_vars": {
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_NET": "IB",
+      "NCCL_NET_PLUGIN": "none",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  data-plane HCA list, see references/cluster-types.md>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "IBV_SHOW_WARNINGS": "1",
+      "NVTE_USE_CAST_TRANSPOSE_TRITON": "0"
+    },
+    "docker_mounts": {
+      "/dev/infiniband": "/dev/infiniband"
+    },
+    "docker_build_arg": {
+      "BASE_DOCKER": "rocm/primus:v26.3",
+      "BUILD_GPU_TARGETS": "<FILL_GPU_TARGETS  gfx942=MI300X/MI325X, gfx950=MI350X/MI355X>",
+      "RCCL_REPO": "https://github.com/ROCm/rocm-systems.git",
+      "RCCL_BRANCH": "",
+      "RCCL_COMMIT": "<FILL_RCCL_COMMIT  pinned RCCL commit sha; leave RCCL_BRANCH/RCCL_COMMIT empty to keep the base image RCCL>"
+    },
+    "gpu_vendor": "AMD",
+    "guest_os": "UBUNTU",
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  },
+  "credentials_required": [],
+  "summary": {
+    "successful_builds": [],
+    "failed_builds": [],
+    "total_build_time": 0,
+    "successful_pushes": [],
+    "failed_pushes": []
+  },
+  "deployment_config": {
+    "target": "slurm",
+    "slurm": {
+      "partition": "<FILL_PARTITION>",
+      "account": "<FILL_ACCOUNT or remove if cluster has none>",
+      "qos": "<FILL_QOS>",
+      "reservation": "<FILL_RESERVATION or remove if none>",
+      "nodes": 2,
+      "gpus_per_node": 8,
+      "time": "04:00:00",
+      "output_dir": "./slurm_output",
+      "exclusive": true,
+      "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "nodelist": "<FILL_NODELIST optional: pin to specific nodes, e.g. node-a,node-b; delete this key to let SLURM schedule>"
+    },
+    "distributed": {
+      "launcher": "torchrun",
+      "backend": "nccl",
+      "port": 29500,
+      "nnodes": 2,
+      "nproc_per_node": 8
+    },
+    "env_vars": {
+      "HF_HOME": "${HF_HOME}",
+      "TORCH_HOME": "${TORCH_HOME}",
+      "XDG_CACHE_HOME": "${XDG_CACHE_HOME}",
+      "PIP_CACHE_DIR": "${PIP_CACHE_DIR}",
+      "MAD_DATAHOME": "${MAD_DATAHOME}",
+      "SCOUT_MOE_DISPATCHER": "alltoall",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_NET": "IB",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  same value as context.docker_env_vars>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
+      "NCCL_TIMEOUT": "900",
+      "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+      "TORCH_NCCL_HIGH_PRIORITY": "1",
+      "OMP_NUM_THREADS": "8",
+      "MIOPEN_FIND_MODE": "1",
+      "MIOPEN_USER_DB_PATH": "${XDG_CACHE_HOME}/miopen",
+      "NVTE_USE_CAST_TRANSPOSE_TRITON": "0"
+    },
+    "debug": false,
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  }
+}
