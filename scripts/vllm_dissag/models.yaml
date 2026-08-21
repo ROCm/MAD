@@ -258,10 +258,10 @@ GLM-5.1-FP8:
     TORCH_NCCL_BLOCKING_WAIT: "0"
     TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
     NCCL_IB_TIMEOUT: "22"
-    # Per-shape warmup before each measured isl/osl cell: the sweep's global 32/32 con=1
-    # warmup never compiles this stack's real prefill shape or decode cudagraph batches,
-    # so the first cell of each shape otherwise reports an inflated TPOT. The script
-    # default is OFF, so no other model's sweep changes.
+    # Per-shape warmup before each measured isl/osl cell, which the sweep's global 32/32
+    # con=1 warmup does not cover. Kept because the latency figures above were measured
+    # with it on, not because it was shown to help: an A/B at 1024/1024 con=8 was neutral.
+    # The script default is OFF, so no other model's sweep changes.
     SHAPE_WARMUP: "1"
   dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
   prefill:

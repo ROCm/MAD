@@ -40,18 +40,13 @@ for i in $(seq 1 $BENCHMARK_ITR); do
     echo "Running the benchserving script for iter: $i" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
     for combo in "${COMBINATIONS[@]}"; do
        IFS="/" read -r isl osl <<< "$combo"
-       # Per-shape warmup at the REAL isl/osl, low concurrency. The global warmup above
-       # is isl=osl=32/con=1, which never exercises this shape's prefill path, its Triton/
-       # aiter kernel variants, or the decode cudagraph batch sizes -- so without this the
-       # FIRST measured cell of each shape absorbs all the residual JIT and reports an
-       # inflated TPOT. Measured cells must start from a warm graph. (Do not confuse this
-       # with the ~302ms -> ~88ms TPOT figure in the GLM-5.1-FP8 recipe: that one is the
-       # over-wide MoRI EP all2all buffer, fixed by --max-num-batched-tokens, not by warmup.)
-       # DEFAULT OFF: every model shares this sweep path, and turning it on changes the
-       # measured TPOT of recipes already validated without it (DeepSeek-V3/-5layer/-R1,
-       # Llama-70B, gpt-oss-120b). GLM opts in via its models.yaml env:, which is the
-       # configuration its latency numbers were measured under. Enable per-run with
-       # SHAPE_WARMUP=1.
+       # Per-shape warmup at the REAL isl/osl, low concurrency: the global warmup above is
+       # isl=osl=32/con=1, so it never exercises this shape's prefill path, its Triton/aiter
+       # kernel variants or the decode cudagraph batch sizes. DEFAULT OFF -- every model
+       # shares this sweep path, and an A/B at 1024/1024 con=8 measured it neutral (TPOT
+       # 42.13 ms on, 42.05 ms off), so recipes validated without it must not be shifted for
+       # no gain. GLM opts in via its models.yaml env:, which is what its published latency
+       # numbers were measured under. Enable per-run with SHAPE_WARMUP=1.
        if [[ "${SHAPE_WARMUP:-0}" == "1" ]]; then
            _w_con="${SHAPE_WARMUP_CON:-4}"
            _w_prompts="${SHAPE_WARMUP_PROMPTS:-8}"
