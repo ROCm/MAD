@@ -408,24 +408,15 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-# Optionally pick the routable fabric IP instead of hostname -I's first entry: some
-# clusters list an overlay NIC BEFORE the routable fabric, and advertising it hangs the
-# prefill/decode barrier at "Waiting for nodes" forever. OPT-IN and site-specific: set
-# FABRIC_SUBNET to your fabric's address prefix (e.g. `-e FABRIC_SUBNET=10.158.`).
-# UNSET (the default) = take $1, i.e. unchanged for every existing model/cluster.
-FABRIC_SUBNET="${FABRIC_SUBNET:-}"
-# From a "hostname -I" line, return the first IP on FABRIC_SUBNET, else the first IP.
-_pick_fabric_ip() {
-    awk -v pfx="$FABRIC_SUBNET" \
-        '{f=$1; if (pfx != "") for(i=1;i<=NF;i++) if(index($i,pfx)==1){f=$i; break} print f}'
-}
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | _pick_fabric_ip)
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
+MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I' | _pick_fabric_ip)
+    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
+    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
     IPS+=("$IP")
 done
 
@@ -600,7 +591,6 @@ docker run --rm \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
-    ${FABRIC_SUBNET:+-e FABRIC_SUBNET=$FABRIC_SUBNET} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
