@@ -21,14 +21,13 @@ SSH="ssh -o StrictHostKeyChecking=no"
 COMMON="IMAGE=${IMAGE:-kimik3-wideep-disagg:latest} TP_SIZE=${TP_SIZE:-2} DP_SIZE=${DP_SIZE:-8} DP_LOCAL=${DP_LOCAL:-4} KV_CACHE_MEMORY_BYTES=${KV_CACHE_MEMORY_BYTES:-8000000000} PREFILL_BACKEND=mori_low_latency DECODE_CG=${DECODE_CG:-NONE} MODEL_DIR=${MODEL_DIR} PMASTER=$PM_IP DMASTER=$DM_IP PROXY_IP=$PM_IP DECODE_POD_HOSTS=$DM_IP,$DW_IP PREFILL_POD_HOSTS=$PM_IP,$PW_IP"
 
 deploy() {  # $1=node
-  $SSH "$1" 'mkdir -p ~/k3disagg/patchers ~/k3disagg/logs' 2>/dev/null
+  $SSH "$1" 'mkdir -p ~/k3disagg/logs' 2>/dev/null
   scp -o StrictHostKeyChecking=no "$REPO/run_2p2d.sh" "$REPO/load_image.sh" "$1:~/k3disagg/" >/dev/null
-  scp -o StrictHostKeyChecking=no "$REPO/patchers/"*.py "$1:~/k3disagg/patchers/" >/dev/null
   # Self-restoring: ensure the disagg image is present (pull from DockerHub if not).
   $SSH "$1" "cd ~/k3disagg && TAG='${IMAGE:-kimik3-wideep-disagg:latest}' HUB_IMAGE='${HUB_IMAGE:-}' DOCKER_USER='${DOCKER_USER:-}' DOCKER_PAT='${DOCKER_PAT:-}' bash load_image.sh" 2>&1 | tail -1
 }
 
-echo "=== deploy scripts+patchers+image to 4 nodes ==="
+echo "=== deploy scripts+image to 4 nodes ==="
 for n in $PM_NODE $PW_NODE $DM_NODE $DW_NODE; do deploy "$n"; echo "  $n ok"; done
 
 echo "=== start WORKERS first ==="

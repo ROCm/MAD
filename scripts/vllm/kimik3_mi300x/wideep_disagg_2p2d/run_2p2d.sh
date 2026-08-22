@@ -7,8 +7,7 @@
 #   Decode  pool: D-master (kv_consumer)             + D-worker (headless)
 # Run this per node with ROLE + the shared *_ADDR env set (see run_2p2d_launch.sh).
 #
-# Applies the KDA MoRIIO patchers at container start (idempotent) so the MoRIIO
-# connector carries K3's ~69 KDA (GDN) recurrent+conv state, not just MLA KV.
+# Applies connector fixes baked into the disagg image (VLLM_REF=v3).
 set -euo pipefail
 
 IMAGE="${IMAGE:-kimik3-wideep-disagg:latest}"
@@ -17,7 +16,6 @@ ROLE="${ROLE:?ROLE=prefill_master|prefill_worker|decode_master|decode_worker}"
 PMASTER="${PMASTER:?prefill master eth0 IP}"
 DMASTER="${DMASTER:?decode master eth0 IP}"
 PROXY_IP="${PROXY_IP:-$PMASTER}"
-PATCHER_DIR="${PATCHER_DIR:-$HOME/k3disagg/patchers}"
 LOGHOST="${LOGHOST:-$HOME/k3disagg/logs}"; mkdir -p "$LOGHOST"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-10240}"
 # Bound the K3 MoE profiling M. On gfx942 the tuned FlyDSL a8w4 configs are
@@ -41,13 +39,13 @@ GPU_UTIL="${GPU_UTIL:-0.88}"
 # fabric (e.g. Mellanox mlx5) override these, e.g.:
 #   NCCL_IB_HCA=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9 \
 #   RDMA_DEVICES=mlx5_0,mlx5_2,...  SOCKET_IFNAME=eth0  IB_GID_INDEX=3 THOR2_BNXT_FIX=0
-SOCKET_IFNAME="${SOCKET_IFNAME:-eno0}"
-NCCL_IB_HCA_VAL="${NCCL_IB_HCA:-rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7}"
-RDMA_DEVICES="${RDMA_DEVICES:-rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7}"
+SOCKET_IFNAME="${SOCKET_IFNAME:-eth0}"
+NCCL_IB_HCA_VAL="${NCCL_IB_HCA:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
+RDMA_DEVICES="${RDMA_DEVICES:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
 IB_GID_INDEX="${IB_GID_INDEX:-3}"
-# Thor2 bnxt libibverbs ABI fix (host v34 driver vs image v59). Needed on Thor2;
-# harmless elsewhere but set THOR2_BNXT_FIX=0 to skip the two -v mounts.
-THOR2_BNXT_FIX="${THOR2_BNXT_FIX:-1}"
+# Thor2 bnxt libibverbs ABI fix (host v34 driver vs image v59). Set THOR2_BNXT_FIX=1
+# on Broadcom Thor2; default OFF for Mellanox mlx5 (OCI).
+THOR2_BNXT_FIX="${THOR2_BNXT_FIX:-0}"
 THOR2_LIBIBVERBS_HOST="${THOR2_LIBIBVERBS_HOST:-/usr/lib/x86_64-linux-gnu/libibverbs.so.1.14.39.0}"
 THOR2_LIBIBVERBS_IMG="${THOR2_LIBIBVERBS_IMG:-/usr/lib/x86_64-linux-gnu/libibverbs.so.1.16.62.0}"
 THOR2_BNXT_HOST="${THOR2_BNXT_HOST:-/usr/local/lib/libbnxt_re-rdmav34.so}"
@@ -171,27 +169,7 @@ docker run -d --name "$CONTAINER" \
   -e HSA_ENABLE_IPC_MODE_LEGACY=0 -e HSA_NO_SCRATCH_RECLAIM=1 \
   -e PYTORCH_ALLOC_CONF=expandable_segments:False -e PYTORCH_HIP_ALLOC_CONF=expandable_segments:False \
   -e MORIIO_SKIP_MAMBA="${MORIIO_SKIP_MAMBA:-0}" \
-  -e K3_MAMBA_N1_FORCE="${K3_MAMBA_N1_FORCE:-}" \
-  -e K3_WRITE_FENCE="${K3_WRITE_FENCE:-}" \
   -e VLLM_BATCH_INVARIANT="${VLLM_BATCH_INVARIANT:-0}" \
-  -e K3_MLA_SINGLE_SPLIT="${K3_MLA_SINGLE_SPLIT:-1}" \
-  -e K3_GROUP_ROUTING="${K3_GROUP_ROUTING:-1}" \
-  -e K3_EXTRA_FIXES="${K3_EXTRA_FIXES:-0}" \
-  -e K3_CHUNK_GATE_SLACK="${K3_CHUNK_GATE_SLACK:-2}" \
-  -e K3_CHUNK_GATE_DEBUG="${K3_CHUNK_GATE_DEBUG:-0}" \
-  -e K3_XFER_PROBE="${K3_XFER_PROBE:-0}" \
-  -e K3_MLA_FULL_PREFILL="${K3_MLA_FULL_PREFILL:-1}" \
-  -e K3_FORCE_PREFILL_KDA="${K3_FORCE_PREFILL_KDA:-0}" \
-  -e K3_WRITE_FENCE_MS="${K3_WRITE_FENCE_MS:-20}" \
-  -e K3_WRITE_DEVSYNC="${K3_WRITE_DEVSYNC:-0}" \
-  -e K3_KDA_CONV_DEBUG="${K3_KDA_CONV_DEBUG:-0}" \
-  -e K3_FWD_BREADCRUMB="${K3_FWD_BREADCRUMB:-0}" \
-  -e K3_WRITE_BC="${K3_WRITE_BC:-0}" \
-  -e K3_KDA_STATE_PROBE="${K3_KDA_STATE_PROBE:-0}" \
-  -e K3_MAMBA_BC="${K3_MAMBA_BC:-0}" \
-  -e K3_DECODE_RECV_PROBE="${K3_DECODE_RECV_PROBE:-0}" \
-  -e K3_HS_BC="${K3_HS_BC:-0}" \
-  -e K3_INPUTS_PROBE="${K3_INPUTS_PROBE:-0}" \
   -e AMD_SERIALIZE_KERNEL="${AMD_SERIALIZE_KERNEL:-0}" -e AMD_LOG_LEVEL="${AMD_LOG_LEVEL:-0}" \
   -e MORI_GPU_ARCHS=gfx942 -e MORI_IB_GID_INDEX=${IB_GID_INDEX} -e MORI_IB_ENABLE_RELAXED_ORDERING=1 \
   -e MORI_NUM_QP_PER_PE=8 -e MORI_SHMEM_HEAP_SIZE=17179869184 \
@@ -201,7 +179,7 @@ docker run -d --name "$CONTAINER" \
   -e VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
   -e KVCFG_B64="$KVCFG_B64" \
   -e QUANT_CONFIG="$QUANT_CONFIG" \
-  -v "$MODEL_DIR":/model:ro -v "$LOGHOST":/logs -v "$PATCHER_DIR":/patchers:ro \
+  -v "$MODEL_DIR":/model:ro -v "$LOGHOST":/logs \
   -v "$JIT_HOST":/opt/vllm_cache \
   ${BNXT_MOUNTS} \
   --entrypoint bash \
@@ -218,156 +196,8 @@ docker run -d --name "$CONTAINER" \
       echo \"[disagg] flydsl \$FLYDSL_VER -> upgrading to 0.2.4 (K3 int4 SiTUv2 requires >=0.2.4)\"
       pip install --no-cache-dir 'flydsl==0.2.4' 2>&1 | tail -1
     fi
-    echo '[disagg] applying KDA MoRIIO patchers...'
-    # KDA/HMA/sampler patchers baked into image source (kimik3-wideep-disagg).
-    # Runtime-relax the over-strict aiter#4471 packed-int4 guard (the grafted
-    # K3-aware AITER lacks compile_moe_gemm1(act=); the proven image runs the
-    # same aiter fine -> guard is a false positive on this stack).
-    VLLM_SP=\$(python3 -c 'import vllm,os;print(os.path.dirname(vllm.__file__))' 2>/dev/null)
-    if [ -f /patchers/apply_kimik3_aiter_situv2_int4.py ]; then
-      python3 /patchers/apply_kimik3_aiter_situv2_int4.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_situ_aiter_gfx942.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_situ_aiter_gfx942.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_mxfp4_int4_guard_relax.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_mxfp4_int4_guard_relax.py \"\$VLLM_SP\" || true
-    fi
-    # Reconcile MoRIIO self.block_size from an attention (non-mamba) layer so the
-    # MLA block_size (1536) doesn't trip the guard against KDA's block_size=1.
-    if [ -f /patchers/apply_kimik3_moriio_block_size_fix.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_block_size_fix.py \"\$VLLM_SP\" || true
-    fi
-    # Use the PADDED physical mamba page for KDA block stride/geometry (fixes the
-    # producer-side GPU memory fault: unpadded conv+ssm page drifts RDMA offsets OOB).
-    if [ -f /patchers/apply_kimik3_moriio_mamba_page_pad_fix.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_mamba_page_pad_fix.py \"\$VLLM_SP\" || true
-    fi
-    # Thread real tp_size into get_port_offset so per-rank ports don't collide when
-    # DP-local>1 AND TP>1 (wide-EP TP2xDP-local-4: dp0/tp1 and dp1/tp0 both bound
-    # handshake port 8406 -> ZMQError Address already in use -> listener dies -> pool
-    # hangs on 'No available shared memory broadcast block'). offset = dp*tp_size+tp.
-    if [ -f /patchers/apply_kimik3_moriio_port_offset_tpsize.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_port_offset_tpsize.py \"\$VLLM_SP\" || true
-    fi
-    # Multi-NODE disagg: advertise the peer pool's per-pod node IPs so prefill can
-    # reach decode ranks on the HEADLESS worker node (else KV writes to that node's
-    # ranks miss -> context-free generation -> 50%/DP2 88%/DP8 wrong-answer alternation).
-    if [ -f /patchers/apply_kimik3_moriio_pod_hosts.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_pod_hosts.py \"\$VLLM_SP\" || true
-    fi
-    # ROOT-CAUSE FIX: route KDA/mamba state transfer by the MAMBA KV-cache group's
-    # block ids (group [1]), not attention's (group [0]). Without this, decode reads
-    # zero KDA state -> fluent but context-free output. Load-bearing; always on.
-    if [ -f /patchers/apply_kimik3_moriio_mamba_blockids.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_mamba_blockids.py \"\$VLLM_SP\" || true
-    fi
-    # ROOT-CAUSE FIX: remote_tp_size=1 (un-advertising router) collapses ALL prefill
-    # ranks to decode tp0 -> only 1/8 decode shards get KV -> context-free. Normalize
-    # degenerate remote TP to local world_size (symmetric TP). Load-bearing; always on.
-    if [ -f /patchers/apply_kimik3_moriio_remote_tp_fix.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_remote_tp_fix.py \"\$VLLM_SP\" || true
-    fi
-    # ROOT-CAUSE FIX: mamba/KDA N-vs-N-1 boundary. Prefill computes h(N-1) (drop last
-    # prompt token), decode recomputes token N from h(N-1). Without this, decode
-    # double-counts the last token in the recurrent state -> echoes it -> wrong output.
-    # Ports vLLM's own nixl/mooncake hybrid-PD handling. Load-bearing; always on.
-    if [ -f /patchers/apply_kimik3_moriio_mamba_n1.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_mamba_n1.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_moriio_group_routing.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_group_routing.py \"\$VLLM_SP\" || true
-    fi
-    if [ \"\${K3_EXTRA_FIXES:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_chunked_allgrp.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_chunked_allgrp.py \"\$VLLM_SP\" || true
-    fi
-    if [ \"\${K3_EXTRA_FIXES:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_chunk_gate_fix.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_chunk_gate_fix.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_xfer_probe.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_xfer_probe.py \"\$VLLM_SP\" || true
-    fi
-    # k3-mla-boundary: clamp final MLA block RDMA copy to valid slots (fix decode recall)
-    if [ \"\${K3_ENABLE_CLAMP:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_moriio_mla_boundary_clamp.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_mla_boundary_clamp.py \"\$VLLM_SP\" || true
-    fi
-    # k3-mla-full: the real fix (prefill computes N MLA / KDA stays N-1). Clamp above OFF by default.
-    if [ -f /patchers/apply_kimik3_mla_full_prefill.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_mla_full_prefill.py \"\$VLLM_SP\" || true
-    fi
-    # k3-force-prefill-kda: route disagg boundary token through prefill KDA kernel
-    if [ -f /patchers/apply_kimik3_force_prefill_kda.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_force_prefill_kda.py \"\$VLLM_SP\" || true
-    fi
-    # Force single-split TRITON_MLA decode (deterministic; avoids uninit-tail merge)
-    if [ -f /patchers/apply_kimik3_mla_single_split.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_mla_single_split.py \"\$VLLM_SP\" || true
-    fi
-    # RDMA write-then-notify ordering fence (K3_WRITE_FENCE=delay): settle before
-    # write_done so decode does not read stale HBM (non-deterministic recall).
-    if [ -f /patchers/apply_kimik3_moriio_write_fence.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_write_fence.py \"\$VLLM_SP\" || true
-    fi
-    # Diagnostic breadcrumbs for the WRITE KV delivery (K3_WRITE_BC=1).
-    if [ \"\${K3_WRITE_BC:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_moriio_write_bc.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_write_bc.py \"\$VLLM_SP\" || true
-    fi
-    # Ground-truth KDA state probe (K3_KDA_STATE_PROBE=1): norm of recurrent/conv
-    # state at the slot decode reads -- ~0 means transferred state didn't land.
-    if [ \"\${K3_KDA_STATE_PROBE:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_kda_state_probe.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_state_probe.py \"\$VLLM_SP\" || true
-    fi
-    # Decode-side receive probe (K3_DECODE_RECV_PROBE=1): on write completion,
-    # read decode's OWN KV slot norm -- ~0 means RDMA bytes never landed on decode.
-    if [ \"\${K3_DECODE_RECV_PROBE:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_decode_recv_probe.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_decode_recv_probe.py \"\$VLLM_SP\" || true
-    fi
-    # Handshake dial breadcrumb (K3_HS_BC=1): logs self_tp/dial_tp/port/path so we
-    # can see if all prefill ranks wrongly dial the same decode rank.
-    if [ \"\${K3_HS_BC:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_handshake_dial_bc.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_handshake_dial_bc.py \"\$VLLM_SP\" || true
-    fi
-    # Decode inputs probe (K3_INPUTS_PROBE=1): logs num_computed_tokens/positions/
-    # block_table in _prepare_inputs -- to find the WRITE-mode decode-consume bug.
-    if [ \"\${K3_INPUTS_PROBE:-0}\" = \"1\" ] && [ -f /patchers/apply_kimik3_decode_inputs_probe.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_decode_inputs_probe.py \"\$VLLM_SP\" || true
-    fi
-    # Diagnostics: MORIIO_SKIP_MAMBA=1 isolates the KDA transfer; KDA OOB bounds log.
-    if [ -f /patchers/apply_kimik3_moriio_mamba_diag.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_mamba_diag.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_moriio_save_skip_mamba.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_moriio_save_skip_mamba.py \"\$VLLM_SP\" || true
-    fi
-    # Guard gather_initial_states against OOB KDA state idx (the disagg producer
-    # prefill GPU memory fault: mis-flagged has_initial_state -> reads a stale/OOB block).
-    if [ -f /patchers/apply_kimik3_kda_gather_guard.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_gather_guard.py \"\$VLLM_SP\" || true
-    fi
-    # k3-kda-nosync: make the KDA gather OOB guard sync-free (unblocks + speeds up
-    # long context >500K; removes a per-KDA-layer device->CPU sync). No-op on a v3+
-    # image where it is already baked in.
-    if [ -f /patchers/apply_kimik3_kda_gather_nosync.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_gather_nosync.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_kda_conv_debug.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_conv_debug.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_fwd_breadcrumb.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_fwd_breadcrumb.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_layer_breadcrumb.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_layer_breadcrumb.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_kda_fa_contiguous.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_fa_contiguous.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_kda_internal_bc.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kda_internal_bc.py \"\$VLLM_SP\" || true
-    fi
-    if [ -f /patchers/apply_kimik3_kvzero_bounds.py ] && [ -n \"\$VLLM_SP\" ]; then
-      python3 /patchers/apply_kimik3_kvzero_bounds.py \"\$VLLM_SP\" || true
-    fi
+    QUANTARG=()
+    if [ -n \"\$QUANT_CONFIG\" ]; then
     QUANTARG=()
     if [ -n \"\$QUANT_CONFIG\" ]; then
       QUANTARG=(--quantization-config \"\$QUANT_CONFIG\")

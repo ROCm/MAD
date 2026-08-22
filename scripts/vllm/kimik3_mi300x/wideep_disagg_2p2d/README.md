@@ -3,8 +3,7 @@
 > **✅ VALIDATED.** Single-needle NIAH passes **deterministically through 300K
 > tokens** (all depths) on this 2-prefill + 2-decode EP16 disagg serve. The
 > previously-open decode-recall bug is fixed (two root causes: 4-KV-group block
-> routing + multi-chunk prefill transfer). See [`STATUS.md`](STATUS.md) for the
-> root-cause write-up and [`RESULTS.md`](RESULTS.md) for the full NIAH +
+> routing + multi-chunk prefill transfer). See [`RESULTS.md`](RESULTS.md) for the full NIAH +
 > latency/throughput tables.
 >
 > **When to use this vs. colocated:** disagg (TP2×DP8) is for **concurrent
@@ -76,7 +75,7 @@ python3 niah_probe.py --url http://<prefill-master-ip>:30000 --model kimi-k3 \
 | `LOAD_STRATEGY` | `lazy` | `prefetch` double-loads RAM when the model is on tmpfs → decode OOM. |
 | `MAX_NUM_BATCHED_TOKENS` | `2048` | Best measured throughput; raising to 8192 did **not** cut latency and hurt throughput (compute-bound prefill). |
 | `MAX_MODEL_LEN` | `320000` | Needed for > 131K-token NIAH (default 131072 caps ~120K). Raise to `1000000` for the full native ctx. |
-| `KV_CACHE_MEMORY_BYTES` | `8e9` | KV cache budget (pinned to skip a profile_run hang, NOT a mem limit). `8e9` = 542K tokens. **Raise to `40e9` (→ 2.84M tokens, ~72 GB/GPU free) for high throughput or single requests > ~600K.** See [OPTIMIZATION.md](OPTIMIZATION.md). |
+| `KV_CACHE_MEMORY_BYTES` | `8e9` | KV cache budget (pinned to skip a profile_run hang, NOT a mem limit). `8e9` = 542K tokens. **Raise to `40e9` (→ 2.84M tokens, ~72 GB/GPU free) for high throughput or single requests > ~600K.** See README KV cache notes below. |
 | `GPU_UTIL` | `0.85` | 0.88 razor-misses KV headroom on some nodes. |
 | `KV_CACHE_DTYPE` | `fp8` (default) | Transfer geometry assumes 1-byte elements; bf16 corrupts. |
 | `PREFILL_BACKEND` | `mori_low_latency` | V1 high_throughput dispatch warmup crashes on this stack. |
@@ -85,7 +84,7 @@ python3 niah_probe.py --url http://<prefill-master-ip>:30000 --model kimi-k3 \
 cache (`/mnt/rammodel/Kimi-K3-MXFP4`) with `LOAD_STRATEGY=lazy` is ~2 min vs
 ~20 min from NFS (whose page cache gets evicted between runs).
 
-`run_2p2d_launch.sh` deploys the scripts + patchers + image to all four nodes,
+`run_2p2d_launch.sh` deploys the scripts + image to all four nodes,
 starts **workers first, then masters**, then (with `AUTO_ROUTER=1`) waits for both
 masters' `/v1/models` before launching exactly one router. `run_2p2d.sh` is the
 per-node entrypoint (dispatches on `ROLE=prefill_master|prefill_worker|
@@ -130,13 +129,7 @@ The two root-cause fixes are **folded into vLLM source** on branch
 `kimi-k3-wideep-disagg-fullsource-v2` of `raviguptaamd/vllm` (the `-v2` = the
 base `fullsource` branch + these fixes baked in). The Dockerfile builds that
 branch (`VLLM_REF=kimi-k3-wideep-disagg-fullsource-v2`), so the **image has the
-fixes baked in**. The same fixes also ship as runtime patchers under
-[`patchers/`](patchers/); on a v2 image they detect "already applied" and no-op
-(idempotent) — so the recipe also works on an older/unfolded image. To rebuild
-the image from scratch see the [Image](#image) section.
-
-**The two root-cause fixes that make NIAH pass** (full write-up in
-[`STATUS.md`](STATUS.md)):
+fixes baked in**. The same fixes are baked into the vLLM source branch built by the Dockerfile. **The two root-cause fixes that make NIAH pass**:
 
 1. **4-KV-group block routing** (`apply_kimik3_moriio_group_routing.py`, always
    on, `K3_GROUP_ROUTING=1`) — K3 has **4** KV-cache groups (3 KDA/mamba + 1 MLA);
@@ -159,9 +152,6 @@ Pre-existing connector fixes (still required, always on):
    so KV fans out to **all** decode TP ranks (not just rank 0).
 5. **mamba N−1 boundary** — producer computes through token N−1, decoder recomputes
    token N (matches vLLM's nixl/mooncake hybrid-PD handling).
-
-[`patchers/diagnostics/`](patchers/diagnostics/) holds element-wise transport
-probes (all env-gated OFF). See the Debugging section.
 
 ## Image
 
