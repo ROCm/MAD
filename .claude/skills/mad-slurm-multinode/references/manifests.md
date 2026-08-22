@@ -133,9 +133,11 @@ differ, the host path belongs on the value side.
   `"dockercontext": "./docker"` (the overlay Dockerfile `COPY`s the two Kimi
   YAMLs out of `docker/kimi_k2_configs/`), and the `log_error_patterns` override
   (torchrun prints a `Traceback` at worker cleanup that would otherwise be
-  scored as a failure). `PRIMUS_SANITY_TRAIN_ITERS` is set only in
-  `context.docker_env_vars`, so the local build-sanity run takes the 3-layer
-  proxy path while the deployed SLURM run measures full depth.
+  scored as a failure). The template does **not** set `PRIMUS_SANITY_TRAIN_ITERS`
+  by default, so it measures full depth — `context.docker_env_vars` reaches
+  every deployment (SLURM included), so setting it there is not a build-only
+  toggle; add it yourself only for a deliberate fast 3-layer CI/sanity pass
+  (see [gotchas.md](gotchas.md#primus_megatron-training)).
   Reference: 2 nodes / 16 GPU MI355X, BF16, MBS=1 -> ~6487 tok/s/GPU,
   ~96.5 TFLOP/s/GPU (run-to-run spread < 0.02%).
   `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.

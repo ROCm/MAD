@@ -18,6 +18,12 @@ modules:
     model: ${PRIMUS_MODEL:kimi_k2_thinking}.yaml
     overrides:
       train_iters: 50
+      # Log every step. Primus' ThroughputAverageExtension skips the first two
+      # logged steps; at the log_interval inherited from pre_trainer.yaml a
+      # 50-iteration run produces only two logged steps, both get skipped, and
+      # the job finishes with no throughput at all -- an empty perf CSV from an
+      # otherwise healthy run.
+      log_interval: 1
       micro_batch_size: 4
       global_batch_size: 128
       seq_length: ${PRIMUS_SEQ_LENGTH:4096}

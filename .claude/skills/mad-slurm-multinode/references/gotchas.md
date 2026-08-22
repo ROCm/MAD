@@ -332,15 +332,25 @@ moe_router_num_groups null no group routing.
   `"dockercontext": "./docker"` — without it madengine gives any dockerfile whose
   path contains `primus` a repo-root context and the build fails at the `COPY`.
 
-- **Set `PRIMUS_SANITY_TRAIN_ITERS` for CI/build sanity, leave it unset for a real
-  measurement.** With all 61 layers and 384 experts, `torch.compile` workers
-  saturate every CPU during NCCL bootstrap and the rendezvous times out
-  (`DistStoreError: Timed out`) before the first training step. Setting
-  `PRIMUS_SANITY_TRAIN_ITERS` selects the 3-layer proxy path
-  (`--num_layers 3 --moe_layer_freq 1`) in `benchmark_report.sh`, which finishes
-  in ~30 min on 2 x MI355X nodes. The template sets it in
-  `context.docker_env_vars` (the local build-sanity run) but **not** in
-  `deployment_config.env_vars`, so the deployed SLURM run measures full depth.
+- **`context.docker_env_vars` reaches every deployment, not just a local
+  build-time sanity pass — `PRIMUS_SANITY_TRAIN_ITERS` must not live there by
+  default.** madengine renders `context.docker_env_vars` as `--env` on the
+  actual `docker run`/`torchrun` invocation on every node, SLURM-deployed runs
+  included (verified directly: grepping a real 2-node SLURM job's container
+  launch line shows `PRIMUS_SANITY_TRAIN_ITERS=50` passed to the container even
+  though the manifest's `deployment_config.env_vars` never set it). An earlier
+  version of this template shipped `PRIMUS_SANITY_TRAIN_ITERS`/
+  `PRIMUS_SANITY_DATATYPE` unconditionally in `context.docker_env_vars`, on the
+  mistaken assumption that block was build-time-only — the effect was that
+  *every* deployment of the template, including the "real" SLURM run, silently
+  took the 3-layer proxy path and never measured full depth. Fixed: the
+  shipped template no longer sets either key. Add `PRIMUS_SANITY_TRAIN_ITERS`
+  to `context.docker_env_vars` yourself only when you deliberately want the
+  fast 3-layer CI/build-sanity path (`--num_layers 3 --moe_layer_freq 1` in
+  `benchmark_report.sh`, ~30 min on 2×MI355X); leave it absent for a real
+  measurement — at full depth, `torch.compile` workers can saturate every CPU
+  during NCCL bootstrap and the rendezvous can time out (`DistStoreError:
+  Timed out`) before the first training step without the rdzv fix below.
 
 - **The torchrun rdzv timeout must be 7200s.** The 600s default is too short for
   MIOpen kernel compilation on a first run with 384 experts, and the job dies at
