@@ -133,7 +133,7 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     rm -rf /tmp/mori-src && \
     git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
     cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
-    BUILD_UMBP=OFF pip install . && \
+    BUILD_UMBP=OFF pip install --no-build-isolation . && \
     python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
     mkdir -p /app && echo "MORI_REF=${MORI_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> /app/versions.txt && \
     rm -rf /tmp/mori-src
