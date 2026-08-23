@@ -632,9 +632,15 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         MBS=1; GBS=32
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
-        # MBS/GBS already match the experiment YAML, so no CLI override is needed.
+        # MBS/GBS match the experiment YAML at single-node (8-GPU) scale;
+        # scaleout_gbs_override renormalizes GBS for NUM_GPUS>8 so an
+        # uneven node count (e.g. 3 nodes/24 GPUs) doesn't violate
+        # Megatron's global_batch_size % (micro_batch_size * world_size) == 0
+        # check at run time.
         MBS=4; GBS=128
-        run_primus "$EXP"
+        GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+        GBS=$(effective_global_batch_size "$MBS" "$GBS")
+        run_primus "$EXP" $GBS_OVERRIDE
       fi
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
@@ -646,7 +652,9 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
         MBS=2; GBS=32
-        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
+        GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+        GBS=$(effective_global_batch_size "$MBS" "$GBS")
+        run_primus "$EXP" --micro_batch_size $MBS $GBS_OVERRIDE
       fi
     fi
   fi
