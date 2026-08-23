@@ -33,18 +33,30 @@
 #   vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile per future model
 #   (e.g. Kimi-2.6) rather than repinning the shared DSV3 image.
 #
-#   ALL connectors in one image: moriio (TP + MoRI-EP wideEP) + rixl (NIXL TP +
-#   DeepEP wideEP). = the fullsource MoRI stack, plus a UCX/RIXL/rocSHMEM/DeepEP
-#   transport layer gated by --build-arg WITH_NIXL (default 1 = everything).
+#   ALSO SERVES GLM-5.2. GLM-5.2-FP8 and GLM-5.2-MXFP4 are architecturally identical
+#   to 5.1 (verified by diffing config.json -- see models.yaml "GLM-5.2 == GLM-5.1
+#   architecturally"), so they run on this image unchanged. The filename is kept at
+#   glmv5.1 because the PIN SET is what the file names, and the pin set is shared;
+#   forking a byte-identical glmv5.2 file would create two things to keep in sync.
+#   Tag the 5.2 build distinctly (recipe uses :glm52-gfx950-ionic).
+#
+#   Connectors: moriio (TP + MoRI-EP wideEP) is always built. The rixl path (NIXL TP
+#   + DeepEP wideEP) is gated by --build-arg WITH_NIXL, DEFAULT 0 -- see the ARG at
+#   the "1. MoRI" section for why.
 #
 #   docker build -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile \
-#     -t <your-registry>/vllm-disagg:glmv5.1 .
-#   export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:glmv5.1
+#     -t <your-registry>/vllm-disagg:glm52-gfx950-ionic .
+#   export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:glm52-gfx950-ionic
 #
-#   WITH_NIXL=1 (default) => builds UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from
-#     source, so all four connector combos (moriio TP/wideEP, rixl NIXL TP, DeepEP
-#     wideEP) are present (~+30-45 min build vs WITH_NIXL=0).
-#   WITH_NIXL=0 => MoRI-EP only (moriio TP/wideEP + deepep-from-base); lean, faster.
+#   WITH_NIXL=0 (DEFAULT) => MoRI-EP only (moriio TP/wideEP + deepep-from-base);
+#     lean, and exactly how the validated image was built. This recipe serves over
+#     MoRI-EP + MoRI-IO, so UCX/RIXL/rocSHMEM/DeepEP is dead weight.
+#   WITH_NIXL=1 => additionally builds UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP
+#     from source, so all four connector combos are present (~+30-45 min build).
+#
+# TARGET HARDWARE: MI355X (gfx950) + Pensando Ionic AI NIC. Set by
+# GFX_COMPILATION_ARCH / BUILD_ROCM_ARCH / MORI_GPU_ARCHS / NIC_COMPILATION_ARCH /
+# MORI_DEVICE_NIC below. For MI300X rebuild with gfx942 + cx7 on all five.
 #
 # STATUS (GLM-5.1-FP8 on this stack): 1P/1D EP8 + 2P/2D EP16 NIAH 2k-35k = 10/10,
 # no crash; long-context accuracy fixed via vLLM #47766 (persistent sparse-MLA kept
@@ -52,20 +64,35 @@
 # (garbage output even at 2k), distinct from the long-context bug; prime suspect is
 # the moriep all-to-all combine at EP32 scale -> deferred to future work. Use 1P/1D
 # and 2P/2D only. (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...)
+#
+# STATUS (GLM-5.2-FP8 on this stack, MI355X 1P/1D EP8, job 5968): boots and serves.
+# NIAH ladder 8k/32k/64k/131k/262k PASSES at >=8.0/10 per rung with no length trend.
+# CAVEAT: retrieval is NOT reproducible across engine boots at temperature 0 -- the
+# same ladder, same seeds, same config scored 7.3/10 and 9.3/10 at 262k on two
+# consecutive boots. Byte-identical prompts, so this is engine-side (suspects:
+# chunked-prefill split under different batch composition, MoE routing varying with
+# batch, FP8 accumulation order vs CUDA-graph capture bucket). Treat any single NIAH
+# run as +/-1 needle. GLM-5.2-MXFP4 is config-only and has NEVER been booted.
+# See scripts/vllm_dissag/GLM52_MI355X.md for the serving recipe and measured perf.
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
 # purpose-built ROCm/vLLM/MoRI base, cloning each overridden source from public Git
 # (no local build-contexts):
 #
-#   - BASE: rocmshared/pytorch-private:vllm-rocm_07_22_2026_shikpate_mori1.2.3
-#     (ROCm + torch + a bundled vLLM/MoRI 1.2.3 stack). The stages below deliberately
-#     OVERRIDE the base's vLLM/MoRI/AITER with the pins we validate for GLM DSA.
+#   - BASE: rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03
+#     (ROCm + torch + a bundled vLLM/MoRI stack; see ARG BASE_IMAGE for the value in
+#     force). The stages below deliberately OVERRIDE the base's vLLM/MoRI/AITER with
+#     the pins we validate for GLM DSA.
+#     NOTE: the base exports PYTORCH_ROCM_ARCH and MAX_JOBS as ENV. An inherited ENV
+#     beats a same-named ARG, so this file uses BUILD_ROCM_ARCH / BUILD_MAX_JOBS and
+#     assigns them through. Do NOT rename them back -- that silently built gfx90a;
+#     gfx942;gfx950 while claiming gfx950 (fixed in 0f660fe).
 #   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
 #     (main LATEST 120d2de broke the connector KV-notify handshake -- see note at MORI_REF.)
-#   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
+#   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl >=0.1.7,<0.1.9;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
-#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_shik_0721
-#     (Shiksha 7/21 WideEP base + GLM DSA edits + sparse-MLA guard fix). Full compile:
+#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
+#     (vLLM v0.27 WideEP base + GLM DSA edits + sparse-MLA guard fix). Full compile:
 #     a different commit than the base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
@@ -101,15 +128,15 @@ ARG WITH_NIXL=0
 ARG NIC_COMPILATION_ARCH="ionic"
 
 # -----------------------------------------------------------------------------
-# 1. MoRI: replace the base's bundled MoRI with the validated ROCm/MoRI @ v1.2.1
-#    (the version for the 06_29 mori121 image, dist-inf-cookbook
-#    Dockerfile.vllm.mori121_shareable). v1.2.1 carries the EP/RDMA correctness fixes
-#    plus the ROCm-7.2.3 dmabuf registration path used by the connector .env
-#    (expandable_segments:False). MoRI is JIT-built, so this swaps the JIT sources the
-#    kernels compile from at runtime.
-#    BUILD CONFIG: match the cookbook build — MORI_GPU_ARCHS=gfx942, BUILD_UMBP=OFF,
-#    DEFAULT NIC backends. Do NOT pass USE_IONIC=OFF / USE_BNXT=OFF: disabling NIC
-#    backends produced a MoRI that deadlocked at the cross-node EP all-to-all init.
+# 1. MoRI: replace the base's bundled MoRI with the pinned ROCm/MoRI @ MORI_REF below.
+#    It carries the EP/RDMA correctness fixes plus the ROCm-7.2.3 dmabuf registration
+#    path used by the connector .env (expandable_segments:False). MoRI is JIT-built, so
+#    this swaps the JIT sources the kernels compile from at runtime.
+#    BUILD CONFIG: MORI_GPU_ARCHS=gfx950 (MI355X) and MORI_DEVICE_NIC=ionic, set as ENV
+#    below -- read those, not this comment. (This block used to say gfx942, left over
+#    from the MI300X original; 0f660fe moved the build to gfx950 and missed the text.)
+#    BUILD_UMBP=OFF. Do NOT pass USE_IONIC=OFF / USE_BNXT=OFF: disabling NIC backends
+#    produced a MoRI that deadlocked at the cross-node EP all-to-all init.
 # -----------------------------------------------------------------------------
 ARG MORI_REPO=https://github.com/ROCm/mori.git
 # 42e895472b08: validated MoRI tip for GLM DSA WideEP disagg. The v0.27 base bundles
@@ -257,7 +284,7 @@ RUN if ! command -v cargo >/dev/null 2>&1; then \
     rm -rf /tmp/vllm-router-src
 
 # -----------------------------------------------------------------------------
-# 4b. WITH_NIXL=1 (default): UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
+# 4b. WITH_NIXL=1 (OPT-IN; default is 0): UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source,
 #     so the rixl connector (NIXL TP + DeepEP wideEP) is present. Single guarded RUN so
 #     WITH_NIXL=0 skips it entirely (no layers, no cost). Build-verified on ci_base.
 # -----------------------------------------------------------------------------
