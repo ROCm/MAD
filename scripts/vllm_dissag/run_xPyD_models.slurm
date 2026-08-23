@@ -57,7 +57,7 @@ _resolve_script_dir() {
 SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
-REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env" "benchmark_customer_slo.sh" "gen_workload.py" "slo_report.py" "benchmark_avg_80K_ten.sh" "benchmark_avg_200K_ten.sh" "benchmark_niah_long.sh" "pool_workload.py")
+REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env" "benchmark_customer_slo.sh" "gen_workload.py" "slo_report.py" "benchmark_avg_80K_ten.sh" "benchmark_avg_200K_ten.sh" "benchmark_niah_long.sh" "benchmark_niah_256k.sh" "pool_workload.py")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
         echo "Error: Required file '$f' not found in $(pwd)." >&2
@@ -517,10 +517,16 @@ case "$BENCHMARK_SCRIPT" in
     # 8-rung default ladder is ~3.3 h at one seed with no warmup and ~13 h at three
     # seeds with warmup. See the header of benchmark_niah_long.sh.
     niah_long)    BENCHMARK_SCRIPT_FILE="benchmark_niah_long.sh" ;;
+    # Same ladder capped at 262,144 -- the window the customer actually states for the
+    # 80K-average row. ~55 min, which is cheap enough to run THREE seeds with warmup
+    # (niah_long drops to one seed purely for budget), so this is the one to reach for
+    # unless the 1M claim is specifically what is being tested. It also refuses to start
+    # if the server's max_model_len cannot admit the top rung.
+    niah_256k)    BENCHMARK_SCRIPT_FILE="benchmark_niah_256k.sh" ;;
     # The valid-list here was stale -- it omitted niah/niah_perf, so a correct
     # BENCHMARK_SCRIPT=niah_perf that hit an unrelated typo elsewhere produced an
     # error message denying that its own value was legal. Keep this in sync.
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive, niah, niah_perf, customer_slo, avg_80k_ten, avg_200k_ten, niah_long)" >&2; exit 1 ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, keepalive, niah, niah_perf, customer_slo, avg_80k_ten, avg_200k_ten, niah_long, niah_256k)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
