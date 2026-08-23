@@ -28,19 +28,49 @@
 # goodput thresholds, the timeout sizing, the warmup) lives in benchmark_customer_slo.sh
 # and has exactly one implementation. Two copies of that logic would drift, and the
 # drift would show up as an unexplained delta between the 80K and 200K rows.
+#
+# FIRST-PASS MODE (the current defaults)
+# --------------------------------------
+# Everything above describes the FINAL number. It is not what the defaults below do,
+# and the difference is deliberate: this row has never been run at all, so the first
+# question is "does 80K/256K even hold up", not "what is its mean to 1.3%". Ten fresh
+# seeds x 3 concurrencies is several hours; spending that before knowing whether c32
+# stays inside the KV pool is spending it on a run we might have to discard wholesale.
+#
+# So the defaults are a characterisation pass:
+#
+#   * c16 and c32 only. c64 at 80K needs 64 x 80,000 x 43.88 KiB = 214 GiB of KV
+#     RESIDENT AT ONCE. That fits only at decode util 0.80 (817 GiB pool); at the 0.50
+#     we are running it does not, and the cell would fail for a capacity reason that
+#     tells us nothing about the model. Add it back once util is raised.
+#   * SLO_ITERS=2 with CELL_WARMUP=1 -- concurrency becomes the outer loop, so each
+#     cell runs twice back-to-back and iteration 1 is a rehearsal at its OWN
+#     concurrency. warmup_shape in the callee runs --max-concurrency 2, which warms the
+#     80K SHAPE but leaves batch composition, block-table pressure and the MoRI-IO
+#     transfer pattern at 32-in-flight cold. Those costs have to land somewhere; this
+#     puts them on a run slo_report.py discards (--min-iter 2).
+#   * RESAMPLE_PER_ITER=0 -- warm and measure MUST see the same sample. Resampling here
+#     would rehearse a different 128-prompt draw than the one scored, and pay a second
+#     multi-minute tokenisation to build it.
+#
+# Pooled n is 192 (64 + 128 measured prompts), SE of the realised mean ~4.6%. That is
+# too loose to quote and is not meant to be quoted -- it is enough to see whether TTFT
+# and TPOT are in the right order of magnitude and whether the cells complete.
+#
+# To get the reportable number, restore the ten-seed run explicitly:
+#   SLO_ITERS=10 RESAMPLE_PER_ITER=1 CELL_WARMUP=0 \
+#     SCENARIOS='256k-ctx:80000:1024:262144:16 32 64' bash benchmark_avg_80K_ten.sh
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # One scenario only: label:isl:osl:context-window:concurrency-list.
-export SCENARIOS="${SCENARIOS:-256k-ctx:80000:1024:262144:16 32 64}"
+export SCENARIOS="${SCENARIOS:-256k-ctx:80000:1024:262144:16 32}"
 
-# Ten iterations, each drawing a FRESH sample. RESAMPLE_PER_ITER=1 is the whole point:
-# without it the harness caches one JSONL and replays it, and averaging one sample with
-# itself ten times shrinks nothing.
-export SLO_ITERS="${SLO_ITERS:-10}"
-export RESAMPLE_PER_ITER=1
+export SLO_ITERS="${SLO_ITERS:-2}"
+export RESAMPLE_PER_ITER="${RESAMPLE_PER_ITER:-0}"
+export CELL_WARMUP="${CELL_WARMUP:-1}"
 export SEED_BASE="${SEED_BASE:-0}"
 
 # Give it a distinct log/result root so a 200K run in the same job cannot overwrite it.
@@ -52,9 +82,29 @@ export RESULT_DIR="${RESULT_DIR:-$(dirname "$LOG")/avg80K_slo_json}"
 export WORKLOAD_DIR="${WORKLOAD_DIR:-$(dirname "$LOG")/avg80K_workloads}"
 mkdir -p "$RESULT_DIR" "$WORKLOAD_DIR" "$(dirname "$LOG")"
 
+# Compute the banner from the ACTUAL cell list rather than a hardcoded 256. The callee
+# sets prompts = max(32, min(con*4, MAX_PROMPTS)), so n depends on which concurrencies
+# are in SCENARIOS -- the old fixed "256 x ITERS" was wrong for every cell set we have
+# ever run, and it overstated the precision of the answer. Under CELL_WARMUP the first
+# iteration of each cell is discarded, so it does not count toward n either.
+_banner=$(python3 - "$SCENARIOS" "$SLO_ITERS" "${CELL_WARMUP:-0}" "${MAX_PROMPTS:-512}" <<'PY'
+import sys
+scn, iters, warm, cap = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", int(sys.argv[4])
+scored = iters - 1 if warm else iters
+n = 0
+for s in scn.split("|"):
+    for c in s.split(":")[4].split():
+        n += max(32, min(int(c) * 4, cap)) * max(scored, 0)
+cv = 0.637                      # lognormal mu=11.1197 sigma=0.5833, mean 80k / p99 262144
+se = 100.0 * cv / n ** 0.5 if n else float("nan")
+print("%d|%.1f|%s" % (n, se, "discarding iter 1 of each cell" if warm else "all iters scored"))
+PY
+)
+IFS='|' read -r _n _se _note <<< "$_banner"
 echo "=============================================================="
-echo " avg 80K / 1K, 256K context -- ${SLO_ITERS} runs, seeds ${SEED_BASE}..$(( SEED_BASE + SLO_ITERS - 1 ))"
-echo " pooled n = 256 x ${SLO_ITERS}; expected SE of the mean 4.0% -> $(python3 -c "print('%.1f' % (4.0/($SLO_ITERS**0.5)))")%"
+echo " avg 80K / 1K, 256K context -- ${SLO_ITERS} iters/cell, seed base ${SEED_BASE}"
+echo " cells: ${SCENARIOS##*:}   (${_note})"
+echo " pooled measured n = ${_n}; SE of the realised mean ~${_se}%"
 echo "=============================================================="
 
 # Recover the real status: `| tee` in the callee always exits 0, and a green exit on a

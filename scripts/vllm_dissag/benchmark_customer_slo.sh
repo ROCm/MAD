@@ -369,6 +369,40 @@ for scenario in "${SCENARIOS[@]}"; do
     fi
 
     warmup_shape "$isl" "$osl" "$pfx"
+
+    # Loop order: CELL_WARMUP=1 makes concurrency the OUTER loop, so each cell is run
+    # ITERS times back-to-back at its own concurrency and the first of those runs acts
+    # as that cell's dress rehearsal.
+    #
+    # Why this is not just a reshuffle: warmup_shape above runs at --num-prompts 4
+    # --max-concurrency 2. That warms the SHAPE (an 80K prompt) but never warms the
+    # scheduler at the concurrency being measured -- batch composition, block-table
+    # pressure and the MoRI-IO transfer pattern at 32 in flight are all still cold when
+    # the first c32 cell starts. With iteration as the outer loop those costs land on
+    # iter 1 of every concurrency; with concurrency outer they land on a run we discard
+    # (see --min-iter on slo_report.py).
+    #
+    # CELL_WARMUP is opt-in so the default layout -- and therefore the meaning of the
+    # 200K wrapper, which was characterised under it -- is unchanged.
+    #
+    # Note this is only coherent with RESAMPLE_PER_ITER=0: warm and measure must see
+    # the SAME sample, or the rehearsal warms a different 256-prompt draw than the one
+    # scored (and pays a second multi-minute tokenisation to build it).
+    if [ "${CELL_WARMUP:-0}" = "1" ]; then
+        if [ "$RESAMPLE_PER_ITER" = "1" ]; then
+            echo "[WARN] CELL_WARMUP=1 with RESAMPLE_PER_ITER=1: each cell's warm and" \
+                 "measured runs will use DIFFERENT samples." | tee -a "${LOG}.log"
+        fi
+        for con in $conlist; do
+            for iter in $(seq 1 "$ITERS"); do
+                [ "$iter" = 1 ] && echo "[CELL-WARM] $label con=$con (iter 1, discarded)"
+                run_cell "$label" "$isl" "$osl" "$con" "$pfx" "$iter" "$wl" >/dev/null
+                sleep 10
+            done
+        done
+        continue
+    fi
+
     for iter in $(seq 1 "$ITERS"); do
         if [ "$WORKLOAD_MODE" = "dist" ] && [ "$RESAMPLE_PER_ITER" = "1" ]; then
             seed=$(( SEED_BASE + iter - 1 ))
@@ -388,10 +422,15 @@ for scenario in "${SCENARIOS[@]}"; do
 done
 
 echo; echo "########## VERDICT ##########"
+# Under CELL_WARMUP the first run of every cell is a rehearsal, so exclude it from the
+# verdict by default -- pooling it in would drag the mean toward a cost we deliberately
+# paid to avoid measuring. MIN_ITER is overridable for the case where you want to SEE
+# the warm/steady delta rather than hide it.
 python3 "$(dirname "$0")/slo_report.py" \
     --result-dir "$RESULT_DIR" \
     --slo-ttft-ms "$SLO_TTFT_MS" --slo-tpot-ms "$SLO_TPOT_MS" \
     --target-prefill "$TGT_PREFILL_TOK_S" --target-decode "$TGT_DECODE_TOK_S" \
     --dp-ranks "$DP_RANKS" \
+    --min-iter "${MIN_ITER:-$([ "${CELL_WARMUP:-0}" = 1 ] && echo 2 || echo 1)}" \
     --csv "${LOG}_slo.csv"
 exit $?

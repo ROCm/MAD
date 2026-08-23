@@ -84,12 +84,29 @@ def main():
     ap.add_argument("--target-decode", type=float, default=670.0)
     ap.add_argument("--dp-ranks", type=int, default=8)
     ap.add_argument("--csv", default="")
+    ap.add_argument("--min-iter", type=int, default=1,
+                    help="Drop cells with _iter < this. Use 2 with CELL_WARMUP=1, where "
+                         "iteration 1 of every cell is a deliberate rehearsal: it absorbs "
+                         "scheduler/JIT warm-up at that concurrency and averaging it in "
+                         "reports a cost we paid specifically in order not to measure it.")
     a = ap.parse_args()
 
     rows = load(a.result_dir)
     if not rows:
         print("No parseable results in %s -- nothing to judge." % a.result_dir)
         return 2
+
+    # Filter AFTER loading so the discard is stated out loud. A silently smaller n is
+    # how a report starts describing a different experiment than the one that ran.
+    if a.min_iter > 1:
+        kept = [r for r in rows if r["_iter"] >= a.min_iter]
+        print("[min-iter] keeping iter >= %d: %d of %d cells (%d warm-up cells excluded)"
+              % (a.min_iter, len(kept), len(rows), len(rows) - len(kept)))
+        if not kept:
+            print("No cells at iter >= %d -- did the run stop after the rehearsal?"
+                  % a.min_iter)
+            return 2
+        rows = kept
 
     hdr = ("%-10s %5s | %8s %8s %8s | %7s %7s %7s | %7s | %9s %8s"
            % ("scenario", "con", "ttft_avg", "p95", "p99",
