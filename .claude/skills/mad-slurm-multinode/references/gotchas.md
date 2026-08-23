@@ -313,7 +313,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   IB/RoCE net path directly. The primus template ships this key set to `none`.
 
 - **`rocm/primus:v26.5` can train fine and still report nothing — pin the base
-  the model was validated on.** Observed on Llama-4-Scout, 2 nodes / 16 GPU
+  that the model was validated on.** Observed on Llama-4-Scout, 2 nodes / 16 GPU
   gfx950: on `v26.5` the run completes all 50 iterations and logs
   `pretrain() completed successfully`, but every step also logs
   `[Patch:megatron.training_log] No token throughput`, the Primus summary prints

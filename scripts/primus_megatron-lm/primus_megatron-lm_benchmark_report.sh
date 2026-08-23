@@ -515,11 +515,17 @@ elif [ "$MODEL_REPO" == "Llama-4-Scout-17B-16E" ]; then
   # parallelism across nodes; tune via PRIMUS_TP/PRIMUS_PP/PRIMUS_EP if needed.
   export EXP=examples/megatron/configs/$CONFIG_DEVICE/llama4_17B16E-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
-  # One micro-batch per data-parallel rank. Set before the datatype switch so the
-  # fallback PERF_LOG (emitted when TRAIN_LOG is missing, e.g. FP8/unsupported
-  # device) still records a well-formed batch_size instead of an empty field.
+  # MBS=1, GBS=8 matches the shipped single-node (8-GPU) config. Set before the
+  # datatype switch so the fallback PERF_LOG (emitted when TRAIN_LOG is
+  # missing, e.g. FP8/unsupported device) still records a well-formed
+  # batch_size instead of an empty field. TP=1/PP=1 here, so Megatron's own
+  # data-parallel size for the divisibility check in scaleout_gbs_override is
+  # NUM_GPUS itself -- EP shards experts within that same group and does not
+  # change it.
   MBS=1
-  GBS=$(normalize_global_batch_size "$MBS" "8" "$NUM_GPUS")
+  GBS=8
+  GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
+  GBS=$(effective_global_batch_size "$MBS" "$GBS")
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" || "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
     if [ "$DATATYPE" == "FP8" ]; then
       echo "Error: Datatype FP8 is not yet enabled for $MODEL_REPO. Only BF16 is supported."
@@ -539,7 +545,7 @@ elif [ "$MODEL_REPO" == "Llama-4-Scout-17B-16E" ]; then
       # dispatcher; disable it for any other dispatcher or Primus aborts.
       SCOUT_DISPATCHER_ARGS=(--moe_token_dispatcher_type "$SCOUT_MOE_DISPATCHER")
       [ "$SCOUT_MOE_DISPATCHER" != "alltoall" ] && SCOUT_DISPATCHER_ARGS+=(--moe_shared_expert_overlap false)
-      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
+      run_primus "$EXP" --micro_batch_size $MBS $GBS_OVERRIDE \
         --tokenizer_model "$SCOUT_HF_TOKENIZER" \
         "${SCOUT_DISPATCHER_ARGS[@]}"
     fi
