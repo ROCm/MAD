@@ -202,8 +202,25 @@ differ, the host path belongs on the value side.
   `models.yaml`, and `SGLANG_ROCM_FUSED_DECODE_MLA=0` set by the launcher for any
   `*Kimi-K2*` model (64 attention heads fall outside the fused decode-MLA range,
   which otherwise crashes unpacking `ForwardMetadata`). Verified at 4 nodes on
-  gfx942 (MI300X). Budget for the weights: this is a ~1T-parameter checkpoint.
+  gfx942 (MI300X). Budget for the weights: this is a ~1T-parameter checkpoint
+  (959 GB on disk as staged from `moonshotai/Kimi-K2-Instruct-0905`).
   `multiple_results` = `perf_sglang-disagg-Kimi-K2-Instruct.csv`.
+
+  **Not yet working on gfx950 (MI355X) / Broadcom Thor2 bnxt_re.** Attempted
+  end to end at 4 nodes with real staged weights: the build succeeds, weight
+  loading completes on both prefill servers (`Multi-thread loading shards:
+  100% Completed`), and DP=16/EP=16/TP=16 distributed init proceeds — but the
+  process then aborts with `Fatal Python error: Aborted` /
+  `mori/src/application/context/context.cpp:332:
+  Context::DefaultPolicyResolve: Assertion 'false && "no transport available
+  for peer"' failed`. This is MoRI's own cross-node expert-parallel
+  all-to-all failing to resolve an RDMA transport between peers — a
+  different code path from Llama-4-Scout's `mori` usage above, which is
+  TP-only and never exercises MoRI's EP a2a. Same `IB_DEVICES` /
+  `MORI_RDMA_DEVICES` / GID index that work for Scout's KV-transfer-only
+  `mori` path do not get MoRI's EP a2a talking on this fabric. Not resolved
+  here — needs MoRI-level RDMA topology debugging on Broadcom Thor2, which
+  is beyond what a manifest config change can fix.
 - **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
   MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
   `launcher: torchrun`, `scripts/pyt_mlperf_training/run.sh`, `nproc_per_node: 8`,
