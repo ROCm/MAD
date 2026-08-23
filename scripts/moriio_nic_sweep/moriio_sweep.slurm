@@ -108,11 +108,17 @@ export MORI_SRC
 MORI_MNT="/opt/mori"           # where it appears inside the container
 export MORI_MNT
 # Mounting SKIP over /opt/mori would hide the baked-in harness, so emit no -v.
+#
+# EXPORTED, and that is load-bearing. The per-node body runs under `set -u` in a
+# separate shell (see _SWEEP_BODY), so a merely-local value here is an unbound
+# variable there and the container never launches. It survived unexported only
+# while the body was a single-quoted heredoc the parent expanded inline.
 if [[ "$MORI_SRC" == "SKIP" ]]; then
   _MORI_SRC_MOUNT=""
 else
   _MORI_SRC_MOUNT="-v $MORI_SRC:$MORI_MNT"
 fi
+export _MORI_SRC_MOUNT
 
 # ---- control plane ---------------------------------------------------------
 # Same picker as run_xPyD_models.slurm: `hostname -I` lists several addresses and
@@ -140,10 +146,40 @@ if [[ -n "${MORIIO_JOBID:-}" ]]; then
 fi
 export SRUN_OPTS SLURM_JOB_ID
 
-NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+# Split-allocation mode. A 2-node sweep does not require a 2-node JOB: two
+# single-node allocations work just as well, because the only thing crossing
+# the boundary is RDMA traffic on the fabric, which Slurm neither brokers nor
+# knows about. It matters in practice -- on a full cluster two 1-node jobs
+# schedule immediately while a 2-node request queues for both at once.
+#
+# srun cannot span job ids, so this launches TWO steps, one per allocation,
+# and forces the rank (SLURM_PROCID is 0 in both, each being ntasks=1).
+SRUN_OPTS2=""
+if [[ -n "${MORIIO_JOBID2:-}" ]]; then
+  _NODELIST2=$(scontrol show job "$MORIIO_JOBID2" -o 2>/dev/null \
+               | tr ' ' '\n' | awk -F= '/^NodeList=/{print $2; exit}')
+  [[ -z "$_NODELIST2" || "$_NODELIST2" == "(null)" ]] && {
+    echo "Error: job $MORIIO_JOBID2 has no NodeList (not running?)." >&2; exit 1; }
+  SRUN_OPTS2="--jobid=${MORIIO_JOBID2} --overlap"
+  echo "[attach] borrowing job ${MORIIO_JOBID2}: ${_NODELIST2}"
+fi
+export SRUN_OPTS2
+
+if [[ -n "${MORIIO_JOBID2:-}" ]]; then
+  NODE_R0=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
+  NODE_R1=$(scontrol show hostnames "$_NODELIST2"        | head -n1)
+  if [[ "$NODE_R0" == "$NODE_R1" ]]; then
+    echo "Error: both jobs are on $NODE_R0. A loopback sweep is not a fabric test." >&2
+    exit 1
+  fi
+  NODES=$(printf '%s\n%s\n' "$NODE_R0" "$NODE_R1")
+else
+  NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+fi
 NNODES=$(echo "$NODES" | wc -l)
 if [[ "$NNODES" != "2" ]]; then
   echo "Error: this sweep is exactly 2 nodes (initiator + target); got $NNODES." >&2
+  echo "       For two single-node allocations, set MORIIO_JOBID and MORIIO_JOBID2." >&2
   exit 1
 fi
 MASTER_NODE=$(echo "$NODES" | head -n1)
@@ -209,9 +245,14 @@ for _v in BLOCK_MIN BLOCK_MAX ITERS BATCH OP_TYPE MEM_TYPE NUM_DEV \
 done
 [ -n "$SWEEP_ENV" ] && echo "[env] forwarding:${SWEEP_ENV//-e /}"
 
-srun ${SRUN_OPTS} --nodelist="$(echo "$NODES" | paste -sd,)" --ntasks="$NNODES" bash -c '
+# The per-node body, hoisted into a variable so it can be launched either as
+# one 2-task step (single allocation) or as two 1-task steps (two allocations).
+# It is identical in both cases -- only who launches it and how RANK is set
+# differ. FORCE_RANK exists because in split mode each step is ntasks=1, so
+# SLURM_PROCID is 0 on BOTH nodes and rank would collide.
+_SWEEP_BODY='
 set -u
-RANK=$SLURM_PROCID
+RANK=${FORCE_RANK:-$SLURM_PROCID}
 echo "[node] rank $RANK on $(hostname)"
 
 $CONTAINER_CLI rm -f "$CONT_NAME" 2>/dev/null || true
@@ -352,10 +393,35 @@ _rc=$?
 echo "[node] rank $RANK container exit=$_rc"
 exit $_rc
 '
-_srun_rc=$?
 
-srun ${SRUN_OPTS} --nodelist="$(echo "$NODES" | paste -sd,)" --ntasks="$NNODES" bash -c \
-  '$CONTAINER_CLI rm -f "${CONT_NAME}_r${SLURM_PROCID}" 2>/dev/null || true' >/dev/null 2>&1
+if [[ -n "${MORIIO_JOBID2:-}" ]]; then
+  # Two allocations. Both ranks must be up concurrently -- rank 0 blocks in the
+  # torchrun rendezvous until rank 1 arrives -- so background rank 1, run rank 0
+  # in the foreground, and take the WORSE exit code. Rank 1 first: it is the
+  # passive target, and starting the listener before the initiator avoids a
+  # connect-before-listen retry storm in the first seconds.
+  FORCE_RANK=1 srun ${SRUN_OPTS2} --nodelist="$NODE_R1" --ntasks=1 \
+      bash -c "$_SWEEP_BODY" &
+  _pid_r1=$!
+  FORCE_RANK=0 srun ${SRUN_OPTS}  --nodelist="$NODE_R0" --ntasks=1 \
+      bash -c "$_SWEEP_BODY"
+  _rc0=$?
+  wait "$_pid_r1"; _rc1=$?
+  _srun_rc=$(( _rc0 > _rc1 ? _rc0 : _rc1 ))
+  echo "[split] rank0(job ${MORIIO_JOBID}) exit=$_rc0  rank1(job ${MORIIO_JOBID2}) exit=$_rc1"
+
+  FORCE_RANK=1 srun ${SRUN_OPTS2} --nodelist="$NODE_R1" --ntasks=1 bash -c \
+    '$CONTAINER_CLI rm -f "${CONT_NAME}_r1" 2>/dev/null || true' >/dev/null 2>&1
+  FORCE_RANK=0 srun ${SRUN_OPTS}  --nodelist="$NODE_R0" --ntasks=1 bash -c \
+    '$CONTAINER_CLI rm -f "${CONT_NAME}_r0" 2>/dev/null || true' >/dev/null 2>&1
+else
+  srun ${SRUN_OPTS} --nodelist="$(echo "$NODES" | paste -sd,)" --ntasks="$NNODES" \
+      bash -c "$_SWEEP_BODY"
+  _srun_rc=$?
+
+  srun ${SRUN_OPTS} --nodelist="$(echo "$NODES" | paste -sd,)" --ntasks="$NNODES" bash -c \
+    '$CONTAINER_CLI rm -f "${CONT_NAME}_r${SLURM_PROCID}" 2>/dev/null || true' >/dev/null 2>&1
+fi
 
 echo "=============================================================="
 echo " sweep exit=${_srun_rc}"
