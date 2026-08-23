@@ -202,10 +202,19 @@ differ, the host path belongs on the value side.
   kernels segfault during Llama-4 warmup on gfx950 and are unnecessary on
   gfx942), and `--disable-custom-all-reduce` (the custom all-reduce kernel
   SIGSEGVs in the warmup embedding all-reduce; plain RCCL all-reduce is used
-  instead). Verified at 4 nodes on gfx942 (MI300X) / Mellanox CX7. This
-  registration is arch-agnostic: gfx950 needs further kernel workarounds that
-  are **not** part of it. Weights default to the non-gated
-  `unsloth/Llama-4-Scout-17B-16E-Instruct` mirror.
+  instead). Verified at 4 nodes on gfx942 (MI300X) / Mellanox CX7, and
+  independently reproduced end-to-end at 4 nodes on gfx950 (MI355X) / Broadcom
+  Thor2 bnxt_re with this exact arch-agnostic registration (no gfx950-specific
+  kernel guards) — full 8-point benchmark sweep, all points returned real
+  completions, e.g. ISL/OSL 1024/1024 @ concurrency 64: 9622 tok/s total, TTFT
+  11497 ms. **Use `KV_TRANSFER_BACKEND=mori` (`RUN_MORI=1`), not `nixl`** — on
+  this cluster `nixl` never hung with an error, it just never completed a
+  request end-to-end (readiness probes retried indefinitely, no crash, no
+  timeout); switching to `mori` with everything else unchanged fixed it
+  immediately. This registration is arch-agnostic: gfx950 needs further kernel
+  workarounds for some models, but none were needed to reach this result here.
+  Weights default to the non-gated `unsloth/Llama-4-Scout-17B-16E-Instruct`
+  mirror.
   `multiple_results` = `perf_sglang-disagg-Llama-4-Scout-17B-16E-Instruct.csv`.
 - **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
   MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
