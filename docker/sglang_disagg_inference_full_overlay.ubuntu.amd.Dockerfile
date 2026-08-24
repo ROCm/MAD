@@ -88,7 +88,7 @@ RUN set -e; \
     if ! grep -q '^def mxfp_supported' "${SGLANG_SRT_UTILS_COMMON}"; then \
       echo "MXFP4_PATCH_SKIPPED: mxfp_supported() is not present in this base image; upstream has restructured gfx942 MXFP4 detection, nothing to patch"; \
     else \
-      before="$(grep -c 'for gfx in \["gfx95"\]' "${SGLANG_SRT_UTILS_COMMON}")"; \
+      before="$(grep -c 'for gfx in \["gfx95"\]' "${SGLANG_SRT_UTILS_COMMON}" || true)"; \
       sed -i '/^def mxfp_supported/,/^def is_gfx95_supported/{s/for gfx in \["gfx95"\]/for gfx in ["gfx95", "gfx942"]/}' "${SGLANG_SRT_UTILS_COMMON}"; \
       if sed -n '/^def mxfp_supported/,/^def is_gfx95_supported/{/^def is_gfx95_supported/!p}' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
         echo "MXFP4_GFX942_PATCH_APPLIED (was ${before} unpatched gfx95-only occurrence(s) in file)"; \
