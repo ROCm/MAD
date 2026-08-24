@@ -65,10 +65,12 @@ USER root
 #    detection string is too narrow). This mirrors that PR: add "gfx942" to
 #    mxfp_supported()'s recognized-arch list only (NOT is_gfx95_supported(),
 #    which gates unrelated MI350-specific behavior and must stay gfx95-only).
-#    Gated by ARG so it's a no-op if the base image ever ships the upstream
-#    fix natively (grep finds nothing to replace -> sed is a harmless no-op,
-#    but the verification step below would then fail loudly instead of
-#    silently passing, so a real upstream fix is still visible).
+#    Detected, not gated by an ARG: the RUN block below checks whether
+#    mxfp_supported() still exists before touching anything. If a future base
+#    image ships the upstream fix by folding gfx942 into mxfp_supported()
+#    directly, the sed becomes a harmless no-op and the verification step
+#    below still passes, so a real upstream fix stays visible in the build log
+#    instead of silently pretending this patch did the work.
 #
 #    UPDATE: as of the rocm/sgl-dev:v0.5.16-rocm720-mi35x-20260807 base,
 #    upstream has removed mxfp_supported() from srt/utils/common.py entirely
