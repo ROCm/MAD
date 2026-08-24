@@ -632,15 +632,18 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         MBS=1; GBS=32
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
-        # MBS/GBS match the experiment YAML at single-node (8-GPU) scale;
-        # scaleout_gbs_override renormalizes GBS for NUM_GPUS>8 so an
-        # uneven node count (e.g. 3 nodes/24 GPUs) doesn't violate
+        # MBS=4/GBS=128 is an explicit override of the experiment YAML (it
+        # happens to match the YAML's own default at this device, but that's
+        # not guaranteed), so both flags must always be passed -- unlike the
+        # scaleout_gbs_override pattern used elsewhere, we can't rely on an
+        # empty override falling back to a correct config default. Compute
+        # the scaled value with effective_global_batch_size and pass it
+        # unconditionally so NUM_GPUS>8 (e.g. 3 nodes/24 GPUs) still satisfies
         # Megatron's global_batch_size % (micro_batch_size * world_size) == 0
-        # check at run time.
+        # check.
         MBS=4; GBS=128
-        GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
         GBS=$(effective_global_batch_size "$MBS" "$GBS")
-        run_primus "$EXP" $GBS_OVERRIDE
+        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
       fi
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
@@ -651,10 +654,15 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         MBS=1; GBS=32
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
+        # MBS=2/GBS=32 deliberately overrides the experiment YAML's own
+        # micro_batch_size=4/global_batch_size=128 -- both flags must always
+        # be passed explicitly, or an unadjusted-at-this-scale run silently
+        # falls back to the YAML's global_batch_size=128 while MBS stays
+        # overridden to 2, doubling the intended gradient-accumulation depth
+        # and diverging from what gets recorded in the perf CSV.
         MBS=2; GBS=32
-        GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
         GBS=$(effective_global_batch_size "$MBS" "$GBS")
-        run_primus "$EXP" --micro_batch_size $MBS $GBS_OVERRIDE
+        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
       fi
     fi
   fi
