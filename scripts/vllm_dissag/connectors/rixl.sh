@@ -289,6 +289,12 @@ _rixl_launch_deepep() {
     fi
 
     local kv_config; kv_config=$(_rixl_kv_config_deepep "${kv_role}" "${engine_id}" "${dp_size}")
+    # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
+    kv_config=$(kv_offload_wrap "${kv_config}")
+
+    # Offloading needs prefix caching; flip it on when KV_OFFLOAD is active.
+    local _prefix_cache_arg="--no-enable-prefix-caching"
+    kv_offload_enabled && _prefix_cache_arg="--enable-prefix-caching"
 
     # Per-model dp: flags from models.yaml (driver-exported). Empty for the DeepSeek
     # deepep entries today, so this is currently a no-op; kept so future per-model
@@ -309,7 +315,7 @@ _rixl_launch_deepep() {
                 --data-parallel-rpc-port "${RPC_PORT}" \
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
-                --no-enable-prefix-caching --block-size 1 \
+                "${_prefix_cache_arg}" --block-size 1 \
                 --gpu-memory-utilization 0.8 \
                 --kv-cache-dtype fp8 \
                 --enable-expert-parallel \
@@ -331,7 +337,7 @@ _rixl_launch_deepep() {
         --data-parallel-rpc-port "${RPC_PORT}" \
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
-        --no-enable-prefix-caching --block-size 1 \
+        "${_prefix_cache_arg}" --block-size 1 \
         --gpu-memory-utilization 0.8 \
         --kv-cache-dtype fp8 \
         --enable-expert-parallel \

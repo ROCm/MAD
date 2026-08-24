@@ -209,8 +209,10 @@ elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
   fi
 fi
 
-export CONNECTOR WIDE_EP EP_BACKEND
-echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}) for model '$MODEL_NAME'"
+# Tiered prefix caching overlay (orthogonal axis; default none). Forwarded to the container.
+KV_OFFLOAD="${KV_OFFLOAD:-none}"
+export CONNECTOR WIDE_EP EP_BACKEND KV_OFFLOAD
+echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD}) for model '$MODEL_NAME'"
 
 # ---------------------------------------------------------------------------
 # Connector platform env: per-connector <connector>.env holds the ROCm-7.2.3
@@ -431,7 +433,8 @@ BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    prefix_cache) BENCHMARK_SCRIPT_FILE="benchmark_prefix_cache.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, prefix_cache)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -578,6 +581,15 @@ docker run --rm \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
+    ${KV_OFFLOAD:+-e KV_OFFLOAD=$KV_OFFLOAD} \
+    ${OFFLOAD_CPU_BYTES:+-e OFFLOAD_CPU_BYTES=$OFFLOAD_CPU_BYTES} \
+    ${OFFLOAD_TRITON_THRESHOLD_KIB:+-e OFFLOAD_TRITON_THRESHOLD_KIB=$OFFLOAD_TRITON_THRESHOLD_KIB} \
+    ${PC_PREFIX_LEN:+-e PC_PREFIX_LEN=$PC_PREFIX_LEN} \
+    ${PC_ISL:+-e PC_ISL=$PC_ISL} \
+    ${PC_OSL:+-e PC_OSL=$PC_OSL} \
+    ${PC_NUM_PROMPTS:+-e PC_NUM_PROMPTS=$PC_NUM_PROMPTS} \
+    ${PC_CON:+-e PC_CON=$PC_CON} \
+    ${PC_SEED:+-e PC_SEED=$PC_SEED} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \

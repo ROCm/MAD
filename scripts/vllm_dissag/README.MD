@@ -113,6 +113,31 @@ export CONNECTOR=moriio WIDE_EP=1          # EP_BACKEND defaults to mori
 export CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep
 ```
 
+### Tiered prefix caching (`KV_OFFLOAD`)
+
+An orthogonal overlay that attaches vLLM's native `OffloadingConnector` (GPU KV → CPU-RAM
+tier for prefix reuse) *on top of* the disagg P/D connector, by composing both via vLLM's
+`MultiConnector`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KV_OFFLOAD` | `none` | `none` (off) or `cpu` (CPU-RAM tier). `fs`/LMCache reserved for later. |
+| `OFFLOAD_CPU_BYTES` | `107374182400` (100 GB) | instance-wide pinned host bytes for the CPU tier |
+
+```bash
+# MoRI-EP wideEP DeepSeek-V3 with CPU-tier prefix caching
+export CONNECTOR=moriio WIDE_EP=1 KV_OFFLOAD=cpu
+export MODEL_NAME=DeepSeek-V3 xP=1 yD=1
+export BENCHMARK_SCRIPT=prefix_cache        # cold+warm two-pass to measure cache hits
+sbatch -N 2 -n 2 --nodelist=<node0,node1> run_xPyD_models.slurm
+```
+
+Scope today: **native CPU offloading**, wideEP DeepSeek-V3 (`DeepSeek-V3`, `DeepSeek-V3-5layer`,
+`DeepSeek-R1`), both connectors. When `KV_OFFLOAD!=none` the launcher swaps the recipe's
+`--no-enable-prefix-caching` for `--enable-prefix-caching` (offloading is meaningless without
+it). Requires an image whose vLLM ships `OffloadingConnector` + `MultiConnector` (recent
+`rocm/vllm-dev` nightlies).
+
 Each followed by:
 ```bash
 export MODEL_NAME=<model> xP=<prefill_nodes> yD=<decode_nodes>
@@ -240,6 +265,14 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
+
+### Prefix-cache benchmark (for `KV_OFFLOAD`)
+
+`benchmark_prefix_cache.sh` sends a large shared prefix with a fixed seed, then runs the
+identical request set twice (cold → warm) so the TTFT drop shows the tiered-cache benefit.
+The default sweep uses `--random-prefix-len 0` and can't. Select it with
+`export BENCHMARK_SCRIPT=prefix_cache`; tune via `PC_PREFIX_LEN`, `PC_ISL`, `PC_OSL`,
+`PC_NUM_PROMPTS`, `PC_CON`, `PC_SEED`.
 
 ## Testing the launcher (no GPUs)
 

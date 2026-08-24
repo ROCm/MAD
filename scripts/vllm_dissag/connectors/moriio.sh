@@ -186,10 +186,16 @@ connector_launch_worker() {
         if [[ "$role" == "master" ]]; then
             extra_args+=(--api-server-count=${_GPUS_PER_NODE})
             local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
+            # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
+            kv_config=$(kv_offload_wrap "${kv_config}")
             kv_args+=(--kv-transfer-config "${kv_config}")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
         fi
+
+        # Offloading needs prefix caching; flip it on when KV_OFFLOAD is active.
+        local _prefix_cache_arg="--no-enable-prefix-caching"
+        kv_offload_enabled && _prefix_cache_arg="--enable-prefix-caching"
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
         # needs block=16 + MLA off (the block=1 + AITER-MLA fp8 decode kernel
@@ -215,7 +221,7 @@ connector_launch_worker() {
                     "${mem_args[@]}" \
                     --kv-cache-dtype "${_kvdtype}" \
                     --block-size "${_block}" \
-                    --no-enable-prefix-caching \
+                    "${_prefix_cache_arg}" \
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
@@ -235,7 +241,7 @@ connector_launch_worker() {
             "${mem_args[@]}" \
             --kv-cache-dtype "${_kvdtype}" \
             --block-size "${_block}" \
-            --no-enable-prefix-caching \
+            "${_prefix_cache_arg}" \
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \

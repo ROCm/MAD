@@ -62,11 +62,17 @@ if [[ "$WIDE_EP" == "1" ]]; then
 fi
 export CONNECTOR WIDE_EP EP_BACKEND
 
+# KV_OFFLOAD overlay (orthogonal axis): cpu attaches the CPU-RAM tier via MultiConnector.
+KV_OFFLOAD="${KV_OFFLOAD:-none}"
+case "$KV_OFFLOAD" in none|cpu) ;; *) echo "Error: invalid KV_OFFLOAD='${KV_OFFLOAD}' (expected none|cpu)." >&2; exit 1 ;; esac
+export KV_OFFLOAD
+
 _CONNECTOR_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.sh"
 [[ -f "$_CONNECTOR_FILE" ]] || { echo "Error: connector profile not found: ${_CONNECTOR_FILE}" >&2; exit 1; }
 [[ -f "${SCRIPT_DIR}/parallelism.sh" ]] || { echo "Error: parallelism.sh not found in ${SCRIPT_DIR}" >&2; exit 1; }
+[[ -f "${SCRIPT_DIR}/connectors/offloading.inc.sh" ]] || { echo "Error: connectors/offloading.inc.sh not found in ${SCRIPT_DIR}" >&2; exit 1; }
 
-echo "[vllm_disagg] CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}"
+echo "[vllm_disagg] CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD}"
 
 # =============================================================================
 # Common Environment Configuration
@@ -206,6 +212,8 @@ export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
 # =============================================================================
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/parallelism.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/connectors/offloading.inc.sh"
 # shellcheck source=/dev/null
 source "${_CONNECTOR_FILE}"
 connector_init

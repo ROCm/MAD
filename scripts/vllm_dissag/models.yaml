@@ -158,6 +158,9 @@ _deepseek_recipe_env: &deepseek_recipe_env
 # The dp: blocks are empty because the moriio(mori) connector emits the validated
 # wideEP serve flags (block-size, kv-cache-*, all2all, cudagraph) from the env: recipe
 # above. No tp: blocks — TP is unsupported for these models.
+#
+# Tiered prefix caching (KV_OFFLOAD=cpu) is a launcher-side overlay, not a yaml flag.
+# Tune the CPU-tier size via OFFLOAD_CPU_BYTES (default 100 GB), or per-model in env:.
 DeepSeek-V3:
   env: *deepseek_recipe_env
   prefill:

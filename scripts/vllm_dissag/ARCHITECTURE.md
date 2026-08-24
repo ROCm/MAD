@@ -230,6 +230,7 @@ flowchart TD
 | `run_xPyD_models.slurm` | sbatch entry: node pick, validation, axis shim, `docker run` env plumb |
 | `vllm_disagg.sh` | **the launcher** — axis resolve, yaml parse, role branch, barrier/benchmark/cleanup |
 | `parallelism.sh` | TP-vs-wideEP shared helpers |
+| `connectors/offloading.inc.sh` | tiered prefix caching overlay: `kv_offload_wrap()` composes the disagg connector + `OffloadingConnector` via `MultiConnector` when `KV_OFFLOAD=cpu` (no-op when `none`) |
 | `connectors/rixl.sh` | NixlConnector profile (TP + DeepEP) |
 | `connectors/moriio.sh` | MoRIIOConnector profile (MoRIIO+TP + MoRI-EP) |
 | `connectors/{rixl,moriio}.env` | per-connector platform env (expandable_segments:False etc.), forwarded via `docker -e` |
