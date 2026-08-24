@@ -182,12 +182,10 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
 # -----------------------------------------------------------------------------
 # VLLM_REPO/REF are a PUBLIC GitHub repo + branch. Override to your own vLLM fork/branch.
 ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
-# REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — `docker build`
-# resolves it to whatever the tip is on the day you build, and two builds can ship
-# different engines. For an auditable rebuild pass the exact commit:
-#   --build-arg VLLM_REF=094820b5deeb1b93733586ca8942589e385a25dc
-# which is the tip every number in models.yaml was measured on. /app/versions.txt in the
-# built image records whichever sha was resolved.
+# REPRODUCIBILITY: this default is now a COMMIT, not a branch name, so two builds ship
+# the same engine. /app/versions.txt in the built image records the sha that was
+# resolved. models.yaml's decode-cudagraph table predates this pin: those numbers were
+# measured on d723eb305e and have not been re-measured on it.
 #
 # What the ref carries: the 10 GLM DSA commits (per-req-ctx metadata key #47766, DSA
 # indexer KV transfer, invalid-token sentinel, MoRI EP sizing knobs, and the EP32
