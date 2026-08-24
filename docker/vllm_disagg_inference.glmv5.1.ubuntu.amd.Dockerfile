@@ -41,8 +41,10 @@
 #
 # STATUS (GLM-5.1-FP8 on this stack): validated on 1P/1D EP8 and 2P/2D EP16 — NIAH
 # 2k-35k retrieves with no length collapse and no crash (long-context accuracy fixed
-# via vLLM #47766). 4P/4D EP32 is a KNOWN OPEN DEFECT: token corruption at ALL context
-# lengths, garbage even at 2k. Use 1P/1D and 2P/2D only.
+# via vLLM #47766). The 4P/4D EP32 token corruption is FIXED by the MoRI combine()
+# original-topk change (vLLM 623fdc946b): measured 4P/4D EP32 NIAH 8k 0/10 -> 10/10,
+# perf-neutral. NOTE: 4P/4D has not been re-validated on the bumped pins below; 2P/2D
+# EP16 has (NIAH 2k 10/10, 8k 10/10; 8192/1024 con32 TPOT ~59 ms).
 # (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...; vLLM compile ~30-60 min.)
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
@@ -52,12 +54,14 @@
 #   - BASE: rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03
 #     (ROCm + torch nightly). The stages below OVERRIDE the base's vLLM/MoRI/AITER
 #     with the pins we validate for GLM DSA.
-#   - MoRI  -> built from ROCm/MoRI @ 42e895472b08 (validated for GLM DSA, BUILD_UMBP=OFF).
-#     A pin, not main: main at 120d2de broke the connector KV-notify handshake.
-#   - AITER -> STOCK ROCm/aiter @ e03fa6040 compiled from source + flydsl 0.1.7-0.1.9;
+#   - MoRI  -> built from ROCm/MoRI @ 624002c897a3 (BUILD_UMBP=OFF). Bumped from
+#     42e895472b08 alongside the AITER bump; co-validated 2P/2D EP16.
+#   - AITER -> raviguptaamd/aiter @ 624e43586b (ROCm/aiter 1d872fa + the gfx942 gqa64
+#     decode fix filed upstream as ROCm/aiter#4957) from source + flydsl 0.3.1;
 #     stale JIT wiped. (#47766 keeps persistent MLA ON -> aiter native gqa64 fold.)
-#   - vLLM  -> COMPILED from raviguptaamd/vllm @ glm5.1-dsa-wideEP_on_vllm-v0.27
-#     (GLM DSA + #47766 metadata-key). Full compile: a different commit than the
+#   - vLLM  -> COMPILED from raviguptaamd/vllm @ 094820b5d (branch
+#     glm5.1-dsa-wideEP_on_d626108b = upstream d626108b + the 10 GLM DSA commits,
+#     incl. the EP32 combine-topk fix). Full compile: a different commit than the
 #     base's, so a .py-only overlay would be ABI-mismatched.
 #   - RDMA fix (expandable_segments:False x2 + HSA_ENABLE_IPC_MODE_LEGACY=0) is NOT baked
 #     here — it lives in scripts/vllm_dissag/connectors/<connector>.env and the launcher
@@ -93,7 +97,7 @@ ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------
 # 1. MoRI: replace the base's bundled MoRI with the commit GLM-5.1 DSA wideEP was
-#    validated on, ROCm/MoRI @ 42e895472b08. NOTE this is NOT tag v1.2.1 that the base
+#    validated on, ROCm/MoRI @ 624002c897a3. NOTE this is NOT tag v1.2.1 that the base
 #    vllm_disagg_inference Dockerfile pins. It carries the EP/RDMA correctness fixes
 #    this recipe needs plus the ROCm-7.2.3 dmabuf registration path used by the
 #    connector .env (expandable_segments:False). MoRI is JIT-built, so this swaps the
@@ -103,11 +107,12 @@ ARG NIC_COMPILATION_ARCH="cx7"
 #    backends produced a MoRI that deadlocked at the cross-node EP all-to-all init.
 # -----------------------------------------------------------------------------
 ARG MORI_REPO=https://github.com/ROCm/mori.git
-# 42e895472b08: validated MoRI tip for GLM DSA WideEP disagg. The base's bundled
+# 624002c897a3: validated MoRI tip for GLM DSA WideEP disagg (bumped from 42e895472b08,
+# which predates the recv-sizing fixes the VLLM_MORI_* knobs need). The base's bundled
 # amd_mori regressed GLM DSA (GPU fault on the aiter DSA decode kernel), so we build
 # from source at this pinned commit by DEFAULT; WITH_MORI_BUILD=0 falls back for debug.
 ARG WITH_MORI_BUILD=1
-ARG MORI_REF=42e895472b08
+ARG MORI_REF=624002c897a3
 ENV MORI_GPU_ARCHS=gfx942
 # Newer MoRI added the UMBP subsystem which requires gRPC (grpcpp/grpcpp.h) not
 # present in this base; UMBP is unrelated to the EP dispatch/combine kernels, so
@@ -138,15 +143,17 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     fi
 
 # -----------------------------------------------------------------------------
-# 2. AITER: the v0.27 base bundles amd-aiter 0.1.19, which GPU-faults on the GLM DSA
-#    decode kernel mla_a8w8_qh64_gqaratio64_v3, so we build aiter from source at the
-#    validated commit e03fa6040 by DEFAULT (WITH_AITER_BUILD=1). aiter > e03fa6040
-#    reintroduces the fault; do not bump without re-running long-ctx NIAH. Set
-#    --build-arg WITH_AITER_BUILD=0 only to fall back to the bundled aiter for debugging.
+# 2. AITER: built from source at raviguptaamd/aiter @ 624e43586b (WITH_AITER_BUILD=1).
+#    That is ROCm/aiter 1d872fa plus a 7-line fix (filed upstream as ROCm/aiter#4957):
+#    newer aiter claims native gfx942 support for gqa64 fp8 decode and routes it to
+#    mla_a8w8_qh64_qseqlen1_gqaratio64_v3_ps, which GPU-faults; the fix lets gqa64 fall
+#    through to aiter's capture-safe persistent view-fold, so cudagraph decode is kept.
+#    The fork ref is TEMPORARY — revert AITER_REPO to ROCm/aiter once #4957 merges.
+#    --build-arg WITH_AITER_BUILD=0 falls back to the bundled aiter for debugging.
 # -----------------------------------------------------------------------------
-ARG AITER_REPO=https://github.com/ROCm/aiter.git
+ARG AITER_REPO=https://github.com/raviguptaamd/aiter.git
 ARG WITH_AITER_BUILD=1
-ARG AITER_REF=e03fa6040
+ARG AITER_REF=624e43586b
 RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
         echo "AITER: using BUNDLED base aiter (WITH_AITER_BUILD=0)" && \
         python3 -c "import importlib.metadata as m; print('aiter (bundled)', m.version('amd-aiter'))" && \
@@ -159,8 +166,8 @@ RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
         git submodule update --init --recursive && \
         (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
         pip install --no-build-isolation --no-deps -v . && \
-        pip install --no-deps -U "flydsl>=0.1.7,<0.1.9" && \
-        echo "AITER_REF=${AITER_REF}@$(git rev-parse HEAD) (stock ROCm/aiter, no fork)" >> /app/versions.txt && \
+        pip install --no-deps -U "flydsl==0.3.1" && \
+        echo "AITER_REF=${AITER_REF}@$(git rev-parse HEAD) (aiter + ROCm/aiter#4957 gqa64 fix)" >> /app/versions.txt && \
         rm -rf /tmp/aiter-src && \
         rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache" ; \
     fi
@@ -178,16 +185,14 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # REPRODUCIBILITY: this default is a BRANCH NAME, so it is mutable — `docker build`
 # resolves it to whatever the tip is on the day you build, and two builds can ship
 # different engines. For an auditable rebuild pass the exact commit:
-#   --build-arg VLLM_REF=d723eb305eb78d1bda0ed357b2b54cc29487221f
+#   --build-arg VLLM_REF=094820b5deeb1b93733586ca8942589e385a25dc
 # which is the tip every number in models.yaml was measured on. /app/versions.txt in the
 # built image records whichever sha was resolved.
 #
-# What the ref carries: the 3 core DSA changes (per-req-ctx metadata key #47766, DSA
-# indexer KV transfer over upstream's native MoRIIO connector, invalid-token sentinel)
-# on top of the base image's vLLM plus 9 ROCm commits. NOTE the base is upstream MAIN of
-# 2026-08-09, so the "v0.27" in the branch name labels this line of work — it is not a
-# checkout of the v0.27 release.
-ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
+# What the ref carries: the 10 GLM DSA commits (per-req-ctx metadata key #47766, DSA
+# indexer KV transfer, invalid-token sentinel, MoRI EP sizing knobs, and the EP32
+# combine() original-topk fix) on top of upstream vLLM d626108b (2026-08-20).
+ARG VLLM_REF=094820b5deeb1b93733586ca8942589e385a25dc
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
     MAX_JOBS=${MAX_JOBS}
@@ -229,7 +234,7 @@ PYEOF
 #    Pinned Rust toolchain (>=1.88: router deps time/home require rustc 1.88).
 # -----------------------------------------------------------------------------
 ARG ROUTER_REPO=https://github.com/raviguptaamd/router.git
-ARG ROUTER_REF=ravgupta/discovery-dp-rank-roundrobin
+ARG ROUTER_REF=ravgupta/dp-roundrobin-on-tip
 ARG RUST_TOOLCHAIN=1.88.0
 RUN if ! command -v cargo >/dev/null 2>&1; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}"; \
