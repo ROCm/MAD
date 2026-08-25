@@ -402,6 +402,9 @@ export SKIP_CURL_TEST
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
+# AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
+[ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="$(eval echo "$AGENTIC_CONFIG")"
+
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
@@ -476,6 +479,7 @@ docker run --rm \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
     $DOCKER_IMAGE_NAME -c "
+        set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "

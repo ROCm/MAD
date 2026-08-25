@@ -88,6 +88,7 @@ fi
 # --------------------------------------------------------------------------
 SUITE_SUMMARY_JSON="${RESULT_DIR}/suite_summary.json"
 _summary_rows=()
+_suite_failed=0
 
 for name in $SUITE_WORKLOAD_NAMES; do
     _profile_json="${SUITE_CORPUS_DIR}/${name}.profile.json"
@@ -188,7 +189,10 @@ for name in $SUITE_WORKLOAD_NAMES; do
 ${REPLAY_CMD}
 EOF
         else
-            run_agentic_replay_and_write_outputs "$_rdir" || true
+            if ! run_agentic_replay_and_write_outputs "$_rdir"; then
+                agentic_log "workload '$name' conc=$conc replay FAILED"
+                _suite_failed=1
+            fi
         fi
     done
 
@@ -250,3 +254,5 @@ print(f"suite summary JSON -> {out_path}")
 PY
     agentic_log "suite complete -> $RESULT_DIR"
 fi
+
+exit "$_suite_failed"

@@ -285,6 +285,35 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 8. shell driver static guards (fixes 2/3/4) ==="
+SLURM_LAUNCHER="$REPO_ROOT/scripts/sglang_disagg/run_xPyD_models.slurm"
+
+# 8.1 suite driver must no longer swallow replay failures with `|| true`
+#     (exclude comment lines to avoid false positives).
+if grep -vE '^[[:space:]]*#' "$SUITE_DRIVER" \
+        | grep -q 'run_agentic_replay_and_write_outputs.*|| true'; then
+    _fail "suite driver: active '|| true' on replay call removed"
+else
+    _pass "suite driver: active '|| true' on replay call removed"
+fi
+
+# 8.2 sglang launcher must set pipefail before the tee pipe.
+if grep -vE '^[[:space:]]*#' "$SLURM_LAUNCHER" | grep -q 'set -o pipefail'; then
+    _pass "sglang launcher: 'set -o pipefail' present"
+else
+    _fail "sglang launcher: 'set -o pipefail' present"
+fi
+
+# 8.3 sglang launcher must expand $HOME in AGENTIC_CONFIG before docker forward.
+if grep -vE '^[[:space:]]*#' "$SLURM_LAUNCHER" | grep -q 'AGENTIC_CONFIG="\$(eval echo'; then
+    _pass "sglang launcher: AGENTIC_CONFIG \$HOME expansion present"
+else
+    _fail "sglang launcher: AGENTIC_CONFIG \$HOME expansion present"
+fi
+
+# ---------------------------------------------------------------------------
 echo "======================================================"
 echo "  run_offline: ${pass} passed, ${fail} failed"
 echo "======================================================"
