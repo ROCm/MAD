@@ -41,27 +41,45 @@ Run from a SLURM login node. Both steps need your image — the model cards carr
 `DOCKER_IMAGE_NAME: "<supply-your-image>"` as a fill-me-in marker, and madengine
 rejects it rather than trying to pull it (see [Image](#image)).
 
+First fill in your cluster's partition and paths in the matching site config —
+[`slurm-config.colocated.json`](slurm-config.colocated.json) (2 node) or
+[`slurm-config.disagg.json`](slurm-config.disagg.json) (4 node). Every field marked
+`CHANGE-ME` is site-specific; see [Site configuration](#site-configuration).
+
 ```sh
 IMG=<your-registry>/<repo>:<tag>
+CFG=benchmark/kimi_k3/mi300x
 
 # colocated, 2 nodes
-madengine build --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --use-image "$IMG"
-madengine run --manifest-file build_manifest.json --keep-model-dir --live-output
+madengine build --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --use-image "$IMG" \
+  --additional-context-file $CFG/slurm-config.colocated.json
+madengine run --manifest-file build_manifest.json --live-output
 
 # prefill/decode disaggregated, 4 nodes
-madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --use-image "$IMG"
-madengine run --manifest-file build_manifest.json --keep-model-dir --live-output
+madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --use-image "$IMG" \
+  --additional-context-file $CFG/slurm-config.disagg.json
+madengine run --manifest-file build_manifest.json --live-output
 ```
+
+The context file is only needed on `build` — its `slurm` and `env_vars` blocks are
+written into the manifest's `deployment_config` and merged back on `run`.
 
 To build and distribute the image instead of supplying a pre-built one, swap
 `--use-image "$IMG"` for `--registry <your-registry>`; the launcher then pulls it
 onto every node in parallel.
 
-Both are `slurm_multi` models. The allocation is sized from each entry's
-`distributed.nnodes` (2 or 4), which madengine turns into `#SBATCH --nodes`; the
-launcher then reads `SLURM_NNODES` for node discovery. Nothing is passed to the
-`.slurm` script on the command line — the topology travels entirely through
-`env_vars`.
+Both are `slurm_multi` models: madengine generates a wrapper SBATCH script that runs
+the model's `.slurm` script on the head node with `bash`, and that script manages its
+own per-node containers via `srun`. The `#SBATCH` header inside the launcher is
+therefore inert — every allocation knob comes from madengine. Nothing is passed to the
+`.slurm` script on the command line; the topology travels entirely through `env_vars`.
+
+The allocation is sized from each entry's **`slurm.nodes`** (2 or 4), which madengine
+emits as `#SBATCH --nodes`; the launcher then reads `SLURM_NNODES` for node discovery.
+`distributed.nnodes` carries the same number for the launcher-detection path but is
+**not** what sizes the allocation — madengine reads only `slurm.nodes`, defaulting to
+1. Keep the two in sync when editing a model card, or override `nodes` in the site
+config, where it wins over the model card.
 
 Alternatively, run inside an allocation you already hold, in which case madengine
 executes the launcher synchronously and the node count comes from the allocation:
@@ -76,6 +94,32 @@ madengine run --manifest-file build_manifest.json --live-output
 - **16× MI300X** (2 nodes) colocated, or **32× MI300X** (4 nodes) disaggregated
 - RDMA fabric between nodes; the defaults assume 8 NICs per node
 - Checkpoint is ~1.5 TB — local NVMe strongly recommended, on every node
+- **Docker** on the compute nodes. The launchers call `docker run` under `srun`;
+  podman/apptainer-only clusters will not work without editing the launcher.
+
+## Site configuration
+
+Everything cluster-specific lives in the two `slurm-config.*.json` files next to this
+README, passed with `--additional-context-file`. Values set there override the model
+cards (`build_orchestrator.py` only fills in a model-card key you did *not* set).
+
+| Field | What it is | How to find it |
+|-------|-----------|----------------|
+| `slurm.partition` | GPU partition to submit to | `sinfo -o '%20P %5D %14F %10G %11l'` — pick a partition whose `GRES` column shows GPUs and whose `A/I/O/T` counts show idle nodes |
+| `slurm.gpus_per_node` | GPUs per node (8 on MI300X) | `GRES` column above, or `scontrol show node <node> \| grep Gres` |
+| `slurm.nodes` | 2 colocated / 4 disaggregated | Fixed by the recipe; must match `distributed.nnodes` |
+| `slurm.time` | Wall clock | `TIMELIMIT` column above is the partition's cap |
+| `env_vars.MODEL_DIR` | Directory holding `Kimi-K3/` | Wherever the ~1.5 TB checkpoint lives; must be readable from every node |
+| `env_vars.LOG_PATH` | Run logs + per-job `perf.csv` | Any shared, writable path |
+
+Two knobs are **not** settable through the config file on this launcher:
+
+- **`--account` / `--qos`.** madengine emits these only for its templated launchers;
+  the hand-built `slurm_multi` header omits them. If your cluster requires an
+  account, export `SBATCH_ACCOUNT` (and `SBATCH_QOS`) before `madengine run` —
+  `sbatch` honors those environment variables and no directive conflicts with them.
+- **`slurm.results_dir`.** Settable in the config file, but *not* from a model card —
+  it is absent from the key list madengine copies out of `models.json`.
 
 ## Image
 
@@ -184,9 +228,13 @@ whose request errors is recorded as a `FAILURE` row with performance 0, so a
 pass→crash regression shows up instead of silently disappearing.
 
 The launcher copies that CSV to `perf_Kimi-K3.csv` beside itself, which is the name
-each entry declares as `multiple_results`; madengine resolves the declared name
-first and falls back to the conventional `/shared_inference/$USER/model_blog_logs/
-$SLURM_JOB_ID/perf.csv` path.
+each entry declares as `multiple_results`. Note that madengine's `slurm_multi`
+collector does **not** resolve `multiple_results` — it globs `perf*.csv` under
+`slurm.results_dir`, then falls back to `/shared_inference/$USER/model_blog_logs/
+$SLURM_JOB_ID/perf.csv` and a handful of other conventional paths. That is why the
+site configs set `results_dir` to the launcher's own directory
+(`scripts/vllm_multinode` or `scripts/vllm_dissag`): it is what makes the declared
+filename findable. `multiple_results` still carries the name for the non-SLURM paths.
 
 ### What the workload reports vs. what madengine reports
 

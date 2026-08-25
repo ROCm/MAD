@@ -391,6 +391,8 @@
       "nnodes": 4
     },
     "slurm": {
+      "nodes": 4,
+      "gpus_per_node": 8,
       "time": "24:00:00"
     },
     "env_vars": {
@@ -429,6 +431,8 @@
       "nnodes": 2
     },
     "slurm": {
+      "nodes": 2,
+      "gpus_per_node": 8,
       "time": "24:00:00"
     },
     "env_vars": {
@@ -466,6 +470,8 @@
       "nnodes": 2
     },
     "slurm": {
+      "nodes": 2,
+      "gpus_per_node": 8,
       "time": "24:00:00"
     },
     "env_vars": {
@@ -506,6 +512,8 @@
       "nnodes": 2
     },
     "slurm": {
+      "nodes": 2,
+      "gpus_per_node": 8,
       "time": "24:00:00"
     },
     "env_vars": {
