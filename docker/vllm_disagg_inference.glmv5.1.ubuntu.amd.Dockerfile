@@ -39,12 +39,17 @@
 #     -t <your-registry>/vllm-disagg:glmv5.1 .
 #   export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:glmv5.1
 #
-# STATUS (GLM-5.1-FP8 on this stack): validated on 1P/1D EP8 and 2P/2D EP16 — NIAH
-# 2k-35k retrieves with no length collapse and no crash (long-context accuracy fixed
-# via vLLM #47766). The 4P/4D EP32 token corruption is FIXED by the MoRI combine()
-# original-topk change (vLLM 623fdc946b): measured 4P/4D EP32 NIAH 8k 0/10 -> 10/10,
-# perf-neutral. NOTE: 4P/4D has not been re-validated on the bumped pins below; 2P/2D
-# EP16 has (NIAH 2k 10/10, 8k 10/10; 8192/1024 con32 TPOT ~59 ms).
+# STATUS (GLM-5.1-FP8 on this stack): 2P/2D EP16 and 4P/4D EP32 both validated ON THE
+# PINS BELOW, from an image built off this file unmodified. Long-context accuracy is
+# fixed in-source (vLLM #47766); the 4P/4D EP32 token corruption is fixed by the MoRI
+# combine() original-topk change (vLLM 623fdc946b).
+#   NIAH, 3 seeds:  2P/2D  2k 9.7/10, 8k 9.7/10 | 4P/4D  2k 9.7/10, 8k 9.3/10
+#   8192/1024 con32 TPOT median:  2P/2D 60.0 ms | 4P/4D 70.4 ms
+#   (also 16384/1024 and con=64; 0 failed requests in all 8 cells, 0 GPU faults)
+# The 9/10s are seed variance, not length collapse: across 12 cells every score is 9 or
+# 10 with no pattern by topology or context length. Read it as ~93-97% retrieval.
+# EP32 costs ~17% TPOT over EP16 (the cross-node all2all inside the captured decode step
+# does not compress as EP widens), so 4P/4D buys capacity, not per-token latency.
 # (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...; vLLM compile ~30-60 min.)
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a
@@ -223,16 +228,18 @@ PYEOF
 # -----------------------------------------------------------------------------
 # 4. vllm-router (DP-rank round-robin + MoRIIO connector) — built in, so NO
 #    external vllm-router binary is needed (leave ROUTER_BINARY unset).
-#    Source = vllm-project/router PR #181 branch, which now carries BOTH the
-#    round-robin DP-rank fix (11841c0d) AND the 2P2D KV-notify fix (6409ac1:
-#    remote_dp_rank_override + remote_dp_size). The KV-notify fix is REQUIRED:
-#    without it the 2P2D EP=16 run reproducibly wedges with "remote blocks never
-#    arrived" deferred-write expiries (decode notify targets the wrong DP rank).
-#    This is the exact source of the validated vllm-router-2p2d-dpfix binary.
+#    Source = upstream vllm-project/router main @ 1d10e71 (2026-08-18) plus ONE
+#    commit: the 2P2D KV-notify fix (moriio_dp_size + effective_dp_size() +
+#    remote_dp_rank_override). REQUIRED: without it the 2P2D EP=16 run reproducibly
+#    wedges with "remote blocks never arrived" deferred-write expiries (decode
+#    notify targets the wrong DP rank). The round-robin DP-rank fix that used to
+#    ride along here is now upstream (prefill_dp_round_robin), so it is no longer
+#    carried locally. Pinned to a sha, not the branch name, so rebuilds are
+#    reproducible; branch is raviguptaamd/router:ravgupta/dp-roundrobin-on-tip.
 #    Pinned Rust toolchain (>=1.88: router deps time/home require rustc 1.88).
 # -----------------------------------------------------------------------------
 ARG ROUTER_REPO=https://github.com/raviguptaamd/router.git
-ARG ROUTER_REF=ravgupta/dp-roundrobin-on-tip
+ARG ROUTER_REF=82dc9811af17412e6e24b5942a5486bc502df23a
 ARG RUST_TOOLCHAIN=1.88.0
 RUN if ! command -v cargo >/dev/null 2>&1; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}"; \
