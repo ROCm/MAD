@@ -43,13 +43,13 @@
 # PINS BELOW, from an image built off this file unmodified. Long-context accuracy is
 # fixed in-source (vLLM #47766); the 4P/4D EP32 token corruption is fixed by the MoRI
 # combine() original-topk change (vLLM 623fdc946b).
-#   NIAH, 3 seeds:  2P/2D  2k 9.7/10, 8k 9.7/10 | 4P/4D  2k 9.7/10, 8k 9.3/10
-#   8192/1024 con32 TPOT median:  2P/2D 60.0 ms | 4P/4D 70.4 ms
-#   (also 16384/1024 and con=64; 0 failed requests in all 8 cells, 0 GPU faults)
+#   NIAH, 3 seeds each:  2P/2D  2k 9.7/10, 8k 9.7/10 | 4P/4D  2k 9.7/10, 8k 9.3/10
 # The 9/10s are seed variance, not length collapse: across 12 cells every score is 9 or
 # 10 with no pattern by topology or context length. Read it as ~93-97% retrieval.
-# EP32 costs ~17% TPOT over EP16 (the cross-node all2all inside the captured decode step
-# does not compress as EP widens), so 4P/4D buys capacity, not per-token latency.
+# A latency/throughput sweep (8192/1024 and 16384/1024 at con 32/64) ran on both
+# topologies with no failed requests and no GPU faults. Numbers are deliberately not
+# quoted here: they are one configuration on one cluster and would be read as a spec.
+# Re-measure on your own hardware before relying on any figure.
 # (BASE_IMAGE is a gated nightly; override --build-arg BASE_IMAGE=...; vLLM compile ~30-60 min.)
 # =============================================================================
 # Builds the GLM-5.1 runtime stack by applying component pins ON TOP of a

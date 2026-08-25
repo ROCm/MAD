@@ -546,8 +546,8 @@ echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 # EP8/EP16 were tuned at and is kept there; at EP32 (4P/4D) it OOMs during EngineCore init
 # ("Tried to allocate 6.00 GiB ... 157.95 GiB allocated"), which SIGTERMs every rank while
 # the socket barrier keeps printing "Waiting for nodes" - it reads as a hang, not a crash.
-# Measured on glm5.1-pr206-9f16198: 0.70 boots (66.79 GiB KV cache) and holds through
-# con=64; 2P/2D EP16 at 0.8 is unaffected. Submit-time -e still overrides either value.
+# 0.70 boots at EP32 and holds under load; 2P/2D EP16 at 0.8 is unaffected (both were
+# exercised on the pinned stack). Submit-time -e still overrides either value.
 # NOTE: the models.yaml GPU_MEMORY_UTILIZATION key is inert - the -e below is unconditional, and
 # vllm_disagg.sh skips any yaml key already in the environment. Change it HERE, not there.
 _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))

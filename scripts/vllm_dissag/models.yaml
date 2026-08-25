@@ -222,24 +222,18 @@ GLM-5.1-FP8:
     GPU_MEMORY_UTILIZATION: "0.80"
     VLLM_CUDAGRAPH_MODE: "NONE"
     PREFILL_CUDAGRAPH_MODE: "NONE"
-    # PERF: FULL graph for the uniform-decode shapes, PIECEWISE for everything else.
-    # Measured on MI300X (1024/64, warm) against the previous PIECEWISE setting. These
-    # rows are the verification baseline for the upstream DSA PRs and stay until those
-    # merge:
-    #     1P/1D EP8   TPOT  88.0 -> 41.8 ms (2.11x), outTP  78.8 -> 143.7 tok/s
-    #     2P/2D EP16  TPOT  94.1 -> 55.4 ms (1.70x), outTP  66.7 -> 113.0 tok/s
-    # Accuracy unaffected (NIAH 2k-35k: 1P/1D 51/60, 2P/2D 55/60, no length collapse,
-    # memfault=0). The gain shrinks as EP widens because the cross-node all2all inside
-    # the captured step does not compress — do NOT assume it holds at EP32 without
-    # measuring. Cost: capture ~92-94 s and ~3.0-3.5 GiB (PIECEWISE was ~5 s / 7.2 GiB),
-    # so a longer boot; notable for CI. Set PIECEWISE to fall back.
+    # FULL graph for the uniform-decode shapes, PIECEWISE for everything else. Chosen
+    # over plain PIECEWISE because it measured faster for decode on MI300X; the gain
+    # narrows as EP widens, since the cross-node all2all inside the captured step does
+    # not compress. Costs a longer boot (capture is slower and the captured graphs hold
+    # more memory than PIECEWISE) - notable for CI. Set PIECEWISE to fall back.
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64 128 256"
     # Moves graph partitioning to inductor codegen (MLA KV-update becomes an eager
     # boundary). The connector default is OFF, so GLM opts in here and no other model's
-    # --compilation-config changes. NOT a correctness requirement on the pinned image
-    # (A/B: NIAH 2k 10/10 both ways, TPOT within ~1%) — kept ON because it is what every
-    # number here was measured with.
+    # --compilation-config changes. Not a correctness requirement - an A/B was accuracy-
+    # neutral and within noise on latency - but kept ON because it is the configuration
+    # this recipe was exercised with.
     USE_INDUCTOR_GRAPH_PARTITION: "1"
     VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
     PREFILL_MORI_BACKEND: "mori_high_throughput"
@@ -273,8 +267,9 @@ GLM-5.1-FP8:
     dp: ""
   decode:
     # PERF: the MoRI EP dispatch width comes from max_num_batched_tokens, so the decode
-    # role otherwise runs an 8192-token-wide all2all every step (~302ms TPOT). It cannot
-    # be shrunk via env: mori derives recv capacity from the send width, so the buffer
-    # must still cover vLLM's profiling dummy run. Keep >= typical prompt length: 512
-    # gave 87.9ms TPOT but 13.1s TTFT; 2048 keeps TTFT healthy.
+    # role otherwise runs an 8192-token-wide all2all every step, which dominates decode
+    # latency. It cannot be shrunk via env: mori derives recv capacity from the send
+    # width, so the buffer must still cover vLLM's profiling dummy run. Keep >= typical
+    # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
+    # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"

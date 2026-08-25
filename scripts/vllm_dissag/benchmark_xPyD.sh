@@ -43,8 +43,8 @@ for i in $(seq 1 $BENCHMARK_ITR); do
        # Per-shape warmup at the REAL isl/osl, low concurrency: the global warmup above is
        # isl=osl=32/con=1, so it never exercises this shape's prefill path, its Triton/aiter
        # kernel variants or the decode cudagraph batch sizes. DEFAULT OFF -- every model
-       # shares this sweep path, and an A/B at 1024/1024 con=8 measured it neutral (TPOT
-       # 42.13 ms on, 42.05 ms off), so recipes validated without it must not be shifted for
+       # shares this sweep path, and an A/B at 1024/1024 con=8 measured it neutral,
+       # so recipes validated without it must not be shifted for
        # no gain. GLM opts in via its models.yaml env:, which is what its published latency
        # numbers were measured under. Enable per-run with SHAPE_WARMUP=1.
        if [[ "${SHAPE_WARMUP:-0}" == "1" ]]; then
