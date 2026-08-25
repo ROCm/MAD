@@ -95,6 +95,8 @@ def generate_corpus(profile, out_dir):
     seed = int(profile.get("seed", 42))
     n = int(profile.get("n_sessions", 200))
     block = int(profile.get("block_size", DEFAULT_BLOCK))
+    if block < 1:
+        raise SystemExit("[gen] block_size must be >= 1")
     model_tag = str(profile.get("model_tag", DEFAULT_MODEL_TAG))
     id_prefix = str(profile.get("id_prefix", DEFAULT_ID_PREFIX))
 
@@ -104,6 +106,12 @@ def generate_corpus(profile, out_dir):
     turns = profile["turns"]
     turns_values = list(turns["values"])
     turns_weights = list(turns["weights"])
+    if not turns_values or not turns_weights:
+        raise SystemExit("[gen] turns must have non-empty values and weights")
+    if len(turns_values) != len(turns_weights):
+        raise SystemExit("[gen] turns values and weights must have equal length")
+    if any(w <= 0 for w in turns_weights):
+        raise SystemExit("[gen] turns weights must all be > 0")
     cache_lo, cache_hi = profile["cache_hit"]
     clamps = profile.get("clamps", {})
     isl_lo, isl_hi = clamps.get("isl", [1200, 245000])

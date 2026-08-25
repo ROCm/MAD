@@ -197,6 +197,9 @@ def _parse_block(lines, i, indent):
             i += 1
             if i < len(lines) and lines[i][0] > indent:
                 val, i = _parse_block(lines, i, lines[i][0])
+            elif (i < len(lines) and lines[i][0] == indent
+                  and lines[i][1].startswith("-")):
+                val, i = _parse_block(lines, i, indent)   # same-indent block sequence
             else:
                 val = None
             d[key] = val
@@ -248,8 +251,11 @@ def _merge_preset(entry, _visited):
     if name in _visited:
         raise ValueError(f"circular preset: {name}")
     _visited.add(name)
+    preset_path = os.path.join(PROFILES_DIR, f"{name}.yaml")
+    if not os.path.isfile(preset_path):
+        raise ValueError(f"preset not found: {name}")
     base = _merge_preset(
-        load_profile_file(os.path.join(PROFILES_DIR, f"{name}.yaml")) or {}, _visited)
+        load_profile_file(preset_path) or {}, _visited)
     for k, v in entry.items():
         if k == "preset":
             continue

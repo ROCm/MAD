@@ -199,6 +199,92 @@ fi
 
 # ---------------------------------------------------------------------------
 echo ""
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== 7. N1 parser + robustness guards ==="
+
+# 7.1 N1: workloads: at the SAME indent as its `-` items must resolve to a
+#     NON-EMPTY workload list via the fallback YAML loader (regression for the
+#     silently-dropped same-indent block sequence).
+cat > "$TMP/n1_same_indent.yaml" <<'YAML'
+serving:
+  model: auto
+  max_model_len: 524288
+run:
+  concurrency: [2]
+  duration: 900
+  scenario: inferencex-agentx-mvp
+workloads:
+- name: samelevel
+  source: profile
+  preset: conformance_256k
+YAML
+n1_count="$(AGENTX_YAML_FALLBACK=1 "$PY" "$AGENTX_DIR/agentx_config.py" \
+    --config "$TMP/n1_same_indent.yaml" --dump-json 2>/dev/null \
+    | "$PY" -c 'import sys,json; print(len(json.load(sys.stdin).get("workloads") or []))')" || n1_count=0
+if [ "${n1_count:-0}" -ge 1 ]; then
+    _pass "N1 fallback parser resolves same-indent workloads ($n1_count)"
+else
+    _fail "N1 fallback parser resolves same-indent workloads (got '${n1_count}')"
+fi
+
+# 7.2 gen guard: block_size 0 -> non-zero exit + explicit message.
+"$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); d["block_size"]=0; json.dump(d,open(sys.argv[2],"w"))' \
+    "$SMALL_JSON" "$TMP/bs0.json"
+bs0_out="$("$PY" "$AGENTX_DIR/gen_agentx_profile.py" --profile "$TMP/bs0.json" --seed 42 \
+    --out-dir "$TMP/bs0_corpus" 2>&1)" && bs0_rc=0 || bs0_rc=$?
+if [ "$bs0_rc" -ne 0 ] && echo "$bs0_out" | grep -q '\[gen\] block_size must be >= 1'; then
+    _pass "gen guard: block_size 0 rejected"
+else
+    _fail "gen guard: block_size 0 rejected (rc=$bs0_rc)"
+    echo "$bs0_out" | sed 's/^/        /'
+fi
+
+# 7.3 gen guard: empty turns.values -> non-zero exit + explicit message.
+"$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); d["turns"]["values"]=[]; json.dump(d,open(sys.argv[2],"w"))' \
+    "$SMALL_JSON" "$TMP/tv0.json"
+tv0_out="$("$PY" "$AGENTX_DIR/gen_agentx_profile.py" --profile "$TMP/tv0.json" --seed 42 \
+    --out-dir "$TMP/tv0_corpus" 2>&1)" && tv0_rc=0 || tv0_rc=$?
+if [ "$tv0_rc" -ne 0 ] && echo "$tv0_out" | grep -q '\[gen\] turns must have non-empty'; then
+    _pass "gen guard: empty turns.values rejected"
+else
+    _fail "gen guard: empty turns.values rejected (rc=$tv0_rc)"
+    echo "$tv0_out" | sed 's/^/        /'
+fi
+
+# 7.4 verify guard: session JSON lacking 'requests' -> non-zero exit + message.
+mkdir -p "$TMP/badcorpus"
+echo '{}' > "$TMP/badcorpus/s1.json"
+vf_out="$("$PY" "$AGENTX_DIR/verify_agentx_profile.py" --profile "$SMALL_JSON" \
+    --corpus "$TMP/badcorpus" 2>&1)" && vf_rc=0 || vf_rc=$?
+if [ "$vf_rc" -ne 0 ] && echo "$vf_out" | grep -q "missing 'requests'"; then
+    _pass "verify guard: missing 'requests' rejected"
+else
+    _fail "verify guard: missing 'requests' rejected (rc=$vf_rc)"
+    echo "$vf_out" | sed 's/^/        /'
+fi
+
+# 7.5 preset guard: unknown preset name -> reported, not silently loaded.
+cat > "$TMP/preset_missing.yaml" <<'YAML'
+serving:
+  model: auto
+  max_model_len: 524288
+run:
+  concurrency: [2]
+  duration: 900
+workloads:
+  - name: bad
+    preset: __missing__
+YAML
+pm_out="$("$PY" "$AGENTX_DIR/agentx_config.py" --config "$TMP/preset_missing.yaml" --dump-json 2>&1)" || true
+if echo "$pm_out" | grep -q "preset not found"; then
+    _pass "preset guard: missing preset reported"
+else
+    _fail "preset guard: missing preset reported"
+    echo "$pm_out" | sed 's/^/        /'
+fi
+
+# ---------------------------------------------------------------------------
 echo "======================================================"
 echo "  run_offline: ${pass} passed, ${fail} failed"
 echo "======================================================"

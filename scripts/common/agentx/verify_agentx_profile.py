@@ -72,7 +72,10 @@ def measure(corpus):
     for f in glob.glob(os.path.join(corpus, "*.json")):
         with open(f) as fh:
             b = json.load(fh)
-        r = b["requests"]; seen = set(); tu.append(len(r))
+        r = b.get("requests")
+        if r is None:
+            raise SystemExit(f"[verify] {f}: session JSON missing 'requests'")
+        seen = set(); tu.append(len(r))
         for x in r:
             if x.get("in"): ai.append(x["in"])
             if x.get("out"): oa.append(x["out"])
