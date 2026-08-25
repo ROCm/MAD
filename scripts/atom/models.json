@@ -1,7 +1,7 @@
 [
     {
         "name": "pyt_atom_kimi-k3",
-        "dockerfile": "../../docker/pyt_atom_kimi_k3",
+        "dockerfile": "../../docker/pyt_atom",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
