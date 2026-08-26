@@ -515,26 +515,13 @@ else
     _JIT_CACHE_MOUNT="";
 fi
 
-# --- Build host RDMA library mounts ---
+# --- Host RDMA library mounts ---
+# None. The v0.26.0 image ships a self-consistent rdma-core (libibverbs + matching mlx5
+# provider + /etc/libibverbs.d), so device passthrough via --device /dev/infiniband is
+# sufficient. Mounting host libs would shadow the container stack and break enumeration.
+# (Keep this block free of apostrophes: it runs inside a single-quoted srun bash -c.)
 _RDMA_MOUNTS=""
-_LIBDIR=/usr/lib/x86_64-linux-gnu
-
-for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
-done
-for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-done
-
-for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
-    for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-    done
-done
-
-[ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
-[ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
-echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+echo "[host-rdma] mounts: (none)"
 
 docker run --rm \
     --device /dev/dri \
@@ -597,6 +584,8 @@ docker run --rm \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
     ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${ENABLE_PREFIX_CACHING:+-e ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \

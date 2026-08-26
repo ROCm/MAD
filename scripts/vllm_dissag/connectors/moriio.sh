@@ -86,10 +86,14 @@ connector_setup_env() {
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
     export VLLM_HANDSHAKE_TIMEOUT_MINS="${VLLM_HANDSHAKE_TIMEOUT_MINS:-30}"
 
-    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton}"
-    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm}"
-    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr}"
-    export AITER_JIT_DIR="${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"
+    # Default the JIT caches to the image-keyed, per-user persistent mount (/opt/vllm_cache)
+    # NOT the world-shared /tmp/vllm_cache: the latter is bind-mounted from the host and gets
+    # poisoned by other users' JIT builds from newer-toolchain images (e.g. an aiter .so needing
+    # a GLIBCXX this image lacks), which aborts every worker. /opt/vllm_cache is keyed by image ID.
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/opt/vllm_cache/triton}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/opt/vllm_cache/vllm}"
+    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/opt/vllm_cache/comgr}"
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}"
     mkdir -p "${TRITON_CACHE_DIR}" "${VLLM_CACHE_ROOT}" "${COMGR_CACHE_DIR}" "${AITER_JIT_DIR}" 2>/dev/null || true
 
     if [[ "${VLLM_ROCM_USE_AITER:-1}" == "1" ]]; then
@@ -193,9 +197,13 @@ connector_launch_worker() {
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
         fi
 
-        # Offloading needs prefix caching; flip it on when KV_OFFLOAD is active.
+        # Prefix caching: OFF by default; the user can force it on via
+        # ENABLE_PREFIX_CACHING=1. OffloadingConnector requires it, so it is
+        # forced on whenever KV_OFFLOAD is active (regardless of the knob).
+        local _pc="${ENABLE_PREFIX_CACHING:-0}"
+        kv_offload_enabled && _pc=1
         local _prefix_cache_arg="--no-enable-prefix-caching"
-        kv_offload_enabled && _prefix_cache_arg="--enable-prefix-caching"
+        [[ "$_pc" == "1" ]] && _prefix_cache_arg="--enable-prefix-caching"
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
         # needs block=16 + MLA off (the block=1 + AITER-MLA fp8 decode kernel
@@ -206,6 +214,11 @@ connector_launch_worker() {
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+        # Optional context cap. Only emitted when a model recipe / submit sets it;
+        # the connector stays model-agnostic (no default). Needed for MLA models
+        # whose default max_model_len makes the TritonMLA attn-logits workspace OOM.
+        local mml_args=()
+        [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
@@ -223,6 +236,7 @@ connector_launch_worker() {
                     --block-size "${_block}" \
                     "${_prefix_cache_arg}" \
                     --all2all-backend "${_all2all}" \
+                    "${mml_args[@]}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
                     "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
@@ -243,6 +257,7 @@ connector_launch_worker() {
             --block-size "${_block}" \
             "${_prefix_cache_arg}" \
             --all2all-backend "${_all2all}" \
+            "${mml_args[@]}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
             "${exec_args[@]}" \
