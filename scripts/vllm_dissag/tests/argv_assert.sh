@@ -24,6 +24,7 @@ _argv() { # connector wide_ep ep_backend model model_path
 }
 
 _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
+_hasre() { grep -qE -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _count() { local n; n="$(grep -cF -- "$2" <<<"$1")"; [[ "$n" == "$3" ]] && { printf "  PASS  %s (=%s)\n" "$4" "$n"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s want %s)\n" "$4" "$n" "$3"; fail=$((fail+1)); }; }
 
@@ -46,6 +47,30 @@ _has    "$B" "--block-size" "has --block-size"
 _has    "$B" "16" "block-size value 16 present"
 _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
+
+echo ""
+echo "=== moriio + wideEP (Kimi-K3-MXFP4, 2P/2D TP2×DP8) ==="
+_argv_k3() {
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+C="$(_argv_k3)"
+_has    "$C" "--tensor-parallel-size" "K3 has --tensor-parallel-size"
+_hasre   "$C" "^2$" "K3 TP=2"
+_has    "$C" "--data-parallel-size" "K3 has --data-parallel-size"
+_hasre   "$C" "^8$" "K3 dp_size=8 (line)"
+_has    "$C" "--data-parallel-size-local" "K3 has dp_local flag"
+_hasre   "$C" "^4$" "K3 dp_local=4 (line)"
+_has    "$C" "--enable-expert-parallel" "K3 has EP"
+_has    "$C" "moriio_pod_hosts" "K3 kv config has pod hosts"
+_has    "$C" "--api-server-count=8" "K3 api-server-count=dp_size"
+_has    "$C" "--reasoning-parser" "K3 reasoning parser flag"
+_has    "$C" "kimi_k3" "K3 reasoning parser value"
+_hasnot "$C" "-tp 1" "K3 not -tp 1"
 
 echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="

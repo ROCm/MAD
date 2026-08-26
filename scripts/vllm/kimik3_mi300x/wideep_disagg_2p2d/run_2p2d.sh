@@ -198,8 +198,6 @@ docker run -d --name "$CONTAINER" \
     fi
     QUANTARG=()
     if [ -n \"\$QUANT_CONFIG\" ]; then
-    QUANTARG=()
-    if [ -n \"\$QUANT_CONFIG\" ]; then
       QUANTARG=(--quantization-config \"\$QUANT_CONFIG\")
     fi
     KVARG=()

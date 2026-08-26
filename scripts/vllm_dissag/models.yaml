@@ -194,10 +194,13 @@ _kimik3_recipe_env: &kimik3_recipe_env
   VLLM_SSM_CONV_STATE_LAYOUT: "DS"
   KV_BLOCK_SIZE: "16"
   KV_CACHE_DTYPE: "fp8"
-  KV_CACHE_MEMORY_BYTES: "40000000000"
+  KV_CACHE_MEMORY_BYTES: "8000000000"
   GPU_MEMORY_UTILIZATION: "0.85"
   MAX_NUM_BATCHED_TOKENS: "2048"
+  MAX_MODEL_LEN: "320000"
   PREFILL_CUDAGRAPH_MODE: "NONE"
+  # Validated standalone launch uses DECODE_CG=NONE (run_2p2d_launch.sh default).
+  # PIECEWISE hangs at cudagraph capture 5/9 on K3+MoRI LL — F25; fix in Session 3 image.
   DECODE_CUDAGRAPH_MODE: "NONE"
   VLLM_ALL2ALL_BACKEND: "mori_low_latency"
   PREFILL_MORI_BACKEND: "mori_low_latency"
@@ -207,6 +210,6 @@ _kimik3_recipe_env: &kimik3_recipe_env
 Kimi-K3-MXFP4:
   env: *kimik3_recipe_env
   prefill:
-    dp: ""
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
   decode:
-    dp: ""
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''

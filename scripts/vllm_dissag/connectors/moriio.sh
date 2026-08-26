@@ -86,10 +86,10 @@ connector_setup_env() {
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
     export VLLM_HANDSHAKE_TIMEOUT_MINS="${VLLM_HANDSHAKE_TIMEOUT_MINS:-30}"
 
-    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton}"
-    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm}"
-    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr}"
-    export AITER_JIT_DIR="${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/opt/vllm_cache/triton}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/opt/vllm_cache/vllm}"
+    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/opt/vllm_cache/comgr}"
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}"
     mkdir -p "${TRITON_CACHE_DIR}" "${VLLM_CACHE_ROOT}" "${COMGR_CACHE_DIR}" "${AITER_JIT_DIR}" 2>/dev/null || true
 
     if [[ "${VLLM_ROCM_USE_AITER:-1}" == "1" ]]; then
@@ -118,9 +118,23 @@ connector_setup_env() {
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
+_moriio_is_kimik3() { [[ "${MODEL_NAME:-}" == "Kimi-K3-MXFP4" ]]; }
+
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    local _proxy_port="${PROXY_PORT}"
+    local _pod_hosts=""
+    if _moriio_is_kimik3; then
+        _proxy_port="${ROUTER_PORT:-30000}"
+        if [[ "$kv_role" == "kv_producer" ]]; then
+            _pod_hosts="${DECODE_POD_HOSTS:-}"
+        else
+            _pod_hosts="${PREFILL_POD_HOSTS:-}"
+        fi
+    fi
+    local _pod_json=""
+    [[ -n "$_pod_hosts" ]] && _pod_json=',"moriio_pod_hosts":"'"${_pod_hosts}"'"'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${_proxy_port}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_json}"'}}'
 }
 
 connector_runtime_patch() {
@@ -173,22 +187,39 @@ connector_launch_worker() {
     # Per-model flags from models.yaml (driver-exported; empty if none).
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
-    [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+    _model_config_to_array "$_mc" model_args
 
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
+        # Kimi-K3-MXFP4 uses TP2×DP8 per pool (not -tp 1); see wideep_disagg_2p2d.
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
+        local _tp_flag=(-tp 1)
+        local _dp_local="${DP_PARALLEL_SIZE_LOCAL}"
+        local _effective_dp="${dp_size}"
+        if _moriio_is_kimik3; then
+            local _k3_tp="${KIMIK3_TP_SIZE:-2}"
+            _tp_flag=(--tensor-parallel-size "${_k3_tp}")
+            _dp_local=$(( _GPUS_PER_NODE / _k3_tp ))
+            _effective_dp=$(( dp_size / _k3_tp ))
+        fi
+
         local extra_args=() kv_args=()
+        local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
         if [[ "$role" == "master" ]]; then
-            extra_args+=(--api-server-count=${_GPUS_PER_NODE})
-            local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
+            if _moriio_is_kimik3; then
+                extra_args+=(--api-server-count="${_effective_dp}")
+            else
+                extra_args+=(--api-server-count=${_GPUS_PER_NODE})
+            fi
             kv_args+=(--kv-transfer-config "${kv_config}")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
+            # K3 headless workers host real DP ranks; they MUST carry kv-transfer-config.
+            _moriio_is_kimik3 && kv_args+=(--kv-transfer-config "${kv_config}")
         fi
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
@@ -200,13 +231,15 @@ connector_launch_worker() {
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+        local _max_batched=()
+        [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]] && _max_batched=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
                 vllm serve "${MODEL_PATH}" \
-                    -tp 1 \
-                    --data-parallel-size "${dp_size}" \
-                    --data-parallel-size-local "${DP_PARALLEL_SIZE_LOCAL}" \
+                    "${_tp_flag[@]}" \
+                    --data-parallel-size "${_effective_dp}" \
+                    --data-parallel-size-local "${_dp_local}" \
                     --data-parallel-address "${dp_addr}" \
                     --data-parallel-rpc-port "${RPC_PORT}" \
                     --enable-expert-parallel \
@@ -219,14 +252,15 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
-                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
+                    "${_max_batched[@]}" \
+                    "${exec_args[@]}" "${model_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
             WORKER_PID=0; return 0
         fi
 
         vllm serve ${MODEL_PATH} \
-            -tp 1 \
-            --data-parallel-size "${dp_size}" \
-            --data-parallel-size-local ${DP_PARALLEL_SIZE_LOCAL} \
+            "${_tp_flag[@]}" \
+            --data-parallel-size "${_effective_dp}" \
+            --data-parallel-size-local ${_dp_local} \
             --data-parallel-address "${dp_addr}" \
             --data-parallel-rpc-port ${RPC_PORT} \
             --enable-expert-parallel \
@@ -239,7 +273,9 @@ connector_launch_worker() {
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+            "${_max_batched[@]}" \
             "${exec_args[@]}" \
+            "${model_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
             2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
@@ -323,7 +359,13 @@ connector_start_proxy() {
         # to DP ranks 0..7 while the TP server only has rank 0 -> every non-rank-0
         # request fails "data_parallel_rank N out of range [0,1)" (7/8 -> 500).
         local _router_dp_local="${DP_PARALLEL_SIZE_LOCAL}"
+        local _router_moriio_dp=""
         parallelism_is_wide_ep || _router_dp_local=1
+        if _moriio_is_kimik3; then
+            local _k3_tp="${KIMIK3_TP_SIZE:-2}"
+            _router_dp_local=$(( _GPUS_PER_NODE / _k3_tp ))
+            _router_moriio_dp=$(( (xP * _GPUS_PER_NODE) / _k3_tp ))
+        fi
         echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
         echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
         [ -f /root/.cargo/env ] && source /root/.cargo/env
@@ -336,6 +378,8 @@ connector_start_proxy() {
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
+        local _router_extra=()
+        [[ -n "$_router_moriio_dp" ]] && _router_extra+=(--moriio-dp-size "${_router_moriio_dp}")
         "${ROUTER_BIN}" \
             --host 0.0.0.0 \
             --port "${ROUTER_PORT}" \
@@ -345,6 +389,7 @@ connector_start_proxy() {
             --decode "${DECODE_URL}" \
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
+            "${_router_extra[@]}" \
             --policy round_robin \
             --prefill-policy round_robin \
             --decode-policy round_robin \

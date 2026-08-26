@@ -87,6 +87,7 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "Kimi-K3-MXFP4" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -94,6 +95,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "Kimi-K3-MXFP4" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -179,7 +181,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "Kimi-K3-MXFP4" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -249,6 +251,18 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
+
+# Kimi-K3-MXFP4 disagg requires validated 2P/2D topology (TP2×DP8 per pool).
+if [[ "$MODEL_NAME" == "Kimi-K3-MXFP4" ]]; then
+  if [[ "$WIDE_EP" != "1" || "$CONNECTOR" != "moriio" ]]; then
+    echo "Error: Kimi-K3-MXFP4 requires CONNECTOR=moriio WIDE_EP=1 (combo 3)." >&2
+    exit 1
+  fi
+  if [[ "$xP" -ne 2 || "$yD" -ne 2 ]]; then
+    echo "Error: Kimi-K3-MXFP4 requires xP=2 yD=2 (2P/2D disagg); got xP=$xP yD=$yD." >&2
+    exit 1
+  fi
+fi
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
@@ -328,6 +342,10 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+if [[ "$MODEL_NAME" == "Kimi-K3-MXFP4" && "$NUM_NODES" -ne 4 ]]; then
+  echo "Error: Kimi-K3-MXFP4 requires 4 nodes (xP=2 + yD=2); NUM_NODES=$NUM_NODES." >&2
+  exit 1
+fi
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -504,7 +522,18 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
     _IMG_KEY="${_IMG_KEY:-noimg}";
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    # Kimi-K3: prefill and decode compile different AITER kernel variants — separate caches.
+    if [ "${MODEL_NAME}" = "Kimi-K3-MXFP4" ] && [ "${JIT_CACHE_SPLIT_K3:-1}" = "1" ]; then
+        if [ "${SLURM_PROCID}" -lt "${xP}" ]; then
+            _JIT_ROLE="prefill";
+        else
+            _JIT_ROLE="decode";
+        fi
+        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}";
+    else
+        _JIT_CACHE_HOST="${_JIT_BASE}";
+    fi
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
