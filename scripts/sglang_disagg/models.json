@@ -575,7 +575,7 @@
             "RUN_MORI": "1",
             "USE_CX7_NICS": "0",
             "BENCHMARK_SCRIPT": "agentic",
-            "AGENTIC_CONFIG": "$HOME/MAD/scripts/common/agentx/agentic.example.yaml"
+            "AGENTIC_WORKLOAD": "conformance_256k"
         },
         "args": "-N 2 -n 2"
     }

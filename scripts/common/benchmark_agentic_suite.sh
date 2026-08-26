@@ -115,8 +115,11 @@ for name in $SUITE_WORKLOAD_NAMES; do
     elif [ "$WL_SOURCE" = "corpus" ]; then
         CORPUS_DIR="$WL_INPUT_DIR"
         if [ "$_is_dry" != "1" ]; then
-            { [ -n "$CORPUS_DIR" ] && [ -d "$CORPUS_DIR" ] && [ -n "$(ls -A "$CORPUS_DIR" 2>/dev/null)" ]; } \
-                || agentic_die "[$name] source=corpus input_dir not found or empty: $CORPUS_DIR"
+            if ! { [ -n "$CORPUS_DIR" ] && [ -d "$CORPUS_DIR" ] && [ -n "$(ls -A "$CORPUS_DIR" 2>/dev/null)" ]; }; then
+                agentic_err "[$name] source=corpus input_dir not found or empty: $CORPUS_DIR"
+                _suite_failed=1
+                continue
+            fi
         fi
     fi
     export WL_SOURCE CORPUS_DIR

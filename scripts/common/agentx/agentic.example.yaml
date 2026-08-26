@@ -63,30 +63,30 @@ workloads:
   # `input_dir` must be a directory of session_XXXXX.json files. Uncomment a
   # `preset:` (or inline distribution fields) to run verify_agentx_profile.py as
   # an optional pre-gate; with none, the corpus is replayed without verification.
-  - name: my_corpus
-    source: corpus
-    input_dir: /tmp/agentx_corpora/conformance_256k
-    # preset: conformance_256k      # optional: verify the corpus against this profile
-    # isl_tail: 262144              # optional: override the context-gating ISL tail
+#   - name: my_corpus
+#     source: corpus
+#     input_dir: /tmp/agentx_corpora/conformance_256k
+#     # preset: conformance_256k      # optional: verify the corpus against this profile
+#     # isl_tail: 262144              # optional: override the context-gating ISL tail
 
   # A user-added custom case, defined inline (no preset). Copy profiles/custom.example.yaml
   # fields here, or reference your own profile via `preset: <name>` after dropping it in profiles/.
-  - name: my_case
-    source: profile
-    model_tag: GLM-5.2-MXFP4
-    id_prefix: my_case
-    seed: 42
-    n_sessions: 150
-    block_size: 64
-    isl_p:   [48000, 120000, 200000]
-    osl_p:   [256, 2000, 9000]
-    delay_p: [3, 20, 180]
-    turns:
-      values:  [2, 3, 4, 6, 10, 20, 45, 103]
-      weights: [20, 24, 20, 12, 8, 6, 7, 3]
-    cache_hit: [0.88, 0.90]
-    clamps:
-      isl:   [1200, 205000]
-      osl:   [8, 20000]
-      delay: [1, 600]
-    # per-workload run override (optional): concurrency: [2]
+#   - name: my_case
+#     source: profile
+#     model_tag: GLM-5.2-MXFP4
+#     id_prefix: my_case
+#     seed: 42
+#     n_sessions: 150
+#     block_size: 64
+#     isl_p:   [48000, 120000, 200000]
+#     osl_p:   [256, 2000, 9000]
+#     delay_p: [3, 20, 180]
+#     turns:
+#       values:  [2, 3, 4, 6, 10, 20, 45, 103]
+#       weights: [20, 24, 20, 12, 8, 6, 7, 3]
+#     cache_hit: [0.88, 0.90]
+#     clamps:
+#       isl:   [1200, 205000]
+#       osl:   [8, 20000]
+#       delay: [1, 600]
+#     # per-workload run override (optional): concurrency: [2]

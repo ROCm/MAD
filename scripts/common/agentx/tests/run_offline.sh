@@ -16,7 +16,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTX_DIR="$(cd "$HERE/.." && pwd)"
 COMMON_DIR="$(cd "$AGENTX_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$COMMON_DIR/../.." && pwd)"
-CONFIG="$AGENTX_DIR/agentic.example.yaml"
+# Use the test config (includes my_corpus); agentic.example.yaml is for user reference.
+CONFIG="$HERE/test_offline.yaml"
 SUITE_DRIVER="$COMMON_DIR/benchmark_agentic_suite.sh"
 PY="python3"
 
@@ -311,6 +312,14 @@ if grep -vE '^[[:space:]]*#' "$SLURM_LAUNCHER" | grep -q 'AGENTIC_CONFIG="\$(eva
     _pass "sglang launcher: AGENTIC_CONFIG \$HOME expansion present"
 else
     _fail "sglang launcher: AGENTIC_CONFIG \$HOME expansion present"
+fi
+
+# 8.4 vLLM launcher must expand $HOME in AGENTIC_CONFIG before docker forward.
+VLLM_LAUNCHER="$REPO_ROOT/scripts/vllm_dissag/run_xPyD_models.slurm"
+if grep -vE '^[[:space:]]*#' "$VLLM_LAUNCHER" | grep -q 'AGENTIC_CONFIG=.*/#\$HOME'; then
+    _pass "vllm launcher: AGENTIC_CONFIG \$HOME expansion present"
+else
+    _fail "vllm launcher: AGENTIC_CONFIG \$HOME expansion present"
 fi
 
 # ---------------------------------------------------------------------------
