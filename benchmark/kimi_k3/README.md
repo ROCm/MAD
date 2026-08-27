@@ -14,7 +14,8 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 
 ## Hardware requirements
 
-- **8x MI350X or MI355X** (TP8)
+- **8x MI350X or MI355X** (TP8) for single-node recipes below
+- **MI300X (gfx942):** multi-node vLLM recipes live at [`scripts/vllm/kimik3_mi300x/`](../../scripts/vllm/kimik3_mi300x/) (PP2×TP8 colocated + 2P/2D disagg)
 - Checkpoint is ~1.56 TB — ensure the model cache volume has enough space
 
 ## Quick start (MAD-integrated)

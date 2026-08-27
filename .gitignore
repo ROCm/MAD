@@ -76,3 +76,6 @@ venv.bak/
 *.log
 *.out
 *.html
+
+# Cursor workspace shadow artifact (path-bug); never commit
+scripts/vllm_dissag/home/

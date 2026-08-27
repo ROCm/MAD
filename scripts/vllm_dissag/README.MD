@@ -53,6 +53,32 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 | `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
+| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; needs `kimik3-wideep-disagg` image (see [`wideep_disagg_2p2d`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/)) |
+
+Standalone reference launcher (debug / OCI): [`scripts/vllm/kimik3_mi300x/wideep_disagg_2p2d/`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/).
+
+See [ARCHITECTURE.md — Kimi-K3 worker taxonomy](ARCHITECTURE.md#5-kimi-k3-mxfp4-worker-taxonomy-w1w5) for W1–W5 ↔ `NODE_RANK` mapping.
+
+**Separate Docker image (not merged into MAD `docker/`):** build only from
+[`Dockerfile.kimik3_disagg`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/Dockerfile.kimik3_disagg).
+MAD integration is launcher + yaml; vLLM fork and connector fixes stay in that recipe Dockerfile.
+
+```bash
+# Build (once per cluster / after vLLM pin change):
+cd scripts/vllm/kimik3_mi300x/wideep_disagg_2p2d
+docker build -f Dockerfile.kimik3_disagg \
+  --build-arg VLLM_REF=kimi-k3-wideep-disagg-fullsource-v3 \
+  -t kimik3-wideep-disagg:latest .
+
+# Run via unified launcher:
+sbatch -N 4 run_xPyD_models.slurm \
+  --export=ALL,MODEL_NAME=Kimi-K3-MXFP4,CONNECTOR=moriio,WIDE_EP=1,xP=2,yD=2,\
+MODEL_PATH=/path/to/Kimi-K3-MXFP4,DOCKER_IMAGE_NAME=kimik3-wideep-disagg:latest
+```
+
+On-disk weights may be `Kimi-K3` or `Kimi-K3-MXFP4` under `models_blog/`; set `MODEL_PATH` to the
+discovered index directory on each node (launcher validates a common path across nodes, or use
+the standalone `run_2p2d_launch.sh` per-node `MODEL_DIR_*` overrides for OCI).
 
 ## Prerequisites
 

@@ -241,3 +241,54 @@ flowchart TD
 | `tests/TEST_PLAN.md` | before/after verification plan |
 | `benchmark_xPyD.sh`, `benchmark_long_context.sh`, `benchmark_niah.{sh,py}`, `benchmark_parser.py`, `parse_to_csv.py` | benchmark + parsing (NIAH = long-context retrieval, vllm#47042) |
 | `socket_barrier.py`, `socket_wait.py`, `salloc_launch.sh` | node coordination + salloc helper |
+
+---
+
+## 5. Kimi-K3-MXFP4 worker taxonomy (W1–W5)
+
+K3 disagg uses **TP2×DP8 → EP16 per pool** (not DeepSeek's TP1×DP16). Five logical workers map onto
+four Slurm tasks plus a co-located router on rank 0.
+
+```mermaid
+flowchart TB
+    subgraph prefillPool [PrefillPool xP=2]
+        W1[W1 prefill_master]
+        W2[W2 prefill_worker headless]
+    end
+    subgraph decodePool [DecodePool yD=2]
+        W3[W3 decode_master]
+        W4[W4 decode_worker headless]
+    end
+    W5[W5 vllm-router on rank0]
+    W5 --> W1
+    W5 --> W3
+    W1 -->|MoRIIO WRITE| W3
+    W2 -->|kv_producer ranks 4-7| W4
+```
+
+| Worker | Recipe `ROLE=` | `NODE_RANK` | Headless | KV role | K3-specific |
+|--------|----------------|-------------|----------|---------|-------------|
+| **W1** | `prefill_master` | 0 (+ **W5** router) | no | `kv_producer` | `--tensor-parallel-size 2`, `--api-server-count 8` |
+| **W2** | `prefill_worker` | 1 | yes, start-rank 4 | `kv_producer` | **must** carry `--kv-transfer-config` |
+| **W3** | `decode_master` | `xP` (2) | no | `kv_consumer` | same TP2 + pod hosts |
+| **W4** | `decode_worker` | `xP+1` (3) | yes, start-rank 4 | `kv_consumer` | **must** carry `--kv-transfer-config` |
+| **W5** | (router) | 0 only | — | — | `--moriio-dp-size 8`, `--intra-node-data-parallel-size 4` |
+
+**Required topology:** `xP=2`, `yD=2`, **4 nodes** — enforced in `run_xPyD_models.slurm`.
+
+**Pod hosts:** `PREFILL_POD_HOSTS` / `DECODE_POD_HOSTS` from `IPADDRS` (first `xP` / next `yD` IPs) go
+into each rank's kv JSON as `moriio_pod_hosts`.
+
+**JIT cache:** K3 prefill (mori HT/LL + cudagraph NONE) and decode (LL + PIECEWISE) compile different
+kernel variants; Slurm mounts separate `.../prefill` vs `.../decode` cache dirs under the image key
+when `MODEL_NAME=Kimi-K3-MXFP4`.
+
+Reference standalone launcher: [`../vllm/kimik3_mi300x/wideep_disagg_2p2d/`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/).
+
+### Docker image (out of scope for MAD merge)
+
+Kimi-K3-MXFP4 **does not** use `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`. It has its own
+[`Dockerfile.kimik3_disagg`](../vllm/kimik3_mi300x/wideep_disagg_2p2d/Dockerfile.kimik3_disagg)
+(vLLM branch `kimi-k3-wideep-disagg-fullsource-v3`, MoRI `--no-build-isolation`, vllm-router).
+Upstream integration adds **launcher + yaml + docs** only; operators build/tag
+`kimik3-wideep-disagg:latest` separately and pass `DOCKER_IMAGE_NAME` to slurm.
