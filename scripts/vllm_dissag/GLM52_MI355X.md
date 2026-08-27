@@ -77,9 +77,23 @@ it responds to xP and not to decode tuning.
 Prefill throughput measures **6,135–8,359 tok/s/rank** against a 34,000 tok/s/rank target,
 i.e. **~4–5x short**, and that is the binding constraint. See §5.
 
-`GLM-5.2-MXFP4` is **config-only and has never been booted.** Its recipe is a copy of the
-FP8 one with the two values that provably do not transfer re-derived (§3). Treat its first
-run as a bring-up, not a benchmark.
+`GLM-5.2-MXFP4` **now BOOTS and serves on gfx950** (2026-08-27, Crusoe MI355X). An earlier
+attempt hit Triton **Code-209** ("no kernel image for gfx950") in the aiter MXFP4 quant
+kernel; that is **resolved on the current aiter/vLLM/flydsl stack** — the MXFP4 MoE kernels
+compile for gfx950. Verified standalone TP8:
+
+```bash
+vllm serve $MODEL_DIR/GLM-5.2-MXFP4 -tp 8 --quantization quark --trust-remote-code \
+    --max-model-len 8192 --gpu-memory-utilization 0.85
+```
+
+`Application startup complete`, 0 kernel errors; smoke test returns coherent output
+("The capital of France is" -> "Paris. Bordering countries are Belgium, Luxembourg,
+Germany, ..."). Model load **51.7 GiB/rank** (vs FP8 ~89 GiB — the ~42% smaller Quark
+MoE-weights-only) so KV headroom is larger (175.8 GiB avail, 2.03M tokens, 248x concurrency
+at 8K). Note `--quantization quark` (NOT fp8); KV stays fp8 (no `kv-cache-scheme` in the
+config — do not set `kv-cache-dtype` to fp4). Disaggregated 1P/1D MXFP4 and a perf sweep are
+the remaining bring-up; the "never booted / Code-209 blocker" status is now **superseded**.
 
 ---
 
