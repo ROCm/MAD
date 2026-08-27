@@ -1,0 +1,149 @@
+{
+  "_comment": [
+    "Worked 4-node example for Broadcom-Thor2, through madengine's standard SLURM path.",
+    "  madengine run --manifest-file scripts/jax-maxtext/example_manifest_multinode_rccl.json",
+    "",
+    "RCCL_COMMIT selects the library and local_image lets madengine build/distribute it. Give",
+    "each build a unique tag: the tag is the cache key, so a reused one makes the next run",
+    "silently reuse the previous image.",
+    "",
+    "Review before use: slurm.partition, NCCL_IB_HCA, NCCL_IB_GID_INDEX, the *_SOCKET_IFNAME",
+    "pair. The RDMA block is Thor2-specific and not portable.",
+    "",
+    "See .claude/skills/mad-slurm-multinode/references/gotchas.md, section jax_maxtext.",
+    "",
+    "NCCL_IB_DISABLE=0 is REQUIRED: madengine's standard SLURM path exports it as 1 by",
+    "default, so without this the run silently uses TCP instead of RDMA.",
+    "",
+    "NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=INIT,NET so every run records which transport RCCL selected: grep the log for 'via NET/IB/*/GDRDMA'. Restricted to those subsystems it logs at connection setup, not per collective - measured at 0.906-0.909 s/step against 0.936 without it, i.e. no cost to the timing it protects."
+  ],
+  "built_images": {
+    "jax-maxtext-rccl": {
+      "model": "jax_maxtext_train_llama-3.1-8b_fp8_multinode_rccl",
+      "docker_image": "jax-maxtext-rccl:804895e493-fi-on-gfx950",
+      "dockerfile": "docker/jax_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
+      "base_docker": "rocm/jax-training:maxtext-v26.5",
+      "build_duration": 0,
+      "local_image": true,
+      "registry_image": null,
+      "registry": null,
+      "gpu_vendor": "AMD"
+    }
+  },
+  "built_models": {
+    "jax-maxtext-rccl": {
+      "name": "jax_maxtext_train_llama-3.1-8b_fp8_multinode_rccl",
+      "url": "",
+      "dockerfile": "docker/jax_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
+      "scripts": "scripts/jax-maxtext/run.sh",
+      "n_gpus": "-1",
+      "owner": "mad.support@amd.com",
+      "training_precision": "fp8",
+      "multiple_results": "perf_Llama-3.1-8B_fp8.csv",
+      "tags": [
+        "jax",
+        "maxtext",
+        "llama3",
+        "training",
+        "multinode",
+        "rccl"
+      ],
+      "timeout": 14400,
+      "args": "--model_repo jax_maxtext_train_llama-3.1-8b --quantization fp8",
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -v /sys:/sys:ro -v /run/udev:/run/udev:ro"
+    }
+  },
+  "context": {
+    "docker_env_vars": {
+      "MODEL_REPO": "jax_maxtext_train_llama-3.1-8b",
+      "QUANTIZATION": "fp8",
+      "GPUS_PER_NODE": "8",
+      "NCCL_IB_HCA": "bnxt_re0:1,bnxt_re1:1,bnxt_re2:1,bnxt_re3:1,bnxt_re4:1,bnxt_re5:1,bnxt_re6:1,bnxt_re7:1",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_GID_INDEX": "3",
+      "NCCL_SOCKET_IFNAME": "fenic0",
+      "GLOO_SOCKET_IFNAME": "fenic0",
+      "RDMAV_DRIVERS": "bnxt_re",
+      "IBV_DRIVERS": "bnxt_re",
+      "LIBIBVERBS_DRIVER_PATH": "/usr/lib/x86_64-linux-gnu/libibverbs",
+      "NCCL_IB_QPS_PER_CONNECTION": "8",
+      "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+      "NCCL_IB_USE_INLINE": "0",
+      "NCCL_IB_MERGE_NICS": "0",
+      "NCCL_IB_ADAPTIVE_ROUTING": "0",
+      "NCCL_IB_ROCE_VERSION_NUM": "2",
+      "NCCL_GDR_FLUSH_DISABLE": "1",
+      "NCCL_DMABUF_ENABLE": "0",
+      "RCCL_WARP_SPEED_AUTO": "0",
+      "XLA_AUTOTUNE_LEVEL": "0",
+      "MAXTEXT_EXTRA_ARGS": "per_device_batch_size=2 steps=25"
+    },
+    "docker_mounts": {
+      "/dev/infiniband": "/dev/infiniband",
+      "/etc/libibverbs.d": "/etc/libibverbs.d"
+    },
+    "docker_build_arg": {
+      "BASE_DOCKER": "rocm/jax-training:maxtext-v26.5",
+      "RCCL_COMMIT": "804895e493",
+      "BUILD_GPU_TARGETS": "gfx950",
+      "RDMA_CORE_VERSION": "63.0",
+      "RCCL_CMAKE_OPTIONS": "-DFAULT_INJECTION=ON"
+    },
+    "gpu_vendor": "AMD",
+    "guest_os": "UBUNTU",
+    "docker_gpus": "0,1,2,3,4,5,6,7",
+    "_comment": "docker_env_vars is what reaches the container; deployment_config.env_vars is host-side. Both carry the transport profile on purpose. See .claude/skills/mad-slurm-multinode/references/gotchas.md, section jax_maxtext."
+  },
+  "credentials_required": [],
+  "deployment_config": {
+    "target": "slurm",
+    "slurm": {
+      "partition": "SITE-PARTITION",
+      "nodes": 4,
+      "gpus_per_node": 8,
+      "time": "03:45:00",
+      "output_dir": "./slurm_output",
+      "exclusive": true,
+      "skip_gpus_directive": true,
+      "network_interface": "fenic0",
+      "_comment": "skip_gpus_directive: this cluster's SLURM rejects the generated --gpus-per-node directive."
+    },
+    "distributed": {
+      "_comment": "One container per node owning all 8 GPUs. nproc_per_node is the GPU count on this path, not a process count - See .claude/skills/mad-slurm-multinode/references/gotchas.md, section jax_maxtext.",
+      "nnodes": 4,
+      "nproc_per_node": 8,
+      "launcher": "docker",
+      "_comment_launcher": "Explicit: a missing launcher is read as torchrun. 'docker' selects the basic-environment setup."
+    },
+    "debug": false,
+    "docker_gpus": "0,1,2,3,4,5,6,7",
+    "env_vars": {
+      "MODEL_REPO": "jax_maxtext_train_llama-3.1-8b",
+      "QUANTIZATION": "fp8",
+      "GPUS_PER_NODE": "8",
+      "NCCL_IB_HCA": "bnxt_re0:1,bnxt_re1:1,bnxt_re2:1,bnxt_re3:1,bnxt_re4:1,bnxt_re5:1,bnxt_re6:1,bnxt_re7:1",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_GID_INDEX": "3",
+      "NCCL_SOCKET_IFNAME": "fenic0",
+      "GLOO_SOCKET_IFNAME": "fenic0",
+      "RDMAV_DRIVERS": "bnxt_re",
+      "IBV_DRIVERS": "bnxt_re",
+      "LIBIBVERBS_DRIVER_PATH": "/usr/lib/x86_64-linux-gnu/libibverbs",
+      "NCCL_IB_QPS_PER_CONNECTION": "8",
+      "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+      "NCCL_IB_USE_INLINE": "0",
+      "NCCL_IB_MERGE_NICS": "0",
+      "NCCL_IB_ADAPTIVE_ROUTING": "0",
+      "NCCL_IB_ROCE_VERSION_NUM": "2",
+      "NCCL_GDR_FLUSH_DISABLE": "1",
+      "NCCL_DMABUF_ENABLE": "0",
+      "RCCL_WARP_SPEED_AUTO": "0",
+      "XLA_AUTOTUNE_LEVEL": "0",
+      "MAXTEXT_EXTRA_ARGS": "per_device_batch_size=2 steps=25"
+    }
+  }
+}

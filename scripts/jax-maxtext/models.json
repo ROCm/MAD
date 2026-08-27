@@ -464,5 +464,71 @@
         "timeout": -1,
         "skip_gpu_arch": "gfx942",
         "args": "--model_repo jax_maxtext_train_qwen3-30b-a3b --quantization fp8"
+    },
+    {
+        "name": "jax_maxtext_train_llama-3.1-8b_multinode_rccl",
+        "dockerfile": "../../docker/jax_maxtext_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-8B.csv",
+        "tags": [
+            "jax",
+            "maxtext",
+            "llama3",
+            "training",
+            "multinode",
+            "rccl"
+        ],
+        "timeout": -1,
+        "args": "--model_repo jax_maxtext_train_llama-3.1-8b",
+        "skip_gpu_arch": "gfx942"
+    },
+    {
+        "name": "jax_maxtext_train_llama-3.1-8b_fp8_multinode_rccl",
+        "dockerfile": "../../docker/jax_maxtext_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "fp8",
+        "multiple_results": "perf_Llama-3.1-8B_fp8.csv",
+        "tags": [
+            "jax",
+            "maxtext",
+            "llama3",
+            "training",
+            "multinode",
+            "rccl"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo jax_maxtext_train_llama-3.1-8b --quantization fp8"
+    },
+    {
+        "name": "jax_maxtext_train_llama-3.1-405b_fp8_multinode_rccl",
+        "dockerfile": "../../docker/jax_maxtext_rccl_overlay",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "fp8",
+        "multiple_results": "perf_Llama-3.1-405B_fp8.csv",
+        "tags": [
+            "jax",
+            "maxtext",
+            "llama3",
+            "training",
+            "multinode",
+            "rccl"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo jax_maxtext_train_llama-3.1-405b --quantization fp8"
     }
 ]
