@@ -1,5 +1,10 @@
 base_config: "base.yml"
 run_name: "llama3_405B_training"
+# Without this, base.yml's default output directory is used and MaxText dies in
+# initialize() -> save_device_information() with FileNotFoundError on
+# maxtext_output/device_info.json, before the mesh is even built. Every other card
+# here sets it; this one did not, which is why 405B could not start at all.
+base_output_directory: "./"
 hardware: "gpu"
 steps: 20
 model_name: "llama3.1-405b"
