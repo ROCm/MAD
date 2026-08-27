@@ -1,3 +1,4 @@
+scripts/sglang_disagg/moriio_profiling/artifacts/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

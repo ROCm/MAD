@@ -84,7 +84,7 @@ model_allows_mori_ep() {
 # RUN_MORI=1: uses mori IO (default).
 # ---------------------------------------------------------------------------
 RUN_FILE="sglang_disagg_mori_io_ep.sh"
-_run_mori="${RUN_MORI:-0}"
+_run_mori="${RUN_MORI:-${RUN_PROFILE:-0}}"
 if [[ "$_run_mori" == "1" ]]; then
     echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
 else
@@ -113,6 +113,34 @@ DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp f
 # sglang_disagg_mori_io_ep.sh (RUN_MORI=1): set to 1 to skip phases; pass from wrapper before sbatch
 SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
 SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
+RUN_PROFILE="${RUN_PROFILE:-0}"
+# Default profile runs to skip benchmark warmup; preserve explicit caller values.
+if [[ -z "${SKIP_WARMUP+x}" ]]; then
+    if [[ "$RUN_PROFILE" == "1" ]]; then
+        SKIP_WARMUP=1
+    else
+        SKIP_WARMUP=0
+    fi
+fi
+# The target SGLang image defaults cached-prefix early send ON. Keep it OFF for
+SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX="${SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX:-0}"
+if [[ "$RUN_PROFILE" == "1" ]]; then
+    SKIP_BENCHMARK=0
+    SGLANG_ROCTX=1
+    MORI_ROCTX=0
+    MORI_ROCTX_TRANSFER=0
+    if [[ "$_run_mori" == "1" ]]; then
+        MORI_ROCTX=1
+        MORI_ROCTX_TRANSFER=1
+    fi
+    ROCPROF=1
+    ROCPROF_FLAGS="--kernel-trace --marker-trace"
+    ROCPROF_DIR_BASE=/run_logs
+    REQ_TIME_STATS=1
+fi
+export RUN_PROFILE SKIP_WARMUP SKIP_BENCHMARK SGLANG_ROCTX MORI_ROCTX MORI_ROCTX_TRANSFER REQ_TIME_STATS
+export SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX
+export ROCPROF ROCPROF_FLAGS ROCPROF_DIR_BASE
 
 MODEL_NAME="${MODEL_NAME:-None}"
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
@@ -392,12 +420,27 @@ docker run --rm \
     -e BENCHMARK_FILE=$BENCHMARK_FILE \
     -e IPADDRS=$IPADDRS \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
+    -e BENCHMARK_NUM_PROMPTS="${BENCHMARK_NUM_PROMPTS:-}" \
+    -e SKIP_WARMUP="$SKIP_WARMUP" \
     -e SKIP_BENCHMARK=$SKIP_BENCHMARK \
     -e SKIP_CURL_TEST=$SKIP_CURL_TEST \
+    -e RUN_PROFILE=$RUN_PROFILE \
+    -e SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX=${SGLANG_DISAGG_PREFILL_EARLY_SEND_CACHED_PREFIX:-0} \
     -e KV_TRANSFER_BACKEND=${KV_TRANSFER_BACKEND:-} \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    -e SGLANG_ROCTX=${SGLANG_ROCTX:-0} \
+    -e MORI_ROCTX=${MORI_ROCTX:-0} \
+    -e MORI_ROCTX_TRANSFER=${MORI_ROCTX_TRANSFER:-0} \
+    -e ROUTER_READY_TIMEOUT_SECONDS=${ROUTER_READY_TIMEOUT_SECONDS:-4000} \
+    -e SGLANG_KV_ROCTX=${SGLANG_KV_ROCTX:-0} \
+    -e ROCPROF=${ROCPROF:-0} \
+    -e ROCPROF_FLAGS="${ROCPROF_FLAGS:-}" \
+    -e ROCPROF_DIR_BASE=${ROCPROF_DIR_BASE:-} \
+    -e EAGER=${EAGER:-0} \
+    -e REQ_TIME_STATS=${REQ_TIME_STATS:-1} \
+    -e BENCHMARK_CON="${BENCHMARK_CON:-}" \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
@@ -406,5 +449,14 @@ docker run --rm \
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "
 '
+RUN_RC=$?
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
 
+if [[ "$RUN_PROFILE" == "1" ]]; then
+    srun --nodes=1 --ntasks=1 --nodelist="$MASTER_NODE" \
+        env XP="$xP" YD="$yD" HR="$LOG_PATH/$SLURM_JOB_ID" RUN_MORI="$_run_mori" \
+        bash "$MOONCAKE_REPO_DIR/moriio_profiling/process_kernels.sh" "$SLURM_JOB_ID"
+    PROCESS_RC=$?
+    [[ "$RUN_RC" -eq 0 ]] || exit "$RUN_RC"
+    exit "$PROCESS_RC"
+fi
