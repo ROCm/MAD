@@ -1,0 +1,45 @@
+diff --git a/src/application/transport/rdma/proxy/proxy_thread.cpp b/src/application/transport/rdma/proxy/proxy_thread.cpp
+index e3728c9..c41d5b0 100644
+--- a/src/application/transport/rdma/proxy/proxy_thread.cpp
++++ b/src/application/transport/rdma/proxy/proxy_thread.cpp
+@@ -163,10 +163,18 @@ void ProxyThread::MainLoop() {
+   uint32_t wr_qp[kMaxBatch];
+   int batch_count = 0;
+ 
++  const bool hpdbg = getenv("MORI_PROXY_DEBUG") != nullptr;
++  unsigned long long spins = 0;
++  uint32_t last_head_dbg = 0xFFFFFFFFu;
+   while (!ring_->shutdown) {
+     batch_count = 0;
+ 
+     uint32_t head = ring_->gpu_head;
++    if (hpdbg && (head != last_head_dbg || (++spins % 200000000ULL) == 0)) {
++      fprintf(stderr, "[proxy-dbg] gpu_head=%u next_slot=%u qps=%zu ring=%p\n", head,
++              next_slot_, qps_.size(), (void*)ring_);
++      last_head_dbg = head;
++    }
+     while (next_slot_ < head && batch_count < kMaxBatch) {
+       uint32_t slot = next_slot_ & PROXY_RING_MASK;
+       volatile ProxyCmd* cmd = &ring_->cmds[slot];
+diff --git a/src/application/transport/rdma/rdma.cpp b/src/application/transport/rdma/rdma.cpp
+index db3b4c5..1d230f1 100644
+--- a/src/application/transport/rdma/rdma.cpp
++++ b/src/application/transport/rdma/rdma.cpp
+@@ -339,6 +339,17 @@ bool ReadIbEnableRelaxedOrderingEnv() {
+ }
+ 
+ int MaybeAddRelaxedOrderingFlag(int accessFlag) {
++  // Pensando ionic (AINIC) does not support REMOTE_ATOMIC-capable MRs; ibv_reg_mr
++  // returns EINVAL (errno 22) for any MR registered with IBV_ACCESS_REMOTE_ATOMIC,
++  // regardless of size. Set MORI_IO_DISABLE_ATOMIC_MR=1 to strip the atomic bit so
++  // MoRI-IO KV registration succeeds on ionic (RDMA write/read still work; the KV
++  // transfer path does not rely on NIC remote-atomic).
++  {
++    const char* v = getenv("MORI_IO_DISABLE_ATOMIC_MR");
++    if (v && v[0] == '1') {
++      accessFlag &= ~IBV_ACCESS_REMOTE_ATOMIC;
++    }
++  }
+ #ifdef IBV_ACCESS_RELAXED_ORDERING
+   if (ReadIbEnableRelaxedOrderingEnv()) {
+     return accessFlag | IBV_ACCESS_RELAXED_ORDERING;

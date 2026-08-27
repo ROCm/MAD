@@ -146,6 +146,25 @@ ARG MORI_REPO=https://github.com/ROCm/mori.git
 # base's bundled mori for debugging.
 ARG WITH_MORI_BUILD=1
 ARG MORI_REF=42e895472b08
+# -----------------------------------------------------------------------------
+# EP16 / cross-node MoRI-EP over ionic (Tej's PR #558 host-CPU proxy).
+# The default MORI_REF above (42e895472b08, ROCm/mori) is validated for 1P/1D EP8
+# (intra-node all2all over XGMI) and is UNCHANGED. But EP16 = expert-parallel across
+# 2 nodes, so the MoE all2all crosses the ionic fabric -- and GPU-initiated IBGDA
+# doorbell MMIO fails under KVM/VFIO passthrough on ionic. Tej's PR #558 adds a
+# host-CPU-proxy transport (MORI_EP_OVER_RDMA=1 -> TransportType::PROXY: the host
+# rings the NIC doorbell via ibv_post_send) that makes cross-node EP work on ionic.
+#
+# Opt in with --build-arg WITH_MORI_EP_OVER_RDMA=1. That switches the MoRI source to
+# Tej's fork/branch below and applies docker/mori_pr558_ionic.patch, which carries the
+# ONE functional ionic fix on top of #558: MaybeAddRelaxedOrderingFlag strips
+# IBV_ACCESS_REMOTE_ATOMIC when MORI_IO_DISABLE_ATOMIC_MR=1 (ionic rejects atomic-
+# capable MRs with EINVAL/errno 22 at any size; the KV path needs no NIC atomics).
+# The patch also adds an OFF-by-default proxy debug trace (MORI_PROXY_DEBUG).
+# Leaving WITH_MORI_EP_OVER_RDMA=0 (default) reproduces the exact validated EP8 image.
+ARG WITH_MORI_EP_OVER_RDMA=0
+ARG MORI_EP_REPO=https://github.com/itej89/mori.git
+ARG MORI_EP_REF=32f8129c51b8            # tej/feat/ep-rdma-sharing (PR #558) tip
 ENV MORI_GPU_ARCHS=gfx950
 # AAC MI355X: Pensando Ionic (AINIC). Pin device-side IBGDA dispatch to the ionic
 # provider. Auto-detect would also work (8x rocep*s0 -> driver readlink -> ionic,
@@ -158,6 +177,9 @@ ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
 # Build/install matches dist-inf-cookbook Dockerfile.vllm.mori121_shareable for v1.2.1:
 # `BUILD_UMBP=OFF pip install .` (default build isolation). apt/pip build tooling kept
 # for bases that lack it; harmless where already present.
+# The ionic EP16 patch (PR #558 + atomic-MR strip). Copied unconditionally so the build
+# context is stable; only applied when WITH_MORI_EP_OVER_RDMA=1.
+COPY docker/mori_pr558_ionic.patch /tmp/mori_pr558_ionic.patch
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -170,11 +192,24 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     else \
         pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true && \
         rm -rf /tmp/mori-src && \
-        git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
-        cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
+        if [ "${WITH_MORI_EP_OVER_RDMA}" = "1" ]; then \
+            _REPO="${MORI_EP_REPO}" ; _REF="${MORI_EP_REF}" ; \
+        else \
+            _REPO="${MORI_REPO}" ; _REF="${MORI_REF}" ; \
+        fi && \
+        git clone --recursive "${_REPO}" /tmp/mori-src && \
+        cd /tmp/mori-src && git checkout "${_REF}" && git submodule update --init --recursive && \
+        if [ "${WITH_MORI_EP_OVER_RDMA}" = "1" ]; then \
+            git apply --verbose /tmp/mori_pr558_ionic.patch && \
+            echo "  applied docker/mori_pr558_ionic.patch (ionic atomic-MR strip + proxy debug)" ; \
+        fi && \
         BUILD_UMBP=OFF pip install . && \
         python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
-        echo "MORI_REF=${MORI_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> /app/versions.txt && \
+        if [ "${WITH_MORI_EP_OVER_RDMA}" = "1" ]; then \
+            echo "MORI_REF=${_REF}@$(git -C /tmp/mori-src rev-parse HEAD) (PR#558 EP-over-RDMA + ionic patch)" >> /app/versions.txt ; \
+        else \
+            echo "MORI_REF=${_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> /app/versions.txt ; \
+        fi && \
         rm -rf /tmp/mori-src ; \
     fi
 
