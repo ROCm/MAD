@@ -68,12 +68,12 @@
 # Build context = repo root:
 #   docker build -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile -t <registry>/<tag> .
 #
-# BASE_IMAGE is the open rocm/vllm-dev ci_base pinned by the validated recipe
-# (dist-inf-cookbook Dockerfile.vllm.mori121_shareable). Override --build-arg
-# BASE_IMAGE=... to build on a different ROCm base. vLLM compile is long (~30-60 min).
+# BASE_IMAGE is the shikpate ROCm/vLLM/MoRI-1.2.3 base carrying the validated
+# Wide-EP MoRI stack. Override --build-arg BASE_IMAGE=... to build on a different
+# ROCm base. vLLM compile is long (~30-60 min).
 # =============================================================================
 
-ARG BASE_IMAGE=rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491
+ARG BASE_IMAGE=rocmshared/pytorch-private:vllm-rocm_07_22_2026_shikpate_mori1.2.3
 FROM ${BASE_IMAGE}
 
 ENTRYPOINT []
@@ -156,9 +156,11 @@ RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER J
 #    committed commits (no working-tree edits).
 # -----------------------------------------------------------------------------
 # VLLM_REPO/REF are a PUBLIC GitHub repo + branch (the Wide-EP WRITE-mode vLLM the
-# dist-inf-cookbook mori121 image builds from). Override to your own vLLM fork/branch.
-ARG VLLM_REPO=https://github.com/shikamd123/vllm.git
-ARG VLLM_REF=vllm_2p2d_wide-ep_write_shikpate_test_06_29_customer
+# disagg image builds from). dsv3-wideep-clean = the shikpate/Shiksha Wide-EP MoRI-IO
+# base + a generic crash-safe rmsnorm probe fix, with all GLM sparse-DSA commits
+# stripped (DeepSeek-V3 uses standard MLA, not DSA). Override to your own fork/branch.
+ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
+ARG VLLM_REF=dsv3-wideep-clean
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
     MAX_JOBS=${MAX_JOBS}

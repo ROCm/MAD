@@ -144,6 +144,10 @@ _deepseek_recipe_env: &deepseek_recipe_env
   KV_CACHE_DTYPE: "fp8"
   KV_CACHE_MEMORY_BYTES: "20000000000"
   GPU_MEMORY_UTILIZATION: "0.80"
+  # Cap context so the attention workspace fits alongside EP-sharded weights.
+  # Without this vLLM sizes the workspace for the model's full 163840 ctx (~128 GiB
+  # alloc -> OOM). 65536 covers the NIAH sweep (longest 35k words ~= 50k tokens).
+  MAX_MODEL_LEN: "65536"
   VLLM_CUDAGRAPH_MODE: "PIECEWISE"
   PREFILL_CUDAGRAPH_MODE: "NONE"
   DECODE_CUDAGRAPH_MODE: "PIECEWISE"
