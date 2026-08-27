@@ -133,6 +133,56 @@ image. Without that graft the K3 MoE profiling shape finds no tuned FlyDSL confi
 falls back to a heuristic kernel, and aborts LLVM inside
 `determine_available_memory` — the worker dies natively with no Python traceback.
 
+### The build pins its toolchain, not just its sources
+
+SHA-pinning every source is not sufficient for a reproducible build. pip resolves
+build dependencies in an **isolated environment** from PyPI at build time, so a
+newer setuptools can break a build whose sources have not moved. That is not
+hypothetical: setuptools ≥ 80 added `assert isinstance(self.compiler, CCompiler)`
+to distutils' `build_ext.build_extension`, which MoRI's legacy
+`Cython.Distutils.build_ext` path violates, failing the `amd_mori` wheel with
+`AssertionError: run() must precede build_extension()` — while every pinned SHA
+was still correct.
+
+The Dockerfile therefore sets `PIP_CONSTRAINT` globally. That is the only
+mechanism that reaches inside pip's build isolation; a plain
+`pip install setuptools==X` in the image does **not** affect it.
+
+## Known failure modes
+
+Each of these was hit on a real MI300X cluster and is fixed in-tree. They are
+recorded because the symptom is a long way from the cause in every case.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `AssertionError: run() must precede build_extension()` building `amd_mori` | unpinned build toolchain (above) | `PIP_CONSTRAINT` in the Dockerfile |
+| `OCI runtime create failed: ... not a directory`, then the surviving node loops on `Waiting for nodes. . .` forever | Docker creates a *directory* at a missing bind-mount source, so the first run on a node lacking an RDMA lib poisons it for all later runs; `[ -e ]` matches that directory | launchers test with `[ -f ]` |
+| `LLVM ERROR: Do not know how to expand this operator's operand!` in `determine_available_memory`, `quantization_config=None` | gfx942 cannot codegen the a16w4 SiTUv2 heuristic kernel; the MoE must be requantized to int4 | all colocated cards set `AITER_SITUV2_A8W4=1` + `--quantization-config` |
+| Job reports COMPLETED with `0 successful, 0 failed` and no `perf.csv` | launchers warned but returned 0, so a crash was indistinguishable from a clean run | launchers `exit 1` when no perf CSV is produced |
+
+The RDMA one deserves emphasis: it is **per-node and self-propagating**, so it
+presents as an intermittent multi-node failure. A node that has never run this
+launcher works; one that has, and lacked the library, fails every time after.
+
+## Cluster prerequisites beyond the model card
+
+A model card cannot express these — they are site facts, and each one blocked a
+run until supplied:
+
+- **Wall time** must fit your SLURM *association* limit, which can be lower than
+  the partition's. The cards declare `24:00:00`; an association capped at
+  `08:00:00` leaves the job `PENDING (AssocMaxWallDurationPerJobLimit)` forever
+  rather than failing. Check with
+  `sacctmgr show assoc user=$USER format=Account,QOS,MaxWall`.
+- **An account** may be required (`--account`). madengine emits `#SBATCH
+  --account` for `slurm_multi` only after the fix in its `di_redesign` line; with
+  older madengine, export `SBATCH_ACCOUNT`.
+- **Docker on the compute nodes**, not just the login node.
+- **A way to distribute the image.** `--build-on-compute` requires `--registry`,
+  so on a registry-less cluster neither madengine nor MAD can get an image onto
+  the nodes. Building once and `docker save`ing to shared storage, then
+  `docker load` per node, works and needs no registry.
+
 ## Where the configuration lives
 
 Nothing K3-specific is baked into the image, matching the shared disagg image's
