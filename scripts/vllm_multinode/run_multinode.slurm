@@ -153,14 +153,24 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true
 
 # Host RDMA userspace libs must match the host kernel driver; mount them over the
 # image copies (same approach as the disagg launcher).
+# Use -f (regular file), NOT -e. Docker auto-creates a DIRECTORY at a bind-mount
+# source that does not exist, so a node where one of these libs is absent ends up
+# with an empty directory at e.g. /usr/lib/x86_64-linux-gnu/libionic.so.1 after the
+# first run. -e is true for that directory, so every later run on that node mounts
+# a directory over a file inside the image and docker refuses:
+#   OCI runtime create failed: ... not a directory: Are you trying to mount a
+#   directory onto a file (or vice-versa)?
+# The failure is per-node and self-propagating, which makes it look intermittent:
+# the container starts on a clean node and dies on a poisoned one, leaving the
+# survivors stuck forever at the socket barrier waiting for a peer that never came.
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
@@ -223,7 +233,15 @@ if [ -f "$_PERF_SRC" ]; then
     cp "$_PERF_SRC" "$_PERF_DST"
     echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
 else
-    echo "WARNING: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+    # Exit non-zero. A run that produced no parseable results is a failure, and
+    # reporting it as success is the worst outcome for a benchmark: madengine
+    # records exit_code=0 in its completion marker and the collector reports
+    # "0 successful, 0 failed", so a hard engine crash is indistinguishable from
+    # a clean run. Observed with the gfx942 MoE LLVM abort, which died in
+    # determine_available_memory and still exited 0.
+    echo "ERROR: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+    echo "Colocated multi-node run FAILED. Logs: ${LOG_PATH}/${SLURM_JOB_ID}" >&2
+    exit 1
 fi
 
 echo "Colocated multi-node run complete. Logs: ${LOG_PATH}/${SLURM_JOB_ID}"

@@ -91,6 +91,27 @@ FROM ${BASE_IMAGE}
 ENTRYPOINT []
 WORKDIR /app
 
+# Pin the *build toolchain*, not just the sources.
+#
+# Every source below is pinned to an immutable commit SHA, which makes the build
+# look reproducible -- but pip builds wheels in an isolated environment and
+# resolves build dependencies (setuptools, wheel) fresh from PyPI at build time.
+# So a newer setuptools published after this file was last exercised can break a
+# build whose sources have not moved at all. That is exactly what happened:
+# setuptools >= 80 added
+#     assert isinstance(self.compiler, CCompiler)
+# to distutils' build_ext.build_extension, which MoRI's legacy
+# Cython.Distutils.build_ext path violates, failing the amd_mori wheel with
+#     AssertionError: run() must precede build_extension()
+# while every pinned SHA was still correct.
+#
+# PIP_CONSTRAINT reaches inside pip's isolated build environments, which a plain
+# `pip install setuptools==X` in the image does not. Set globally so later stages
+# (AITER, vLLM, router) cannot regress the same way.
+ARG SETUPTOOLS_CONSTRAINT="setuptools<80"
+RUN printf '%s\n' "${SETUPTOOLS_CONSTRAINT}" > /etc/pip-constraints.txt
+ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
+
 ARG GFX_COMPILATION_ARCH="gfx942"
 ARG PYTORCH_ROCM_ARCH="gfx942"
 ARG MAX_JOBS=32

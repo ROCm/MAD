@@ -538,16 +538,22 @@ fi
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
+# -f, not -e: docker creates a DIRECTORY at a bind-mount source that does not
+# exist, so on a node lacking one of these libs the first run leaves an empty
+# directory behind and every later run mounts a directory over a file inside the
+# image, which docker rejects ("not a directory"). Self-propagating and per-node,
+# so it presents as an intermittent failure. Full note in
+# scripts/vllm_multinode/run_multinode.slurm.
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 
@@ -679,6 +685,11 @@ if [ -f "$_PERF_SRC" ]; then
     cp "$_PERF_SRC" "$_PERF_DST"
     echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
 else
-    echo "WARNING: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+    # Exit non-zero: a run with no parseable results is a failure. Reporting it
+    # as success makes madengine record exit_code=0 and collect "0 successful,
+    # 0 failed", which is indistinguishable from a clean run. See the longer
+    # note in scripts/vllm_multinode/run_multinode.slurm.
+    echo "ERROR: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+    exit 1
 fi
 
