@@ -365,8 +365,8 @@ connector_start_proxy() {
         echo "Starting vLLM Router (Production Proxy) on port ${PROXY_PORT}..."
         [ -f /root/.cargo/env ] && source /root/.cargo/env
         # Resolve the router binary: ROUTER_BINARY (site override, e.g. a shared-FS
-        # build) wins, else the one on PATH. Images that don't ship a router (e.g.
-        # the mori121 runtime image) require ROUTER_BINARY to be set.
+        # build) wins, else the one on PATH. Runtime-only images that don't ship a
+        # router require ROUTER_BINARY to be set.
         local ROUTER_BIN="${ROUTER_BINARY:-$(command -v vllm-router 2>/dev/null || true)}"
         if [ -z "${ROUTER_BIN}" ] || [ ! -x "${ROUTER_BIN}" ]; then
             echo "Error: vllm-router not found. Set ROUTER_BINARY=<path>, or PROXY_TYPE=toy_proxy." \

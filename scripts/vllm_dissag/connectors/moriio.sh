@@ -35,11 +35,11 @@ connector_init() {
     ROUTER_PORT="${ROUTER_PORT:-${VLLM_ROUTER_HTTP_PORT:-30000}}"
     [ "$PROXY_TYPE" == "vllm_router" ] && PROXY_PORT="${ROUTER_PORT}"
 
-    # Per-role MoRI all2all backend (wideEP only). Newer vLLM images (the v1.2.0
-    # MoRI-EP image) split the kernel: prefill=high_throughput (InterNodeV1),
-    # decode=low_latency (InterNodeV1LL) and REJECT the bare "mori" alias. Default
-    # to the per-role names; override via PREFILL_MORI_BACKEND/DECODE_MORI_BACKEND
-    # (or VLLM_ALL2ALL_BACKEND for the prefill side).
+    # Per-role MoRI all2all backend (wideEP only). Newer MoRI-EP images split the
+    # kernel: prefill=high_throughput (InterNodeV1), decode=low_latency
+    # (InterNodeV1LL) and REJECT the bare "mori" alias. Default to the per-role
+    # names; override via PREFILL_MORI_BACKEND/DECODE_MORI_BACKEND (or
+    # VLLM_ALL2ALL_BACKEND for the prefill side).
     PREFILL_MORI_BACKEND="${PREFILL_MORI_BACKEND:-${VLLM_ALL2ALL_BACKEND:-mori_high_throughput}}"
     DECODE_MORI_BACKEND="${DECODE_MORI_BACKEND:-mori_low_latency}"
 }
@@ -58,7 +58,7 @@ connector_setup_env() {
 
     export VLLM_LOGGING_LEVEL=INFO
     export VLLM_USE_V1=1
-    export VLLM_ALL2ALL_BACKEND=mori
+    export VLLM_ALL2ALL_BACKEND="${VLLM_ALL2ALL_BACKEND:-mori}"
 
     export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
@@ -114,7 +114,7 @@ connector_setup_env() {
 
     export ROCSHMEM_HEAP_SIZE="${ROCSHMEM_HEAP_SIZE:-8589934592}"
     export ROCSHMEM_MAX_NUM_CONTEXTS="${ROCSHMEM_MAX_NUM_CONTEXTS:-256}"
-    # MoRI shmem heap: 4 GiB default too small for EP>=32; 16 GiB (matches #324).
+    # MoRI shmem heap: 4 GiB default too small for EP>=32; use 16 GiB.
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
@@ -139,16 +139,38 @@ connector_launch_worker() {
 
     connector_setup_env "${EP_BACKEND:-mori}"
 
-    # Patch PyTorch default_pg_timeout (DP Gloo groups) — wideEP only.
+    # Patch PyTorch default_pg_timeout (DP Gloo groups) — wideEP only. REQUIRED: the
+    # DP ranks form a Gloo PG whose default timeout is 30 min; the cold AITER JIT
+    # compile on first boot takes ~15-20 min, and ranks that finish early block on the
+    # slowest one — a 30-min PG timeout kills the launch mid-compile. There is no clean
+    # runtime hook: torch reads no env var for this, and the value is frozen as a
+    # default-arg at torch-import time, so a post-import monkeypatch is too late. We
+    # therefore rewrite the source constant BEFORE torch is imported. Safe because the
+    # container is --rm and site-packages is baked in the image (NOT host-mounted); do
+    # NOT host-mount dist-packages or this edit would corrupt the shared host copy.
     if parallelism_is_wide_ep; then
         local _timeout_s="${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
-        local _torch_const="/usr/local/lib/python3.12/dist-packages/torch/distributed/constants.py"
-        if [ -f "$_torch_const" ]; then
+        # Resolve torch's constants.py from the live interpreter (do not hardcode the
+        # python version dir — it drifts across images).
+        local _torch_const
+        _torch_const="$(python3 -c 'import os,torch.distributed as d; print(os.path.join(os.path.dirname(d.__file__),"constants.py"))' 2>/dev/null)"
+        if [[ -z "$_torch_const" || ! -f "$_torch_const" ]]; then
+            echo "WARN: could not locate torch/distributed/constants.py; Gloo PG timeout stays at the 30m default — long JIT compiles may time out." >&2
+        elif grep -q "default_pg_timeout: timedelta = timedelta(seconds=" "$_torch_const"; then
+            echo "[moriio] Gloo PG timeout already patched in ${_torch_const}"
+        else
             sed -i "s/default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT/default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})/" "$_torch_const" 2>/dev/null || true
+            # Verify the substitution actually landed — the target line changes across
+            # torch versions, and a silent no-op reintroduces the 30m timeout crash.
+            if grep -q "default_pg_timeout: timedelta = timedelta(seconds=${_timeout_s})" "$_torch_const"; then
+                echo "[moriio] Patched Gloo PG timeout -> ${_timeout_s}s in ${_torch_const}"
+            else
+                echo "WARN: failed to patch default_pg_timeout in ${_torch_const} (torch layout changed?); Gloo PG stays at the 30m default — long JIT compiles may time out. Update the sed target for this torch version." >&2
+            fi
         fi
     fi
 
-    # Per-role execution mode. Ported from #324: NEVER use bare --enforce-eager.
+    # Per-role execution mode. NEVER use bare --enforce-eager.
     # On these AITER images an enforce-eager worker (no +quant_fp8 custom op) routes
     # fp8 quant through an AITER op whose signature mismatches the build
     # (dynamic_per_token_scaled_quant: out aiter_tensor_t) -> engine-init crash.
@@ -178,7 +200,7 @@ connector_launch_worker() {
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
-        # v1.2.0 image rejects the bare "mori" alias; these names are required.
+        # Newer MoRI-EP images reject the bare "mori" alias; these names are required.
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
@@ -306,7 +328,6 @@ connector_wait_workers_ready() {
 }
 
 connector_start_proxy() {
-    # Ported faithfully from the validated MAD-private PR#324 mori launcher.
     # vllm_router: production router with --kv-connector moriio (needs the binary on
     #   PATH or ROUTER_BINARY set); includes a registration gate so the benchmark
     #   doesn't fire before prefill+decode register (else every request 503s).

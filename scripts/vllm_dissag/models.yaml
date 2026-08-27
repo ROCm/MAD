@@ -121,9 +121,9 @@ Qwen3-30B-A3B:
 
 # ============================ MoE (TP + wideEP) ============================
 
-# DeepSeek-V3 family. The env: block encodes the validated MoRI-EP recipe knobs
-# (from MAD-private #324 DeepSeekV3_recipe.env). They are exported BEFORE the
-# connector's setup_env, so they define the wideEP recipe by default while still
+# DeepSeek-V3 family. The env: block encodes the validated MoRI-EP recipe knobs.
+# They are exported BEFORE the connector's setup_env, so they define the wideEP
+# recipe by default while still
 # yielding to a submit-time `-e` override. WIDE_EP=1 (wideEP) reads these; the
 # connector emits --block-size/--kv-cache-memory-bytes/--all2all-backend from them.
 # The tp: blocks are the TP-mode (WIDE_EP=0) flags (dense-style serving).

@@ -58,15 +58,16 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 
 - A Slurm cluster with `xP + yD` nodes (minimum 2: `xP=1`, `yD=1`), 8 GPUs/node.
 - A Docker image with vLLM + the KV connector(s) + NIC drivers. See **Building the Docker image**.
-- Model weights present on all allocated nodes under `/mnt/m2m_nobackup/models_blog/` or
-  `/shared_inference/models_blog/` (or set `MODEL_DIR`).
+- Model weights present on all allocated nodes at `$MODEL_DIR/$MODEL_NAME` (`MODEL_DIR` default
+  `/shared_inference/models_blog/`). The slurm resolves `MODEL_PATH` from these; override
+  `MODEL_DIR` to point elsewhere.
 - A shared filesystem for logs.
 
 ## Building the Docker image
 
-No public prebuilt image ships — build your own from the one fullsource Dockerfile (MoRI +
-AITER + vLLM + vllm-router + optional UCX/RIXL/rocSHMEM/DeepEP, from Git pins on an open
-ROCm ci_base):
+No public prebuilt image ships — build your own from the single Dockerfile
+`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile` (MoRI + AITER + vLLM + vllm-router +
+optional UCX/RIXL/rocSHMEM/DeepEP, from Git pins on an open ROCm ci_base):
 
 ```bash
 cd MAD
@@ -172,10 +173,12 @@ separate port from the vLLM server.
 
 **Port defaults by connector:**
 
-| Connector | vLLM server port | Proxy port |
-|-----------|------------------|------------|
-| `rixl` (TP or DeepEP) | 2584 | `ROUTER_PORT` (30000 default) |
-| `moriio` (MoRI-EP or TP) | 20005 | `ROUTER_PORT` (30000) with the default vllm_router; 10001 with `PROXY_TYPE=moriio_toy` |
+| Connector | vLLM server port | Proxy port (`vllm_router`) | Toy-proxy port |
+|-----------|------------------|----------------------------|----------------|
+| `rixl` (TP or DeepEP) | 2584 | `ROUTER_PORT` (default 18001) | 18001 (`toy_proxy`) |
+| `moriio` (MoRI-EP or TP) | 20005 | `ROUTER_PORT` (default 30000) | 10001 (`moriio_toy`) |
+
+Override any port with the matching env var (`ROUTER_PORT`, `MORI_SERVE_PORT`, etc.).
 
 ## Proxy options
 
@@ -184,24 +187,22 @@ separate port from the vLLM server.
 
 `ROUTER_BINARY` (both connectors): path to the `vllm-router` binary. Images that bake the
 router ship it on `PATH`, so this can be left unset. Runtime-only images that do NOT ship a
-router (e.g. the mori121 MoRI-EP image) require `ROUTER_BINARY=<path>` — point it at a built
+router require `ROUTER_BINARY=<path>` — point it at a built
 `vllm-router` on a shared mount. If unset and none is on `PATH`, the launcher aborts with a
 clear error.
 
-## Validation status (image capability)
+## Image capability by combo
 
-The consolidated launcher assembles correct argv for all 4 combos (offline gates in `tests/`),
-but each combo also needs the connector's transport built into the image:
+The launcher assembles correct argv for all 4 combos, but each combo needs its transport
+built into the image. Build with `WITH_NIXL=1` (default) to get all four; `WITH_NIXL=0` gives
+a MoRI-only image (moriio TP/wideEP).
 
-| Combo | Live-validated | Image requirement |
-|-------|----------------|-------------------|
-| moriio + TP | ✅ | MoRI (mori121 image) |
-| moriio + wideEP (mori) | ✅ 1P/1D + 2P/2D | MoRI (mori121 image) |
-| rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
-| rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
-
-The `mori_ep_fullsource` Dockerfile builds the MoRI stack; rixl/DeepEP combos need an image
-where those transports are validated (e.g. develop's `vllm_disagg_inference` for NIXL).
+| Combo | Transport needed in image |
+|-------|---------------------------|
+| moriio + TP | MoRI |
+| moriio + wideEP (mori) | MoRI |
+| rixl + TP | NixlConnector (+ working NCCL TP path) |
+| rixl + wideEP (deepep) | DeepEP all2all kernels |
 
 ## DeepEP options (optional)
 
@@ -226,6 +227,18 @@ Parse a results log:
 python3 benchmark_parser.py <log_path>/benchmark_XXX_CONCURRENCY.log
 ```
 
+The default sweep runs `benchmark_xPyD.sh`. Two alternatives plug in via `BENCHMARK_SCRIPT_FILE`:
+
+- **`benchmark_long_context.sh`** — steady-state long-context throughput/latency with per-shape
+  warmup (each ISL/OSL cell is warmed before measurement, so JIT/cudagraph/handshake costs are
+  excluded). Use for large-ISL runs, e.g. `BENCHMARK_COMBINATIONS="28000/1000"`.
+- **`benchmark_niah.sh`** — long-context *retrieval* accuracy (see below).
+
+```bash
+export BENCHMARK_SCRIPT_FILE=benchmark_long_context.sh
+export BENCHMARK_COMBINATIONS="28000/1000" BENCHMARK_CON="1 4 8"
+```
+
 ### Long-context retrieval (NIAH)
 
 `benchmark_niah.{sh,py}` run a needle-in-a-haystack retrieval sweep (adapted from
@@ -241,20 +254,10 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
 
-## Testing the launcher (no GPUs)
+## Inspecting the launcher (no GPUs)
 
-Offline suites validate the launcher without a cluster — run after any change to the
-launcher/connectors/yaml:
-
-```bash
-bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
-```
-
-- `tests/gate_check.sh` — connector × WIDE_EP combo validation (valid/invalid pairings, back-compat shims).
-- `tests/argv_assert.sh` — asserts expected `vllm serve` flags/env are present/absent per cell, from
-  the launcher's `DRY_RUN=1` output (no GPUs, no container).
-
-You can also dry-run any single cell to inspect the assembled command:
+Dry-run any cell to print the assembled `vllm serve` argv without launching — useful to
+sanity-check flags after editing the launcher/connectors/`models.yaml`:
 
 ```bash
 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori DRY_RUN=1 NODE_RANK=0 \
