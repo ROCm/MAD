@@ -47,8 +47,19 @@ if [[ -z "${CONNECTOR:-}" ]]; then
 fi
 WIDE_EP="${WIDE_EP:-0}"
 
+if [[ "${RUN_PROFILE:-0}" == "1" && "$CONNECTOR" != "moriio" ]]; then
+    echo "mori must be on for profiling" >&2
+    exit 1
+fi
+
 case "$CONNECTOR" in rixl|moriio) ;; *) echo "Error: invalid CONNECTOR='${CONNECTOR}' (expected rixl|moriio)." >&2; exit 1 ;; esac
 case "$WIDE_EP" in 0|1) ;; *) echo "Error: invalid WIDE_EP='${WIDE_EP}' (expected 0|1)." >&2; exit 1 ;; esac
+
+if [[ "${RUN_PROFILE:-0}" == "1" && "$CONNECTOR" == "moriio" ]]; then
+    _PROFILING_HOOKS="${SCRIPT_DIR}/moriio_profiling/hooks.sh"
+    [[ -f "$_PROFILING_HOOKS" ]] || { echo "Error: profiling hooks not found: ${_PROFILING_HOOKS}" >&2; exit 1; }
+    source "$_PROFILING_HOOKS"
+fi
 
 # EP backend defaults to the connector's partner; validate cross-pairings out.
 if [[ "$WIDE_EP" == "1" ]]; then
@@ -135,7 +146,14 @@ wait_for_proxy_and_cleanup() {
     echo "Waiting until proxy server closes..."
     python $NIXL_COOKBOOK_PATH/socket_wait.py --remote-ip ${MASTER_ADDR} --remote-port $PROXY_PORT
     echo "Killing the ${label} server"
-    pkill -P "$worker_pid" 2>/dev/null; kill "$worker_pid" 2>/dev/null || true
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        stop_worker "$worker_pid" || {
+            echo "[vllm_disagg] ERROR: profiling finalization failed for ${label}" >&2
+            exit 1
+        }
+    else
+        pkill -P "$worker_pid" 2>/dev/null; kill "$worker_pid" 2>/dev/null || true
+    fi
 }
 
 print_node_info() {
@@ -252,7 +270,14 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Killing the proxy server.."
     pkill -P $proxy_pid 2>/dev/null; kill $proxy_pid 2>/dev/null || true
     echo "Killing the prefill master server.."
-    pkill -P $local_worker_pid 2>/dev/null; kill $local_worker_pid 2>/dev/null || true
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        stop_worker "$local_worker_pid" || {
+            echo "[vllm_disagg] ERROR: profiling finalization failed for prefill master" >&2
+            exit 1
+        }
+    else
+        pkill -P "$local_worker_pid" 2>/dev/null; kill "$local_worker_pid" 2>/dev/null || true
+    fi
 
 elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -lt "$xP" ]; then
     print_node_info "Prefill child node"

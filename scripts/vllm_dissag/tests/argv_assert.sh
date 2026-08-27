@@ -53,7 +53,7 @@ echo "=== connector platform env files carry the RDMA-fix env ==="
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
 S="$(cat "$SLURM")"
 _has "$S" 'CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"' "slurm sources connector .env"
-_has "$S" '${CONNECTOR_ENV_ARGS}' "slurm forwards CONNECTOR_ENV_ARGS in docker run"
+_has "$S" '"${CONNECTOR_ENV_ARGS[@]}"' "slurm forwards CONNECTOR_ENV_ARGS in docker run"
 for cf in moriio rixl; do
   F="$DIR/connectors/${cf}.env"
   if [[ -f "$F" ]]; then

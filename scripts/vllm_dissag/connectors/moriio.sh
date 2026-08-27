@@ -155,7 +155,8 @@ connector_launch_worker() {
     # So even "no cudagraph" is expressed as cudagraph_mode:NONE WITH +quant_fp8.
     # Per-role mode: DECODE_CUDAGRAPH_MODE / PREFILL_CUDAGRAPH_MODE, falling back to
     # the global VLLM_CUDAGRAPH_MODE (back-compat).
-    local exec_args=()
+    local exec_args=() shutdown_args=()
+    [[ "${RUN_PROFILE:-0}" == "1" ]] && shutdown_args+=(--shutdown-timeout "${VLLM_PROFILING_SHUTDOWN_TIMEOUT_S:-120}")
     local _cudagraph_mode="${VLLM_CUDAGRAPH_MODE:-}"
     if [[ "$log_prefix" == "decode" ]]; then
         _cudagraph_mode="${DECODE_CUDAGRAPH_MODE:-$_cudagraph_mode}"
@@ -174,6 +175,12 @@ connector_launch_worker() {
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+
+    local _RP=""
+    if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+        moriio_profiling_hook_start "${log_prefix}"
+        _RP="${MORIIO_PROFILING_RUN_PREFIX}"
+    fi
 
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
@@ -203,7 +210,7 @@ connector_launch_worker() {
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
-                vllm serve "${MODEL_PATH}" \
+                ${_RP}vllm serve "${MODEL_PATH}" \
                     -tp 1 \
                     --data-parallel-size "${dp_size}" \
                     --data-parallel-size-local "${DP_PARALLEL_SIZE_LOCAL}" \
@@ -219,11 +226,10 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
-                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
+                    "${shutdown_args[@]}" "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
             WORKER_PID=0; return 0
         fi
-
-        vllm serve ${MODEL_PATH} \
+	${_RP}vllm serve ${MODEL_PATH} \
             -tp 1 \
             --data-parallel-size "${dp_size}" \
             --data-parallel-size-local ${DP_PARALLEL_SIZE_LOCAL} \
@@ -239,10 +245,11 @@ connector_launch_worker() {
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+            "${shutdown_args[@]}" \
             "${exec_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
-            2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
+            > >(tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
         WORKER_PID=$!
         return 0
     fi
@@ -269,27 +276,27 @@ connector_launch_worker() {
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "moriio" "${log_prefix}" "${role}" \
-            vllm serve "${MODEL_PATH}" \
+            ${_RP}vllm serve "${MODEL_PATH}" \
                 --tensor-parallel-size "${_tp_size}" \
                 --port "${SERVE_PORT}" \
                 --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
                 --trust-remote-code \
                 --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
                 --kv-transfer-config "${kv_config}" \
-                "${exec_args[@]}" "${model_args[@]}"
+                "${shutdown_args[@]}" "${exec_args[@]}" "${model_args[@]}"
         WORKER_PID=0; return 0
     fi
-
-    vllm serve ${MODEL_PATH} \
+    ${_RP}vllm serve ${MODEL_PATH} \
         --tensor-parallel-size "${_tp_size}" \
         --port ${SERVE_PORT} \
         --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.8} \
         --trust-remote-code \
         --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
         --kv-transfer-config "${kv_config}" \
+        "${shutdown_args[@]}" \
         "${exec_args[@]}" \
         "${model_args[@]}" \
-        2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
+        > >(tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
     WORKER_PID=$!
 }
 

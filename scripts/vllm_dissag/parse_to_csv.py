@@ -44,28 +44,27 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     current_concurrency = None
 
     for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in previous sections (from [RUNNING] line)
-        if i > 1:
-            prev_section = sections[i-1]
+        # The first result's configuration is in sections[0].
+        prev_section = sections[i - 1]
 
-            # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-            config_match = re.search(
-                r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
-                prev_section
-            )
-            # Fallback: extract from Namespace(...) in vllm bench serve output
-            if not config_match:
-                isl_m = re.search(r'random_input_len=(\d+)', prev_section)
-                osl_m = re.search(r'random_output_len=(\d+)', prev_section)
-                con_m = re.search(r'max_concurrency=(\d+)', prev_section)
-                if isl_m and osl_m and con_m:
-                    config_match = type('Match', (), {
-                        'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
-                    })()
-            if config_match:
-                current_input_seq_len = int(config_match.group(1))
-                current_output_seq_len = int(config_match.group(2))
-                current_concurrency = int(config_match.group(3))
+        # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
+        config_match = re.search(
+            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
+            prev_section
+        )
+        # Fallback: extract from Namespace(...) in vllm bench serve output
+        if not config_match:
+            isl_m = re.search(r'random_input_len=(\d+)', prev_section)
+            osl_m = re.search(r'random_output_len=(\d+)', prev_section)
+            con_m = re.search(r'max_concurrency=(\d+)', prev_section)
+            if isl_m and osl_m and con_m:
+                config_match = type('Match', (), {
+                    'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
+                })()
+        if config_match:
+            current_input_seq_len = int(config_match.group(1))
+            current_output_seq_len = int(config_match.group(2))
+            current_concurrency = int(config_match.group(3))
 
         # Extract Total token throughput (tok/s) from benchmark result section
         throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)

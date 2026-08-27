@@ -82,6 +82,62 @@ Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. 
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
 can reach.
 
+### MoRIIO profiling
+
+From the repository root, build the dedicated profiling target. The normal
+`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile` is not used for profiling.
+
+```bash
+PROFILING_IMAGE="<profiling-image>"  # replace with a registry tag you will push
+docker build --target profiling --build-arg WITH_NIXL=0 \
+  -f docker/vllm_disagg_inference.profiling.ubuntu.amd.Dockerfile \
+  -t "$PROFILING_IMAGE" .
+```
+
+From the repository root, submit this bounded 1P/1D MoRIIO TP profile:
+
+```bash
+cd scripts/vllm_dissag
+PROFILING_IMAGE="<profiling-image>"  # replace with the pushed tag or digest
+RUN_PROFILE=1 \
+CONNECTOR=moriio \
+RUN_MORI=0 \
+RUN_DEEPEP=0 \
+MORIIO_REQID_MAP=1 \
+DOCKER_IMAGE_NAME="$PROFILING_IMAGE" \
+MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV \
+WIDE_EP=0 \
+xP=1 \
+yD=1 \
+GPUS_PER_NODE=8 \
+SKIP_WARMUP=1 \
+BENCHMARK_SCRIPT=sweep \
+BENCHMARK_ITR=1 \
+BENCHMARK_NUM_PROMPTS=1 \
+BENCHMARK_CON="1" \
+BENCHMARK_COMBINATIONS="256/8" \
+sbatch --export=ALL --partition=amd-rccl --time=02:00:00 --gres=gpu:8 \
+  -N 2 -n 2 run_xPyD_models.slurm
+```
+
+`RUN_PROFILE=1` does not select the connector. Profiling requires the effective
+connector to be `moriio`; otherwise `run_xPyD_models.slurm` prints
+`CONNECTOR=moriio is required when RUN_PROFILE=1`, while direct
+`vllm_disagg.sh` invocation prints `mori must be on for profiling`. Both write
+to stderr and exit `1` before profile-helper checks, sourcing, or container
+launch. `MORIIO_REQID_MAP` defaults to `0`; exact
+`1` enables request mapping. Profiling defaults `SKIP_WARMUP=1`, which keeps
+warmup traffic out of the measured trace; set it explicitly to `0` to include
+warmup.
+
+**Because rocprof records one continuous server-lifetime trace, use one
+preferably small concurrency value, one preferably small ISL/OSL combination,
+one iteration, and one preferably small request count; keep OSL especially
+small.**
+
+See [moriio_profiling/README.md](moriio_profiling/README.md) for detailed model,
+topology, artifact, and validation guidance.
+
 ## Quick start
 
 ```bash
@@ -200,7 +256,7 @@ but each combo also needs the connector's transport built into the image:
 | rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
 
-The `mori_ep_fullsource` Dockerfile builds the MoRI stack; rixl/DeepEP combos need an image
+The `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile` builds the MoRI stack; rixl/DeepEP combos need an image
 where those transports are validated (e.g. develop's `vllm_disagg_inference` for NIXL).
 
 ## DeepEP options (optional)

@@ -15,7 +15,7 @@ flowchart TB
     user([user / CI]) -->|"sbatch + env\n(CONNECTOR, WIDE_EP, EP_BACKEND,\nMODEL_NAME, xP, yD, RUN_MORI/RUN_DEEPEP)"| slurm
 
     subgraph host["Submit host"]
-        slurm["run_xPyD_models.slurm\n• resolve script dir\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• docker run per node (-e env plumb)"]
+        slurm["run_xPyD_models.slurm\n• resolve script dir\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• docker run per node (-e env plumb)\n• profile post-processing + status propagation"]
     end
 
     slurm -->|"srun + docker run\n(one container per node)"| n0
@@ -31,7 +31,7 @@ flowchart TB
     end
 
     subgraph driverbox["Inside each container: vllm_disagg.sh (the one launcher)"]
-        driver["DRIVER\n• axis select + validate\n• topology math\n• models.yaml parse\n• role branch\n• barrier / benchmark / cleanup"]
+        driver["DRIVER\n• axis select + validate\n• topology math\n• models.yaml parse\n• role branch\n• barrier / benchmark / cleanup\n• profile shutdown/failure handling"]
         para["parallelism.sh\nTP vs wideEP arg helpers"]
         yaml[("models.yaml\nper-model flags + env")]
         conn{{"connectors/<CONNECTOR>.sh"}}
@@ -47,7 +47,7 @@ flowchart TB
     n0 --> driverbox
     driver -->|connector_launch_worker| vllm[["vllm serve\n(prefill / decode worker)"]]
     driver -->|rank 0 only| proxy[["proxy / router\n(co-located)"]]
-    proxy --> bench["benchmark_xPyD.sh\n→ *_CONCURRENCY.log"]
+    proxy --> bench["RUN_PROFILE=0: benchmark_xPyD.sh\nRUN_PROFILE=1: benchmark_xPyD_profile.sh\n→ *_CONCURRENCY.log"]
 ```
 
 ---
@@ -96,7 +96,7 @@ flowchart TD
 flowchart LR
     subgraph TP["WIDE_EP=0  (TP, PARALLEL_MODE=tp)"]
         rt["rixl + TP\nNixlConnector\n--tensor-parallel-size"]
-        mt["moriio + TP  (NEW)\nMoRIIOConnector\n--tensor-parallel-size"]
+        mt["moriio + TP\nMoRIIOConnector\n--tensor-parallel-size"]
     end
     subgraph EP["WIDE_EP=1  (wideEP, PARALLEL_MODE=dp)"]
         rd["rixl + deepep\nNixlConnector\n-tp 1 --data-parallel-size\n--enable-expert-parallel\n--all2all-backend deepep_*"]
@@ -239,5 +239,6 @@ flowchart TD
 | `tests/run_all.sh` | runs all offline gates (gate_check + argv_assert) |
 | `tests/{drive_cell,harvest,run_interactive}.sh` | interactive-allocation live-test drivers |
 | `tests/TEST_PLAN.md` | before/after verification plan |
-| `benchmark_xPyD.sh`, `benchmark_long_context.sh`, `benchmark_niah.{sh,py}`, `benchmark_parser.py`, `parse_to_csv.py` | benchmark + parsing (NIAH = long-context retrieval, vllm#47042) |
+| `benchmark_xPyD.sh`, `benchmark_xPyD_profile.sh`, `benchmark_long_context.sh`, `benchmark_niah.{sh,py}`, `benchmark_parser.py`, `parse_to_csv.py` | normal/profile benchmark + parsing (NIAH = long-context retrieval, vllm#47042) |
+| `moriio_profiling/{hooks.sh,process_kernels.sh,trace_tools.py}` | profiling wrap, bounded shutdown/failure handling, and post-processing |
 | `socket_barrier.py`, `socket_wait.py`, `salloc_launch.sh` | node coordination + salloc helper |
