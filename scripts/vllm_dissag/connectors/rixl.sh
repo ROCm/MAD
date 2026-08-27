@@ -235,6 +235,24 @@ _rixl_launch_tp() {
     local engine_id
     if [[ "$log_prefix" == "prefill" ]]; then engine_id="pd-run"; else engine_id="pd-decode"; fi
     local kv_config; kv_config=$(_rixl_kv_config_tp "${kv_role}" "${engine_id}")
+    # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
+    kv_config=$(kv_offload_wrap "${kv_config}")
+
+    # Prefix caching decouple (parity with _rixl_launch_deepep): OFF by default,
+    # forced on when KV_OFFLOAD is active OR ENABLE_PREFIX_CACHING=1, so the `none`
+    # arm of a KV-offload A/B also runs APC on (else the comparison is void).
+    local _pc="${ENABLE_PREFIX_CACHING:-0}"
+    kv_offload_enabled && _pc=1
+    local _prefix_cache_arg="--no-enable-prefix-caching"
+    [[ "$_pc" == "1" ]] && _prefix_cache_arg="--enable-prefix-caching"
+
+    # Optional context cap + small HBM KV cap (parity with _rixl_launch_deepep);
+    # --kv-cache-memory-bytes forces KV eviction so a KV_OFFLOAD A/B has something
+    # to offload. Emitted only when set at submit time.
+    local mml_args=()
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     # Per-model config string (from models.yaml; tokenized as the legacy eval did)
     local cfg_args=()
@@ -246,6 +264,9 @@ _rixl_launch_tp() {
             vllm serve "${MODEL_PATH}" \
                 --port "${SERVER_PORT}" \
                 --trust-remote-code \
+                "${_prefix_cache_arg}" \
+                "${mml_args[@]}" \
+                "${mem_args[@]}" \
                 --kv-transfer-config "${kv_config}" \
                 "${cfg_args[@]}"
         WORKER_PID=0; return 0
@@ -254,6 +275,9 @@ _rixl_launch_tp() {
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
+        "${_prefix_cache_arg}" \
+        "${mml_args[@]}" \
+        "${mem_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         "${cfg_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
@@ -292,9 +316,14 @@ _rixl_launch_deepep() {
     # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
     kv_config=$(kv_offload_wrap "${kv_config}")
 
-    # Offloading needs prefix caching; flip it on when KV_OFFLOAD is active.
+    # Prefix caching: OFF by default; the user can force it on via
+    # ENABLE_PREFIX_CACHING=1. OffloadingConnector requires it, so it is forced on
+    # whenever KV_OFFLOAD is active (regardless of the knob). Decoupling APC from
+    # KV_OFFLOAD lets the `none` arm of a KV-offload A/B also run with APC on.
+    local _pc="${ENABLE_PREFIX_CACHING:-0}"
+    kv_offload_enabled && _pc=1
     local _prefix_cache_arg="--no-enable-prefix-caching"
-    kv_offload_enabled && _prefix_cache_arg="--enable-prefix-caching"
+    [[ "$_pc" == "1" ]] && _prefix_cache_arg="--enable-prefix-caching"
 
     # Per-model dp: flags from models.yaml (driver-exported). Empty for the DeepSeek
     # deepep entries today, so this is currently a no-op; kept so future per-model
@@ -302,6 +331,16 @@ _rixl_launch_deepep() {
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+
+    # Optional context cap + HBM KV cap (parity with moriio.sh). Emitted only when
+    # set at submit time. --max-model-len is REQUIRED for DeepSeek-V3 MLA (the
+    # default max_model_len makes the TritonMLA attn-logits workspace OOM every
+    # prefill worker); --kv-cache-memory-bytes sets a small HBM cap so KV eviction
+    # actually happens (so a KV_OFFLOAD A/B has something to offload).
+    local mml_args=()
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "deepep" "${log_prefix}" "${role}" \
@@ -323,6 +362,8 @@ _rixl_launch_deepep() {
                 ${DBO_ARGS} \
                 "${extra_args[@]}" \
                 "${model_args[@]}" \
+                "${mml_args[@]}" \
+                "${mem_args[@]}" \
                 --kv-transfer-config "${kv_config}"
         WORKER_PID=0; return 0
     fi
@@ -345,6 +386,8 @@ _rixl_launch_deepep() {
         ${DBO_ARGS} \
         "${extra_args[@]}" \
         "${model_args[@]}" \
+        "${mml_args[@]}" \
+        "${mem_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
     WORKER_PID=$!

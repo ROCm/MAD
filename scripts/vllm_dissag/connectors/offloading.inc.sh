@@ -35,6 +35,14 @@ kv_offload_wrap() {
     OFFLOAD_CPU_BYTES="${OFFLOAD_CPU_BYTES}" _BASE_JSON="${base_json}" python3 - <<'PY'
 import json, os
 base = json.loads(os.environ["_BASE_JSON"])
+# vLLM's MultiConnector rebuilds each sub-connector as
+# KVTransferConfig(**sub_dict, engine_id=engine_id) (multi_connector.py
+# _get_connector_classes_and_configs). It reads engine_id via dict.get() WITHOUT
+# popping it, so a sub-connector dict that still carries an "engine_id" key raises
+# "got multiple values for keyword argument 'engine_id'". Lift engine_id off the
+# base dict to the outer MultiConnector; vLLM's fallback (ktc.get("engine_id",
+# outer.engine_id)) then re-applies it to the base (and offload) sub-connector.
+engine_id = base.pop("engine_id", None)
 offload = {
     "kv_connector": "OffloadingConnector",
     "kv_role": "kv_both",
@@ -49,6 +57,8 @@ multi = {
         "connectors": [offload, base],
     },
 }
+if engine_id is not None:
+    multi["engine_id"] = engine_id
 print(json.dumps(multi))
 PY
 }

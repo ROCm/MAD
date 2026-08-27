@@ -125,18 +125,19 @@ tier for prefix reuse) *on top of* the disagg P/D connector, by composing both v
 | `OFFLOAD_CPU_BYTES` | `107374182400` (100 GB) | instance-wide pinned host bytes for the CPU tier |
 
 ```bash
-# MoRI-EP wideEP DeepSeek-V3 with CPU-tier prefix caching
-export CONNECTOR=moriio WIDE_EP=1 KV_OFFLOAD=cpu
-export MODEL_NAME=DeepSeek-V3 xP=1 yD=1
+# NIXL (rixl) TP Llama-3.1-405B with CPU-tier prefix caching
+export CONNECTOR=rixl WIDE_EP=0 KV_OFFLOAD=cpu
+export MODEL_NAME=Llama-3.1-405B-Instruct-FP8-KV xP=1 yD=1
+export KV_CACHE_MEMORY_BYTES=8000000000     # small HBM KV cap so eviction feeds the CPU tier
 export BENCHMARK_SCRIPT=prefix_cache        # cold+warm two-pass to measure cache hits
 sbatch -N 2 -n 2 --nodelist=<node0,node1> run_xPyD_models.slurm
 ```
 
-Scope today: **native CPU offloading**, wideEP DeepSeek-V3 (`DeepSeek-V3`, `DeepSeek-V3-5layer`,
-`DeepSeek-R1`), both connectors. When `KV_OFFLOAD!=none` the launcher swaps the recipe's
-`--no-enable-prefix-caching` for `--enable-prefix-caching` (offloading is meaningless without
-it). Requires an image whose vLLM ships `OffloadingConnector` + `MultiConnector` (recent
-`rocm/vllm-dev` nightlies).
+Scope today: **native CPU offloading** on the NIXL (`rixl`) path, validated with
+`Llama-3.1-405B-Instruct-FP8-KV` (1P/1D, TP=8). When `KV_OFFLOAD!=none` the launcher forces
+`--enable-prefix-caching` (offloading is meaningless without it); pair it with a small
+`--kv-cache-memory-bytes` cap so HBM KV actually evicts into the CPU tier. Requires an image
+whose vLLM ships `OffloadingConnector` + `MultiConnector` (e.g. `vllm/vllm-openai-rocm:v0.26.0`).
 
 Each followed by:
 ```bash
