@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(madengine discover *)",
+      "Bash(madengine run *)",
+      "Bash(madengine build *)",
+      "Bash(python3 -m json.tool *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(rocm-smi *)",
+      "Bash(amd-smi *)",
+      "Bash(bash .claude/skills/mad-common/preflight.sh)",
+      "Bash(python3 .claude/skills/mad-validate/scripts/validate.py *)",
+      "Read",
+      "Grep",
+      "Glob"
+    ]
+  }
+}

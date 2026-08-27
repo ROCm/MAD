@@ -36,6 +36,7 @@ Below are blueprints of supported models along with their documentation.
   - [Tag Functionality](#tag-functionality)
   - [Timeout Configuration](#timeout-configuration)
   - [Debugging Options](#debugging-options)
+- [Claude Code Integration](#claude-code-integration)
 - [Contributing](#contributing)
   - [Adding New Models](#adding-new-models)
   - [Model Configuration](#model-configuration)
@@ -137,7 +138,7 @@ Configure execution timeouts at multiple levels:
 2. **Model-specific**: Set `timeout` field in `models.json`
 3. **Runtime override**: Use `--timeout` command line option
 
-> **Note**: Setting timeout to `0` disables the timeout entirely.
+> **Note**: Setting timeout to `-1` disables the timeout entirely.
 
 ### Debugging Options
 
@@ -156,9 +157,26 @@ madengine run --tags model_name --clean-docker-cache
 
 > ⚠️ **Warning**: When using `--keep-alive`, you must manually stop and remove the container before running the same model again.
 
+## Claude Code Integration
+
+MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code) that cover the four most common tasks. See `CLAUDE.md` for full context and conventions.
+
+| Skill | Invocation | What it does |
+|-------|-----------|--------------|
+| `/mad-benchmark <tag>` | Manual | Build and run a madengine benchmark on AMD GPUs |
+| `/mad-profile <tag> [tool]` | Manual | Run with a profiling/tracing tool attached |
+| `/mad-tune <tag>` | Manual | Measure-change-measure tuning loop |
+| `/mad-add-model <name>` | Manual | Scaffold models.json + Dockerfile + run.sh from the nearest template |
+| `/mad-report [csv]` | Auto | Summarize or compare benchmark results |
+| `/mad-validate [tag]` | Auto | GPU-free lint of models.json and file references |
+
+Larger fan-out jobs use workflows: `mad-benchmark-sweep` (parallel matrix across tags) and `mad-tune-search` (profile-informed tuning with adversarial verification).
+
 ## Contributing
 
 ### Adding New Models
+
+> **Using Claude Code?** Run `/mad-add-model <framework_project_workload>` — it scaffolds all three artifacts (models.json entry, Dockerfile, run.sh) from the closest existing template and validates the result automatically. The manual steps below are for reference.
 
 Follow these steps to add a new model to the MAD repository:
 
