@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLM-5.2-FP8 disagg — Crusoe MI355X + AINIC (ionic)</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --fg:#c9d1d9; --muted:#8b949e;
+          --tp8:#3fb950; --ep8:#58a6ff; --ep16:#d29922; --accent:#f778ba; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; padding:28px 20px 80px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:34px 0 12px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .note { background:#1c2333; border:1px solid var(--border); border-left:3px solid var(--accent);
+          padding:10px 14px; border-radius:6px; margin:14px 0; color:var(--muted); font-size:13px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin:16px 0; }
+  .card { flex:1 1 200px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .card h3 { margin:0 0 6px; font-size:13px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+  .card .big { font-size:30px; font-weight:700; }
+  .card .unit { font-size:13px; color:var(--muted); }
+  .tp8 { color:var(--tp8); } .ep8 { color:var(--ep8); } .ep16 { color:var(--ep16); }
+  table { width:100%; border-collapse:collapse; margin:10px 0 4px; font-size:13px; }
+  th,td { border:1px solid var(--border); padding:6px 10px; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  th { background:#1c2128; color:var(--muted); font-weight:600; }
+  .chart { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin:12px 0; }
+  .bar-row { display:flex; align-items:center; gap:10px; margin:5px 0; }
+  .bar-row .lbl { width:120px; font-size:12px; color:var(--muted); }
+  .bar { height:20px; border-radius:4px; min-width:2px; }
+  .bar-row .val { font-size:12px; }
+  .legend { display:flex; gap:16px; font-size:12px; color:var(--muted); margin:6px 0 2px; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .sw { width:11px; height:11px; border-radius:2px; display:inline-block; }
+  .ok { color:var(--tp8); font-weight:600; }
+  .blocked { color:#f85149; font-weight:600; }
+  code { background:#1c2128; padding:1px 5px; border-radius:4px; font-size:12px; }
+  footer { color:var(--muted); font-size:12px; margin-top:40px; border-top:1px solid var(--border); padding-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GLM-5.2-FP8 — 1P/1D disaggregated serving on Crusoe MI355X + AINIC (ionic)</h1>
+  <p class="sub">TP8 vs EP8 vs EP16 &middot; MoRI-EP + MoRIIO over Pensando AINIC (ionic, fw 1.117.5-a-77, KVM/VFIO) &middot; via vllm-router</p>
+
+  <div class="note">
+    <b>Scope:</b> Crusoe cluster, ISL 8K/32K/128K, <code>osl=128</code>, GLM-5.2-<b>FP8</b>
+    (<code>glm_moe_dsa</code>, 78 layers, e4m3 block-128), <code>kv-cache-dtype=fp8</code>,
+    <code>max-model-len=131072</code>. Different cluster/shape than the AAC 1P/1D-EP8 sweep in
+    <code>GLM52_MI355X.md</code> (ISL 28,672/1,024) — do not cross-compare. EP16 recipe in
+    <code>GLM52_EP16_IONIC.md</code>; full tables in <code>RESULTS_CRUSOE_IONIC.md</code>.
+  </div>
+
+  <h2>Headline — TPOT ladder (per-output-token latency)</h2>
+  <div class="cards">
+    <div class="card"><h3>TP8 &middot; latency king</h3><div class="big tp8">~22<span class="unit"> ms</span></div><div class="unit">no all2all &middot; 218 tok/s @ con8</div></div>
+    <div class="card"><h3>EP8</h3><div class="big ep8">~60<span class="unit"> ms</span></div><div class="unit">MoRI intra-node XGMI &middot; 371 tok/s @ con64</div></div>
+    <div class="card"><h3>EP16</h3><div class="big ep16">~117<span class="unit"> ms</span></div><div class="unit">MoRI cross-node ionic &middot; 280 tok/s @ con64</div></div>
+  </div>
+  <div class="note">TPOT is <b>flat across every context and concurrency</b> for each config — it is a
+    fixed per-decode-step comm tax, not a queueing effect. Each all2all hop (none &rarr; XGMI &rarr;
+    cross-node RDMA) roughly <b>doubles</b> TPOT.</div>
+
+  <div class="chart">
+    <div class="legend">
+      <span><i class="sw" style="background:var(--tp8)"></i>TP8</span>
+      <span><i class="sw" style="background:var(--ep8)"></i>EP8</span>
+      <span><i class="sw" style="background:var(--ep16)"></i>EP16</span>
+      <span style="margin-left:auto">Median TPOT (ms) — lower is better, scale to 130ms</span>
+    </div>
+    <div class="bar-row"><span class="lbl">TP8</span><div class="bar" style="width:17%;background:var(--tp8)"></div><span class="val tp8">22 ms</span></div>
+    <div class="bar-row"><span class="lbl">EP8</span><div class="bar" style="width:46%;background:var(--ep8)"></div><span class="val ep8">60 ms</span></div>
+    <div class="bar-row"><span class="lbl">EP16</span><div class="bar" style="width:90%;background:var(--ep16)"></div><span class="val ep16">117 ms</span></div>
+  </div>
+
+  <h2>Output throughput @ ISL 8K (tok/s, scales with concurrency)</h2>
+  <div class="chart">
+    <div class="legend">
+      <span><i class="sw" style="background:var(--ep8)"></i>EP8</span>
+      <span><i class="sw" style="background:var(--ep16)"></i>EP16</span>
+      <span style="margin-left:auto">aggregate output tok/s — scale to 400</span>
+    </div>
+    <div class="bar-row"><span class="lbl">EP8 con8</span><div class="bar" style="width:24%;background:var(--ep8)"></div><span class="val">96</span></div>
+    <div class="bar-row"><span class="lbl">EP8 con16</span><div class="bar" style="width:39%;background:var(--ep8)"></div><span class="val">156</span></div>
+    <div class="bar-row"><span class="lbl">EP8 con32</span><div class="bar" style="width:61%;background:var(--ep8)"></div><span class="val">244</span></div>
+    <div class="bar-row"><span class="lbl">EP8 con64</span><div class="bar" style="width:93%;background:var(--ep8)"></div><span class="val">371</span></div>
+    <div class="bar-row"><span class="lbl">EP16 con8</span><div class="bar" style="width:14%;background:var(--ep16)"></div><span class="val">56</span></div>
+    <div class="bar-row"><span class="lbl">EP16 con16</span><div class="bar" style="width:24%;background:var(--ep16)"></div><span class="val">96</span></div>
+    <div class="bar-row"><span class="lbl">EP16 con32</span><div class="bar" style="width:42%;background:var(--ep16)"></div><span class="val">169</span></div>
+    <div class="bar-row"><span class="lbl">EP16 con64</span><div class="bar" style="width:70%;background:var(--ep16)"></div><span class="val">280</span></div>
+  </div>
+
+  <h2>EP8 — full matrix (via vllm-router)</h2>
+  <table>
+    <tr><th>ISL</th><th>con</th><th>tok/s</th><th>Mean TTFT (ms)</th><th>Median TPOT (ms)</th></tr>
+    <tr><td>8K</td><td>8</td><td>96.1</td><td>2,725</td><td>59.4</td></tr>
+    <tr><td>8K</td><td>16</td><td>156.1</td><td>4,794</td><td>59.5</td></tr>
+    <tr><td>8K</td><td>32</td><td>243.8</td><td>6,880</td><td>61.4</td></tr>
+    <tr><td>8K</td><td>64</td><td>370.6</td><td>11,179</td><td>62.4</td></tr>
+    <tr><td>32K</td><td>8</td><td>56.4</td><td>9,443</td><td>59.5</td></tr>
+    <tr><td>32K</td><td>16</td><td>87.3</td><td>13,902</td><td>59.7</td></tr>
+    <tr><td>32K</td><td>32</td><td>112.9</td><td>24,973</td><td>59.7</td></tr>
+    <tr><td>32K</td><td>64</td><td>118.6</td><td>52,569</td><td>59.6</td></tr>
+    <tr><td>128K</td><td>8</td><td>20.1</td><td>40,852</td><td>60.5</td></tr>
+    <tr><td>128K</td><td>16</td><td>26.1</td><td>64,444</td><td>60.4</td></tr>
+    <tr><td>128K</td><td>32</td><td>26.9</td><td>125,827</td><td>60.5</td></tr>
+    <tr><td>128K</td><td>64</td><td>27.4</td><td>248,372</td><td>60.5</td></tr>
+  </table>
+
+  <h2>EP16 — full matrix (via vllm-router)</h2>
+  <table>
+    <tr><th>ISL</th><th>con</th><th>tok/s</th><th>Mean TTFT (ms)</th><th>Median TPOT (ms)</th></tr>
+    <tr><td>8K</td><td>8</td><td>56.2</td><td>3,264</td><td>115.3</td></tr>
+    <tr><td>8K</td><td>16</td><td>96.4</td><td>5,170</td><td>116.7</td></tr>
+    <tr><td>8K</td><td>32</td><td>168.7</td><td>7,004</td><td>116.4</td></tr>
+    <tr><td>8K</td><td>64</td><td>279.7</td><td>10,671</td><td>118.0</td></tr>
+    <tr><td>32K</td><td>8</td><td>38.8</td><td>10,547</td><td>115.6</td></tr>
+    <tr><td>32K</td><td>16</td><td>65.8</td><td>13,573</td><td>116.3</td></tr>
+    <tr><td>32K</td><td>32</td><td>104.7</td><td>20,542</td><td>116.3</td></tr>
+    <tr><td>32K</td><td>64</td><td>113.6</td><td>48,457</td><td>115.9</td></tr>
+    <tr><td>128K</td><td>8</td><td>17.4</td><td>42,239</td><td>116.5</td></tr>
+    <tr><td>128K</td><td>16</td><td>24.9</td><td>61,214</td><td>116.8</td></tr>
+    <tr><td>128K</td><td>32</td><td>26.0</td><td>123,516</td><td>116.8</td></tr>
+    <tr><td>128K</td><td>64</td><td colspan="3" style="text-align:center;color:var(--muted)">shape not completed</td></tr>
+  </table>
+
+  <h2>NIAH long-context retrieval — all three = 10/10</h2>
+  <table>
+    <tr><th>Config</th><th>2K words</th><th>20K</th><th>50K</th><th>90K</th></tr>
+    <tr><td>TP8</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td></tr>
+    <tr><td>EP8</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td></tr>
+    <tr><td>EP16</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td><td class="ok">10/10</td></tr>
+  </table>
+  <div class="note">GLM-5.2-FP8 long-context retrieval is <b>perfect</b>; fp8 KV cache does not hurt
+    accuracy and EP topology does not change correctness. Earlier "low NIAH" scores were a harness
+    bug (<code>NIAH_MAXTOK=64</code> truncated the model's chain-of-thought before the answer; no
+    <code>enable_thinking:false</code>). The harness in this branch is already fixed.</div>
+
+  <h2>Status of optimization levers</h2>
+  <table>
+    <tr><th>Lever</th><th>Status</th><th>Why</th></tr>
+    <tr><td>cudagraph decode FULL_AND_PIECEWISE</td><td class="ok">ON</td><td>the TPOT fix (see GLM52_MI355X.md §3)</td></tr>
+    <tr><td>vllm-router (raviguptaamd fork)</td><td class="ok">ON</td><td>DP-rank round-robin + KV-notify dpfix; toy proxy wedges at con&ge;32</td></tr>
+    <tr><td>MoRI PR#558 host-proxy (EP16)</td><td class="ok">ON</td><td>MORI_EP_OVER_RDMA=1; GPU IBGDA doorbell fails under KVM on ionic</td></tr>
+    <tr><td>DBO (dual-batch overlap)</td><td class="blocked">BLOCKED</td><td>MoRI supports_async=False; DeepEP unusable on ionic-KVM</td></tr>
+    <tr><td>MXFP4</td><td class="blocked">BLOCKED</td><td>Triton Code-209 on gfx950 (MoE kernel); FP8 is the path</td></tr>
+    <tr><td>MTP / speculative</td><td class="blocked">BLOCKED</td><td>hangs in disagg (draft-verify needs local KV)</td></tr>
+  </table>
+
+  <footer>
+    GLM-5.2-FP8 disaggregated serving on Crusoe MI355X + AINIC (ionic). Generated for ROCm/MAD PR #205.
+    Full recipe: <code>GLM52_EP16_IONIC.md</code> &middot; tables: <code>RESULTS_CRUSOE_IONIC.md</code>.
+  </footer>
+</div>
+</body>
+</html>
