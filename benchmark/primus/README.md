@@ -195,296 +195,296 @@ You can also check the Primus repository directly for the latest supported confi
 
 | Model | Tag |
 | --- | --- |
-| deepseek v2 BF16 | `primus_train/megatron_MI300X_deepseek_v2-BF16-pretrain` |
-| deepseek v2 FP8 | `primus_train/megatron_MI300X_deepseek_v2-FP8-pretrain` |
-| deepseek v2 lite BF16 | `primus_train/megatron_MI300X_deepseek_v2_lite-BF16-pretrain` |
-| deepseek v2 lite FP8 | `primus_train/megatron_MI300X_deepseek_v2_lite-FP8-pretrain` |
-| deepseek v3 BF16 | `primus_train/megatron_MI300X_deepseek_v3-BF16-pretrain` |
-| deepseek v3 FP8 | `primus_train/megatron_MI300X_deepseek_v3-FP8-pretrain` |
-| flux 12b ddp energon schnell resample local spec FP8 | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8` |
-| flux 12b ddp energon schnell resample te spec | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_te_spec` |
-| flux 12b ddp energon schnell resample te spec FP8 | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8` |
-| flux 12b fsdp2 energon schnell resample local spec | `primus_train/megatron_MI300X_flux_12b_fsdp2_energon_schnell_resample_local_spec` |
-| flux 12b fsdp2 energon schnell resample local spec FP8 | `primus_train/megatron_MI300X_flux_12b_fsdp2_energon_schnell_resample_local_spec_fp8` |
-| flux 535m | `primus_train/megatron_MI300X_flux_535m_pretrain` |
-| flux 535m pretrain FP8 | `primus_train/megatron_MI300X_flux_535m_pretrain_fp8` |
-| flux 535m with guidance embed | `primus_train/megatron_MI300X_flux_535m_with_guidance_embed` |
-| gdn 1B-100B BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-100B-pretrain` |
-| gdn 1B-exp7-fsdp-overlap BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-exp7-fsdp-overlap` |
-| gdn 1B BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-pretrain` |
-| gdn 300M BF16 | `primus_train/megatron_MI300X_gdn_300M_BF16-pretrain` |
-| gpt oss 20B BF16 | `primus_train/megatron_MI300X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B FP8 | `primus_train/megatron_MI300X_gpt_oss_20B-FP8-pretrain` |
-| grok1 BF16 | `primus_train/megatron_MI300X_grok1-BF16-pretrain` |
-| grok1 FP8 | `primus_train/megatron_MI300X_grok1-FP8-pretrain` |
-| grok2 BF16 | `primus_train/megatron_MI300X_grok2-BF16-pretrain` |
-| grok2 FP8 | `primus_train/megatron_MI300X_grok2-FP8-pretrain` |
-| hylo llama gdn 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_1B_BF16-pretrain` |
-| hylo llama gdn 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_300M_BF16-pretrain` |
-| hylo llama kda 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_kda_1B_BF16-pretrain` |
-| hylo llama mamba 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_1B_BF16-pretrain` |
-| hylo llama mamba 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_300M_BF16-pretrain` |
-| hylo llama mamba 3B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_3B_BF16-pretrain` |
-| hylo llama mamba 8B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_8B_BF16-pretrain` |
-| kda 1B BF16 | `primus_train/megatron_MI300X_kda_1B_BF16-pretrain` |
-| kda 300M BF16 | `primus_train/megatron_MI300X_kda_300M_BF16-pretrain` |
-| llama2 13B BF16 | `primus_train/megatron_MI300X_llama2_13B-BF16-pretrain` |
-| llama2 13B FP8 | `primus_train/megatron_MI300X_llama2_13B-FP8-pretrain` |
-| llama2 70B BF16 | `primus_train/megatron_MI300X_llama2_70B-BF16-pretrain` |
-| llama2 70B FP8 | `primus_train/megatron_MI300X_llama2_70B-FP8-pretrain` |
-| llama2 7B BF16 | `primus_train/megatron_MI300X_llama2_7B-BF16-pretrain` |
-| llama2 7B FP8 | `primus_train/megatron_MI300X_llama2_7B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/megatron_MI300X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/megatron_MI300X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/megatron_MI300X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/megatron_MI300X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/megatron_MI300X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/megatron_MI300X_llama3.1_8B-FP8-pretrain` |
-| llama3.2 1B BF16 | `primus_train/megatron_MI300X_llama3.2_1B-BF16-pretrain` |
-| llama3.2 1B FP8 | `primus_train/megatron_MI300X_llama3.2_1B-FP8-pretrain` |
-| llama3.2 3B BF16 | `primus_train/megatron_MI300X_llama3.2_3B-BF16-pretrain` |
-| llama3.2 3B FP8 | `primus_train/megatron_MI300X_llama3.2_3B-FP8-pretrain` |
-| llama3.3 70B BF16 | `primus_train/megatron_MI300X_llama3.3_70B-BF16-pretrain` |
-| llama3.3 70B FP8 | `primus_train/megatron_MI300X_llama3.3_70B-FP8-pretrain` |
-| llama3 70B BF16 | `primus_train/megatron_MI300X_llama3_70B-BF16-pretrain` |
-| llama3 70B FP8 | `primus_train/megatron_MI300X_llama3_70B-FP8-pretrain` |
-| llama3 8B BF16 | `primus_train/megatron_MI300X_llama3_8B-BF16-pretrain` |
-| llama3 8B FP8 | `primus_train/megatron_MI300X_llama3_8B-FP8-pretrain` |
-| llama4 17B128E BF16 | `primus_train/megatron_MI300X_llama4_17B128E-BF16-pretrain` |
-| llama4 17B128E FP8 | `primus_train/megatron_MI300X_llama4_17B128E-FP8-pretrain` |
-| llama4 17B16E BF16 | `primus_train/megatron_MI300X_llama4_17B16E-BF16-pretrain` |
-| llama4 17B16E FP8 | `primus_train/megatron_MI300X_llama4_17B16E-FP8-pretrain` |
-| mamba 370M | `primus_train/megatron_MI300X_mamba_370M-pretrain` |
-| mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI300X_mixtral_8x22B_v0.1-BF16-pretrain` |
-| mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI300X_mixtral_8x22B_v0.1-FP8-pretrain` |
-| mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI300X_mixtral_8x7B_v0.1-BF16-pretrain` |
-| mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI300X_mixtral_8x7B_v0.1-FP8-pretrain` |
-| qwen2.5 14B BF16 | `primus_train/megatron_MI300X_qwen2.5_14B-BF16-pretrain` |
-| qwen2.5 14B FP8 | `primus_train/megatron_MI300X_qwen2.5_14B-FP8-pretrain` |
-| qwen2.5 32B BF16 | `primus_train/megatron_MI300X_qwen2.5_32B-BF16-pretrain` |
-| qwen2.5 32B FP8 | `primus_train/megatron_MI300X_qwen2.5_32B-FP8-pretrain` |
-| qwen2.5 3B BF16 | `primus_train/megatron_MI300X_qwen2.5_3B-BF16-pretrain` |
-| qwen2.5 3B FP8 | `primus_train/megatron_MI300X_qwen2.5_3B-FP8-pretrain` |
-| qwen2.5 72B BF16 | `primus_train/megatron_MI300X_qwen2.5_72B-BF16-pretrain` |
-| qwen2.5 72B FP8 | `primus_train/megatron_MI300X_qwen2.5_72B-FP8-pretrain` |
-| qwen2.5 7B BF16 | `primus_train/megatron_MI300X_qwen2.5_7B-BF16-pretrain` |
-| qwen2.5 7B FP8 | `primus_train/megatron_MI300X_qwen2.5_7B-FP8-pretrain` |
-| qwen3 14B BF16 | `primus_train/megatron_MI300X_qwen3_14B-BF16-pretrain` |
-| qwen3 14B FP8 | `primus_train/megatron_MI300X_qwen3_14B-FP8-pretrain` |
-| qwen3 235B A22B BF16 | `primus_train/megatron_MI300X_qwen3_235B_A22B-BF16-pretrain` |
-| qwen3 235B A22B FP8 | `primus_train/megatron_MI300X_qwen3_235B_A22B-FP8-pretrain` |
-| qwen3 30B A3B BF16 | `primus_train/megatron_MI300X_qwen3_30B_A3B-BF16-pretrain` |
-| qwen3 30B A3B FP8 | `primus_train/megatron_MI300X_qwen3_30B_A3B-FP8-pretrain` |
-| qwen3 32B BF16 | `primus_train/megatron_MI300X_qwen3_32B-BF16-pretrain` |
-| qwen3 32B FP8 | `primus_train/megatron_MI300X_qwen3_32B-FP8-pretrain` |
-| qwen3 4B BF16 | `primus_train/megatron_MI300X_qwen3_4B-BF16-pretrain` |
-| qwen3 4B FP8 | `primus_train/megatron_MI300X_qwen3_4B-FP8-pretrain` |
-| qwen3 5 35B A3B BF16 | `primus_train/megatron_MI300X_qwen3_5_35B_A3B-BF16-pretrain` |
-| qwen3 5 35B A3B FP8 | `primus_train/megatron_MI300X_qwen3_5_35B_A3B-FP8-pretrain` |
-| qwen3 8B BF16 | `primus_train/megatron_MI300X_qwen3_8B-BF16-pretrain` |
-| qwen3 8B FP8 | `primus_train/megatron_MI300X_qwen3_8B-FP8-pretrain` |
+| Deepseek v2 BF16 | `primus_train/megatron_MI300X_deepseek_v2-BF16-pretrain` |
+| Deepseek v2 FP8 | `primus_train/megatron_MI300X_deepseek_v2-FP8-pretrain` |
+| Deepseek v2 lite BF16 | `primus_train/megatron_MI300X_deepseek_v2_lite-BF16-pretrain` |
+| Deepseek v2 lite FP8 | `primus_train/megatron_MI300X_deepseek_v2_lite-FP8-pretrain` |
+| Deepseek v3 BF16 | `primus_train/megatron_MI300X_deepseek_v3-BF16-pretrain` |
+| Deepseek v3 FP8 | `primus_train/megatron_MI300X_deepseek_v3-FP8-pretrain` |
+| Flux 12b ddp energon schnell resample local spec FP8 | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8` |
+| Flux 12b ddp energon schnell resample te spec | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_te_spec` |
+| Flux 12b ddp energon schnell resample te spec FP8 | `primus_train/megatron_MI300X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8` |
+| Flux 12b fsdp2 energon schnell resample local spec | `primus_train/megatron_MI300X_flux_12b_fsdp2_energon_schnell_resample_local_spec` |
+| Flux 12b fsdp2 energon schnell resample local spec FP8 | `primus_train/megatron_MI300X_flux_12b_fsdp2_energon_schnell_resample_local_spec_fp8` |
+| Flux 535m | `primus_train/megatron_MI300X_flux_535m_pretrain` |
+| Flux 535m pretrain FP8 | `primus_train/megatron_MI300X_flux_535m_pretrain_fp8` |
+| Flux 535m with guidance embed | `primus_train/megatron_MI300X_flux_535m_with_guidance_embed` |
+| Gdn 1B-100B BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-100B-pretrain` |
+| Gdn 1B-exp7-fsdp-overlap BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-exp7-fsdp-overlap` |
+| Gdn 1B BF16 | `primus_train/megatron_MI300X_gdn_1B_BF16-pretrain` |
+| Gdn 300M BF16 | `primus_train/megatron_MI300X_gdn_300M_BF16-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/megatron_MI300X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/megatron_MI300X_gpt_oss_20B-FP8-pretrain` |
+| Grok1 BF16 | `primus_train/megatron_MI300X_grok1-BF16-pretrain` |
+| Grok1 FP8 | `primus_train/megatron_MI300X_grok1-FP8-pretrain` |
+| Grok2 BF16 | `primus_train/megatron_MI300X_grok2-BF16-pretrain` |
+| Grok2 FP8 | `primus_train/megatron_MI300X_grok2-FP8-pretrain` |
+| Hylo llama gdn 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_1B_BF16-pretrain` |
+| Hylo llama gdn 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_300M_BF16-pretrain` |
+| Hylo llama kda 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_kda_1B_BF16-pretrain` |
+| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_1B_BF16-pretrain` |
+| Hylo llama mamba 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_300M_BF16-pretrain` |
+| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_3B_BF16-pretrain` |
+| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_8B_BF16-pretrain` |
+| Kda 1B BF16 | `primus_train/megatron_MI300X_kda_1B_BF16-pretrain` |
+| Kda 300M BF16 | `primus_train/megatron_MI300X_kda_300M_BF16-pretrain` |
+| Llama2 13B BF16 | `primus_train/megatron_MI300X_llama2_13B-BF16-pretrain` |
+| Llama2 13B FP8 | `primus_train/megatron_MI300X_llama2_13B-FP8-pretrain` |
+| Llama2 70B BF16 | `primus_train/megatron_MI300X_llama2_70B-BF16-pretrain` |
+| Llama2 70B FP8 | `primus_train/megatron_MI300X_llama2_70B-FP8-pretrain` |
+| Llama2 7B BF16 | `primus_train/megatron_MI300X_llama2_7B-BF16-pretrain` |
+| Llama2 7B FP8 | `primus_train/megatron_MI300X_llama2_7B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/megatron_MI300X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/megatron_MI300X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/megatron_MI300X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/megatron_MI300X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/megatron_MI300X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/megatron_MI300X_llama3.1_8B-FP8-pretrain` |
+| Llama3.2 1B BF16 | `primus_train/megatron_MI300X_llama3.2_1B-BF16-pretrain` |
+| Llama3.2 1B FP8 | `primus_train/megatron_MI300X_llama3.2_1B-FP8-pretrain` |
+| Llama3.2 3B BF16 | `primus_train/megatron_MI300X_llama3.2_3B-BF16-pretrain` |
+| Llama3.2 3B FP8 | `primus_train/megatron_MI300X_llama3.2_3B-FP8-pretrain` |
+| Llama3.3 70B BF16 | `primus_train/megatron_MI300X_llama3.3_70B-BF16-pretrain` |
+| Llama3.3 70B FP8 | `primus_train/megatron_MI300X_llama3.3_70B-FP8-pretrain` |
+| Llama3 70B BF16 | `primus_train/megatron_MI300X_llama3_70B-BF16-pretrain` |
+| Llama3 70B FP8 | `primus_train/megatron_MI300X_llama3_70B-FP8-pretrain` |
+| Llama3 8B BF16 | `primus_train/megatron_MI300X_llama3_8B-BF16-pretrain` |
+| Llama3 8B FP8 | `primus_train/megatron_MI300X_llama3_8B-FP8-pretrain` |
+| Llama4 17B128E BF16 | `primus_train/megatron_MI300X_llama4_17B128E-BF16-pretrain` |
+| Llama4 17B128E FP8 | `primus_train/megatron_MI300X_llama4_17B128E-FP8-pretrain` |
+| Llama4 17B16E BF16 | `primus_train/megatron_MI300X_llama4_17B16E-BF16-pretrain` |
+| Llama4 17B16E FP8 | `primus_train/megatron_MI300X_llama4_17B16E-FP8-pretrain` |
+| Mamba 370M | `primus_train/megatron_MI300X_mamba_370M-pretrain` |
+| Mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI300X_mixtral_8x22B_v0.1-BF16-pretrain` |
+| Mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI300X_mixtral_8x22B_v0.1-FP8-pretrain` |
+| Mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI300X_mixtral_8x7B_v0.1-BF16-pretrain` |
+| Mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI300X_mixtral_8x7B_v0.1-FP8-pretrain` |
+| Qwen2.5 14B BF16 | `primus_train/megatron_MI300X_qwen2.5_14B-BF16-pretrain` |
+| Qwen2.5 14B FP8 | `primus_train/megatron_MI300X_qwen2.5_14B-FP8-pretrain` |
+| Qwen2.5 32B BF16 | `primus_train/megatron_MI300X_qwen2.5_32B-BF16-pretrain` |
+| Qwen2.5 32B FP8 | `primus_train/megatron_MI300X_qwen2.5_32B-FP8-pretrain` |
+| Qwen2.5 3B BF16 | `primus_train/megatron_MI300X_qwen2.5_3B-BF16-pretrain` |
+| Qwen2.5 3B FP8 | `primus_train/megatron_MI300X_qwen2.5_3B-FP8-pretrain` |
+| Qwen2.5 72B BF16 | `primus_train/megatron_MI300X_qwen2.5_72B-BF16-pretrain` |
+| Qwen2.5 72B FP8 | `primus_train/megatron_MI300X_qwen2.5_72B-FP8-pretrain` |
+| Qwen2.5 7B BF16 | `primus_train/megatron_MI300X_qwen2.5_7B-BF16-pretrain` |
+| Qwen2.5 7B FP8 | `primus_train/megatron_MI300X_qwen2.5_7B-FP8-pretrain` |
+| Qwen3 14B BF16 | `primus_train/megatron_MI300X_qwen3_14B-BF16-pretrain` |
+| Qwen3 14B FP8 | `primus_train/megatron_MI300X_qwen3_14B-FP8-pretrain` |
+| Qwen3 235B A22B BF16 | `primus_train/megatron_MI300X_qwen3_235B_A22B-BF16-pretrain` |
+| Qwen3 235B A22B FP8 | `primus_train/megatron_MI300X_qwen3_235B_A22B-FP8-pretrain` |
+| Qwen3 30B A3B BF16 | `primus_train/megatron_MI300X_qwen3_30B_A3B-BF16-pretrain` |
+| Qwen3 30B A3B FP8 | `primus_train/megatron_MI300X_qwen3_30B_A3B-FP8-pretrain` |
+| Qwen3 32B BF16 | `primus_train/megatron_MI300X_qwen3_32B-BF16-pretrain` |
+| Qwen3 32B FP8 | `primus_train/megatron_MI300X_qwen3_32B-FP8-pretrain` |
+| Qwen3 4B BF16 | `primus_train/megatron_MI300X_qwen3_4B-BF16-pretrain` |
+| Qwen3 4B FP8 | `primus_train/megatron_MI300X_qwen3_4B-FP8-pretrain` |
+| Qwen3 5 35B A3B BF16 | `primus_train/megatron_MI300X_qwen3_5_35B_A3B-BF16-pretrain` |
+| Qwen3 5 35B A3B FP8 | `primus_train/megatron_MI300X_qwen3_5_35B_A3B-FP8-pretrain` |
+| Qwen3 8B BF16 | `primus_train/megatron_MI300X_qwen3_8B-BF16-pretrain` |
+| Qwen3 8B FP8 | `primus_train/megatron_MI300X_qwen3_8B-FP8-pretrain` |
 
 #### MI325X Configs (68)
 
 | Model | Tag |
 | --- | --- |
-| deepseek v2 BF16 | `primus_train/megatron_MI325X_deepseek_v2-BF16-pretrain` |
-| deepseek v2 FP8 | `primus_train/megatron_MI325X_deepseek_v2-FP8-pretrain` |
-| deepseek v2 lite BF16 | `primus_train/megatron_MI325X_deepseek_v2_lite-BF16-pretrain` |
-| deepseek v2 lite FP8 | `primus_train/megatron_MI325X_deepseek_v2_lite-FP8-pretrain` |
-| deepseek v3 BF16 | `primus_train/megatron_MI325X_deepseek_v3-BF16-pretrain` |
-| deepseek v3 FP8 | `primus_train/megatron_MI325X_deepseek_v3-FP8-pretrain` |
-| gpt oss 20B BF16 | `primus_train/megatron_MI325X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B FP8 | `primus_train/megatron_MI325X_gpt_oss_20B-FP8-pretrain` |
-| grok1 BF16 | `primus_train/megatron_MI325X_grok1-BF16-pretrain` |
-| grok1 FP8 | `primus_train/megatron_MI325X_grok1-FP8-pretrain` |
-| grok2 BF16 | `primus_train/megatron_MI325X_grok2-BF16-pretrain` |
-| grok2 FP8 | `primus_train/megatron_MI325X_grok2-FP8-pretrain` |
-| hylo llama mamba 1B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_1B_BF16-pretrain` |
-| hylo llama mamba 3B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_3B_BF16-pretrain` |
-| hylo llama mamba 8B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_8B_BF16-pretrain` |
-| llama2 13B BF16 | `primus_train/megatron_MI325X_llama2_13B-BF16-pretrain` |
-| llama2 13B FP8 | `primus_train/megatron_MI325X_llama2_13B-FP8-pretrain` |
-| llama2 70B BF16 | `primus_train/megatron_MI325X_llama2_70B-BF16-pretrain` |
-| llama2 70B FP8 | `primus_train/megatron_MI325X_llama2_70B-FP8-pretrain` |
-| llama2 7B BF16 | `primus_train/megatron_MI325X_llama2_7B-BF16-pretrain` |
-| llama2 7B FP8 | `primus_train/megatron_MI325X_llama2_7B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/megatron_MI325X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/megatron_MI325X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/megatron_MI325X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/megatron_MI325X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/megatron_MI325X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/megatron_MI325X_llama3.1_8B-FP8-pretrain` |
-| llama3.2 1B BF16 | `primus_train/megatron_MI325X_llama3.2_1B-BF16-pretrain` |
-| llama3.2 1B FP8 | `primus_train/megatron_MI325X_llama3.2_1B-FP8-pretrain` |
-| llama3.2 3B BF16 | `primus_train/megatron_MI325X_llama3.2_3B-BF16-pretrain` |
-| llama3.2 3B FP8 | `primus_train/megatron_MI325X_llama3.2_3B-FP8-pretrain` |
-| llama3.3 70B BF16 | `primus_train/megatron_MI325X_llama3.3_70B-BF16-pretrain` |
-| llama3.3 70B FP8 | `primus_train/megatron_MI325X_llama3.3_70B-FP8-pretrain` |
-| llama3 70B BF16 | `primus_train/megatron_MI325X_llama3_70B-BF16-pretrain` |
-| llama3 70B FP8 | `primus_train/megatron_MI325X_llama3_70B-FP8-pretrain` |
-| llama3 8B BF16 | `primus_train/megatron_MI325X_llama3_8B-BF16-pretrain` |
-| llama3 8B FP8 | `primus_train/megatron_MI325X_llama3_8B-FP8-pretrain` |
-| llama4 17B128E BF16 | `primus_train/megatron_MI325X_llama4_17B128E-BF16-pretrain` |
-| llama4 17B128E FP8 | `primus_train/megatron_MI325X_llama4_17B128E-FP8-pretrain` |
-| llama4 17B16E BF16 | `primus_train/megatron_MI325X_llama4_17B16E-BF16-pretrain` |
-| llama4 17B16E FP8 | `primus_train/megatron_MI325X_llama4_17B16E-FP8-pretrain` |
-| mamba 370M | `primus_train/megatron_MI325X_mamba_370M-pretrain` |
-| mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI325X_mixtral_8x22B_v0.1-BF16-pretrain` |
-| mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI325X_mixtral_8x22B_v0.1-FP8-pretrain` |
-| mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI325X_mixtral_8x7B_v0.1-BF16-pretrain` |
-| mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI325X_mixtral_8x7B_v0.1-FP8-pretrain` |
-| qwen2.5 14B BF16 | `primus_train/megatron_MI325X_qwen2.5_14B-BF16-pretrain` |
-| qwen2.5 14B FP8 | `primus_train/megatron_MI325X_qwen2.5_14B-FP8-pretrain` |
-| qwen2.5 32B BF16 | `primus_train/megatron_MI325X_qwen2.5_32B-BF16-pretrain` |
-| qwen2.5 32B FP8 | `primus_train/megatron_MI325X_qwen2.5_32B-FP8-pretrain` |
-| qwen2.5 3B BF16 | `primus_train/megatron_MI325X_qwen2.5_3B-BF16-pretrain` |
-| qwen2.5 3B FP8 | `primus_train/megatron_MI325X_qwen2.5_3B-FP8-pretrain` |
-| qwen2.5 72B BF16 | `primus_train/megatron_MI325X_qwen2.5_72B-BF16-pretrain` |
-| qwen2.5 72B FP8 | `primus_train/megatron_MI325X_qwen2.5_72B-FP8-pretrain` |
-| qwen2.5 7B BF16 | `primus_train/megatron_MI325X_qwen2.5_7B-BF16-pretrain` |
-| qwen2.5 7B FP8 | `primus_train/megatron_MI325X_qwen2.5_7B-FP8-pretrain` |
-| qwen3 14B BF16 | `primus_train/megatron_MI325X_qwen3_14B-BF16-pretrain` |
-| qwen3 14B FP8 | `primus_train/megatron_MI325X_qwen3_14B-FP8-pretrain` |
-| qwen3 235B A22B BF16 | `primus_train/megatron_MI325X_qwen3_235B_A22B-BF16-pretrain` |
-| qwen3 235B A22B FP8 | `primus_train/megatron_MI325X_qwen3_235B_A22B-FP8-pretrain` |
-| qwen3 30B A3B BF16 | `primus_train/megatron_MI325X_qwen3_30B_A3B-BF16-pretrain` |
-| qwen3 30B A3B FP8 | `primus_train/megatron_MI325X_qwen3_30B_A3B-FP8-pretrain` |
-| qwen3 32B BF16 | `primus_train/megatron_MI325X_qwen3_32B-BF16-pretrain` |
-| qwen3 32B FP8 | `primus_train/megatron_MI325X_qwen3_32B-FP8-pretrain` |
-| qwen3 4B BF16 | `primus_train/megatron_MI325X_qwen3_4B-BF16-pretrain` |
-| qwen3 4B FP8 | `primus_train/megatron_MI325X_qwen3_4B-FP8-pretrain` |
-| qwen3 8B BF16 | `primus_train/megatron_MI325X_qwen3_8B-BF16-pretrain` |
-| qwen3 8B FP8 | `primus_train/megatron_MI325X_qwen3_8B-FP8-pretrain` |
+| Deepseek v2 BF16 | `primus_train/megatron_MI325X_deepseek_v2-BF16-pretrain` |
+| Deepseek v2 FP8 | `primus_train/megatron_MI325X_deepseek_v2-FP8-pretrain` |
+| Deepseek v2 lite BF16 | `primus_train/megatron_MI325X_deepseek_v2_lite-BF16-pretrain` |
+| Deepseek v2 lite FP8 | `primus_train/megatron_MI325X_deepseek_v2_lite-FP8-pretrain` |
+| Deepseek v3 BF16 | `primus_train/megatron_MI325X_deepseek_v3-BF16-pretrain` |
+| Deepseek v3 FP8 | `primus_train/megatron_MI325X_deepseek_v3-FP8-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/megatron_MI325X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/megatron_MI325X_gpt_oss_20B-FP8-pretrain` |
+| Grok1 BF16 | `primus_train/megatron_MI325X_grok1-BF16-pretrain` |
+| Grok1 FP8 | `primus_train/megatron_MI325X_grok1-FP8-pretrain` |
+| Grok2 BF16 | `primus_train/megatron_MI325X_grok2-BF16-pretrain` |
+| Grok2 FP8 | `primus_train/megatron_MI325X_grok2-FP8-pretrain` |
+| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_1B_BF16-pretrain` |
+| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_3B_BF16-pretrain` |
+| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_8B_BF16-pretrain` |
+| Llama2 13B BF16 | `primus_train/megatron_MI325X_llama2_13B-BF16-pretrain` |
+| Llama2 13B FP8 | `primus_train/megatron_MI325X_llama2_13B-FP8-pretrain` |
+| Llama2 70B BF16 | `primus_train/megatron_MI325X_llama2_70B-BF16-pretrain` |
+| Llama2 70B FP8 | `primus_train/megatron_MI325X_llama2_70B-FP8-pretrain` |
+| Llama2 7B BF16 | `primus_train/megatron_MI325X_llama2_7B-BF16-pretrain` |
+| Llama2 7B FP8 | `primus_train/megatron_MI325X_llama2_7B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/megatron_MI325X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/megatron_MI325X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/megatron_MI325X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/megatron_MI325X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/megatron_MI325X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/megatron_MI325X_llama3.1_8B-FP8-pretrain` |
+| Llama3.2 1B BF16 | `primus_train/megatron_MI325X_llama3.2_1B-BF16-pretrain` |
+| Llama3.2 1B FP8 | `primus_train/megatron_MI325X_llama3.2_1B-FP8-pretrain` |
+| Llama3.2 3B BF16 | `primus_train/megatron_MI325X_llama3.2_3B-BF16-pretrain` |
+| Llama3.2 3B FP8 | `primus_train/megatron_MI325X_llama3.2_3B-FP8-pretrain` |
+| Llama3.3 70B BF16 | `primus_train/megatron_MI325X_llama3.3_70B-BF16-pretrain` |
+| Llama3.3 70B FP8 | `primus_train/megatron_MI325X_llama3.3_70B-FP8-pretrain` |
+| Llama3 70B BF16 | `primus_train/megatron_MI325X_llama3_70B-BF16-pretrain` |
+| Llama3 70B FP8 | `primus_train/megatron_MI325X_llama3_70B-FP8-pretrain` |
+| Llama3 8B BF16 | `primus_train/megatron_MI325X_llama3_8B-BF16-pretrain` |
+| Llama3 8B FP8 | `primus_train/megatron_MI325X_llama3_8B-FP8-pretrain` |
+| Llama4 17B128E BF16 | `primus_train/megatron_MI325X_llama4_17B128E-BF16-pretrain` |
+| Llama4 17B128E FP8 | `primus_train/megatron_MI325X_llama4_17B128E-FP8-pretrain` |
+| Llama4 17B16E BF16 | `primus_train/megatron_MI325X_llama4_17B16E-BF16-pretrain` |
+| Llama4 17B16E FP8 | `primus_train/megatron_MI325X_llama4_17B16E-FP8-pretrain` |
+| Mamba 370M | `primus_train/megatron_MI325X_mamba_370M-pretrain` |
+| Mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI325X_mixtral_8x22B_v0.1-BF16-pretrain` |
+| Mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI325X_mixtral_8x22B_v0.1-FP8-pretrain` |
+| Mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI325X_mixtral_8x7B_v0.1-BF16-pretrain` |
+| Mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI325X_mixtral_8x7B_v0.1-FP8-pretrain` |
+| Qwen2.5 14B BF16 | `primus_train/megatron_MI325X_qwen2.5_14B-BF16-pretrain` |
+| Qwen2.5 14B FP8 | `primus_train/megatron_MI325X_qwen2.5_14B-FP8-pretrain` |
+| Qwen2.5 32B BF16 | `primus_train/megatron_MI325X_qwen2.5_32B-BF16-pretrain` |
+| Qwen2.5 32B FP8 | `primus_train/megatron_MI325X_qwen2.5_32B-FP8-pretrain` |
+| Qwen2.5 3B BF16 | `primus_train/megatron_MI325X_qwen2.5_3B-BF16-pretrain` |
+| Qwen2.5 3B FP8 | `primus_train/megatron_MI325X_qwen2.5_3B-FP8-pretrain` |
+| Qwen2.5 72B BF16 | `primus_train/megatron_MI325X_qwen2.5_72B-BF16-pretrain` |
+| Qwen2.5 72B FP8 | `primus_train/megatron_MI325X_qwen2.5_72B-FP8-pretrain` |
+| Qwen2.5 7B BF16 | `primus_train/megatron_MI325X_qwen2.5_7B-BF16-pretrain` |
+| Qwen2.5 7B FP8 | `primus_train/megatron_MI325X_qwen2.5_7B-FP8-pretrain` |
+| Qwen3 14B BF16 | `primus_train/megatron_MI325X_qwen3_14B-BF16-pretrain` |
+| Qwen3 14B FP8 | `primus_train/megatron_MI325X_qwen3_14B-FP8-pretrain` |
+| Qwen3 235B A22B BF16 | `primus_train/megatron_MI325X_qwen3_235B_A22B-BF16-pretrain` |
+| Qwen3 235B A22B FP8 | `primus_train/megatron_MI325X_qwen3_235B_A22B-FP8-pretrain` |
+| Qwen3 30B A3B BF16 | `primus_train/megatron_MI325X_qwen3_30B_A3B-BF16-pretrain` |
+| Qwen3 30B A3B FP8 | `primus_train/megatron_MI325X_qwen3_30B_A3B-FP8-pretrain` |
+| Qwen3 32B BF16 | `primus_train/megatron_MI325X_qwen3_32B-BF16-pretrain` |
+| Qwen3 32B FP8 | `primus_train/megatron_MI325X_qwen3_32B-FP8-pretrain` |
+| Qwen3 4B BF16 | `primus_train/megatron_MI325X_qwen3_4B-BF16-pretrain` |
+| Qwen3 4B FP8 | `primus_train/megatron_MI325X_qwen3_4B-FP8-pretrain` |
+| Qwen3 8B BF16 | `primus_train/megatron_MI325X_qwen3_8B-BF16-pretrain` |
+| Qwen3 8B FP8 | `primus_train/megatron_MI325X_qwen3_8B-FP8-pretrain` |
 
 #### MI355X Configs (124)
 
 | Model | Tag |
 | --- | --- |
-| deepseek1.5B-odc-lbmini | `primus_train/megatron_MI355X_deepseek1.5B-odc-lbmini` |
-| deepseek v2 BF16 | `primus_train/megatron_MI355X_deepseek_v2-BF16-pretrain` |
-| deepseek v2 FP8 | `primus_train/megatron_MI355X_deepseek_v2-FP8-pretrain` |
-| deepseek v2 lite BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-pretrain` |
-| deepseek v2 lite-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft-packed-bridge_aligned` |
-| deepseek v2 lite-sft-packed BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft-packed` |
-| deepseek v2 lite-sft BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft` |
-| deepseek v2 lite FP8 | `primus_train/megatron_MI355X_deepseek_v2_lite-FP8-pretrain` |
-| deepseek v3 BF16 | `primus_train/megatron_MI355X_deepseek_v3-BF16-pretrain` |
-| deepseek v3 FP8 | `primus_train/megatron_MI355X_deepseek_v3-FP8-pretrain` |
-| deepseek v4 flash BF16 | `primus_train/megatron_MI355X_deepseek_v4_flash-BF16-pretrain` |
-| deepseek v4 flash FP8 | `primus_train/megatron_MI355X_deepseek_v4_flash-FP8-pretrain` |
-| flux 12b ddp energon schnell resample local spec FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8` |
-| flux 12b ddp energon schnell resample local spec mlperf FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8_mlperf` |
-| flux 12b ddp energon schnell resample local spec mxfp4 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_mxfp4` |
-| flux 12b ddp energon schnell resample te spec | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec` |
-| flux 12b ddp energon schnell resample te spec FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8` |
-| flux 12b ddp energon schnell resample te spec mlperf FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8_mlperf` |
-| flux 12b ddp energon schnell resample te spec mxfp4 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_mxfp4` |
-| flux 12b fsdp2 energon schnell resample local spec | `primus_train/megatron_MI355X_flux_12b_fsdp2_energon_schnell_resample_local_spec` |
-| flux 12b fsdp2 energon schnell resample local spec FP8 | `primus_train/megatron_MI355X_flux_12b_fsdp2_energon_schnell_resample_local_spec_fp8` |
-| flux 535m | `primus_train/megatron_MI355X_flux_535m_pretrain` |
-| flux 535m pretrain FP8 | `primus_train/megatron_MI355X_flux_535m_pretrain_fp8` |
-| flux 535m with guidance embed | `primus_train/megatron_MI355X_flux_535m_with_guidance_embed` |
-| gdn 1B BF16 | `primus_train/megatron_MI355X_gdn_1B_BF16-pretrain` |
-| gdn 300M BF16 | `primus_train/megatron_MI355X_gdn_300M_BF16-pretrain` |
-| glm5 BF16 | `primus_train/megatron_MI355X_glm5-BF16-pretrain` |
-| glm5 FP8 | `primus_train/megatron_MI355X_glm5-FP8-pretrain` |
-| gpt oss 120B BF16 | `primus_train/megatron_MI355X_gpt_oss_120B-BF16-pretrain` |
-| gpt oss 120B FP8 | `primus_train/megatron_MI355X_gpt_oss_120B-FP8-pretrain` |
-| gpt oss 20B BF16 | `primus_train/megatron_MI355X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B-mlperf FP8 | `primus_train/megatron_MI355X_gpt_oss_20B-FP8-mlperf-pretrain` |
-| gpt oss 20B FP8 | `primus_train/megatron_MI355X_gpt_oss_20B-FP8-pretrain` |
-| grok1 BF16 | `primus_train/megatron_MI355X_grok1-BF16-pretrain` |
-| grok1 FP8 | `primus_train/megatron_MI355X_grok1-FP8-pretrain` |
-| grok2 BF16 | `primus_train/megatron_MI355X_grok2-BF16-pretrain` |
-| grok2 FP8 | `primus_train/megatron_MI355X_grok2-FP8-pretrain` |
-| hylo llama gdn 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_gdn_1B_BF16-pretrain` |
-| hylo llama kda 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_kda_1B_BF16-pretrain` |
-| hylo llama mamba 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_1B_BF16-pretrain` |
-| hylo llama mamba 3B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_3B_BF16-pretrain` |
-| hylo llama mamba 8B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_8B_BF16-pretrain` |
-| kda 1B BF16 | `primus_train/megatron_MI355X_kda_1B_BF16-pretrain` |
-| kda 300M BF16 | `primus_train/megatron_MI355X_kda_300M_BF16-pretrain` |
-| kimi k2 BF16 | `primus_train/megatron_MI355X_kimi_k2-BF16-pretrain` |
-| kimi k2 FP8 | `primus_train/megatron_MI355X_kimi_k2-FP8-pretrain` |
-| kimi k3-8L-official BF16 | `primus_train/megatron_MI355X_kimi_k3-BF16-8L-official` |
-| kimi k3-curve BF16 | `primus_train/megatron_MI355X_kimi_k3-BF16-curve` |
-| lfm2 8B A1B BF16 | `primus_train/megatron_MI355X_lfm2_8B_A1B-BF16-pretrain` |
-| lfm2 8B A1B FP8 | `primus_train/megatron_MI355X_lfm2_8B_A1B-FP8-pretrain` |
-| lfm2 8B A1B-te-precision FP8 | `primus_train/megatron_MI355X_lfm2_8B_A1B-FP8-te-precision` |
-| llama2 13B BF16 | `primus_train/megatron_MI355X_llama2_13B-BF16-pretrain` |
-| llama2 13B FP8 | `primus_train/megatron_MI355X_llama2_13B-FP8-pretrain` |
-| llama2 70B BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-pretrain` |
-| llama2 70B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-sft-packed-bridge_aligned` |
-| llama2 70B-sft-packed-mlperf aligned BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-sft-packed-mlperf_aligned` |
-| llama2 70B FP8 | `primus_train/megatron_MI355X_llama2_70B-FP8-pretrain` |
-| llama2 70B-sft-packed-perf FP8 | `primus_train/megatron_MI355X_llama2_70B-FP8-sft-packed-perf` |
-| llama2 7B BF16 | `primus_train/megatron_MI355X_llama2_7B-BF16-pretrain` |
-| llama2 7B FP8 | `primus_train/megatron_MI355X_llama2_7B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/megatron_MI355X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/megatron_MI355X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/megatron_MI355X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/megatron_MI355X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/megatron_MI355X_llama3.1_8B-FP8-pretrain` |
-| llama3.1 8B MXFP4 | `primus_train/megatron_MI355X_llama3.1_8B-MXFP4-pretrain` |
-| llama3.1 8B MXFP8 | `primus_train/megatron_MI355X_llama3.1_8B-MXFP8-pretrain` |
-| llama3.2 1B BF16 | `primus_train/megatron_MI355X_llama3.2_1B-BF16-pretrain` |
-| llama3.2 1B FP8 | `primus_train/megatron_MI355X_llama3.2_1B-FP8-pretrain` |
-| llama3.2 3B BF16 | `primus_train/megatron_MI355X_llama3.2_3B-BF16-pretrain` |
-| llama3.2 3B FP8 | `primus_train/megatron_MI355X_llama3.2_3B-FP8-pretrain` |
-| llama3.3 70B BF16 | `primus_train/megatron_MI355X_llama3.3_70B-BF16-pretrain` |
-| llama3.3 70B FP8 | `primus_train/megatron_MI355X_llama3.3_70B-FP8-pretrain` |
-| llama3 70B BF16 | `primus_train/megatron_MI355X_llama3_70B-BF16-pretrain` |
-| llama3 70B FP8 | `primus_train/megatron_MI355X_llama3_70B-FP8-pretrain` |
-| llama3 8B-lora-sft BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-lora-sft` |
-| llama3 8B BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-pretrain` |
-| llama3 8B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed-bridge_aligned` |
-| llama3 8B-sft-packed-squad BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed-squad` |
-| llama3 8B-sft-packed BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed` |
-| llama3 8B-sft BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft` |
-| llama3 8B FP8 | `primus_train/megatron_MI355X_llama3_8B-FP8-pretrain` |
-| llama4 17B128E BF16 | `primus_train/megatron_MI355X_llama4_17B128E-BF16-pretrain` |
-| llama4 17B128E FP8 | `primus_train/megatron_MI355X_llama4_17B128E-FP8-pretrain` |
-| llama4 17B16E BF16 | `primus_train/megatron_MI355X_llama4_17B16E-BF16-pretrain` |
-| llama4 17B16E FP8 | `primus_train/megatron_MI355X_llama4_17B16E-FP8-pretrain` |
-| mamba 370M | `primus_train/megatron_MI355X_mamba_370M-pretrain` |
-| minimax m2.5 BF16 | `primus_train/megatron_MI355X_minimax_m2.5-BF16-pretrain` |
-| minimax m2.5 FP8 | `primus_train/megatron_MI355X_minimax_m2.5-FP8-pretrain` |
-| mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-BF16-pretrain` |
-| mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-FP8-pretrain` |
-| mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x7B_v0.1-BF16-pretrain` |
-| mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI355X_mixtral_8x7B_v0.1-FP8-pretrain` |
-| native hf to megatron sft.template | `primus_train/megatron_MI355X_native_hf_to_megatron_sft.template` |
-| qwen14B-odc-dn | `primus_train/megatron_MI355X_qwen14B-odc-dn` |
-| qwen2.5 14B BF16 | `primus_train/megatron_MI355X_qwen2.5_14B-BF16-pretrain` |
-| qwen2.5 14B FP8 | `primus_train/megatron_MI355X_qwen2.5_14B-FP8-pretrain` |
-| qwen2.5 32B BF16 | `primus_train/megatron_MI355X_qwen2.5_32B-BF16-pretrain` |
-| qwen2.5 32B FP8 | `primus_train/megatron_MI355X_qwen2.5_32B-FP8-pretrain` |
-| qwen2.5 3B BF16 | `primus_train/megatron_MI355X_qwen2.5_3B-BF16-pretrain` |
-| qwen2.5 3B FP8 | `primus_train/megatron_MI355X_qwen2.5_3B-FP8-pretrain` |
-| qwen2.5 72B BF16 | `primus_train/megatron_MI355X_qwen2.5_72B-BF16-pretrain` |
-| qwen2.5 72B FP8 | `primus_train/megatron_MI355X_qwen2.5_72B-FP8-pretrain` |
-| qwen2.5 7B BF16 | `primus_train/megatron_MI355X_qwen2.5_7B-BF16-pretrain` |
-| qwen2.5 7B FP8 | `primus_train/megatron_MI355X_qwen2.5_7B-FP8-pretrain` |
-| qwen3 14B BF16 | `primus_train/megatron_MI355X_qwen3_14B-BF16-pretrain` |
-| qwen3 14B FP8 | `primus_train/megatron_MI355X_qwen3_14B-FP8-pretrain` |
-| qwen3 235B A22B BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B-BF16-pretrain` |
-| qwen3 235B A22B-sft BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B-BF16-sft` |
-| qwen3 235B A22B FP8 | `primus_train/megatron_MI355X_qwen3_235B_A22B-FP8-pretrain` |
-| qwen3 235B A22B 4layer-sft BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B_4layer-BF16-sft` |
-| qwen3 30B A3B BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-pretrain` |
-| qwen3 30B A3B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-sft-packed-bridge_aligned` |
-| qwen3 30B A3B-sft-packed BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-sft-packed` |
-| qwen3 30B A3B FP8 | `primus_train/megatron_MI355X_qwen3_30B_A3B-FP8-pretrain` |
-| qwen3 32B BF16 | `primus_train/megatron_MI355X_qwen3_32B-BF16-pretrain` |
-| qwen3 32B FP8 | `primus_train/megatron_MI355X_qwen3_32B-FP8-pretrain` |
-| qwen3 4B BF16 | `primus_train/megatron_MI355X_qwen3_4B-BF16-pretrain` |
-| qwen3 4B FP8 | `primus_train/megatron_MI355X_qwen3_4B-FP8-pretrain` |
-| qwen3 5 35B A3B BF16 | `primus_train/megatron_MI355X_qwen3_5_35B_A3B-BF16-pretrain` |
-| qwen3 5 35B A3B FP8 | `primus_train/megatron_MI355X_qwen3_5_35B_A3B-FP8-pretrain` |
-| qwen3 8B BF16 | `primus_train/megatron_MI355X_qwen3_8B-BF16-pretrain` |
-| qwen3 8B FP8 | `primus_train/megatron_MI355X_qwen3_8B-FP8-pretrain` |
+| Deepseek1.5B-odc-lbmini | `primus_train/megatron_MI355X_deepseek1.5B-odc-lbmini` |
+| Deepseek v2 BF16 | `primus_train/megatron_MI355X_deepseek_v2-BF16-pretrain` |
+| Deepseek v2 FP8 | `primus_train/megatron_MI355X_deepseek_v2-FP8-pretrain` |
+| Deepseek v2 lite BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-pretrain` |
+| Deepseek v2 lite-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft-packed-bridge_aligned` |
+| Deepseek v2 lite-sft-packed BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft-packed` |
+| Deepseek v2 lite-sft BF16 | `primus_train/megatron_MI355X_deepseek_v2_lite-BF16-sft` |
+| Deepseek v2 lite FP8 | `primus_train/megatron_MI355X_deepseek_v2_lite-FP8-pretrain` |
+| Deepseek v3 BF16 | `primus_train/megatron_MI355X_deepseek_v3-BF16-pretrain` |
+| Deepseek v3 FP8 | `primus_train/megatron_MI355X_deepseek_v3-FP8-pretrain` |
+| Deepseek v4 flash BF16 | `primus_train/megatron_MI355X_deepseek_v4_flash-BF16-pretrain` |
+| Deepseek v4 flash FP8 | `primus_train/megatron_MI355X_deepseek_v4_flash-FP8-pretrain` |
+| Flux 12b ddp energon schnell resample local spec FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8` |
+| Flux 12b ddp energon schnell resample local spec mlperf FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_fp8_mlperf` |
+| Flux 12b ddp energon schnell resample local spec mxfp4 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_local_spec_mxfp4` |
+| Flux 12b ddp energon schnell resample te spec | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec` |
+| Flux 12b ddp energon schnell resample te spec FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8` |
+| Flux 12b ddp energon schnell resample te spec mlperf FP8 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_fp8_mlperf` |
+| Flux 12b ddp energon schnell resample te spec mxfp4 | `primus_train/megatron_MI355X_flux_12b_ddp_energon_schnell_resample_te_spec_mxfp4` |
+| Flux 12b fsdp2 energon schnell resample local spec | `primus_train/megatron_MI355X_flux_12b_fsdp2_energon_schnell_resample_local_spec` |
+| Flux 12b fsdp2 energon schnell resample local spec FP8 | `primus_train/megatron_MI355X_flux_12b_fsdp2_energon_schnell_resample_local_spec_fp8` |
+| Flux 535m | `primus_train/megatron_MI355X_flux_535m_pretrain` |
+| Flux 535m pretrain FP8 | `primus_train/megatron_MI355X_flux_535m_pretrain_fp8` |
+| Flux 535m with guidance embed | `primus_train/megatron_MI355X_flux_535m_with_guidance_embed` |
+| Gdn 1B BF16 | `primus_train/megatron_MI355X_gdn_1B_BF16-pretrain` |
+| Gdn 300M BF16 | `primus_train/megatron_MI355X_gdn_300M_BF16-pretrain` |
+| Glm5 BF16 | `primus_train/megatron_MI355X_glm5-BF16-pretrain` |
+| Glm5 FP8 | `primus_train/megatron_MI355X_glm5-FP8-pretrain` |
+| Gpt oss 120B BF16 | `primus_train/megatron_MI355X_gpt_oss_120B-BF16-pretrain` |
+| Gpt oss 120B FP8 | `primus_train/megatron_MI355X_gpt_oss_120B-FP8-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/megatron_MI355X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B-mlperf FP8 | `primus_train/megatron_MI355X_gpt_oss_20B-FP8-mlperf-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/megatron_MI355X_gpt_oss_20B-FP8-pretrain` |
+| Grok1 BF16 | `primus_train/megatron_MI355X_grok1-BF16-pretrain` |
+| Grok1 FP8 | `primus_train/megatron_MI355X_grok1-FP8-pretrain` |
+| Grok2 BF16 | `primus_train/megatron_MI355X_grok2-BF16-pretrain` |
+| Grok2 FP8 | `primus_train/megatron_MI355X_grok2-FP8-pretrain` |
+| Hylo llama gdn 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_gdn_1B_BF16-pretrain` |
+| Hylo llama kda 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_kda_1B_BF16-pretrain` |
+| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_1B_BF16-pretrain` |
+| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_3B_BF16-pretrain` |
+| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_8B_BF16-pretrain` |
+| Kda 1B BF16 | `primus_train/megatron_MI355X_kda_1B_BF16-pretrain` |
+| Kda 300M BF16 | `primus_train/megatron_MI355X_kda_300M_BF16-pretrain` |
+| Kimi k2 BF16 | `primus_train/megatron_MI355X_kimi_k2-BF16-pretrain` |
+| Kimi k2 FP8 | `primus_train/megatron_MI355X_kimi_k2-FP8-pretrain` |
+| Kimi k3-8L-official BF16 | `primus_train/megatron_MI355X_kimi_k3-BF16-8L-official` |
+| Kimi k3-curve BF16 | `primus_train/megatron_MI355X_kimi_k3-BF16-curve` |
+| Lfm2 8B A1B BF16 | `primus_train/megatron_MI355X_lfm2_8B_A1B-BF16-pretrain` |
+| Lfm2 8B A1B FP8 | `primus_train/megatron_MI355X_lfm2_8B_A1B-FP8-pretrain` |
+| Lfm2 8B A1B-te-precision FP8 | `primus_train/megatron_MI355X_lfm2_8B_A1B-FP8-te-precision` |
+| Llama2 13B BF16 | `primus_train/megatron_MI355X_llama2_13B-BF16-pretrain` |
+| Llama2 13B FP8 | `primus_train/megatron_MI355X_llama2_13B-FP8-pretrain` |
+| Llama2 70B BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-pretrain` |
+| Llama2 70B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-sft-packed-bridge_aligned` |
+| Llama2 70B-sft-packed-mlperf aligned BF16 | `primus_train/megatron_MI355X_llama2_70B-BF16-sft-packed-mlperf_aligned` |
+| Llama2 70B FP8 | `primus_train/megatron_MI355X_llama2_70B-FP8-pretrain` |
+| Llama2 70B-sft-packed-perf FP8 | `primus_train/megatron_MI355X_llama2_70B-FP8-sft-packed-perf` |
+| Llama2 7B BF16 | `primus_train/megatron_MI355X_llama2_7B-BF16-pretrain` |
+| Llama2 7B FP8 | `primus_train/megatron_MI355X_llama2_7B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/megatron_MI355X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/megatron_MI355X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/megatron_MI355X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/megatron_MI355X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/megatron_MI355X_llama3.1_8B-FP8-pretrain` |
+| Llama3.1 8B MXFP4 | `primus_train/megatron_MI355X_llama3.1_8B-MXFP4-pretrain` |
+| Llama3.1 8B MXFP8 | `primus_train/megatron_MI355X_llama3.1_8B-MXFP8-pretrain` |
+| Llama3.2 1B BF16 | `primus_train/megatron_MI355X_llama3.2_1B-BF16-pretrain` |
+| Llama3.2 1B FP8 | `primus_train/megatron_MI355X_llama3.2_1B-FP8-pretrain` |
+| Llama3.2 3B BF16 | `primus_train/megatron_MI355X_llama3.2_3B-BF16-pretrain` |
+| Llama3.2 3B FP8 | `primus_train/megatron_MI355X_llama3.2_3B-FP8-pretrain` |
+| Llama3.3 70B BF16 | `primus_train/megatron_MI355X_llama3.3_70B-BF16-pretrain` |
+| Llama3.3 70B FP8 | `primus_train/megatron_MI355X_llama3.3_70B-FP8-pretrain` |
+| Llama3 70B BF16 | `primus_train/megatron_MI355X_llama3_70B-BF16-pretrain` |
+| Llama3 70B FP8 | `primus_train/megatron_MI355X_llama3_70B-FP8-pretrain` |
+| Llama3 8B-lora-sft BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-lora-sft` |
+| Llama3 8B BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-pretrain` |
+| Llama3 8B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed-bridge_aligned` |
+| Llama3 8B-sft-packed-squad BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed-squad` |
+| Llama3 8B-sft-packed BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft-packed` |
+| Llama3 8B-sft BF16 | `primus_train/megatron_MI355X_llama3_8B-BF16-sft` |
+| Llama3 8B FP8 | `primus_train/megatron_MI355X_llama3_8B-FP8-pretrain` |
+| Llama4 17B128E BF16 | `primus_train/megatron_MI355X_llama4_17B128E-BF16-pretrain` |
+| Llama4 17B128E FP8 | `primus_train/megatron_MI355X_llama4_17B128E-FP8-pretrain` |
+| Llama4 17B16E BF16 | `primus_train/megatron_MI355X_llama4_17B16E-BF16-pretrain` |
+| Llama4 17B16E FP8 | `primus_train/megatron_MI355X_llama4_17B16E-FP8-pretrain` |
+| Mamba 370M | `primus_train/megatron_MI355X_mamba_370M-pretrain` |
+| Minimax m2.5 BF16 | `primus_train/megatron_MI355X_minimax_m2.5-BF16-pretrain` |
+| Minimax m2.5 FP8 | `primus_train/megatron_MI355X_minimax_m2.5-FP8-pretrain` |
+| Mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-BF16-pretrain` |
+| Mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-FP8-pretrain` |
+| Mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x7B_v0.1-BF16-pretrain` |
+| Mixtral 8x7B v0.1 FP8 | `primus_train/megatron_MI355X_mixtral_8x7B_v0.1-FP8-pretrain` |
+| Native hf to megatron sft.template | `primus_train/megatron_MI355X_native_hf_to_megatron_sft.template` |
+| Qwen14B-odc-dn | `primus_train/megatron_MI355X_qwen14B-odc-dn` |
+| Qwen2.5 14B BF16 | `primus_train/megatron_MI355X_qwen2.5_14B-BF16-pretrain` |
+| Qwen2.5 14B FP8 | `primus_train/megatron_MI355X_qwen2.5_14B-FP8-pretrain` |
+| Qwen2.5 32B BF16 | `primus_train/megatron_MI355X_qwen2.5_32B-BF16-pretrain` |
+| Qwen2.5 32B FP8 | `primus_train/megatron_MI355X_qwen2.5_32B-FP8-pretrain` |
+| Qwen2.5 3B BF16 | `primus_train/megatron_MI355X_qwen2.5_3B-BF16-pretrain` |
+| Qwen2.5 3B FP8 | `primus_train/megatron_MI355X_qwen2.5_3B-FP8-pretrain` |
+| Qwen2.5 72B BF16 | `primus_train/megatron_MI355X_qwen2.5_72B-BF16-pretrain` |
+| Qwen2.5 72B FP8 | `primus_train/megatron_MI355X_qwen2.5_72B-FP8-pretrain` |
+| Qwen2.5 7B BF16 | `primus_train/megatron_MI355X_qwen2.5_7B-BF16-pretrain` |
+| Qwen2.5 7B FP8 | `primus_train/megatron_MI355X_qwen2.5_7B-FP8-pretrain` |
+| Qwen3 14B BF16 | `primus_train/megatron_MI355X_qwen3_14B-BF16-pretrain` |
+| Qwen3 14B FP8 | `primus_train/megatron_MI355X_qwen3_14B-FP8-pretrain` |
+| Qwen3 235B A22B BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B-BF16-pretrain` |
+| Qwen3 235B A22B-sft BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B-BF16-sft` |
+| Qwen3 235B A22B FP8 | `primus_train/megatron_MI355X_qwen3_235B_A22B-FP8-pretrain` |
+| Qwen3 235B A22B 4layer-sft BF16 | `primus_train/megatron_MI355X_qwen3_235B_A22B_4layer-BF16-sft` |
+| Qwen3 30B A3B BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-pretrain` |
+| Qwen3 30B A3B-sft-packed-bridge aligned BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-sft-packed-bridge_aligned` |
+| Qwen3 30B A3B-sft-packed BF16 | `primus_train/megatron_MI355X_qwen3_30B_A3B-BF16-sft-packed` |
+| Qwen3 30B A3B FP8 | `primus_train/megatron_MI355X_qwen3_30B_A3B-FP8-pretrain` |
+| Qwen3 32B BF16 | `primus_train/megatron_MI355X_qwen3_32B-BF16-pretrain` |
+| Qwen3 32B FP8 | `primus_train/megatron_MI355X_qwen3_32B-FP8-pretrain` |
+| Qwen3 4B BF16 | `primus_train/megatron_MI355X_qwen3_4B-BF16-pretrain` |
+| Qwen3 4B FP8 | `primus_train/megatron_MI355X_qwen3_4B-FP8-pretrain` |
+| Qwen3 5 35B A3B BF16 | `primus_train/megatron_MI355X_qwen3_5_35B_A3B-BF16-pretrain` |
+| Qwen3 5 35B A3B FP8 | `primus_train/megatron_MI355X_qwen3_5_35B_A3B-FP8-pretrain` |
+| Qwen3 8B BF16 | `primus_train/megatron_MI355X_qwen3_8B-BF16-pretrain` |
+| Qwen3 8B FP8 | `primus_train/megatron_MI355X_qwen3_8B-FP8-pretrain` |
 
 ---
 
@@ -500,91 +500,91 @@ You can also check the Primus repository directly for the latest supported confi
 
 | Model | Tag |
 | --- | --- |
-| deepseek v3 16b BF16 | `primus_train/torchtitan_MI300X_deepseek_v3_16b-BF16-pretrain` |
-| deepseek v3 16b FP8 | `primus_train/torchtitan_MI300X_deepseek_v3_16b-FP8-pretrain` |
-| deepseek v3 236b BF16 | `primus_train/torchtitan_MI300X_deepseek_v3_236b-BF16-pretrain` |
-| deepseek v3 236b FP8 | `primus_train/torchtitan_MI300X_deepseek_v3_236b-FP8-pretrain` |
-| deepseek v3 671b | `primus_train/torchtitan_MI300X_deepseek_v3_671b-pretrain` |
-| gpt oss 120B BF16 | `primus_train/torchtitan_MI300X_gpt_oss_120B-BF16-pretrain` |
-| gpt oss 120B FP8 | `primus_train/torchtitan_MI300X_gpt_oss_120B-FP8-pretrain` |
-| gpt oss 20B BF16 | `primus_train/torchtitan_MI300X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B FP8 | `primus_train/torchtitan_MI300X_gpt_oss_20B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/torchtitan_MI300X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/torchtitan_MI300X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/torchtitan_MI300X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/torchtitan_MI300X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/torchtitan_MI300X_llama3.1_8B-FP8-pretrain` |
-| llama4 17Bx128E BF16 | `primus_train/torchtitan_MI300X_llama4_17Bx128E-BF16-pretrain` |
-| llama4 17Bx128E FP8 | `primus_train/torchtitan_MI300X_llama4_17Bx128E-FP8-pretrain` |
-| llama4 17Bx16E BF16 | `primus_train/torchtitan_MI300X_llama4_17Bx16E-BF16-pretrain` |
-| llama4 17Bx16E FP8 | `primus_train/torchtitan_MI300X_llama4_17Bx16E-FP8-pretrain` |
-| qwen3 0.6B | `primus_train/torchtitan_MI300X_qwen3_0.6B-pretrain` |
-| qwen3 1.7B | `primus_train/torchtitan_MI300X_qwen3_1.7B-pretrain` |
-| qwen3 14B | `primus_train/torchtitan_MI300X_qwen3_14B-pretrain` |
-| qwen3 32B | `primus_train/torchtitan_MI300X_qwen3_32B-pretrain` |
-| qwen3 4B | `primus_train/torchtitan_MI300X_qwen3_4B-pretrain` |
-| qwen3 8B | `primus_train/torchtitan_MI300X_qwen3_8B-pretrain` |
+| Deepseek v3 16b BF16 | `primus_train/torchtitan_MI300X_deepseek_v3_16b-BF16-pretrain` |
+| Deepseek v3 16b FP8 | `primus_train/torchtitan_MI300X_deepseek_v3_16b-FP8-pretrain` |
+| Deepseek v3 236b BF16 | `primus_train/torchtitan_MI300X_deepseek_v3_236b-BF16-pretrain` |
+| Deepseek v3 236b FP8 | `primus_train/torchtitan_MI300X_deepseek_v3_236b-FP8-pretrain` |
+| Deepseek v3 671b | `primus_train/torchtitan_MI300X_deepseek_v3_671b-pretrain` |
+| Gpt oss 120B BF16 | `primus_train/torchtitan_MI300X_gpt_oss_120B-BF16-pretrain` |
+| Gpt oss 120B FP8 | `primus_train/torchtitan_MI300X_gpt_oss_120B-FP8-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/torchtitan_MI300X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/torchtitan_MI300X_gpt_oss_20B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/torchtitan_MI300X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/torchtitan_MI300X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/torchtitan_MI300X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/torchtitan_MI300X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/torchtitan_MI300X_llama3.1_8B-FP8-pretrain` |
+| Llama4 17Bx128E BF16 | `primus_train/torchtitan_MI300X_llama4_17Bx128E-BF16-pretrain` |
+| Llama4 17Bx128E FP8 | `primus_train/torchtitan_MI300X_llama4_17Bx128E-FP8-pretrain` |
+| Llama4 17Bx16E BF16 | `primus_train/torchtitan_MI300X_llama4_17Bx16E-BF16-pretrain` |
+| Llama4 17Bx16E FP8 | `primus_train/torchtitan_MI300X_llama4_17Bx16E-FP8-pretrain` |
+| Qwen3 0.6B | `primus_train/torchtitan_MI300X_qwen3_0.6B-pretrain` |
+| Qwen3 1.7B | `primus_train/torchtitan_MI300X_qwen3_1.7B-pretrain` |
+| Qwen3 14B | `primus_train/torchtitan_MI300X_qwen3_14B-pretrain` |
+| Qwen3 32B | `primus_train/torchtitan_MI300X_qwen3_32B-pretrain` |
+| Qwen3 4B | `primus_train/torchtitan_MI300X_qwen3_4B-pretrain` |
+| Qwen3 8B | `primus_train/torchtitan_MI300X_qwen3_8B-pretrain` |
 
 #### MI325X Configs (25)
 
 | Model | Tag |
 | --- | --- |
-| deepseek v3 16b BF16 | `primus_train/torchtitan_MI325X_deepseek_v3_16b-BF16-pretrain` |
-| deepseek v3 16b FP8 | `primus_train/torchtitan_MI325X_deepseek_v3_16b-FP8-pretrain` |
-| deepseek v3 236b BF16 | `primus_train/torchtitan_MI325X_deepseek_v3_236b-BF16-pretrain` |
-| deepseek v3 236b FP8 | `primus_train/torchtitan_MI325X_deepseek_v3_236b-FP8-pretrain` |
-| deepseek v3 671b | `primus_train/torchtitan_MI325X_deepseek_v3_671b-pretrain` |
-| gpt oss 120B BF16 | `primus_train/torchtitan_MI325X_gpt_oss_120B-BF16-pretrain` |
-| gpt oss 120B FP8 | `primus_train/torchtitan_MI325X_gpt_oss_120B-FP8-pretrain` |
-| gpt oss 20B BF16 | `primus_train/torchtitan_MI325X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B FP8 | `primus_train/torchtitan_MI325X_gpt_oss_20B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/torchtitan_MI325X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/torchtitan_MI325X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/torchtitan_MI325X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/torchtitan_MI325X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/torchtitan_MI325X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/torchtitan_MI325X_llama3.1_8B-FP8-pretrain` |
-| llama4 17Bx128E BF16 | `primus_train/torchtitan_MI325X_llama4_17Bx128E-BF16-pretrain` |
-| llama4 17Bx128E FP8 | `primus_train/torchtitan_MI325X_llama4_17Bx128E-FP8-pretrain` |
-| llama4 17Bx16E BF16 | `primus_train/torchtitan_MI325X_llama4_17Bx16E-BF16-pretrain` |
-| llama4 17Bx16E FP8 | `primus_train/torchtitan_MI325X_llama4_17Bx16E-FP8-pretrain` |
-| qwen3 0.6B | `primus_train/torchtitan_MI325X_qwen3_0.6B-pretrain` |
-| qwen3 1.7B | `primus_train/torchtitan_MI325X_qwen3_1.7B-pretrain` |
-| qwen3 14B | `primus_train/torchtitan_MI325X_qwen3_14B-pretrain` |
-| qwen3 32B | `primus_train/torchtitan_MI325X_qwen3_32B-pretrain` |
-| qwen3 4B | `primus_train/torchtitan_MI325X_qwen3_4B-pretrain` |
-| qwen3 8B | `primus_train/torchtitan_MI325X_qwen3_8B-pretrain` |
+| Deepseek v3 16b BF16 | `primus_train/torchtitan_MI325X_deepseek_v3_16b-BF16-pretrain` |
+| Deepseek v3 16b FP8 | `primus_train/torchtitan_MI325X_deepseek_v3_16b-FP8-pretrain` |
+| Deepseek v3 236b BF16 | `primus_train/torchtitan_MI325X_deepseek_v3_236b-BF16-pretrain` |
+| Deepseek v3 236b FP8 | `primus_train/torchtitan_MI325X_deepseek_v3_236b-FP8-pretrain` |
+| Deepseek v3 671b | `primus_train/torchtitan_MI325X_deepseek_v3_671b-pretrain` |
+| Gpt oss 120B BF16 | `primus_train/torchtitan_MI325X_gpt_oss_120B-BF16-pretrain` |
+| Gpt oss 120B FP8 | `primus_train/torchtitan_MI325X_gpt_oss_120B-FP8-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/torchtitan_MI325X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/torchtitan_MI325X_gpt_oss_20B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/torchtitan_MI325X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/torchtitan_MI325X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/torchtitan_MI325X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/torchtitan_MI325X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/torchtitan_MI325X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/torchtitan_MI325X_llama3.1_8B-FP8-pretrain` |
+| Llama4 17Bx128E BF16 | `primus_train/torchtitan_MI325X_llama4_17Bx128E-BF16-pretrain` |
+| Llama4 17Bx128E FP8 | `primus_train/torchtitan_MI325X_llama4_17Bx128E-FP8-pretrain` |
+| Llama4 17Bx16E BF16 | `primus_train/torchtitan_MI325X_llama4_17Bx16E-BF16-pretrain` |
+| Llama4 17Bx16E FP8 | `primus_train/torchtitan_MI325X_llama4_17Bx16E-FP8-pretrain` |
+| Qwen3 0.6B | `primus_train/torchtitan_MI325X_qwen3_0.6B-pretrain` |
+| Qwen3 1.7B | `primus_train/torchtitan_MI325X_qwen3_1.7B-pretrain` |
+| Qwen3 14B | `primus_train/torchtitan_MI325X_qwen3_14B-pretrain` |
+| Qwen3 32B | `primus_train/torchtitan_MI325X_qwen3_32B-pretrain` |
+| Qwen3 4B | `primus_train/torchtitan_MI325X_qwen3_4B-pretrain` |
+| Qwen3 8B | `primus_train/torchtitan_MI325X_qwen3_8B-pretrain` |
 
 #### MI355X Configs (25)
 
 | Model | Tag |
 | --- | --- |
-| deepseek v3 16b BF16 | `primus_train/torchtitan_MI355X_deepseek_v3_16b-BF16-pretrain` |
-| deepseek v3 16b FP8 | `primus_train/torchtitan_MI355X_deepseek_v3_16b-FP8-pretrain` |
-| deepseek v3 236b BF16 | `primus_train/torchtitan_MI355X_deepseek_v3_236b-BF16-pretrain` |
-| deepseek v3 236b FP8 | `primus_train/torchtitan_MI355X_deepseek_v3_236b-FP8-pretrain` |
-| deepseek v3 671b | `primus_train/torchtitan_MI355X_deepseek_v3_671b-pretrain` |
-| gpt oss 120B BF16 | `primus_train/torchtitan_MI355X_gpt_oss_120B-BF16-pretrain` |
-| gpt oss 120B FP8 | `primus_train/torchtitan_MI355X_gpt_oss_120B-FP8-pretrain` |
-| gpt oss 20B BF16 | `primus_train/torchtitan_MI355X_gpt_oss_20B-BF16-pretrain` |
-| gpt oss 20B FP8 | `primus_train/torchtitan_MI355X_gpt_oss_20B-FP8-pretrain` |
-| llama3.1 405B BF16 | `primus_train/torchtitan_MI355X_llama3.1_405B-BF16-pretrain` |
-| llama3.1 405B FP8 | `primus_train/torchtitan_MI355X_llama3.1_405B-FP8-pretrain` |
-| llama3.1 70B BF16 | `primus_train/torchtitan_MI355X_llama3.1_70B-BF16-pretrain` |
-| llama3.1 70B FP8 | `primus_train/torchtitan_MI355X_llama3.1_70B-FP8-pretrain` |
-| llama3.1 8B BF16 | `primus_train/torchtitan_MI355X_llama3.1_8B-BF16-pretrain` |
-| llama3.1 8B FP8 | `primus_train/torchtitan_MI355X_llama3.1_8B-FP8-pretrain` |
-| llama4 17Bx128E BF16 | `primus_train/torchtitan_MI355X_llama4_17Bx128E-BF16-pretrain` |
-| llama4 17Bx128E FP8 | `primus_train/torchtitan_MI355X_llama4_17Bx128E-FP8-pretrain` |
-| llama4 17Bx16E BF16 | `primus_train/torchtitan_MI355X_llama4_17Bx16E-BF16-pretrain` |
-| llama4 17Bx16E FP8 | `primus_train/torchtitan_MI355X_llama4_17Bx16E-FP8-pretrain` |
-| qwen3 0.6B | `primus_train/torchtitan_MI355X_qwen3_0.6B-pretrain` |
-| qwen3 1.7B | `primus_train/torchtitan_MI355X_qwen3_1.7B-pretrain` |
-| qwen3 14B | `primus_train/torchtitan_MI355X_qwen3_14B-pretrain` |
-| qwen3 32B | `primus_train/torchtitan_MI355X_qwen3_32B-pretrain` |
-| qwen3 4B | `primus_train/torchtitan_MI355X_qwen3_4B-pretrain` |
-| qwen3 8B | `primus_train/torchtitan_MI355X_qwen3_8B-pretrain` |
+| Deepseek v3 16b BF16 | `primus_train/torchtitan_MI355X_deepseek_v3_16b-BF16-pretrain` |
+| Deepseek v3 16b FP8 | `primus_train/torchtitan_MI355X_deepseek_v3_16b-FP8-pretrain` |
+| Deepseek v3 236b BF16 | `primus_train/torchtitan_MI355X_deepseek_v3_236b-BF16-pretrain` |
+| Deepseek v3 236b FP8 | `primus_train/torchtitan_MI355X_deepseek_v3_236b-FP8-pretrain` |
+| Deepseek v3 671b | `primus_train/torchtitan_MI355X_deepseek_v3_671b-pretrain` |
+| Gpt oss 120B BF16 | `primus_train/torchtitan_MI355X_gpt_oss_120B-BF16-pretrain` |
+| Gpt oss 120B FP8 | `primus_train/torchtitan_MI355X_gpt_oss_120B-FP8-pretrain` |
+| Gpt oss 20B BF16 | `primus_train/torchtitan_MI355X_gpt_oss_20B-BF16-pretrain` |
+| Gpt oss 20B FP8 | `primus_train/torchtitan_MI355X_gpt_oss_20B-FP8-pretrain` |
+| Llama3.1 405B BF16 | `primus_train/torchtitan_MI355X_llama3.1_405B-BF16-pretrain` |
+| Llama3.1 405B FP8 | `primus_train/torchtitan_MI355X_llama3.1_405B-FP8-pretrain` |
+| Llama3.1 70B BF16 | `primus_train/torchtitan_MI355X_llama3.1_70B-BF16-pretrain` |
+| Llama3.1 70B FP8 | `primus_train/torchtitan_MI355X_llama3.1_70B-FP8-pretrain` |
+| Llama3.1 8B BF16 | `primus_train/torchtitan_MI355X_llama3.1_8B-BF16-pretrain` |
+| Llama3.1 8B FP8 | `primus_train/torchtitan_MI355X_llama3.1_8B-FP8-pretrain` |
+| Llama4 17Bx128E BF16 | `primus_train/torchtitan_MI355X_llama4_17Bx128E-BF16-pretrain` |
+| Llama4 17Bx128E FP8 | `primus_train/torchtitan_MI355X_llama4_17Bx128E-FP8-pretrain` |
+| Llama4 17Bx16E BF16 | `primus_train/torchtitan_MI355X_llama4_17Bx16E-BF16-pretrain` |
+| Llama4 17Bx16E FP8 | `primus_train/torchtitan_MI355X_llama4_17Bx16E-FP8-pretrain` |
+| Qwen3 0.6B | `primus_train/torchtitan_MI355X_qwen3_0.6B-pretrain` |
+| Qwen3 1.7B | `primus_train/torchtitan_MI355X_qwen3_1.7B-pretrain` |
+| Qwen3 14B | `primus_train/torchtitan_MI355X_qwen3_14B-pretrain` |
+| Qwen3 32B | `primus_train/torchtitan_MI355X_qwen3_32B-pretrain` |
+| Qwen3 4B | `primus_train/torchtitan_MI355X_qwen3_4B-pretrain` |
+| Qwen3 8B | `primus_train/torchtitan_MI355X_qwen3_8B-pretrain` |
 
 ---
 
