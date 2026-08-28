@@ -134,12 +134,33 @@ LOG="/run_logs/${SLURM_JOB_ID:-0}/colocated_NODE${NODE_RANK}.log"
 vllm serve "${MODEL_PATH}" "${serve_args[@]}" 2>&1 | tee "${LOG}" >/dev/null &
 WORKER_PID=$!
 
+# Shutdown sentinel on the shared log volume (/run_logs is $LOG_PATH on the host,
+# visible from every node). The head writes it when it is done; workers watch for
+# it. Without this the job DEADLOCKS: the head finishes the benchmark, kills only
+# its own server and exits, while each worker sits in `wait` on a headless vLLM
+# that nothing ever stops. srun then waits on those tasks until the wall clock --
+# observed as 4.5 hours of two idle exclusive nodes after results were written.
+SHUTDOWN_FLAG="/run_logs/${SLURM_JOB_ID:-0}/.shutdown"
+
 if [[ "${NODE_RANK}" -ne 0 ]]; then
     # Workers have no API server: hold until the head tears the job down.
     echo "[colocated] worker ${NODE_RANK} serving headless; log ${LOG}"
-    wait "${WORKER_PID}"
+    while kill -0 "${WORKER_PID}" 2>/dev/null; do
+        if [ -f "${SHUTDOWN_FLAG}" ]; then
+            echo "[colocated] worker ${NODE_RANK} got shutdown signal; stopping"
+            pkill -P "${WORKER_PID}" 2>/dev/null
+            kill "${WORKER_PID}" 2>/dev/null || true
+            break
+        fi
+        sleep 5
+    done
+    wait "${WORKER_PID}" 2>/dev/null || true
     exit 0
 fi
+
+# Raise the sentinel however the head leaves -- including on error or timeout,
+# so a failed head cannot strand the workers either.
+trap 'touch "${SHUTDOWN_FLAG}" 2>/dev/null || true' EXIT
 
 # ---- head: wait for readiness, benchmark, then shut down -------------------
 echo "[colocated] head waiting for 'Application startup complete.' in ${LOG}"

@@ -7,14 +7,21 @@
 #   NIAH_URL     endpoint (default http://127.0.0.1:30000/v1/chat/completions)
 #   NIAH_MODEL   model name/tag the server serves (required — the served path)
 #   NIAH_WORDS   comma list of context sizes in words (default 2000,8000,20000,35000)
-#   NIAH_MAXTOK  max_tokens for the answer (default 2048)
+#   NIAH_MAXTOK  max_tokens for the answer (default 8192)
 #   NIAH_TIMEOUT per-request timeout seconds (default 1800)
+#
+# Reasoning models need headroom. Scoring reads the reasoning trace as well as
+# the answer, so if max_tokens runs out mid-trace the response is truncated and
+# only the earliest needles appear -- indistinguishable from a genuine retrieval
+# miss unless finish_reason is recorded. Observed on Kimi-K3 at 2048: two of four
+# context sizes scored 1/10, both listing only ANIMALS[0], the needle placed
+# first in the haystack. Hence the larger default and the finish= field below.
 import os, sys, json, random, urllib.request
 
 URL = os.environ.get("NIAH_URL", "http://127.0.0.1:30000/v1/chat/completions")
 MODEL = os.environ.get("NIAH_MODEL", "")
 WORDS = [int(x) for x in os.environ.get("NIAH_WORDS", "2000,8000,20000,35000").split(",") if x.strip()]
-MAXTOK = int(os.environ.get("NIAH_MAXTOK", "2048"))
+MAXTOK = int(os.environ.get("NIAH_MAXTOK", "8192"))
 TIMEOUT = float(os.environ.get("NIAH_TIMEOUT", "1800"))
 
 FILLER = (
@@ -55,14 +62,20 @@ def run(n_words):
     req = urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            msg = json.loads(r.read())["choices"][0]["message"]
+            choice = json.loads(r.read())["choices"][0]
+            msg = choice["message"]
+            finish = choice.get("finish_reason") or "unknown"
     except Exception as e:
         print("words=%6d  ERROR  %s" % (n_words, e), flush=True)
         return None
     text = ((msg.get("content") or "") + " " + (msg.get("reasoning_content") or "")).lower()
     found = sorted(a for a in ANIMALS if a in text)
-    print("words=%6d  found=%2d/10  %s" % (n_words, len(found), found), flush=True)
-    return len(found)
+    # finish is reported so a truncated response ("length") is distinguishable
+    # from a real retrieval miss. Without it a run that exhausted max_tokens
+    # mid-reasoning scores low and reads as a model failure.
+    print("words=%6d  found=%2d/10  finish=%s  %s"
+          % (n_words, len(found), finish, found), flush=True)
+    return (len(found), finish)
 
 
 def main():
@@ -77,7 +90,13 @@ def main():
     print("=== NIAH summary ===", flush=True)
     for n in WORDS:
         v = results[n]
-        print("  words=%6d  found=%s/10" % (n, "ERR" if v is None else v), flush=True)
+        if v is None:
+            print("  words=%6d  found=ERR/10" % n, flush=True)
+        else:
+            count, finish = v
+            note = "  (TRUNCATED: raise NIAH_MAXTOK)" if finish == "length" else ""
+            print("  words=%6d  found=%s/10  finish=%s%s"
+                  % (n, count, finish, note), flush=True)
 
 
 if __name__ == "__main__":

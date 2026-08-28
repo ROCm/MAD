@@ -280,22 +280,26 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
 
 
 def parse_niah_log(log_file: str):
-    """Parse a benchmark_niah.py log into {context_words: found_out_of_10}.
+    """Parse a benchmark_niah.py log into per-size retrieval results.
 
     benchmark_niah.py prints one line per size:
-        words= 20000  found= 9/10  [...]
+        words= 20000  found= 9/10  finish=stop  [...]
     and 'found=ERR' (via the summary) for a request that errored. Only the
     per-size result lines are read; the trailing summary repeats them.
+
+    Returns {context_words: (found, finish_reason)}, or {context_words: None}
+    for a request that errored. finish_reason is '' for logs predating the
+    finish= field.
     """
     results = {}
-    pat = re.compile(r'^words=\s*(\d+)\s+found=\s*(\d+)/10')
+    pat = re.compile(r'^words=\s*(\d+)\s+found=\s*(\d+)/10(?:\s+finish=(\S+))?')
     err = re.compile(r'^words=\s*(\d+)\s+ERROR')
     with open(log_file, 'r', errors='replace') as f:
         for line in f:
             line = line.strip()
             m = pat.match(line)
             if m:
-                results[int(m.group(1))] = int(m.group(2))
+                results[int(m.group(1))] = (int(m.group(2)), m.group(3) or '')
                 continue
             m = err.match(line)
             if m:
@@ -335,14 +339,28 @@ def save_niah_perf_csv(results, output_file: str, model_name: str = "",
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for words in sorted(results):
-            found = results[words]
+            entry = results[words]
+            if entry is None:
+                found, finish = None, 'error'
+            else:
+                found, finish = entry
+            # The count stays the metric -- always reported, never dropped. But a
+            # response truncated by max_tokens is not a valid retrieval
+            # measurement: scoring reads the reasoning trace, so a cut-off trace
+            # scores low for a reason that has nothing to do with retrieval.
+            # Recording it SUCCESS would put a measurement artifact into the
+            # results as if it were a model result.
+            truncated = (finish == 'length')
+            metric = f'needles found /10 (NIAH ctx={words} words)'
+            if truncated:
+                metric += ' [TRUNCATED: response hit max_tokens]'
             row = {
                 'model': model_name,
                 'benchmark': 'niah',
                 'context_words': words,
                 'performance': '0' if found is None else str(found),
-                'metric': f'needles found /10 (NIAH ctx={words} words)',
-                'status': 'FAILURE' if found is None else 'SUCCESS',
+                'metric': metric,
+                'status': 'FAILURE' if (found is None or truncated) else 'SUCCESS',
             }
             row.update(config_cols)
             writer.writerow(row)
