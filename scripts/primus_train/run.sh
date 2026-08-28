@@ -57,20 +57,49 @@ else
   export EXP="examples/megatron/exp_pretrain.yaml"
 fi
 
-# Infer BACKEND from EXP path so run_pretrain.sh uses correct runner (torchtitan, megatron, maxtext, etc.)
-# Primus expects BACKEND=MaxText for Jax/MaxText; lowercase for others.
-exp_lower="$(echo "$EXP" | tr '[:upper:]' '[:lower:]')"
-if [[ "$exp_lower" == *"/maxtext/"* ]]; then
-  export BACKEND="MaxText"
-elif [[ "$exp_lower" == *"/torchtitan/"* ]]; then
-  export BACKEND="torchtitan"
-elif [[ "$exp_lower" == *"/megatron_bridge/"* ]]; then
-  export BACKEND="megatron_bridge"
-elif [[ "$exp_lower" == *"/moe_package/"* ]]; then
-  export BACKEND="moe_package"
-else
-  export BACKEND="megatron"
+# BACKEND selects the runner (megatron, torchtitan, maxtext, ...) in run_pretrain.sh.
+# Primus validates it against modules.pre_trainer.framework in the EXP and aborts on
+# mismatch (examples/scripts/prepare_experiment.py), so read the framework from the config
+# rather than guessing from the directory name — that also picks up launchers added in
+# later Primus releases (maxdiffusion, nemo_automodel in v26.6) with no change here.
+# Note the directory name is not always the framework: examples/moe_package/ configs
+# declare framework: megatron.
+# pre_trainer is the usual key; SFT/post-train configs declare framework under post_trainer.
+framework="$(cd "$PRIMUS_ROOT" && python3 -c '
+import sys, yaml
+mods = (yaml.safe_load(open(sys.argv[1])) or {}).get("modules") or {}
+for key in ("pre_trainer", "post_trainer"):
+    fw = (mods.get(key) or {}).get("framework")
+    if fw:
+        print(fw)
+        break
+' "$EXP" 2>/dev/null)"
+
+# Fallback for configs we cannot parse (missing PyYAML, non-standard layout): infer from the
+# launcher directory, i.e. the component after examples/ in examples/<launcher>/configs/...
+# Match on that component only: a plain substring test would mislabel
+# examples/megatron/configs/<arch>/diffusion/*.yaml, which are framework: megatron.
+if [[ -z "$framework" ]]; then
+  exp_lower="$(echo "$EXP" | tr '[:upper:]' '[:lower:]')"
+  launcher="${exp_lower##*examples/}"
+  launcher="${launcher%%/*}"
+  case "$launcher" in
+    maxtext|maxdiffusion|torchtitan|megatron_bridge|nemo_automodel|diffusion|hummingbirdxt)
+      framework="$launcher" ;;
+    *)
+      # megatron, moe_package (framework: megatron), and anything unrecognized
+      framework="megatron" ;;
+  esac
 fi
+
+# prepare_experiment.py compares case-insensitively, but run_pretrain.sh string-matches the
+# literals "MaxText" and "MaxDiffusion" to skip LD_LIBRARY_PATH injection and
+# HSA_NO_SCRATCH_RECLAIM for the JAX backends, so those two need exact casing.
+case "$framework" in
+  maxtext)      export BACKEND="MaxText" ;;
+  maxdiffusion) export BACKEND="MaxDiffusion" ;;
+  *)            export BACKEND="$framework" ;;
+esac
 
 # HF_TOKEN for Primus prepare (HF-backed configs): use MAD_SECRETS_HFTOKEN from madengine v2
 # (set via additional_context.docker_env_vars) if HF_TOKEN not already set
