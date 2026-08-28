@@ -176,6 +176,10 @@ PY
 )"
     [[ -n "$_yaml_env" ]] && eval "$_yaml_env"
 
+    # Fallback: launcher-calculated default if not set by submit-time or yaml
+    : ${GPU_MEMORY_UTILIZATION:=$_GPU_MEM_UTIL_LAUNCHER_DEFAULT}
+    export GPU_MEMORY_UTILIZATION
+
     # 2) Resolve per-role flag strings for the active PARALLEL_MODE.
     eval "$(python3 - <<'PY'
 import os, shlex, yaml

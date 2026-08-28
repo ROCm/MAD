@@ -162,12 +162,18 @@ connector_launch_worker() {
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
+    # use_inductor_graph_partition=true moves graph partitioning from Dynamo/FX to
+    # inductor codegen, splitting at cudagraph_unsafe ops (incl. the MLA KV-update) so
+    # they run as eager boundaries. Default OFF: enabling it here would change
+    # --compilation-config for EVERY model. GLM opts in via its models.yaml env:.
+    local _igp_json=""
+    [[ "${USE_INDUCTOR_GRAPH_PARTITION:-0}" == "1" ]] && _igp_json=',"use_inductor_graph_partition":true'
     if [[ -n "$_cudagraph_mode" && "$_cudagraph_mode" != "NONE" ]]; then
         local _capture_sizes="${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256}"
-        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"'"${_cudagraph_mode}"'","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
         exec_args+=(--cudagraph-capture-sizes ${_capture_sizes})
     else
-        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]}')
+        exec_args+=(--compilation-config '{"cudagraph_mode":"NONE","custom_ops":["+quant_fp8"]'"${_igp_json}"'}')
     fi
 
     # Per-model flags from models.yaml (driver-exported; empty if none).
@@ -229,7 +235,7 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
-                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}"
+                    "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}" "${model_args[@]}"
             WORKER_PID=0; return 0
         fi
 
@@ -252,6 +258,7 @@ connector_launch_worker() {
             "${exec_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
+            "${model_args[@]}" \
             2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
         WORKER_PID=$!
         return 0
