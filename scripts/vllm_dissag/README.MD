@@ -40,8 +40,9 @@ neither → combo 1.
 
 Use these exact `MODEL_NAME` values (defined in `models.yaml` + the slurm allowlists).
 The **Combos** column lists which of the 4 valid combos above each model may run in; the
-slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family is
-**wideEP-only** (TP is rejected — its recipe needs the wideEP serve path).
+slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family and
+`GLM-5.1-FP8` are **wideEP-only** (TP is rejected — their recipes need the wideEP serve
+path).
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
@@ -53,6 +54,7 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 | `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 
 ## Prerequisites
 
@@ -64,7 +66,7 @@ slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek fam
 
 ## Building the Docker image
 
-No public prebuilt image ships — build your own from the one fullsource Dockerfile (MoRI +
+No public prebuilt image ships — build your own from the fullsource Dockerfile (MoRI +
 AITER + vLLM + vllm-router + optional UCX/RIXL/rocSHMEM/DeepEP, from Git pins on an open
 ROCm ci_base):
 
@@ -74,9 +76,24 @@ docker build -t <your-registry>/vllm-disagg:local \
   -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile .
 ```
 
-One image serves all connectors. `WITH_NIXL=1` (default) builds every transport (moriio
-TP/wideEP + rixl NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean
-MoRI-EP-only image (moriio + deepep-from-base, faster build).
+That image serves all connectors for every model in the table above **except**
+`GLM-5.1-FP8`. `WITH_NIXL=1` (default) builds every transport (moriio TP/wideEP + rixl
+NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image
+(moriio + deepep-from-base, faster build).
+
+`GLM-5.1-FP8` needs its own per-model image, because its vLLM/AITER/MoRI pins differ
+from the DeepSeek-V3/R1 stack the shared Dockerfile is pinned to:
+
+```bash
+docker build -t <your-registry>/vllm-disagg:glmv5.1 \
+  -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile .
+```
+
+That Dockerfile defaults to `WITH_NIXL=0` (MoRI-EP only, which is all GLM-5.1 uses) and
+its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime patchers,
+so every GLM DSA fix has to be in-source in that image. Add a
+`vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
+own pins rather than repinning the shared one.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -158,6 +175,11 @@ Env precedence (lowest → highest): connector default → `models.yaml` `env:` 
 `-e VAR=...`. So a model can override a connector default (e.g. a `MORI_*` knob) without editing any
 script, and a per-run/per-cluster `-e` still wins.
 
+**GPU_MEMORY_UTILIZATION**: If not set in yaml or submit-time, the launcher defaults to **0.70** at
+EP≥32 (to accommodate MoRI buffer scaling at high EP width) and **0.8** otherwise. Models needing
+topology-dependent values should omit this key from yaml and rely on the fallback; models needing a
+static override can specify it in their `env:` block.
+
 ## Node topology (all modes)
 
 ```
@@ -234,7 +256,7 @@ lengths and the model is scored on how many it retrieves. Select it in place of 
 sweep via the launcher's benchmark hook:
 
 ```bash
-export BENCHMARK_SCRIPT_FILE=benchmark_niah.sh
+export BENCHMARK_SCRIPT=niah
 export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 ```
 
