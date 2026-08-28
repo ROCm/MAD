@@ -623,14 +623,8 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
   # PRIMUS_SANITY_TRAIN_ITERS additionally drops it to 3 layers for CI/build
   # sanity; leave it unset for a representative full-depth measurement.
   #
-  # SCALE REQUIREMENT: full depth needs >= 24 nodes (192 GPUs) with
-  # PRIMUS_EP=192. This is arithmetic, not tuning -- weights + fp32 grads +
-  # (unsharded, since expert-DP collapses to 1) optimizer state come to roughly
-  # 1126 GiB/GPU at the old EP=8 2-node shape, against 252 GiB available on
-  # MI355X. The deployment must also set
-  # PYTORCH_HIP_ALLOC_CONF=expandable_segments:True: with the previous
-  # garbage_collection_threshold:0.8 the allocator thrashes near the ceiling and
-  # hangs for many minutes instead of raising OutOfMemoryError.
+  # Full depth needs 24 nodes (192 GPUs) with PRIMUS_EP=192, and the
+  # deployment must set PYTORCH_HIP_ALLOC_CONF=expandable_segments:True.
   export EXP=examples/megatron/configs/$CONFIG_DEVICE/kimi_k2_thinking-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
@@ -641,18 +635,10 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         MBS=1; GBS=32
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
-        # MBS=1 and full activation recompute are REQUIRED, not tuning: at
-        # 1T total params this model only fits with both. Measured on MI355X
-        # (252 GiB usable/GPU) at 24 nodes / EP=192: ~188 GiB resident with
-        # recompute on, and the first OOM-free run needed MBS=1 -- MBS=4 dies
-        # in backward on the MoE permutation buffers, which scale with the
-        # micro-batch. See references/gotchas.md for the full memory budget
-        # and why smaller scale-outs cannot work at all.
-        #
-        # Both flags are always passed explicitly (rather than the
-        # scaleout_gbs_override pattern used elsewhere) because we cannot rely
-        # on an empty override falling back to a correct config default.
-        # effective_global_batch_size keeps
+        # MBS=1 and full recompute are required, not tuning -- at 1T params
+        # the model does not fit without both. Flags are passed explicitly
+        # rather than via scaleout_gbs_override so an empty override can never
+        # fall back to a wrong default; effective_global_batch_size keeps
         # global_batch_size % (micro_batch_size * world_size) == 0 at any scale.
         MBS=1; GBS=128
         GBS=$(effective_global_batch_size "$MBS" "$GBS")
