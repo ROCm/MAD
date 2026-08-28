@@ -178,3 +178,38 @@ DeepSeek-R1:
     dp: ""
   decode:
     dp: ""
+
+# Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs from
+# scripts/vllm/kimik3_mi300x/wideep_disagg_2p2d/; vLLM connector fixes live in the
+# disagg image (raviguptaamd/vllm @ kimi-k3-wideep-disagg-fullsource-v3).
+_kimik3_recipe_env: &kimik3_recipe_env
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MLA: "0"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  AITER_SITUV2_A8W4: "1"
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "8000000000"
+  GPU_MEMORY_UTILIZATION: "0.85"
+  MAX_NUM_BATCHED_TOKENS: "2048"
+  MAX_MODEL_LEN: "320000"
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  # Validated standalone launch uses DECODE_CG=NONE (run_2p2d_launch.sh default).
+  # PIECEWISE hangs at cudagraph capture 5/9 on K3+MoRI LL — F25; fix in Session 3 image.
+  DECODE_CUDAGRAPH_MODE: "NONE"
+  VLLM_ALL2ALL_BACKEND: "mori_low_latency"
+  PREFILL_MORI_BACKEND: "mori_low_latency"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+
+Kimi-K3-MXFP4:
+  env: *kimik3_recipe_env
+  prefill:
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
+  decode:
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy lazy --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''

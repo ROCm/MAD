@@ -239,7 +239,7 @@ _rixl_launch_tp() {
     # Per-model config string (from models.yaml; tokenized as the legacy eval did)
     local cfg_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
-    [[ -n "$_mc" ]] && eval "cfg_args=(${_mc})"
+    _model_config_to_array "$_mc" cfg_args
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "rixl" "${log_prefix}" "${role}" \
@@ -295,7 +295,7 @@ _rixl_launch_deepep() {
     # dp: tuning is actually honored on the deepep path.
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
-    [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+    _model_config_to_array "$_mc" model_args
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "deepep" "${log_prefix}" "${role}" \

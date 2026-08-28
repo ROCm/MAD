@@ -37,10 +37,22 @@ mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
 if [[ "${JIT_CACHE_PERSIST:-1}" == "1" ]]; then
     _IMG_KEY="$(docker image inspect --format '{{.Id}}' "$DOCKER_IMAGE_NAME" 2>/dev/null | sed 's/^sha256://; s/[^a-f0-9]//g' | cut -c1-12)"
     _IMG_KEY="${_IMG_KEY:-noimg}"
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    # Kimi-K3: prefill and decode compile different AITER kernel variants — separate caches
+    # (same logic as run_xPyD_models.slurm; missing this caused PIECEWISE decode hang — F25).
+    if [[ "${MODEL_NAME}" == "Kimi-K3-MXFP4" && "${JIT_CACHE_SPLIT_K3:-1}" == "1" ]]; then
+        if [[ "${NODE_RANK:-0}" -lt "${xP:-1}" ]]; then
+            _JIT_ROLE="prefill"
+        else
+            _JIT_ROLE="decode"
+        fi
+        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}"
+    else
+        _JIT_CACHE_HOST="${_JIT_BASE}"
+    fi
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
-    echo "JIT cache (persistent, image ${_IMG_KEY}): ${_JIT_CACHE_HOST} -> /opt/vllm_cache"
+    echo "JIT cache (persistent, image ${_IMG_KEY}${_JIT_ROLE:+/${_JIT_ROLE}}): ${_JIT_CACHE_HOST} -> /opt/vllm_cache"
 else
     _JIT_CACHE_MOUNT=""
 fi
@@ -49,14 +61,14 @@ fi
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
@@ -108,6 +120,7 @@ docker run --rm \
     -e HSA_ENABLE_IPC_MODE_LEGACY=${HSA_ENABLE_IPC_MODE_LEGACY:-0} \
     -e MORI_GPU_ARCHS=${MORI_GPU_ARCHS:-gfx942} \
     -e HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-1} \
+    ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
