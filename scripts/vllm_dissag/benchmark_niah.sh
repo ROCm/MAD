@@ -40,4 +40,9 @@ NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
 NIAH_WARMUP="${NIAH_WARMUP:-1}" \
   python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
 
+# Generate madengine perf.csv rows from NIAH results (mirrors benchmark_xPyD.sh)
+python3 "$NIXL_COOKBOOK_PATH/parse_to_csv.py" "${LOG}" --niah \
+    --perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv --model-name "${MODEL_NAME}" \
+    2>&1 | tee -a "${LOG}"
+
 echo "NIAH results -> ${LOG}"

@@ -541,18 +541,18 @@ done
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 
-# GPU memory headroom scales with EP width: the MoRI dispatch/combine buffers grow with
-# the number of EP ranks, so the fraction that fits weights+KV has to shrink. 0.8 is what
-# EP8/EP16 were tuned at and is kept there; at EP32 (4P/4D) it OOMs during EngineCore init
-# ("Tried to allocate 6.00 GiB ... 157.95 GiB allocated"), which SIGTERMs every rank while
-# the socket barrier keeps printing "Waiting for nodes" - it reads as a hang, not a crash.
-# 0.70 boots at EP32 and holds under load; 2P/2D EP16 at 0.8 is unaffected (both were
-# exercised on the pinned stack). Submit-time -e still overrides either value.
-# NOTE: the models.yaml GPU_MEMORY_UTILIZATION key is inert - the -e below is unconditional, and
-# vllm_disagg.sh skips any yaml key already in the environment. Change it HERE, not there.
+# GPU_MEMORY_UTILIZATION precedence:
+#   1. Submit-time `-e GPU_MEMORY_UTILIZATION=X` (explicit override)
+#   2. models.yaml env: block (static per-model value)
+#   3. Launcher fallback below (topology-aware: 0.70 at EP>=32, else 0.8)
+#
+# Models needing topology-dependent values (e.g., GLM) should OMIT the key from
+# yaml and use the fallback. Models needing a static value can specify it in yaml.
+# The 0.70 at EP>=32 accounts for larger MoRI dispatch/combine buffers at high EP
+# width; measured on GLM but applies to any MoRI model as a safe default.
 _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
-if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_DEFAULT=0.70; else _GPU_MEM_UTIL_DEFAULT=0.8; fi
-echo "GPU_MEMORY_UTILIZATION default: ${_GPU_MEM_UTIL_DEFAULT} (decode EP width ${_EP_WIDTH})"
+if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
+echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
 docker run --rm \
     --device /dev/dri \
@@ -641,7 +641,8 @@ docker run --rm \
     ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
     ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
     ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
-    -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-$_GPU_MEM_UTIL_DEFAULT} \
+    ${GPU_MEMORY_UTILIZATION:+-e GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION} \
+    -e _GPU_MEM_UTIL_LAUNCHER_DEFAULT=$_GPU_MEM_UTIL_LAUNCHER_DEFAULT \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
     ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
     ${HIP_FORCE_DEV_KERNARG:+-e HIP_FORCE_DEV_KERNARG=$HIP_FORCE_DEV_KERNARG} \

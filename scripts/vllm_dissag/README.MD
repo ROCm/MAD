@@ -175,6 +175,11 @@ Env precedence (lowest → highest): connector default → `models.yaml` `env:` 
 `-e VAR=...`. So a model can override a connector default (e.g. a `MORI_*` knob) without editing any
 script, and a per-run/per-cluster `-e` still wins.
 
+**GPU_MEMORY_UTILIZATION**: If not set in yaml or submit-time, the launcher defaults to **0.70** at
+EP≥32 (to accommodate MoRI buffer scaling at high EP width) and **0.8** otherwise. Models needing
+topology-dependent values should omit this key from yaml and rely on the fallback; models needing a
+static override can specify it in their `env:` block.
+
 ## Node topology (all modes)
 
 ```

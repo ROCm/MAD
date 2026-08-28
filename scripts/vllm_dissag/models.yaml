@@ -13,11 +13,13 @@
 #                       overrides connector defaults but still yields to a submit-time
 #                       `-e VAR=...` (which wins). This is the SINGLE HOME for the model
 #                       serving recipe (KV_BLOCK_SIZE, KV_CACHE_DTYPE, per-role
-#                       PREFILL/DECODE_CUDAGRAPH_MODE, *_MORI_BACKEND, GPU_MEMORY_UTILIZATION,
-#                       KV_CACHE_MEMORY_BYTES, VLLM_ROCM_USE_AITER_MLA, ...). The Docker image
-#                       ships NONE of these — it is a clean binary/library artifact, so the
-#                       same image serves any model/cluster. (Platform + MoRI fabric env lives
-#                       in connectors/<connector>.env; both are forwarded via `docker -e`.)
+#                       PREFILL/DECODE_CUDAGRAPH_MODE, *_MORI_BACKEND, KV_CACHE_MEMORY_BYTES,
+#                       VLLM_ROCM_USE_AITER_MLA, ...). GPU_MEMORY_UTILIZATION is optional here;
+#                       if omitted, the launcher provides a topology-aware fallback (0.70 at
+#                       EP>=32, 0.8 otherwise). The Docker image ships NONE of these — it is a
+#                       clean binary/library artifact, so the same image serves any model/cluster.
+#                       (Platform + MoRI fabric env lives in connectors/<connector>.env; both
+#                       are forwarded via `docker -e`.)
 #
 # BOUNDARY — the launcher/connector owns the wideEP parallelism DEGREE and transport:
 #   --data-parallel-size / --enable-expert-parallel / --all2all-backend /
@@ -143,7 +145,6 @@ _deepseek_recipe_env: &deepseek_recipe_env
   KV_BLOCK_SIZE: "16"
   KV_CACHE_DTYPE: "fp8"
   KV_CACHE_MEMORY_BYTES: "20000000000"
-  GPU_MEMORY_UTILIZATION: "0.80"
   VLLM_CUDAGRAPH_MODE: "PIECEWISE"
   PREFILL_CUDAGRAPH_MODE: "NONE"
   DECODE_CUDAGRAPH_MODE: "PIECEWISE"
@@ -219,7 +220,6 @@ GLM-5.1-FP8:
     VLLM_ROCM_USE_AITER_MLA: "1"
     KV_BLOCK_SIZE: "1"
     KV_CACHE_DTYPE: "fp8"
-    GPU_MEMORY_UTILIZATION: "0.80"
     VLLM_CUDAGRAPH_MODE: "NONE"
     PREFILL_CUDAGRAPH_MODE: "NONE"
     # FULL graph for the uniform-decode shapes, PIECEWISE for everything else. Chosen
