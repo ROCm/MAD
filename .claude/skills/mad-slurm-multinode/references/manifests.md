@@ -126,8 +126,13 @@ differ, the host path belongs on the value side.
   `perf_primus-megatron-GPT-OSS-120B.csv`.
 - **Primus Kimi-K2-Thinking**
   (`primus_pyt_megatron_lm_train_kimi-k2-thinking_overlay`): 1T-total /
-  27B-active MLA + MoE (61 layers, 384 experts), BF16 only, EP=8 intra-node,
-  TP=1, seq 4096. **Mock data, 50 iterations, no checkpoint** — a throughput
+  27B-active MLA + MoE (61 layers, 384 experts), BF16 only, **EP=192 across
+  24 nodes**, TP=1, MBS=1, full recompute, seq 4096. Smaller scale-outs are not
+  a tuning question — they cannot fit; the budget and the failure modes are in
+  [gotchas.md](gotchas.md#primus_megatron-training). Validated end-to-end at
+  24 nodes / 192 GPUs: 61 layers, all 50 iterations, `torchrun` exit 0,
+  ~236 tok/s/GPU steady state (derived from iteration wall-clock — Primus emits
+  no throughput line for this model, see below). **Mock data, 50 iterations, no checkpoint** — a throughput
   benchmark, not a training run (see [gotchas.md](gotchas.md#primus_megatron-training)).
   Two things differ from the other Primus templates and must be preserved:
   `"dockercontext": "./docker"` (the overlay Dockerfile `COPY`s the two Kimi
@@ -140,6 +145,14 @@ differ, the host path belongs on the value side.
   (see [gotchas.md](gotchas.md#primus_megatron-training)).
   Reference: 2 nodes / 16 GPU MI355X, BF16, MBS=1 -> ~6487 tok/s/GPU,
   ~96.5 TFLOP/s/GPU (run-to-run spread < 0.02%).
+  **Known open issue — the perf CSV comes out empty even on a healthy run.**
+  Primus' `training_log` patch fires only twice for this model (iterations 1-2,
+  both reported as `No token throughput` because
+  `log_avg_skip_iterations: 2` deliberately skips them) and then never again,
+  so no `tokens/s/GPU` line is ever emitted and the parser writes a
+  header-only CSV. The run itself is fine — same pipeline produces numbers for
+  Llama-4-Scout — so treat an empty CSV here as this bug, not as a failed run,
+  and read throughput off the iteration timestamps instead.
   `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.

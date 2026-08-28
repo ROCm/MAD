@@ -23,7 +23,12 @@
       "owner": "mad.support@amd.com",
       "training_precision": "",
       "multiple_results": "perf_primus-megatron-Kimi-K2-Thinking.csv",
-      "tags": ["pyt", "pretrain", "kimi-k2-thinking", "training"],
+      "tags": [
+        "pyt",
+        "pretrain",
+        "kimi-k2-thinking",
+        "training"
+      ],
       "timeout": -1,
       "args": "--model_repo primus_pyt_megatron_lm_train_kimi-k2-thinking",
       "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro <FILL_AINIC_MOUNTS if fabric needs host ibverbs/ionic libs, e.g. -v /etc/libibverbs.d:/etc/libibverbs.d:ro -v /usr/lib/x86_64-linux-gnu/libionic.so:...:ro; delete if not needed, see references/cluster-types.md>",
@@ -64,7 +69,11 @@
       "NCCL_GDR_FLUSH_DISABLE": "1",
       "NCCL_DMABUF_ENABLE": "0",
       "NCCL_IGNORE_CPU_AFFINITY": "1",
-      "NCCL_IB_QPS_PER_CONNECTION": "1"
+      "NCCL_IB_QPS_PER_CONNECTION": "1",
+      "PRIMUS_EP": "192",
+      "PRIMUS_TP": "1",
+      "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:True",
+      "PYTORCH_ALLOC_CONF": "expandable_segments:True"
     },
     "docker_mounts": {
       "/dev/infiniband": "/dev/infiniband"
@@ -95,7 +104,7 @@
       "account": "<FILL_ACCOUNT or remove if cluster has none>",
       "qos": "<FILL_QOS>",
       "reservation": "<FILL_RESERVATION or remove if none>",
-      "nodes": 2,
+      "nodes": 24,
       "gpus_per_node": 8,
       "time": "08:00:00",
       "output_dir": "./slurm_output",
@@ -106,7 +115,7 @@
       "launcher": "torchrun",
       "backend": "nccl",
       "port": 29500,
-      "nnodes": 2,
+      "nnodes": 24,
       "nproc_per_node": 8
     },
     "env_vars": {
@@ -132,7 +141,11 @@
       "TORCH_NCCL_HIGH_PRIORITY": "1",
       "OMP_NUM_THREADS": "8",
       "MIOPEN_FIND_MODE": "1",
-      "MIOPEN_USER_DB_PATH": "${XDG_CACHE_HOME}/miopen"
+      "MIOPEN_USER_DB_PATH": "${XDG_CACHE_HOME}/miopen",
+      "PRIMUS_EP": "192",
+      "PRIMUS_TP": "1",
+      "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:True",
+      "PYTORCH_ALLOC_CONF": "expandable_segments:True"
     },
     "debug": false,
     "docker_gpus": "0,1,2,3,4,5,6,7"

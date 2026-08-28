@@ -316,6 +316,39 @@ Keywords: Kimi-K2-Thinking 384 experts MoE, rdzv timeout DistStoreError MIOpen,
 PRIMUS_SANITY_TRAIN_ITERS proxy 3-layer, log_error_patterns torchrun SIGSEGV Traceback,
 moe_router_num_groups null no group routing.
 
+- **Kimi-K2-Thinking needs >= 24 nodes (192 GPUs, EP=192). Smaller is
+  arithmetically impossible, and the failure is invisible.** At 1T total params
+  the per-GPU budget is weights (bf16) + grads (fp32, `grad_reduce_in_fp32`) +
+  Adam state (12 B/param). Expert optimizer state is only sharded across
+  expert-DP = `world_size / EP`, so when `EP == world_size` it is not sharded at
+  all. At the original EP=8 / 2-node shape that totals ~1126 GiB/GPU against
+  252 GiB usable on MI355X. Measured working point: 24 nodes, `PRIMUS_EP=192`,
+  `micro_batch_size=1`, full recompute -> ~188 GiB resident, ~236 tok/s/GPU
+  steady state (61 layers, seq 4096).
+  Three separate walls hit in order, each masking the next: DDP `param_data`
+  allocation, then forward activations (fixed by recompute), then the MoE
+  permutation buffers in backward (fixed by MBS=1).
+
+- **Set `PYTORCH_HIP_ALLOC_CONF=expandable_segments:True` for this model.** With
+  the previous `garbage_collection_threshold:0.8`, once occupancy approaches the
+  ceiling the caching allocator re-runs a full GC on *every* allocation and
+  spins for many minutes instead of raising `OutOfMemoryError`. That looks
+  exactly like a collective deadlock -- GPUs pinned at 100%, an unchanging
+  `py-spy` frame, a frozen log -- and it cost a long detour blaming RCCL and the
+  MoE all-to-all. The give-away is that the stuck frame is a plain
+  `torch.empty(...)`, not a kernel launch or a collective.
+
+- **A "silent" worker death here is almost never silent -- it is a hidden
+  `OutOfMemoryError`.** `primus/cli/main.py` wraps every worker exception in
+  `except Exception: ... raise SystemExit(1)`; CPython deliberately prints no
+  traceback for `SystemExit`; and torchrun's `--local-ranks-filter 0` hides the
+  stderr of whichever rank actually failed. Net effect: `exitcode 1`,
+  `error_file: <N/A>`, no traceback anywhere. To recover the real exception
+  without rebuilding the image, inject a `sitecustomize.py` via `PYTHONPATH`
+  that hooks `sys.exit` and PEP 669 `sys.monitoring` RAISE, and dump
+  `SystemExit.__context__` to a per-rank file (a per-rank file also dodges the
+  rank filter).
+
 - **Kimi-K2-Thinking is a mock-data throughput benchmark, not a training run.**
   `docker/kimi_k2_configs/kimi_k2_thinking-BF16-pretrain.yaml` sets `mock_data:
   true`, `train_iters: 50` and `disable_last_saving: true` unconditionally. The

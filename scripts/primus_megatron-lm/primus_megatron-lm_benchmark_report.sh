@@ -614,7 +614,7 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
 elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
   echo "[INFO] $MODEL_REPO TRAINING"
   # Kimi-K2-Thinking: 1T-total / 27B-active MLA + MoE (61 layers, 384 experts),
-  # EP=8 intra-node, TP=1. Both the model YAML and this BF16 experiment YAML are
+  # TP=1. Both the model YAML and this BF16 experiment YAML are
   # injected into the Primus tree by the rccl_overlay Dockerfile -- unlike every
   # other model here, they do not ship inside the rocm/primus base image.
   #
@@ -622,6 +622,15 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
   # mock_data and train_iters: 50 unconditionally and saves no checkpoint.
   # PRIMUS_SANITY_TRAIN_ITERS additionally drops it to 3 layers for CI/build
   # sanity; leave it unset for a representative full-depth measurement.
+  #
+  # SCALE REQUIREMENT: full depth needs >= 24 nodes (192 GPUs) with
+  # PRIMUS_EP=192. This is arithmetic, not tuning -- weights + fp32 grads +
+  # (unsharded, since expert-DP collapses to 1) optimizer state come to roughly
+  # 1126 GiB/GPU at the old EP=8 2-node shape, against 252 GiB available on
+  # MI355X. The deployment must also set
+  # PYTORCH_HIP_ALLOC_CONF=expandable_segments:True: with the previous
+  # garbage_collection_threshold:0.8 the allocator thrashes near the ceiling and
+  # hangs for many minutes instead of raising OutOfMemoryError.
   export EXP=examples/megatron/configs/$CONFIG_DEVICE/kimi_k2_thinking-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
   if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
@@ -632,18 +641,23 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
         MBS=1; GBS=32
         run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
       else
-        # MBS=4/GBS=128 is an explicit override of the experiment YAML (it
-        # happens to match the YAML's own default at this device, but that's
-        # not guaranteed), so both flags must always be passed -- unlike the
-        # scaleout_gbs_override pattern used elsewhere, we can't rely on an
-        # empty override falling back to a correct config default. Compute
-        # the scaled value with effective_global_batch_size and pass it
-        # unconditionally so NUM_GPUS>8 (e.g. 3 nodes/24 GPUs) still satisfies
-        # Megatron's global_batch_size % (micro_batch_size * world_size) == 0
-        # check.
-        MBS=4; GBS=128
+        # MBS=1 and full activation recompute are REQUIRED, not tuning: at
+        # 1T total params this model only fits with both. Measured on MI355X
+        # (252 GiB usable/GPU) at 24 nodes / EP=192: ~188 GiB resident with
+        # recompute on, and the first OOM-free run needed MBS=1 -- MBS=4 dies
+        # in backward on the MoE permutation buffers, which scale with the
+        # micro-batch. See references/gotchas.md for the full memory budget
+        # and why smaller scale-outs cannot work at all.
+        #
+        # Both flags are always passed explicitly (rather than the
+        # scaleout_gbs_override pattern used elsewhere) because we cannot rely
+        # on an empty override falling back to a correct config default.
+        # effective_global_batch_size keeps
+        # global_batch_size % (micro_batch_size * world_size) == 0 at any scale.
+        MBS=1; GBS=128
         GBS=$(effective_global_batch_size "$MBS" "$GBS")
-        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
+        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
+          --recompute_granularity full --recompute_method uniform --recompute_num_layers 1
       fi
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
