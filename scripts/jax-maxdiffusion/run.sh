@@ -25,10 +25,10 @@
 #
 #################################################################################
 
-# Wrapper for Primus JAX/MaxText pretrain when run via madengine (local, SLURM, K8s).
+# Wrapper for Primus JAX/MaxDiffusion pretrain when run via madengine (local, SLURM, K8s).
 # Sets EXP from PRIMUS_CONFIG_PATH or --config_path, runs Primus examples/run_pretrain.sh
-# with BACKEND=MaxText, then extracts tps/tflops into primus_perf_output.csv for
-# madengine multiple_results. MaxText-only: no Megatron/TorchTitan logic here.
+# with BACKEND=MaxDiffusion, then extracts fps/tflops into primus_perf_output.csv for
+# madengine multiple_results. Same shape as scripts/jax-maxtext/run.sh.
 set -e
 
 # madengine invokes this as `cd run_directory && bash run.sh ...`.
@@ -53,7 +53,7 @@ fi
 
 # EXP is required by run_pretrain.sh. --config_path must also be stripped from the
 # forwarded args: run_pretrain.sh appends leftovers to the training command and it is
-# not a valid MaxText flag.
+# not a valid MaxDiffusion flag.
 forward_args=()
 if [[ -n "${PRIMUS_CONFIG_PATH:-}" ]]; then
   export EXP="$PRIMUS_CONFIG_PATH"
@@ -79,18 +79,14 @@ if [[ -z "$EXP" ]]; then
 fi
 
 # Makes run_pretrain.sh launch primus/cli train pretrain rather than torchrun.
-export BACKEND="MaxText"
+export BACKEND="MaxDiffusion"
 
-# Use the image-baked MaxText (/workspace/maxtext) rather than Primus's
-# third_party/maxtext checkout. The image build installs matching XLA/JAX/TE
-# wheels alongside MaxText; using a mismatched third_party copy can trigger
-# hipblaslt Tensile kernel failures on gfx950.
-export MAXTEXT_PATH="${MAXTEXT_PATH:-/workspace/maxtext}"
-export BACKEND_PATH="${BACKEND_PATH:-$MAXTEXT_PATH}"
+export MAXDIFFUSION_PATH="${MAXDIFFUSION_PATH:-/workspace/maxdiffusion}"
+export BACKEND_PATH="${BACKEND_PATH:-$MAXDIFFUSION_PATH}"
 
-# The image already satisfies requirements-jax.txt (installed at build time), so the
-# per-run pip install has nothing to do. Skipping it keeps launches off the network and
-# stops a resolve from moving pinned versions under a benchmark. PRIMUS_SKIP_PIP=0 restores it.
+# The image already satisfies requirements-maxdiffusion.txt and owns the pinned
+# maxdiffusion stack (patched source, specific transformers/torch), so the per-run pip
+# install can only clobber it. PRIMUS_SKIP_PIP=0 restores it.
 export PRIMUS_SKIP_PIP="${PRIMUS_SKIP_PIP:-1}"
 
 # HF_TOKEN for Primus prepare: explicit, then MAD convention, then madengine v2.
@@ -102,13 +98,30 @@ elif [[ -n "${MAD_SECRET_HFTOKEN:-}" ]]; then
   export HF_TOKEN="$MAD_SECRET_HFTOKEN"
 fi
 
+# Cache weights on the mounted checkout, not Primus's default /workspace/hf_cache in the
+# container's writable layer: flux_dev pulls ~58GB and this host's root filesystem also
+# holds /var/lib/docker. A re-run then reuses the download instead of refetching.
+export HF_HOME="${HF_HOME:-/myworkspace/hf_cache}"
+
 # This wrapper deliberately exports no perf/arch env. All XLA_FLAGS and NVTE/HIP/HSA
-# tunables, including the arch-gated ones, are applied in-process before JAX init by
-# primus/backends/maxtext/env_spec.py. MAD only picks the config and finds the log.
+# tunables travel with each config's top-level env: block, and the arch-gated ones are
+# applied in-process before JAX init by primus/backends/maxdiffusion/env_spec.py.
 
 # I/O contract, not a knob: tells Primus where to write the log this wrapper parses.
 mkdir -p "$RUN_DIR/output"
 export TRAIN_LOG="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
+
+# The trainer writes per-step JSON metrics here (configs bind metrics_file to it). This is
+# the reliable perf source: the per-step stdout line does not survive the Primus launcher's
+# stdout handling. Parent of run_directory, so it outlives madengine's cleanup.
+export PERF_METRICS_FILE="$RUN_DIR/../perf_metrics_$(basename "$EXP" .yaml).jsonl"
+rm -f "$PERF_METRICS_FILE"
+
+# Without these, a hard exit during trainer teardown (a fatal HIP/JAX abort in
+# cleanup on_error) discards block-buffered stdout and the traceback, leaving only
+# "launcher exited with code 1". The fault handler covers SIGSEGV/SIGABRT/SIGFPE.
+export PYTHONUNBUFFERED=1
+export PYTHONFAULTHANDLER=1
 
 # EXP paths are relative to PRIMUS_ROOT. No exec: the perf extractor runs after training.
 # The `||` is what keeps set -e from exiting here, so a failed run still gets parsed.
@@ -120,8 +133,9 @@ bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "${forward_args[@]}" || exitcode=$?
 # and deletes run_directory before parsing perf, so the CSV must go to the parent.
 PERF_OUT="$RUN_DIR/../primus_perf_output.csv"
 if [[ -f "$TRAIN_LOG" ]]; then
-  extract_script="${script_dir}/extract_maxtext_perf.py"
-  [[ -f "$RUN_DIR/extract_maxtext_perf.py" ]] && extract_script="$RUN_DIR/extract_maxtext_perf.py"
-  python3 "$extract_script" "$TRAIN_LOG" "$PERF_OUT" || true
+  extract_script="${script_dir}/extract_maxdiffusion_perf.py"
+  [[ -f "$RUN_DIR/extract_maxdiffusion_perf.py" ]] && extract_script="$RUN_DIR/extract_maxdiffusion_perf.py"
+  python3 "$extract_script" "$TRAIN_LOG" "$PERF_OUT" --model-id "$(basename "$EXP" .yaml)" \
+    --metrics-file "$PERF_METRICS_FILE" || true
 fi
 exit "$exitcode"

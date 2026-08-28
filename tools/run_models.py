@@ -267,9 +267,9 @@ def run_model(
         update_dict(docker_build_args, mad_secrets)
 
     build_args = " ".join([f"--build-arg {key}='{value}'" for key, value in docker_build_args.items()])
-    docker_context = "./docker"
-    model_docker_image = f"ci-{model_name}"
-    model_docker_container = f"container_ci-{model_name}"
+    docker_context = model.get("dockercontext", "./docker")
+    model_docker_image = f"ci-{model_name}".lower()
+    model_docker_container = f"container_ci-{model_name}".lower()
 
     # Store the data for the run details
     run_details.model = model_name
@@ -435,7 +435,7 @@ def run_model(
             update_perf_csv(exception_result="perf_entry.json", perf_csv=output)
             # Clean up the instance of docker
             del docker
-            sys.exit(1)
+            return False
         
         test_duration = time.time() - test_start_time
         logger.info(f"Test duration: {test_duration} seconds")
@@ -530,7 +530,8 @@ def main() -> bool:
     console = Console(live_output=args.live_output)
 
     # Load models.json file to list of dictionary.
-    models = load_models()
+    models_data = load_models()
+    models = models_data["models"] if isinstance(models_data, dict) and "models" in models_data else models_data
 
     user_tags = None
     if args.tags:
