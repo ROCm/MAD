@@ -26,7 +26,7 @@ sleep 10
 NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}/v1/chat/completions" \
 NIAH_MODEL="${NIAH_MODEL:-${MODEL_PATH}}" \
 NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
-NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
+NIAH_MAXTOK="${NIAH_MAXTOK:-8192}" \
 NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
   python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
 
