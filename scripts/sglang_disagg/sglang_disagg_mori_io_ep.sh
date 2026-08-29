@@ -345,6 +345,10 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
 
     # --- Launch first prefill server on this node (co-located with router) ---
     setup_sglang_worker_env
+    # MoRI-HT prefill recv buffer: PER_RANK must be >= per-rank prefill dispatch
+    # (chunked_prefill_size / dp_size). With a large chunk for fast long-context TTFT,
+    # bump this or MoRI asserts "PER_RANK must be >= per-rank MoRI dispatch tokens".
+    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${DSV4_PREFILL_MORI_PER_RANK:-16384}"
     PREFILL_NODE_RANK=0
 
     # DP_MODE=1 with dp-size>1: router must use follow_bootstrap_room so each
@@ -582,10 +586,8 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     # NODE_RANK 0..xP-1 map directly to PREFILL_NODE_RANK 0..xP-1 (proxy co-located on NODE_RANK=0).
     PREFILL_NODE_RANK=$((NODE_RANK))
     setup_sglang_worker_env
-    #if [[ "$DP_MODE" == "0" ]]; then
-    #    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
-    #    echo "DP_MODE=0 prefill SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
-    #fi
+    # MoRI-HT prefill recv buffer (see NODE_RANK=0 branch): PER_RANK >= per-rank prefill dispatch.
+    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${DSV4_PREFILL_MORI_PER_RANK:-16384}"
 
     _prefill_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
