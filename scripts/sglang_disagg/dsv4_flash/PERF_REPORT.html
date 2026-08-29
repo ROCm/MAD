@@ -36,7 +36,7 @@
 
 <div class="card">
   <div class="kv">
-    <div>Status</div><div><span class="pass">✅ EP8 (1P1D) &amp; EP16 (2P2D) working · decode CUDA-graph enabled · TPOT SLO met</span></div>
+    <div>Status</div><div><span class="pass">✅ EP8 &amp; EP16 working · decode CUDA-graph + MTP · TPOT p95 39–40 ms (SLO met) · accuracy identical</span></div>
     <div>Upstream PR</div><div><a href="https://github.com/ROCm/MAD/pull/240">ROCm/MAD #240</a> — "Add DeepSeek-V4-Flash-FP8 (MoRI-EP wide-EP, EP8 + EP16) to sglang_disagg"</div>
     <div>Docker image</div><div><code>rocmshared/sglang-disagg-dsv4:mori-mi308-pr2</code></div>
     <div>Image digest</div><div><code>sha256:e1d0fdc10b263f530e3a8fc69fa010ed20112484af86477dd765ad1b36010a22</code></div>
@@ -54,8 +54,9 @@
 <ul>
   <li><b>Correctness (NIAH):</b> <span class="pass">18/18 PASS</span> on <b>both</b> EP8 1P1D and EP16 2P2D — context 1K→200K, needle at 10/50/90% depth (18/18 re-confirmed with decode CUDA-graph on).</li>
   <li><b>Decode CUDA-graph:</b> <span class="pass">enabled</span> (MoRI-LL, backend=full). Prefill stays eager (MoRI-HT).</li>
-  <li><b>TPOT SLO (&lt;50 ms p95):</b> <span class="pass">MET</span> at customer shape 100K/1.1K, concurrency 24 (49 ms) &amp; 36 (50 ms).</li>
-  <li><b>TTFT SLO (&lt;10 s):</b> <span class="bad">NOT met at 100K</span> (~82–157 s) — compute-bound ROCm prefill wall (see §6). Holds for ISL ≲16K.</li>
+  <li><b>MTP (EAGLE speculative decode):</b> <span class="pass">enabled</span> — DSV4 built-in MTP head, accept length ~3. <b>Accuracy identical</b> (NIAH 18/18; every draft token verified by the full model).</li>
+  <li><b>TPOT SLO (&lt;50 ms p95):</b> <span class="pass">MET with margin</span> — 100K/1.1K, <b>p95 39–40 ms</b> at con12/24/36 (was 49–59 ms before MTP).</li>
+  <li><b>TTFT SLO (&lt;10 s):</b> <span class="bad">NOT met at 100K</span> (~78–157 s) — compute-bound ROCm prefill wall (see §6). Holds for ISL ≲16K. (MTP is decode-only; does not affect TTFT.)</li>
 </ul>
 </div>
 
@@ -81,22 +82,24 @@
 </table>
 
 <h2>4. Customer SLO sweep — 100K / 1.1K (EP16 2P2D)</h2>
-<p class="sub">Customer shape: ISL 100K, OSL 1.1K, concurrency 12/24/36. Streaming per-request TTFT + inter-token TPOT, percentiles. Optimized config (decode CUDA-graph + <code>--num-continuous-decode-steps 2</code>), warmed. All requests succeeded.</p>
+<p class="sub">Customer shape: ISL 100K, OSL 1.1K, concurrency 12/24/36. Winning config: decode CUDA-graph + <b>MTP (EAGLE 3/1/4)</b>, warmed. TPOT computed from <code>usage.completion_tokens</code> (correct under speculative burst delivery). All requests succeeded.</p>
 <table>
-<tr><th>Concurrency</th><th>TTFT p50</th><th>TTFT p95</th><th>TTFT p99</th><th>TPOT p50</th><th>TPOT p95</th><th>E2E p50</th><th>agg tok/s</th><th>ok</th></tr>
-<tr><td>12</td><td>82.4s</td><td>194s</td><td>194s</td><td>48ms</td><td class="warn">59ms</td><td>135.5s</td><td>48</td><td class="pass">12/12</td></tr>
-<tr><td>24</td><td>85.9s</td><td>211s</td><td>249s</td><td>48ms</td><td class="pass">49ms</td><td>138.9s</td><td>77</td><td class="pass">24/24</td></tr>
-<tr><td>36</td><td>157.5s</td><td>280s</td><td>280s</td><td>47ms</td><td class="pass">50ms</td><td>162.0s</td><td>102</td><td class="pass">36/36</td></tr>
+<tr><th>Concurrency</th><th>TTFT p50</th><th>TTFT p95</th><th>TPOT p50</th><th>TPOT p95</th><th>E2E p50</th><th>agg tok/s</th><th>ok</th></tr>
+<tr><td>12</td><td>78.3s</td><td>182s</td><td>36ms</td><td class="pass">39ms</td><td>119.6s</td><td>53</td><td class="pass">12/12</td></tr>
+<tr><td>24</td><td>143.5s</td><td>207s</td><td>36ms</td><td class="pass">40ms</td><td>150.4s</td><td>80</td><td class="pass">24/24</td></tr>
+<tr><td>36</td><td>154.4s</td><td>224s</td><td>34ms</td><td class="pass">39ms</td><td>186.1s</td><td>116</td><td class="pass">36/36</td></tr>
 </table>
-<p class="sub"><b>SLO scorecard:</b> <span class="pass">TPOT p95 &lt;50 ms — MET</span> at con24 (49 ms) &amp; con36 (50 ms). <span class="bad">TTFT &lt;10 s — NOT met at 100K</span> (compute-bound; see §6). Throughput 48–102 tok/s aggregate (prefill-bound; rises with concurrency).</p>
+<p class="sub"><b>SLO scorecard:</b> <span class="pass">TPOT p95 &lt;50 ms — MET with margin</span> (39–40 ms across con12/24/36). <span class="bad">TTFT &lt;10 s — NOT met at 100K</span> (compute-bound; see §6). Throughput 53–116 tok/s aggregate (prefill-bound; rises with concurrency).</p>
 
-<h3>4.1 TPOT: eager decode → CUDA-graph + continuous-decode-steps</h3>
+<h3>4.1 TPOT optimization path: eager → CUDA-graph → MTP</h3>
 <table>
-<tr><th>Config</th><th>con12 TPOT p95</th><th>con24 TPOT p95</th><th>con36 TPOT p95</th></tr>
-<tr><td>Baseline (decode CUDA-graph, steps=1)</td><td>55ms</td><td>52ms</td><td>—</td></tr>
-<tr><td><b>Optimized (steps=2)</b></td><td class="warn">59ms</td><td class="pass">49ms</td><td class="pass">50ms</td></tr>
+<tr><th>Config</th><th>con12 p95</th><th>con24 p95</th><th>con36 p95</th><th>accuracy</th></tr>
+<tr><td>decode eager (initial)</td><td colspan="3">MoRI-LL crashed under capture — decode could not meet TPOT</td><td>—</td></tr>
+<tr><td>decode CUDA-graph (steps=1)</td><td>55ms</td><td>52ms</td><td>—</td><td>18/18</td></tr>
+<tr><td>+ continuous-decode-steps=2</td><td class="warn">59ms</td><td class="pass">49ms</td><td class="pass">50ms</td><td>18/18</td></tr>
+<tr><td><b>+ MTP (EAGLE 3/1/4)</b></td><td class="pass">39ms</td><td class="pass">40ms</td><td class="pass">39ms</td><td class="pass">18/18</td></tr>
 </table>
-<p class="sub">The earlier "decode eager" build could not meet TPOT at all (MoRI-LL crashed under capture). Enabling decode CUDA-graph (MoRI bump, §7) then <code>--num-continuous-decode-steps 2</code> brings TPOT p95 to the &lt;50 ms line at con24/36. con12 (59 ms) is the small-batch outlier — fewer requests per rank → less efficient decode batching.</p>
+<p class="sub">Three-step decode optimization: (1) enabling CUDA-graph required a MoRI bump (§7); (2) continuous-decode-steps=2 amortized scheduling; (3) <b>MTP</b> (DSV4's built-in 1-head MTP as the EAGLE draft, accept length ~3) gives the biggest win — TPOT p95 to <b>39–40 ms</b>. MTP supersedes continuous-decode-steps. <b>Every config keeps NIAH 18/18 — MTP changes nothing about correctness</b> (draft tokens are verified by the full model).</p>
 
 <h3>4.2 TTFT vs input length (single request, where &lt;10 s holds)</h3>
 <table>
@@ -161,7 +164,7 @@ ISL=100000 OSL=1100 CONS=12,24,36 ENDPOINT=http://&lt;router&gt;:2322 python3 sl
   <li>Weights: <a href="https://huggingface.co/sgl-project/DeepSeek-V4-Flash-FP8">sgl-project/DeepSeek-V4-Flash-FP8</a></li>
 </ul>
 
-<p class="foot">MI308X/gfx942 + Broadcom Thor2. Decode CUDA-graph on (MoRI 7c51d18f); TPOT p95 &lt;50 ms met at con24/36; TTFT&lt;10 s met for ISL≲16K, 100K TTFT bounded by the ROCm sparse-prefill enablement gap. Correctness 18/18 NIAH both topologies. Repro scripts + this report version-controlled in the PR under <code>scripts/sglang_disagg/dsv4_flash/</code>.</p>
+<p class="foot">MI308X/gfx942 + Broadcom Thor2. <b>Winning config: decode CUDA-graph (MoRI 7c51d18f) + MTP (EAGLE 3/1/4).</b> TPOT p95 39–40 ms at con12/24/36 (accuracy identical, NIAH 18/18 both topologies); TTFT&lt;10 s met for ISL≲16K, 100K TTFT bounded by the ROCm sparse-prefill enablement gap. Repro scripts + this report version-controlled in the PR under <code>scripts/sglang_disagg/dsv4_flash/</code> (recipe: <code>models.yaml</code>; harnesses: <code>slo_harness.py</code>, <code>niah.py</code>). Experiments driven from a WSL workstation over SSH to the 4-node cluster; full experiment history + optimize points captured in the session logbook for future reference.</p>
 
 </div>
 </body>
