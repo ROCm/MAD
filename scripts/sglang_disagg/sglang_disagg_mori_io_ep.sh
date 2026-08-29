@@ -82,7 +82,7 @@ pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
 
 
-# host_ip must match the IPADDRS scope (fabric on skyRiver, not the mgmt default route).
+# host_ip must match the IPADDRS scope (fabric subnet, not the mgmt default route).
 # Pick the local IPv4 that is present in IPADDRS; fall back to the default-route src.
 host_ip=""
 for _cand in $(hostname -I 2>/dev/null); do

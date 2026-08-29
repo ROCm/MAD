@@ -1,5 +1,5 @@
 #!/bin/bash
-# Non-SLURM driver for sglang_disagg DSV4-Flash EP8/EP16 on skyRiver (bnxt/Thor2).
+# Non-SLURM driver for sglang_disagg DSV4-Flash EP8/EP16 on a bnxt/Thor2 (Broadcom) cluster.
 # Mirrors the docker-run + env block of run_xPyD_models.slurm, but launches per-node
 # over SSH (no SLURM). Runs the framework's own sglang_disagg_mori_io_ep.sh inside.
 #
