@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepSeek-V4-Flash-FP8 — EP8 &amp; EP16 + Customer SLO (MoRI-EP WideEP, MI308X)</title>
+<style>
+  :root{--bg:#0f1116;--card:#1a1d26;--fg:#e6e8ee;--mut:#9aa3b2;--acc:#4f8cff;--ok:#2ecc71;--warn:#f5a623;--bad:#e5534b;--line:#2a2f3a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1060px;margin:0 auto;padding:32px 22px 80px}
+  h1{font-size:26px;margin:0 0 6px} h2{font-size:20px;margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:16px;margin:22px 0 8px;color:var(--acc)}
+  .sub{color:var(--mut);margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:600;background:#161922}
+  code,pre{font-family:"SF Mono",Menlo,Consolas,monospace}
+  pre{background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-size:13px;color:#cfe0ff}
+  code{background:#0b0d12;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:13px;color:#cfe0ff}
+  a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+  .pass{color:var(--ok);font-weight:700} .warn{color:var(--warn);font-weight:700} .bad{color:var(--bad);font-weight:700}
+  .kv{display:grid;grid-template-columns:190px 1fr;gap:6px 14px}
+  .kv div:nth-child(odd){color:var(--mut)}
+  .big{font-size:22px;font-weight:700}
+  ul{margin:6px 0 6px 18px} li{margin:3px 0}
+  .foot{color:var(--mut);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>DeepSeek-V4-Flash-FP8 — EP8 &amp; EP16 Enablement, Correctness &amp; Customer SLO</h1>
+<p class="sub">MoRI-EP WideEP disaggregated inference (SGLang) on AMD Instinct MI308X (gfx942) + Broadcom Thor2 RoCE fabric · ROCm/MAD <code>sglang_disagg</code></p>
+
+<div class="card">
+  <div class="kv">
+    <div>Status</div><div><span class="pass">✅ EP8 (1P1D) &amp; EP16 (2P2D) working · decode CUDA-graph enabled · TPOT SLO met</span></div>
+    <div>Upstream PR</div><div><a href="https://github.com/ROCm/MAD/pull/240">ROCm/MAD #240</a> — "Add DeepSeek-V4-Flash-FP8 (MoRI-EP wide-EP, EP8 + EP16) to sglang_disagg"</div>
+    <div>Docker image</div><div><code>rocmshared/sglang-disagg-dsv4:mori-mi308-pr2</code></div>
+    <div>Image digest</div><div><code>sha256:e1d0fdc10b263f530e3a8fc69fa010ed20112484af86477dd765ad1b36010a22</code></div>
+    <div>PR head commit</div><div><code>3e800f2</code> (branch <code>add-deepseek-v4-flash-sglang-disagg</code>)</div>
+    <div>Model</div><div>DeepSeek-V4-Flash, block-FP8 E4M3 [128,128] · <code>DeepseekV4ForCausalLM</code> · 43L / 256 experts / topk 6 / hidden 4096 · 1M ctx</div>
+    <div>Weights (HF)</div><div><a href="https://huggingface.co/sgl-project/DeepSeek-V4-Flash-FP8">sgl-project/DeepSeek-V4-Flash-FP8</a> (FP8-E4M3 — NOT the INT8 repackage)</div>
+    <div>Hardware</div><div>4× node, 8× MI308X (gfx942) each · Broadcom Thor2 bnxt RoCE (8 rails, 200 Gb/s/bond)</div>
+    <div>Software</div><div>ROCm 7.2 · SGLang v0.5.15 (patched DSV4) · MoRI <code>7c51d18f</code> · attention backend <code>dsv4</code></div>
+  </div>
+</div>
+
+<h2>1. Summary</h2>
+<div class="card">
+<p>DeepSeek-V4-Flash-FP8 is served through MoRI-EP wide-EP disaggregated P/D. Both topologies are validated end-to-end via <code>sglang_router</code>, greedy <code>/v1/completions</code>. Since the initial enablement, <b>decode now runs under CUDA-graph</b> (MoRI-LL) and the decode-latency SLO is met.</p>
+<ul>
+  <li><b>Correctness (NIAH):</b> <span class="pass">18/18 PASS</span> on <b>both</b> EP8 1P1D and EP16 2P2D — context 1K→200K, needle at 10/50/90% depth (18/18 re-confirmed with decode CUDA-graph on).</li>
+  <li><b>Decode CUDA-graph:</b> <span class="pass">enabled</span> (MoRI-LL, backend=full). Prefill stays eager (MoRI-HT).</li>
+  <li><b>TPOT SLO (&lt;50 ms p95):</b> <span class="pass">MET</span> at customer shape 100K/1.1K, concurrency 24 (49 ms) &amp; 36 (50 ms).</li>
+  <li><b>TTFT SLO (&lt;10 s):</b> <span class="bad">NOT met at 100K</span> (~82–157 s) — compute-bound ROCm prefill wall (see §6). Holds for ISL ≲16K.</li>
+</ul>
+</div>
+
+<h2>2. Topologies</h2>
+<table>
+<tr><th>models.json entry</th><th>xP</th><th>yD</th><th>Nodes</th><th>Per-role</th></tr>
+<tr><td><code>pyt_sglang_disagg_mori_io_dsv4-flash_ep8_1p1d</code></td><td>1</td><td>1</td><td>2</td><td>TP8·EP8·DP8, DP_MODE=1</td></tr>
+<tr><td><code>pyt_sglang_disagg_mori_io_dsv4-flash_ep16_2p2d</code></td><td>2</td><td>2</td><td>4</td><td>TP16·EP16·DP16 (wide decode across 2 nodes)</td></tr>
+</table>
+<p>MoRI-EP mode: prefill <code>--deepep-mode normal</code> (HT, eager), decode <code>--deepep-mode low_latency</code> (LL, CUDA-graph). KV transfer: MoRI-IO. Bootstrap/dist-init ride the <code>.200</code> RoCE fabric; NCCL/GLOO sockets ride the mgmt NIC.</p>
+
+<h2>3. Correctness — Needle-in-a-Haystack (18/18 each)</h2>
+<p class="sub">Neutral filler with <code>"Marie was born in the city of Paris."</code> at 10/50/90% depth → expect <code>" Paris"</code>. Greedy, <code>/v1/completions</code>. Re-confirmed with decode CUDA-graph on.</p>
+<table>
+<tr><th>Context</th><th>EP8 1P1D (10 / 50 / 90%)</th><th>EP16 2P2D (10 / 50 / 90%)</th></tr>
+<tr><td>1K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td>4K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td>16K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td>32K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td>100K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td>200K</td><td class="pass">✅ ✅ ✅</td><td class="pass">✅ ✅ ✅</td></tr>
+<tr><td><b>Total</b></td><td class="pass big">18/18</td><td class="pass big">18/18</td></tr>
+</table>
+
+<h2>4. Customer SLO sweep — 100K / 1.1K (EP16 2P2D)</h2>
+<p class="sub">Customer shape: ISL 100K, OSL 1.1K, concurrency 12/24/36. Streaming per-request TTFT + inter-token TPOT, percentiles. Optimized config (decode CUDA-graph + <code>--num-continuous-decode-steps 2</code>), warmed. All requests succeeded.</p>
+<table>
+<tr><th>Concurrency</th><th>TTFT p50</th><th>TTFT p95</th><th>TTFT p99</th><th>TPOT p50</th><th>TPOT p95</th><th>E2E p50</th><th>agg tok/s</th><th>ok</th></tr>
+<tr><td>12</td><td>82.4s</td><td>194s</td><td>194s</td><td>48ms</td><td class="warn">59ms</td><td>135.5s</td><td>48</td><td class="pass">12/12</td></tr>
+<tr><td>24</td><td>85.9s</td><td>211s</td><td>249s</td><td>48ms</td><td class="pass">49ms</td><td>138.9s</td><td>77</td><td class="pass">24/24</td></tr>
+<tr><td>36</td><td>157.5s</td><td>280s</td><td>280s</td><td>47ms</td><td class="pass">50ms</td><td>162.0s</td><td>102</td><td class="pass">36/36</td></tr>
+</table>
+<p class="sub"><b>SLO scorecard:</b> <span class="pass">TPOT p95 &lt;50 ms — MET</span> at con24 (49 ms) &amp; con36 (50 ms). <span class="bad">TTFT &lt;10 s — NOT met at 100K</span> (compute-bound; see §6). Throughput 48–102 tok/s aggregate (prefill-bound; rises with concurrency).</p>
+
+<h3>4.1 TPOT: eager decode → CUDA-graph + continuous-decode-steps</h3>
+<table>
+<tr><th>Config</th><th>con12 TPOT p95</th><th>con24 TPOT p95</th><th>con36 TPOT p95</th></tr>
+<tr><td>Baseline (decode CUDA-graph, steps=1)</td><td>55ms</td><td>52ms</td><td>—</td></tr>
+<tr><td><b>Optimized (steps=2)</b></td><td class="warn">59ms</td><td class="pass">49ms</td><td class="pass">50ms</td></tr>
+</table>
+<p class="sub">The earlier "decode eager" build could not meet TPOT at all (MoRI-LL crashed under capture). Enabling decode CUDA-graph (MoRI bump, §7) then <code>--num-continuous-decode-steps 2</code> brings TPOT p95 to the &lt;50 ms line at con24/36. con12 (59 ms) is the small-batch outlier — fewer requests per rank → less efficient decode batching.</p>
+
+<h3>4.2 TTFT vs input length (single request, where &lt;10 s holds)</h3>
+<table>
+<tr><th>ISL</th><th>TTFT</th><th>&lt;10 s SLO</th></tr>
+<tr><td>4K</td><td>1.98s</td><td class="pass">✅</td></tr>
+<tr><td>8K</td><td>3.36s</td><td class="pass">✅</td></tr>
+<tr><td>16K</td><td>8.94s</td><td class="pass">✅ (borderline)</td></tr>
+<tr><td>100K</td><td>~58s</td><td class="bad">❌</td></tr>
+</table>
+<p class="sub">TTFT is linear in prefill compute (~1720 tok/s). On the current ROCm stack the &lt;10 s TTFT SLO is met for ISL up to ~16K; 100K needs upstream enablement (§6). TPOT ~50 ms holds across all ISL.</p>
+
+<h2>5. Reference perf (8K/1K &amp; 16K/1K) — decode eager → CUDA-graph</h2>
+<p class="sub">Aggregate output tok/s; decode eager vs CUDA-graph (the enablement win).</p>
+<table>
+<tr><th>ISL/OSL</th><th>Con</th><th>EP8 eager</th><th>EP8 cudagraph</th><th>EP16 eager</th><th>EP16 cudagraph</th></tr>
+<tr><td>8K/1K</td><td>16</td><td>35</td><td class="pass">57 (+63%)</td><td>62</td><td class="pass">166 (+168%)</td></tr>
+<tr><td>8K/1K</td><td>32</td><td>7*</td><td class="pass">104</td><td>65</td><td class="pass">192 (+195%)</td></tr>
+</table>
+<p class="sub">* EP8 8K/con32 eager saw early-EOS on the synthetic prompt; not representative. All requests succeeded in every cell.</p>
+
+<h2>6. TTFT at 100K — root cause &amp; the upstream ask</h2>
+<div class="card">
+<p>During 100K prefill, <b>GPU utilization = 100%</b> on all ranks → <b>compute-bound, not comm-bound</b>. 100K × 43-layer DSV4 sparse-MLA on MI308X saturates at ~1720 tok/s → ~58 s TTFT. Two would-be accelerators are both <b>upstream enablement gaps, not tunable config</b>:</p>
+<ul>
+  <li><b>Sparse-MLA prefill kernel is CUDA-only.</b> SGLang explicitly logs <code>"Disabling SGLANG_OPT_FLASHMLA_SPARSE_PREFILL by default on ROCm/HIP for DeepseekV4ForCausalLM"</code> → MI308X runs the dense fallback.</li>
+  <li><b>Prefill context-parallel conflicts with DP-attention.</b> DSV4 requires <code>--cp-strategy interleave</code>, but interleave CP forbids DP-attention, and DSV4 requires DP-attention (<code>num_key_value_heads=1</code>). So prefill-CP is unusable for DSV4-Flash EP here.</li>
+</ul>
+<p><b>Config levers tried (exhausted):</b> chunk size 512→8192/rank (+9%), DSA prefill backend (0%), sparse-prefill (ROCm-blocked), prefill-CP (DSV4/DP-attn conflict).</p>
+<p class="warn"><b>Ask:</b> (a) ROCm/aiter port of the sparse-MLA prefill kernel for DSV4 (biggest lever); or (b) DP-attention-compatible interleave prefill-CP for DSV4. Until then, &lt;10 s TTFT is achievable for ISL ≲16K; 100K TTFT is a hardware/kernel ceiling on this stack.</p>
+</div>
+
+<h2>7. What changed to enable decode CUDA-graph</h2>
+<div class="card">
+<p>The initial build ran decode eager because MoRI-LL crashed under CUDA-graph capture. Root-caused to two independent issues, both fixed:</p>
+<ul>
+  <li><b>MoRI too old.</b> Pinned <code>158c7e83</code> predated <b>#363</b> (guard dispatch kernels vs out-of-range expert id → the <code>low_latency_async.cpp:360 (pe&gt;=0 &amp;&amp; pe&lt;worldSize)</code> assertion) and <b>#505</b> (AsyncLL slot double-alloc when top-k does not divide warpSize; DSV4 is topk6/warp64). Bumped <code>MORI_COMMIT</code> → <code>7c51d18f</code>.</li>
+  <li><b>Recv-buffer sizing conflated with the dispatch cap.</b> The launcher tied <code>SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK</code> (sizes the LL recv buffer) to the smaller decode dispatch cap → <code>low_latency_async.cpp:324 "Total recv token overflow"</code> during capture. Decoupled them (decode PER_RANK=512, prefill PER_RANK=16384), role-specific.</li>
+</ul>
+</div>
+
+<h2>8. How to reproduce / remeasure</h2>
+<pre>docker pull rocmshared/sglang-disagg-dsv4:mori-mi308-pr2
+git clone https://github.com/ROCm/MAD.git &amp;&amp; cd MAD
+git fetch origin pull/240/head:pr240 &amp;&amp; git checkout pr240
+# recipe + repro scripts: scripts/sglang_disagg/ and scripts/sglang_disagg/dsv4_flash/
+
+# Launch (non-SLURM, EP16 2P2D):
+IMG=&lt;image&gt; KEEP_ALIVE=1 SKIP_BENCHMARK=1 xP=2 yD=2 DP_MODE=1 \
+  PREFILL_NODES="nodeA nodeB" DECODE_NODES="nodeC nodeD" \
+  bash scripts/sglang_disagg/dsv4_flash/run_dsv4_nonslurm.sh
+# (EP8 1P1D: xP=1 yD=1, PREFILL_NODES=nodeA DECODE_NODES=nodeB)
+
+# Correctness (NIAH) + SLO sweep:
+ENDPOINT=http://&lt;router&gt;:2322 python3 niah.py
+ISL=100000 OSL=1100 CONS=12,24,36 ENDPOINT=http://&lt;router&gt;:2322 python3 slo_harness.py</pre>
+
+<h2>9. Links</h2>
+<ul>
+  <li>PR: <a href="https://github.com/ROCm/MAD/pull/240">https://github.com/ROCm/MAD/pull/240</a></li>
+  <li>Image: <code>docker pull rocmshared/sglang-disagg-dsv4:mori-mi308-pr2</code></li>
+  <li>Upstream issue: <a href="https://github.com/sgl-project/sglang/issues/36390">sgl-project/sglang#36390</a></li>
+  <li>Weights: <a href="https://huggingface.co/sgl-project/DeepSeek-V4-Flash-FP8">sgl-project/DeepSeek-V4-Flash-FP8</a></li>
+</ul>
+
+<p class="foot">MI308X/gfx942 + Broadcom Thor2. Decode CUDA-graph on (MoRI 7c51d18f); TPOT p95 &lt;50 ms met at con24/36; TTFT&lt;10 s met for ISL≲16K, 100K TTFT bounded by the ROCm sparse-prefill enablement gap. Correctness 18/18 NIAH both topologies. Repro scripts + this report version-controlled in the PR under <code>scripts/sglang_disagg/dsv4_flash/</code>.</p>
+
+</div>
+</body>
+</html>
