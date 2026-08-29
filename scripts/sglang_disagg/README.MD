@@ -10,6 +10,7 @@ MoE Models
 - DeepSeek-V3 (https://huggingface.co/deepseek-ai/DeepSeek-V3)
 - DeepSeek-R1 (https://huggingface.co/deepseek-ai/DeepSeek-R1)
 - Mixtral-8x7B-v0.1 (https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)
+- DeepSeek-V4-Flash-FP8 (https://huggingface.co/sgl-project/DeepSeek-V4-Flash-FP8) — MoRI-EP wide-EP; use the FP8-E4M3 checkpoint, DP-attention mandatory (num_key_value_heads=1). EP8 1P1D and EP16 2P2D validated on MI308X/gfx942 + Broadcom Thor2 (set USE_CX7_NICS=0).
 
 This repository contains scripts and documentation to launch PD Disaggregation for above models. You will find setup instructions, node assignment details and benchmarking commands.
 
@@ -129,3 +130,39 @@ curl -X POST http://127.0.0.1:2322/generate \
 For larger models, such as DeepSeekV3 and Llama-3.1-405B-Instruct-FP8-KV and higher concurrency(512+), errors with below signature is observed:<br>
 _'<TransferEncodingError: 400, message:\n  Not enough data to satisfy transfer length header.\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n '_<br>
 This leads to dropping requests and lower throughput.This issue is being discussed on the SGLang forums.
+
+## DeepSeek-V4-Flash-FP8 (MoRI-EP wide-EP, EP8 + EP16)
+
+DeepSeek-V4-Flash is served through the MoRI-EP wide-EP path (`DP_MODE=1`). Notes specific to this model:
+
+- **Checkpoint:** use the **FP8-E4M3 block-quant** weights (e.g. `sgl-project/DeepSeek-V4-Flash-FP8`). The model uses the dedicated `dsv4` attention backend (not `aiter`), and `num_key_value_heads=1` so attention cannot be tensor-sharded — **DP-attention is mandatory** for any EP run.
+- **MoRI-EP mode:** prefill uses `--deepep-mode normal` (high-throughput), decode uses `--deepep-mode low_latency` (matches the MoRI HT-prefill / LL-decode split). Set in `models.yaml`.
+- **Prefill is eager** (`--disable-cuda-graph`); decode uses cudagraph capture.
+
+### Topologies (via `models.json`)
+
+| Entry | xP | yD | Nodes |
+|-------|----|----|-------|
+| `pyt_sglang_disagg_mori_io_dsv4-flash_ep8_1p1d`  | 1 | 1 | 2 (EP8, 1 prefill + 1 decode) |
+| `pyt_sglang_disagg_mori_io_dsv4-flash_ep16_2p2d` | 2 | 2 | 4 (EP16, 2 prefill + 2 decode) |
+
+### Docker image
+
+A prebuilt image (SGLang + MoRI on ROCm 7.2, gfx942) is available:
+
+```bash
+docker pull rocmshared/sglang-disagg-dsv4:mori-mi308-pr
+```
+
+Or build via `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile` (base `lmsysorg/sglang:v0.5.15-rocm720-mi30x`, MoRI from source).
+
+### Broadcom Thor2 (bnxt) / non-CX7 clusters
+
+Set `USE_CX7_NICS=0`. On bnxt the image's baked `libbnxt_re` may be ABI-stale versus the host kernel; the launcher exposes the host's ABI-correct `libbnxt_re` and runs `ldconfig` in-container automatically for this path. RDMA NIC selection (`IB_DEVICES` / `MORI_RDMA_DEVICES`) should be set to the node's RoCE devices.
+
+### Validation (MI308X/gfx942 + Broadcom Thor2)
+
+Both topologies validated end-to-end (serve via `sglang_router`, greedy `/v1/completions`):
+
+- **Correctness:** needle-in-a-haystack **18/18** (context 1K→200K, needle at 10/50/90% depth) on **both** EP8 1P1D and EP16 2P2D. Factual length-sweep coherent to 200K.
+- **Perf** (functional, eager decode; all requests succeeded): 8K/1K and 16K/1K input/output at concurrency 16 and 32.

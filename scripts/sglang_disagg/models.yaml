@@ -72,3 +72,18 @@ DeepSeek-R1:
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
     dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
+
+DeepSeek-V4-Flash-FP8:
+  # DeepSeek-V4-Flash (block-FP8 E4M3, [128,128]): 43L / 256 experts / topk6 / hidden 4096, 1M ctx.
+  # DSV4 uses the dedicated 'dsv4' attention backend (NOT aiter). num_key_value_heads=1, so
+  # attention CANNOT be tensor-sharded -> DP-attention is MANDATORY for any EP run (DP_MODE=1).
+  # Requires the FP8-E4M3 checkpoint (NOT the INT8-packed sgl-project repackage).
+  base_flags: "--attention-backend dsv4 --page-size 256 --kv-cache-dtype fp8_e4m3 --swa-full-tokens-ratio 0.1 --disable-shared-experts-fusion --tool-call-parser deepseekv4 --reasoning-parser deepseek-v4 --watchdog-timeout 1000000 --mem-fraction-static 0.90 --disable-custom-all-reduce"
+  # MoRI-EP wide expert dispatch + DP-attention (mirrors DeepSeek-V3 EP path).
+  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192 --chunked-prefill-size 8192 --disable-cuda-graph --mem-fraction-static 0.80 --deepep-mode normal"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    dp: "--max-running-requests 8192 --chunked-prefill-size 8192 --disable-cuda-graph --mem-fraction-static 0.85 --deepep-mode low_latency"

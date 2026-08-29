@@ -12,6 +12,7 @@ SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "DeepSeek-V4-Flash-FP8"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -81,7 +82,13 @@ pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
 
 
-host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
+# host_ip must match the IPADDRS scope (fabric on skyRiver, not the mgmt default route).
+# Pick the local IPv4 that is present in IPADDRS; fall back to the default-route src.
+host_ip=""
+for _cand in $(hostname -I 2>/dev/null); do
+    case ",${IPADDRS}," in *",${_cand},"*) host_ip="$_cand"; break;; esac
+done
+[[ -z "$host_ip" ]] && host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
 
 if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
@@ -183,6 +190,9 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
+# Also source per-model env (set_env_vars.sh) so MODEL_NAME-guarded blocks (e.g. DSV4
+# thread caps + aiter flags) apply on the MoRI-EP path, not just the mooncake server path.
+[[ -f "${SCRIPT_DIR}/set_env_vars.sh" ]] && source "${SCRIPT_DIR}/set_env_vars.sh"
 
 # KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.
@@ -421,21 +431,28 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             echo "Decode NODE${i} ready."
         done
     else
+        # Readiness gate. Prefer a network /health poll (FS-agnostic: works on
+        # non-SLURM / no-shared-FS clusters where a peer's log file is not visible
+        # on the router node). Fall back to the local-log grep when the peer HTTP
+        # endpoint is not reachable (e.g. same-node master, or ROUTER_READY_HTTP=0).
+        _master_prefill_ip="${IP_ARRAY[0]}"
+        _master_decode_ip="${IP_ARRAY[$xP]}"
         _master_prefill_log="${_runlog}/prefill_NODE0.log"
         _master_decode_log="${_runlog}/decode_NODE${xP}.log"
-        echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
-        for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
-            IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+        echo "Waiting for master prefill (${_master_prefill_ip}) + master decode (${_master_decode_ip}) — DP_MODE=${DP_MODE}"
+        for _label_and_ep in "master prefill|${_master_prefill_ip}:3000|${_master_prefill_log}" "master decode|${_master_decode_ip}:3000|${_master_decode_log}"; do
+            IFS='|' read -r _log_label _http_ep LOG_FILE <<< "${_label_and_ep}"
+            until { [[ "${ROUTER_READY_HTTP:-1}" == "1" ]] && curl -s -m 3 "http://${_http_ep}/health" >/dev/null 2>&1; } \
+                  || { [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; }; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
+                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (http://${_http_ep}/health or ${LOG_FILE})" >&2
                     tail -n 40 "$LOG_FILE" 2>/dev/null || true
                     exit 1
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
-            echo "${_log_label} ready (${LOG_FILE})."
+            echo "${_log_label} ready (${_http_ep})."
         done
     fi
 
@@ -546,11 +563,19 @@ PY
         fi
     fi
 
-    echo "Killing the proxy server (pid=${proxy_pid})"
-    kill "${proxy_pid}"
+    # KEEP_ALIVE=1: leave router + servers running (for external NIAH/perf/manual
+    # testing) instead of tearing down. Block on the server pids so the container
+    # stays up until stopped.
+    if [[ "${KEEP_ALIVE:-0}" == "1" ]]; then
+        echo "KEEP_ALIVE=1: router (pid=${proxy_pid}) + prefill (pid=${_node0_prefill_pid}) left running. Router on ${host_ip}:2322. Ctrl-C / docker stop to end."
+        wait "${_node0_prefill_pid}" "${proxy_pid}"
+    else
+        echo "Killing the proxy server (pid=${proxy_pid})"
+        kill "${proxy_pid}"
 
-    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
-    kill "${_node0_prefill_pid}"
+        echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
+        kill "${_node0_prefill_pid}"
+    fi
 
 elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"
