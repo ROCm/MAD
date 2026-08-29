@@ -86,4 +86,4 @@ DeepSeek-V4-Flash-FP8:
     dp: "--max-running-requests 8192 --chunked-prefill-size 8192 --disable-cuda-graph --mem-fraction-static 0.80 --deepep-mode normal"
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
-    dp: "--max-running-requests 8192 --chunked-prefill-size 8192 --disable-cuda-graph --mem-fraction-static 0.85 --deepep-mode low_latency"
+    dp: "--max-running-requests 8192 --chunked-prefill-size 8192 --cuda-graph-bs 1 2 4 8 12 16 24 32 48 64 --mem-fraction-static 0.85 --deepep-mode low_latency"

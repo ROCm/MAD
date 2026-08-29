@@ -55,5 +55,14 @@ if [[ "${MODEL_NAME:-}" == "DeepSeek-V4-Flash-FP8" ]]; then
   # exhaust RLIMIT_NPROC ("can't start new thread") during weight load.
   export OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 NUMEXPR_NUM_THREADS=4 GOTO_NUM_THREADS=4
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-  echo "[set_env_vars] applied DeepSeek-V4-Flash-FP8 env block"
+  # MoRI-LL decode cudagraph capture: two INDEPENDENT knobs (do not conflate).
+  #  - MORI_MAX_DISPATCH_TOKENS_DECODE: per-step decode dispatch cap (small = low latency).
+  #  - SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK: sizes the recv buffer
+  #    (MaxNumTokensToRecv ~= PER_RANK * world_size). This is ROLE-SPECIFIC and must be set
+  #    in the launcher's per-role branch (prefill needs >= chunked_prefill_size = 8192;
+  #    decode needs headroom for the largest captured bs). Do NOT export it globally here or
+  #    prefill fails its "PER_RANK must be >= chunked_prefill_size" assertion.
+  export MORI_MAX_DISPATCH_TOKENS_DECODE="${DSV4_MORI_MAX_DISPATCH_TOKENS_DECODE:-64}"
+  export MORI_MOE_MAX_INPUT_TOKENS_DECODE="${DSV4_MORI_MOE_MAX_INPUT_TOKENS_DECODE:-332}"
+  echo "[set_env_vars] applied DeepSeek-V4-Flash-FP8 env block (decode dispatch cap=${MORI_MAX_DISPATCH_TOKENS_DECODE})"
 fi
