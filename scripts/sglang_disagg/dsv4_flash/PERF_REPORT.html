@@ -109,7 +109,19 @@
 <tr><td>16K</td><td>8.94s</td><td class="pass">✅ (borderline)</td></tr>
 <tr><td>100K</td><td>~58s</td><td class="bad">❌</td></tr>
 </table>
-<p class="sub">TTFT is linear in prefill compute (~1720 tok/s). On the current ROCm stack the &lt;10 s TTFT SLO is met for ISL up to ~16K; 100K needs upstream enablement (§6). TPOT ~50 ms holds across all ISL.</p>
+<p class="sub">TTFT is linear in prefill compute (~1720 tok/s). On the current ROCm stack the &lt;10 s TTFT SLO is met for ISL up to ~16K; 100K needs upstream enablement (§6). TPOT ~36–40 ms (with MTP) holds across all ISL.</p>
+
+<h2>4.3 MTP (Multi-Token Prediction / EAGLE speculative decode)</h2>
+<div class="card">
+<p>DeepSeek-V4-Flash ships a single MTP head (<code>num_nextn_predict_layers: 1</code>). Enabled as the EAGLE draft: <code>--speculative-algorithm EAGLE --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4</code>. The draft proposes several tokens per step; <b>the full model verifies every one</b>, so output is bit-identical to non-speculative decode — <b>accuracy is unchanged</b>.</p>
+<p><b>Works on our stack:</b> MTP + MoRI-LL + decode CUDA-graph coexist on SGLang 0.5.15 / gfx942 — no <code>paged_mqa_logits_metadata</code> assertion (a gap seen on some other hardware). Accept length ~3 (EP16) / ~2 (EP8).</p>
+<table>
+<tr><th>Topology</th><th>MTP accuracy (NIAH)</th><th>accept len</th><th>TPOT p95 (before → MTP)</th><th>notes</th></tr>
+<tr><td><b>EP16 2P2D</b></td><td class="pass">18/18</td><td>~3</td><td class="pass">49–59ms → <b>39–40ms</b></td><td>customer SLO target</td></tr>
+<tr><td><b>EP8 1P1D</b></td><td class="pass">18/18*</td><td>~2</td><td class="pass">66ms → ~54ms</td><td>*paced; see note</td></tr>
+</table>
+<p class="sub">Both topologies: MTP correct (NIAH 18/18) with a real decode-latency win. MTP is decode-only (no TTFT effect). <b>EP8 note:</b> single-node EP8 has tighter memory margins — at extreme context (100K–200K) under bursty back-to-back concurrency it can transiently 503 (recovers); isolated/paced requests pass 18/18. EP16 (16 GPUs) has the headroom and is the recommended config for the 100K/1.1K customer workload. MTP supersedes <code>--num-continuous-decode-steps</code>.</p>
+</div>
 
 <h2>5. Reference perf (8K/1K &amp; 16K/1K) — decode eager → CUDA-graph</h2>
 <p class="sub">Aggregate output tok/s; decode eager vs CUDA-graph (the enablement win).</p>
@@ -131,12 +143,13 @@
 <p class="warn"><b>Ask:</b> (a) ROCm/aiter port of the sparse-MLA prefill kernel for DSV4 (biggest lever); or (b) DP-attention-compatible interleave prefill-CP for DSV4. Until then, &lt;10 s TTFT is achievable for ISL ≲16K; 100K TTFT is a hardware/kernel ceiling on this stack.</p>
 </div>
 
-<h2>7. What changed to enable decode CUDA-graph</h2>
+<h2>7. What changed to reach the winning config (decode CUDA-graph + MTP)</h2>
 <div class="card">
-<p>The initial build ran decode eager because MoRI-LL crashed under CUDA-graph capture. Root-caused to two independent issues, both fixed:</p>
+<p>The initial build ran decode eager because MoRI-LL crashed under CUDA-graph capture. Root-caused to two independent issues, both fixed; then MTP layered on top:</p>
 <ul>
   <li><b>MoRI too old.</b> Pinned <code>158c7e83</code> predated <b>#363</b> (guard dispatch kernels vs out-of-range expert id → the <code>low_latency_async.cpp:360 (pe&gt;=0 &amp;&amp; pe&lt;worldSize)</code> assertion) and <b>#505</b> (AsyncLL slot double-alloc when top-k does not divide warpSize; DSV4 is topk6/warp64). Bumped <code>MORI_COMMIT</code> → <code>7c51d18f</code>.</li>
   <li><b>Recv-buffer sizing conflated with the dispatch cap.</b> The launcher tied <code>SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK</code> (sizes the LL recv buffer) to the smaller decode dispatch cap → <code>low_latency_async.cpp:324 "Total recv token overflow"</code> during capture. Decoupled them (decode PER_RANK=512, prefill PER_RANK=16384), role-specific.</li>
+  <li><b>MTP enabled.</b> DSV4-Flash's built-in MTP head as the EAGLE draft (<code>--speculative-algorithm EAGLE --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4</code>). Works with MoRI-LL + decode CUDA-graph; accept length ~3; accuracy unchanged (NIAH 18/18). This is the largest decode-latency win (§4.3).</li>
 </ul>
 </div>
 
