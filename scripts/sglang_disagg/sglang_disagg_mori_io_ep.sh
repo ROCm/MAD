@@ -205,6 +205,16 @@ if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then
     echo "[override] Transfer backend: ${_TRANSFER_BACKEND}"
 fi
 
+# Profiling: rocprofv3 wrapping adds startup overhead that can trip the gloo/dist rendezvous
+# (workers init slower than the default timeout -> "Connection closed by peer"). Raise the dist
+# timeout + MoRI disagg wait so the whole DP group comes up under the profiler.
+if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG+=" --dist-timeout 3600"
+    DECODE_MODEL_CONFIG+=" --dist-timeout 3600"
+    export SGLANG_DISAGGREGATION_WAITING_TIMEOUT=3600 GLOO_TIMEOUT_SECONDS=3600
+    export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
+fi
+
 
 # =============================================================================
 # Cluster Topology (dist-init endpoints)
@@ -305,6 +315,29 @@ setup_sglang_worker_env() {
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }
 
+# _prof_prefix ROLE: when RUN_PROFILE=1, echoes a rocprofv3 wrapper that captures GPU
+# kernels + ROCtx markers (MoRI-IO KV transfers, MoRI-EP kernels) into a per-role/per-node
+# Perfetto trace. Sets the MoRI ROCtx marker gates. Empty (no-op) when RUN_PROFILE!=1.
+#
+# ⚠ KNOWN LIMITATION (see dsv4_flash/steps_to_profile.md §3): wrapping ALL 8 DP workers under
+# rocprofv3 --kernel-trace CRASHES the DP gloo collective on MI308X (per-kernel hook overhead
+# stalls a sync -> "Connection closed by peer"). --dist-timeout and -P (below) delay/tolerate
+# but do NOT remove the overhead, so this still dies. This wiring is the BASE to build the
+# rank-0-only SGLang patch on (steps_to_profile.md §4B), not a working full-DP capture.
+_prof_prefix() {
+    [[ "${RUN_PROFILE:-0}" != "1" ]] && { echo ""; return; }
+    local _role="$1"
+    local _dir="${PROFILE_OUT:-/prof}/${_role}_NODE${NODE_RANK}"
+    mkdir -p "$_dir" 2>/dev/null
+    export MORI_ROCTX=1 MORI_ROCTX_TRANSFER=1
+    # -P START:DURATION:REPEAT keeps DATA COLLECTION off until the server is stable; note the
+    # instrumentation HOOKS are still installed at attach (that overhead is the crash cause).
+    # PROFILE_KERNEL=0 drops --kernel-trace (marker-only, lighter — steps_to_profile.md §4A).
+    local _delay="${PROFILE_DELAY:-600}" _win="${PROFILE_WINDOW:-120}"
+    local _ktrace="--kernel-trace"; [[ "${PROFILE_KERNEL:-1}" == "0" ]] && _ktrace=""
+    echo "rocprofv3 -P ${_delay}:${_win}:1 --marker-trace ${_ktrace} -f pftrace -d ${_dir} -- "
+}
+
 # _dbg: timestamped debug trace (NODE_RANK + wall-clock prefix).
 _dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
 
@@ -357,7 +390,7 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     _prefill_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
-    _prefill_cmd="python3 -m sglang.launch_server \
+    _prefill_cmd="$(_prof_prefix prefill)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
@@ -592,7 +625,7 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     _prefill_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
-    PREFILL_CMD="python3 -m sglang.launch_server \
+    PREFILL_CMD="$(_prof_prefix prefill)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
@@ -684,7 +717,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     _decode_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _decode_lb_method="follow_bootstrap_room"
 
-    DECODE_CMD="python3 -m sglang.launch_server \
+    DECODE_CMD="$(_prof_prefix decode)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode decode \
         --load-balance-method ${_decode_lb_method} \
