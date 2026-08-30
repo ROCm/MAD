@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi-K3 MXFP4 · vLLM 2P/2D Disagg EP16 — v4 Report</title>
+<style>
+  :root{
+    --bg:#0f1420; --surface:#171e2e; --surface2:#1e2740; --ink:#e8edf7; --muted:#9aa7bd;
+    --line:#2a3550; --accent:#4f8cff; --good:#3fb98a; --warn:#e0a83a;
+    --bad:#e56a6a; --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 24px 80px}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:8px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+  h2{font-size:19px;margin:38px 0 12px;padding-top:8px;letter-spacing:-.2px}
+  h3{font-size:15px;margin:22px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
+  .sub{color:var(--muted);font-size:14px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.9em;background:var(--surface2);padding:1px 6px;border-radius:5px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:20px 0}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card .k{color:var(--muted);font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
+  .card .v{font-size:22px;font-weight:650;margin-top:4px}
+  .card .v.good{color:var(--good)} .card .v.warn{color:var(--warn)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.4px}
+  tbody tr:hover{background:var(--surface)}
+  td.num{font-family:var(--mono);text-align:right}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600}
+  .pill.pass{background:rgba(63,185,138,.16);color:var(--good)}
+  .pill.fail{background:rgba(229,106,106,.16);color:var(--bad)}
+  .pill.open{background:rgba(224,168,58,.16);color:var(--warn)}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:16px 0}
+  .box.good{border-left:3px solid var(--good)}
+  .box.warn{border-left:3px solid var(--warn)}
+  .box.info{border-left:3px solid var(--accent)}
+  ul{margin:8px 0;padding-left:22px} li{margin:5px 0}
+  .steps{counter-reset:s;list-style:none;padding:0}
+  .steps li{counter-increment:s;position:relative;padding:10px 0 10px 40px;border-bottom:1px solid var(--line)}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:9px;width:26px;height:26px;border-radius:50%;
+    background:var(--surface2);color:var(--accent);font-weight:700;font-size:13px;display:grid;place-items:center}
+  .foot{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  .tag{font-family:var(--mono);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Kimi-K3&nbsp;MXFP4 — vLLM 2P/2D Disaggregated EP16</h1>
+  <div class="sub">Cutting-edge stack bring-up, accuracy fix &amp; perf characterization ·
+  4× MI300X/MI325X · Broadcom Thor2 RoCE · <span class="tag">generated 2026-08-29</span></div>
+</header>
+
+<div class="grid">
+  <div class="card"><div class="k">Single-request NIAH</div><div class="v good">PASS</div><div class="sub">50K / 100K recall correct</div></div>
+  <div class="card"><div class="k">Concurrency KV integrity</div><div class="v good">FIXED</div><div class="sub">RDMA readback barrier</div></div>
+  <div class="card"><div class="k">Throughput scaling</div><div class="v good">con16 ≈ con1</div><div class="sub">latency floor amortizes</div></div>
+  <div class="card"><div class="k">Per-wave latency floor</div><div class="v warn">~150 s</div><div class="sub">open perf item</div></div>
+</div>
+
+<h2>1 · The stack</h2>
+<table>
+  <thead><tr><th>Component</th><th>Pin</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Base image</td><td class="tag">rocm/vllm-dev:ci_base-dedbf6be…</td><td>ROCm 7.2 / cp312</td></tr>
+    <tr><td>vLLM</td><td class="tag">raviguptaamd/vllm@2cbc11cd7</td><td>upstream d626108b + K3 MoRIIO + <b>RDMA readback fix</b></td></tr>
+    <tr><td>MoRI</td><td class="tag">624002c897a3</td><td>built from source (WITH_MORI_BUILD=1)</td></tr>
+    <tr><td>AITER · flydsl</td><td class="tag">0.1.19 · 0.2.4</td><td>prebuilt rocm7.2 wheel</td></tr>
+    <tr><td>vllm-router</td><td class="tag">pinned ROUTER_REF</td><td>PD-disagg discovery mode</td></tr>
+    <tr><td>NIXL</td><td class="tag">WITH_NIXL=0</td><td>disabled</td></tr>
+  </tbody>
+</table>
+<p><b>Topology:</b> per pool <b>TP2 × DP8 → EP16</b> (no PP). Prefill pool = <code>mori_high_throughput</code> + eager (CG=NONE);
+decode pool = <code>mori_low_latency</code> + <code>FULL_AND_PIECEWISE</code>. MoRIIO WRITE-mode KV + KDA-state RDMA transfer.</p>
+
+<h2>2 · Accuracy results (NIAH single-needle, thinking=false)</h2>
+
+<h3>Single request / sequential — clean</h3>
+<table>
+  <thead><tr><th>Context</th><th>Depth</th><th>Recall</th><th class="num">Latency</th></tr></thead>
+  <tbody>
+    <tr><td>50K</td><td>0.1 / 0.5 / 0.9</td><td><span class="pill pass">3/3 PASS</span></td><td class="num">~197 s</td></tr>
+    <tr><td>100K</td><td>0.1 / 0.5</td><td><span class="pill pass">PASS</span></td><td class="num">~478–510 s</td></tr>
+    <tr><td>50K (MT≥256, readback on)</td><td>0.5</td><td><span class="pill pass">PASS</span> <span class="tag">ZEBRA-9999</span></td><td class="num">~148 s</td></tr>
+    <tr><td>distinct-needle @6K</td><td>seq con=1</td><td><span class="pill pass">3/3 PASS</span></td><td class="num">100–268 s</td></tr>
+  </tbody>
+</table>
+<p class="sub">Note: probes need <code>max_tokens ≥ 256</code> — on thinking=false the response-channel preamble
+truncates the answer at MT=64 (a false FAIL, not corruption).</p>
+
+<h3>Concurrency (distinct-needle NIAH @6K, con=8) — the write-race &amp; its fix</h3>
+<table>
+  <thead><tr><th>Configuration</th><th>Recall</th><th>Failure mode</th></tr></thead>
+  <tbody>
+    <tr><td>baseline (no fix)</td><td><span class="pill fail">3/8</span></td><td>KV corruption — garbage output (<span class="tag">标准模型 / 1e0a1e0a</span>)</td></tr>
+    <tr><td>K3_WRITE_FENCE=delay 200 ms</td><td><span class="pill open">6/8</span></td><td>still garbage on 2 (sleep is imperfect)</td></tr>
+    <tr><td>RDMA readback (single region)</td><td><span class="pill open">6/8</span></td><td>garbage still on 2 (one offset ≠ all KV)</td></tr>
+    <tr><td><b>RDMA readback (multi-region)</b></td><td><span class="pill pass">6/8 CLEAN</span></td><td><b>garbage GONE</b>; residual = parser/format + timeout</td></tr>
+    <tr><td>+ MT≥256</td><td><span class="pill pass">all completed CORRECT</span></td><td>2 "fails" are client timeouts, not wrong answers</td></tr>
+  </tbody>
+</table>
+
+<div class="box good">
+  <b>Accuracy verdict:</b> every request that completes recalls correctly. The concurrency
+  KV-corruption is eliminated at the transport layer by the RDMA read-after-write barrier.
+</div>
+
+<h2>3 · Throughput / latency characterization</h2>
+<table>
+  <thead><tr><th>Concurrency</th><th class="num">Wall time (2K ctx)</th><th class="num">Effective / request</th><th>All correct?</th></tr></thead>
+  <tbody>
+    <tr><td>con = 1</td><td class="num">~170 s</td><td class="num">170 s</td><td><span class="pill pass">yes</span></td></tr>
+    <tr><td>con = 4</td><td class="num">181 s</td><td class="num">~45 s</td><td><span class="pill pass">yes</span></td></tr>
+    <tr><td>con = 16</td><td class="num">183 s</td><td class="num">~11 s</td><td><span class="pill pass">completed = yes</span></td></tr>
+    <tr><td>con = 32 (projected)</td><td class="num">~185 s</td><td class="num">~6 s</td><td>—</td></tr>
+  </tbody>
+</table>
+<div class="box info">
+  <b>Key insight:</b> the ~150 s cost is a <b>fixed per-decode-wave floor that is shared across all
+  in-flight requests</b> — 16 concurrent finish in ≈ the time of 1. Throughput scales with concurrency;
+  the floor only hurts single-stream latency.
+</div>
+
+<h2>4 · Root-cause: the concurrency write-race</h2>
+<div class="box warn">
+  In WRITE mode, decode admits a request when the ZMQ <code>write_done</code> message arrives —
+  but on RoCE, the sender's RDMA-WRITE completing does <b>not</b> guarantee the KV is visible in the
+  <i>receiver's</i> HBM. Under concurrency, decode read stale / garbage KV.
+</div>
+<p><b>The fix (vLLM <code>moriio_engine._finalize_if_complete</code>):</b> after the writes complete and before
+<code>write_done</code>, issue a tiny RDMA <b>read of every written region</b> (stashed as
+<code>readback_targets</code>, capped 64). An RDMA read-after-write to the same session forces the prior
+writes globally visible — deterministic, vs a guessed <code>K3_WRITE_FENCE</code> sleep. Enabled with
+<code>K3_WRITE_READBACK=1</code>.</p>
+
+<h2>5 · Open items &amp; roadmap</h2>
+<ul>
+  <li><span class="pill open">perf</span> <b>~150 s per-wave latency floor</b> — prime suspect MoRI 624002c8
+      InterNodeV1LL decode all2all warmup (v3's older MoRI + same backend was ~20 s/50K). Next: decode
+      all2all HT A/B, rocprof, or MoRI bisect.</li>
+  <li><span class="pill open">perf</span> Serve <b>degrades over long lifetime</b> — restart fresh before benchmarking.</li>
+  <li><span class="pill open">cosmetic</span> kimi_k3 parser leaks <code>&lt;|open|&gt;response&lt;|sep|&gt;</code>
+      into content on thinking=false (needle still recalled; absorbed by MT≥256).</li>
+  <li>MTP/speculative <b>not available</b> for K3 (no nextn heads). Prefill/decode context-parallelism &amp;
+      chunked-prefill tuning available — gated behind fixing the floor.</li>
+</ul>
+
+<h2>6 · What was ruled out (config levers that did NOT fix the floor)</h2>
+<table>
+  <thead><tr><th>Hypothesis</th><th>Test</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Reasoning tokens</td><td>thinking=false</td><td>same ~150 s</td></tr>
+    <tr><td>WRITE-notify DP-rank mismatch</td><td>READ mode</td><td>same 150 s + garbage → rejected</td></tr>
+    <tr><td>Cudagraph mode</td><td>PIECEWISE (v3's value)</td><td>same 171 s</td></tr>
+    <tr><td>MoRIIO transfer knobs</td><td>qp=2 / workers=8</td><td>broke the WRITE notify path → reverted</td></tr>
+  </tbody>
+</table>
+
+<h2>7 · Deliverables &amp; links</h2>
+<table>
+  <thead><tr><th>Artifact</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td>Fresh PR → <b>ROCm/MAD</b> (upstream)</td><td><a href="https://github.com/ROCm/MAD/pull/241">github.com/ROCm/MAD/pull/241</a></td></tr>
+    <tr><td>Iteration PR (personal fork)</td><td><a href="https://github.com/raviguptaamd/MAD/pull/5">github.com/raviguptaamd/MAD/pull/5</a></td></tr>
+    <tr><td>vLLM fork w/ readback fix</td><td class="tag">raviguptaamd/vllm@v4-disagg (2cbc11cd7)</td></tr>
+    <tr><td>Recipe folder</td><td class="tag">scripts/vllm/kimik3_mi300x/vllm_disagg/Kimik3D_DI/</td></tr>
+    <tr><td>Full experiment log</td><td class="tag">Kimik3D_DI/docs/PERF_DIAGNOSIS.md</td></tr>
+    <tr><td>Optimization roadmap</td><td class="tag">Kimik3D_DI/docs/OPT_ROADMAP.md</td></tr>
+  </tbody>
+</table>
+
+<h3>PR contents (runnable by anyone)</h3>
+<ol class="steps">
+  <li><b>Dockerfile.kimik3_disagg</b> — all pins baked in; <code>/app/versions.txt</code> records resolved shas.</li>
+  <li><b>run_2p2d.sh / run_2p2d_launch.sh</b> — 4-node bring-up (workers → masters → router), HANDSHAKE patch, readback toggle.</li>
+  <li><b>niah_sweep.py / perf_sweep.py</b> — accuracy + throughput probes (env-driven <code>ROUTER_URL</code>).</li>
+  <li><b>README.md</b> — build → configure → launch → validate, end to end.</li>
+</ol>
+
+<div class="foot">
+  Kimi-K3 MXFP4 wide-EP disaggregated serving · latest upstream stack (vLLM d626108b · MoRI 624002c8) ·
+  cluster IPs/hosts scrubbed from all shipped files.
+</div>
+
+</div>
+</body>
+</html>
