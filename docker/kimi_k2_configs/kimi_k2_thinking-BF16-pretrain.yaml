@@ -18,11 +18,16 @@ modules:
     model: ${PRIMUS_MODEL:kimi_k2_thinking}.yaml
     overrides:
       train_iters: 50
-      # Log every step. Primus' ThroughputAverageExtension skips the first two
-      # logged steps; at the log_interval inherited from pre_trainer.yaml a
-      # 50-iteration run produces only two logged steps, both get skipped, and
-      # the job finishes with no throughput at all -- an empty perf CSV from an
-      # otherwise healthy run.
+      # Pin the logging cadence to every step. This restates what Primus
+      # already defaults to (primus/configs/modules/megatron/pre_trainer.yaml:
+      # log_interval: 1, log_throughput: true, unchanged upstream since 2025),
+      # so it changes nothing today -- it only stops a future base image from
+      # silently widening the interval underneath a 50-iteration run.
+      #
+      # It is NOT the fix for the empty-perf-CSV symptom below. That symptom
+      # was still observed on the validated 24-node run with this line already
+      # in place, so whatever suppresses the throughput line is not the log
+      # cadence; see references/manifests.md for the open item.
       log_interval: 1
       micro_batch_size: 4
       global_batch_size: 128

@@ -141,9 +141,14 @@ differ, the host path belongs on the value side.
   (see [gotchas.md](gotchas.md#primus_megatron-training)).
   Reference: 2 nodes / 16 GPU MI355X, BF16, MBS=1 -> ~6487 tok/s/GPU,
   ~96.5 TFLOP/s/GPU (run-to-run spread < 0.02%).
-  Known open issue: Primus emits no throughput line for this model, so the
-  perf CSV comes out header-only even on a healthy run. Read throughput off the
-  iteration timestamps instead.
+  Known open issue: no `tokens/s/GPU` line reaches the log for this model, so
+  the perf CSV comes out header-only even on a healthy run. Read throughput off
+  the iteration timestamps instead. The cause is **not** the logging cadence:
+  Primus already defaults to `log_interval: 1` / `log_throughput: true`
+  (`primus/configs/modules/megatron/pre_trainer.yaml`), the shipped Kimi
+  experiment YAML only restates that default, and the 24-node run above was
+  measured with it in place and still produced an empty CSV. Root cause is
+  still open — do not "fix" it by touching `log_interval`.
   `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.
