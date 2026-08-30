@@ -86,8 +86,12 @@ DeepSeek-R1:
 # same proven path as DeepSeek-R1. The only Kimi-specific server flag is
 # --tool-call-parser kimi_k2 (no reasoning parser: Instruct is reflex-grade).
 # --dist-timeout 3600 absorbs NFS weight-load skew across nodes at this size.
-# SGLANG_ROCM_FUSED_DECODE_MLA=0, set by the launcher for any Kimi-K2 model,
-# still applies: 64 attention heads are outside the fused decode-MLA range.
+# SGLANG_ROCM_FUSED_DECODE_MLA=0, forced by the launcher for any Kimi-K2 model,
+# still applies -- it matches upstream's own default and its Kimi-K2 ROCm CI
+# recipes. Note --attention-backend aiter above is what arms that flag at all:
+# the fused path is only reached when the flag is on AND the backend is aiter
+# (srt/models/deepseek_common/attention_backend_handler.py:_dispatch_mla_subtype).
+# There is no head-count guard there, so the flag is the only thing deciding it.
 Kimi-K2-Instruct:
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73 --dist-timeout 3600 --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
   dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"

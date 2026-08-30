@@ -375,16 +375,26 @@ setup_sglang_worker_env() {
     export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
-    # Kimi-K2 (64 attn heads) MLA: the fused decode-MLA path rejects head counts
-    # outside {16,128}; disable it ONLY for Kimi-K2 so the runtime picks a supported
-    # MLA backend (avoids the ROCm "ForwardMetadata" unpack crash on Kimi K2 /
-    # K2-Thinking). Other MLA models (e.g. DeepSeek) keep the fused path. An explicit
-    # SGLANG_ROCM_FUSED_DECODE_MLA in the environment always wins.
-    if [[ -z "${SGLANG_ROCM_FUSED_DECODE_MLA:-}" ]]; then
-        case "${MODEL_NAME:-}" in
-            *Kimi-K2*|*kimi-k2*) export SGLANG_ROCM_FUSED_DECODE_MLA=0 ;;
-        esac
-    fi
+    # Kimi-K2 MLA: keep the non-fused decode path. This matches upstream, which
+    # defaults the flag off (srt/environ.py: SGLANG_ROCM_FUSED_DECODE_MLA =
+    # EnvBool(False)) and sets it to 0 explicitly in its own Kimi-K2 ROCm CI
+    # recipes (scripts/ci/slurm/recipes/mi355x-fp8/kimik26/**.yaml). Other MLA
+    # models (e.g. DeepSeek) keep whatever the image chose.
+    #
+    # This deliberately does NOT test "is the variable unset?". The rocm/sgl-dev
+    # images bake SGLANG_ROCM_FUSED_DECODE_MLA=1 into the image Config.Env, so on
+    # every sgl-dev base the variable is already non-empty and an unset-test never
+    # fires -- Kimi then silently ran the fused path, the opposite of the intent
+    # here (observed on a 4-node 2P2D gfx942 run: the live server process had
+    # =1). An image-level default is not an operator decision and does not get to
+    # win; set SGLANG_KEEP_FUSED_DECODE_MLA=1 to opt back in deliberately.
+    case "${MODEL_NAME:-}" in
+        *Kimi-K2*|*kimi-k2*)
+            if [[ "${SGLANG_KEEP_FUSED_DECODE_MLA:-0}" != "1" ]]; then
+                export SGLANG_ROCM_FUSED_DECODE_MLA=0
+            fi
+            ;;
+    esac
     export SGLANG_MORI_FP8_DISP="${SGLANG_MORI_FP8_DISP:-True}"
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }
