@@ -12,6 +12,7 @@ SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "DeepSeek-V4-Flash-FP8"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -81,7 +82,13 @@ pip install --ignore-installed --force-reinstall flask
 pip install pyyaml
 
 
-host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
+# host_ip must match the IPADDRS scope (fabric subnet, not the mgmt default route).
+# Pick the local IPv4 that is present in IPADDRS; fall back to the default-route src.
+host_ip=""
+for _cand in $(hostname -I 2>/dev/null); do
+    case ",${IPADDRS}," in *",${_cand},"*) host_ip="$_cand"; break;; esac
+done
+[[ -z "$host_ip" ]] && host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
 
 if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
@@ -183,6 +190,9 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
+# Also source per-model env (set_env_vars.sh) so MODEL_NAME-guarded blocks (e.g. DSV4
+# thread caps + aiter flags) apply on the MoRI-EP path, not just the mooncake server path.
+[[ -f "${SCRIPT_DIR}/set_env_vars.sh" ]] && source "${SCRIPT_DIR}/set_env_vars.sh"
 
 # KV transfer backend: default mori, switchable to mooncake (Mooncake).
 # Kept out of models.yaml so model config is backend-agnostic.
@@ -193,6 +203,16 @@ export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 
 if [[ "${_TRANSFER_BACKEND}" != "mori" ]]; then
     echo "[override] Transfer backend: ${_TRANSFER_BACKEND}"
+fi
+
+# Profiling: rocprofv3 wrapping adds startup overhead that can trip the gloo/dist rendezvous
+# (workers init slower than the default timeout -> "Connection closed by peer"). Raise the dist
+# timeout + MoRI disagg wait so the whole DP group comes up under the profiler.
+if [[ "${RUN_PROFILE:-0}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG+=" --dist-timeout 3600"
+    DECODE_MODEL_CONFIG+=" --dist-timeout 3600"
+    export SGLANG_DISAGGREGATION_WAITING_TIMEOUT=3600 GLOO_TIMEOUT_SECONDS=3600
+    export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 fi
 
 
@@ -295,6 +315,29 @@ setup_sglang_worker_env() {
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }
 
+# _prof_prefix ROLE: when RUN_PROFILE=1, echoes a rocprofv3 wrapper that captures GPU
+# kernels + ROCtx markers (MoRI-IO KV transfers, MoRI-EP kernels) into a per-role/per-node
+# Perfetto trace. Sets the MoRI ROCtx marker gates. Empty (no-op) when RUN_PROFILE!=1.
+#
+# ⚠ KNOWN LIMITATION (see dsv4_flash/steps_to_profile.md §3): wrapping ALL 8 DP workers under
+# rocprofv3 --kernel-trace CRASHES the DP gloo collective on MI308X (per-kernel hook overhead
+# stalls a sync -> "Connection closed by peer"). --dist-timeout and -P (below) delay/tolerate
+# but do NOT remove the overhead, so this still dies. This wiring is the BASE to build the
+# rank-0-only SGLang patch on (steps_to_profile.md §4B), not a working full-DP capture.
+_prof_prefix() {
+    [[ "${RUN_PROFILE:-0}" != "1" ]] && { echo ""; return; }
+    local _role="$1"
+    local _dir="${PROFILE_OUT:-/prof}/${_role}_NODE${NODE_RANK}"
+    mkdir -p "$_dir" 2>/dev/null
+    export MORI_ROCTX=1 MORI_ROCTX_TRANSFER=1
+    # -P START:DURATION:REPEAT keeps DATA COLLECTION off until the server is stable; note the
+    # instrumentation HOOKS are still installed at attach (that overhead is the crash cause).
+    # PROFILE_KERNEL=0 drops --kernel-trace (marker-only, lighter — steps_to_profile.md §4A).
+    local _delay="${PROFILE_DELAY:-600}" _win="${PROFILE_WINDOW:-120}"
+    local _ktrace="--kernel-trace"; [[ "${PROFILE_KERNEL:-1}" == "0" ]] && _ktrace=""
+    echo "rocprofv3 -P ${_delay}:${_win}:1 --marker-trace ${_ktrace} -f pftrace -d ${_dir} -- "
+}
+
 # _dbg: timestamped debug trace (NODE_RANK + wall-clock prefix).
 _dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
 
@@ -335,6 +378,10 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
 
     # --- Launch first prefill server on this node (co-located with router) ---
     setup_sglang_worker_env
+    # MoRI-HT prefill recv buffer: PER_RANK must be >= per-rank prefill dispatch
+    # (chunked_prefill_size / dp_size). With a large chunk for fast long-context TTFT,
+    # bump this or MoRI asserts "PER_RANK must be >= per-rank MoRI dispatch tokens".
+    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${DSV4_PREFILL_MORI_PER_RANK:-16384}"
     PREFILL_NODE_RANK=0
 
     # DP_MODE=1 with dp-size>1: router must use follow_bootstrap_room so each
@@ -343,7 +390,7 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     _prefill_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
-    _prefill_cmd="python3 -m sglang.launch_server \
+    _prefill_cmd="$(_prof_prefix prefill)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
@@ -421,21 +468,28 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             echo "Decode NODE${i} ready."
         done
     else
+        # Readiness gate. Prefer a network /health poll (FS-agnostic: works on
+        # non-SLURM / no-shared-FS clusters where a peer's log file is not visible
+        # on the router node). Fall back to the local-log grep when the peer HTTP
+        # endpoint is not reachable (e.g. same-node master, or ROUTER_READY_HTTP=0).
+        _master_prefill_ip="${IP_ARRAY[0]}"
+        _master_decode_ip="${IP_ARRAY[$xP]}"
         _master_prefill_log="${_runlog}/prefill_NODE0.log"
         _master_decode_log="${_runlog}/decode_NODE${xP}.log"
-        echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
-        for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
-            IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+        echo "Waiting for master prefill (${_master_prefill_ip}) + master decode (${_master_decode_ip}) — DP_MODE=${DP_MODE}"
+        for _label_and_ep in "master prefill|${_master_prefill_ip}:3000|${_master_prefill_log}" "master decode|${_master_decode_ip}:3000|${_master_decode_log}"; do
+            IFS='|' read -r _log_label _http_ep LOG_FILE <<< "${_label_and_ep}"
+            until { [[ "${ROUTER_READY_HTTP:-1}" == "1" ]] && curl -s -m 3 "http://${_http_ep}/health" >/dev/null 2>&1; } \
+                  || { [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; }; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
+                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (http://${_http_ep}/health or ${LOG_FILE})" >&2
                     tail -n 40 "$LOG_FILE" 2>/dev/null || true
                     exit 1
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
-            echo "${_log_label} ready (${LOG_FILE})."
+            echo "${_log_label} ready (${_http_ep})."
         done
     fi
 
@@ -546,26 +600,32 @@ PY
         fi
     fi
 
-    echo "Killing the proxy server (pid=${proxy_pid})"
-    kill "${proxy_pid}"
+    # KEEP_ALIVE=1: leave router + servers running (for external NIAH/perf/manual
+    # testing) instead of tearing down. Block on the server pids so the container
+    # stays up until stopped.
+    if [[ "${KEEP_ALIVE:-0}" == "1" ]]; then
+        echo "KEEP_ALIVE=1: router (pid=${proxy_pid}) + prefill (pid=${_node0_prefill_pid}) left running. Router on ${host_ip}:2322. Ctrl-C / docker stop to end."
+        wait "${_node0_prefill_pid}" "${proxy_pid}"
+    else
+        echo "Killing the proxy server (pid=${proxy_pid})"
+        kill "${proxy_pid}"
 
-    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
-    kill "${_node0_prefill_pid}"
+        echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
+        kill "${_node0_prefill_pid}"
+    fi
 
 elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"
     # NODE_RANK 0..xP-1 map directly to PREFILL_NODE_RANK 0..xP-1 (proxy co-located on NODE_RANK=0).
     PREFILL_NODE_RANK=$((NODE_RANK))
     setup_sglang_worker_env
-    #if [[ "$DP_MODE" == "0" ]]; then
-    #    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
-    #    echo "DP_MODE=0 prefill SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
-    #fi
+    # MoRI-HT prefill recv buffer (see NODE_RANK=0 branch): PER_RANK >= per-rank prefill dispatch.
+    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${DSV4_PREFILL_MORI_PER_RANK:-16384}"
 
     _prefill_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
-    PREFILL_CMD="python3 -m sglang.launch_server \
+    PREFILL_CMD="$(_prof_prefix prefill)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
@@ -637,7 +697,12 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
         #export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
         #echo "DP_MODE=0 decode SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
         export SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD="${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD:-$((MORI_MAX_DISPATCH_TOKENS_DECODE * 2))}"
-        export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_DECODE}"
+        # Recv-buffer size (MaxNumTokensToRecv ~= PER_RANK * world_size). Must be sized for the
+        # captured decode batch, NOT tied to the (smaller) dispatch-token cap. CI sets these two
+        # independently; conflating them starves the recv buffer and overflows under cudagraph
+        # (mori low_latency_async.cpp:324). Default to a decode-safe 512 (covers cuda-graph-bs<=64
+        # at topk6/EP8); override via SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK.
+        export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK:-512}"
         _dbg "SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK=${SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK}"
         _dbg "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD}"
         _dbg "MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE}"
@@ -652,7 +717,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     _decode_lb_method="round_robin"
     [[ "$DP_MODE" == "1" ]] && _decode_lb_method="follow_bootstrap_room"
 
-    DECODE_CMD="python3 -m sglang.launch_server \
+    DECODE_CMD="$(_prof_prefix decode)python3 -m sglang.launch_server \
         --model-path ${MODEL_PATH} \
         --disaggregation-mode decode \
         --load-balance-method ${_decode_lb_method} \

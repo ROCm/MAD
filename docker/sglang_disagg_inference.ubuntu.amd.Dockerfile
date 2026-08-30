@@ -38,7 +38,11 @@ RUN pip install --upgrade sglang-router
 
 WORKDIR /sgl-workspace/mori
 
-ARG MORI_COMMIT="158c7e8335a0b19b3f1f422ff134d7869252135e"
+# MoRI >= #363 (guard dispatch kernels vs out-of-range expert id) and #505 (AsyncLL slot
+# double-alloc when top-k does not divide warpSize) are REQUIRED for DeepSeek-V4-Flash decode
+# CUDA-graph capture (topk6 -> 6 does not divide warpSize 64). The older 158c7e83 pin (2026-06-08)
+# predates both and crashes at capture (mori low_latency_async.cpp:360 pe-out-of-range).
+ARG MORI_COMMIT="7c51d18fda59457cc9238ed262bd93c8cad906c9"
 # Set INSTALL_MORI=1 to build/install MoRI at MORI_COMMIT; any other value skips it.
 ARG INSTALL_MORI=1
 

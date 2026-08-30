@@ -30,6 +30,7 @@ echo ""
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "DeepSeek-V4-Flash-FP8"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -57,6 +58,7 @@ MORI_EP_VALID_MODELS=( \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
+    "DeepSeek-V4-Flash-FP8" \
 )
 
 # Define valid model names
@@ -68,6 +70,7 @@ VALID_MODELS=( \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
+    "DeepSeek-V4-Flash-FP8" \
 )
 
 model_allows_mori_ep() {
@@ -350,6 +353,28 @@ export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
 export SKIP_BENCHMARK
 export SKIP_CURL_TEST
 
+# --- Persistent JIT cache + orphaned-lock sweep (MoRI/aiter FileBaton has no
+# PID/timeout: a lock orphaned by a killed run hangs every later run forever).
+# Versioned by image so a MoRI/aiter bump never serves stale kernels.
+JIT_CACHE_ROOT="${JIT_CACHE_ROOT:-$HOME/.mad_jit_cache}"
+JIT_CACHE_DIR="${JIT_CACHE_ROOT}/$(echo "${DOCKER_IMAGE_NAME:-img}" | tr '/:' '__')"
+mkdir -p "$JIT_CACHE_DIR/mori" "$JIT_CACHE_DIR/aiter"
+if [[ "${SKIP_JIT_LOCK_CLEAN:-0}" != "1" ]]; then
+  # delete stale FileBaton locks iff no live compiler process is running
+  if ! pgrep -x cc1plus >/dev/null 2>&1 && ! pgrep -x clang >/dev/null 2>&1 && ! pgrep -x hipcc >/dev/null 2>&1; then
+    find "$JIT_CACHE_DIR" \( -name "lock_module_*" -o -name "*.lock" -o -name "lock" \) -delete 2>/dev/null || true
+    echo "[jit] swept orphaned JIT locks under $JIT_CACHE_DIR"
+  fi
+fi
+
+# Broadcom Thor2 (bnxt, USE_CX7_NICS=0): the image's baked libbnxt_re is often ABI-stale
+# vs the host kernel -> MoRI reports "no transport". Expose the host's ABI-correct lib.
+BNXT_LIB_MOUNT=""
+if [[ "${USE_CX7_NICS:-0}" == "0" ]]; then
+  _hostlib=$(ls /usr/local/lib/libbnxt_re-rdmav34.so 2>/dev/null | head -1)
+  [[ -n "$_hostlib" ]] && BNXT_LIB_MOUNT="-v ${_hostlib}:${_hostlib}:ro"
+fi
+
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
@@ -375,6 +400,10 @@ docker run --rm \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
     -v ${LOG_PATH}:/run_logs \
+    -v ${JIT_CACHE_DIR}:/jit_cache \
+    -e MORI_JIT_CACHE_DIR=/jit_cache/mori \
+    -e AITER_JIT_DIR=/jit_cache/aiter \
+    ${BNXT_LIB_MOUNT} \
     -v $MOONCAKE_REPO_DIR:$MOONCAKE_COOKBOOK_PATH \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
@@ -403,6 +432,7 @@ docker run --rm \
     --entrypoint /bin/bash \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
+        if [ \"${USE_CX7_NICS:-0}\" = \"0\" ] && [ -e /usr/local/lib/libbnxt_re-rdmav34.so ]; then echo /usr/local/lib > /etc/ld.so.conf.d/bnxt.conf; ldconfig; fi
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "
 '
