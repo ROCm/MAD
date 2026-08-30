@@ -13,15 +13,29 @@ honest status of what is measured vs. in-progress.
 
 ---
 
-## 0. TL;DR — apply patches, set env, launch all-together
+## 0. TL;DR — build image (patches baked), set env, launch all-together
+
+The Dockerfile now builds vLLM + AITER from **forks that already contain the patches**, so a
+`docker build` yields a self-contained image — **no runtime bind-mounts needed**:
+- vLLM  ← `raviguptaamd/vllm@glm5.2-mi355x-mtp-ep16`  (8 MTP/EP16 stability commits)
+- AITER ← `raviguptaamd/aiter@glm5.2-mi355x-mtp-ep16` (AITER_FORCE_CK_FMOE gate)
+- router ← `raviguptaamd/router` ; MoRI ← `itej89/mori` (PR#558, unmodified)
 
 ```bash
-# 1) inside the serving container/image, after pip-installing vLLM + AITER:
-bash scripts/vllm_dissag/apply_all_patches.sh          # idempotent; auto-detects vllm/aiter dirs
+# 1) build the self-contained image (patches compiled in):
+docker build -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile \
+  --build-arg WITH_MORI_EP_OVER_RDMA=1 -t vllm-mori-pr558:ionic .
 
 # 2) launch ALL components together (never partial-restart a single role — see §5):
 #    proxy(router) -> prefill(both ranks) -> decode(both ranks), one coherent bring-up.
+#    Select behavior per config via the env matrix in §2 (patches default to stock).
 ```
+
+> `apply_all_patches.sh` is retained for **dev / other-base** use: run it to (re)generate the
+> same patches against any fresh stock vLLM+AITER checkout. It is idempotent and anchor-based,
+> and is the source of truth the fork commits were generated from. The **cudagraph** patches
+> (`VLLM_STARTUP_DP_UNIFORM*`, §4) are WIP and remain apply-script-only — NOT in the fork
+> branches — until the capture-lockstep boundary is resolved.
 
 MTP is a **decode-only** feature. Prefill is the KV producer and does **not** run the
 speculator — launch prefill with `SPEC=off` and decode with `SPEC=mtp`.

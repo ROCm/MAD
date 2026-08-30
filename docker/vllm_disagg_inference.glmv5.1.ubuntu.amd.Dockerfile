@@ -221,9 +221,10 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
 #    reintroduces the fault; do not bump without re-running long-ctx NIAH. Set
 #    --build-arg WITH_AITER_BUILD=0 only to fall back to the bundled aiter for debugging.
 # -----------------------------------------------------------------------------
-ARG AITER_REPO=https://github.com/ROCm/aiter.git
+ARG AITER_REPO=https://github.com/raviguptaamd/aiter.git
 ARG WITH_AITER_BUILD=1
-ARG AITER_REF=e03fa6040
+# glm5.2-mi355x-mtp-ep16 = e03fa6040 + AITER_FORCE_CK_FMOE gate (EP16-MTP 1tg->CK)
+ARG AITER_REF=glm5.2-mi355x-mtp-ep16
 RUN if [ "${WITH_AITER_BUILD}" != "1" ]; then \
         echo "AITER: using BUNDLED base aiter (WITH_AITER_BUILD=0)" && \
         python3 -c "import importlib.metadata as m; print('aiter (bundled)', m.version('amd-aiter'))" && \
@@ -260,7 +261,11 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # compiled graph (MLA "unknown parameter type"), sparse-indexer bounds-guard, and the
 # decisive sentinel -1->0 (cda3648602 — aiter mla_decode_fwd derefs -1 -> GPU fault at
 # disagg long-ctx). NIAH-validated 1P/1D + 2P/1D + 1P/2D, 2k-35k, decode PIECEWISE.
-ARG VLLM_REF=glm5.1-dsa-wideEP_on_vllm-v0.27
+# glm5.2-mi355x-mtp-ep16 = glm5.1-dsa-wideEP_on_vllm-v0.27 (623fdc946) + 8 GLM-5.2 MTP/EP16
+# stability commits (MTP KV block-fix; VLLM_SKIP_{FWDCTX_DP_AR,DP_SYNC_ON_PROFILE,PROFILE_RUN,
+# WARMUP_DUMMY} startup DP-deadlock gates; DSA kernel/indexer/persistent). All env-gated,
+# default-stock, no-op on TP8/EP8/non-MTP. Measured: TP8-MTP -41%, EP8-MTP -38% TPOT.
+ARG VLLM_REF=glm5.2-mi355x-mtp-ep16
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${BUILD_ROCM_ARCH} \
     MAX_JOBS=${BUILD_MAX_JOBS}
