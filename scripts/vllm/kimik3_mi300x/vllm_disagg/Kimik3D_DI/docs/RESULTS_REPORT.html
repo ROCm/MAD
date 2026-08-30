@@ -148,8 +148,14 @@ writes globally visible — deterministic, vs a guessed <code>K3_WRITE_FENCE</co
   <li><span class="pill open">perf</span> Serve <b>degrades over long lifetime</b> — restart fresh before benchmarking.</li>
   <li><span class="pill open">cosmetic</span> kimi_k3 parser leaks <code>&lt;|open|&gt;response&lt;|sep|&gt;</code>
       into content on thinking=false (needle still recalled; absorbed by MT≥256).</li>
-  <li>MTP/speculative <b>not available</b> for K3 (no nextn heads). Prefill/decode context-parallelism &amp;
-      chunked-prefill tuning available — gated behind fixing the floor.</li>
+  <li><b>MTP / speculative decode:</b> vLLM has a COMPLETE Kimi-K3 MTP path
+      (<code>KimiK3MTPModel</code>, model_type <code>kimi_k3_mtp</code>,
+      <code>--speculative-config</code> wiring). The K3 architecture supports it. BUT this
+      <b>MXFP4 checkpoint ships it disabled</b> — <code>text_config.num_nextn_predict_layers = 0</code>
+      and no MTP/nextn weight tensors in the safetensors index. Enabling it needs a checkpoint
+      that includes the trained MTP head (n_predict ≥ 1 + weights), not a code/config change —
+      then it works via the existing vLLM path.</li>
+  <li>Prefill/decode context-parallelism &amp; chunked-prefill tuning available — gated behind fixing the floor.</li>
 </ul>
 
 <h2>6 · What was ruled out (config levers that did NOT fix the floor)</h2>

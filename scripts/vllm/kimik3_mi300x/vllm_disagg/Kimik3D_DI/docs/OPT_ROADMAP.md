@@ -11,13 +11,21 @@ InterNodeV1LL decode all2all barrier on bnxt.
   (b) MoRI bisect 624002c8 → v3's MoRI to find the regression commit; (c) profile the decode
   forward (rocprof) during the 150s to see which kernel/collective spins.
 
-## 1. Decode speculative / MTP  — NOT AVAILABLE for K3 in this stack
-- vLLM supports MTP self-speculation for deepseek/glm/mimo (`config/speculative.py:37`), but
-  **K3 config has no `num_nextn_predict_layers` / MTP head** and the K3 vLLM model class
-  defines no nextn path. So MTP is a no-op here without model changes.
-- EAGLE / draft-model speculative: possible mechanically but needs a trained K3 draft head —
-  not a near-term recipe lever. **Deferred to model team.**
-- If/when K3 ships MTP layers: `--speculative-config '{"method":"...","num_speculative_tokens":N}'`.
+## 1. Decode speculative / MTP  — SUPPORTED by vLLM, but DISABLED in this checkpoint
+- vLLM has a COMPLETE Kimi-K3 MTP path: `KimiK3MTPModel`/`KimiK3MTP`
+  (`model_executor/models/registry.py:693`), model_type `kimi_k3_mtp`
+  (`config/speculative.py:56`), and dedicated wiring (`config/speculative.py:390-397`) that,
+  for `model_type == "kimi_k3"`, reads `n_predict` from
+  `text_config.num_nextn_predict_layers` and swaps in the MTP architecture.
+- **BLOCKER = the checkpoint, not the code.** The shipped Kimi-K3-MXFP4 sets
+  `text_config.num_nextn_predict_layers = 0` and its safetensors index has **zero**
+  MTP/nextn weight tensors. So MTP is off because the trained head was not included.
+- **To enable:** obtain/produce a K3 checkpoint with `num_nextn_predict_layers >= 1` and the
+  MTP head weights, then serve with
+  `--speculative-config '{"method":"kimi_k3_mtp","num_speculative_tokens":N}'`. No vLLM/recipe
+  code change needed — the path already exists. Flipping the config to >0 WITHOUT the weights
+  fails at load (missing MTP tensors).
+- EAGLE / draft-model speculative is an alternative but also needs a trained draft head.
 
 ## 2. Prefill context parallelism (long-ctx prefill) — AVAILABLE
 - `prefill_context_parallel_size` (PCP) and `decode_context_parallel_size` (DCP) exist
