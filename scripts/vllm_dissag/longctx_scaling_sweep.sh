@@ -19,7 +19,7 @@
 #   CON_LIST       concurrency sweep (default "8 16 32 64")
 #   OSL            output len (default 128)
 #   OUT            result dir (default /shared_nfs/ravgupta_disagg205/results_longctx_<CFG>)
-#   NIAH_PY        fixed NIAH harness (default /shared_nfs/ravgupta_disagg205/benchmark_niah_v2.py)
+#   NIAH_PY        fixed NIAH harness (default /shared_nfs/ravgupta_disagg205/benchmark_niah_v3.py)
 #   LOGBOOK        NFS logbook to append (default /shared_nfs/ravgupta_disagg205/EP16_LOGBOOK.md)
 #   NIAH_MIN       accuracy gate threshold /10 (default 8)
 #   IMAGE_REF      image tag for provenance (default vllm-mori-pr558:ionic)
@@ -35,7 +35,7 @@ SIZES="${SIZES:-50000 100000 200000 300000 500000 750000}"
 CON_LIST="${CON_LIST:-8 16 32 64}"
 OSL="${OSL:-128}"
 OUT="${OUT:-/shared_nfs/ravgupta_disagg205/results_longctx_${CFG}}"
-NIAH_PY="${NIAH_PY:-/shared_nfs/ravgupta_disagg205/benchmark_niah_v2.py}"
+NIAH_PY="${NIAH_PY:-/shared_nfs/ravgupta_disagg205/benchmark_niah_v3.py}"
 LOGBOOK="${LOGBOOK:-/shared_nfs/ravgupta_disagg205/EP16_LOGBOOK.md}"
 NIAH_MIN="${NIAH_MIN:-8}"
 IMAGE_REF="${IMAGE_REF:-vllm-mori-pr558:ionic}"
@@ -82,10 +82,10 @@ niah_gate(){ local sz=$1 out="$OUT/niah_${sz}.txt"
 # ---- helper: one perf cell -> append CSV row + summary --------------------
 bench_cell(){ local sz=$1 con=$2 np=$3 niah=$4 gate=$5 raw="$OUT/raw_${sz}_con${con}.log"
   # timeout scales with total tokens (prefill is ~linear): base 1800s per 2k tokens, capped high
-  local tmo=$(( 1800 * (sz + osl) / 2048 )); [ "$tmo" -lt 1800 ] && tmo=1800; [ "$tmo" -gt 21600 ] && tmo=21600
+  local tmo=$(( 1800 * (sz + OSL) / 2048 )); [ "$tmo" -lt 1800 ] && tmo=1800; [ "$tmo" -gt 21600 ] && tmo=21600
   log ">>> $CFG size=$sz con=$con np=$np (timeout ${tmo}s, niah=${niah}/10)"
   timeout "$tmo" vllm bench serve --backend openai --base-url "$BASE" --model "$MODEL" \
-    --dataset-name random --random-input-len "$sz" --random-output-len "$osl" --random-prefix-len 0 \
+    --dataset-name random --random-input-len "$sz" --random-output-len "$OSL" --random-prefix-len 0 \
     --max-concurrency "$con" --num-prompts "$np" --ignore-eos --temperature 0 \
     --percentile-metrics ttft,tpot,e2el \
     --result-dir "$OUT" --result-filename "res_${sz}_con${con}.json" --save-result > "$raw" 2>&1
@@ -106,7 +106,7 @@ bench_cell(){ local sz=$1 con=$2 np=$3 niah=$4 gate=$5 raw="$OUT/raw_${sz}_con${
   rtput=$(gv "Request throughput"); otput=$(gv "Output token throughput")
   ttftm=$(gv "Mean TTFT"); ttftp50=$(gv "Median TTFT"); ttftp99=$(gv "P99 TTFT")
   tpotm=$(gv "Mean TPOT"); tpotp50=$(gv "Median TPOT"); e2el=$(gv "Mean E2EL"); dur=$(gv "Benchmark duration")
-  echo "$(STAMP),$CFG,$NODES,$IMAGE_REF,$sz,$osl,$con,$np,$niah,$gate,${succ:-0},${fail:-},${rtput:-},${otput:-},${ttftm:-},${ttftp50:-},${ttftp99:-},${tpotm:-},${tpotp50:-},${e2el:-},${dur:-},$outcome" >> "$CSV"
+  echo "$(STAMP),$CFG,$NODES,$IMAGE_REF,$sz,$OSL,$con,$np,$niah,$gate,${succ:-0},${fail:-},${rtput:-},${otput:-},${ttftm:-},${ttftp50:-},${ttftp99:-},${tpotm:-},${tpotp50:-},${e2el:-},${dur:-},$outcome" >> "$CSV"
   if [ "$outcome" = "ok" ]; then
     log "    OK succ=$succ out_tput=${otput} tpot_p50=${tpotp50} ttft_mean=${ttftm}"
     book "  [$CFG] size=$sz con=$con -> tok/s=${otput} TPOT=${tpotp50}ms TTFT=${ttftm}ms succ=$succ (niah ${niah}/10) @ $(STAMP)"
@@ -125,7 +125,7 @@ for sz in $SIZES; do
   book "  [$CFG] NIAH size=$sz -> ${niah}/10 ($gate) @ $(STAMP)"
   # per-shape warmup once (compile kernels for this size), low con
   timeout 3600 vllm bench serve --backend openai --base-url "$BASE" --model "$MODEL" \
-    --dataset-name random --random-input-len "$sz" --random-output-len "$osl" \
+    --dataset-name random --random-input-len "$sz" --random-output-len "$OSL" \
     --max-concurrency 2 --num-prompts 2 --ignore-eos --temperature 0 >/dev/null 2>&1 || true
   for con in $CON_LIST; do
     # np policy: small multiple of con, shrink at huge sizes to bound wall-clock
