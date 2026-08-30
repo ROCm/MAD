@@ -432,4 +432,17 @@ ENV AITER_JIT_DIR=/opt/vllm_cache/aiter_jit \
 RUN rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori && \
     echo "JIT_SCRUBBED: /root/.mori + /tmp/mori_jit_* cleared at build end" >> /app/versions.txt
 
+# FINAL libibverbs pin (MUST be the last layer): the pre-MoRI pin ensures MoRI COMPILES
+# against 1.14/rdmav34, but later layers (apt/pip/base packages) can reset the .so.1 symlink
+# back to 1.16/rdmav59. Re-pin here so the shipped image RUNS against 1.14, matching the host
+# AINIC ionic driver (libionic-rdmav34.so). Without this the image aborts at MoRI transport
+# init: context.cpp:353 "no transport available for peer".
+RUN set -e; _L=/usr/lib/x86_64-linux-gnu; \
+    _V14="$(ls ${_L}/libibverbs.so.1.14* 2>/dev/null | sort | tail -1)"; \
+    if [ -n "${_V14}" ]; then \
+        ln -sf "$(basename ${_V14})" ${_L}/libibverbs.so.1 && \
+        ln -sf libibverbs.so.1 ${_L}/libibverbs.so && \
+        echo "[ibverbs-final] libibverbs.so.1 -> $(readlink ${_L}/libibverbs.so.1) (rdmav34)" >> /app/versions.txt; \
+    fi
+
 RUN cat /app/versions.txt 2>/dev/null | tail -20 || true
