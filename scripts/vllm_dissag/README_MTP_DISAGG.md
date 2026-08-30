@@ -96,15 +96,31 @@ EP16-MTP boots + serves; a clean sustained-decode TPOT is pending the cudagraph 
 end state. Current status:
 
 - TP8-MTP, EP8-MTP: run with cudagraphs ON (validated).
-- **EP16-MTP: currently requires `DECODE_CUDAGRAPH_MODE=NONE`** to boot, because cudagraph
-  *capture* runs its own `_dummy_run` that hits the DP `all_reduce` / EP all2all path. With
-  patches 2–5 gating the profile/warmup dummy-runs, the remaining task is to ensure the **capture
-  dummy_run** is likewise coordinated (or gated) and that MoRIIO KV transfer is correct under
-  captured graphs (the connector's `wait_for_layer_load` already has a "must not run during
-  full-graph capture" guard — verify it fires). Tracked as the active work item; **do not ship
-  EP16-MTP with `NONE` as the final config.**
+- **EP16-MTP with cudagraphs:** the blocker was that cudagraph *capture* runs `_dummy_run` at each
+  capture size through `dispatch_cg_and_sync_dp(need_eager=False)` → a DP-group `all_reduce`.
+  During capture the ranks proceed at their own pace (one JIT-building an AITER kernel while
+  another already reached the collective) → asymmetric arrival → deadlock. That is why the eager
+  `NONE` fallback existed.
 
-Until then, EP16-MTP with `NONE` is functional-but-eager (correctness OK, perf sub-optimal).
+  **Fix (two patches, so we keep cudagraphs, not drop them):**
+  - `apply_glm_vllm_startup_dp_uniform_fix.py` (`VLLM_STARTUP_DP_UNIFORM`): in
+    `sync_cudagraph_and_dp_padding`, when the flag is set, fill the DP coordination tensor
+    **locally** (every rank reports its own identical dummy shape) instead of `all_reduce`. At
+    startup all ranks pass the same dummy shape, so the result is identical — graphs still capture
+    correctly, minus the deadlocking collective.
+  - `apply_glm_vllm_startup_dp_uniform_worker_fix.py` (`VLLM_STARTUP_DP_UNIFORM_ENABLE`): sets that
+    flag **only** around the warmup+`capture_model()` block (try/finally), so **runtime inference
+    keeps the true cross-rank `all_reduce`**. Scope is startup-only by construction.
+
+  **To run EP16-MTP with cudagraphs:** set `DECODE_CUDAGRAPH_MODE=FULL_AND_PIECEWISE`,
+  `VLLM_STARTUP_DP_UNIFORM_ENABLE=1`, and turn the startup *skips* OFF (`VLLM_SKIP_PROFILE_RUN=0`,
+  `VLLM_SKIP_WARMUP_DUMMY=0`, `VLLM_SKIP_KERNEL_WARMUP=0`) — the point is now to *let* warmup+capture
+  run, just without the deadlocking collective. Keep `AITER_FORCE_CK_FMOE=1` and
+  `VLLM_SKIP_DP_SYNC_ALL=0`.
+
+  Status: patches written + wired into `apply_all_patches.sh`; **live A/B validation (graphs-ON
+  TPOT vs the eager number) is the open item.** The eager `NONE` recipe (§2) remains the
+  known-functional fallback until the graphs-ON run is measured.
 
 ---
 

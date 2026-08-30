@@ -44,6 +44,10 @@ VLLM_PATCHES=(
   apply_glm_vllm_fwdctx_dp_sync_fix.py      # VLLM_SKIP_FWDCTX_DP_AR       (default 1)
   apply_glm_vllm_skip_profile_run_fix.py    # VLLM_SKIP_PROFILE_RUN        (default 0)
   apply_glm_vllm_skip_warmup_dummy_fix.py   # VLLM_SKIP_WARMUP_DUMMY       (default 0)
+  # EP16+MTP WITH decode cudagraphs (FULL_AND_PIECEWISE): local-uniform DP fill during
+  # warmup+capture so capture does not deadlock; runtime keeps the real all_reduce.
+  apply_glm_vllm_startup_dp_uniform_fix.py        # VLLM_STARTUP_DP_UNIFORM        (default 0)
+  apply_glm_vllm_startup_dp_uniform_worker_fix.py # VLLM_STARTUP_DP_UNIFORM_ENABLE (default 0)
 )
 
 for p in "${VLLM_PATCHES[@]}"; do
