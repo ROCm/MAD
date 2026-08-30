@@ -180,6 +180,21 @@ ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
 # The ionic EP16 patch (PR #558 + atomic-MR strip). Copied unconditionally so the build
 # context is stable; only applied when WITH_MORI_EP_OVER_RDMA=1.
 COPY docker/mori_pr558_ionic.patch /tmp/mori_pr558_ionic.patch
+# libibverbs ABI FIX (must run BEFORE MoRI compiles): some base images ship libibverbs
+# 1.16 (provider ABI rdmav59) with the .so.1 symlink pointing at it, but the host AINIC
+# ionic driver is rdmav34 (libibverbs 1.14). If MoRI compiles against 1.16 it looks for
+# libionic-rdmav59.so at runtime -> "no transport available for peer" abort. Repoint the
+# symlink to the 1.14 (rdmav34) lib the host driver matches, so MoRI both COMPILES and
+# RUNS against 1.14 -- no runtime mount hacks, consistent ABI. (The old validated image
+# had .so.1 -> 1.14.39.0.) No-op if only 1.14 is present.
+RUN set -e; _LIBDIR=/usr/lib/x86_64-linux-gnu; \
+    _V14="$(ls ${_LIBDIR}/libibverbs.so.1.14* 2>/dev/null | sort | tail -1)"; \
+    if [ -n "${_V14}" ]; then \
+        ln -sf "$(basename ${_V14})" ${_LIBDIR}/libibverbs.so.1 && \
+        ln -sf libibverbs.so.1 ${_LIBDIR}/libibverbs.so && \
+        echo "[ibverbs] pinned libibverbs.so.1 -> $(basename ${_V14}) (rdmav34)"; \
+    else echo "[ibverbs] no 1.14 lib found, leaving as-is"; fi
+
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
