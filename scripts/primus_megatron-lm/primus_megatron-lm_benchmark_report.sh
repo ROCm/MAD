@@ -627,44 +627,50 @@ elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
   # deployment must set PYTORCH_HIP_ALLOC_CONF=expandable_segments:True.
   export EXP=examples/megatron/configs/$CONFIG_DEVICE/kimi_k2_thinking-$DATATYPE-pretrain.yaml
   SEQ_LEN=4096
-  if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
-    if [ "$DATATYPE" == "FP8" ]; then
-      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
-    elif [ "$DATATYPE" == "BF16" ]; then
-      if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
-        MBS=1; GBS=32
-        run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
-      else
-        # MBS=1 and full recompute are required, not tuning -- at 1T params
-        # the model does not fit without both. Flags are passed explicitly
-        # rather than via scaleout_gbs_override so an empty override can never
-        # fall back to a wrong default; effective_global_batch_size keeps
-        # global_batch_size % (micro_batch_size * world_size) == 0 at any scale.
-        MBS=1; GBS=128
-        GBS=$(effective_global_batch_size "$MBS" "$GBS")
-        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
-          --recompute_granularity full --recompute_method uniform --recompute_num_layers 1
-      fi
+  # BF16-only, and not merely by policy: the rccl_overlay Dockerfile injects
+  # exactly one experiment YAML for this model (kimi_k2_thinking-BF16-pretrain.yaml),
+  # so $EXP above cannot resolve for any other DATATYPE. Guard once, up front,
+  # instead of per-device: the per-device `if FP8 ... elif BF16` shape used by the
+  # other model blocks names only FP8, which left MXFP8/MXFP4/FP4 matching no
+  # branch at all and falling through with no diagnostic whatsoever. The same
+  # applies to an unrecognized DEVICE. Behaviour on the unsupported path is
+  # unchanged (echo, no exit) so the "configuration not supported" perf-CSV row
+  # stays consistent with every other block in this file -- what changes is that
+  # the log now always says which value was rejected.
+  if [ "$DATATYPE" != "BF16" ]; then
+    echo "Error: Datatype $DATATYPE is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+  elif [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+      MBS=1; GBS=32
+      run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+    else
+      # MBS=1 and full recompute are required, not tuning -- at 1T params
+      # the model does not fit without both. Flags are passed explicitly
+      # rather than via scaleout_gbs_override so an empty override can never
+      # fall back to a wrong default; effective_global_batch_size keeps
+      # global_batch_size % (micro_batch_size * world_size) == 0 at any scale.
+      MBS=1; GBS=128
+      GBS=$(effective_global_batch_size "$MBS" "$GBS")
+      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
+        --recompute_granularity full --recompute_method uniform --recompute_num_layers 1
     fi
   elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
-    if [ "$DATATYPE" == "FP8" ]; then
-      echo "Error: Datatype FP8 is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
-    elif [ "$DATATYPE" == "BF16" ]; then
-      if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
-        MBS=1; GBS=32
-        run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
-      else
-        # MBS=2/GBS=32 deliberately overrides the experiment YAML's own
-        # micro_batch_size=4/global_batch_size=128 -- both flags must always
-        # be passed explicitly, or an unadjusted-at-this-scale run silently
-        # falls back to the YAML's global_batch_size=128 while MBS stays
-        # overridden to 2, doubling the intended gradient-accumulation depth
-        # and diverging from what gets recorded in the perf CSV.
-        MBS=2; GBS=32
-        GBS=$(effective_global_batch_size "$MBS" "$GBS")
-        run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
-      fi
+    if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+      MBS=1; GBS=32
+      run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+    else
+      # MBS=2/GBS=32 deliberately overrides the experiment YAML's own
+      # micro_batch_size=4/global_batch_size=128 -- both flags must always
+      # be passed explicitly, or an unadjusted-at-this-scale run silently
+      # falls back to the YAML's global_batch_size=128 while MBS stays
+      # overridden to 2, doubling the intended gradient-accumulation depth
+      # and diverging from what gets recorded in the perf CSV.
+      MBS=2; GBS=32
+      GBS=$(effective_global_batch_size "$MBS" "$GBS")
+      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
     fi
+  else
+    echo "Error: Device $DEVICE is not supported for $MODEL_REPO. Supported: MI355X, MI350X, MI300X, MI325X."
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"
