@@ -184,6 +184,61 @@ writes globally visible — deterministic, vs a guessed <code>K3_WRITE_FENCE</co
   <li><b>README.md</b> — build → configure → launch → validate, end to end.</li>
 </ol>
 
+<h2>8 · Changes to public codebases (subcomponents)</h2>
+<p class="sub">Scope of what was actually modified vs. consumed. Only <b>one</b> subcomponent
+received a functional code change; the rest are pinned/consumed unchanged.</p>
+<table>
+  <thead><tr><th>Repo</th><th>What I did</th><th>Detail</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>vLLM</b><br><span class="tag">raviguptaamd/vllm</span></td>
+      <td><span class="pill pass">CODE CHANGE</span></td>
+      <td>Commit <code>2cbc11cd7</code> on branch <code>v4-disagg</code> — <b>MoRIIO RDMA read-after-write
+      barrier</b> for the concurrency KV write-race. +63 lines / 2 files:
+      <code>moriio_engine.py</code> (readback loop in <code>_finalize_if_complete</code> + stash in
+      <code>write_kv_layer</code>), <code>moriio_common.py</code> (<code>readback_targets</code> /
+      <code>readback_session</code> fields on <code>RemoteAllocInfo</code>). Gated
+      <code>K3_WRITE_READBACK=1</code>. Reads back every written region before
+      <code>write_done</code> → forces KV globally visible in the receiver HBM.</td>
+    </tr>
+    <tr>
+      <td><b>MAD (ROCm)</b><br><span class="tag">ROCm/MAD</span></td>
+      <td><span class="pill open">NEW FILES (PR)</span></td>
+      <td>PR&nbsp;#241 — new recipe folder <code>scripts/vllm/kimik3_mi300x/vllm_disagg/Kimik3D_DI/</code>
+      (Dockerfile, launchers, probes, README, docs). No existing MAD code changed.</td>
+    </tr>
+    <tr>
+      <td><b>MoRI</b><br><span class="tag">ROCm/mori</span></td>
+      <td><span class="pill">CONSUMED (pin)</span></td>
+      <td>Pin <code>624002c897a3</code> — built from source, <b>unchanged</b>. (It's the prime
+      suspect for the ~150 s floor, but not modified here.)</td>
+    </tr>
+    <tr>
+      <td><b>vllm-router</b><br><span class="tag">raviguptaamd/router</span></td>
+      <td><span class="pill">CONSUMED (pin)</span></td>
+      <td>Pinned <code>ROUTER_REF</code>, built from source, <b>unchanged</b>.</td>
+    </tr>
+    <tr>
+      <td><b>AITER · flydsl</b><br><span class="tag">ROCm/aiter</span></td>
+      <td><span class="pill">CONSUMED (pin)</span></td>
+      <td>AITER <code>0.1.19</code> prebuilt wheel + flydsl <code>0.2.4</code>, <b>unchanged</b>.</td>
+    </tr>
+    <tr>
+      <td><b>Base image</b><br><span class="tag">rocm/vllm-dev</span></td>
+      <td><span class="pill">CONSUMED (pin)</span></td>
+      <td><code>ci_base-dedbf6be…</code>, <b>unchanged</b>.</td>
+    </tr>
+  </tbody>
+</table>
+<div class="box info">
+  <b>Net:</b> the one functional upstream code change this effort produced is the vLLM MoRIIO
+  <b>RDMA readback barrier</b> (<code>2cbc11cd7</code>). Everything else is a new self-contained
+  recipe (MAD PR&nbsp;#241) plus version pins consumed as-is.
+  <br><span class="tag">Caveat: the Dockerfile pinning vLLM 2cbc11cd7 has been compile-checked but not yet
+  built end-to-end; the live validation used the same fix applied via a runtime overlay onto a
+  prior image.</span>
+</div>
+
 <div class="foot">
   Kimi-K3 MXFP4 wide-EP disaggregated serving · latest upstream stack (vLLM d626108b · MoRI 624002c8) ·
   cluster IPs/hosts scrubbed from all shipped files.
