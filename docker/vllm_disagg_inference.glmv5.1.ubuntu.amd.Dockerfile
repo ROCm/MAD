@@ -203,7 +203,7 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
             git apply --verbose /tmp/mori_pr558_ionic.patch && \
             echo "  applied docker/mori_pr558_ionic.patch (ionic atomic-MR strip + proxy debug)" ; \
         fi && \
-        BUILD_UMBP=OFF pip install . && \
+        SETUPTOOLS_SCM_PRETEND_VERSION=0.1.0 BUILD_UMBP=OFF pip install . && \
         python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
         if [ "${WITH_MORI_EP_OVER_RDMA}" = "1" ]; then \
             echo "MORI_REF=${_REF}@$(git -C /tmp/mori-src rev-parse HEAD) (PR#558 EP-over-RDMA + ionic patch)" >> /app/versions.txt ; \
