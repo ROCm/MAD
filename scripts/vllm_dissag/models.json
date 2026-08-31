@@ -279,6 +279,69 @@
         "args": "-N 2 -n 2"
     },
     {
+        "name": "pyt_vllm_disagg_mori_glm-5.1-fp8",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.1",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.1-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.1-fp8_niah",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.1",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "niah"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.1-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "niah"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3",
         "dockerfile": "../../docker/vllm_disagg_inference",
         "scripts": "run_xPyD_models.slurm",
@@ -368,6 +431,72 @@
             "RUN_MORI": "0",
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3",
+        "dockerfile": "../../docker/vllm_disagg_inference",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "DeepSeek-V3",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_256k"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer",
+        "dockerfile": "../../docker/vllm_disagg_inference",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "DeepSeek-V3-5layer",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_256k"
         },
         "args": "-N 2 -n 2"
     }

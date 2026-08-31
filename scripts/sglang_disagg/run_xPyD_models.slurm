@@ -114,6 +114,20 @@ DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp f
 SKIP_BENCHMARK="${SKIP_BENCHMARK:-0}"
 SKIP_CURL_TEST="${SKIP_CURL_TEST:-0}"
 
+# Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
+#   sweep   (default) -> benchmark_xPyD.sh    (random ISL/OSL concurrency sweep)
+#   agentic           -> benchmark_agentic.sh (aiperf agentic trace replay)
+# The in-container launcher (sglang_disagg_mori_io_ep.sh) auto-enables server
+# metrics + radix prefix cache when BENCHMARK_SCRIPT=agentic.
+BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
+case "$BENCHMARK_SCRIPT" in
+  sweep)   BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
+  agentic) BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
+  *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, agentic)" >&2; exit 1 ;;
+esac
+export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
+echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
+
 MODEL_NAME="${MODEL_NAME:-None}"
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
@@ -300,14 +314,49 @@ echo ""
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
 MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
+# Prefer the fabric-subnet IP: nodes are multi-homed and picking the first
+# hostname -I address can land on a different subnet, which hangs the socket
+# barrier on mixed-subnet coordination. The preferred subnet prefix is
+# overridable via FABRIC_SUBNET_PREFIX (default "10.158." for the OCI
+# useocpm2m fabric); setting it empty is not intended (an empty prefix would
+# match every address), so when it is empty we skip the prefix match and go
+# straight to the first-address fallback. Fall back to the first address if no
+# matching address is present; fail fast if empty.
+FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
+# Escape regex-special chars so the prefix is matched literally, anchored at start.
+FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
+MASTER_ADDR_RAW="$MASTER_ADDR"
+if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
+    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
+else
+    MASTER_ADDR=""
+fi
+if [ -z "$MASTER_ADDR" ]; then
+    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | awk '{print $1}')
+fi
+if [ -z "$MASTER_ADDR" ]; then
+    echo "ERROR: could not resolve MASTER_ADDR for node '$MASTER_NODE' from 'hostname -I' output: '$MASTER_ADDR_RAW'" >&2
+    exit 1
+fi
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
     IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
+    IP_RAW="$IP"
+    if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
+        IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
+    else
+        IP=""
+    fi
+    if [ -z "$IP" ]; then
+        IP=$(echo "$IP_RAW" | awk '{print $1}')
+    fi
+    if [ -z "$IP" ]; then
+        echo "ERROR: could not resolve IP for node '$NODE' from 'hostname -I' output: '$IP_RAW'" >&2
+        exit 1
+    fi
     IPS+=("$IP")
 done
 
@@ -353,6 +402,9 @@ export SKIP_CURL_TEST
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
 export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
+# AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
+[ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="$(eval echo "$AGENTIC_CONFIG")"
+
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
@@ -394,14 +446,40 @@ docker run --rm \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
     -e SKIP_BENCHMARK=$SKIP_BENCHMARK \
     -e SKIP_CURL_TEST=$SKIP_CURL_TEST \
-    -e KV_TRANSFER_BACKEND=${KV_TRANSFER_BACKEND:-} \
+    ${KV_TRANSFER_BACKEND:+-e KV_TRANSFER_BACKEND=$KV_TRANSFER_BACKEND} \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
+    ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \
+    ${AGENTIC_CONC:+-e AGENTIC_CONC=$AGENTIC_CONC} \
+    ${DURATION:+-e DURATION=$DURATION} \
+    ${AGENTIC_PORT:+-e AGENTIC_PORT=$AGENTIC_PORT} \
+    ${MODEL_PREFIX:+-e MODEL_PREFIX=$MODEL_PREFIX} \
+    ${WEKA_LOADER_OVERRIDE:+-e WEKA_LOADER_OVERRIDE=$WEKA_LOADER_OVERRIDE} \
+    ${AIPERF_UNSAFE_OVERRIDE:+-e AIPERF_UNSAFE_OVERRIDE=$AIPERF_UNSAFE_OVERRIDE} \
+    ${AGENTIC_CACHE_WARMUP_DURATION:+-e AGENTIC_CACHE_WARMUP_DURATION=$AGENTIC_CACHE_WARMUP_DURATION} \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${AGENTIC_CONFIG:+-e AGENTIC_CONFIG=$AGENTIC_CONFIG} \
+    ${AGENTIC_WORKLOAD:+-e AGENTIC_WORKLOAD=$AGENTIC_WORKLOAD} \
+    ${SUITE_CORPUS_DIR:+-e SUITE_CORPUS_DIR=$SUITE_CORPUS_DIR} \
+    ${AIPERF_PIN:+-e AIPERF_PIN=$AIPERF_PIN} \
+    ${AGENTIC_UTILS_PIN:+-e AGENTIC_UTILS_PIN=$AGENTIC_UTILS_PIN} \
+    ${SUITE_CORPUS_FORCE:+-e SUITE_CORPUS_FORCE=$SUITE_CORPUS_FORCE} \
+    ${AGENTIC_STRICT_CONTEXT:+-e AGENTIC_STRICT_CONTEXT=$AGENTIC_STRICT_CONTEXT} \
+    ${AGENTIC_HF_ISL_TAIL:+-e AGENTIC_HF_ISL_TAIL=$AGENTIC_HF_ISL_TAIL} \
+    ${HF_HOME:+-e HF_HOME=$HF_HOME} \
+    ${ENABLE_SERVER_METRICS:+-e ENABLE_SERVER_METRICS=$ENABLE_SERVER_METRICS} \
+    ${ENABLE_RADIX_CACHE:+-e ENABLE_RADIX_CACHE=$ENABLE_RADIX_CACHE} \
+    ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
+    ${AGENTIC_ALLOW_UV_INSTALL:+-e AGENTIC_ALLOW_UV_INSTALL=$AGENTIC_ALLOW_UV_INSTALL} \
+    ${AGENTIC_UV_VERSION:+-e AGENTIC_UV_VERSION=$AGENTIC_UV_VERSION} \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
     $DOCKER_IMAGE_NAME -c "
+        set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
     "
