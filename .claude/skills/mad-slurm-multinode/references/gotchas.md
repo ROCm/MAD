@@ -312,6 +312,69 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   transport vars) to disable the plugin and let the bundled `librccl` drive the
   IB/RoCE net path directly. The primus template ships this key set to `none`.
 
+Keywords: Kimi-K2-Thinking 384 experts MoE, rdzv timeout DistStoreError MIOpen,
+PRIMUS_SANITY_TRAIN_ITERS proxy 3-layer, log_error_patterns torchrun SIGSEGV Traceback,
+moe_router_num_groups null no group routing.
+
+- **Kimi-K2-Thinking needs 24 nodes (192 GPUs) with `PRIMUS_EP=192`,
+  `micro_batch_size=1` and full recompute.** At 1T params it does not fit in
+  less; all three are requirements, not tuning. Set
+  `PYTORCH_HIP_ALLOC_CONF=expandable_segments:True` alongside them.
+
+- **Kimi-K2-Thinking is a mock-data throughput benchmark, not a training run.**
+  `docker/kimi_k2_configs/kimi_k2_thinking-BF16-pretrain.yaml` sets `mock_data:
+  true`, `train_iters: 50` and `disable_last_saving: true` unconditionally. The
+  architecture is the real 61-layer / 384-expert one, so the tok/s and TFLOP/s
+  figures are representative, but no dataset is read and no checkpoint is
+  written. Do not quote it as a 1T-parameter pretraining result.
+
+- **The two Kimi YAMLs are injected by the Dockerfile, not shipped in the base
+  image.** Unlike every other Primus model here,
+  `kimi_k2_thinking.yaml` and `kimi_k2_thinking-BF16-pretrain.yaml` live in this
+  repo under `docker/kimi_k2_configs/` and are copied into the Primus tree by
+  `docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile`. That `COPY`
+  is relative to the build context, so the manifest must keep
+  `"dockercontext": "./docker"` — without it madengine gives any dockerfile whose
+  path contains `primus` a repo-root context and the build fails at the `COPY`.
+
+- **`context.docker_env_vars` reaches every deployment, not just a local
+  build-time sanity pass — `PRIMUS_SANITY_TRAIN_ITERS` must not live there by
+  default.** madengine renders `context.docker_env_vars` as `--env` on the
+  actual `docker run`/`torchrun` invocation on every node, SLURM-deployed runs
+  included (verified directly: grepping a real 2-node SLURM job's container
+  launch line shows `PRIMUS_SANITY_TRAIN_ITERS=50` passed to the container even
+  though the manifest's `deployment_config.env_vars` never set it). An earlier
+  version of this template shipped `PRIMUS_SANITY_TRAIN_ITERS`/
+  `PRIMUS_SANITY_DATATYPE` unconditionally in `context.docker_env_vars`, on the
+  mistaken assumption that block was build-time-only — the effect was that
+  *every* deployment of the template, including the "real" SLURM run, silently
+  took the 3-layer proxy path and never measured full depth. Fixed: the
+  shipped template no longer sets either key. Add `PRIMUS_SANITY_TRAIN_ITERS`
+  to `context.docker_env_vars` yourself only when you deliberately want the
+  fast 3-layer CI/build-sanity path (`--num_layers 3 --moe_layer_freq 1` in
+  `benchmark_report.sh`, ~30 min on 2×MI355X); leave it absent for a real
+  measurement — at full depth, `torch.compile` workers can saturate every CPU
+  during NCCL bootstrap and the rendezvous can time out (`DistStoreError:
+  Timed out`) before the first training step without the rdzv fix below.
+
+- **The torchrun rdzv timeout must be 7200s.** The 600s default is too short for
+  MIOpen kernel compilation on a first run with 384 experts, and the job dies at
+  `DistStoreError` during NCCL init — this looks like a network fault but is not.
+  The `rccl_overlay` Dockerfile patches `run_pretrain.sh` and
+  `primus-cli-direct.sh` to `--rdzv-conf timeout=7200`. Rebuild without that
+  patch and the failure comes back.
+
+- **`log_error_patterns` must be overridden.** torchrun prints `Traceback (most
+  recent call last)` to stdout when a worker is SIGTERMed at cleanup, even after
+  all 50 iterations complete cleanly. madengine's default error scan treats any
+  `Traceback` as a failure and returns exit code 3, discarding a perfectly valid
+  perf CSV. The template's `log_error_patterns` list drops `Traceback`,
+  `RuntimeError:`, `Exception:`, `FAILED` and `failed (exitcode:` — keep it.
+
+- **Architecture difference from DeepSeek-V3 that shows up in manifests:** Kimi K2
+  uses `n_group=1`, so `moe_router_num_groups` is `null` (no group routing), and
+  there are no MTP layers. Both are handled inside `kimi_k2_thinking.yaml`; no
+  env overrides are needed.
 - **`rocm/primus:v26.5` can train fine and still report nothing — pin the base
   that the model was validated on.** Observed on Llama-4-Scout, 2 nodes / 16 GPU
   gfx950: on `v26.5` the run completes all 50 iterations and logs

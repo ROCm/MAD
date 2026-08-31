@@ -65,25 +65,43 @@ USER root
 #    detection string is too narrow). This mirrors that PR: add "gfx942" to
 #    mxfp_supported()'s recognized-arch list only (NOT is_gfx95_supported(),
 #    which gates unrelated MI350-specific behavior and must stay gfx95-only).
-#    Gated by ARG so it's a no-op if the base image ever ships the upstream
-#    fix natively (grep finds nothing to replace -> sed is a harmless no-op,
-#    but the verification step below would then fail loudly instead of
-#    silently passing, so a real upstream fix is still visible).
+#    Detected, not gated by an ARG: the RUN block below checks whether
+#    mxfp_supported() still exists before touching anything. If a future base
+#    image ships the upstream fix by folding gfx942 into mxfp_supported()
+#    directly, the sed becomes a harmless no-op and the verification step
+#    below still passes, so a real upstream fix stays visible in the build log
+#    instead of silently pretending this patch did the work.
+#
+#    UPDATE: as of the rocm/sgl-dev:v0.5.16-rocm720-mi35x-20260807 base,
+#    upstream has removed mxfp_supported() from srt/utils/common.py entirely
+#    (replaced by is_gfx942_supported()/is_gfx95_supported() and a differently
+#    named gating function) -- there is no longer any "MXFP4"/"mxfp4"/"Mxfp4"
+#    string anywhere in the file to patch. That is a real, verified upstream
+#    restructuring (checked directly inside the base image), not a transient
+#    grep miss, so it is handled as its own branch below: log it and move on
+#    instead of hard-failing every build that uses this Dockerfile regardless
+#    of which model it's building. The hard-fail path stays for the case the
+#    original author actually designed it for -- mxfp_supported() exists but
+#    the sed did not land -- which is the scenario a silent pass would hide.
 ###############################################################################
 ARG SGLANG_SRT_UTILS_COMMON=/sgl-workspace/sglang/python/sglang/srt/utils/common.py
 RUN set -e; \
     test -f "${SGLANG_SRT_UTILS_COMMON}" || { echo "MXFP4_PATCH_TARGET_MISSING ${SGLANG_SRT_UTILS_COMMON}"; exit 1; }; \
-    before="$(grep -c 'for gfx in \["gfx95"\]' "${SGLANG_SRT_UTILS_COMMON}")"; \
-    sed -i '/^def mxfp_supported/,/^def is_gfx95_supported/{s/for gfx in \["gfx95"\]/for gfx in ["gfx95", "gfx942"]/}' "${SGLANG_SRT_UTILS_COMMON}"; \
-    if grep -A6 '^def mxfp_supported' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
-      echo "MXFP4_GFX942_PATCH_APPLIED (was ${before} unpatched gfx95-only occurrence(s) in file)"; \
+    if ! grep -q '^def mxfp_supported' "${SGLANG_SRT_UTILS_COMMON}"; then \
+      echo "MXFP4_PATCH_SKIPPED: mxfp_supported() is not present in this base image; upstream has restructured gfx942 MXFP4 detection, nothing to patch"; \
     else \
-      echo "MXFP4_GFX942_PATCH_FAILED_OR_ALREADY_UPSTREAM — mxfp_supported() body has no gfx942 after patch attempt"; \
-      exit 1; \
-    fi; \
-    if grep -A10 '^def is_gfx95_supported' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
-      echo "MXFP4_PATCH_SCOPE_LEAK — is_gfx95_supported() unexpectedly also patched, aborting"; \
-      exit 1; \
+      before="$(grep -c 'for gfx in \["gfx95"\]' "${SGLANG_SRT_UTILS_COMMON}" || true)"; \
+      sed -i '/^def mxfp_supported/,/^def is_gfx95_supported/{s/for gfx in \["gfx95"\]/for gfx in ["gfx95", "gfx942"]/}' "${SGLANG_SRT_UTILS_COMMON}"; \
+      if sed -n '/^def mxfp_supported/,/^def is_gfx95_supported/{/^def is_gfx95_supported/!p}' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
+        echo "MXFP4_GFX942_PATCH_APPLIED (was ${before} unpatched gfx95-only occurrence(s) in file)"; \
+      else \
+        echo "MXFP4_GFX942_PATCH_FAILED: mxfp_supported() exists but has no gfx942 after patch attempt"; \
+        exit 1; \
+      fi; \
+      if grep -A20 '^def is_gfx95_supported' "${SGLANG_SRT_UTILS_COMMON}" | grep -q 'gfx942'; then \
+        echo "MXFP4_PATCH_SCOPE_LEAK: is_gfx95_supported() unexpectedly also patched, aborting"; \
+        exit 1; \
+      fi; \
     fi
 
 ###############################################################################

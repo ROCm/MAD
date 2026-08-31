@@ -12,6 +12,7 @@ SCRIPT_DIR="${_MORI_SCRIPT_DIR}"
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "Kimi-K2-Instruct"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -374,6 +375,26 @@ setup_sglang_worker_env() {
     export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-eth0}}"
     export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
+    # Kimi-K2 MLA: keep the non-fused decode path. This matches upstream, which
+    # defaults the flag off (srt/environ.py: SGLANG_ROCM_FUSED_DECODE_MLA =
+    # EnvBool(False)) and sets it to 0 explicitly in its own Kimi-K2 ROCm CI
+    # recipes (scripts/ci/slurm/recipes/mi355x-fp8/kimik26/**.yaml). Other MLA
+    # models (e.g. DeepSeek) keep whatever the image chose.
+    #
+    # This deliberately does NOT test "is the variable unset?". The rocm/sgl-dev
+    # images bake SGLANG_ROCM_FUSED_DECODE_MLA=1 into the image Config.Env, so on
+    # every sgl-dev base the variable is already non-empty and an unset-test never
+    # fires -- Kimi then silently ran the fused path, the opposite of the intent
+    # here (observed on a 4-node 2P2D gfx942 run: the live server process had
+    # =1). An image-level default is not an operator decision and does not get to
+    # win; set SGLANG_KEEP_FUSED_DECODE_MLA=1 to opt back in deliberately.
+    case "${MODEL_NAME:-}" in
+        *Kimi-K2*|*kimi-k2*)
+            if [[ "${SGLANG_KEEP_FUSED_DECODE_MLA:-0}" != "1" ]]; then
+                export SGLANG_ROCM_FUSED_DECODE_MLA=0
+            fi
+            ;;
+    esac
     export SGLANG_MORI_FP8_DISP="${SGLANG_MORI_FP8_DISP:-True}"
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
 }
@@ -506,7 +527,18 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
     # Requires shared /run_logs across nodes.
     SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
-    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
+    # Time-to-first-ready scales with checkpoint size, so the default is per model
+    # rather than one number for every card. 4000s is fine for the ~600 GB class
+    # (DeepSeek-R1 reached ready in well under half of it), but Kimi-K2 is ~1 TB of
+    # FP8 weights: a 4-node run measured 15m15s of weight load on an idle NFS and
+    # 24m48s on a busy one, and the slow case blew past 4000s at 4003s -- run.sh
+    # then tore down healthy servers that were still initialising. Give the 1 TB
+    # class 3h; an explicit ROUTER_READY_TIMEOUT_SECONDS still overrides both.
+    _router_ready_default=4000
+    case "${MODEL_NAME:-}" in
+        *Kimi-K2*|*kimi-k2*) _router_ready_default=10800 ;;
+    esac
+    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-$_router_ready_default}"
     ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"

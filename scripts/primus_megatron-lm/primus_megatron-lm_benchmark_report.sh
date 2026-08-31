@@ -45,7 +45,7 @@ POSTTRAIN_TYPE="lora"
 usage() {
   echo "Usage: $0 -m <model_repo> -p <datatype> -t <mode> -f <posttrain_type>"
   echo "\nOptions:"
-  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-4-Scout-17B-16E, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
+  echo "  -m <model_repo>      Model repository (Llama-2-7B, Llama-2-70B, Llama-3.1-8B, Llama-3.1-70B, Llama-4-Scout-17B-16E, Kimi-K2-Thinking, DeepSeek-V2-lite, DeepSeek-V3-proxy, Mixtral-8x7B, Mixtral-8x22B-proxy, Zebra-Llama-1B, Zebra-Llama-3B, Zebra-Llama-8B, Qwen-3-32B, GPT-OSS-20B, GPT-OSS-120B, Qwen-3-30B, Qwen-3-235B, Mamba-370M)"
   echo "  -p <datatype>        Precision type (FP8, BF16, MXFP8, or MXFP4). MXFP8/MXFP4 only supported on MI355X/MI350X."
   echo "  -t <mode>            Training mode (pretrain or posttrain, default: pretrain)"
   echo "  -f <posttrain_type>  Post-training type (sft or lora, default: lora). Only used when mode is posttrain."
@@ -655,6 +655,78 @@ elif [ "$MODEL_REPO" == "DeepSeek-V3-proxy" ]; then
         -- train pretrain \
         --config $EXP --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS $DEEPEP_ARGS 2>&1 | tee $TRAIN_LOG
     fi
+  fi
+  if [ -f "$TRAIN_LOG" ]; then
+    echo "[INFO] Benchmarking"
+    python3 $perf_script --model $MODEL_REPO --input $TRAIN_LOG --output $PERF_LOG --mode $MODE --precision $DATATYPE --batch_size $MBS --global_batch_size $GBS --seq_len $SEQ_LEN --device $DEVICE --num_gpus $NUM_GPUS
+    rm $TRAIN_LOG
+  else
+    echo "[INFO] Training log not found - configuration not supported."
+    echo "model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus" > $PERF_LOG
+    echo "$MODEL_REPO,,tok_per_s_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+    echo "$MODEL_REPO,,TFLOPS_per_gpu,$MODE,$DATATYPE,$MBS,$GBS,$SEQ_LEN,$DEVICE,$NUM_GPUS" >> $PERF_LOG
+  fi
+
+elif [ "$MODEL_REPO" == "Kimi-K2-Thinking" ]; then
+  echo "[INFO] $MODEL_REPO TRAINING"
+  # Kimi-K2-Thinking: 1T-total / 27B-active MLA + MoE (61 layers, 384 experts),
+  # TP=1. Both the model YAML and this BF16 experiment YAML are
+  # injected into the Primus tree by the rccl_overlay Dockerfile -- unlike every
+  # other model here, they do not ship inside the rocm/primus base image.
+  #
+  # This is a throughput benchmark, not a training run: the experiment YAML sets
+  # mock_data and train_iters: 50 unconditionally and saves no checkpoint.
+  # PRIMUS_SANITY_TRAIN_ITERS additionally drops it to 3 layers for CI/build
+  # sanity; leave it unset for a representative full-depth measurement.
+  #
+  # Full depth needs 24 nodes (192 GPUs) with PRIMUS_EP=192, and the
+  # deployment must set PYTORCH_HIP_ALLOC_CONF=expandable_segments:True.
+  export EXP=examples/megatron/configs/$CONFIG_DEVICE/kimi_k2_thinking-$DATATYPE-pretrain.yaml
+  SEQ_LEN=4096
+  # BF16-only, and not merely by policy: the rccl_overlay Dockerfile injects
+  # exactly one experiment YAML for this model (kimi_k2_thinking-BF16-pretrain.yaml),
+  # so $EXP above cannot resolve for any other DATATYPE. Guard once, up front,
+  # instead of per-device: the per-device `if FP8 ... elif BF16` shape used by the
+  # other model blocks names only FP8, which left MXFP8/MXFP4/FP4 matching no
+  # branch at all and falling through with no diagnostic whatsoever. The same
+  # applies to an unrecognized DEVICE. Behaviour on the unsupported path is
+  # unchanged (echo, no exit) so the "configuration not supported" perf-CSV row
+  # stays consistent with every other block in this file -- what changes is that
+  # the log now always says which value was rejected.
+  if [ "$DATATYPE" != "BF16" ]; then
+    echo "Error: Datatype $DATATYPE is not supported for $MODEL_REPO on $DEVICE. Only BF16 is supported."
+  elif [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
+    if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+      MBS=1; GBS=32
+      run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+    else
+      # MBS=1 and full recompute are required, not tuning -- at 1T params
+      # the model does not fit without both. Flags are passed explicitly
+      # rather than via scaleout_gbs_override so an empty override can never
+      # fall back to a wrong default; effective_global_batch_size keeps
+      # global_batch_size % (micro_batch_size * world_size) == 0 at any scale.
+      MBS=1; GBS=128
+      GBS=$(effective_global_batch_size "$MBS" "$GBS")
+      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS \
+        --recompute_granularity full --recompute_method uniform --recompute_num_layers 1
+    fi
+  elif [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [[ -n "${PRIMUS_SANITY_TRAIN_ITERS:-}" ]]; then
+      MBS=1; GBS=32
+      run_primus "$EXP" --num_layers 3 --moe_layer_freq 1 --micro_batch_size $MBS --global_batch_size $GBS
+    else
+      # MBS=2/GBS=32 deliberately overrides the experiment YAML's own
+      # micro_batch_size=4/global_batch_size=128 -- both flags must always
+      # be passed explicitly, or an unadjusted-at-this-scale run silently
+      # falls back to the YAML's global_batch_size=128 while MBS stays
+      # overridden to 2, doubling the intended gradient-accumulation depth
+      # and diverging from what gets recorded in the perf CSV.
+      MBS=2; GBS=32
+      GBS=$(effective_global_batch_size "$MBS" "$GBS")
+      run_primus "$EXP" --micro_batch_size $MBS --global_batch_size $GBS
+    fi
+  else
+    echo "Error: Device $DEVICE is not supported for $MODEL_REPO. Supported: MI355X, MI350X, MI300X, MI325X."
   fi
   if [ -f "$TRAIN_LOG" ]; then
     echo "[INFO] Benchmarking"

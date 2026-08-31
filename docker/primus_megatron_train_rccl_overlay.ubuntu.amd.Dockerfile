@@ -286,6 +286,47 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
       echo "RDMA_CORE_VERSION empty — keeping base image rdma-core"; \
     fi
 
+# ---- Kimi-K2-Thinking Primus configs ----------------------------------------
+# Primus ships model/experiment YAMLs inside the base image; Kimi-K2-Thinking is
+# not one of them, so the two configs are carried in this repo and injected here.
+# Harmless for every other model: two YAML files nobody reads unless
+# primus_pyt_megatron_lm_train_kimi-k2-thinking is the requested model repo.
+#
+# NOTE: these COPY lines make ./docker the required build context (which is what
+# the manifest templates already set via "dockercontext": "./docker").
+COPY kimi_k2_configs/kimi_k2_thinking.yaml \
+     ${WORKSPACE_DIR}/Primus/primus/configs/models/megatron/kimi_k2_thinking.yaml
+COPY kimi_k2_configs/kimi_k2_thinking-BF16-pretrain.yaml \
+     ${WORKSPACE_DIR}/Primus/examples/megatron/configs/MI355X/kimi_k2_thinking-BF16-pretrain.yaml
+# benchmark_report.sh resolves the config under $CONFIG_DEVICE, so mirror the
+# experiment YAML into every device dir the base image actually ships.
+RUN set -e; \
+    for d in MI350X MI300X MI325X; do \
+      tgt="${WORKSPACE_DIR}/Primus/examples/megatron/configs/${d}"; \
+      if [ -d "$tgt" ]; then \
+        cp "${WORKSPACE_DIR}/Primus/examples/megatron/configs/MI355X/kimi_k2_thinking-BF16-pretrain.yaml" "$tgt/"; \
+      fi; \
+    done
+
+# Raise the torchrun rendezvous timeout from the 600s default to 7200s. On the
+# first Kimi-K2-Thinking iteration MIOpen compiles kernels for 384 experts, which
+# outlasts 600s and drops the slower ranks out of the rendezvous with
+# DistStoreError. Applied unconditionally: a longer rendezvous timeout only
+# changes how long a genuinely stuck job takes to fail, and multi-node runs of
+# every other model benefit from the same headroom.
+RUN set -e; \
+    for f in ${WORKSPACE_DIR}/Primus/examples/run_pretrain.sh \
+             ${WORKSPACE_DIR}/Primus/runner/primus-cli-direct.sh; do \
+      if [ -f "$f" ]; then \
+        if grep -q "rdzv.conf" "$f"; then \
+          sed -i 's/--rdzv-conf timeout=[0-9]*/--rdzv-conf timeout=7200/' "$f"; \
+        else \
+          sed -i 's/\(--master_port[^)]*\)$/\1\n        --rdzv-conf timeout=7200/' "$f"; \
+        fi; \
+        grep -n "rdzv" "$f" | head -3; \
+      fi; \
+    done
+
 # ---- final verification: import torch + every librccl == candidate ----------
 RUN set -e && \
     if [[ -n "${RDMA_CORE_VERSION}" ]]; then \

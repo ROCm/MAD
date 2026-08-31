@@ -1,0 +1,40 @@
+# Kimi-K2-Thinking BF16 pretrain — throughput benchmark, not a real training run.
+#
+# mock_data: true and train_iters: 50 below are unconditional: this experiment
+# measures steady-state tok/s and TFLOP/s on synthetic batches over 50 steps and
+# saves nothing (disable_last_saving). It uses the real 61-layer architecture, so
+# the numbers are representative of the shape, but no checkpoint is produced and
+# no dataset is read. Setting PRIMUS_SANITY_TRAIN_ITERS additionally cuts the run
+# to 3 layers for CI/build sanity — see references/gotchas.md.
+work_group: ${PRIMUS_TEAM:amd}
+user_name: ${PRIMUS_USER:root}
+exp_name: ${PRIMUS_EXP_NAME:kimi_k2_thinking-pretrain}
+workspace: ${PRIMUS_WORKSPACE:./output}
+
+modules:
+  pre_trainer:
+    framework: megatron
+    config: pre_trainer.yaml
+    model: ${PRIMUS_MODEL:kimi_k2_thinking}.yaml
+    overrides:
+      train_iters: 50
+      # Pin the logging cadence to every step. This restates what Primus
+      # already defaults to (primus/configs/modules/megatron/pre_trainer.yaml:
+      # log_interval: 1, log_throughput: true, unchanged upstream since 2025),
+      # so it changes nothing today -- it only stops a future base image from
+      # silently widening the interval underneath a 50-iteration run.
+      #
+      # It is NOT the fix for the empty-perf-CSV symptom below. That symptom
+      # was still observed on the validated 24-node run with this line already
+      # in place, so whatever suppresses the throughput line is not the log
+      # cadence; see references/manifests.md for the open item.
+      log_interval: 1
+      micro_batch_size: 4
+      global_batch_size: 128
+      seq_length: ${PRIMUS_SEQ_LENGTH:4096}
+      max_position_embeddings: ${PRIMUS_MAX_POSITION_EMBEDDINGS:4096}
+      tensor_model_parallel_size: ${PRIMUS_TP:1}
+      expert_model_parallel_size: ${PRIMUS_EP:8}
+      mock_data: true
+      moe_use_legacy_grouped_gemm: true
+      disable_last_saving: true

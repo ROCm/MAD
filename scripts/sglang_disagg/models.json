@@ -556,6 +556,29 @@
         "args": ""
     },
     {
+        "name": "sglang-disagg-kimi-k2-instruct-overlay",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-Kimi-K2-Instruct.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "kimi-k2",
+            "moe",
+            "ep-internode",
+            "rccl-tp",
+            "mori-a2a"
+        ],
+        "timeout": 14400,
+        "args": ""
+    },
+    {
         "name": "sglang-disagg-llama-4-scout-overlay",
         "url": "",
         "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",

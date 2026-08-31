@@ -1,0 +1,37 @@
+extends:
+  - deepseek_v3_base.yaml
+
+# https://huggingface.co/moonshotai/Kimi-K2-Instruct/blob/main/config.json
+# Kimi K2 Thinking: 1039.77B total params, 27.03B active params
+
+tokenizer_type: NullTokenizer
+vocab_size: 102400
+
+# model
+num_layers: 61
+hidden_size: 7168
+ffn_hidden_size: 18432
+num_attention_heads: 64
+
+# mla
+q_lora_rank: 1536
+kv_lora_rank: 512
+qk_head_dim: 128
+qk_pos_emb_head_dim: 64
+v_head_dim: 128
+kv_channels: 128
+
+# no MTP
+mtp_num_layers: null
+
+# moe — first 1 layer dense, then all MoE
+moe_layer_freq: "([0]*1+[1]*60)"
+num_experts: 384
+moe_router_topk: 8
+moe_ffn_hidden_size: 2048
+moe_shared_expert_intermediate_size: 2048
+
+# device-limited routing (no group routing: n_group=1)
+moe_router_num_groups: null
+moe_router_group_topk: null
+moe_router_topk_scaling_factor: 2.827

@@ -58,6 +58,8 @@ elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_deepseek-v2" ]]; then
   model="DeepSeek-V2"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_deepseek-v3-proxy" ]]; then
   model="DeepSeek-V3-proxy"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_kimi-k2-thinking" ]]; then
+  model="Kimi-K2-Thinking"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_mixtral-8x7b" ]]; then
   model="Mixtral-8x7B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_mixtral-8x22b-proxy" ]]; then

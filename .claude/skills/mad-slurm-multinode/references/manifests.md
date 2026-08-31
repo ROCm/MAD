@@ -124,6 +124,32 @@ differ, the host path belongs on the value side.
   `timeout: 14400` (4h) — the CLI default (7200s/2h) times out on this model;
   keep the explicit 14400. `multiple_results` =
   `perf_primus-megatron-GPT-OSS-120B.csv`.
+- **Primus Kimi-K2-Thinking**
+  (`primus_pyt_megatron_lm_train_kimi-k2-thinking_overlay`): 1T-total /
+  27B-active MLA + MoE (61 layers, 384 experts), BF16 only, EP=192 across
+  24 nodes, TP=1, MBS=1, full recompute, seq 4096. It does not fit in less.
+  Validated end-to-end: all 50 iterations, `torchrun` exit 0, ~236 tok/s/GPU. **Mock data, 50 iterations, no checkpoint** — a throughput
+  benchmark, not a training run (see [gotchas.md](gotchas.md#primus_megatron-training)).
+  Two things differ from the other Primus templates and must be preserved:
+  `"dockercontext": "./docker"` (the overlay Dockerfile `COPY`s the two Kimi
+  YAMLs out of `docker/kimi_k2_configs/`), and the `log_error_patterns` override
+  (torchrun prints a `Traceback` at worker cleanup that would otherwise be
+  scored as a failure). The template does **not** set `PRIMUS_SANITY_TRAIN_ITERS`
+  by default, so it measures full depth — `context.docker_env_vars` reaches
+  every deployment (SLURM included), so setting it there is not a build-only
+  toggle; add it yourself only for a deliberate fast 3-layer CI/sanity pass
+  (see [gotchas.md](gotchas.md#primus_megatron-training)).
+  Reference: 2 nodes / 16 GPU MI355X, BF16, MBS=1 -> ~6487 tok/s/GPU,
+  ~96.5 TFLOP/s/GPU (run-to-run spread < 0.02%).
+  Known open issue: no `tokens/s/GPU` line reaches the log for this model, so
+  the perf CSV comes out header-only even on a healthy run. Read throughput off
+  the iteration timestamps instead. The cause is **not** the logging cadence:
+  Primus already defaults to `log_interval: 1` / `log_throughput: true`
+  (`primus/configs/modules/megatron/pre_trainer.yaml`), the shipped Kimi
+  experiment YAML only restates that default, and the 24-node run above was
+  measured with it in place and still produced an empty CSV. Root cause is
+  still open — do not "fix" it by touching `log_interval`.
+  `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.
 - **Primus Llama-4-Scout-17B-16E**
   (`primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay`): same
   `rccl_overlay` Dockerfile / `torchrun` shape. MoE, BF16 only, seq 4096, MBS=1;
@@ -193,6 +219,48 @@ differ, the host path belongs on the value side.
      (attention backend selection is CLI-driven, independent of this env
      var).
   `multiple_results` = `perf_sglang-disagg-GPT-OSS-120B.csv`.
+- **sglang_disagg Kimi-K2-Instruct** (`sglang-disagg-kimi-k2-instruct-overlay`):
+  1T MLA + MoE, native FP8. Use
+  `assets/manifests/sglang_disagg_kimi-k2-instruct.template.json`. Same 4-node xP=2/yD=2,
+  `RUN_MORI=1`, `DP_MODE=1` (Kimi-K2-Instruct is on the
+  `MORI_DP_MODE1_ALLOWED_MODELS` allowlist), TP=EP=DP=16 per server. The FP8 MoE
+  runner has the DeepEP-style pre-permute registered, so it gets the full MoRI
+  expert all-to-all plus CUDA graphs. Kimi-specific bits are already in the
+  scripts: `--tool-call-parser kimi_k2` and `--dist-timeout 3600` in
+  `models.yaml`, and `SGLANG_ROCM_FUSED_DECODE_MLA=0` forced by the launcher for
+  any `*Kimi-K2*` model — matching upstream, which defaults the flag off and sets
+  it to `0` in its own Kimi-K2 ROCm CI recipes. (The launcher forces it rather
+  than only setting it when unset: the `rocm/sgl-dev` bases bake
+  `SGLANG_ROCM_FUSED_DECODE_MLA=1` into the image `Config.Env`, so an unset-test
+  never fires there. `SGLANG_KEEP_FUSED_DECODE_MLA=1` is the deliberate opt-in.)
+
+  Also launcher-side: `ROUTER_READY_TIMEOUT_SECONDS` defaults to `10800` for
+  `*Kimi-K2*` instead of the usual `4000`. Time-to-first-ready scales with
+  checkpoint size, and at ~1 TB the weight load alone measured 15m15s on an idle
+  NFS and 24m48s on a busy one — the slow case overran the 4000s default at
+  4003s and `run.sh` tore down servers that were still initialising.
+
+  Validated at 4 nodes / 32 GPUs on gfx942 (MI300X) + Mellanox CX7: 8/8 benchmark
+  points, perf CSV 56/56 `SUCCESS`, 0 `no transport available for peer`. Budget
+  for the weights: a ~1T-parameter checkpoint (959 GB on disk as staged from
+  `moonshotai/Kimi-K2-Instruct-0905`; ~1.1 TB for the full repo).
+  `multiple_results` = `perf_sglang-disagg-Kimi-K2-Instruct.csv`.
+
+  **Not yet working on gfx950 (MI355X) / Broadcom Thor2 bnxt_re.** Attempted
+  end to end at 4 nodes with real staged weights: the build succeeds, weight
+  loading completes on both prefill servers (`Multi-thread loading shards:
+  100% Completed`), and DP=16/EP=16/TP=16 distributed init proceeds — but the
+  process then aborts with `Fatal Python error: Aborted` /
+  `mori/src/application/context/context.cpp:332:
+  Context::DefaultPolicyResolve: Assertion 'false && "no transport available
+  for peer"' failed`. This is MoRI's own cross-node expert-parallel
+  all-to-all failing to resolve an RDMA transport between peers — a
+  different code path from Llama-4-Scout's `mori` usage above, which is
+  TP-only and never exercises MoRI's EP a2a. Same `IB_DEVICES` /
+  `MORI_RDMA_DEVICES` / GID index that work for Scout's KV-transfer-only
+  `mori` path do not get MoRI's EP a2a talking on this fabric. Not resolved
+  here — needs MoRI-level RDMA topology debugging on Broadcom Thor2, which
+  is beyond what a manifest config change can fix.
 - **sglang_disagg Llama-4-Scout-17B-16E-Instruct**
   (`sglang-disagg-llama-4-scout-overlay`): 17Bx16E MoE, bf16, same 4-node
   xP=2/yD=2 shape. TP-only (`DP_MODE=0`) with `RUN_MORI=1` and `mori`
