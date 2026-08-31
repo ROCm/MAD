@@ -30,6 +30,7 @@ echo ""
 MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
+    "Kimi-K2-Instruct"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -58,6 +59,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
+    "Kimi-K2-Instruct" \
 )
 
 # Define valid model names
@@ -70,6 +72,7 @@ VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
+    "Kimi-K2-Instruct" \
 )
 
 model_allows_mori_ep() {
@@ -142,6 +145,15 @@ validate_model_name() {
 }
 
 validate_model_name "${MODEL_NAME}"
+
+# DP_MODE=1 is only wired up for the MoRI DP-attention + EP path
+# (sglang_disagg_mori_io_ep.sh gates on this same allowlist); reject it here
+# too, before any node is launched, instead of failing later per-node.
+if [[ "$DP_MODE" == "1" ]] && ! mori_model_allows_dp_mode_one "$MODEL_NAME"; then
+    echo "Error: DP_MODE=1 is not supported for model '${MODEL_NAME}'. Allowed models:" >&2
+    mori_dp_mode1_allowed_models_lines >&2
+    exit 1
+fi
 
 # ------------------------
 # Model path validation and selection across all nodes
