@@ -527,7 +527,18 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
     # Requires shared /run_logs across nodes.
     SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
-    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
+    # Time-to-first-ready scales with checkpoint size, so the default is per model
+    # rather than one number for every card. 4000s is fine for the ~600 GB class
+    # (DeepSeek-R1 reached ready in well under half of it), but Kimi-K2 is ~1 TB of
+    # FP8 weights: a 4-node run measured 15m15s of weight load on an idle NFS and
+    # 24m48s on a busy one, and the slow case blew past 4000s at 4003s -- run.sh
+    # then tore down healthy servers that were still initialising. Give the 1 TB
+    # class 3h; an explicit ROUTER_READY_TIMEOUT_SECONDS still overrides both.
+    _router_ready_default=4000
+    case "${MODEL_NAME:-}" in
+        *Kimi-K2*|*kimi-k2*) _router_ready_default=10800 ;;
+    esac
+    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-$_router_ready_default}"
     ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"

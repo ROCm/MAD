@@ -200,19 +200,30 @@ differ, the host path belongs on the value side.
      var).
   `multiple_results` = `perf_sglang-disagg-GPT-OSS-120B.csv`.
 - **sglang_disagg Kimi-K2-Instruct** (`sglang-disagg-kimi-k2-instruct-overlay`):
-  1T MLA + MoE, native FP8. Structurally identical to DeepSeek-R1 — start from
-  `sglang_disagg_deepseek-r1.template.json` and change `MODEL_NAME`,
-  `MODEL_PATH`, `MODEL_REPO` and `multiple_results`. Same 4-node xP=2/yD=2,
+  1T MLA + MoE, native FP8. Use
+  `assets/manifests/sglang_disagg_kimi-k2-instruct.template.json`. Same 4-node xP=2/yD=2,
   `RUN_MORI=1`, `DP_MODE=1` (Kimi-K2-Instruct is on the
   `MORI_DP_MODE1_ALLOWED_MODELS` allowlist), TP=EP=DP=16 per server. The FP8 MoE
   runner has the DeepEP-style pre-permute registered, so it gets the full MoRI
   expert all-to-all plus CUDA graphs. Kimi-specific bits are already in the
   scripts: `--tool-call-parser kimi_k2` and `--dist-timeout 3600` in
-  `models.yaml`, and `SGLANG_ROCM_FUSED_DECODE_MLA=0` set by the launcher for any
-  `*Kimi-K2*` model (64 attention heads fall outside the fused decode-MLA range,
-  which otherwise crashes unpacking `ForwardMetadata`). Verified at 4 nodes on
-  gfx942 (MI300X). Budget for the weights: this is a ~1T-parameter checkpoint
-  (959 GB on disk as staged from `moonshotai/Kimi-K2-Instruct-0905`).
+  `models.yaml`, and `SGLANG_ROCM_FUSED_DECODE_MLA=0` forced by the launcher for
+  any `*Kimi-K2*` model — matching upstream, which defaults the flag off and sets
+  it to `0` in its own Kimi-K2 ROCm CI recipes. (The launcher forces it rather
+  than only setting it when unset: the `rocm/sgl-dev` bases bake
+  `SGLANG_ROCM_FUSED_DECODE_MLA=1` into the image `Config.Env`, so an unset-test
+  never fires there. `SGLANG_KEEP_FUSED_DECODE_MLA=1` is the deliberate opt-in.)
+
+  Also launcher-side: `ROUTER_READY_TIMEOUT_SECONDS` defaults to `10800` for
+  `*Kimi-K2*` instead of the usual `4000`. Time-to-first-ready scales with
+  checkpoint size, and at ~1 TB the weight load alone measured 15m15s on an idle
+  NFS and 24m48s on a busy one — the slow case overran the 4000s default at
+  4003s and `run.sh` tore down servers that were still initialising.
+
+  Validated at 4 nodes / 32 GPUs on gfx942 (MI300X) + Mellanox CX7: 8/8 benchmark
+  points, perf CSV 56/56 `SUCCESS`, 0 `no transport available for peer`. Budget
+  for the weights: a ~1T-parameter checkpoint (959 GB on disk as staged from
+  `moonshotai/Kimi-K2-Instruct-0905`; ~1.1 TB for the full repo).
   `multiple_results` = `perf_sglang-disagg-Kimi-K2-Instruct.csv`.
 
   **Not yet working on gfx950 (MI355X) / Broadcom Thor2 bnxt_re.** Attempted
