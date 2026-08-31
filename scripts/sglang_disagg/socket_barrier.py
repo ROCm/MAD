@@ -5,6 +5,35 @@ import sys
 import threading
 import time
 
+DEFAULT_TIMEOUT_SECONDS = 3600
+
+
+def _default_timeout():
+    """Read BARRIER_TIMEOUT_SECONDS, rejecting garbage with a readable message.
+
+    This runs on every node of every run, so a typo here would otherwise surface as
+    a bare ValueError traceback on all of them at import time, before argparse can
+    say anything useful. Unset or empty means "not configured" and falls back to the
+    default; anything else set but unparseable is an operator mistake and is
+    reported rather than silently replaced -- quietly substituting a different
+    timeout than the one asked for is how you get a run that behaves nothing like
+    its configuration.
+    """
+    raw = os.environ.get("BARRIER_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_TIMEOUT_SECONDS
+    try:
+        return int(raw)
+    except ValueError:
+        print(
+            f"ERROR: BARRIER_TIMEOUT_SECONDS must be an integer number of seconds "
+            f"(0 = wait forever), got {raw!r}.",
+            file=sys.stderr,
+            flush=True,
+        )
+        sys.exit(2)
+
+
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Optionally open and close a port on the local node.")
 parser.add_argument("--local-ip", required=False, help="Local IP address to bind the server.")
@@ -15,9 +44,9 @@ parser.add_argument("--node-ports", required=True, help="Comma-separated list of
 parser.add_argument(
     "--timeout",
     type=int,
-    default=int(os.environ.get("BARRIER_TIMEOUT_SECONDS", 3600)),
-    help="Give up after this many seconds (0 = wait forever). Default 3600, "
-    "override with BARRIER_TIMEOUT_SECONDS.",
+    default=_default_timeout(),
+    help=f"Give up after this many seconds (0 = wait forever). Default "
+    f"{DEFAULT_TIMEOUT_SECONDS}, override with BARRIER_TIMEOUT_SECONDS.",
 )
 args = parser.parse_args()
 
