@@ -62,6 +62,8 @@ fi
 exp_lower="$(echo "$EXP" | tr '[:upper:]' '[:lower:]')"
 if [[ "$exp_lower" == *"/maxtext/"* ]]; then
   export BACKEND="MaxText"
+elif [[ "$exp_lower" == *"/maxdiffusion/"* ]]; then
+  export BACKEND="MaxDiffusion"
 elif [[ "$exp_lower" == *"/torchtitan/"* ]]; then
   export BACKEND="torchtitan"
 elif [[ "$exp_lower" == *"/megatron_bridge/"* ]]; then
