@@ -34,6 +34,14 @@
 # today, so the dp: blocks below are intentionally empty — placeholders so per-model
 # dp: tuning can be added later without launcher edits (both connectors now append it).
 
+# Prefix cache (agentic): the default xPyD perf sweeps run cache-free — the
+# connectors hardcode "--no-enable-prefix-caching" on the emitted vllm serve argv
+# (NOT a yaml flag). The agentic trace-replay path re-enables prefix caching by
+# STRIPPING that flag in the connector (moriio.sh / rixl.sh) when BENCHMARK_SCRIPT=agentic
+# (or ENABLE_PREFIX_CACHE=1). That strip is exercised only by the agentic-tagged
+# models.json entries (BENCHMARK_SCRIPT=agentic), not by any perf-sweep entry; there is
+# nothing to set here. Do not add a prefix-cache flag to these entries.
+
 # ============================ Dense / TP-capable ============================
 
 Llama-3.1-405B-Instruct-FP8-KV:
