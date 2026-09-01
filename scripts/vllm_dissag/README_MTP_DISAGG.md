@@ -1,10 +1,14 @@
 # GLM-5.2 MTP (speculative decode) on disaggregated serving — TP8 / EP8 / EP16
 
 Dedicated, portable recipe for running GLM-5.2-FP8 disaggregated serving **with MTP
-(multi-token prediction / speculative decode)** across all three parallelism modes, on
-MI355X / gfx950 + AINIC ionic. This is the file to read when moving PR #205 to another
-cluster. It captures **every source patch, env var, and launch option** MTP needs, plus an
-honest status of what is measured vs. in-progress.
+(multi-token prediction / speculative decode)**, on MI355X / gfx950 + AINIC ionic. This is
+the file to read when moving PR #205 to another cluster. It captures **every source patch,
+env var, and launch option** MTP needs, plus an honest status of what is measured vs. broken.
+
+**Working:** MTP serves with decode cudagraphs on **TP8** (−41% TPOT) and **EP8** (−44% TPOT),
+and **EP16 without MTP** serves with cudagraphs (114.9 ms). **EP16 _with_ MTP does NOT serve**
+(cross-node cudagraph capture lockstep — proven root cause and fix path in §4). It is a known
+limitation; no EP16-MTP number is published.
 
 - Infra background (why EP16 needs the MoRI host-proxy, topology, image build): see
   [`GLM52_EP16_IONIC.md`](GLM52_EP16_IONIC.md) and [`GLM52_MI355X.md`](GLM52_MI355X.md).
@@ -65,6 +69,10 @@ never reach those collectives, so leaving the gates on is harmless for them.
 
 Common to all: `SPEC=mtp` (decode) / `SPEC=off` (prefill), `SPEC_TOK=1`, `VLLM_ROCM_USE_AITER=1`.
 
+> **EP16-MTP column is the *attempted* recipe, not a working one.** EP16-MTP does not serve
+> (§4). The values below reflect the furthest-progressed configuration (gets master fully
+> through capture); the headless rank still wedges on the last graph. Kept for the future fix.
+
 | Env | TP8-MTP | EP8-MTP | EP16-MTP | Why |
 |---|---|---|---|---|
 | `VLLM_SKIP_DP_SYNC_ON_PROFILE` | 1 | 1 | **1** | startup DP profile all_reduce (no-op on TP8/EP8) |
@@ -75,7 +83,7 @@ Common to all: `SPEC=mtp` (decode) / `SPEC=off` (prefill), `SPEC_TOK=1`, `VLLM_R
 | `AITER_FORCE_CK_FMOE` | 0 | 0 | **1** | avoid 1tg LoadKernel wedge (EP16 only) |
 | `VLLM_SKIP_DP_SYNC_ALL` | 0 | 0 | **0** | **must be 0** — runtime DP coord ON for serving |
 | `MORI_EP_OVER_RDMA` | 0 | 0 | **1** | Tej PR#558 host-proxy for cross-node all2all |
-| `DECODE_CUDAGRAPH_MODE` | FULL_AND_PIECEWISE | FULL_AND_PIECEWISE | see §4 | decode graph capture (perf-critical) |
+| `DECODE_CUDAGRAPH_MODE` | FULL_AND_PIECEWISE | FULL_AND_PIECEWISE | **N/A — does not serve** (§4) | decode graph capture (perf-critical) |
 
 **Launcher passthrough:** these env vars must be forwarded into the container via `docker -e`.
 `vllm_pd_ep16_launch.sh` line ~156 forwards them; if you port to a new launcher, forward the
@@ -99,42 +107,58 @@ Of the EP16-MTP knobs, **only one has a steady-state cost, and it is being remov
 - **`DECODE_CUDAGRAPH_MODE=NONE`: the one real cost** (eager decode = per-step kernel-launch
   overhead). This is a *workaround*, not the target — see §4.
 
-**Measured MTP wins (TPOT, decode):** TP8 **−41 %** (19.2→11.3 ms), EP8 **−38 %** (60→37 ms).
-EP16-MTP boots + serves; a clean sustained-decode TPOT is pending the cudagraph work in §4.
+**Measured MTP wins (TPOT, decode):** TP8 **−41 %** (19.2→11.3 ms), EP8 **−44 %** (58.9→33.2 ms).
+**EP16-MTP does NOT serve** — neither with cudagraphs (capture lockstep, see §4) nor reliably in
+eager (`NONE` boots + smoke-tests but times out under sustained decode). It is a **known limitation**;
+no EP16-MTP TPOT is published. See §4 for the proven root cause and the fix path.
 
 ---
 
-## 4. Decode cudagraph status (`FULL_AND_PIECEWISE`) — IN PROGRESS, perf-critical
+## 4. EP16-MTP + decode cudagraph — BROKEN (known limitation, root cause proven)
 
-`FULL_AND_PIECEWISE` decode cudagraphs are **required for production perf** and are the intended
-end state. Current status:
+`FULL_AND_PIECEWISE` decode cudagraphs are **required for production perf**. They work for
+TP8-MTP, EP8-MTP, and EP16-**no**-MTP. **EP16 + MTP + cudagraph does not serve** and is a known
+limitation of this PR. No EP16-MTP TPOT is published.
 
-- TP8-MTP, EP8-MTP: run with cudagraphs ON (validated).
-- **EP16-MTP with cudagraphs:** the blocker was that cudagraph *capture* runs `_dummy_run` at each
-  capture size through `dispatch_cg_and_sync_dp(need_eager=False)` → a DP-group `all_reduce`.
-  During capture the ranks proceed at their own pace (one JIT-building an AITER kernel while
-  another already reached the collective) → asymmetric arrival → deadlock. That is why the eager
-  `NONE` fallback existed.
+**Root cause (proven via py-spy stack dumps, reproduced across ~10 runs):** *cross-node cudagraph
+capture lockstep.* The two decode nodes (DP16 = 2 nodes of 8 ranks) capture the graph-size list at
+different speeds — MTP's `M:1` draft-token shapes make one node lag. Whichever node finishes its
+capture list **first** leaves the capture phase; the other node's remaining graph contains a
+cross-node MoRI-EP all2all that now has **no partner**, so that node wedges (GPU pinned at 100%,
+native hang at `seq_lens.to("cpu")` right after the orphaned all2all in
+`rocm_aiter_mla_sparse.py`). `vllm/v1/worker/gpu/cudagraph_utils.py`'s capture loop iterates
+`for desc in descs` with **no cross-rank barrier between sizes**, so the two nodes are free to
+desync.
 
-  **Fix (two patches, so we keep cudagraphs, not drop them):**
-  - `apply_glm_vllm_startup_dp_uniform_fix.py` (`VLLM_STARTUP_DP_UNIFORM`): in
-    `sync_cudagraph_and_dp_padding`, when the flag is set, fill the DP coordination tensor
-    **locally** (every rank reports its own identical dummy shape) instead of `all_reduce`. At
-    startup all ranks pass the same dummy shape, so the result is identical — graphs still capture
-    correctly, minus the deadlocking collective.
-  - `apply_glm_vllm_startup_dp_uniform_worker_fix.py` (`VLLM_STARTUP_DP_UNIFORM_ENABLE`): sets that
-    flag **only** around the warmup+`capture_model()` block (try/finally), so **runtime inference
-    keeps the true cross-rank `all_reduce`**. Scope is startup-only by construction.
+**Proven characteristics (so a future fix can target precisely):**
+- `FULL_AND_PIECEWISE`: wedges on the **first** graph (0 captured, all 8 local GPUs pinned).
+- `PIECEWISE`: captures **7/8** graphs on *both* nodes — only the **last** graph wedges. So
+  piecewise sub-graphs are mostly node-local; the crossing all2all is isolated to one graph.
+- **Size-independent:** trimming capture sizes to `1 2 4 8` still wedges the last graph (at size 8
+  identically to 256) → it is lockstep, **not** a size threshold. Trimming sizes cannot fix it.
 
-  **To run EP16-MTP with cudagraphs:** set `DECODE_CUDAGRAPH_MODE=FULL_AND_PIECEWISE`,
-  `VLLM_STARTUP_DP_UNIFORM_ENABLE=1`, and turn the startup *skips* OFF (`VLLM_SKIP_PROFILE_RUN=0`,
-  `VLLM_SKIP_WARMUP_DUMMY=0`, `VLLM_SKIP_KERNEL_WARMUP=0`) — the point is now to *let* warmup+capture
-  run, just without the deadlocking collective. Keep `AITER_FORCE_CK_FMOE=1` and
-  `VLLM_SKIP_DP_SYNC_ALL=0`.
+**Ruled out (do not re-chase):** DP-group timeout (raised to 7200s via
+`--cpu-distributed-timeout-seconds`, no abort — master waits patiently); the post-capture
+`warmup_kernels` all_reduce (skipping it via `VLLM_SKIP_KERNEL_WARMUP=1` did not help); a
+`torch.cuda...synchronize()` in the sparse-MLA metadata build (patched to skip during capture, no
+effect — it is downstream of the orphaned all2all); AITER tuned-config gaps (master lacks the same
+`M:1` entries and still passes them); stale containers / port conflicts (orchestrator preclean added).
 
-  Status: patches written + wired into `apply_all_patches.sh`; **live A/B validation (graphs-ON
-  TPOT vs the eager number) is the open item.** The eager `NONE` recipe (§2) remains the
-  known-functional fallback until the graphs-ON run is measured.
+**Partial fixes that DO work and should stay** (they get *master* fully through capture; they are
+necessary-but-not-sufficient):
+- `apply_glm_vllm_startup_dp_uniform_fix.py` + `_worker_fix.py` (`VLLM_STARTUP_DP_UNIFORM[_ENABLE]`):
+  local-fill the DP coordination tensor during warmup+capture so the *padding* all_reduce doesn't
+  deadlock. Scoped startup-only; runtime keeps the real all_reduce.
+- Real all_reduce + long DP timeout (`--cpu-distributed-timeout-seconds 7200`): restores the
+  capture barrier that keeps EP16-**no**-MTP in lockstep.
+
+**The actual fix (NOT done):** add a **cross-rank barrier inside the cudagraph capture loop**
+(`cudagraph_utils.py` capture / `gpu_worker.capture_model`) so neither decode node leaves capture
+until **both** have captured every size — then the last graph's cross-node all2all always has its
+partner. This is a vLLM source change (upstream-able); it was scoped but not implemented in this PR.
+
+**Eager fallback is also not usable:** `DECODE_CUDAGRAPH_MODE=NONE` boots and passes a smoke test but
+times out under sustained decode load, so there is no working EP16-MTP path today.
 
 ---
 

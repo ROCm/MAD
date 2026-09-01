@@ -94,5 +94,7 @@ hurt accuracy, and EP topology does not change correctness.
   host-proxy). vLLM gates ROCm DBO overlap to `deepep_high_throughput`.
 - **MXFP4** — GLM-5.2-MXFP4 hits **Triton Code-209 on gfx950** for the MoE kernel in this stack
   (blocked; FP8 is the working path). Tracked separately for a fix across TP8/EP8/EP16.
-- **MTP / speculative** (`num_nextn_predict_layers=1`) — loads clean but **hangs in disagg**
-  (draft-verify needs local KV; disagg transfers KV via MoRIIO).
+- **MTP / speculative** (`num_nextn_predict_layers=1`) — **works on TP8 and EP8 disagg**
+  (−41% / −44% TPOT; the MoRIIO block-transfer fix handles the extra draft KV block). **EP16-MTP
+  does NOT serve** — cross-node cudagraph capture lockstep (see `MTP_EP16_BREAKTHROUGH.md` §end);
+  documented known limitation.

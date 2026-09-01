@@ -1,17 +1,23 @@
-# GLM-5.2 MTP + EP16 disaggregation — root cause & fixes (2026-08-30)
+# GLM-5.2 MTP + EP16 disaggregation — root cause & fixes (updated 2026-08-31)
 
-Consolidated record of the MTP (multi-token-prediction / speculative decode) work and the EP16
-deadlock breakthrough. Every claim here is backed by a py-spy stack dump or a measured run, not
-inference. Fixes are env-gated so they cannot regress the already-validated TP8 / EP8 / EP16-noMTP
-cases.
+Consolidated record of the MTP (multi-token-prediction / speculative decode) work. Every claim here
+is backed by a py-spy stack dump or a measured run, not inference. Fixes are env-gated so they cannot
+regress the already-validated TP8 / EP8 / EP16-noMTP cases.
+
+> **Status correction (2026-08-31):** an earlier version of this file called F2 "the breakthrough"
+> and implied EP16-MTP was nearly serving. That was premature. **EP16 + MTP does NOT serve** — see
+> "EP16-MTP: still broken" at the end for the fully-proven root cause (cross-node cudagraph capture
+> lockstep) and the fix that remains to be written. The F1–F4 fixes below are real and necessary
+> (they enable MTP on TP8/EP8 and get EP16-MTP *most* of the way through startup) but are **not
+> sufficient** for EP16-MTP to serve.
 
 ## What works (measured, NIAH-clean)
 
 | Config | FP8 | MXFP4 | MTP |
 |--------|-----|-------|-----|
-| TP8 1P/1D | 12/12 matrix, TPOT ~19ms | confirmed | **-41% TPOT (19.2→11.3ms)** |
-| EP8 1P/1D | 12/12 matrix, TPOT ~60ms | confirmed | **-38% TPOT (60→37ms)** |
-| EP16 2P/2D | TTFT 11.3s / TPOT 117ms | TTFT 10.0s / TPOT 185ms | decode boots; prefill residual (see below) |
+| TP8 1P/1D | 12/12 matrix, TPOT ~19ms | confirmed | **serves: −41% TPOT (19.2→11.3ms)** |
+| EP8 1P/1D | 12/12 matrix, TPOT ~59ms | confirmed | **serves: −44% TPOT (58.9→33.2ms)** |
+| EP16 2P/2D | TTFT 11.3s / TPOT 114.9ms | TTFT 10.0s / TPOT 185ms | **does NOT serve** (capture lockstep — see end) |
 
 ## The four fixes (all env-gated, PR#205 apply-scripts)
 
@@ -24,7 +30,7 @@ cases.
 - **Safety:** only fires when `len(local) > len(remote)`, which never happens without MTP → zero effect
   on non-MTP runs.
 
-### F2. vLLM DP profile-sync deadlock fix — `apply_glm_vllm_dp_profile_sync_fix.py`  ★ the breakthrough
+### F2. vLLM DP profile-sync deadlock fix — `apply_glm_vllm_dp_profile_sync_fix.py`
 - **Bug (py-spy proven):** during startup `profile_run`, MTP's speculator calls
   `dispatch_cg_and_sync_dp` → `sync_cudagraph_and_dp_padding`, which does a DP-group `all_reduce`
   needing ALL dp ranks. At EP16 (DP16 across 2 nodes) ranks arrive **asymmetrically** (one node lags in
@@ -51,15 +57,36 @@ cases.
 - `KV_CACHE_MEMORY_BYTES=60G`, `MAXLEN=131072`, host-local `/cache` (AITER JIT FileBaton needs local fs,
   not NFS), `MODEL` passthrough for MXFP4.
 
-## EP16-MTP residual: prefill (under investigation)
+## EP16-MTP: still broken — cross-node cudagraph capture lockstep (2026-08-31, ~10 runs)
 
-- Decode-side deadlock: **SOLVED** by F2. Decode reaches KV cache, MoRIIO init, router registration.
-- Prefill stalls **before workers spawn** (`pf_workers=0`, GPU idle, at the ApiServer/transformers
-  stage) = a DP16 multi-apiserver cross-node **rendezvous** stall, earlier than F2's profile path.
-- **Open question (user's insight):** MTP is a *decode-only* feature, yet the EP16 orchestrator passes
-  `SPEC=mtp` to BOTH prefill and decode. EP8-MTP prefill also ran MTP and started fine (DP8), so it's
-  not inherently broken — but at DP16 it may be the extra failure surface. Candidate fix: pass
-  `SPEC=mtp` to **decode only**; prefill is the KV producer and does not run the speculator. Testing.
+The F1–F4 fixes above (plus the `VLLM_STARTUP_DP_UNIFORM` capture patches) get EP16-MTP through
+prefill and get the decode **master** rank fully through cudagraph capture. It **still does not
+serve.** Root cause is fully proven (py-spy × multiple, reproduced ~10 times):
+
+- **The wedge:** the two decode nodes (DP16 = 2×8 ranks) capture the graph-size list at different
+  speeds — MTP's `M:1` draft-token shapes make one node lag. Whichever node finishes its capture
+  list **first** leaves the capture phase; the other node's remaining graph contains a cross-node
+  MoRI-EP all2all that now has **no partner** → that node wedges (GPU 100%, native hang at
+  `seq_lens.to("cpu")` in `rocm_aiter_mla_sparse.py`, right after the orphaned all2all).
+- **Where:** `vllm/v1/worker/gpu/cudagraph_utils.py` capture loop (`for desc in descs`) has **no
+  cross-rank barrier between sizes**, so the two nodes desync.
+
+**Proven characteristics (target for the fix):**
+- `FULL_AND_PIECEWISE`: wedges on the **first** graph (0 captured).
+- `PIECEWISE`: captures **7/8** graphs on *both* nodes — only the **last** (cross-node) graph wedges.
+- **Size-independent:** trimming capture sizes to `1 2 4 8` still wedges the last graph → it is
+  lockstep, **not** a size threshold. Trimming sizes does not help.
+
+**Ruled out (do not re-chase):** DP-group timeout (raised to 7200s, no abort); post-capture
+`warmup_kernels` all_reduce (skipping it did not help); sparse-MLA `synchronize()` (patched, no
+effect); AITER tuned-config gaps (master lacks the same entries and passes); stale containers.
+
+**The fix (NOT implemented in this PR):** a **cross-rank barrier inside the cudagraph capture loop**
+so neither decode node leaves capture until **both** have captured every size — then the last graph's
+all2all always has a partner. This is a vLLM source change (upstream-able). Scoped, not written.
+
+**Eager is not a fallback either:** `DECODE_CUDAGRAPH_MODE=NONE` boots + smoke-tests but times out
+under sustained decode. So there is no working EP16-MTP path today; it is a documented limitation.
 
 ## Regression safety summary
 

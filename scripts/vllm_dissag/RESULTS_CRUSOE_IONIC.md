@@ -102,5 +102,6 @@ model over-think a trivial task). See `benchmark_niah_v2.py`.
   requires `supports_async=True`, provided only by `deepep_*`/`nixl`. DeepEP is unusable here
   (its all2all uses the GPU IBGDA doorbell that fails under KVM on ionic — the reason we use
   MoRI + host-proxy). ROCm gates DBO overlap to `deepep_high_throughput` (vllm config).
-- **MTP / speculative** (`num_nextn_predict_layers=1`): loads clean but **hangs in
-  disaggregated serving** (draft-verify needs local KV; disagg transfers KV via MoRIIO).
+- **MTP / speculative** (`num_nextn_predict_layers=1`): **serves on TP8 and EP8 disagg**
+  (−41% / −44% TPOT via the MoRIIO draft-block fix). **EP16-MTP does NOT serve** — cross-node
+  cudagraph capture lockstep (`MTP_EP16_BREAKTHROUGH.md`); documented known limitation.
