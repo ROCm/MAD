@@ -235,8 +235,10 @@ _rixl_launch_tp() {
     local engine_id
     if [[ "$log_prefix" == "prefill" ]]; then engine_id="pd-run"; else engine_id="pd-decode"; fi
     local kv_config; kv_config=$(_rixl_kv_config_tp "${kv_role}" "${engine_id}")
-    # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
+    # KV_OFFLOAD wrap: MultiConnector[<offload backend>, base] when cpu, else no-op.
     kv_config=$(kv_offload_wrap "${kv_config}")
+    # lmcache backend reads its tier config from the env; native/none is a no-op.
+    kv_offload_setup_env
 
     # Prefix caching decouple (parity with _rixl_launch_deepep): OFF by default,
     # forced on when KV_OFFLOAD is active OR ENABLE_PREFIX_CACHING=1, so the `none`
@@ -313,8 +315,10 @@ _rixl_launch_deepep() {
     fi
 
     local kv_config; kv_config=$(_rixl_kv_config_deepep "${kv_role}" "${engine_id}" "${dp_size}")
-    # KV_OFFLOAD wrap: MultiConnector[Offloading, base] when cpu, else no-op.
+    # KV_OFFLOAD wrap: MultiConnector[<offload backend>, base] when cpu, else no-op.
     kv_config=$(kv_offload_wrap "${kv_config}")
+    # lmcache backend reads its tier config from the env; native/none is a no-op.
+    kv_offload_setup_env
 
     # Prefix caching: OFF by default; the user can force it on via
     # ENABLE_PREFIX_CACHING=1. OffloadingConnector requires it, so it is forced on

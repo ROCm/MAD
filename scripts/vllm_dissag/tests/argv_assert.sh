@@ -23,11 +23,12 @@ _argv() { # connector wide_ep ep_backend model model_path
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
-# emit argv for a cell with a KV_OFFLOAD tier set
-_argv_off() { # connector wide_ep ep_backend model model_path kv_offload
+# emit argv for a cell with a KV_OFFLOAD tier set (+ optional OFFLOAD_BACKEND)
+_argv_off() { # connector wide_ep ep_backend model model_path kv_offload [offload_backend]
   env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
-    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
@@ -57,14 +58,25 @@ _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
 
 echo ""
-echo "=== KV_OFFLOAD=cpu (tiered prefix cache; rixl TP Llama-3.1-405B) ==="
+echo "=== KV_OFFLOAD=cpu native (tiered prefix cache; rixl TP Llama-3.1-405B) ==="
 O="$(_argv_off rixl 0 '' Llama-3.1-405B-Instruct-FP8-KV /m/L405 cpu)"
 _has    "$O" "MultiConnector" "wraps in MultiConnector"
-_has    "$O" "OffloadingConnector" "adds OffloadingConnector"
+_has    "$O" "OffloadingConnector" "adds OffloadingConnector (native default)"
 _has    "$O" "cpu_bytes_to_use" "OffloadingConnector has cpu_bytes_to_use"
 _has    "$O" "NixlConnector" "base NixlConnector preserved inside MultiConnector"
+_hasnot "$O" "LMCacheConnectorV1" "no LMCache on the native path"
 _has    "$O" "--enable-prefix-caching" "prefix caching enabled under offload"
 _hasnot "$O" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu OFFLOAD_BACKEND=lmcache (LMCacheConnectorV1; rixl TP 405B) ==="
+L="$(_argv_off rixl 0 '' Llama-3.1-405B-Instruct-FP8-KV /m/L405 cpu lmcache)"
+_has    "$L" "MultiConnector" "wraps in MultiConnector"
+_has    "$L" "LMCacheConnectorV1" "adds LMCacheConnectorV1"
+_has    "$L" "NixlConnector" "base NixlConnector preserved inside MultiConnector"
+_hasnot "$L" "OffloadingConnector" "no native OffloadingConnector on the lmcache path"
+_hasnot "$L" "cpu_bytes_to_use" "no OffloadingConnector cpu_bytes_to_use on lmcache path"
+_has    "$L" "--enable-prefix-caching" "prefix caching enabled under lmcache offload"
 
 echo ""
 echo "=== KV_OFFLOAD=none is unchanged (no MultiConnector; disagg recipe intact) ==="

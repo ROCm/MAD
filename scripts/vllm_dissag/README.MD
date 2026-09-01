@@ -115,29 +115,54 @@ export CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep
 
 ### Tiered prefix caching (`KV_OFFLOAD`)
 
-An orthogonal overlay that attaches vLLM's native `OffloadingConnector` (GPU KV → CPU-RAM
-tier for prefix reuse) *on top of* the disagg P/D connector, by composing both via vLLM's
-`MultiConnector`.
+An orthogonal overlay that attaches a CPU-RAM KV tier (GPU KV → host, for prefix reuse)
+*on top of* the disagg P/D connector, by composing both via vLLM's `MultiConnector`. The
+tier's backend is selectable via `OFFLOAD_BACKEND`:
+
+- **`lmcache`** — LMCache's `LMCacheConnectorV1`, sized by `LMCACHE_MAX_LOCAL_CPU_SIZE`. Optionally
+  extend it with a filesystem tier below CPU (GPU → CPU RAM → local disk) via `OFFLOAD_DISK_PATH`:
+  LMCache (LRU) spills CPU-evicted chunks to disk instead of dropping them. Mirrors the llm-d
+  `tiered-prefix-cache` guide ([llm-d#2154](https://github.com/llm-d/llm-d/pull/2154)).
+- **`native`** (code default) — vLLM's built-in `OffloadingConnector`, sized by `OFFLOAD_CPU_BYTES`.
+  CPU tier only (no fs tier).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KV_OFFLOAD` | `none` | `none` (off) or `cpu` (CPU-RAM tier). `fs`/LMCache reserved for later. |
-| `OFFLOAD_CPU_BYTES` | `107374182400` (100 GB) | instance-wide pinned host bytes for the CPU tier |
+| `KV_OFFLOAD` | `none` | `none` (off) or `cpu` (CPU-RAM tier) |
+| `OFFLOAD_BACKEND` | `native` | `native` (OffloadingConnector) or `lmcache` (LMCacheConnectorV1) |
+| `LMCACHE_MAX_LOCAL_CPU_SIZE` | `100.0` | lmcache only: **per-worker** CPU tier in GB |
+| `OFFLOAD_DISK_PATH` | (unset) | lmcache only: base dir for an fs tier below CPU (unset = no disk tier). Node-local disk (e.g. `/mnt/m2m_nobackup/...`), **not** a network FS |
+| `LMCACHE_MAX_LOCAL_DISK_SIZE` | `0.0` | lmcache only: **per-worker** disk tier in GB |
+| `OFFLOAD_CPU_BYTES` | `107374182400` (100 GB) | native only: instance-wide pinned host bytes |
 
 ```bash
-# NIXL (rixl) TP Llama-3.1-405B with CPU-tier prefix caching
-export CONNECTOR=rixl WIDE_EP=0 KV_OFFLOAD=cpu
+# NIXL (rixl) TP Llama-3.1-405B with CPU-tier prefix caching — native (default)
+export CONNECTOR=rixl WIDE_EP=0 KV_OFFLOAD=cpu           # OFFLOAD_BACKEND=native implied
 export MODEL_NAME=Llama-3.1-405B-Instruct-FP8-KV xP=1 yD=1
 export KV_CACHE_MEMORY_BYTES=8000000000     # small HBM KV cap so eviction feeds the CPU tier
 export BENCHMARK_SCRIPT=prefix_cache        # cold+warm two-pass to measure cache hits
 sbatch -N 2 -n 2 --nodelist=<node0,node1> run_xPyD_models.slurm
+
+# Same, but LMCache as the CPU-tier backend (A/B against native)
+export OFFLOAD_BACKEND=lmcache
+export LMCACHE_MAX_LOCAL_CPU_SIZE=100.0      # per-worker GB (LMCache semantics)
+export DOCKER_IMAGE_NAME=<your-lmcache-image>  # MUST have `lmcache` installed (see below)
+sbatch -N 2 -n 2 --nodelist=<node0,node1> run_xPyD_models.slurm
 ```
 
-Scope today: **native CPU offloading** on the NIXL (`rixl`) path, validated with
-`Llama-3.1-405B-Instruct-FP8-KV` (1P/1D, TP=8). When `KV_OFFLOAD!=none` the launcher forces
-`--enable-prefix-caching` (offloading is meaningless without it); pair it with a small
-`--kv-cache-memory-bytes` cap so HBM KV actually evicts into the CPU tier. Requires an image
-whose vLLM ships `OffloadingConnector` + `MultiConnector` (e.g. `vllm/vllm-openai-rocm:v0.26.0`).
+When `KV_OFFLOAD!=none` the launcher forces `--enable-prefix-caching` (offloading is
+meaningless without it); pair it with a small `--kv-cache-memory-bytes` cap so HBM KV
+actually evicts into the CPU tier. Validated with `Llama-3.1-405B-Instruct-FP8-KV`
+(1P/1D, TP=8) on the NIXL (`rixl`) path.
+
+**Image requirements.** `native` needs an image whose vLLM ships `OffloadingConnector` +
+`MultiConnector` (e.g. `vllm/vllm-openai-rocm:v0.26.0`). `lmcache` **additionally** needs
+`lmcache` (v0.5.3+) installed — the stock image does **not** ship it, and `LMCacheConnectorV1`
+will fail to import without it. Build one from source (LMCache built with `BUILD_WITH_HIP=1`,
+`PYTORCH_ROCM_ARCH=gfx942` for MI300) and point `DOCKER_IMAGE_NAME` at it; the llm-d
+`docker/Dockerfile.rocm-lmcache` recipe is a working reference. LMCache reads its tier config
+from the process env (`LMCACHE_MAX_LOCAL_CPU_SIZE`, `PYTHONHASHSEED`, `PROMETHEUS_MULTIPROC_DIR`),
+all forwarded into the container by the slurm.
 
 Each followed by:
 ```bash

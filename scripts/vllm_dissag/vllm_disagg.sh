@@ -63,16 +63,22 @@ fi
 export CONNECTOR WIDE_EP EP_BACKEND
 
 # KV_OFFLOAD overlay (orthogonal axis): cpu attaches the CPU-RAM tier via MultiConnector.
+# OFFLOAD_BACKEND selects that tier's backend (native OffloadingConnector | lmcache);
+# only meaningful when KV_OFFLOAD != none.
 KV_OFFLOAD="${KV_OFFLOAD:-none}"
 case "$KV_OFFLOAD" in none|cpu) ;; *) echo "Error: invalid KV_OFFLOAD='${KV_OFFLOAD}' (expected none|cpu)." >&2; exit 1 ;; esac
-export KV_OFFLOAD
+OFFLOAD_BACKEND="${OFFLOAD_BACKEND:-native}"
+if [[ "$KV_OFFLOAD" != "none" ]]; then
+    case "$OFFLOAD_BACKEND" in native|lmcache) ;; *) echo "Error: invalid OFFLOAD_BACKEND='${OFFLOAD_BACKEND}' (expected native|lmcache)." >&2; exit 1 ;; esac
+fi
+export KV_OFFLOAD OFFLOAD_BACKEND
 
 _CONNECTOR_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.sh"
 [[ -f "$_CONNECTOR_FILE" ]] || { echo "Error: connector profile not found: ${_CONNECTOR_FILE}" >&2; exit 1; }
 [[ -f "${SCRIPT_DIR}/parallelism.sh" ]] || { echo "Error: parallelism.sh not found in ${SCRIPT_DIR}" >&2; exit 1; }
 [[ -f "${SCRIPT_DIR}/connectors/offloading.inc.sh" ]] || { echo "Error: connectors/offloading.inc.sh not found in ${SCRIPT_DIR}" >&2; exit 1; }
 
-echo "[vllm_disagg] CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD}"
+echo "[vllm_disagg] CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD}$([[ "$KV_OFFLOAD" != none ]] && echo " OFFLOAD_BACKEND=${OFFLOAD_BACKEND}")"
 
 # =============================================================================
 # Common Environment Configuration
