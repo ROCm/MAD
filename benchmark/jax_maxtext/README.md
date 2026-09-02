@@ -4,156 +4,206 @@
 
 MaxText framework for ROCm is a specialized fork from upstream MaxText, designed to enable training of large language model (LLM) on AMD GPUs. By leveraging AMD Instinct™ MI300X and MI355X GPUs, MaxText delivers great scalability, performance, and resource utilization for AI workload. See the GitHub repository at [ROCm/maxtext](https://github.com/ROCm/maxtext/).
 
-AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs containing essential components, including Jax, XLA, ROCm libraries, and MaxText utilities. It contains the following software components to accelerate training workloads:
+AMD provides a ready-to-use Docker image for AMD Instinct MI300X and MI355X GPUs containing essential components, including Jax, XLA, ROCm libraries, and MaxText utilities.
 
->[!NOTE]
->Shardy is the partitioning system in JAX. The v26.5 Docker image ships JAX 0.10.0, so you now have to set `shardy=True` during the training run. You might get related errors if it's not configured correctly. See the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) for more details.
->
+> **Canonical reference:** For the full Primus JAX MaxText training guide — including detailed environment setup, all supported models, multi-node networking, and the complete `primus-cli` reference — see the [Primus JAX MaxText training documentation](https://github.com/AMD-AGI/Primus/blob/main/docs/02-user-guide/jax-maxtext-training.md). This README focuses on the MAD integration layer and quick-start workflows.
 
->[!NOTE]
-> There is a known performance regression for Mixtral-8x7b in v26.5. This is being tracked and will be addressed in a future release.
+> [!NOTE]
+> Shardy is the partitioning system in JAX. The v26.6 Docker image ships JAX 0.11.0, so you now have to set `shardy=True` during the training run. You might get related errors if it's not configured correctly. See the [migration guide](https://docs.jax.dev/en/latest/shardy_jax_migration.html) for more details.
 
->[!NOTE]
+> [!NOTE]
 > There is a discrepancy in loss curve if you set `packing=false`. It converges at a slightly higher value than previous docker images. We can achieve the same convergence as past docker images if you set `NVTE_CK_USES_FWD_V3=0`. (i.e. using FAv2 for forward instead of FAv3). This is being tracked and will be addressed in a future release.
 
->[!NOTE]
-> On MI355X (gfx950), RCCL's WarpSpeed feature (`RCCL_WARP_SPEED_AUTO`) — a gfx950-only optimization that is enabled by default in gfx950 builds — can cause NaN losses during training. To avoid this, set `RCCL_WARP_SPEED_AUTO=0`. For MAD-integrated benchmarking system, this is already applied automatically in the gfx950 (MI355X) environment scripts under `scripts/jax-maxtext/env_scripts/` (e.g. `gfx950_llama3_8b_env.sh`), so the benchmark scripts handle it for you. If you launch training manually on MI355X, export `RCCL_WARP_SPEED_AUTO=0` yourself. This variable is a no-op on MI300X (gfx942).
+> [!NOTE]
+> On MI355X (gfx950), RCCL's WarpSpeed feature (`RCCL_WARP_SPEED_AUTO`) — a gfx950-only optimization that is enabled by default in gfx950 builds — can cause NaN losses during training. To avoid this, set `RCCL_WARP_SPEED_AUTO=0`. For the MAD-integrated benchmarking system, this is applied automatically by the Primus MaxText backend when a gfx950 (MI355X) device is detected, so the benchmark scripts handle it for you. If you launch training manually on MI355X, export `RCCL_WARP_SPEED_AUTO=0` yourself. This variable is a no-op on MI300X (gfx942).
 
-| Software component | Version        |
-|--------------------|----------------|
-| ROCm               | 7.14.0                |
-| Jax                | 0.10.0                 |
-| Python             | 3.12.3                |
-| Transformer Engine | 2.15.0.dev0+rocm7.15.0a20260707.72d01a0  |
-| hipBLASLt          | 1.4.1+cd957402        |
+
+| Software component | Version                   |
+| ------------------ | ------------------------- |
+| ROCm               | 7.14.0                    |
+| Jax                | 0.11.0                    |
+| Python             | 3.12.3                    |
+| Transformer Engine | 2.17.0+rocm7.14.0.50a84ad |
+| hipBLASLt          | 1.4.1+cd957402            |
 
 
 ## Supported features and models
+
 MaxText supports the following key features to train large language models efficiently:
 
-* Transformer Engine (TE)
-* Flash Attention (FA) 3, with or without input sequence packing
-* GEMM tuning
-* Multi-node Support
-* NANOO FP8 (for MI300X) or FP8 (for MI355X)
+- Transformer Engine (TE)
+- Flash Attention (FA) 3, with or without input sequence packing
+- GEMM tuning
+- Multi-node Support
+- NANOO FP8 (for MI300X) or FP8 (for MI355X)
 
-The following models are pre-optimized for performance on the AMD Instinct MI300X and MI355X accelerator.
+The following models are pre-optimized for performance on the AMD Instinct MI300X and MI355X accelerators.
 
-* Llama 2 7B
-* Llama 2 70B
-* Llama 3/3.1 8B
-* Llama 3/3.1 70B
-* Llama 3.1 405B
-* Llama 3.3 70B
-* DeepSeek-V2-lite (16B)
-* Mixtral-8x7B
-* Qwen3 14B
-* Qwen3 30B-A3B
+- Llama 2 7B
+- Llama 2 70B
+- Llama 3/3.1 8B
+- Llama 3/3.1 70B
+- Llama 3.3 70B
+- DeepSeek-V2-lite (16B)
+- Gemma4 26B
+- Gemma4 31B
+- Mixtral-8x7B
+- Qwen3 14B
+- Qwen3 30B-A3B
 
 Note: Some models, such as Llama 3, require an external license agreement through a third party (for example, Meta).
 
-
 ## System validation
+
 If you have already validated your system, skip this step. Otherwise, please complete the following [system validation and optimization steps](https://rocm.docs.amd.com/en/latest/how-to/rocm-for-ai/training/prerequisite-system-validation.html#train-a-model-system-validation) to set up your system before starting training.
 
-
 ## Environment setup
-This Docker image is optimized for specific model configurations outlined below. Performance can vary for other training workloads, as AMD doesn’t validate configurations and run conditions outside those described.
 
-For multinode, we need to make sure we have all the packages installed based on the network device we use. You can check multi node examples on how to install these packages before running the workload. You need to only do the set up below if you are using multinode with RDMA, otherwise skip this part.
+This Docker image is optimized for specific model configurations outlined below. Performance can vary for other training workloads, as AMD doesn't validate configurations and run conditions outside those described.
 
-Install the packages below for building and installing the RDMA driver:
-```bash
-apt install iproute2 -y
-apt install -y linux-headers-"$(uname -r)" libelf-dev
-apt install -y gcc make libtool autoconf librdmacm-dev rdmacm-utils infiniband-diags ibverbs-utils perftest ethtool libibverbs-dev rdma-core strace libibmad5 libibnetdisc5 ibverbs-providers libibumad-dev libibumad3 libibverbs1 libnl-3-dev libnl-route-3-dev
+For multi-node training, `primus-cli` handles node discovery, RDMA interface
+selection, and environment variable propagation automatically via its Slurm mode.
+If you need to customize networking (for example, selecting specific RDMA devices
+or overriding the socket interface), see the
+[Primus multi-node networking guide](https://github.com/AMD-AGI/Primus/blob/main/docs/04-technical-guides/multi-node-networking.md).
+
+> [!NOTE]
+> The only models supported in this workflow are those listed in the above section.
+> This container is optimized for the model configurations described below; other
+> configurations and run conditions are not validated by AMD.
+
+### Quick start (single-node, MAD-integrated)
+
+```sh
+# 1. Clone MAD and install dependencies
+git clone https://github.com/ROCm/MAD
+cd MAD
+pip install -r requirements.txt
+
+# 2. Fetch Primus (required before discovery or docker build)
+bash tools/fetch_primus.sh
+
+# 3. Discover available models (auto-filters by your GPU arch)
+madengine discover --tags maxtext        # MaxText models
+madengine discover --tags maxdiffusion   # MaxDiffusion models
+
+# 4. Run all MaxText models
+export MAD_SECRETS_HFTOKEN="<your Hugging Face token>"
+madengine run --tags maxtext --live-output --timeout 14400
 ```
-Please refer to your NIC manufacturer's webpage for further steps about compiling and install the RoCE driver, e.g. for Broadcom, please refer to the section **Compiling Broadcom NIC Software from Source** in [Ethernet Networking Guide for AMD Instinct MI300X GPU Clusters](https://docs.broadcom.com/doc/957608-AN2XX)
 
-Set the following env variables. You can again check the multinode examples on how to set these variables.
-- **Master Address:**
-  Change `localhost` to the master node's hostname:
-  ```bash
-  export MASTER_ADDR="${MASTER_ADDR:-localhost}"
-  ```
+For standalone (no MAD) or multi-node usage, see the sections below.
 
-- **Number of Nodes:**
-  Set the number of nodes you want to train on (e.g., 2, 4, 8):
-  ```bash
-  export NNODES="${NNODES:-1}"
-  ```
+Users have three paths to reproduce the benchmark results:
 
-- **Node Rank:**
-  Set the rank of each node (0 for master, 1 for the first worker node, etc.):
-  ```bash
-  export NODE_RANK="${NODE_RANK:-0}"
-  ```
-- **Network Interface**
-  Update the network interface in the script to match your system’s network interface.
-  To find your network interface, run (out of container):
-  ```bash
-  ip a
-  ```
-  Then, update the following variables in the script:
-  ```bash
-  export NCCL_SOCKET_IFNAME=ens50f0np0
-  ```
-- **RDMA Interface**
-  First make sure that packages above are installed on all the nodes. Then set the RDMA interfaces to use for communication.
-   ```bash
-   # If using Broadcom NIC
-   export NCCL_IB_HCA=rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7
-   # If using Mellanox NIC
-   export NCCL_IB_HCA=mlx5_0,mlx5_1,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_8,mlx5_9
-   ```
->[!NOTE]
->The only models supported in this workflow are those listed in the above section.
->
+- [MAD-integrated benchmarking](#mad-integrated-benchmarking) — recommended, auto-discovers models and manages Docker
+- [Standalone benchmarking](#standalone-benchmarking) — run training manually inside a Docker container
+- [Primus benchmarking](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend) — use primus-cli directly
 
-This container should not be expected to provide generalized performance across all training workloads. Users should expect the container perform in the model configurations described below, but other configurations and run conditions are not validated by AMD.
-Use the following instructions to set up the environment, configure the script to train models, and reproduce the benchmark results on the MI300X, MI325X, MI350X, MI355X accelerators with the Docker image.
+Jax MaxText has also been integrated into [Primus](https://github.com/AMD-AGI/Primus), which supports multiple backends including Megatron-LM, TorchTitan, and JAX MaxText, alongside ROCm-optimized components. MAD launches all JAX MaxText training through Primus: the MAD-integrated path uses the `scripts/jax-maxtext/run.sh` wrapper around Primus (`examples/run_pretrain.sh` with `BACKEND=MaxText`), and you can also drive `primus-cli` directly (see [Using primus-cli](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)).
 
-Users have two choices to reproduce the benchmark results using this Automation and Dashboarding repository.
-
-- [MAD-integrated benchmarking](#mad-integrated-benchmarking)
-- [Standalone benchmarking](#standalone-benchmarking)
-- [Primus benchmarking](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
-
-Jax MaxText has also been integrated into [Primus](https://github.com/AMD-AGI/Primus), which supports multiple backends including Megatron-LM, TorchTitan, and JAX MaxText, alongside ROCm-optimized components. Users can now use the unified `primus-cli` to run training jobs with Jax MaxText backend.
+> [!NOTE]
+> There is no single Primus image that covers every backend. `rocm/primus:*` ships the torch/megatron/torchtitan stack and does **not** include JAX. JAX MaxText runs on the dedicated `rocm/jax-training:maxtext-v26.6` image, which is what MAD builds from `docker/primus_maxtext.ubuntu.amd.Dockerfile`. Primus is available as a git submodule (`git submodule update --init scripts/Primus`) or via `tools/fetch_primus.sh`, which clones the pinned branch into the same gitignored `scripts/Primus` path — see below. The `scripts/jax-maxtext/` launcher and metric parser are MaxText-only (no Megatron/TorchTitan logic).
 
 ## MAD-integrated benchmarking
 
-Clone the ROCm Model Automation and Dashboarding (MAD) repository to a local directory and install the required packages on the host machine.
+Clone the ROCm Model Automation and Dashboarding (MAD) repository and install the required
+packages on the host machine. Primus must be checked out into `scripts/Primus` **before
+discovery or build**, since the JAX models are discovered from its example configs and both
+`primus_`* images bake the repo into the image. You can either initialize the git submodule
+(`git submodule update --init scripts/Primus`) or use `tools/fetch_primus.sh`.
 
 ```sh
 git clone https://github.com/ROCm/MAD
 cd MAD
 pip install -r requirements.txt
+
+# Check Primus out into scripts/Primus. Idempotent, so it is safe to re-run.
+bash tools/fetch_primus.sh
 ```
 
-Run models through MAD-integrated benchmarking with the following command:
+`tools/fetch_primus.sh` clones the pinned branch (`main`). Override `PRIMUS_URL`,
+`PRIMUS_REF`, or `PRIMUS_DIR` for a fork, a different branch or commit, or another location.
+
+> [!NOTE]
+> Cloning with `--recursive` is **not required** — `tools/fetch_primus.sh` or
+> `git submodule update --init scripts/Primus` are sufficient. Both Docker images take their
+> framework from the base image — `/workspace/maxtext` and `/workspace/maxdiffusion`, each at
+> the same commit as Primus's pin — and pin `MAXTEXT_PATH` / `MAXDIFFUSION_PATH` to it.
+> Primus's own `third_party/` submodules are not needed for MAD builds; the base image's
+> pre-patched copies are used instead.
+
+This step is **not** automatic: the checkout has to exist in the docker build context
+before any image is built, so neither the dockerfiles nor `scripts/jax-*/run.sh` (which
+runs inside the container) can do it for you. If `scripts/Primus` is missing, discovery
+finds **zero** JAX models and prints a warning naming this script, rather than failing
+in a way `madengine run` reports.
+
+In CI pipelines, set `MAD_AUTO_FETCH_PRIMUS=1` to have discovery fetch Primus
+automatically when the checkout is absent (off by default):
+
+```sh
+MAD_AUTO_FETCH_PRIMUS=1 madengine run --tags maxtext --live-output --timeout 14400
+```
+
+JAX MaxText models are **auto-discovered** from the Primus MaxText experiment configs
+(`scripts/Primus/examples/maxtext/configs/<DEVICE>/<config>.yaml`). madengine walks every
+`scripts/<dir>/` directory at discovery time and, for any directory containing a
+`get_models_json.py`, calls its `list_models()` to get one virtual model per config — this
+happens for `scripts/jax-maxtext/get_models_json.py` unconditionally, with no entry needed in
+the root `models.json` (there is none). A `jax-maxtext/default` model is also always
+registered, pointing at the same fallback config `scripts/jax-maxtext/run.sh` uses when no
+`--config_path` is given — a stable name that doesn't require knowing a specific config.
+
+Discovered tags follow the pattern `jax-maxtext/maxtext_<DEVICE>_<config>` (the `jax-maxtext/`
+prefix is the `scripts/jax-maxtext` directory), e.g.
+`jax-maxtext/maxtext_MI300X_llama2_7B-bf16-pretrain` or
+`jax-maxtext/maxtext_MI355X_llama2_7B-fp8-pretrain`. All of them build the
+`docker/primus_maxtext` image and run through `scripts/jax-maxtext/run.sh`. Each model also
+carries tags (`maxtext`, `jax`, `<DEVICE>`, `<config>`, `<precision>`) so you can select a
+single model by its full name or a group by a shared tag.
+
+List the available models with madengine discovery:
+
+```sh
+madengine discover --tags maxtext          # all MaxText models
+madengine discover --tags maxdiffusion     # all MaxDiffusion models
+madengine discover --tags jax              # all JAX models (MaxText + MaxDiffusion)
+madengine discover --tags nanoo_fp8        # all nanoo_fp8 (MI300X quantized) models
+```
+
+> [!NOTE]
+> On MI300X machines, madengine automatically skips MI355X models (and vice versa) via
+> the `skip_gpu_arch` field — you do not need to add `MI300X` or `MI355X` to the tags.
+
+Run all MaxText models, all MaxDiffusion models, or both at once:
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-python3 tools/run_models.py --tags <mad_model> --keep-model-dir --live-output --timeout 28800
+madengine run --tags maxtext --live-output --timeout 14400        # all MaxText models
+madengine run --tags maxdiffusion --live-output --timeout 14400   # all MaxDiffusion models
+madengine run --tags jax --live-output --timeout 14400            # all JAX models (MaxText + MaxDiffusion)
 ```
 
-For example, use this command to run a performance benchmark test of the Llama 2 7B model on one GPU with bf16 data type in the host machine.
+Run a single model by its full discovered name:
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-python3 tools/run_models.py --tags jax_maxtext_train_llama-2-7b --keep-model-dir --live-output --timeout 28800
+madengine run --tags jax-maxtext/maxtext_MI300X_llama2_7B-bf16-pretrain --keep-model-dir --live-output --timeout 28800
 ```
 
->[!NOTE]
->The madengine package is now available allowing for the replacement of run_models.py.
->
+Or the nanoo_fp8 quantized Llama 2 7B on MI300X:
+
 ```sh
-export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
-python3 madengine run --tags jax_maxtext_train_llama-2-7b --keep-model-dir --live-output --timeout 28800
+madengine run --tags jax-maxtext/maxtext_MI300X_llama2_7B-nanoo_fp8-pretrain --keep-model-dir --live-output --timeout 28800
 ```
 
-ROCm MAD launches a Docker container with the name `container_ci-jax_maxtext_train_llama-2-7b`. The latency and throughput reports of the model are collected in the following path:
+> [!NOTE]
+> `tools/run_models.py` remains available as a drop-in alternative to `madengine run` for the same `--tags`.
+
+MAD launches a Docker container named `container_ci-<mad_model>`. Performance metrics
+(`tokens_per_second`, `tflops`) are parsed from the training log by
+`scripts/jax-maxtext/extract_maxtext_perf.py` and collected in:
 
 ```sh
 ~/MAD/perf.csv
@@ -161,18 +211,62 @@ ROCm MAD launches a Docker container with the name `container_ci-jax_maxtext_tra
 
 #### Available models
 
-| model_name                              |
-| --------------------------------------- |
-| jax_maxtext_train_llama-2-7b            |
-| jax_maxtext_train_llama-2-70b           |
-| jax_maxtext_train_llama-3.1-8b          |
-| jax_maxtext_train_llama-3.1-70b         |
-| jax_maxtext_train_llama-3.1-405b        |
-| jax_maxtext_train_llama-3.3-70b         |
-| jax_maxtext_train_deepseek-v2-lite-16b  |
-| jax_maxtext_train_mixtral-8x7b          |
-| jax_maxtext_train_qwen3-14b             |
-| jax_maxtext_train_qwen3-30b-a3b         |
+Model tags are generated from the Primus MaxText configs for each device, so the exact
+list tracks whatever configs ship in your `scripts/Primus` checkout. List the live
+set via madengine discovery (`scripts/jax-maxtext/get_models_json.py`) or by
+browsing `scripts/Primus/examples/maxtext/configs/`.
+
+Every listed model has a bf16 variant (`jax-maxtext/maxtext_<DEVICE>_<model>-bf16-pretrain`). Quantization is
+**device-specific**: MI300X uses **NANOO FP8** (`-nanoo_fp8`) and MI355X uses **FP8** (`-fp8`)
+— there is no plain-fp8 on MI300X and no nanoo_fp8 on MI355X. Every model has a bf16
+variant; the columns below show which quantized variant is also available:
+
+
+| Model            | MI300X (bf16 + …) | MI355X (bf16 + …) |
+| ---------------- | ----------------- | ----------------- |
+| Llama 2 7B       | `-nanoo_fp8`      | `-fp8`            |
+| Llama 2 70B      | `-nanoo_fp8`      | `-fp8`            |
+| Llama 3/3.1 8B   | `-nanoo_fp8`      | `-fp8`            |
+| Llama 3/3.1 70B  | bf16 only         | `-fp8`            |
+| Llama 3.3 70B    | bf16 only         | `-fp8`            |
+| DeepSeek-V2-lite | `-nanoo_fp8`      | `-fp8`            |
+| Gemma4 26B       | `-nanoo_fp8`      | `-fp8`            |
+| Gemma4 31B       | `-nanoo_fp8`      | `-fp8`            |
+| Mixtral-8x7B     | `-nanoo_fp8`      | `-fp8`            |
+| Qwen3 14B        | `-nanoo_fp8`      | `-fp8`            |
+| Qwen3 30B-A3B    | `-nanoo_fp8`      | `-fp8`            |
+
+
+Example tags: `jax-maxtext/maxtext_MI300X_llama2_7B-bf16-pretrain`, `jax-maxtext/maxtext_MI300X_llama2_7B-nanoo_fp8-pretrain`, `jax-maxtext/maxtext_MI355X_llama2_7B-fp8-pretrain`.
+(MI350X/MI325X map to MI355X/MI300X configs respectively.)
+
+> [!NOTE]
+> Multi-node-only models (Llama 3.1 405B, Grok-1, Mixtral-8x22B) are excluded from
+> single-node `jax-maxtext/` discovery. Set `JAX_MAXTEXT_INCLUDE_MULTINODE=1` to include them.
+
+#### MaxDiffusion models
+
+MaxDiffusion models are discovered the same way as MaxText — auto-discovered from
+`scripts/Primus/examples/maxdiffusion/configs/<DEVICE>/<config>.yaml` by
+`scripts/jax-maxdiffusion/get_models_json.py`, tagged
+`jax-maxdiffusion/maxdiffusion_<DEVICE>_<config>` — and run through
+`scripts/jax-maxdiffusion/run.sh` with the `docker/primus_maxdiffusion` image. A
+`jax-maxdiffusion/default` model is also always registered, mirroring
+`jax-maxtext/default` above. Use `--tags maxdiffusion` to run all of them:
+
+```sh
+madengine run --tags maxdiffusion --live-output --timeout 14400
+```
+
+
+| Model        | MI300X | MI355X |
+| ------------ | ------ | ------ |
+| FLUX.1-dev   | bf16   | bf16   |
+| WAN 2.1 1.3B | bf16   | bf16   |
+| WAN 2.1 14B  | bf16   | bf16   |
+
+
+Example tags: `jax-maxdiffusion/maxdiffusion_MI300X_flux_dev-pretrain`, `jax-maxdiffusion/maxdiffusion_MI300X_wan2.1_1.3b-pretrain`.
 
 ## Standalone benchmarking
 
@@ -181,18 +275,21 @@ Download and launch the Docker image
 Use the following command to pull the Docker image from Docker Hub.
 
 ```
-docker pull rocm/jax-training:maxtext-v26.5
+docker pull rocm/jax-training:maxtext-v26.6
 ```
+
 ### Single Node Training examples
 
 #### Setup
->[!NOTE]
->Please adjust the following variables based on your environment.
->
+
+> [!NOTE]
+> Please adjust the following variables based on your environment.
 
 Export variables
+
 - MAD_SECRETS_HFTOKEN is your HuggingFace token to access models, tokenizers, data. See this [page](https://huggingface.co/docs/hub/en/security-tokens) for more info.
 - HF_HOME is where huggingface_hub will store local data, please refer to [Huggingface cli Document](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli#hf-download) on how to download the data. If you already have downloaded/cached huggingface artifacts, set this variable to that path. Downloaded files typically get cached to a place like this: `~/.cache/huggingface`.
+
 ```
 export MAD_SECRETS_HFTOKEN=<Your HuggingFace token>
 export HF_HOME=<Location of saved/cached HuggingFace models>
@@ -200,300 +297,90 @@ export HF_HOME=<Location of saved/cached HuggingFace models>
 
 Launch the Docker container.
 
-```
-docker run -it --device /dev/dri --device /dev/kfd --network host --ipc host --group-add video --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN --shm-size 64G --name training_env rocm/jax-training:maxtext-v26.5
+```bash
+docker run -it \
+  --device /dev/dri --device /dev/kfd \
+  --network host --ipc host --group-add video \
+  --cap-add SYS_PTRACE --security-opt seccomp=unconfined --privileged \
+  -v $HOME:$HOME -v $HOME/.ssh:/root/.ssh \
+  -v $HF_HOME:/hf_cache -e HF_HOME=/hf_cache \
+  -e MAD_SECRETS_HFTOKEN=$MAD_SECRETS_HFTOKEN \
+  --shm-size 64G --name training_env \
+  rocm/jax-training:maxtext-v26.6
 ```
 
 Execute the training_env container (optional if not already in the container)
-```
-docker start maxtext_training
-docker exec -it maxtext_training bash
-```
-
-Clone Model Automation and Dashboarding (MAD) repo
-```
-git clone https://github.com/ROCm/MAD.git
-cd MAD/scripts/jax-maxtext
-```
-
-Run setup scripts to install libraries and datasets needed for benchmarking
-```
-./jax-maxtext_benchmark_setup.sh -m <model>
-```
-
-Run the benchmark in quantized or unquantized mode.
 
 ```
-# For unquantized training
-./jax-maxtext_benchmark_report.sh -m <model>
-
-# Or for quantized training
-./jax-maxtext_benchmark_report.sh -m <model> -q nanoo_fp8
+docker start training_env
+docker exec -it training_env bash
 ```
 
-The performance results should be written to a file in the parent folder.
+Inside the container, the Primus repository (with the MaxText backend) is available at
+`/workspace/Primus`. Run training with `primus-cli`; **direct** mode runs in the current
+container. Configs live under `examples/maxtext/configs/<DEVICE>/` where `<DEVICE>` is
+`MI300X` or `MI355X`.
 
-### Benchmarking examples
+```bash
+cd /workspace/Primus
 
-#### Example commands
-1.	**Single-node training with Llama 2 7B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Llama-2-7B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-7B
+# Unquantized (bf16), e.g. Llama 2 7B on MI300X
+# Note: RCCL_WARP_SPEED_AUTO=0 is auto-set by Primus on MI355X (gfx950).
+./primus-cli direct -- train pretrain \
+  --config examples/maxtext/configs/MI300X/llama2_7B-bf16-pretrain.yaml
 ```
 
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-7B -q nanoo_fp8
+For quantized training, replace `-bf16-` in the config name with `-fp8-` (MI355X)
+or `-nanoo_fp8-` (MI300X):
+
+```bash
+# nanoo_fp8 on MI300X
+./primus-cli direct -- train pretrain \
+  --config examples/maxtext/configs/MI300X/llama2_7B-nanoo_fp8-pretrain.yaml
+
+# fp8 on MI355X
+./primus-cli direct -- train pretrain \
+  --config examples/maxtext/configs/MI355X/llama2_7B-fp8-pretrain.yaml
 ```
 
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-7B -q fp8
-```
-
-2.	**Single-node training with Llama 2 70B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Llama-2-70B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-70B
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-70B -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-2-70B -q fp8
-```
-
-3.	**Single-node training with Llama 3.1 8B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Llama-3.1-8B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.1-8B -q fp8
-```
-
-4.	**Single-node training with Llama 3.1 70B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Llama-3.1-70B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.1-70B
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.1-70B -q fp8
-```
-
-5.	**Single-node training with Llama 3.3 70B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Llama-3.3-70B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.3-70B
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Llama-3.3-70B -q fp8
-```
-
-6.	**Single-node training with DeepSeek2 16B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m DeepSeek-V2-lite
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m DeepSeek-V2-lite -q fp8
-```
-
-7.	**Single-node training with Mixtral-8x7B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Mixtral-8x7B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Mixtral-8x7B -q fp8
-```
-
-8.	**Single-node training with Qwen3 14B model**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Qwen3-14B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-14B
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-14B -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-14B -q fp8
-```
-
-9.	**Single-node training with Qwen3 30B-A3B model (MoE)**
-
-Setup
-```
-./jax-maxtext_benchmark_setup.sh -m Qwen3-30B-A3B
-```
-
-For unquantized training
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B
-```
-
-Or for nanoo_fp8 quantized training on MI300X
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B -q nanoo_fp8
-```
-
-Or for fp8 quantized training on MI355X
-```
-./jax-maxtext_benchmark_report.sh -m Qwen3-30B-A3B -q fp8
-```
-
+The same pattern applies to every supported model (`llama2_70B`, `llama3_8B`, `llama3_70B`,
+`llama3.3_70B`, `deepseek_v2_16B`, `gemma4_26B`, `gemma4_31B`,
+`mixtral_8x7B`, `qwen3_14B`, `qwen3_30B_A3B`). See the
+[Using primus-cli](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
+section for container and Slurm modes.
 
 ### Multi-Node Training examples
-Note: these scripts will launch the docker and execute the benchmark, so **please run them outside of any docker**.
 
-The examples below use Slurm for running on multiple nodes. The unified multinode benchmark script accepts a configuration file that specifies the model and training parameters.
+Multi-node training is launched through the unified `primus-cli` in Slurm mode.
+The standalone MAD multinode launcher and the per-model `env_scripts/*.yml`
+configuration files have been retired; model/precision/parallelism settings now
+live in the Primus MaxText experiment configs under
+`examples/maxtext/configs/<DEVICE>/<model>-<precision>-pretrain.yaml`
+(bundled in the `rocm/jax-training` image at `/workspace/Primus`).
 
-#### Running Multi-Node Training
-
-To run multi-node training, use the following command:
+See the [Using primus-cli](#using-primus-cli-to-run-training-jobs-with-jax-maxtext-backend)
+section below for direct, container, and Slurm examples. The general form for a
+multi-node run is:
 
 ```bash
-sbatch -N <NUM_NODES> jax_maxtext_multinode_benchmark.sh <config_file.yml> [docker_image]
+# From /workspace/Primus (or a cloned Primus checkout)
+# RCCL_WARP_SPEED_AUTO=0 is auto-set by Primus on MI355X (gfx950).
+./primus-cli --config my_maxtext_config.yaml slurm srun -N <NUM_NODES> \
+  -- train pretrain --config examples/maxtext/configs/<DEVICE>/<model>-<precision>-pretrain.yaml
 ```
 
-**Parameters:**
-- `<NUM_NODES>`: Number of nodes to use for training (e.g., 2, 4, 8)
-- `<config_file.yml>`: Path to the YAML configuration file containing model and training parameters
-- `[docker_image]`: (Optional) Docker image to use. If not specified, defaults to `rocm/jax-training:maxtext-v26.5`
-
-**Configuration files** are available in the `scripts/jax-maxtext/env_scripts/` directory for different models and GPU architectures:
-
-For MI300X (gfx942):
-- `llama2_7b.yml` - Llama 2 7B
-- `llama2_70b.yml` - Llama 2 70B
-- `llama3_8b.yml` - Llama 3 8B
-- `llama3_70b.yml` - Llama 3 70B
-- `qwen3_14b.yml` - Qwen3 14B
-- `qwen3_30b_a3b.yml` - Qwen3 30B-A3B
-
-For MI355X (gfx950):
-- `gfx950_llama2_7b.yml` - Llama 2 7B
-- `gfx950_llama2_70b.yml` - Llama 2 70B
-- `gfx950_llama3_8b.yml` - Llama 3 8B
-- `gfx950_llama3_70b.yml` - Llama 3 70B
-- `gfx950_llama3.1_405b.yml` - Llama 3.1 405B
-- `gfx950_qwen3_14b.yml` - Qwen3 14B
-- `gfx950_qwen3_30b_a3b.yml` - Qwen3 30B-A3B
-
-#### Example Commands
-
-1. **Multi-node training with Llama 2 7B model on 2 nodes:**
-```bash
-sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_7b.yml
-```
-
-2. **Multi-node training with Llama 2 70B model on 4 nodes with custom image:**
-```bash
-sbatch -N 4 jax_maxtext_multinode_benchmark.sh env_scripts/llama2_70b.yml rocm/jax-training:maxtext-v26.5
-```
-
-3. **Multi-node training with Llama 3 8B model on 2 nodes:**
-```bash
-sbatch -N 2 jax_maxtext_multinode_benchmark.sh env_scripts/llama3_8b.yml
-```
-
-4. **Multi-node training with Llama 3 70B model on 8 nodes:**
-```bash
-sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/llama3_70b.yml
-```
-
-5. **Multi-node training with Llama 3.1 405B model on MI355X (gfx950) with 8 nodes:**
-```bash
-sbatch -N 8 jax_maxtext_multinode_benchmark.sh env_scripts/gfx950_llama3.1_405b.yml
-```
+where `<DEVICE>` is `MI300X` or `MI355X`, `<model>` is one of the MaxText
+configs (e.g. `llama2_7B`, `llama2_70B`, `llama3_8B`, `llama3_70B`,
+`gemma4_26B`, `gemma4_31B`, `mixtral_8x7B`,
+`qwen3_14B`, `qwen3_30B_A3B`), and `<precision>` is `bf16`,
+`fp8` (MI355X), or `nanoo_fp8` (MI300X), e.g. `llama2_7B-bf16-pretrain.yaml`.
 
 ## Using primus-cli to run training jobs with Jax MaxText backend
 
 **Clone the Primus repository**
+
 ```
-git clone https://github.com/AMD-AIG-AIMA/Primus.git
+git clone https://github.com/AMD-AGI/Primus.git
 cd Primus
 git checkout main
 git submodule update --init third_party/maxtext/
@@ -506,27 +393,26 @@ For detailed usage of primus-cli, please refer to [Primus CLI User Guide](https:
 Here are some examples of using primus-cli to run training jobs with Jax MaxText backend.
 
 Direct Mode: Running the training directly on current host or within an existing docker container.
+
 ```bash
-# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
-export RCCL_WARP_SPEED_AUTO=0
-./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+# RCCL_WARP_SPEED_AUTO=0 is auto-set by Primus on MI355X (gfx950); no action needed.
+./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-bf16-pretrain.yaml
 ```
 
-Container Mode: execute in Docker/Podman containers
+Container Mode: execute in Docker/Podman containers. You **must** pass `--image` because
+the default Primus image (`rocm/primus`) is the PyTorch stack and does not include JAX.
+
 ```bash
-# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
-export RCCL_WARP_SPEED_AUTO=0
-./primus-cli container --image rocm/jax-training:maxtext-v26.5 \
-  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+./primus-cli container --image rocm/jax-training:maxtext-v26.6 \
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-bf16-pretrain.yaml
 ```
 
 Slurm Mode: execute distributed training on a Slurm cluster
+
 ```bash
-# On MI355X (gfx950), disable RCCL WarpSpeed to avoid NaN losses (no-op on MI300X)
-export RCCL_WARP_SPEED_AUTO=0
 # Use a custom config file, where you can specify the docker image and set environment variables.
 ./primus-cli --config my_maxtext_config.yaml slurm srun -N 8 \
-  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-pretrain.yaml
+  -- train pretrain --config examples/maxtext/configs/MI355X/llama2_7B-bf16-pretrain.yaml
 ```
 
 ## Profiling with JAX XPlane Profiler
@@ -545,13 +431,14 @@ upload_all_profiler_results=True   # Save all GPU profiles (not just GPU0)
 ```
 
 **Choosing step counts:**
+
 - `steps` should be > `skip_first_n_steps_for_profiler` + `profiler_steps` (e.g., `steps=12` with skip=2, profile=5 gives 5 warmup + 5 profiled + 2 cooldown)
 - `skip_first_n_steps_for_profiler=2` skips step 0 (compilation) and step 1 (warmup)
 - `profiler_steps=5` is typically enough; more steps = larger `.xplane.pb` files
 
 ### Profiling with MAD/madengine
 
-The model YAML configs under `scripts/jax-maxtext/env_scripts/` already include a `profiler` key (set to `""` by default). To enable profiling when running through MAD or madengine, edit the YAML config for your model and set the profiler fields:
+The Primus MaxText experiment configs (`examples/maxtext/configs/<DEVICE>/<model>-<precision>-pretrain.yaml` in `/workspace/Primus`) already include a `profiler` key under `overrides` (set to `""` by default). To enable profiling when running through MAD or madengine, edit the `overrides` block of the config for your model and set the profiler fields:
 
 ```yaml
 profiler: "xplane"
@@ -565,10 +452,10 @@ Then run the benchmark as usual:
 
 ```bash
 # Via madengine
-python3 madengine run --tags jax_maxtext_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+madengine run --tags jax-maxtext/maxtext_MI300X_llama3_8B-bf16-pretrain --keep-model-dir --live-output --timeout 28800
 
 # Or via run_models.py
-python3 tools/run_models.py --tags jax_maxtext_train_llama-3.1-8b --keep-model-dir --live-output --timeout 28800
+python3 tools/run_models.py --tags jax-maxtext/maxtext_MI300X_llama3_8B-bf16-pretrain --keep-model-dir --live-output --timeout 28800
 ```
 
 Profile output will be written under the `base_output_directory` specified in the YAML (see [Output Structure](#output-structure) below). Use `--keep-model-dir` so the container's output directory is preserved after the run.
@@ -579,8 +466,8 @@ Profile output will be written under the `base_output_directory` specified in th
 #!/bin/bash
 set -e
 
-IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.5
-TAG="$2"         # Short tag for output folder, e.g. v26.5_llama2_7b
+IMAGE="$1"       # Docker image, e.g. rocm/jax-training:maxtext-v26.6
+TAG="$2"         # Short tag for output folder, e.g. v26.6_llama2_7b
 PROFILE_DIR="/path/to/profiles/${TAG}"
 
 mkdir -p "${PROFILE_DIR}"
@@ -647,6 +534,7 @@ tensorboard --logdir /path/to/profiles/<TAG>/profile --port 6006
 Navigate to **Profile > Trace Viewer** in the TensorBoard UI.
 
 **Tips:**
+
 - Zoom into a single training step (skip the first profiled step as it may have residual warmup)
 - Look at individual GPU streams to see compute/RCCL overlap
 
@@ -660,9 +548,20 @@ Navigate to **Profile > Trace Viewer** in the TensorBoard UI.
 ## Profiling with rocprofv3
 
 If you need to collect a trace and the JAX profiler isn't working then you can use rocprofv3 as a temporary workaround like this:
+
 ```
 rocprofv3 --hip-trace --kernel-trace --memory-copy-trace --rccl-trace --output-format pftrace -d ./v3_traces -- python3 app.py
 ```
-- Just replace `python3 app.py` with any command line command that you want to run such as `./jax-maxtext_benchmark_report.sh -m Llama-2-7B`.
+
+- Just replace `python3 app.py` with any command line command that you want to run such as `./primus-cli direct -- train pretrain --config examples/maxtext/configs/MI300X/llama2_7B-bf16-pretrain.yaml` (run from `/workspace/Primus`).
 - You can set the directory where you want the .json traces to be saved using `-d <TRACE_DIRECTORY>`
-- The resulting traces can be opened in perfetto: https://ui.perfetto.dev/
+- The resulting traces can be opened in perfetto: [https://ui.perfetto.dev/](https://ui.perfetto.dev/)
+
+## Related documentation
+
+- [Primus JAX MaxText training guide](https://github.com/AMD-AGI/Primus/blob/main/docs/02-user-guide/jax-maxtext-training.md) — canonical reference for environment setup, models, and training options
+- [Primus CLI reference](https://github.com/AMD-AGI/Primus/blob/main/docs/02-user-guide/cli-reference.md) — full `primus-cli` command-line reference
+- [End-to-end training recipes](https://github.com/AMD-AGI/Primus/blob/main/docs/02-user-guide/end-to-end-training-recipes.md) — complete config inventory and step-by-step recipes
+- [MaxText parameters](https://github.com/AMD-AGI/Primus/blob/main/docs/03-configuration-reference/maxtext-parameters.md) — YAML config field reference
+- [Multi-node networking](https://github.com/AMD-AGI/Primus/blob/main/docs/04-technical-guides/multi-node-networking.md) — RDMA, NCCL, and Slurm networking setup
+- [Release notes](https://github.com/AMD-AGI/Primus/blob/main/docs/01-getting-started/release-notes.md) — full software stack details for each image tag

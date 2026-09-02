@@ -82,3 +82,18 @@ venv.bak/
 !.claude/skills/mad-profiling/assets/**/*.json
 __pycache__/
 .pytest_cache/
+# Primus checkout for JAX/MaxText discovery + image build. Use either:
+#   git submodule update --init scripts/Primus
+#   tools/fetch_primus.sh
+# See benchmark/jax_maxtext/README.md for details.
+scripts/Primus/
+
+# Artifacts left in the repo root by a madengine run. hf_cache matters most: the
+# jax-maxdiffusion wrapper points HF_HOME here so gated FLUX/WAN weights survive between
+# runs, which puts 100+GB one careless `git add -A` away from being staged.
+hf_cache/
+run_directory/
+.jax-*_env/
+perf_metrics_*.jsonl
+scripts/jax-maxtext/output/
+scripts/jax-maxdiffusion/output/

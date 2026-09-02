@@ -1,0 +1,92 @@
+# AgentX suite config: one served model, a LIST of workloads run in sequence.
+#
+# Copy this to agentic.yaml (or point AGENTIC_CONFIG at it) and edit. The suite
+# driver (scripts/common/benchmark_agentic_suite.sh) generates+verifies a corpus
+# for each source=profile entry (or downloads the dataset for source=hf), runs
+# the aiperf replay against the one endpoint, and writes a per-workload result
+# dir plus a combined suite summary. Adding "N cases" = adding N list entries.
+#
+# Environment variables override file values (MODEL, MAX_MODEL_LEN, AGENTIC_PORT,
+# AGENTIC_SERVER_METRICS, AGENTIC_CONC, DURATION). AGENTIC_WORKLOAD=<name> runs
+# just that one entry.
+
+serving:
+  model: auto              # 'auto' resolves the served-model id from /v1/models; or set explicitly
+  max_model_len: 524288    # must be >= each workload's ISL tail (Case-B needs 524288).
+                           # Set 0 (or leave unset / MAX_MODEL_LEN=0) to AUTO-DETECT the served
+                           # window from /v1/models; a set value always wins. If a workload's ISL
+                           # tail exceeds the window the suite WARNs and caps --max-context-length
+                           # (set AGENTIC_STRICT_CONTEXT=1 to SKIP that workload instead).
+  port: auto               # 'auto' -> recipe default (sglang router 2322 / vLLM shim port)
+  server_metrics: auto     # 'auto' -> recipe-provided host:port list; or space-separated endpoints
+
+run:
+  concurrency: [2, 4, 8]   # scalar or list; >=2 (warmup-credit floor). Swept per workload.
+  duration: 900            # measured window (s); scenario minimum is 900 for a valid submission
+  scenario: inferencex-agentx-mvp   # aiperf --scenario; override per run (or env AGENTIC_SCENARIO)
+
+workloads:
+  # Case-A: generated conformance corpus (ExplainX targets), inherits the shipped preset.
+  - name: conformance_256k
+    source: profile
+    preset: conformance_256k
+
+  # Case-B: longer-context conformance corpus; needs max_model_len 524288.
+  - name: conformance_512k
+    source: profile
+    preset: conformance_512k
+
+  # inferencex: download a real captured trace corpus instead of generating one.
+  # The loader name sets the context-gating ISL tail (_256k -> 262144; full
+  # corpus -> conservative ~1M, override with AGENTIC_HF_ISL_TAIL).
+  - name: inferencex
+    source: hf
+    loader: semianalysis_cc_traces_weka_062126_256k
+
+  # inferencex via a reusable HF preset (profiles/inferencex_256k.yaml): inherits
+  # the loader + bundled concurrency sweep + duration + Tier 1 knobs.
+  - name: inferencex_preset
+    preset: inferencex_256k
+
+  # Same preset, but override the sweep and trim the corpus to fit a smaller model.
+  - name: inferencex_small
+    preset: inferencex_256k
+    concurrency: [2]              # entry overrides the preset's [2, 4, 8] sweep
+    num_dataset_entries: 50       # Tier 1: pull fewer sessions
+    trajectory: { min: 0.30, max: 0.80 }
+    filter:                       # Tier 2: local subset/trim (download once, then filter)
+      max_isl: 200000            # drop sessions with any turn over 200k input tokens
+      max_turns: 40              # truncate each session to its first 40 turns
+      sample: 100                # randomly keep 100 sessions (seed=42)
+
+  # Replay an EXISTING on-disk weka_trace corpus as-is (no generate, no download).
+  # `input_dir` must be a directory of session_XXXXX.json files. Uncomment a
+  # `preset:` (or inline distribution fields) to run verify_agentx_profile.py as
+  # an optional pre-gate; with none, the corpus is replayed without verification.
+#   - name: my_corpus
+#     source: corpus
+#     input_dir: /tmp/agentx_corpora/conformance_256k
+#     # preset: conformance_256k      # optional: verify the corpus against this profile
+#     # isl_tail: 262144              # optional: override the context-gating ISL tail
+
+  # A user-added custom case, defined inline (no preset). Copy profiles/custom.example.yaml
+  # fields here, or reference your own profile via `preset: <name>` after dropping it in profiles/.
+#   - name: my_case
+#     source: profile
+#     model_tag: GLM-5.2-MXFP4
+#     id_prefix: my_case
+#     seed: 42
+#     n_sessions: 150
+#     block_size: 64
+#     isl_p:   [48000, 120000, 200000]
+#     osl_p:   [256, 2000, 9000]
+#     delay_p: [3, 20, 180]
+#     turns:
+#       values:  [2, 3, 4, 6, 10, 20, 45, 103]
+#       weights: [20, 24, 20, 12, 8, 6, 7, 3]
+#     cache_hit: [0.88, 0.90]
+#     clamps:
+#       isl:   [1200, 205000]
+#       osl:   [8, 20000]
+#       delay: [1, 600]
+#     # per-workload run override (optional): concurrency: [2]

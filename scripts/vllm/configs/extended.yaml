@@ -60,6 +60,8 @@
   max_concurrency: 1
   env:
     VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --enable-expert-parallel: True
 
 - benchmark: serving
   model:

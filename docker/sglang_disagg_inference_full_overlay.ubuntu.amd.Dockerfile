@@ -214,6 +214,20 @@ ARG MORI_WHEEL_URL=
 # build MoRI for a different arch than the rest of the image.
 ARG MORI_GPU_ARCHS=${BUILD_GPU_TARGETS}
 ARG MORI_VERSION=1.2.0
+# NOTE (UMBP unit-test build guard): mori's src/umbp/CMakeLists.txt calls
+# `add_subdirectory(tests)` UNCONDITIONALLY, ignoring the top-level BUILD_TESTS
+# option (which setup.py already defaults to OFF, and which correctly gates
+# tests/cpp). Those UMBP tests use gtest_discover_tests() in its default
+# POST_BUILD discovery mode, which EXECUTES each freshly-linked test binary at
+# build time to enumerate test cases. The binaries link the ROCm/HIP runtime
+# (libamdhip64 / libhsa-runtime64 / librocm_smi64 / libhsakmt), so they abort on
+# startup inside `docker build`, which has NO GPU (RUN steps cannot pass
+# --gpus/--device, so /dev/kfd and /dev/dri are absent). The empty output then
+# breaks CMake's string(JSON ...) in GoogleTest/ParseTestList.cmake and fails the
+# amd_mori wheel build. Nothing is "pulled from the build host" -- CMake just
+# tries to RUN the test binaries during the build. Re-gated behind BUILD_TESTS in
+# the RUN block below; idempotent no-op once upstream fixes it (already fixed on
+# mori main, still present at the pinned MORI_COMMIT).
 ARG MORI_SRC_DIR=/sgl-workspace/mori
 
 ENV MORI_GPU_ARCHS=${MORI_GPU_ARCHS} \
@@ -253,6 +267,12 @@ RUN set -e; \
         git clone --depth 1 --branch "${MORI_BRANCH}" "${MORI_REPO}" "${MORI_SRC_DIR}"; \
       fi; \
       cd "${MORI_SRC_DIR}" && git submodule update --init --recursive || true; \
+      if grep -qE '^add_subdirectory\(tests\)$' src/umbp/CMakeLists.txt; then \
+        sed -i 's|^add_subdirectory(tests)$|if(BUILD_TESTS)\n  add_subdirectory(tests)\nendif()|' src/umbp/CMakeLists.txt; \
+        echo "MORI_UMBP_TESTS_GUARDED (add_subdirectory(tests) now gated by BUILD_TESTS)"; \
+      else \
+        echo "MORI_UMBP_TESTS_GUARD_SKIPPED (unguarded pattern not found; upstream may have fixed it)"; \
+      fi; \
       pip install --no-cache-dir "cmake<4.0" setuptools wheel pybind11 ninja; \
       pip install --no-build-isolation --no-cache-dir --force-reinstall .; \
     fi

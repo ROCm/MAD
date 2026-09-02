@@ -258,7 +258,26 @@ PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_ARCH_FLAGS} ${MODEL_MODE_FLAGS
 DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_ARCH_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE})"
 
-export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
+# Agentic gating: the default concurrency sweep keeps the perf-tuned config
+# (models.yaml base_flags, radix cache off). Only the agentic trace-replay path
+# (BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh) — or an explicit override — turns
+# on the radix prefix cache and server-side Prometheus metrics. This keeps the
+# default path byte-for-byte unchanged.
+AGENTIC_METRICS_ENABLED=0
+if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+    AGENTIC_METRICS_ENABLED=1
+fi
+SERVER_METRICS_FLAGS=""
+if [[ "${AGENTIC_METRICS_ENABLED}" == "1" ]]; then
+    SERVER_METRICS_FLAGS="--enable-metrics --enable-metrics-for-all-schedulers"
+fi
+if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_RADIX_CACHE:-0}" == "1" ]]; then
+    PREFILL_MODEL_CONFIG="${PREFILL_MODEL_CONFIG//--disable-radix-cache/}"
+    DECODE_MODEL_CONFIG="${DECODE_MODEL_CONFIG//--disable-radix-cache/}"
+    echo "[radix] radix prefix cache ENABLED (stripped --disable-radix-cache) for agentic/ENABLE_RADIX_CACHE"
+fi
+
+export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS SERVER_METRICS_FLAGS
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
@@ -768,15 +787,32 @@ PY
     fi
 
     benchmark_status=0
+    # Server-side Prometheus metrics for the agentic replay: point aiperf at the
+    # sglang servers' :3000/metrics directly (the router exposes Prometheus on a
+    # separate port and lacks gpu_cache_hit_rate). Gated on the agentic path so
+    # the default sweep is unaffected. AGENTIC_SERVER_METRICS is consumed by
+    # scripts/common/agentic_lib.sh (build_replay_cmd -> aiperf --server-metrics).
+    if [[ "${AGENTIC_METRICS_ENABLED}" == "1" \
+          && -n "${IP_FIRST_PREFILL:-}" && -n "${IP_FIRST_DECODE:-}" ]]; then
+        export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${IP_FIRST_PREFILL}:3000 ${IP_FIRST_DECODE}:3000}"
+        echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+        echo "=== server /metrics reachability check ==="
+        curl -sf "http://${IP_FIRST_PREFILL}:3000/metrics" | head -3 || echo "PREFILL metrics UNREACHABLE"
+        curl -sf "http://${IP_FIRST_DECODE}:3000/metrics" | head -3 || echo "DECODE metrics UNREACHABLE"
+    fi
     if [[ "${SKIP_BENCHMARK:-0}" != "1" ]] && [[ -n "${MOONCAKE_COOKBOOK_PATH:-}" ]]; then
-        if [[ -f "${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh" ]]; then
-            echo "Running ${MOONCAKE_COOKBOOK_PATH}/benchmark_xPyD.sh"
+        # Benchmark hook is selectable: default random-sweep benchmark_xPyD.sh,
+        # or set BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh for aiperf agentic
+        # trace replay (see scripts/common/agentic_lib.sh).
+        _bench_file="${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
+        if [[ -f "${MOONCAKE_COOKBOOK_PATH}/${_bench_file}" ]]; then
+            echo "Running ${MOONCAKE_COOKBOOK_PATH}/${_bench_file}"
             (
                 cd "${MOONCAKE_COOKBOOK_PATH}" || exit 1
-                bash benchmark_xPyD.sh
+                bash "${_bench_file}"
             ) || benchmark_status=$?
         else
-            echo "WARN: benchmark_xPyD.sh not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
+            echo "WARN: ${_bench_file} not found under MOONCAKE_COOKBOOK_PATH=${MOONCAKE_COOKBOOK_PATH}" >&2
             benchmark_status=1
         fi
     fi
@@ -828,6 +864,7 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     PREFILL_CMD+=" \
         --decode-log-interval 1 \
         ${PREFILL_MODEL_CONFIG} \
+        ${SERVER_METRICS_FLAGS} \
         --log-level-http warning"
 
     export PREFILL_CMD PREFILL_NODE_RANK
@@ -920,6 +957,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     DECODE_CMD+=" \
         --decode-log-interval 1 \
         ${DECODE_MODEL_CONFIG} \
+        ${SERVER_METRICS_FLAGS} \
         --log-level-http warning"
 
     export DECODE_CMD DECODE_NODE_RANK
