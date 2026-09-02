@@ -47,7 +47,11 @@ echo "Building dependencies for $MODEL_REPO"
 set -x 
 export HF_HOME=/hf_cache
 mkdir /hf_cache
+# Tracing off across the login: with set -x bash echoes the expanded command, so the
+# token lands in the run log - which is tee'd to shared storage on a multi-node run.
+{ set +x; } 2>/dev/null
 hf auth login --token $HF_TOKEN --add-to-git-credential
+set -x
 
 # always download and use the real dataset
 # hf download legacy-datasets/c4 \
@@ -74,6 +78,10 @@ elif [[ "$MODEL_REPO" == "Llama-3.1-8B" ]]; then
   download_tokenizer "meta-llama/Meta-Llama-3-8B"
 elif [[ "$MODEL_REPO" == "Llama-3.1-70B" ]]; then
   download_tokenizer "meta-llama/Meta-Llama-3-70B"
+elif [[ "$MODEL_REPO" == "Llama-3.1-405B" ]]; then
+  # gfx950_llama3.1_405b.yml uses dataset_type: synthetic and points tokenizer_path at
+  # Llama-3.3-70B-Instruct, so this fetches that tokenizer rather than a 405B one.
+  download_tokenizer "meta-llama/Llama-3.3-70B-Instruct"
 elif [[ "$MODEL_REPO" == "Llama-3.3-70B" ]]; then
   download_tokenizer "meta-llama/Llama-3.3-70B-Instruct"
 elif [[ "$MODEL_REPO" == "DeepSeek-V2-lite" ]]; then

@@ -10,7 +10,11 @@ slurm.nodes distributed.nnodes nodelist world size,
 heterogeneous nodes NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME network_interface,
 routable interface eth0 eth1 IPv6 link-local fe80 gloo connect timeout subnet,
 madengine --timeout 0 None sbatch template, -o output csv ignored classic slurm,
-docker commit ENTRYPOINT cat exit 126, NFS root_squash docker mount permission denied
+docker commit ENTRYPOINT cat exit 126, NFS root_squash docker mount permission denied,
+jax maxtext JAX_COORDINATOR_IP NODE_RANK SLURM_PROCID loopback rendezvous hang,
+nofile fd limit Initialize clique silent stall 32 devices,
+built_models.env_vars not read docker_env_vars, RCCL overlay strings marker positive control,
+empty quantization override replaces yaml value, seconds_per_step first performance match
 
 Cross-cutting and per-workload pitfalls observed in real runs. SKILL.md links
 here; this file is read before a run.
@@ -103,6 +107,44 @@ here; this file is read before a run.
   `error while creating mount source path ...: mkdir ...: permission denied`,
   even though the user's own shell reads it fine. Stage run data under a path
   whose whole chain is world-traversable (`o+x`), not just group-readable.
+- **The SLURM path exports `NCCL_IB_DISABLE=1` by default — set it to 0 or the run uses
+  TCP.** It is one of the variables madengine injects into the generated sbatch itself
+  (alongside `MIOPEN_*`, `OMP_NUM_THREADS`, `NCCL_TIMEOUT`, `RCCL_ENABLE_HIPGRAPH`), so it is
+  absent from the manifest and easy to miss. Nothing fails: RCCL reports `via NET/Socket` and
+  the job simply runs several times slower — measured here at 0.936 s/step over RDMA versus
+  4.4-6.8 s/step over sockets for the same 8B workload on the same nodes, with TFLOP/s down
+  from 935 to 125. Put `NCCL_IB_DISABLE: "0"` in BOTH env blocks, and keep `NCCL_DEBUG=INFO`
+  with `NCCL_DEBUG_SUBSYS=INIT,NET` enabled so every run records its own transport instead of
+  needing a separate probe to find this out. Restricted to those subsystems the logging is at
+  connection setup rather than per collective, and costs nothing measurable: 0.906-0.909
+  s/step with it against 0.936 without. An A/B taken over
+  sockets is not just slow, it is insensitive: both arms sit on the same transport ceiling,
+  and a 405B comparison that shows +192 % over RDMA collapsed to +0.59 % over sockets.
+- **`built_models.*.env_vars` is not read on the docker/SLURM path.** Only
+  `context.docker_env_vars` becomes container environment; `deployment_config.env_vars`
+  configures the host-side launcher. The reference manifests here carry the transport
+  profile in BOTH, and `scripts/validate_manifest.sh` checks `NCCL_IB_HCA` is equal in the
+  two blocks for exactly this reason. A profile placed only under `built_models` is silently
+  absent at run time: the job trains, reports a number, and used RCCL defaults.
+- **Raise the open-file limit at 4+ nodes** via
+  `built_models.*.additional_docker_run_options` (`--ulimit nofile=1048576:1048576`). A
+  32-device clique exhausts the default; the symptom is not an fd error but a multi-hour
+  silent stall at the framework's clique/communicator init. 16 devices fit under the
+  default, 32 do not. The same option is where `--device=/dev/infiniband` belongs — the
+  hardcoded per-vendor docker options expose only `/dev/kfd` and `/dev/dri/renderD*`, and
+  without the RDMA device ibverbs finds nothing and the run falls back to TCP, which reads
+  as "slower" rather than "broken".
+- **A verification that cannot fail is worse than none.** Two instances seen here: a
+  `strings`-based marker census returns 0 both when the marker is absent and when the file
+  was never read (missing binary, over-eager filter) — always pair it with a positive
+  control string that must be present; and installing a source-built rdma-core *over* the
+  distro packages leaves both provider sets in place, so a presence check passes while
+  libibverbs can still resolve the old provider. Remove the packaged rdma-core before
+  `ninja install` (see `docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile`).
+- **`bash -n` does not parse heredoc bodies.** A syntax check on a script that generates a
+  per-node script proves nothing about the generated one. Extract the body between the
+  delimiters and check it separately — and assert the extraction is non-empty, since an
+  extraction yielding 0 lines "passes" trivially.
 - **Node environments can be heterogeneous across a cluster — don't trust a
   single detect probe.** The interface that carries the routable control-plane
   IP is not guaranteed to have the same name on every node (e.g. one node routes
@@ -118,6 +160,88 @@ here; this file is read before a run.
   rather than hard-coding an interface name. This is an environment
   (cluster-provisioning) inconsistency, not a workload bug — flag it to the
   cluster owner if a uniform-environment guarantee is expected.
+
+## jax_maxtext (training)
+
+Keywords: jax maxtext llama3 pretrain, JAX_COORDINATOR_IP JAX_COORDINATOR_PORT NNODES
+NODE_RANK, SLURM_PROCID rank derivation, loopback 127.0.0.1 rendezvous hang, RCCL overlay
+RCCL_COMMIT, base_output_directory device_info.json FileNotFoundError, empty quantization
+override, seconds_per_step median first performance match, XLA autotune level 32 ranks,
+gated Llama repo tokenizer synthetic dataset.
+
+- **The model script translates the launcher's variables, it does not source them.**
+  MaxText's `initialize_jax_for_gpu` reads `JAX_COORDINATOR_IP` / `JAX_COORDINATOR_PORT` /
+  `NNODES` / `NODE_RANK` from the environment and calls `jax.distributed.initialize` itself;
+  supplying those four is the model script's job. Note the gate: the whole block is skipped
+  unless `JAX_COORDINATOR_IP` is set, so a multi-node job that forgets it does not fail - it
+  runs single-process per node. On the standard SLURM path the inputs are already there:
+  madengine resolves `MASTER_ADDR` on the host, sets `NODE_RANK` from `SLURM_PROCID` inside
+  the srun task, and forwards both into the container. Reading `SLURM_PROCID` /
+  `SLURM_JOB_NODELIST` in the model script is a **fallback for direct invocation** — when a
+  coordinator looks wrong, check what the launcher forwarded before suspecting the fallback.
+  **Reject a loopback result**: JAX accepts `127.0.0.1` as a coordinator, every rank then
+  binds its own, and the run hangs in rendezvous with no error. `scontrol` is not in these
+  images, so a `SLURM_JOB_NODELIST` fallback must check for it rather than assume it.
+- **One container per node owning all 8 GPUs.** That is the topology multi-threaded RCCL
+  state is exercised in; eight single-GPU processes per node are a different workload.
+  Counter-intuitively this needs `nproc_per_node: 8`, not 1: on the container path
+  `container_runner.py` resolves the container's GPU count from `NPROC_PER_NODE` **first**
+  and only then `GPUS_PER_NODE`, so a 1 there exposes a single GPU per node while every
+  other part of the config still says eight. SLURM starts one task per node regardless
+  (`#SBATCH --ntasks=<nodes>`), so the one-container-per-node topology is unaffected. The
+  mirror-image mistake is letting `NPROC_PER_NODE` stand in for the GPU count inside the
+  model script: the variable means the per-node GPU count on the container path but a
+  process count for a process-based launcher like torchrun, and may be unset on a direct
+  invocation, so a `GPUS_PER_NODE:-$NPROC_PER_NODE` fallback makes the reported `num_gpus`
+  depend on which launcher ran. Give the model script an explicit default.
+- **Append-mode training logs plus a reused workspace silently blend runs.** MAD report
+  scripts typically pipe training to `tee -a`, so a second run of the same model in a
+  workspace that is not discarded leaves both runs in one file and every metric is computed
+  over the mix - an A/B result then depends on what was already in the log. **Truncate per
+  invocation**; confining the parser to the final run is not sufficient on its own, because a
+  run that emits no step records at all (steps=0, an early crash, a changed log format)
+  leaves no boundary to detect and the previous run's records are read as the current
+  result - demonstrated: an appended log whose latest run has no steps yields the earlier
+  run's median with no indication anything is wrong. Keep the boundary detection as defence
+  in depth for logs the harness did not produce. The same reuse hazard applies to the result CSV: delete the destination
+  *before* parsing, or a parser that refuses to produce a measurement leaves the previous
+  run's valid-looking file in place for the collector to pick up. And where a launcher may
+  give every rank the same workspace, the training log needs a rank suffix too, not just the
+  CSV - otherwise the ranks interleave step records into one file and rank 0's median is
+  taken over a sample that never existed.
+- **Per-rank output filenames are collected by nobody.** The SLURM template collects
+  artifacts by the EXACT `multiple_results` filename, so a `perf_..._rankN.csv` written by a
+  worker stays in that node's local workspace and is discarded with it. On this path each
+  task copies the project into a node-local `SLURM_TMPDIR`/`/tmp` workspace, so the ranks do
+  not share a path and every rank can just write the canonical name - each node's copy is
+  then collected under its own `node_<PROCID>` directory. Reserve rank suffixes for
+  launchers that hand every rank the same shared workspace; `MAD_COLLECT_METRICS`, which the
+  template sets per task and forwards into the container, is a usable signal for telling the
+  two apart.
+- **`XLA_AUTOTUNE_LEVEL=0` is required at 32 ranks.** The gfx950 env scripts default to
+  level 4; levels 1 and 2 did not finish compiling within 50 and 90 minutes at 32 ranks,
+  while level 0 compiles in under a minute at no measured compute cost (962 vs 968
+  TFLOP/s/device on a 2-node control).
+- **An empty `quantization=` on the MaxText command line replaces the config value, it is
+  not ignored.** A card passing no `--quantization` made the wrapper hand MaxText
+  `quantization=`, and `gfx950_llama3.1_405b.yml` — which sets `quantization: "fp8"` —
+  trained in bf16 while every label said FP8 (`Config param quantization: None` in the log).
+  Declare the precision on the card.
+- **`gfx950_llama3.1_405b.yml` set no `base_output_directory`.** MaxText fell back to a
+  default whose parent does not exist and died in `initialize()` at
+  `save_device_information()` with `FileNotFoundError` on `maxtext_output/device_info.json` —
+  before the mesh is built, so zero steps and a prompt, quiet exit.
+- **The tokenizer fetch fails on hosts without access to the gated Llama repos**
+  ("Access denied. This repository requires approval.") and this is harmless: these cards
+  train on `dataset_type: synthetic`. Do not make setup failure fatal — verified against
+  logs of runs that completed normally and carry the same error.
+- **madengine scrapes the FIRST `performance:` match.** The single-node cards emit
+  `performance: 1 pass`; a report script that prints a real metric earlier silently
+  redefines what every existing card reports. Gate a new metric to the multi-node path.
+- **Median `seconds_per_step` is comparable only between runs with equal `steps`.** Step
+  time drifts upward over the first steady steps before plateauing (0.860 s at step 3 vs
+  0.874–0.876 s at steps 10–14 on a 4-node run), so a `steps=15` median is systematically
+  lower than a `steps=25` one.
 
 ## sglang_disagg
 

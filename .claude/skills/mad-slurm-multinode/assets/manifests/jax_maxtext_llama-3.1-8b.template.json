@@ -1,0 +1,147 @@
+{
+  "built_images": {
+    "jax-maxtext-rccl": {
+      "model": "jax_maxtext_train_llama-3.1-8b_fp8_multinode_rccl",
+      "docker_image": "jax-maxtext-rccl:<FILL_RCCL_COMMIT>-<FILL_BUILD_VARIANT>-gfx950",
+      "dockerfile": "docker/jax_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
+      "base_docker": "rocm/jax-training:maxtext-v26.5",
+      "build_duration": 0,
+      "local_image": true,
+      "registry_image": null,
+      "registry": null,
+      "gpu_vendor": "AMD"
+    }
+  },
+  "built_models": {
+    "jax-maxtext-rccl": {
+      "name": "jax_maxtext_train_llama-3.1-8b_fp8_multinode_rccl",
+      "url": "",
+      "dockerfile": "docker/jax_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
+      "scripts": "scripts/jax-maxtext/run.sh",
+      "n_gpus": "-1",
+      "owner": "mad.support@amd.com",
+      "training_precision": "fp8",
+      "multiple_results": "perf_Llama-3.1-8B_fp8.csv",
+      "tags": [
+        "jax",
+        "maxtext",
+        "llama3",
+        "training",
+        "multinode",
+        "rccl"
+      ],
+      "timeout": 14400,
+      "args": "--model_repo jax_maxtext_train_llama-3.1-8b --quantization fp8",
+      "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -v /sys:/sys:ro -v /run/udev:/run/udev:ro"
+    }
+  },
+  "context": {
+    "docker_env_vars": {
+      "MODEL_REPO": "jax_maxtext_train_llama-3.1-8b",
+      "QUANTIZATION": "fp8",
+      "GPUS_PER_NODE": "8",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  data-plane HCA list, see references/cluster-types.md>",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "NCCL_IB_QPS_PER_CONNECTION": "8",
+      "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+      "RCCL_WARP_SPEED_AUTO": "0",
+      "XLA_AUTOTUNE_LEVEL": "0",
+      "MAXTEXT_EXTRA_ARGS": "per_device_batch_size=2 steps=25"
+    },
+    "_comment_mounts": "The image carries its own bnxt_re provider; the host provider directory is mounted as well so ibverbs resolves it either way.",
+    "docker_mounts": {
+      "/dev/infiniband": "/dev/infiniband",
+      "/etc/libibverbs.d": "/etc/libibverbs.d"
+    },
+    "docker_build_arg": {
+      "BASE_DOCKER": "rocm/jax-training:maxtext-v26.5",
+      "RCCL_COMMIT": "<FILL_RCCL_COMMIT>",
+      "BUILD_GPU_TARGETS": "gfx950",
+      "RDMA_CORE_VERSION": "<FILL_RDMA_CORE  empty to keep the base image rdma-core; 63.0 is the Broadcom-Thor2 bnxt_re EFAULT fix, see references/cluster-types.md>",
+      "RCCL_CMAKE_OPTIONS": "<FILL_RCCL_CMAKE_OPTIONS  extra cmake -D flags, e.g. -DFAULT_INJECTION=OFF; empty for RCCL defaults>"
+    },
+    "gpu_vendor": "AMD",
+    "guest_os": "UBUNTU",
+    "docker_gpus": "0,1,2,3,4,5,6,7"
+  },
+  "credentials_required": [],
+  "deployment_config": {
+    "target": "slurm",
+    "slurm": {
+      "partition": "<FILL_PARTITION>",
+      "nodes": 4,
+      "gpus_per_node": 8,
+      "time": "03:45:00",
+      "output_dir": "./slurm_output",
+      "exclusive": true,
+      "_comment_skip_gpus": "This cluster's SLURM rejects the generated --gpus-per-node directive; without this the job is refused before launch.",
+      "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "_comment": "On Broadcom-Thor2 add \"skip_gpus_directive\": true - that cluster's SLURM rejects the generated --gpus-per-node directive. Do NOT set it on a cluster that allocates GPUs through GRES: the job would then be submitted with no GPU request at all."
+    },
+    "distributed": {
+      "_comment": "One container per node owning all 8 GPUs. nproc_per_node is the GPU count on this path, not a process count - See .claude/skills/mad-slurm-multinode/references/gotchas.md, section jax_maxtext.",
+      "nnodes": 4,
+      "nproc_per_node": 8,
+      "_comment_launcher": "Explicit: a missing launcher is read as torchrun. 'docker' selects the basic-environment setup.",
+      "launcher": "docker"
+    },
+    "debug": false,
+    "docker_gpus": "0,1,2,3,4,5,6,7",
+    "env_vars": {
+      "MODEL_REPO": "jax_maxtext_train_llama-3.1-8b",
+      "QUANTIZATION": "fp8",
+      "GPUS_PER_NODE": "8",
+      "NCCL_IB_HCA": "<FILL_NCCL_IB_HCA  data-plane HCA list, see references/cluster-types.md>",
+      "NCCL_IB_DISABLE": "0",
+      "NCCL_DEBUG": "INFO",
+      "NCCL_DEBUG_SUBSYS": "INIT,NET",
+      "NCCL_IB_GID_INDEX": "<FILL_GID  RoCEv2 GID index, see references/cluster-types.md>",
+      "NCCL_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "GLOO_SOCKET_IFNAME": "<FILL_IFNAME  management iface, see references/cluster-types.md>",
+      "RDMAV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
+      "NCCL_IB_QPS_PER_CONNECTION": "8",
+      "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+      "RCCL_WARP_SPEED_AUTO": "0",
+      "XLA_AUTOTUNE_LEVEL": "0",
+      "MAXTEXT_EXTRA_ARGS": "per_device_batch_size=2 steps=25"
+    }
+  },
+  "summary": {
+    "successful_builds": [],
+    "failed_builds": [],
+    "total_build_time": 0,
+    "successful_pushes": [],
+    "failed_pushes": []
+  },
+  "_comment": [
+    "JAX/MaxText Llama-3.1 pretraining, multi-node, against a chosen RCCL build.",
+    "",
+    "gfx950 only. The multi-node cards this drives carry skip_gpu_arch: gfx942, and the fp8",
+    "variant is excluded there (the catalog uses nanoo_fp8 on gfx942), so filling this in for",
+    "an MI300X-class cluster would launch an unsupported precision path.",
+    "",
+    "Fill every <FILL_...>; archetype-dependent values come from references/cluster-types.md,",
+    "including that archetype's own extras (Thor2 QP/RoCE tuning, AINIC RCCL_AINIC_ROCE).",
+    "RDMA_CORE_VERSION is Thor2-specific - leave it empty elsewhere, it replaces the image's",
+    "distro rdma-core.",
+    "",
+    "RCCL_COMMIT selects the library and RCCL_CMAKE_OPTIONS its build options; <FILL_BUILD_VARIANT>",
+    "labels the image so the two travel together. Give each build a unique tag: the tag is the",
+    "cache key, so a reused one silently reuses the previous image.",
+    "",
+    "NCCL_IB_DISABLE=0 is REQUIRED: madengine's standard SLURM path exports it as 1 by default,",
+    "so without this the run silently uses TCP instead of RDMA.",
+    "",
+    "See .claude/skills/mad-slurm-multinode/references/gotchas.md, section jax_maxtext.",
+    "",
+    "NCCL_DEBUG=INFO with NCCL_DEBUG_SUBSYS=INIT,NET so every run records which transport RCCL selected: grep the log for 'via NET/IB/*/GDRDMA'. Restricted to those subsystems it logs at connection setup, not per collective - measured at 0.906-0.909 s/step against 0.936 without it, i.e. no cost to the timing it protects."
+  ]
+}
