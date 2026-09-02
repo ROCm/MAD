@@ -2,7 +2,7 @@
   "built_images": {
     "sglang-disagg-llama-4-scout": {
       "model": "sglang-disagg-llama-4-scout-overlay",
-      "docker_image": "<FILL_TAG  single full-overlay image tag, e.g. sglang-v0514-overlay:rccl-<sha>smifix-mori-<sha>-rixl-<sha>-mooncake<ver>-gfx942 (append -rdma62 when built with --build-arg ENABLE_RDMA62=1)>",
+      "docker_image": "<FILL_TAG  single full-overlay image tag naming the arch and rdma-core, e.g. sglang-v0514-overlay:rccl-78e8ba0smifix-mori-a14e6992-gfx942-rdma63>",
       "dockerfile": "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile",
       "base_docker": "lmsysorg/sglang:v0.5.14-rocm720-mi30x",
       "build_duration": 0,

@@ -145,6 +145,21 @@ exports = {
     "MODEL_EXPERIMENTAL_FLAGS": cfg.get("experimental_flags", ""),
 }
 
+# Optional `arch_flags:` map, keyed by GPU-arch prefix, applied by the launcher's
+# arch gate below (longest matching prefix wins). Keys must be valid shell
+# identifiers because they become variable-name suffixes.
+arch_flags = cfg.get("arch_flags", {}) or {}
+if not isinstance(arch_flags, dict):
+    print(f"echo {q(f'ERROR: arch_flags for {model_name} must be a mapping of arch-prefix to flags')}; exit 1")
+    sys.exit(0)
+for key in arch_flags:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)):
+        print(f"echo {q(f'ERROR: arch_flags key {key!r} is not a valid identifier')}; exit 1")
+        sys.exit(0)
+exports["MODEL_ARCH_FLAG_KEYS"] = " ".join(str(k) for k in arch_flags)
+for key, value in arch_flags.items():
+    exports[f"MODEL_ARCH_FLAGS__{key}"] = value or ""
+
 for key, value in exports.items():
     print(f"{key}={q(value)}")
 PY
@@ -193,8 +208,54 @@ export PREFILL_TP_SIZE DECODE_TP_SIZE
 # =============================================================================
 
 
-PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
-DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+# --- arch-specific flags ----------------------------------------------------
+# Some settings are correct on one GPU generation and actively harmful on another, so
+# models.yaml can carry an optional `arch_flags:` map keyed by GPU-arch prefix. The
+# launcher detects the arch and appends the entry whose key is the LONGEST matching
+# prefix, so `gfx95:` covers the whole gfx95x family while `gfx942:` can still say
+# something different. Appended after base_flags, so an arch entry can also override a
+# base value (sglang parses with argparse: the last occurrence of a flag wins).
+#
+# Motivating case, Llama-4-Scout, where the two arches need opposite things:
+#   gfx95  needs --moe-runner-backend triton (AITER MoE segfaults during warmup),
+#   gfx942 must NOT have it -- it corrupts generation while every harness signal stays
+#          green (a 4-node sweep reported 8/8 points at 2501 tok/s emitting only token
+#          id 0), and then needs a higher --mem-fraction-static than gfx95, because the
+#          AITER MoE runner it falls back to needs more device memory on a 192 GB card.
+#
+# Set SGLANG_GFX_ARCH to override detection (e.g. to exercise another arch's path).
+# When the arch cannot be detected, NO arch flags are applied -- deliberately, because
+# the failure modes are not symmetric: missing a kernel workaround fails loudly at
+# warmup, while applying one on the wrong arch fails silently with corrupted output
+# that benchmarks still score as a pass. Prefer the loud failure.
+_detect_gfx_arch() {
+    local a="${SGLANG_GFX_ARCH:-${MAD_SYSTEM_GPU_ARCHITECTURE:-}}"
+    [[ -n "$a" ]] && { echo "$a"; return; }
+    a="$(rocminfo 2>/dev/null | grep -m1 -oE 'gfx[0-9a-f]+' || true)"
+    [[ -z "$a" ]] && a="$(python3 -c 'import torch;print(torch.cuda.get_device_properties(0).gcnArchName)' 2>/dev/null | cut -d: -f1 || true)"
+    echo "$a"
+}
+GFX_ARCH="$(_detect_gfx_arch)"
+MODEL_ARCH_FLAGS=""
+if [[ -n "${MODEL_ARCH_FLAG_KEYS:-}" ]]; then
+    if [[ -z "$GFX_ARCH" ]]; then
+        echo "WARNING: GPU arch not detected; NOT applying any arch_flags (keys: ${MODEL_ARCH_FLAG_KEYS}). Set SGLANG_GFX_ARCH to force." >&2
+    else
+        _arch_key=""
+        for _k in ${MODEL_ARCH_FLAG_KEYS}; do
+            if [[ "$GFX_ARCH" == "${_k}"* ]] && (( ${#_k} > ${#_arch_key} )); then _arch_key="$_k"; fi
+        done
+        if [[ -n "$_arch_key" ]]; then
+            _v="MODEL_ARCH_FLAGS__${_arch_key}"; MODEL_ARCH_FLAGS="${!_v}"
+            echo "Arch gate: ${GFX_ARCH} matches arch_flags[${_arch_key}] -> applying: ${MODEL_ARCH_FLAGS}"
+        else
+            echo "Arch gate: ${GFX_ARCH} matches no arch_flags key (${MODEL_ARCH_FLAG_KEYS}) -> applying none"
+        fi
+    fi
+fi
+
+PREFILL_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_ARCH_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_PREFILL_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
+DECODE_MODEL_CONFIG="${MODEL_BASE_FLAGS} ${MODEL_ARCH_FLAGS} ${MODEL_MODE_FLAGS} ${MODEL_DECODE_FLAGS} ${MODEL_EXPERIMENTAL_FLAGS}"
 echo "Using model-specific configuration for: $MODEL_NAME (mode=${PARALLEL_MODE})"
 
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS
