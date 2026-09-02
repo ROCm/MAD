@@ -23,11 +23,11 @@ _argv() { # connector wide_ep ep_backend model model_path
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
-# emit argv for a cell with a KV_OFFLOAD tier set (+ optional OFFLOAD_BACKEND)
-_argv_off() { # connector wide_ep ep_backend model model_path kv_offload [offload_backend]
+# emit argv for a cell with a KV_OFFLOAD tier set (+ optional OFFLOAD_BACKEND, OFFLOAD_DISK_PATH)
+_argv_off() { # connector wide_ep ep_backend model model_path kv_offload [offload_backend] [disk_path]
   env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
-    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} \
+    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} ${8:+OFFLOAD_DISK_PATH="$8"} \
     MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
@@ -67,6 +67,21 @@ _has    "$O" "NixlConnector" "base NixlConnector preserved inside MultiConnector
 _hasnot "$O" "LMCacheConnectorV1" "no LMCache on the native path"
 _has    "$O" "--enable-prefix-caching" "prefix caching enabled under offload"
 _hasnot "$O" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu native + OFFLOAD_DISK_PATH (fs tier; rixl TP 405B) ==="
+OF="$(_argv_off rixl 0 '' Llama-3.1-405B-Instruct-FP8-KV /m/L405 cpu native /mnt/kv)"
+_has    "$OF" "OffloadingConnector" "native OffloadingConnector on the fs path"
+_has    "$OF" "cpu_bytes_to_use" "CPU tier preserved with an fs tier below it"
+_has    "$OF" "TieringOffloadingSpec" "fs tier uses TieringOffloadingSpec"
+_has    "$OF" "secondary_tiers" "config has secondary_tiers"
+_has    "$OF" '"type": "fs"' "secondary tier type is fs"
+_hasnot "$OF" "LMCacheConnectorV1" "no LMCache on the native fs path"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu native WITHOUT disk path emits no fs tier ==="
+_hasnot "$O" "secondary_tiers" "plain native cpu has no secondary_tiers"
+_hasnot "$O" "TieringOffloadingSpec" "plain native cpu has no TieringOffloadingSpec"
 
 echo ""
 echo "=== KV_OFFLOAD=cpu OFFLOAD_BACKEND=lmcache (LMCacheConnectorV1; rixl TP 405B) ==="

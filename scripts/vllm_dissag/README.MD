@@ -119,21 +119,24 @@ An orthogonal overlay that attaches a CPU-RAM KV tier (GPU KV → host, for pref
 *on top of* the disagg P/D connector, by composing both via vLLM's `MultiConnector`. The
 tier's backend is selectable via `OFFLOAD_BACKEND`:
 
-- **`lmcache`** — LMCache's `LMCacheConnectorV1`, sized by `LMCACHE_MAX_LOCAL_CPU_SIZE`. Optionally
-  extend it with a filesystem tier below CPU (GPU → CPU RAM → local disk) via `OFFLOAD_DISK_PATH`:
-  LMCache (LRU) spills CPU-evicted chunks to disk instead of dropping them. Mirrors the llm-d
-  `tiered-prefix-cache` guide ([llm-d#2154](https://github.com/llm-d/llm-d/pull/2154)).
+- **`lmcache`** — LMCache's `LMCacheConnectorV1`, sized by `LMCACHE_MAX_LOCAL_CPU_SIZE`.
 - **`native`** (code default) — vLLM's built-in `OffloadingConnector`, sized by `OFFLOAD_CPU_BYTES`.
-  CPU tier only (no fs tier).
+
+Either backend can add a filesystem tier below the CPU tier (GPU → CPU RAM → disk) via
+`OFFLOAD_DISK_PATH`: `native` attaches an `OffloadingConnector` `TieringOffloadingSpec` `fs`
+secondary tier; `lmcache` (LRU) spills CPU-evicted chunks to its `local_disk`. Mirrors the
+llm-d `tiered-prefix-cache` guide ([llm-d#2154](https://github.com/llm-d/llm-d/pull/2154)).
+The **validated / recommended** path is `lmcache` + `cpu`; the other cells are functional but
+not benchmarked here.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KV_OFFLOAD` | `none` | `none` (off) or `cpu` (CPU-RAM tier) |
 | `OFFLOAD_BACKEND` | `native` | `native` (OffloadingConnector) or `lmcache` (LMCacheConnectorV1) |
 | `LMCACHE_MAX_LOCAL_CPU_SIZE` | `100.0` | lmcache only: **per-worker** CPU tier in GB |
-| `OFFLOAD_DISK_PATH` | (unset) | lmcache only: base dir for an fs tier below CPU (unset = no disk tier). Node-local disk (e.g. `/mnt/m2m_nobackup/...`), **not** a network FS |
-| `LMCACHE_MAX_LOCAL_DISK_SIZE` | `0.0` | lmcache only: **per-worker** disk tier in GB |
 | `OFFLOAD_CPU_BYTES` | `107374182400` (100 GB) | native only: instance-wide pinned host bytes |
+| `OFFLOAD_DISK_PATH` | (unset) | either backend: base dir for an fs tier below CPU (unset = no disk tier). Node-local disk (e.g. `/mnt/m2m_nobackup/...`), **not** a network FS. A per-host subdir is appended |
+| `LMCACHE_MAX_LOCAL_DISK_SIZE` | `0.0` | lmcache only: **per-worker** disk tier in GB |
 
 ```bash
 # NIXL (rixl) TP Llama-3.1-405B with CPU-tier prefix caching — native (default)
