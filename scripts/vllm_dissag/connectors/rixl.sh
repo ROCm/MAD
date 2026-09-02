@@ -29,7 +29,12 @@ connector_init() {
         # rixl/TP ports
         SERVER_PORT=2584; SERVE_PORT="${SERVER_PORT}"
         KV_PORT=14600
-        CONTAINER_BARRIER_PORT=5000
+        # Container-creation barrier port. Env-overridable (BARRIER_PORT) so it can
+        # be moved off the collision-prone default 5000: the launcher's `fuser -k`
+        # cleanup targets this port on the host (host networking), so a stale host
+        # service on 5000 would otherwise be killed. Residual risk: the host-side
+        # fuser still kills whatever holds this port for the launching user.
+        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-5000}"
     fi
 
     PROXY_TYPE="${PROXY_TYPE:-vllm_router}"
@@ -320,11 +325,13 @@ _rixl_launch_deepep() {
     # lmcache backend reads its tier config from the env; native/none is a no-op.
     kv_offload_setup_env
 
-    # Prefix caching: OFF by default; the user can force it on via
-    # ENABLE_PREFIX_CACHING=1. OffloadingConnector requires it, so it is forced on
-    # whenever KV_OFFLOAD is active (regardless of the knob). Decoupling APC from
-    # KV_OFFLOAD lets the `none` arm of a KV-offload A/B also run with APC on.
-    local _pc="${ENABLE_PREFIX_CACHING:-0}"
+    # Prefix caching: OFF by default. Forced ON when KV_OFFLOAD is active (the
+    # OffloadingConnector requires it), the agentic trace-replay path runs, or the
+    # user requests it (ENABLE_PREFIX_CACHING=1 / ENABLE_PREFIX_CACHE=1). Decoupling
+    # APC from KV_OFFLOAD lets the `none` arm of a KV-offload A/B also run APC on.
+    local _pc=0
+    [[ "${ENABLE_PREFIX_CACHING:-0}" == "1" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]] && _pc=1
+    [[ "${BENCHMARK_SCRIPT:-}" == "agentic" ]] && _pc=1
     kv_offload_enabled && _pc=1
     local _prefix_cache_arg="--no-enable-prefix-caching"
     [[ "$_pc" == "1" ]] && _prefix_cache_arg="--enable-prefix-caching"
@@ -411,6 +418,13 @@ connector_wait_workers_ready() {
 
 connector_start_proxy() {
     local PREFILL_ARGS="" DECODE_ARGS="" PREFILL_PORTS="" DECODE_PORTS="" i
+    # Agentic replay: point aiperf at the backend vLLM servers' /metrics (SERVER_PORT)
+    # for prefill+decode masters. Gated on the agentic path so the default sweep is
+    # unaffected. Consumed by scripts/common/agentic_lib.sh (aiperf --server-metrics).
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+        export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVER_PORT} ${DECODE_MASTER_ADDR}:${SERVER_PORT}}"
+        echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+    fi
     for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do PREFILL_ARGS+="${IP_ARRAY[$i]} "; PREFILL_PORTS+="$SERVER_PORT "; done
     for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do DECODE_ARGS+="${IP_ARRAY[$i]} "; DECODE_PORTS+="$SERVER_PORT "; done
 

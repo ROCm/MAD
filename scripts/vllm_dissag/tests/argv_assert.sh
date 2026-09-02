@@ -131,6 +131,27 @@ _parse() { # $1=connector ; reads its .env with same logic as the slurm
 _has "$(_parse moriio)" "-e PYTORCH_HIP_ALLOC_CONF=expandable_segments:False" "parse yields HIP_ALLOC -e arg"
 _has "$(PYTORCH_HIP_ALLOC_CONF=expandable_segments:True _parse moriio)" "-e PYTORCH_HIP_ALLOC_CONF=expandable_segments:True" "submit-time override wins"
 
+# Per-shape warmup must stay opt-in: it is on the shared sweep path, so a default-on gate
+# would change the measured TPOT of every already-validated recipe. GLM opts in via its
+# models.yaml env:, and both GLM-only knobs need a docker -e line or they cannot be
+# A/B-tested from the submit side (the recipe applies whenever the key is absent).
+echo ""
+echo "=== per-shape warmup is opt-in, not default-on ==="
+B="$(cat "$DIR/benchmark_xPyD.sh")"
+_has    "$B" '${SHAPE_WARMUP:-0}' "benchmark_xPyD.sh: warmup gate defaults OFF"
+_hasnot "$B" '${SHAPE_WARMUP:-1}' "benchmark_xPyD.sh: gate is not default-on"
+_OPTIN="$(python3 - "$DIR/models.yaml" <<'PY'
+import sys, yaml
+y = yaml.safe_load(open(sys.argv[1])) or {}
+optin = [m for m, c in y.items()
+         if isinstance(c, dict) and (c.get("env") or {}).get("SHAPE_WARMUP") == "1"]
+print("[" + ",".join(sorted(optin)) + "]")
+PY
+)"
+_has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
+_has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
+_has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+
 echo ""
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
