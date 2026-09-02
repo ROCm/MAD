@@ -1,0 +1,37 @@
+# Case-B conformance profile (ROCm/MAD #173, generalized).
+# Longer-context / heavier-tail variant of Case-A. Regenerating with these
+# params via gen_agentx_profile.py reproduces #173's committed corpus
+# byte-for-byte and verifies 13/13 through verify_agentx_profile.py.
+name: conformance_512k
+model_tag: GLM-5.2-MXFP4     # written into requests[].model + models[]; retag per served model
+id_prefix: caseA             # #173 used the literal "caseA" salt for Case-B too; keep to byte-match
+seed: 42
+n_sessions: 300
+block_size: 64
+
+# Distribution targets: P50 / P90 / P99
+isl_p:   [62000, 220000, 500000]   # input tokens per request (tail to 500k)
+osl_p:   [180, 1400, 7000]         # output tokens per request
+delay_p: [3.6, 23, 240]            # inter-turn think delay (seconds)
+
+# Turns-per-session discrete distribution (heavier tail than Case-A).
+turns:
+  values:  [2, 3, 5, 8, 20, 50, 82, 110, 144]
+  weights: [20, 20, 20, 10, 8, 8, 7, 4, 3]
+
+# Per-turn prefix-reuse band -> ~88-90% prefix cache hit.
+cache_hit: [0.88, 0.90]
+
+# Sampling clamps (lo, hi). ISL tail runs to 520k for this case.
+clamps:
+  isl:   [1200, 520000]
+  osl:   [8, 20000]
+  delay: [1, 600]
+
+# Verifier targets + tolerance bands. Case-B widens the ISL P99 band to
+# 0.75-1.25 (the 500k tail is noisier), matching #173's verify_caseB.py.
+verify:
+  turns_p: [5, 82, 144]        # Turns P50/P90/P99
+  cache_target: 89             # Cache-hit P50 %
+  band_overrides:
+    "Input ISL P99": [0.75, 1.25]

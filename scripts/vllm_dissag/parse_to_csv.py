@@ -143,6 +143,69 @@ def _get_run_metadata(pipeline: str = "vllm"):
     }
 
 
+def parse_niah_log(log_file: str) -> Dict[int, Dict]:
+    """Parse NIAH benchmark log file and extract retrieval results per context length.
+
+    Scans for summary lines emitted by benchmark_niah.py:
+      words=  2000  mean=9.7/10  min=9  max=10  (n=3)
+    Returns {n_words: {'mean': float, 'min': int, 'max': int, 'n': int}}.
+    """
+    results = {}
+    with open(log_file, 'r') as f:
+        for line in f:
+            # Match:   words=  2000  mean=9.7/10  min=9  max=10  (n=3)
+            m = re.search(
+                r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\s+\(n=(\d+)\)',
+                line
+            )
+            if m:
+                n_words = int(m.group(1))
+                results[n_words] = {
+                    'mean': float(m.group(2)),
+                    'min': int(m.group(3)),
+                    'max': int(m.group(4)),
+                    'n': int(m.group(5)),
+                }
+    return results
+
+
+def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
+                       model_name: str = "", pipeline: str = "vllm"):
+    """Save NIAH results in madengine perf.csv format (one row per context length)."""
+    if not results:
+        print("No NIAH results to save to perf.csv.")
+        return
+
+    meta = _get_run_metadata(pipeline)
+
+    fieldnames = [
+        'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
+        'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
+        'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
+        'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
+        'build_duration', 'test_duration', 'dataname', 'data_provider_type',
+        'data_size', 'data_download_duration', 'build_number',
+        'additional_docker_run_options',
+    ]
+
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for n_words in sorted(results.keys()):
+            data = results[n_words]
+            row = {
+                'model': model_name,
+                'performance': f"{data['mean']:.1f}",
+                'metric': f"retrieval/10 (niah words={n_words} seeds={data['n']})",
+                'status': 'SUCCESS',
+            }
+            row.update(meta)
+            writer.writerow(row)
+
+    print(f"Saved {len(results)} NIAH rows to perf.csv: {output_file}")
+
+
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
                   model_name: str = "", pipeline: str = "vllm"):
     """Save results in madengine perf.csv format."""
@@ -190,6 +253,8 @@ def main():
     parser.add_argument('-o', '--output', type=str, help='Output CSV file name (default: <log_file>_results.csv)')
     parser.add_argument('--perf-csv', type=str, help='Also generate madengine perf.csv at this path')
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
+    parser.add_argument('--niah', action='store_true',
+                        help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
 
     args = parser.parse_args()
 
@@ -201,6 +266,22 @@ def main():
 
     print(f"Parsing log file: {log_file}")
 
+    # NIAH mode: parse retrieval scores, write perf.csv only
+    if args.niah:
+        if not args.perf_csv:
+            print("Error: --niah requires --perf-csv")
+            sys.exit(1)
+        results = parse_niah_log(log_file)
+        if not results:
+            print("No NIAH results found in log file.")
+            return
+        save_niah_perf_csv(results, args.perf_csv, args.model_name)
+        print(f"\nSummary (NIAH):")
+        print(f"  Context lengths parsed: {len(results)}")
+        print(f"  perf.csv: {args.perf_csv}")
+        return
+
+    # Default: throughput sweep mode
     results = parse_benchmark_log(log_file)
 
     if not results:
