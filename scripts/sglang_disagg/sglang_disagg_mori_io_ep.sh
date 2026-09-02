@@ -407,13 +407,46 @@ echo "DECODE_ARGS: $DECODE_ARGS"
 # Container Synchronization
 # =============================================================================
 
-echo "Waiting at the container creation barrier on $host_name"
-python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
+# Time-to-first-ready scales with checkpoint size, so the default is per model rather
+# than one number for every card. 4000s is fine for the ~600 GB class (DeepSeek-R1
+# reached ready in well under half of it), but Kimi-K2 is ~1 TB of FP8 weights: a
+# 4-node run measured 15m15s of weight load on an idle NFS and 24m48s on a busy one,
+# and the slow case blew past 4000s at 4003s -- run.sh then tore down healthy servers
+# that were still initialising. Give the 1 TB class 3h; an explicit
+# ROUTER_READY_TIMEOUT_SECONDS still overrides both.
+#
+# Computed here, before the per-rank branching, because every rank needs it: rank 0
+# polls the server logs with it, and the other ranks wait for rank 0's router with it.
+_router_ready_default=4000
+case "${MODEL_NAME:-}" in
+    *Kimi-K2*|*kimi-k2*) _router_ready_default=10800 ;;
+esac
+ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-$_router_ready_default}"
+
+# The two barrier waits below are not the same kind of wait and must not share a
+# timeout. The container-creation barrier is peers starting a container: minutes.
+# The router wait further down is ranks 1..N waiting for rank 0 to finish loading
+# weights and bring every server up: hours. A single 3600s default for both killed a
+# healthy 4-node run at exactly 3600s ("barrier timed out ... 10.158.x:2322"), and
+# would also have killed the validated Kimi run, which took 72 minutes to reach ready.
+# So the router wait is bounded by the readiness timeout itself, plus a margin, and can
+# never fire before the thing it is waiting for has been given up on.
+BARRIER_TIMEOUT_SECONDS="${BARRIER_TIMEOUT_SECONDS:-3600}"
+ROUTER_BARRIER_TIMEOUT_SECONDS="${ROUTER_BARRIER_TIMEOUT_SECONDS:-$(( ROUTER_READY_TIMEOUT_SECONDS + 1800 ))}"
+
+echo "Waiting at the container creation barrier on $host_name (timeout ${BARRIER_TIMEOUT_SECONDS}s)"
+if ! python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-ip ${host_ip} \
     --local-port ${BARRIER_PORT} \
     --enable-port \
     --node-ips ${IPADDRS} \
-    --node-ports ${BARRIER_PORT}
+    --node-ports ${BARRIER_PORT} \
+    --timeout "${BARRIER_TIMEOUT_SECONDS}"; then
+    # Checked, unlike before: an unchecked barrier turns a hard failure into
+    # "Script completed successfully" and madengine then reports the run as passed.
+    echo "ERROR: container-creation barrier failed on ${host_name}; aborting this rank" >&2
+    exit 1
+fi
 
 
 # =============================================================================
@@ -588,18 +621,6 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
     # Requires shared /run_logs across nodes.
     SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
-    # Time-to-first-ready scales with checkpoint size, so the default is per model
-    # rather than one number for every card. 4000s is fine for the ~600 GB class
-    # (DeepSeek-R1 reached ready in well under half of it), but Kimi-K2 is ~1 TB of
-    # FP8 weights: a 4-node run measured 15m15s of weight load on an idle NFS and
-    # 24m48s on a busy one, and the slow case blew past 4000s at 4003s -- run.sh
-    # then tore down healthy servers that were still initialising. Give the 1 TB
-    # class 3h; an explicit ROUTER_READY_TIMEOUT_SECONDS still overrides both.
-    _router_ready_default=4000
-    case "${MODEL_NAME:-}" in
-        *Kimi-K2*|*kimi-k2*) _router_ready_default=10800 ;;
-    esac
-    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-$_router_ready_default}"
     ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"
@@ -832,10 +853,15 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     _dbg "prefill server started pid=${prefill_pid}"
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
-    echo "Waiting for proxy server to be up..."
-    python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
+    echo "Waiting for proxy server to be up (timeout ${ROUTER_BARRIER_TIMEOUT_SECONDS}s)..."
+    if ! python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --timeout "${ROUTER_BARRIER_TIMEOUT_SECONDS}"; then
+        echo "ERROR: proxy on ${MASTER_ADDR}:2322 never came up within ${ROUTER_BARRIER_TIMEOUT_SECONDS}s" >&2
+        _shutdown_server "${prefill_pid}" "prefill NODE${NODE_RANK}"
+        exit 1
+    fi
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
@@ -913,10 +939,15 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     _dbg "decode server started pid=${decode_pid}"
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
-    echo "Waiting for proxy server to be up..."
-    python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
+    echo "Waiting for proxy server to be up (timeout ${ROUTER_BARRIER_TIMEOUT_SECONDS}s)..."
+    if ! python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --timeout "${ROUTER_BARRIER_TIMEOUT_SECONDS}"; then
+        echo "ERROR: proxy on ${MASTER_ADDR}:2322 never came up within ${ROUTER_BARRIER_TIMEOUT_SECONDS}s" >&2
+        _shutdown_server "${decode_pid}" "decode NODE${NODE_RANK}"
+        exit 1
+    fi
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
