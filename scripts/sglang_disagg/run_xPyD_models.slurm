@@ -54,6 +54,7 @@ MORI_EP_VALID_MODELS=( \
     "Qwen3-32B" \
     "Mixtral-8x7B-Instruct-v0.1" \
     "Llama-3.1-8B-Instruct" \
+    "Llama-3.1-70B-Instruct" \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \
@@ -67,6 +68,7 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Mixtral-8x7B-Instruct-v0.1" \
     "Llama-3.1-8B-Instruct" \
+    "Llama-3.1-70B-Instruct" \
     "Llama-3.1-405B-Instruct-FP8-KV" \
     "amd-Llama-3.3-70B-Instruct-FP8-KV" \
     "DeepSeek-V3" \

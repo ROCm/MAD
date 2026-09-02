@@ -192,6 +192,9 @@ if ! _weights_complete; then
             Qwen3-Next-80B) _MODEL_REPO="Qwen/Qwen3-Next-80B-A3B-Instruct" ;;
             GPT-OSS-120B)   _MODEL_REPO="openai/gpt-oss-120b" ;;
             Kimi-K2-Instruct) _MODEL_REPO="moonshotai/Kimi-K2-Instruct-0905" ;;
+            # Non-gated mirror: the official meta-llama Llama-4 repos need a
+            # per-account license grant, which an unattended run cannot obtain.
+            Llama-4-Scout-17B-16E-Instruct) _MODEL_REPO="unsloth/Llama-4-Scout-17B-16E-Instruct" ;;
             *) echo "ERROR: weights missing at ${MODEL_PATH}; set MODEL_REPO for ${MODEL_NAME}" >&2; exit 1 ;;
         esac
     fi

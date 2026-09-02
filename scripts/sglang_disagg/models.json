@@ -577,5 +577,47 @@
         ],
         "timeout": 14400,
         "args": ""
+    },
+    {
+        "name": "sglang-disagg-llama-4-scout-overlay",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-Llama-4-Scout-17B-16E-Instruct.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "llama4",
+            "moe",
+            "tp-only"
+        ],
+        "timeout": 21600,
+        "args": ""
+    },
+    {
+        "name": "sglang-disagg-llama-3.1-70b-overlay",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-Llama-3.1-70B-Instruct.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "llama3",
+            "dense",
+            "tp-only"
+        ],
+        "timeout": 14400,
+        "args": ""
     }
 ]

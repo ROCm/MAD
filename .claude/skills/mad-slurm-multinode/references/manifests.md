@@ -150,6 +150,26 @@ differ, the host path belongs on the value side.
   measured with it in place and still produced an empty CSV. Root cause is
   still open — do not "fix" it by touching `log_interval`.
   `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.
+- **Primus Llama-4-Scout-17B-16E**
+  (`primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay`): same
+  `rccl_overlay` Dockerfile / `torchrun` shape. MoE, BF16 only, seq 4096, MBS=1;
+  the shipped config runs EP=8 intra-node with TP=1/PP=1, so scaleout is pure
+  data parallelism and the global batch is renormalised to one micro-batch per
+  rank. Two knobs, both optional:
+  - `SCOUT_MOE_DISPATCHER` (default `alltoall`) — set `allgather` to route the
+    MoE dispatch around a RCCL build that hangs in `ALLTOALL_BASE`; the script
+    then also turns off `moe_shared_expert_overlap`, which is alltoall-only.
+  - `SCOUT_HF_TOKENIZER` (default `unsloth/Llama-4-Scout-17B-16E`) — a non-gated
+    mirror, so the run does not need a per-account Llama-4 license grant. Point
+    it at `meta-llama/Llama-4-Scout-17B-16E` once access is granted.
+  Reference point: 2 nodes / 16 GPU gfx950, BF16, `alltoall` → ~2734 tok/s/GPU,
+  ~275 TFLOP/s/GPU on `rocm/primus:v26.3` with RCCL develop `f1be5f14` (the
+  earlier `c67fbe4956` hung in the MoE all-to-all). Reproduced on this template:
+  2749.5 tok/s/GPU, 276.8 TFLOP/s/GPU, 48/48 parsed iterations, 0 RCCL errors.
+  The `v26.3` pin is deliberate — on `v26.5` the run trains to completion but
+  emits no throughput at all, see
+  [gotchas.md](gotchas.md#primus_megatron-training).
+  `multiple_results` = `perf_primus-megatron-Llama-4-Scout-17B-16E.csv`.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.
   `launcher: sglang-disagg`, `scripts/sglang_disagg/run.sh` entrypoint,
@@ -241,6 +261,29 @@ differ, the host path belongs on the value side.
   `mori` path do not get MoRI's EP a2a talking on this fabric. Not resolved
   here — needs MoRI-level RDMA topology debugging on Broadcom Thor2, which
   is beyond what a manifest config change can fix.
+- **sglang_disagg Llama-4-Scout-17B-16E-Instruct**
+  (`sglang-disagg-llama-4-scout-overlay`): 17Bx16E MoE, bf16, same 4-node
+  xP=2/yD=2 shape. TP-only (`DP_MODE=0`) with `RUN_MORI=1` and `mori`
+  KV-transfer. The three flags that matter are already in
+  `scripts/sglang_disagg/models.yaml`, no manifest action needed:
+  `--attention-backend triton` and `--moe-runner-backend triton` (the AITER MoE
+  kernels segfault during Llama-4 warmup on gfx950 and are unnecessary on
+  gfx942), and `--disable-custom-all-reduce` (the custom all-reduce kernel
+  SIGSEGVs in the warmup embedding all-reduce; plain RCCL all-reduce is used
+  instead). Verified at 4 nodes on gfx942 (MI300X) / Mellanox CX7, and
+  independently reproduced end-to-end at 4 nodes on gfx950 (MI355X) / Broadcom
+  Thor2 bnxt_re with this exact arch-agnostic registration (no gfx950-specific
+  kernel guards) — full 8-point benchmark sweep, all points returned real
+  completions, e.g. ISL/OSL 1024/1024 @ concurrency 64: 9622 tok/s total, TTFT
+  11497 ms. **Use `KV_TRANSFER_BACKEND=mori` (`RUN_MORI=1`), not `nixl`** — on
+  this cluster `nixl` never hung with an error, it just never completed a
+  request end-to-end (readiness probes retried indefinitely, no crash, no
+  timeout); switching to `mori` with everything else unchanged fixed it
+  immediately. This registration is arch-agnostic: gfx950 needs further kernel
+  workarounds for some models, but none were needed to reach this result here.
+  Weights default to the non-gated `unsloth/Llama-4-Scout-17B-16E-Instruct`
+  mirror.
+  `multiple_results` = `perf_sglang-disagg-Llama-4-Scout-17B-16E-Instruct.csv`.
 - **MLPerf Training Llama-3.1-8B** (`pyt_mlperf_training_llama-3.1-8b`): the
   MLCommons `small_llm_pretraining/nemo` benchmark on the NeMo/Megatron/TE stack.
   `launcher: torchrun`, `scripts/pyt_mlperf_training/run.sh`, `nproc_per_node: 8`,

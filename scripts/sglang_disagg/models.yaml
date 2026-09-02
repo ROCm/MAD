@@ -131,3 +131,33 @@ GPT-OSS-120B:
     tp: "--disable-cuda-graph"
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+
+# Llama 4 Scout: 17Bx16E MoE, bf16. --disable-custom-all-reduce: the custom
+# all-reduce kernel SIGSEGVs on gfx950 during the embedding all-reduce in warmup;
+# fall back to plain RCCL all-reduce. --attention-backend triton avoids the AITER
+# attention path that segfaults on gfx950 warmup and is harmless on gfx942 (verified
+# there: coherent completions). Context 131072.
+#
+# The two arches need opposite things here, so both live in arch_flags, not base_flags.
+#
+# gfx95 needs --moe-runner-backend triton: the AITER MoE kernels segfault during warmup.
+# gfx942 must NOT have it. There it silently corrupts output while every harness signal
+# stays green -- a 4-node 2P2D run produced a full 8/8 benchmark sweep at 2501 tok/s
+# while every generated token was id 0, and a single-node run with only this flag
+# returned multilingual gibberish ("iscentrouwd 의존해야傾 ocean...") where the same
+# server without it answers "Paris. Paris is known as the City of Light".
+# bench_serving counts tokens, not meaning, so nothing in the harness catches it.
+#
+# gfx942 then needs a higher --mem-fraction-static than the 0.8 that suits gfx95:
+# falling back to the AITER MoE runner costs more device memory, and on a 192 GB card
+# 0.8 leaves nothing for the KV cache ("Raise --mem-fraction-static above 0.854").
+# Appended after base_flags, so this overrides the base value.
+Llama-4-Scout-17B-16E-Instruct:
+  base_flags: "--attention-backend triton --disable-custom-all-reduce --watchdog-timeout 1000000 --mem-fraction-static 0.8 --context-length 131072"
+  arch_flags:
+    gfx95: "--moe-runner-backend triton"
+    gfx942: "--mem-fraction-static 0.9"
+  prefill:
+    tp: "--disable-cuda-graph"
+  decode:
+    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"

@@ -375,6 +375,20 @@ moe_router_num_groups null no group routing.
   uses `n_group=1`, so `moe_router_num_groups` is `null` (no group routing), and
   there are no MTP layers. Both are handled inside `kimi_k2_thinking.yaml`; no
   env overrides are needed.
+- **`rocm/primus:v26.5` can train fine and still report nothing — pin the base
+  that the model was validated on.** Observed on Llama-4-Scout, 2 nodes / 16 GPU
+  gfx950: on `v26.5` the run completes all 50 iterations and logs
+  `pretrain() completed successfully`, but every step also logs
+  `[Patch:megatron.training_log] No token throughput`, the Primus summary prints
+  `Harmonic mean of TPS (excluding first 2 steps): N/A`, and
+  `primus_megatron-lm_benchmark_report.py` finds no `tokens/s/GPU` — so the perf
+  CSV comes out empty and madengine scores the run FAILED. The identical commit
+  on `rocm/primus:v26.3` gave 48/48 parsed iterations, 2749.5 tok/s/GPU and
+  276.8 TFLOP/s/GPU. This is easy to misread as a parser bug in MAD; it is not —
+  grep the training log for `No token throughput` before touching the parser.
+  The v26.5 run additionally SIGSEGVs at teardown
+  (`destroy_process_group() was not called before program exit`), which is a
+  second, independent reason it is scored as a failure.
 
 ## pyt_mlperf_training (MLPerf Llama-3.1)
 

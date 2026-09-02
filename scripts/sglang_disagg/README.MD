@@ -3,6 +3,7 @@
 Dense Models
 - Qwen3-32B (https://huggingface.co/Qwen/Qwen3-32B)
 - meta-llama/Llama-3.1-8B-Instruct (https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
+- meta-llama/Llama-3.1-70B-Instruct (https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)
 - amd/Llama-3.3-70B-Instruct-FP8-KV (https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV)
 - amd/Llama-3.1-405B-Instruct-FP8-KV (https://huggingface.co/amd/Llama-3.1-405B-Instruct-FP8-KV)
 
@@ -11,6 +12,7 @@ MoE Models
 - DeepSeek-R1 (https://huggingface.co/deepseek-ai/DeepSeek-R1)
 - Mixtral-8x7B-v0.1 (https://huggingface.co/mistralai/Mixtral-8x7B-v0.1)
 - Kimi-K2-Instruct (https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905) — 1T MLA + MoE, native FP8
+- Llama-4-Scout-17B-16E-Instruct (https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct) — staged from the non-gated `unsloth/Llama-4-Scout-17B-16E-Instruct` mirror by default
 
 This repository contains scripts and documentation to launch PD Disaggregation for above models. You will find setup instructions, node assignment details and benchmarking commands.
 

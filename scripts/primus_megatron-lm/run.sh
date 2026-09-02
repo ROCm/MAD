@@ -50,6 +50,8 @@ elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-2-7b" ]]; then
   model="Llama-2-7B"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-2-70b" ]]; then
   model="Llama-2-70B"
+elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e" ]]; then
+  model="Llama-4-Scout-17B-16E"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_deepseek-v2-lite-16b" ]]; then
   model="DeepSeek-V2-lite"
 elif [[ "$MODEL_REPO" == "primus_pyt_megatron_lm_train_deepseek-v2" ]]; then
