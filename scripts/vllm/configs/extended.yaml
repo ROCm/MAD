@@ -80,3 +80,30 @@
   arch_overrides:
     gfx942:
       dtype: float16
+
+# Cohere2 is only validated in bf16; no gfx942 float16 override
+- benchmark: serving
+  model:
+    CohereLabs/c4ai-command-r7b-12-2024
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+# command-a-plus is a 219B MoE VLM; this is a text-only benchmark, so skip the
+# vision tower and free the VRAM for KV cache
+- benchmark: serving
+  model:
+    CohereLabs/command-a-plus-05-2026-bf16
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --language-model-only: true

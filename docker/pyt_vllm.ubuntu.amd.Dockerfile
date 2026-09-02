@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.23.0
+ARG BASE_DOCKER=vllm/vllm-openai-rocm:v0.28.0
 FROM $BASE_DOCKER
 
 USER root

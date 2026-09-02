@@ -14,8 +14,8 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.2.3
--   ✅ vLLM 0.26.0
--   ✅ PyTorch 2.11.0 (2.11.0+gitd0c8b1f3)
+-   ✅ vLLM 0.28.0
+-   ✅ PyTorch 2.12.0 (2.12.0+git6bbd260)
 -   ✅ hipBLASLt 1.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.26.0
+docker pull vllm/vllm-openai-rocm:v0.28.0
 ```
 
 ### MAD-integrated benchmarking
@@ -90,6 +90,8 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
+| pyt_vllm_command-a-plus                | [CohereLabs/command-a-plus-05-2026-bf16](https://huggingface.co/CohereLabs/command-a-plus-05-2026-bf16) |
+| pyt_vllm_command-r7b                   | [CohereLabs/c4ai-command-r7b-12-2024](https://huggingface.co/CohereLabs/c4ai-command-r7b-12-2024) |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
 | pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4) |
 | pyt_vllm_deepseek-v3.2_fp4             | [amd/DeepSeek-V3.2-MXFP4](https://huggingface.co/amd/DeepSeek-V3.2-MXFP4) |
@@ -131,8 +133,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
 
 >[!NOTE]
->`pyt_vllm_kimi-k3` is the one exception to the shared Docker image above. Kimi K3 requires
->vLLM >= 0.27.0, which is not yet in a tagged `vllm-openai-rocm` release, so it builds from
+>`pyt_vllm_kimi-k3` is the one exception to the shared Docker image above. It builds from
 >the model-specific `vllm/vllm-openai-rocm:kimi-k3` image via
 >[docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile).
 >It needs an 8x MI350X/MI355X (gfx950) node — the ~1680 GB minimum footprint does not fit a
@@ -157,9 +158,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.26.0
+docker pull vllm/vllm-openai-rocm:v0.28.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.26.0
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.28.0
 ```
 
 >[!NOTE]
@@ -374,6 +375,9 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.28.0
+- Added Cohere Command R7B and Command A+ to the extended benchmark suite
 
 v0.26.0
 - Minimax gfx942 fix

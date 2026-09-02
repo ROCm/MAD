@@ -1,5 +1,41 @@
 [
     {
+        "name": "pyt_vllm_command-a-plus",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_command-a-plus-05-2026-bf16.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_extended",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo CohereLabs/command-a-plus-05-2026-bf16 --config configs/extended.yaml"
+    },
+    {
+        "name": "pyt_vllm_command-r7b",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_c4ai-command-r7b-12-2024.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_extended",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo CohereLabs/c4ai-command-r7b-12-2024 --config configs/extended.yaml"
+    },
+    {
         "name": "pyt_vllm_deepseek-r1",
         "dockerfile": "../../docker/pyt_vllm",
         "scripts": "run.sh",
