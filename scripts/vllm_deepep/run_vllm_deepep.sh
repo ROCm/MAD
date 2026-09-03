@@ -55,6 +55,19 @@ NUM_PROMPTS="${NUM_PROMPTS:-64}"
 WARMUP_RUNS="${WARMUP_RUNS:-2}"
 MEASURED_RUNS="${MEASURED_RUNS:-3}"
 
+# seq 1 0 (or 1 <negative>) silently produces no iterations, so a bad value
+# here does not fail -- it skips straight to a header-only CSV and the script
+# exits 0, which MAD records as a successful run with zero measurements.
+_require_positive_int() {
+  local name="$1" value="$2"
+  if ! [[ "${value}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "${name}=${value} must be a positive integer" >&2
+    exit 1
+  fi
+}
+_require_positive_int WARMUP_RUNS "${WARMUP_RUNS}"
+_require_positive_int MEASURED_RUNS "${MEASURED_RUNS}"
+
 PYTHON="${PYTHON:-/opt/venv/bin/python}"
 VLLM="${VLLM:-/opt/venv/bin/vllm}"
 LOG_DIR="${LOG_DIR:-$(pwd)}"
@@ -141,10 +154,14 @@ elif [[ -n "${MODEL_REVISION:-}" ]]; then
   # commands at the same local directory removes the second revision
   # entirely, rather than trying to keep two of them in sync.
   echo "resolving ${MODEL_REPO}@${MODEL_REVISION} to a local snapshot..."
+  # repo/revision passed as argv, not interpolated into the Python source: a
+  # ref containing a quote would otherwise produce a SyntaxError at best, and
+  # arbitrary Python at worst, from a value that is supposed to be inert data.
   MODEL="$("${PYTHON}" -c "
+import sys
 from huggingface_hub import snapshot_download
-print(snapshot_download('${MODEL_REPO}', revision='${MODEL_REVISION}'))
-")"
+print(snapshot_download(sys.argv[1], revision=sys.argv[2]))
+" "${MODEL_REPO}" "${MODEL_REVISION}")"
   echo "resolved to ${MODEL}"
   MODEL_REVISION_LABEL="${MODEL_REVISION}"
 else
@@ -196,14 +213,33 @@ for _ in $(seq 1 240); do
   fi
   sleep 15
 done
-curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null
+# The loop above breaks on success or on the server dying; a server that
+# stays alive without ever answering healthy falls through to here. Checked
+# explicitly rather than left to run bare under set -e: an unguarded failure
+# at this point aborts with no message and no log tail, making a cold-JIT
+# hang or an init deadlock look identical to every other exit.
+if ! curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+  echo "server never became healthy after $((240 * 15))s; tail of ${SERVER_LOG}:" >&2
+  tail -40 "${SERVER_LOG}" >&2
+  exit 1
+fi
+
+# Bounds a single benchmark invocation. Without it, a stall in the EP
+# collective after a healthy startup -- not covered by the health check above,
+# which only proves the server came up -- would hang here indefinitely,
+# occupying all 8 GPUs for as long as the job is left running. 1800s is
+# generous relative to a normal run (seconds to low minutes at the sizes this
+# script uses) rather than tuned to any one workload; override for larger
+# ISL/OSL/NUM_PROMPTS combinations.
+BENCH_TIMEOUT_SECS="${BENCH_TIMEOUT_SECS:-1800}"
 
 bench_once() {
   # --trust-remote-code forwarded: bench serve loads its own tokenizer
   # (get_tokenizer(...)) independently of the server, and a model that
   # genuinely needs the opt-in would otherwise serve successfully and then
   # fail here, after the server already came up.
-  "${VLLM}" bench serve --backend vllm --model "${MODEL}" \
+  timeout --kill-after=30 "${BENCH_TIMEOUT_SECS}" \
+    "${VLLM}" bench serve --backend vllm --model "${MODEL}" \
     --host 127.0.0.1 --port "${PORT}" \
     --dataset-name random \
     --random-input-len "${ISL}" --random-output-len "${OSL}" \
@@ -218,6 +254,21 @@ bench_once() {
 # pushing that cold-tuning cost into the first MEASURED run instead, silently.
 _failed_requests() {
   echo "$1" | awk '/Failed requests/ {print $NF; exit}'
+}
+
+# RFC4126-quoting via Python's csv module rather than string concatenation:
+# MODEL is attacker-influenced-in-practice input (MODEL_PATH, or a resolved
+# Hub snapshot path) and MODEL_REVISION is an arbitrary ref -- either could
+# contain a comma, a quote, or a newline, any of which shifts columns or
+# splits one row into several under plain `echo "a,b,c"`. Fields passed as
+# argv, not interpolated into source, for the same reason the snapshot
+# resolution above does it that way.
+_csv_row() {
+  "${PYTHON}" -c '
+import csv, sys
+csv.writer(sys.stdout, lineterminator="
+").writerow(sys.argv[1:])
+' "$@"
 }
 
 echo "--- ${WARMUP_RUNS} warm-up run(s), discarded ---"
@@ -299,17 +350,18 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   # that has not converged stays visible instead of being hidden in a mean.
   # MAD prefixes these labels with the model-card name, which is what carries
   # the backend and the model.
-  printf '%s\n' \
-    "run${i}_throughput,${tput_val},total_token_throughput_tok_s" \
-    "run${i}_tpot,${tpot_val},median_tpot_ms" \
-    "run${i}_ttft,${ttft_val},p99_ttft_ms" \
+  _csv_row "run${i}_throughput" "${tput_val}" "total_token_throughput_tok_s" \
     >> "${RESULT_CSV}"
+  _csv_row "run${i}_tpot" "${tpot_val}" "median_tpot_ms" >> "${RESULT_CSV}"
+  _csv_row "run${i}_ttft" "${ttft_val}" "p99_ttft_ms" >> "${RESULT_CSV}"
 
   # MODEL, not MODEL_REPO: with MODEL_PATH set the server and the benchmark
   # both ran against the local path, and recording the repo id would label the
   # row with a model that was never loaded.
-  echo "${ALL2ALL_BACKEND},${MODEL},${MODEL_REVISION_LABEL},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
-    >> "${DETAIL_CSV}"
+  _csv_row "${ALL2ALL_BACKEND}" "${MODEL}" "${MODEL_REVISION_LABEL}" \
+    "${CONCURRENCY}" "${ISL}" "${OSL}" "${NUM_PROMPTS}" "${i}" \
+    "${tput_val}" "${tpot_val}" "${ttft_val}" "${WARMUP_RUNS}" \
+    "${MORI_DISABLE_TOPO:-}" >> "${DETAIL_CSV}"
 done
 
 echo "=== results (${RESULT_CSV}) ==="

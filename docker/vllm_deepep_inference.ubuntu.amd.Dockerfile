@@ -42,16 +42,42 @@
 #   uses. This recipe was validated against a THERock ROCm 7.14 / Torch 2.11
 #   base, so override it if your base predates the ROCm version DeepEP needs.
 #
-#   Stages, each gated so a rebuild only pays for what changed:
+#   Stages, ordered so a rebuild only pays for what actually changed:
 #     DEEPEP_REPO / DEEPEP_COMMIT  DeepEP build (EP_TARGET_HIP=1,
 #                                  EP_DISABLE_LEGACY=1). Required; the source is
-#                                  not vendored here.
+#                                  not vendored here. Comes first: nothing else
+#                                  depends on it, so it never gets invalidated
+#                                  by a later ARG.
 #     AITER_COMMIT                 AITER, with the zero-token get_ksplit guard.
-#     RDMA_CORE_VERSION            rdma-core from source (default 63.0),
-#                                  replacing the distro packages. Empty keeps
-#                                  the base image's.
+#                                  After DeepEP, so a DeepEP-only change still
+#                                  invalidates this (residual coupling -- see
+#                                  below) but nothing after AITER is coupled to
+#                                  DeepEP's ARGs.
+#     VLLM_WHEEL                   vLLM. Deliberately AFTER DeepEP and AITER:
+#                                  this is the argument that moves on every
+#                                  "pick up a newer wheel" rebuild, and used to
+#                                  sit before both, invalidating their compiles
+#                                  on every such rebuild for no reason -- ARG
+#                                  scoping alone cannot fix that in a single
+#                                  linear stage; only ordering can.
 #     ENABLE_TORCHVISION_STUB      Text-only torchvision surface, for ROCm bases
 #                                  whose torchvision ABI breaks `import vllm`.
+#     RDMA_CORE_VERSION            rdma-core from source (default 63.0),
+#                                  replacing the distro packages. Empty keeps
+#                                  the base image's. Compiled in its own FROM
+#                                  stage (rdma-core-build, top of this file),
+#                                  whose only inputs are BASE_IMAGE and
+#                                  RDMA_CORE_VERSION -- so unlike the others,
+#                                  it is untouched by DEEPEP_COMMIT,
+#                                  AITER_COMMIT or VLLM_WHEEL changing.
+#
+#   Known residual coupling: DEEPEP_COMMIT changing still invalidates AITER's
+#   compile, since DeepEP precedes it in the same linear stage and neither
+#   compile is (yet) split into its own FROM stage the way rdma-core's is.
+#   Fixing that needs multi-stage isolation of two Python-packaged components
+#   (an editable AITER install, DeepEP's compiled extension), which is a
+#   larger, riskier change than reordering -- not attempted without validating
+#   it against a real build end to end.
 #
 #   Runtime notes that are easy to lose:
 #     * NCCL_CUMEM_ENABLE=1 is mandatory. Without VMM, RCCL answers
@@ -74,15 +100,61 @@
 # =============================================================================
 
 ARG BASE_IMAGE=rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491
+
+###############################################################################
+# rdma-core, compiled independently of DeepEP/AITER/vLLM.
+#
+# In a single linear stage, changing DEEPEP_COMMIT, AITER_COMMIT or
+# VLLM_WHEEL invalidates every layer after it, including this compile --
+# despite rdma-core depending on none of them. A separate FROM stage removes
+# that coupling: this stage's cache key is BASE_IMAGE + RDMA_CORE_VERSION
+# only.
+#
+# This stage BUILDS but does not INSTALL. Installing over the base image's
+# existing rdma-core (and purging any stale out-of-tree provider) has to run
+# against the FINAL image's actual state, not this stage's -- that is a
+# correctness requirement, not a caching one, so it stays where the final
+# artifact is assembled. See the comment on that step for why.
+###############################################################################
+FROM ${BASE_IMAGE} AS rdma-core-build
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ARG RDMA_CORE_VERSION=63.0
+RUN set -e; \
+    mkdir -p /tmp/rdma-core; \
+    if [ -z "${RDMA_CORE_VERSION}" ]; then \
+      echo "RDMA_CORE_FROM_SOURCE <disabled, keeping base rdma-core>"; \
+    else \
+      apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git ca-certificates cmake ninja-build build-essential pkg-config make \
+        libnl-3-dev libnl-route-3-dev libudev-dev libssl-dev libsystemd-dev \
+        python3-docutils pandoc; \
+      git clone --depth 1 --branch "v${RDMA_CORE_VERSION}" \
+        https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core; \
+      mkdir -p /tmp/rdma-core/build && cd /tmp/rdma-core/build; \
+      cmake -GNinja \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
+        -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+        -DCMAKE_INSTALL_RUNDIR=/run \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DNO_PYVERBS=1 \
+        ..; \
+      ninja -j"$(nproc)"; \
+    fi
+
 FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Build args are declared immediately before the stage that consumes them, not
 # in one block up top: an ARG in scope becomes part of the cache key of every
-# following layer, so hoisting them all would make a change to AITER_COMMIT (or
-# the wheel path, or the rdma-core version) rebuild DeepEP and everything after
-# it -- defeating the staged-rebuild property this file is organised around.
+# following layer, so hoisting them all would make a change to any one of them
+# invalidate everything below, regardless of the stage/ordering work above.
+# ARG scoping and stage ordering are complementary, not substitutes for each
+# other: scoping stops an unrelated ARG's mere presence from padding the cache
+# key; ordering (and, for rdma-core, a separate FROM stage) stops one
+# component's actual rebuild from cascading into an unrelated one's.
 ARG PYTHON=/opt/venv/bin/python
 ARG GPU_TARGETS=gfx950
 
@@ -93,7 +165,12 @@ ENV VLLM_TARGET_DEVICE=rocm \
     EP_DISABLE_LEGACY=1
 
 ###############################################################################
-# 1) DeepEP and vLLM.
+# 1) DeepEP.
+#
+# The vLLM wheel install that used to live in this section now comes after
+# AITER (see below): with DeepEP and vLLM combined here, changing VLLM_WHEEL
+# alone invalidated this build and every layer after it, including AITER's.
+# Neither install has a build-time dependency on the other.
 ###############################################################################
 ARG DEEPEP_REPO
 ARG DEEPEP_COMMIT
@@ -111,10 +188,6 @@ RUN test -n "${DEEPEP_REPO}" || { echo "DEEPEP_REPO is required"; exit 1; }; \
     site_dir="$(${PYTHON} -c "import site; print(site.getsitepackages()[0] + '/deep_ep')")"; \
     mkdir -p "${site_dir}/include"; \
     cp -a deep_ep/include/. "${site_dir}/include/"
-
-ARG VLLM_WHEEL=vllm.whl
-COPY ${VLLM_WHEEL} /tmp/vllm.whl
-RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
 
 ###############################################################################
 # 2) Text-only torchvision surface.
@@ -182,34 +255,48 @@ RUN set -e; \
       ${PYTHON} -m pip install --no-cache-dir --no-build-isolation -e .
 
 ###############################################################################
-# 4) rdma-core from source, replacing the distro packages and dropping the
+# 4) vLLM.
+#
+# After DeepEP and AITER, not combined with DeepEP's install: this is the
+# argument that changes on every "just pick up a newer wheel" rebuild, so
+# putting it last among the source builds means that rebuild no longer pays
+# for DeepEP's or AITER's compile.
+###############################################################################
+ARG VLLM_WHEEL=vllm.whl
+COPY ${VLLM_WHEEL} /tmp/vllm.whl
+RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
+
+###############################################################################
+# 5) rdma-core, installed from the artifacts the rdma-core-build stage
+#    already compiled -- replacing the distro packages and dropping the
 #    vendor bnxt_re provider.
 #
-#    Keep this stage last. It installs over the distro rdma-core rather than
-#    removing it: removing libibverbs1 and friends would leave every dependent
-#    with an unmet dependency and break apt here and in any downstream image.
+#    Only the install and the provider purge happen here; see the
+#    rdma-core-build stage (top of this file) for why the compile does not.
+#    It installs over the distro rdma-core rather than removing it: removing
+#    libibverbs1 and friends would leave every dependent with an unmet
+#    dependency and break apt here and in any downstream image.
 ###############################################################################
 ARG RDMA_CORE_VERSION=63.0
-RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
+COPY --from=rdma-core-build /tmp/rdma-core /tmp/rdma-core
+RUN if [ -n "${RDMA_CORE_VERSION}" ] && [ -f /tmp/rdma-core/build/build.ninja ]; then \
       set -e; \
+      : "Only cmake needed here: the compile already happened in"; \
+      : "rdma-core-build, so this stage installs the already-built tree"; \
+      : "rather than rebuilding it -- no compiler, linker, or -dev headers"; \
+      : "required. cmake --install, not ninja install / make install: ninja's"; \
+      : "'install' target depends on 'all', so it re-checks every build edge"; \
+      : "first -- and Docker's COPY resets every file's mtime to copy time,"; \
+      : "which reliably confuses ninja's mtime-based freshness check into"; \
+      : "relinking targets that were already built. Verified on hardware:"; \
+      : "'ninja install' on the copied tree failed on a missing link-time"; \
+      : "libsystemd.so (the runtime lib is present, the -dev symlink is not,"; \
+      : "and this stage installs neither) because it tried to relink"; \
+      : "bin/ibacm. cmake --install runs only the generated install script"; \
+      : "against files already on disk and never touches the build graph."; \
       apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        git ca-certificates cmake ninja-build build-essential pkg-config make \
-        libnl-3-dev libnl-route-3-dev libudev-dev libssl-dev libsystemd-dev \
-        python3-docutils pandoc; \
-      git clone --depth 1 --branch "v${RDMA_CORE_VERSION}" \
-        https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core; \
-      mkdir -p /tmp/rdma-core/build && cd /tmp/rdma-core/build; \
-      cmake -GNinja \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
-        -DCMAKE_INSTALL_SYSCONFDIR=/etc \
-        -DCMAKE_INSTALL_RUNDIR=/run \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DNO_PYVERBS=1 \
-        ..; \
-      ninja -j"$(nproc)"; \
-      DEBIAN_FRONTEND=noninteractive apt-get purge -y python3-docutils pandoc; \
+        cmake; \
       DEBIAN_FRONTEND=noninteractive apt-get autoremove -y; \
       rm -rf /var/lib/apt/lists/*; \
       : "Install over the distro packages rather than removing them. dpkg -r"; \
@@ -219,7 +306,8 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
       : "install targets the same prefix and shadows those files, and the"; \
       : "provider cleanup below removes the part that actually matters, so the"; \
       : "removal bought nothing that is not handled here."; \
-      ninja install; \
+      cmake --install /tmp/rdma-core/build; \
+      cd /tmp/rdma-core/build; \
       : "Drop every bnxt_re provider except the one this build just installed."; \
       : "The base image can ship an out-of-tree vendor provider whose name is"; \
       : "neither predictable nor tied to the rdma-core ABI (observed:"; \
