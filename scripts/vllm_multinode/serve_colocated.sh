@@ -120,27 +120,35 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Checkpoint page-cache pre-warm.
-# vLLM's startup barrier (in_the_same_node_as -> torch.distributed.barrier on the
-# gloo CPU group) is all-or-nothing across every rank, so what has to stay small
-# is the GAP between nodes, not the absolute load time. Job 239755 died exactly
-# there: node 0 finished loading at 23:21:41, node 1 was still building layers
-# ~50 min later, and gloo's 1800s default fired first. Reading the checkpoint
-# here pulls it into the host page cache BEFORE the container barrier below, so
-# every node enters `vllm serve` from warm cache instead of racing the others for
-# the same NFS export.
-# Only sound while the checkpoint fits in RAM (1453 GiB of 1838 GiB here) --
-# set PREWARM_CHECKPOINT=0 to skip. Keep PREWARM_JOBS low: the goal is even
-# bandwidth across nodes, not peak throughput on any one of them.
-# The reported duration is the diagnostic. A large spread between nodes means the
-# storage path is the problem and no timeout will fix it.
+# Checkpoint page-cache pre-warm. OFF by default -- it made things worse here.
+# The idea was to even out the cross-node gap that breaks vLLM's all-or-nothing
+# startup barrier by faulting the checkpoint in before it. In practice job 240624
+# never got past this block: both nodes were still reading at the 7200s pipeline
+# timeout, so vllm serve never launched at all.
+# The flaw is that this reads the WHOLE checkpoint on EVERY node, while PP2xTP8
+# means each node only ever loads its own shard. On a 1453 GiB checkpoint that is
+# ~4x the necessary I/O against one NFS export, with both nodes competing for it
+# -- self-inflicted contention, which is the very thing it was meant to relieve.
+# Left in, opt-in, because the per-node duration is still a useful storage probe:
+# a large spread between nodes means the storage path is the problem and no
+# timeout will fix it. Bounded by PREWARM_TIMEOUT_SECONDS so it can never eat the
+# job's budget again -- on expiry it warns and proceeds rather than burning the
+# whole allocation.
+# Only sound while the checkpoint fits in RAM (1453 GiB of 1838 GiB here).
 # -----------------------------------------------------------------------------
-if [[ "${PREWARM_CHECKPOINT:-1}" == "1" ]]; then
+if [[ "${PREWARM_CHECKPOINT:-0}" == "1" ]]; then
     _warm_start=${SECONDS}
-    echo "[prewarm] reading ${MODEL_PATH} into page cache on $(hostname -s)"
-    find -L "${MODEL_PATH}" -name "*.safetensors" -print0 2>/dev/null \
-        | xargs -0 -r -P "${PREWARM_JOBS:-4}" cat >/dev/null 2>&1 || true
-    echo "[prewarm] done on $(hostname -s) in $(( SECONDS - _warm_start ))s"
+    _warm_budget="${PREWARM_TIMEOUT_SECONDS:-900}"
+    echo "[prewarm] reading ${MODEL_PATH} into page cache on $(hostname -s) (budget ${_warm_budget}s)"
+    if timeout "${_warm_budget}" bash -c '
+        find -L "$1" -name "*.safetensors" -print0 2>/dev/null \
+            | xargs -0 -r -P "$2" cat >/dev/null 2>&1
+    ' _ "${MODEL_PATH}" "${PREWARM_JOBS:-4}"; then
+        echo "[prewarm] done on $(hostname -s) in $(( SECONDS - _warm_start ))s"
+    else
+        echo "[prewarm] BUDGET EXPIRED on $(hostname -s) after $(( SECONDS - _warm_start ))s; continuing anyway." >&2
+        echo "[prewarm] storage delivered less than the whole checkpoint in that window - the shared filesystem is the bottleneck." >&2
+    fi
 fi
 
 # -----------------------------------------------------------------------------
