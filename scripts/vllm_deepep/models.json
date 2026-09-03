@@ -19,17 +19,9 @@
         ],
         "timeout": -1,
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
-            "MODEL_REPO": "deepseek-ai/DeepSeek-V2-Lite",
-            "ALL2ALL_BACKEND": "deepep_v2",
-            "EP_NIC_NAME": "bnxt_re0",
-            "NCCL_SOCKET_IFNAME": "fenic0",
-            "WARMUP_RUNS": "2",
-            "MEASURED_RUNS": "3",
-            "CONCURRENCY": "16",
-            "ISL": "256",
-            "OSL": "128"
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
         },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-V2-Lite -e ALL2ALL_BACKEND=deepep_v2 -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128",
         "args": ""
     },
     {
@@ -52,17 +44,9 @@
         ],
         "timeout": -1,
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
-            "MODEL_REPO": "deepseek-ai/DeepSeek-V2-Lite",
-            "ALL2ALL_BACKEND": "mori_high_throughput",
-            "EP_NIC_NAME": "bnxt_re0",
-            "NCCL_SOCKET_IFNAME": "fenic0",
-            "WARMUP_RUNS": "2",
-            "MEASURED_RUNS": "3",
-            "CONCURRENCY": "16",
-            "ISL": "256",
-            "OSL": "128"
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
         },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-V2-Lite -e ALL2ALL_BACKEND=mori_high_throughput -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128",
         "args": ""
     },
     {
@@ -85,18 +69,9 @@
         ],
         "timeout": -1,
         "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
-            "MODEL_REPO": "deepseek-ai/DeepSeek-R1",
-            "ALL2ALL_BACKEND": "deepep_v2",
-            "EP_NIC_NAME": "bnxt_re0",
-            "NCCL_SOCKET_IFNAME": "fenic0",
-            "GPU_MEMORY_UTILIZATION": "0.80",
-            "WARMUP_RUNS": "2",
-            "MEASURED_RUNS": "3",
-            "CONCURRENCY": "16",
-            "ISL": "256",
-            "OSL": "128"
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
         },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-R1 -e ALL2ALL_BACKEND=deepep_v2 -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e GPU_MEMORY_UTILIZATION=0.80 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128",
         "args": ""
     }
 ]

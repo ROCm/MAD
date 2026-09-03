@@ -42,6 +42,16 @@ state it cannot be interpreted.
 
 ## Knobs
 
+These are read by the script from its environment. madengine's `env_vars`
+model-card field is consumed **host-side** — it feeds image selection and, on
+the self-managed-launcher path, the host environment — but it is not forwarded
+into a container that madengine runs itself: the local path constructs
+`Docker(...)` without `envVars`, so the only env that reaches the container is
+what appears as an explicit `-e` on the `docker run` line. Hence every runtime
+knob below lives in `additional_docker_run_options`, and `env_vars` carries
+only `DOCKER_IMAGE_NAME`. Override by editing that string, or by exporting the
+variable and running the script directly inside the container.
+
 | variable | default | note |
 | --- | --- | --- |
 | `ALL2ALL_BACKEND` | `deepep_v2` | or `mori_high_throughput` |
@@ -54,10 +64,16 @@ state it cannot be interpreted.
 `NCCL_CUMEM_ENABLE=1` is set for both backends and is not optional: RCCL
 rejects symmetric memory without VMM.
 
-**DeepEP arm** keeps GIN on (`NCCL_GIN_TYPE=2`, `EP_GIN_QUEUE_DEPTH=0`, needs
-`/dev/infiniband` in the container). GIN carries no payload inside one XGMI
-domain, but it is the path that matters for scale-out, so the single-node run
-exercises it rather than a mode nobody deploys.
+**DeepEP arm** keeps GIN on (`NCCL_GIN_TYPE=2`, `EP_GIN_QUEUE_DEPTH=0`). GIN
+carries no payload inside one XGMI domain, but it is the path that matters for
+scale-out, so the single-node run exercises it rather than a mode nobody
+deploys. The buffer constructor still reserves queue pairs, so the container
+needs the RDMA device: madengine passes `--device=/dev/kfd` and the render
+nodes but nothing else, so `--device=/dev/infiniband` is supplied through
+`additional_docker_run_options` on every entry, together with
+`--ulimit memlock=-1` (registration pins memory) and `--shm-size 128g` (eight
+data-parallel workers). Without the device the DeepEP arm fails at buffer
+construction, not at benchmark time.
 
 **MoRI arm** sets `MORI_DISABLE_TOPO=1`, which works around a null dereference
 in `CollectAndSortCandidates`. It skips GPU/NIC affinity matching; for a

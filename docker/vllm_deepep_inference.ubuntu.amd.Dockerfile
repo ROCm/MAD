@@ -57,12 +57,14 @@
 #     * NCCL_CUMEM_ENABLE=1 is mandatory. Without VMM, RCCL answers
 #       "Communicator does not support symmetric memory" and the ElasticBuffer
 #       is never created.
-#     * On a single node set EP_DISABLE_GIN=1. DeepEP moves no payload
-#       through GIN inside one XGMI domain -- is_scaleup_nvlink is true and the
+#     * GIN is a deliberate choice on a single node. DeepEP moves no payload
+#       through it inside one XGMI domain -- is_scaleup_nvlink is true and the
 #       barrier and dispatch/combine run over symmetric memory -- but the buffer
 #       constructor still asserts on ginType and reserves queue pairs unless GIN
-#       is disabled. Leaving it on additionally requires /dev/infiniband,
-#       NCCL_GIN_TYPE=2 and EP_GIN_QUEUE_DEPTH=0.
+#       is disabled. Keeping it on (NCCL_GIN_TYPE=2, EP_GIN_QUEUE_DEPTH=0)
+#       exercises the path that matters for scale-out and requires
+#       --device=/dev/infiniband and --ulimit memlock=-1 on the container;
+#       EP_DISABLE_GIN=1 avoids both but tests a mode nobody deploys.
 #     * Mount the JIT caches. AITER tunes GEMM shapes at run time behind a
 #       global build lock, and with data parallelism one rank tunes while the
 #       others wait in the collective:
@@ -257,4 +259,8 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
 
 RUN ${PYTHON} -c "import deep_ep, torch, vllm; assert torch.version.hip; print('VLLM_DEEPEP_BUILD_OK')"
 
-ENTRYPOINT ["vllm"]
+# Clear the base image's entrypoint, as the sibling vLLM images do. madengine
+# keeps a container alive with `docker run ... <image> cat` and then drives it
+# with `docker exec`; any ENTRYPOINT here turns that keepalive into
+# `<entrypoint> cat`, which exits immediately and takes the run with it.
+ENTRYPOINT []
