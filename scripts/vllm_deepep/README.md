@@ -91,8 +91,28 @@ job.
 
 ## Output
 
-`perf_vllm_deepep.csv`, one row per measured run:
+Two files. `perf_vllm_deepep.csv` is the one registered as `multiple_results`,
+and MAD dictates its shape: `tools/utils.py:1231` raises unless the columns are
+exactly `model` / `performance` / `metric`, and `:1247-1250` reads only those
+three and discards the rest. So it is long-form, three rows per measured run:
+
+```
+model,performance,metric
+run1_throughput,1234.56,total_token_throughput_tok_s
+run1_tpot,12.34,median_tpot_ms
+run1_ttft,345.67,p99_ttft_ms
+```
+
+MAD prefixes each label with the model-card name, so the backend and the model
+arrive in the ingested row without being repeated here.
+
+Because the ingested file cannot carry context, the diagnostic columns go to
+`perf_vllm_deepep_detail.csv`, which is deliberately *not* registered and so is
+never parsed:
 
 ```
 backend,model,concurrency,isl,osl,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo
 ```
+
+Its `model` field is the resolved model — the local path when `MODEL_PATH` is
+set, not the repo id — since that is what was actually served.

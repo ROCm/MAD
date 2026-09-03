@@ -59,7 +59,14 @@ PYTHON="${PYTHON:-/opt/venv/bin/python}"
 VLLM="${VLLM:-/opt/venv/bin/vllm}"
 LOG_DIR="${LOG_DIR:-$(pwd)}"
 SERVER_LOG="${LOG_DIR}/vllm_${ALL2ALL_BACKEND}_server.log"
+# MAD ingests multiple_results in long form: it requires exactly the columns
+# model / performance / metric and drops everything else (tools/utils.py:1231
+# raises if one is missing; :1247-1250 reads only those three). So the
+# diagnostic context that makes a number interpretable -- backend, load shape,
+# discarded warm-ups -- cannot live in that file. It goes to a companion CSV
+# that is not registered as multiple_results and is therefore not parsed.
 RESULT_CSV="${LOG_DIR}/perf_vllm_deepep.csv"
+DETAIL_CSV="${LOG_DIR}/perf_vllm_deepep_detail.csv"
 
 echo "=== vllm_deepep: ${MODEL_REPO} over ${ALL2ALL_BACKEND} ==="
 
@@ -151,8 +158,9 @@ for i in $(seq 1 "${WARMUP_RUNS}"); do
   bench_once > /dev/null || { echo "warm-up run ${i} failed" >&2; exit 1; }
 done
 
+echo "model,performance,metric" > "${RESULT_CSV}"
 echo "backend,model,concurrency,isl,osl,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo" \
-  > "${RESULT_CSV}"
+  > "${DETAIL_CSV}"
 
 for i in $(seq 1 "${MEASURED_RUNS}"); do
   out="$(bench_once)"
@@ -160,9 +168,25 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   tput_val=$(echo "${out}" | awk '/Total token throughput/ {print $NF}')
   tpot_val=$(echo "${out}" | awk '/Median TPOT/ {print $NF}')
   ttft_val=$(echo "${out}" | awk '/P99 TTFT/ {print $NF}')
-  echo "${ALL2ALL_BACKEND},${MODEL_REPO},${CONCURRENCY},${ISL},${OSL},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
+
+  # Each run is its own set of rows rather than a pre-averaged one, so a run
+  # that has not converged stays visible instead of being hidden in a mean.
+  # MAD prefixes these labels with the model-card name, which is what carries
+  # the backend and the model.
+  printf '%s\n' \
+    "run${i}_throughput,${tput_val},total_token_throughput_tok_s" \
+    "run${i}_tpot,${tpot_val},median_tpot_ms" \
+    "run${i}_ttft,${ttft_val},p99_ttft_ms" \
     >> "${RESULT_CSV}"
+
+  # MODEL, not MODEL_REPO: with MODEL_PATH set the server and the benchmark
+  # both ran against the local path, and recording the repo id would label the
+  # row with a model that was never loaded.
+  echo "${ALL2ALL_BACKEND},${MODEL},${CONCURRENCY},${ISL},${OSL},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
+    >> "${DETAIL_CSV}"
 done
 
 echo "=== results (${RESULT_CSV}) ==="
 cat "${RESULT_CSV}"
+echo "=== detail (${DETAIL_CSV}) ==="
+cat "${DETAIL_CSV}"
