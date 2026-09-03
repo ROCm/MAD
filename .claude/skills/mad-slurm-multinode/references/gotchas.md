@@ -108,9 +108,10 @@ here; this file is read before a run.
   even though the user's own shell reads it fine. Stage run data under a path
   whose whole chain is world-traversable (`o+x`), not just group-readable.
 - **The SLURM path exports `NCCL_IB_DISABLE=1` by default — set it to 0 or the run uses
-  TCP.** It is one of the variables madengine injects into the generated sbatch itself
-  (alongside `MIOPEN_*`, `OMP_NUM_THREADS`, `NCCL_TIMEOUT`, `RCCL_ENABLE_HIPGRAPH`), so it is
-  absent from the manifest and easy to miss. Nothing fails: RCCL reports `via NET/Socket` and
+  TCP.** It comes from madengine's own multi-node profile
+  (`src/madengine/deployment/presets/slurm/profiles/multi-node.json`, alongside `MIOPEN_*`,
+  `OMP_NUM_THREADS`, `NCCL_TIMEOUT`), not from anything you wrote, so it is absent from the
+  manifest and easy to miss. Grepping the generated sbatch for it is the fast check. Nothing fails: RCCL reports `via NET/Socket` and
   the job simply runs several times slower — measured here at 0.936 s/step over RDMA versus
   4.4-6.8 s/step over sockets for the same 8B workload on the same nodes, with TFLOP/s down
   from 935 to 125. Put `NCCL_IB_DISABLE: "0"` in BOTH env blocks, and keep `NCCL_DEBUG=INFO`
@@ -163,10 +164,10 @@ here; this file is read before a run.
 
 ## jax_maxtext (training)
 
-Keywords: jax maxtext llama3 pretrain, JAX_COORDINATOR_IP JAX_COORDINATOR_PORT NNODES
+Keywords: jax maxtext llama3 pretrain primus, JAX_COORDINATOR_IP JAX_COORDINATOR_PORT NNODES
 NODE_RANK, SLURM_PROCID rank derivation, loopback 127.0.0.1 rendezvous hang, RCCL overlay
-RCCL_COMMIT, base_output_directory device_info.json FileNotFoundError, empty quantization
-override, seconds_per_step median first performance match, XLA autotune level 32 ranks,
+RCCL_COMMIT, launcher primus BACKEND MaxText PRIMUS_CONFIG_PATH, stale primus_perf_output.csv,
+seconds_per_step median first performance match, XLA_GPU_AUTOTUNE_LEVEL fp8 NaN compile time,
 gated Llama repo tokenizer synthetic dataset.
 
 - **The model script translates the launcher's variables, it does not source them.**
@@ -194,21 +195,17 @@ gated Llama repo tokenizer synthetic dataset.
   process count for a process-based launcher like torchrun, and may be unset on a direct
   invocation, so a `GPUS_PER_NODE:-$NPROC_PER_NODE` fallback makes the reported `num_gpus`
   depend on which launcher ran. Give the model script an explicit default.
-- **Append-mode training logs plus a reused workspace silently blend runs.** MAD report
-  scripts typically pipe training to `tee -a`, so a second run of the same model in a
-  workspace that is not discarded leaves both runs in one file and every metric is computed
-  over the mix - an A/B result then depends on what was already in the log. **Truncate per
-  invocation**; confining the parser to the final run is not sufficient on its own, because a
-  run that emits no step records at all (steps=0, an early crash, a changed log format)
-  leaves no boundary to detect and the previous run's records are read as the current
-  result - demonstrated: an appended log whose latest run has no steps yields the earlier
-  run's median with no indication anything is wrong. Keep the boundary detection as defence
-  in depth for logs the harness did not produce. The same reuse hazard applies to the result CSV: delete the destination
-  *before* parsing, or a parser that refuses to produce a measurement leaves the previous
-  run's valid-looking file in place for the collector to pick up. And where a launcher may
-  give every rank the same workspace, the training log needs a rank suffix too, not just the
-  CSV - otherwise the ranks interleave step records into one file and rank 0's median is
-  taken over a sample that never existed.
+- **A stale result CSV outlives the run that failed to overwrite it.** `run.sh` writes the
+  perf CSV to `$RUN_DIR/../primus_perf_output.csv` — the PARENT of `run_directory`, because
+  madengine deletes `run_directory` before parsing. That parent is not deleted, and the write
+  is skipped entirely when the training log is missing and swallowed by `|| true` when the
+  extractor fails. So on any path that reuses the parent directory, a crashed run can be
+  scored with the previous run's numbers and nothing looks wrong. On the SLURM path each task
+  gets a fresh node-local workspace, which hides this; a local re-run does not. Delete the
+  destination CSV *before* the training command, not after it. The same reasoning applies to
+  the training log: prefer truncation per invocation over append, since a run that emits no
+  step records at all — steps=0, an early crash, a changed log format — leaves no boundary
+  for a parser to detect and the previous run's records are read as the current result.
 - **Per-rank output filenames are collected by nobody.** The SLURM template collects
   artifacts by the EXACT `multiple_results` filename, so a `perf_..._rankN.csv` written by a
   worker stays in that node's local workspace and is discarded with it. On this path each
@@ -218,19 +215,18 @@ gated Llama repo tokenizer synthetic dataset.
   launchers that hand every rank the same shared workspace; `MAD_COLLECT_METRICS`, which the
   template sets per task and forwards into the container, is a usable signal for telling the
   two apart.
-- **`XLA_AUTOTUNE_LEVEL=0` is required at 32 ranks.** The gfx950 env scripts default to
-  level 4; levels 1 and 2 did not finish compiling within 50 and 90 minutes at 32 ranks,
-  while level 0 compiles in under a minute at no measured compute cost (962 vs 968
-  TFLOP/s/device on a 2-node control).
-- **An empty `quantization=` on the MaxText command line replaces the config value, it is
-  not ignored.** A card passing no `--quantization` made the wrapper hand MaxText
-  `quantization=`, and `gfx950_llama3.1_405b.yml` — which sets `quantization: "fp8"` —
-  trained in bf16 while every label said FP8 (`Config param quantization: None` in the log).
-  Declare the precision on the card.
-- **`gfx950_llama3.1_405b.yml` set no `base_output_directory`.** MaxText fell back to a
-  default whose parent does not exist and died in `initialize()` at
-  `save_device_information()` with `FileNotFoundError` on `maxtext_output/device_info.json` —
-  before the mesh is built, so zero steps and a prompt, quiet exit.
+- **XLA autotune level pulls in two directions — do not set it blind.** Primus owns
+  `XLA_FLAGS` for MaxText (`primus/backends/maxtext/env_spec.py`, applied in-process before
+  JAX init) and defaults `--xla_gpu_autotune_level=4`, because `>=4` is what lets XLA pick a
+  numerically stable fp8 kernel — below it, fp8 MoE runs NaN. Against that: on the retired
+  MAD-native env scripts at 32 ranks, levels 1 and 2 did not finish compiling within 50 and
+  90 minutes, while level 0 compiled in under a minute at no measured compute cost (962 vs
+  968 TFLOP/s/device on a 2-node control). Those two facts were measured on different stacks
+  and level 4 itself was never timed at 32 ranks, so treat neither as settled: if a 4-node
+  fp8 run appears to hang before step 1, suspect compilation and time it before changing the
+  level. The knob is `XLA_GPU_AUTOTUNE_LEVEL` (Primus reads that name, not
+  `XLA_AUTOTUNE_LEVEL`), and lowering it trades an fp8 correctness guarantee for compile
+  time.
 - **The tokenizer fetch fails on hosts without access to the gated Llama repos**
   ("Access denied. This repository requires approval.") and this is harmless: these cards
   train on `dataset_type: synthetic`. Do not make setup failure fatal — verified against
