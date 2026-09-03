@@ -32,10 +32,11 @@
 #   docker build -f docker/vllm_deepep_inference.ubuntu.amd.Dockerfile \
 #     --build-arg DEEPEP_REPO=<url> --build-arg DEEPEP_COMMIT=<sha> \
 #     --build-arg VLLM_WHEEL=<path/to/vllm-*.whl relative to the build context> \
-#     # VLLM_WHEEL defaults to vllm.whl in the context root. The wheel must be
-#     # inside the build context; docker cannot check a COPY source in advance,
-#     # so a missing file fails at that COPY.
 #     -t <your-registry>/vllm-deepep:local .
+#
+#   VLLM_WHEEL defaults to vllm.whl in the context root. The wheel must be
+#   inside the build context; docker cannot check a COPY source in advance, so
+#   a missing file fails at that COPY.
 #
 #   BASE_IMAGE defaults to the same ROCm vLLM base the sibling disagg image
 #   uses. This recipe was validated against a THERock ROCm 7.14 / Torch 2.11
@@ -75,16 +76,13 @@ FROM ${BASE_IMAGE}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Build args are declared immediately before the stage that consumes them, not
+# in one block up top: an ARG in scope becomes part of the cache key of every
+# following layer, so hoisting them all would make a change to AITER_COMMIT (or
+# the wheel path, or the rdma-core version) rebuild DeepEP and everything after
+# it -- defeating the staged-rebuild property this file is organised around.
 ARG PYTHON=/opt/venv/bin/python
 ARG GPU_TARGETS=gfx950
-
-ARG DEEPEP_REPO
-ARG DEEPEP_COMMIT
-ARG AITER_REPO=https://github.com/ROCm/aiter.git
-ARG AITER_COMMIT=d9e5ef7ce08ee7045d583aed768cff41aa9210fe
-ARG RDMA_CORE_VERSION=63.0
-ARG ENABLE_TORCHVISION_STUB=1
-ARG VLLM_WHEEL=vllm.whl
 
 ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${GPU_TARGETS} \
@@ -95,6 +93,8 @@ ENV VLLM_TARGET_DEVICE=rocm \
 ###############################################################################
 # 1) DeepEP and vLLM.
 ###############################################################################
+ARG DEEPEP_REPO
+ARG DEEPEP_COMMIT
 RUN test -n "${DEEPEP_REPO}" || { echo "DEEPEP_REPO is required"; exit 1; }; \
     test -n "${DEEPEP_COMMIT}" || { echo "DEEPEP_COMMIT is required"; exit 1; }; \
     set -e; \
@@ -110,6 +110,7 @@ RUN test -n "${DEEPEP_REPO}" || { echo "DEEPEP_REPO is required"; exit 1; }; \
     mkdir -p "${site_dir}/include"; \
     cp -a deep_ep/include/. "${site_dir}/include/"
 
+ARG VLLM_WHEEL=vllm.whl
 COPY ${VLLM_WHEEL} /tmp/vllm.whl
 RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
 
@@ -120,6 +121,7 @@ RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
 # torch. vLLM imports it transitively through a multimodal config even for
 # text-only models, so `import vllm` fails before serving starts.
 ###############################################################################
+ARG ENABLE_TORCHVISION_STUB=1
 RUN if [ "${ENABLE_TORCHVISION_STUB}" = "1" ]; then \
       set -e; \
       site_dir="$(${PYTHON} -c "import site; print(site.getsitepackages()[0])")"; \
@@ -149,6 +151,8 @@ RUN if [ "${ENABLE_TORCHVISION_STUB}" = "1" ]; then \
 # The get_ksplit guard returns 0 when a split has no work instead of dividing
 # by zero, which a data-parallel profile microbatch can trigger.
 ###############################################################################
+ARG AITER_REPO=https://github.com/ROCm/aiter.git
+ARG AITER_COMMIT=d9e5ef7ce08ee7045d583aed768cff41aa9210fe
 RUN set -e; \
     git clone "${AITER_REPO}" /opt/aiter; \
     git -C /opt/aiter checkout -f "${AITER_COMMIT}"; \
@@ -183,6 +187,7 @@ RUN set -e; \
 #    `dpkg -r --force-all` below: the removal leaves dependents with dangling
 #    deps and later apt invocations abort.
 ###############################################################################
+ARG RDMA_CORE_VERSION=63.0
 RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
       set -e; \
       apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
@@ -213,10 +218,24 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
       done; \
       [ -n "$to_remove" ] && dpkg -r --force-all $to_remove; \
       ninja install; \
-      rm -f /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav34.so \
-            /usr/local/lib/x86_64-linux-gnu/libbnxt_re-rdmav34.so \
-            /usr/local/lib/libbnxt_re-rdmav34.so; \
+      : "Drop every bnxt_re provider except the one this build just installed."; \
+      : "The base image can ship an out-of-tree vendor provider whose name is"; \
+      : "neither predictable nor tied to the rdma-core ABI (observed:"; \
+      : "libbnxt_re-235.2.86.0.so, alongside older -rdmavNN.so builds). If one"; \
+      : "survives, libibverbs loads it against the new rdma-core and every run"; \
+      : "warns 'Driver bnxt_re does not support the kernel ABI'. Matching a"; \
+      : "hard-coded ABI suffix is wrong twice over: it misses vendor names, and"; \
+      : "it goes stale whenever IBVERBS_PABI_VERSION moves (v63 installs"; \
+      : "-rdmav59.so). Deleting the symlink alone is also not enough -- ldconfig"; \
+      : "regenerates SONAME links from the real file, so the .so itself must go."; \
+      keep="$(ls -1 /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav*.so 2>/dev/null | tail -1)"; \
+      test -n "${keep}" || { echo "no bnxt_re provider installed by rdma-core ${RDMA_CORE_VERSION}"; exit 1; }; \
+      find /usr/lib/x86_64-linux-gnu/libibverbs /usr/local/lib \
+           /usr/local/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu \
+           -maxdepth 1 -name 'libbnxt_re*.so*' 2>/dev/null \
+        | while read -r f; do [ "${f}" = "${keep}" ] || rm -f "${f}"; done; \
       ldconfig; \
+      echo "IBVERBS_BNXT_KEPT ${keep}"; \
       cd / && rm -rf /tmp/rdma-core; \
       echo "IBVERBS_PROVIDERS $(ls /usr/lib/x86_64-linux-gnu/libibverbs/ 2>/dev/null | tr '\n' ' ')"; \
     else \
