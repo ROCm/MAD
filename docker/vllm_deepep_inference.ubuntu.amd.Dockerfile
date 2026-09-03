@@ -183,9 +183,9 @@ RUN set -e; \
 # 4) rdma-core from source, replacing the distro packages and dropping the
 #    vendor bnxt_re provider.
 #
-#    Keep this stage last, and run every apt command before the
-#    `dpkg -r --force-all` below: the removal leaves dependents with dangling
-#    deps and later apt invocations abort.
+#    Keep this stage last. It installs over the distro rdma-core rather than
+#    removing it: removing libibverbs1 and friends would leave every dependent
+#    with an unmet dependency and break apt here and in any downstream image.
 ###############################################################################
 ARG RDMA_CORE_VERSION=63.0
 RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
@@ -210,30 +210,43 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
       DEBIAN_FRONTEND=noninteractive apt-get purge -y python3-docutils pandoc; \
       DEBIAN_FRONTEND=noninteractive apt-get autoremove -y; \
       rm -rf /var/lib/apt/lists/*; \
-      to_remove=""; \
-      for p in ibverbs-providers libibverbs1 libibverbs-dev ibverbs-utils \
-               librdmacm1 librdmacm-dev rdma-core libibumad3 infiniband-diags; do \
-        dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" \
-          && to_remove="$to_remove $p"; \
-      done; \
-      [ -n "$to_remove" ] && dpkg -r --force-all $to_remove; \
+      : "Install over the distro packages rather than removing them. dpkg -r"; \
+      : "--force-all on libibverbs1 and friends leaves every dependent with an"; \
+      : "unmet dependency, so any later apt operation -- including one in a"; \
+      : "downstream image built FROM this one -- aborts. The from-source"; \
+      : "install targets the same prefix and shadows those files, and the"; \
+      : "provider cleanup below removes the part that actually matters, so the"; \
+      : "removal bought nothing that is not handled here."; \
       ninja install; \
       : "Drop every bnxt_re provider except the one this build just installed."; \
       : "The base image can ship an out-of-tree vendor provider whose name is"; \
       : "neither predictable nor tied to the rdma-core ABI (observed:"; \
-      : "libbnxt_re-235.2.86.0.so, alongside older -rdmavNN.so builds). If one"; \
+      : "libbnxt_re-235.2.86.0.so, alongside -rdmavNN.so builds). If one"; \
       : "survives, libibverbs loads it against the new rdma-core and every run"; \
-      : "warns 'Driver bnxt_re does not support the kernel ABI'. Matching a"; \
-      : "hard-coded ABI suffix is wrong twice over: it misses vendor names, and"; \
-      : "it goes stale whenever IBVERBS_PABI_VERSION moves (v63 installs"; \
-      : "-rdmav59.so). Deleting the symlink alone is also not enough -- ldconfig"; \
-      : "regenerates SONAME links from the real file, so the .so itself must go."; \
-      keep="$(ls -1 /usr/lib/x86_64-linux-gnu/libibverbs/libbnxt_re-rdmav*.so 2>/dev/null | tail -1)"; \
-      test -n "${keep}" || { echo "no bnxt_re provider installed by rdma-core ${RDMA_CORE_VERSION}"; exit 1; }; \
-      find /usr/lib/x86_64-linux-gnu/libibverbs /usr/local/lib \
-           /usr/local/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu \
-           -maxdepth 1 -name 'libbnxt_re*.so*' 2>/dev/null \
-        | while read -r f; do [ "${f}" = "${keep}" ] || rm -f "${f}"; done; \
+      : "warns 'Driver bnxt_re does not support the kernel ABI'. Deleting the"; \
+      : "symlink alone is not enough -- ldconfig regenerates SONAME links from"; \
+      : "the real file, so the .so itself must go."; \
+      : "The keeper comes from cmake's install manifest, i.e. from what THIS"; \
+      : "build produced. Globbing the destination cannot distinguish a fresh"; \
+      : "provider from a stale one: a base carrying -rdmav60 would win a"; \
+      : "lexical sort against the -rdmav59 that v63 installs, and the wrong"; \
+      : "file would survive."; \
+      keep="$(grep -m1 -E '/libbnxt_re[^/]*\\.so$' install_manifest.txt || true)"; \
+      test -n "${keep}" || { echo "rdma-core ${RDMA_CORE_VERSION} installed no bnxt_re provider"; exit 1; }; \
+      keep_real="$(readlink -f "${keep}")"; \
+      roots=""; \
+      for d in /usr/lib/x86_64-linux-gnu/libibverbs /usr/local/lib \
+               /usr/local/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do \
+        [ -d "$d" ] && roots="$roots $d"; \
+      done; \
+      : "roots is filtered first: find exits 1 on a missing root, and this"; \
+      : "block runs under set -e with a global pipefail."; \
+      if [ -n "$roots" ]; then \
+        find $roots -maxdepth 1 -name 'libbnxt_re*.so*' \
+          | while read -r f; do \
+              [ "$(readlink -f "$f")" = "${keep_real}" ] || rm -f "$f"; \
+            done; \
+      fi; \
       ldconfig; \
       echo "IBVERBS_BNXT_KEPT ${keep}"; \
       cd / && rm -rf /tmp/rdma-core; \
