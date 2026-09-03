@@ -21,9 +21,30 @@ PRIMUS_ROOT = os.path.normpath(os.path.join(THIS_DIR, "..", "Primus"))
 # One glob for all launchers: examples/<launcher>/configs/**/*.yaml
 CONFIGS_GLOB = os.path.join(PRIMUS_ROOT, "examples", "*", "configs", "**", "*.yaml")
 
+# JAX backends have their own dedicated discovery (scripts/jax-maxtext/get_models_json.py,
+# scripts/jax-maxdiffusion/get_models_json.py) with correct dockerfiles and arch filtering.
+# Discovering them here too would create duplicates on the wrong base image.
+JAX_BACKENDS = {"maxtext", "maxdiffusion"}
+
 
 def list_models():
-    models = []
+    # Default/smoke-test entry -> "primus_train/default". Lives here (not root models.json)
+    # so this directory has one registration file, per madengine's models.json vs.
+    # get_models_json.py rule. HSA_NO_SCRATCH_RECLAIM etc. are not modeled here: madengine
+    # has no per-model env field, so pass them via --additional-context docker_env_vars
+    # (see benchmark/primus/README.md) instead.
+    models = [
+        CustomModel(
+            name="default",
+            dockerfile="../../docker/primus",
+            dockercontext=".",
+            scripts="run.sh",
+            n_gpus="-1",
+            owner="mad.support@amd.com",
+            tags=["training", "primus", "megatron", "pretrain"],
+            args="",
+        )
+    ]
     if not os.path.isdir(PRIMUS_ROOT):
         return models
     # recursive=True is required for ** to span directories; without it configs nested one
@@ -36,6 +57,8 @@ def list_models():
         if len(parts) < 5:
             continue
         launcher = parts[1]   # megatron, torchtitan, megatron_bridge, etc.
+        if launcher in JAX_BACKENDS:
+            continue
         arch = parts[3]       # MI300X, MI355X, etc.
         short_name = os.path.splitext(os.path.basename(yaml_path))[0]
         # discover_models prefixes with dirname (primus_train/), so no prefix here

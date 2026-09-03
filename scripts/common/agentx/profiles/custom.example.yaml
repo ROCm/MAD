@@ -1,0 +1,50 @@
+# Annotated template for a CUSTOM AgentX workload profile.
+#
+# Copy this file, edit the targets to your workload, then reference it from
+# agentic.yaml either inline or as a profile file. A profile is just ~6
+# distribution targets + a session count + a seed; the generator turns it into
+# a reproducible weka_trace corpus and the verifier gates it against these same
+# targets. There is no per-case code -- add a case by adding a profile.
+#
+# Round-trip (no GPU needed):
+#   python3 agentx_config.py --profile profiles/custom.example.yaml --emit-json > /tmp/c.json
+#   python3 gen_agentx_profile.py    --profile /tmp/c.json --out-dir /tmp/custom_corpus
+#   python3 verify_agentx_profile.py --profile /tmp/c.json --corpus  /tmp/custom_corpus
+#   # -> "N/N axes within band"
+
+name: my_case                 # unique workload name (becomes the result subdir)
+model_tag: GLM-5.2-MXFP4      # tag written into the trace; retag to your served model if you like
+id_prefix: my_case            # session-id salt (any string; changes the corpus identity)
+seed: 42                      # fixed seed => byte-identical corpus every run
+n_sessions: 150              # more sessions => tighter percentiles (and a bigger corpus)
+block_size: 64                # KV block size (tokens/block); keep 64 unless your engine differs
+
+# Distribution targets, each a P50 / P90 / P99 triple.
+isl_p:   [48000, 120000, 200000]  # input tokens per request
+osl_p:   [256, 2000, 9000]        # output tokens per request
+delay_p: [3, 20, 180]             # inter-turn think delay (seconds)
+
+# Turns-per-session discrete distribution: parallel values/weights lists.
+# Keep enough multi-turn mass that the prefix-cache-hit median lands ~88-90%.
+turns:
+  values:  [2, 3, 4, 6, 10, 20, 45, 103]
+  weights: [20, 24, 20, 12, 8, 6, 7, 3]
+
+# Per-turn prefix-reuse band -> target prefix cache-hit fraction.
+cache_hit: [0.88, 0.90]
+
+# Sampling clamps (lo, hi) applied after the lognormal draw.
+clamps:
+  isl:   [1200, 205000]
+  osl:   [8, 20000]
+  delay: [1, 600]
+
+# Optional verifier block. If omitted, turns targets are derived from the turns
+# distribution and the cache target from the midpoint of cache_hit, so a custom
+# profile round-trips to N/N without you spelling the targets out. Provide it to
+# pin exact targets or widen a band on a noisy tail axis.
+# verify:
+#   turns_p: [3, 30, 60]
+#   cache_target: 89
+#   band_overrides:
+#     "Input ISL P99": [0.75, 1.25]
