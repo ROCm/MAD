@@ -87,6 +87,11 @@ serve_args=(
     --trust-remote-code
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
+    # Separate field from the one above: --distributed-timeout-seconds only
+    # reaches the device/NCCL groups, while the startup barrier that killed
+    # job 239755 runs on the gloo CPU group and takes its deadline from this
+    # one. Unset, both fall back to PyTorch's stock 1800s.
+    --cpu-distributed-timeout-seconds "${CPU_DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
 )
 [[ -n "${KV_CACHE_DTYPE:-}" ]]        && serve_args+=(--kv-cache-dtype "${KV_CACHE_DTYPE}")
 [[ -n "${KV_BLOCK_SIZE:-}" ]]         && serve_args+=(--block-size "${KV_BLOCK_SIZE}")
@@ -115,6 +120,30 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 # -----------------------------------------------------------------------------
+# Checkpoint page-cache pre-warm.
+# vLLM's startup barrier (in_the_same_node_as -> torch.distributed.barrier on the
+# gloo CPU group) is all-or-nothing across every rank, so what has to stay small
+# is the GAP between nodes, not the absolute load time. Job 239755 died exactly
+# there: node 0 finished loading at 23:21:41, node 1 was still building layers
+# ~50 min later, and gloo's 1800s default fired first. Reading the checkpoint
+# here pulls it into the host page cache BEFORE the container barrier below, so
+# every node enters `vllm serve` from warm cache instead of racing the others for
+# the same NFS export.
+# Only sound while the checkpoint fits in RAM (1453 GiB of 1838 GiB here) --
+# set PREWARM_CHECKPOINT=0 to skip. Keep PREWARM_JOBS low: the goal is even
+# bandwidth across nodes, not peak throughput on any one of them.
+# The reported duration is the diagnostic. A large spread between nodes means the
+# storage path is the problem and no timeout will fix it.
+# -----------------------------------------------------------------------------
+if [[ "${PREWARM_CHECKPOINT:-1}" == "1" ]]; then
+    _warm_start=${SECONDS}
+    echo "[prewarm] reading ${MODEL_PATH} into page cache on $(hostname -s)"
+    find -L "${MODEL_PATH}" -name "*.safetensors" -print0 2>/dev/null \
+        | xargs -0 -r -P "${PREWARM_JOBS:-4}" cat >/dev/null 2>&1 || true
+    echo "[prewarm] done on $(hostname -s) in $(( SECONDS - _warm_start ))s"
+fi
+
+# -----------------------------------------------------------------------------
 # Container barrier — every node's container must exist before any rank dials the
 # master, otherwise early ranks burn their connect retries against a dead port.
 # Reuses the disagg harness's barrier rather than re-implementing a sleep.
@@ -131,8 +160,21 @@ fi
 mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
 LOG="/run_logs/${SLURM_JOB_ID:-0}/colocated_NODE${NODE_RANK}.log"
 
-vllm serve "${MODEL_PATH}" "${serve_args[@]}" 2>&1 | tee "${LOG}" >/dev/null &
+# Redirect through process substitution rather than a pipeline: after `a | b &`
+# the shell reports b's PID, so WORKER_PID used to be tee's. Every `kill` below
+# then hit tee and left vLLM running, and no liveness check was possible.
+vllm serve "${MODEL_PATH}" "${serve_args[@]}" > >(tee "${LOG}" >/dev/null) 2>&1 &
 WORKER_PID=$!
+
+# `kill -0` alone is not enough: a child that has exited but not been reaped is a
+# zombie and still answers signal 0, so a dead engine would read as alive forever.
+_alive() {
+    kill -0 "$1" 2>/dev/null || return 1
+    case "$(ps -o stat= -p "$1" 2>/dev/null)" in
+        *Z*) return 1 ;;
+    esac
+    return 0
+}
 
 # Shutdown sentinel on the shared log volume (/run_logs is $LOG_PATH on the host,
 # visible from every node). The head writes it when it is done; workers watch for
@@ -145,7 +187,7 @@ SHUTDOWN_FLAG="/run_logs/${SLURM_JOB_ID:-0}/.shutdown"
 if [[ "${NODE_RANK}" -ne 0 ]]; then
     # Workers have no API server: hold until the head tears the job down.
     echo "[colocated] worker ${NODE_RANK} serving headless; log ${LOG}"
-    while kill -0 "${WORKER_PID}" 2>/dev/null; do
+    while _alive "${WORKER_PID}"; do
         if [ -f "${SHUTDOWN_FLAG}" ]; then
             echo "[colocated] worker ${NODE_RANK} got shutdown signal; stopping"
             pkill -P "${WORKER_PID}" 2>/dev/null
@@ -166,6 +208,14 @@ trap 'touch "${SHUTDOWN_FLAG}" 2>/dev/null || true' EXIT
 echo "[colocated] head waiting for 'Application startup complete.' in ${LOG}"
 _TIMEOUT="${LOG_WAIT_TIMEOUT_SECONDS:-4000}"; _elapsed=0
 until grep -Fq "Application startup complete." "${LOG}" 2>/dev/null; do
+    # A dead engine used to be indistinguishable from a slow one: job 239755's
+    # head sat here for the full 4000s polling a log whose writer had already
+    # died 20 minutes earlier, and reported a timeout instead of the traceback.
+    if ! _alive "${WORKER_PID}"; then
+        echo "[colocated] vllm serve exited after ${_elapsed}s without becoming ready. Tail:" >&2
+        tail -80 "${LOG}" >&2
+        exit 1
+    fi
     if [ "${_elapsed}" -ge "${_TIMEOUT}" ]; then
         echo "[colocated] TIMEOUT (${_TIMEOUT}s): server never became ready. Tail:" >&2
         tail -40 "${LOG}" >&2

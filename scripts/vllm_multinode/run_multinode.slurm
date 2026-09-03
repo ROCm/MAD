@@ -144,6 +144,14 @@ export BENCHMARK_SCRIPT_FILE LOG_PATH USER_NAME
 export NNODES="$NUM_NODES"
 export MAD_SCRIPTS_MOUNT=/mad_scripts
 
+# Knobs CI needs to tune (timeouts, pre-warm) are not worth a new -e line and a
+# MAD PR each. COLOCATED_FORWARD_ENV names them, comma-separated, and the srun
+# body below forwards whatever it names into the container.
+# Anything arriving via sbatch --export=ALL is already exported; re-export here
+# so a value set inside this script also survives into srun.
+export COLOCATED_FORWARD_ENV
+for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; done
+
 srun --nodelist="$SELECTED_NODELIST" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)"
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true
@@ -176,6 +184,47 @@ done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 
+# Host-local compilation cache dirs (ext4, survive container restarts).
+mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
+
+# --- Persistent JIT cache mount (lifted from vllm_dissag/run_xPyD_models.slurm) ---
+# The image points AITER_JIT_DIR/TRITON_CACHE_DIR/VLLM_CACHE_ROOT/COMGR_CACHE_DIR at
+# /opt/vllm_cache, but this launcher only ever mounted /tmp/vllm_cache -- a path
+# nothing reads. Every rank therefore recompiled AITER CK kernels from scratch on
+# every run, inside --rm containers that threw the result away. Cold compile is
+# ~15 min for the MoE/FP8 GEMM set against ~1 min warm, and it is per-node, so a
+# node that compiles cold while its peer does not is exactly the startup skew the
+# cross-node barrier cannot absorb.
+# Keyed by image ID so a new image starts a fresh cache rather than reusing
+# stale-ABI shared objects. Override JIT_CACHE_HOST, or set JIT_CACHE_PERSIST=0.
+# NOTE: this section runs inside a single-quoted `srun bash -c ...`, so avoid
+# single quotes here; the image-id hash is extracted with tr, not sed.
+if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
+    _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null)
+    _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12)
+    _IMG_KEY="${_IMG_KEY:-noimg}"
+    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
+    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
+    echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache"
+else
+    _JIT_CACHE_MOUNT=""
+fi
+
+# --- Forwarded env (see COLOCATED_FORWARD_ENV above) ---
+# Written to a file rather than built into -e flags so values containing spaces
+# survive; docker takes the whole line after = verbatim. Node-local /tmp, mode
+# 600, and never archived -- unlike the wrapper scripts, which are build
+# artifacts and must stay free of secrets.
+_ENV_FILE=/tmp/colocated_fwd_env.${SLURM_JOB_ID}.${SLURM_PROCID}
+rm -f "$_ENV_FILE"
+: > "$_ENV_FILE"
+chmod 600 "$_ENV_FILE"
+for _v in ${COLOCATED_FORWARD_ENV//,/ }; do
+    [ -n "${!_v:-}" ] && printf "%s=%s\n" "$_v" "${!_v}" >> "$_ENV_FILE"
+done
+echo "[fwd-env] forwarding: $(cut -d= -f1 "$_ENV_FILE" | tr "\n" " ")"
+
 docker run --rm \
     --device /dev/dri --device /dev/kfd --device /dev/infiniband \
     --network host --ipc host --group-add video \
@@ -186,7 +235,9 @@ docker run --rm \
     -v '"$MAD_SCRIPTS_DIR"':$MAD_SCRIPTS_MOUNT \
     -v /shared_inference:/shared_inference \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
+    $_JIT_CACHE_MOUNT \
     $_RDMA_MOUNTS \
+    --env-file "$_ENV_FILE" \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e NODE_RANK=$SLURM_PROCID \
@@ -219,6 +270,7 @@ docker run --rm \
         bash $MAD_SCRIPTS_MOUNT/vllm_multinode/serve_colocated.sh \
           2>&1 | tee /run_logs/${SLURM_JOB_ID}/colocated_bench_NODE${SLURM_PROCID}.log
     "
+rm -f "$_ENV_FILE"
 '
 
 srun --nodelist="$SELECTED_NODELIST" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
