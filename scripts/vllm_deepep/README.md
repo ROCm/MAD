@@ -164,7 +164,7 @@ which is the same as losing them. So the diagnostic columns go to
 never parsed:
 
 ```
-backend,model,concurrency,isl,osl,num_prompts,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo
+backend,model,model_revision,concurrency,isl,osl,num_prompts,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo
 ```
 
 Its `model` field is the resolved model — the local path when `MODEL_PATH` is

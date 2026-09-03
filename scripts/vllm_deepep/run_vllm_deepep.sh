@@ -123,7 +123,11 @@ fi
 
 if [[ -n "${MODEL_PATH:-}" ]]; then
   MODEL="${MODEL_PATH}"
-  MODEL_REVISION=""
+  # Not "main": that would claim this is the Hub's moving revision, when it
+  # is not on the Hub at all. Recorded as empty -- "not applicable" -- and
+  # rendered explicitly in the CSV below rather than through a ":-main"
+  # default, which cannot distinguish "unset" from "deliberately empty".
+  MODEL_REVISION_LABEL=""
 elif [[ -n "${MODEL_REVISION:-}" ]]; then
   # Resolve to one local snapshot and serve/benchmark THAT path. A --revision
   # flag on `vllm serve` alone is not enough: `vllm bench serve` loads its own
@@ -142,11 +146,12 @@ from huggingface_hub import snapshot_download
 print(snapshot_download('${MODEL_REPO}', revision='${MODEL_REVISION}'))
 ")"
   echo "resolved to ${MODEL}"
+  MODEL_REVISION_LABEL="${MODEL_REVISION}"
 else
   echo "MODEL_REVISION is not set; serving ${MODEL_REPO} at its moving" >&2
   echo "'main' Hub revision. Results are not reproducible run to run." >&2
   MODEL="${MODEL_REPO}"
-  MODEL_REVISION=""
+  MODEL_REVISION_LABEL="main"
 fi
 
 # --- server -----------------------------------------------------------------
@@ -206,6 +211,15 @@ bench_once() {
     --ignore-eos "${TRUST_REMOTE_CODE_ARGS[@]}" 2>&1
 }
 
+# Shared between warm-up and measured runs: a nonzero "Failed requests" count
+# does not fail the process, so checking the exit status alone is not enough
+# in either loop. For a warm-up specifically, a partial failure leaves AITER's
+# GEMM shapes still untuned -- exactly what warm-up exists to avoid -- while
+# pushing that cold-tuning cost into the first MEASURED run instead, silently.
+_failed_requests() {
+  echo "$1" | awk '/Failed requests/ {print $NF; exit}'
+}
+
 echo "--- ${WARMUP_RUNS} warm-up run(s), discarded ---"
 for i in $(seq 1 "${WARMUP_RUNS}"); do
   # The *measurements* are discarded, not the diagnostics: redirecting to
@@ -213,6 +227,14 @@ for i in $(seq 1 "${WARMUP_RUNS}"); do
   # the vLLM error that explains it is the whole content of the failure.
   if ! out="$(bench_once)"; then
     echo "warm-up run ${i} failed:" >&2
+    echo "${out}" | tail -40 >&2
+    exit 1
+  fi
+  failed="$(_failed_requests "${out}")"
+  if [[ "${failed}" != "0" ]]; then
+    echo "warm-up run ${i}: ${failed:-an unparseable} failed-request count;" >&2
+    echo "AITER's GEMM shapes are likely still untuned. Refusing to proceed" >&2
+    echo "into measured runs on a warm-up that did not actually warm anything." >&2
     echo "${out}" | tail -40 >&2
     exit 1
   fi
@@ -251,7 +273,7 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   # Require an explicit zero. A missing field is not a pass: if the summary
   # format changes and drops or renames this line, treating absence as success
   # would silently disable the safeguard on exactly the runs it exists for.
-  failed=$(echo "${out}" | awk '/Failed requests/ {print $NF; exit}')
+  failed="$(_failed_requests "${out}")"
   if [[ "${failed}" != "0" ]]; then
     if [[ -z "${failed}" ]]; then
       echo "run ${i}: no 'Failed requests' field in the summary; cannot confirm" >&2
@@ -286,7 +308,7 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   # MODEL, not MODEL_REPO: with MODEL_PATH set the server and the benchmark
   # both ran against the local path, and recording the repo id would label the
   # row with a model that was never loaded.
-  echo "${ALL2ALL_BACKEND},${MODEL},${MODEL_REVISION:-main},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
+  echo "${ALL2ALL_BACKEND},${MODEL},${MODEL_REVISION_LABEL},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
     >> "${DETAIL_CSV}"
 done
 
