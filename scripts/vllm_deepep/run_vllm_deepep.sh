@@ -106,17 +106,6 @@ case "${ALL2ALL_BACKEND}" in
 esac
 
 # --- model ------------------------------------------------------------------
-if [[ -n "${MODEL_PATH:-}" ]]; then
-  MODEL="${MODEL_PATH}"
-else
-  MODEL="${MODEL_REPO}"
-fi
-# Pin the revision when serving straight from the hub: without it, a moving
-# `main` branch is what actually runs in a "reproducible" benchmark. Only
-# meaningful together with TRUST_REMOTE_CODE, since pinning a HF ref does
-# nothing for a local MODEL_PATH.
-MODEL_REVISION="${MODEL_REVISION:-}"
-
 # vLLM has native architectures for both configured models
 # (vllm/model_executor/models/deepseek_v2.py covers DeepseekV2ForCausalLM and
 # DeepseekV3ForCausalLM) and current transformers ships its own DeepseekV2Config
@@ -131,9 +120,33 @@ TRUST_REMOTE_CODE_ARGS=()
 if [[ "${TRUST_REMOTE_CODE}" == "1" ]]; then
   TRUST_REMOTE_CODE_ARGS=(--trust-remote-code)
 fi
-MODEL_REVISION_ARGS=()
-if [[ -n "${MODEL_REVISION}" ]]; then
-  MODEL_REVISION_ARGS=(--revision "${MODEL_REVISION}")
+
+if [[ -n "${MODEL_PATH:-}" ]]; then
+  MODEL="${MODEL_PATH}"
+  MODEL_REVISION=""
+elif [[ -n "${MODEL_REVISION:-}" ]]; then
+  # Resolve to one local snapshot and serve/benchmark THAT path. A --revision
+  # flag on `vllm serve` alone is not enough: `vllm bench serve` loads its own
+  # tokenizer independently, at the model's default (moving) Hub revision --
+  # https://github.com/vllm-project/vllm/blob/main/vllm/benchmarks/serve.py,
+  # `get_tokenizer(tokenizer_id, ...)` with no revision argument, and `vllm
+  # bench serve` has no --revision flag to give it one. So a moved `main`
+  # would tokenize the benchmark's prompts differently from what the pinned
+  # server understands, and the mismatch is silent -- both sides consider
+  # their own tokenizer authoritative. Downloading once and pointing both
+  # commands at the same local directory removes the second revision
+  # entirely, rather than trying to keep two of them in sync.
+  echo "resolving ${MODEL_REPO}@${MODEL_REVISION} to a local snapshot..."
+  MODEL="$("${PYTHON}" -c "
+from huggingface_hub import snapshot_download
+print(snapshot_download('${MODEL_REPO}', revision='${MODEL_REVISION}'))
+")"
+  echo "resolved to ${MODEL}"
+else
+  echo "MODEL_REVISION is not set; serving ${MODEL_REPO} at its moving" >&2
+  echo "'main' Hub revision. Results are not reproducible run to run." >&2
+  MODEL="${MODEL_REPO}"
+  MODEL_REVISION=""
 fi
 
 # --- server -----------------------------------------------------------------
@@ -158,7 +171,7 @@ fi
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
-  "${TRUST_REMOTE_CODE_ARGS[@]}" "${MODEL_REVISION_ARGS[@]}" \
+  "${TRUST_REMOTE_CODE_ARGS[@]}" \
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 trap 'kill ${SERVER_PID} 2>/dev/null || true' EXIT
@@ -181,12 +194,16 @@ done
 curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null
 
 bench_once() {
+  # --trust-remote-code forwarded: bench serve loads its own tokenizer
+  # (get_tokenizer(...)) independently of the server, and a model that
+  # genuinely needs the opt-in would otherwise serve successfully and then
+  # fail here, after the server already came up.
   "${VLLM}" bench serve --backend vllm --model "${MODEL}" \
     --host 127.0.0.1 --port "${PORT}" \
     --dataset-name random \
     --random-input-len "${ISL}" --random-output-len "${OSL}" \
     --max-concurrency "${CONCURRENCY}" --num-prompts "${NUM_PROMPTS}" \
-    --ignore-eos 2>&1
+    --ignore-eos "${TRUST_REMOTE_CODE_ARGS[@]}" 2>&1
 }
 
 echo "--- ${WARMUP_RUNS} warm-up run(s), discarded ---"
@@ -202,7 +219,7 @@ for i in $(seq 1 "${WARMUP_RUNS}"); do
 done
 
 echo "model,performance,metric" > "${RESULT_CSV}"
-echo "backend,model,concurrency,isl,osl,num_prompts,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo" \
+echo "backend,model,model_revision,concurrency,isl,osl,num_prompts,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo" \
   > "${DETAIL_CSV}"
 
 for i in $(seq 1 "${MEASURED_RUNS}"); do
@@ -269,7 +286,7 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   # MODEL, not MODEL_REPO: with MODEL_PATH set the server and the benchmark
   # both ran against the local path, and recording the repo id would label the
   # row with a model that was never loaded.
-  echo "${ALL2ALL_BACKEND},${MODEL},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
+  echo "${ALL2ALL_BACKEND},${MODEL},${MODEL_REVISION:-main},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
     >> "${DETAIL_CSV}"
 done
 

@@ -61,6 +61,8 @@ variable and running the script directly inside the container.
 | --- | --- | --- |
 | `ALL2ALL_BACKEND` | `deepep_v2` | or `mori_high_throughput` |
 | `MODEL_REPO` | `deepseek-ai/DeepSeek-V2-Lite` | `MODEL_PATH` overrides with a local path |
+| `MODEL_REVISION` | pinned per card | see below; empty means the moving `main` |
+| `TRUST_REMOTE_CODE` | `0` | see below |
 | `WARMUP_RUNS` / `MEASURED_RUNS` | 2 / 3 | see above |
 | `CONCURRENCY` / `ISL` / `OSL` | 16 / 256 / 128 | `ISL + OSL` must stay under `MAX_MODEL_LEN`, or every request fails and the results are a row of zeros |
 | `GPU_MEMORY_UTILIZATION` | 0.70 | 0.80 for R1 |
@@ -68,6 +70,50 @@ variable and running the script directly inside the container.
 
 `NCCL_CUMEM_ENABLE=1` is set for both backends and is not optional: RCCL
 rejects symmetric memory without VMM.
+
+## Reproducibility: revision pinning and remote code
+
+All three shipped cards set `MODEL_REVISION` to the commit each was validated
+against, not to a branch name, so re-running a card later serves the exact
+weights and config this comparison was measured on rather than whatever
+`main` has moved to since. Passing `MODEL_REVISION` on its own is not
+sufficient, which is why the script does more than add `--revision` to `vllm
+serve`: `vllm bench serve` loads its own tokenizer independently and has no
+`--revision` flag at all, so a moved `main` would tokenize the benchmark's
+prompts differently from what the pinned server understands, silently, with
+each side considering its own tokenizer authoritative. The script instead
+resolves `MODEL_REPO`@`MODEL_REVISION` to one local snapshot via
+`huggingface_hub.snapshot_download` and points both commands at that path, so
+there is only one revision instead of two that need to agree. `MODEL_PATH`
+bypasses this (it is already a fixed local path); leaving `MODEL_REVISION`
+empty falls back to the moving revision with a warning, for ad hoc runs where
+reproducibility does not matter.
+
+Neither DeepSeek-V2-Lite nor DeepSeek-R1 needs `TRUST_REMOTE_CODE=1` -- vLLM
+has native architectures for both, and current `transformers` ships its own
+config classes, so neither model's `auto_map` is ever consulted. It defaults
+off, since executing a mutable HF repo's Python as root in this container
+(host networking, elevated capabilities, device access) is not something to
+enable unconditionally. When set, it is forwarded to both `vllm serve` and
+`vllm bench serve` -- forwarding it to only the server would let a model that
+genuinely needs it start successfully and then fail once the benchmark's
+independent tokenizer load hits the same requirement.
+
+## JIT cache mounts
+
+Each card mounts its AITER JIT build cache, AITER's tuned-config directory,
+and DeepEP's JIT cache under `/var/cache/mad/vllm_deepep/<card-name>/`,
+matching the paths the Dockerfile documents
+(`/opt/aiter/aiter/jit/build`, `/tmp/aiter_configs`, `/root/.deep_ep`).
+Without these, every fresh container repeats AITER's globally-locked GEMM
+tuning from cold -- the ~270 s R1 first pass this README's warm-up section
+describes.
+
+The mount path is keyed by card name, not by `DOCKER_IMAGE_NAME`: it separates
+the DeepEP and MoRI arms (different AITER tuning shapes) but not two different
+images pointed at the same card. If you swap in an incompatible image or
+AITER build, clear that card's cache directory first -- a build cache from a
+different AITER revision is a correctness risk, not just a wasted rebuild.
 
 **DeepEP arm** keeps GIN on (`NCCL_GIN_TYPE=2`, `EP_GIN_QUEUE_DEPTH=0`). GIN
 carries no payload inside one XGMI domain, but it is the path that matters for
