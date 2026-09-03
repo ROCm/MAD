@@ -111,6 +111,30 @@ if [[ -n "${MODEL_PATH:-}" ]]; then
 else
   MODEL="${MODEL_REPO}"
 fi
+# Pin the revision when serving straight from the hub: without it, a moving
+# `main` branch is what actually runs in a "reproducible" benchmark. Only
+# meaningful together with TRUST_REMOTE_CODE, since pinning a HF ref does
+# nothing for a local MODEL_PATH.
+MODEL_REVISION="${MODEL_REVISION:-}"
+
+# vLLM has native architectures for both configured models
+# (vllm/model_executor/models/deepseek_v2.py covers DeepseekV2ForCausalLM and
+# DeepseekV3ForCausalLM) and current transformers ships its own DeepseekV2Config
+# / DeepseekV3Config, so AutoConfig resolves without the repository's
+# auto_map -- trust_remote_code is not required for either DeepSeek-V2-Lite or
+# DeepSeek-R1. It defaults off. Executing a mutable HF repo's Python as root in
+# this container (host networking, elevated capabilities, device access) is
+# not something to enable by default; TRUST_REMOTE_CODE=1 is an explicit
+# opt-in for a model that genuinely needs it.
+TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-0}"
+TRUST_REMOTE_CODE_ARGS=()
+if [[ "${TRUST_REMOTE_CODE}" == "1" ]]; then
+  TRUST_REMOTE_CODE_ARGS=(--trust-remote-code)
+fi
+MODEL_REVISION_ARGS=()
+if [[ -n "${MODEL_REVISION}" ]]; then
+  MODEL_REVISION_ARGS=(--revision "${MODEL_REVISION}")
+fi
 
 # --- server -----------------------------------------------------------------
 # Refuse to start if something already answers on PORT. Otherwise a stale
@@ -134,7 +158,8 @@ fi
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
-  --trust-remote-code > "${SERVER_LOG}" 2>&1 &
+  "${TRUST_REMOTE_CODE_ARGS[@]}" "${MODEL_REVISION_ARGS[@]}" \
+  > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 trap 'kill ${SERVER_PID} 2>/dev/null || true' EXIT
 

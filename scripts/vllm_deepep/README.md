@@ -12,9 +12,14 @@ madengine run --tags vllm_deepep --live-output
 or one arm at a time:
 
 ```bash
-madengine run --tags deepep      --live-output   # DeepEP V2
-madengine run --tags mori_ep     --live-output   # MoRI
+madengine run --tags pyt_vllm_deepep_v2_deepseek-v2-lite --live-output   # DeepEP V2
+madengine run --tags pyt_vllm_mori_deepseek-v2-lite      --live-output   # MoRI
 ```
+
+Not `--tags deepep` / `--tags mori_ep`: madengine selects every model card
+carrying *any* requested tag (`tools/run_models.py:544`), and `deepep` is also
+on the R1 entry -- so that tag alone would launch two unrelated jobs instead
+of one comparison arm. Model-card names are unique; tags are not.
 
 The image is not built here — supply it with `DOCKER_IMAGE_NAME`. Build it from
 `docker/vllm_deepep_inference.ubuntu.amd.Dockerfile`; that file documents the
