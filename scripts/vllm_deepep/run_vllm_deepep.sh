@@ -155,7 +155,14 @@ bench_once() {
 
 echo "--- ${WARMUP_RUNS} warm-up run(s), discarded ---"
 for i in $(seq 1 "${WARMUP_RUNS}"); do
-  bench_once > /dev/null || { echo "warm-up run ${i} failed" >&2; exit 1; }
+  # The *measurements* are discarded, not the diagnostics: redirecting to
+  # /dev/null would leave a failed warm-up reporting only its run number, and
+  # the vLLM error that explains it is the whole content of the failure.
+  if ! out="$(bench_once)"; then
+    echo "warm-up run ${i} failed:" >&2
+    echo "${out}" | tail -40 >&2
+    exit 1
+  fi
 done
 
 echo "model,performance,metric" > "${RESULT_CSV}"
@@ -163,7 +170,15 @@ echo "backend,model,concurrency,isl,osl,run,total_tok_s,median_tpot_ms,p99_ttft_
   > "${DETAIL_CSV}"
 
 for i in $(seq 1 "${MEASURED_RUNS}"); do
-  out="$(bench_once)"
+  # Assigning from a command substitution that fails would abort here under
+  # `set -e` with the captured output still sitting unused in ${out} -- the run
+  # would die without ever showing why. Handle the status explicitly.
+  if ! out="$(bench_once)"; then
+    echo "run ${i}: benchmark exited nonzero:" >&2
+    echo "${out}" | tail -40 >&2
+    rm -f "${RESULT_CSV}" "${DETAIL_CSV}"
+    exit 1
+  fi
   echo "${out}" | tail -25
   tput_val=$(echo "${out}" | awk '/Total token throughput/ {print $NF}')
   tpot_val=$(echo "${out}" | awk '/Median TPOT/ {print $NF}')
