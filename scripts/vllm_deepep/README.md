@@ -91,10 +91,11 @@ job.
 
 ## Output
 
-Two files. `perf_vllm_deepep.csv` is the one registered as `multiple_results`,
-and MAD dictates its shape: `tools/utils.py:1231` raises unless the columns are
-exactly `model` / `performance` / `metric`, and `:1247-1250` reads only those
-three and discards the rest. So it is long-form, three rows per measured run:
+Two files. `perf_vllm_deepep.csv` is the one registered as `multiple_results`.
+MAD requires it to have at least three columns and to include `model`,
+`performance` and `metric` (`tools/utils.py:1224-1236`); extra columns are
+permitted but ignored, since `:1247-1251` reads only those three. Long-form,
+three rows per measured run:
 
 ```
 model,performance,metric
@@ -106,7 +107,8 @@ run1_ttft,345.67,p99_ttft_ms
 MAD prefixes each label with the model-card name, so the backend and the model
 arrive in the ingested row without being repeated here.
 
-Because the ingested file cannot carry context, the diagnostic columns go to
+Extra columns would therefore survive the check but never reach `perf.csv`,
+which is the same as losing them. So the diagnostic columns go to
 `perf_vllm_deepep_detail.csv`, which is deliberately *not* registered and so is
 never parsed:
 

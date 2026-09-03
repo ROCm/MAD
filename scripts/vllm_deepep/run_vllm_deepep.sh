@@ -169,6 +169,27 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   tpot_val=$(echo "${out}" | awk '/Median TPOT/ {print $NF}')
   ttft_val=$(echo "${out}" | awk '/P99 TTFT/ {print $NF}')
 
+  # `vllm bench serve` exits 0 while reporting failed requests, and still
+  # prints the three metric lines -- as zeros. Ingested, those are
+  # indistinguishable from a successful measurement, which is worse than no
+  # data. The most likely cause is ISL + OSL exceeding MAX_MODEL_LEN, where
+  # every request fails and the run looks merely slow.
+  failed=$(echo "${out}" | awk '/Failed requests/ {print $NF}')
+  if [[ -n "${failed}" && "${failed}" != "0" ]]; then
+    echo "run ${i}: ${failed} failed request(s); refusing to record a result." >&2
+    echo "check that ISL(${ISL}) + OSL(${OSL}) < MAX_MODEL_LEN(${MAX_MODEL_LEN})." >&2
+    rm -f "${RESULT_CSV}" "${DETAIL_CSV}"
+    exit 1
+  fi
+  # An empty field means the summary did not parse -- a changed bench output
+  # format, or a run that died mid-way. Either way it is not a zero.
+  if [[ -z "${tput_val}" || -z "${tpot_val}" || -z "${ttft_val}" ]]; then
+    echo "run ${i}: could not parse the benchmark summary; refusing to record a result." >&2
+    echo "${out}" | tail -40 >&2
+    rm -f "${RESULT_CSV}" "${DETAIL_CSV}"
+    exit 1
+  fi
+
   # Each run is its own set of rows rather than a pre-averaged one, so a run
   # that has not converged stays visible instead of being hidden in a mean.
   # MAD prefixes these labels with the model-card name, which is what carries
