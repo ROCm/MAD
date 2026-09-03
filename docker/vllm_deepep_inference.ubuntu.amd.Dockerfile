@@ -233,7 +233,7 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ]; then \
       : "provider from a stale one: a base carrying -rdmav60 would win a"; \
       : "lexical sort against the -rdmav59 that v63 installs, and the wrong"; \
       : "file would survive."; \
-      keep="$(grep -m1 -E '/libbnxt_re[^/]*\\.so$' install_manifest.txt || true)"; \
+      keep="$(grep -m1 -E '/libbnxt_re[^/]*\.so$' install_manifest.txt || true)"; \
       test -n "${keep}" || { echo "rdma-core ${RDMA_CORE_VERSION} installed no bnxt_re provider"; exit 1; }; \
       keep_real="$(readlink -f "${keep}")"; \
       roots=""; \

@@ -113,6 +113,17 @@ else
 fi
 
 # --- server -----------------------------------------------------------------
+# Refuse to start if something already answers on PORT. Otherwise a stale
+# server left by an earlier run satisfies the readiness probe below, the newly
+# launched one dies with "address already in use", and the benchmark measures
+# the old process while the CSV labels it with this run's backend and model --
+# a wrong number that looks entirely well-formed.
+if curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
+  echo "something is already serving on port ${PORT}; refusing to start." >&2
+  echo "stop it, or set PORT to a free port." >&2
+  exit 1
+fi
+
 "${VLLM}" serve "${MODEL}" \
   --host 127.0.0.1 --port "${PORT}" \
   --tensor-parallel-size 1 \
@@ -166,7 +177,7 @@ for i in $(seq 1 "${WARMUP_RUNS}"); do
 done
 
 echo "model,performance,metric" > "${RESULT_CSV}"
-echo "backend,model,concurrency,isl,osl,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo" \
+echo "backend,model,concurrency,isl,osl,num_prompts,run,total_tok_s,median_tpot_ms,p99_ttft_ms,warmup_discarded,mori_disable_topo" \
   > "${DETAIL_CSV}"
 
 for i in $(seq 1 "${MEASURED_RUNS}"); do
@@ -180,19 +191,34 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
     exit 1
   fi
   echo "${out}" | tail -25
-  tput_val=$(echo "${out}" | awk '/Total token throughput/ {print $NF}')
-  tpot_val=$(echo "${out}" | awk '/Median TPOT/ {print $NF}')
-  ttft_val=$(echo "${out}" | awk '/P99 TTFT/ {print $NF}')
+  # `exit` after the first hit, deliberately. Newer `vllm bench serve` prints an
+  # automatic steady-state block in addition to the overall one, with the same
+  # labels; without this each awk returns two newline-separated values, the
+  # non-empty check still passes, and every CSV row becomes two malformed
+  # physical rows. The wheel is supplied externally, so its output format is
+  # not ours to pin.
+  tput_val=$(echo "${out}" | awk '/Total token throughput/ {print $NF; exit}')
+  tpot_val=$(echo "${out}" | awk '/Median TPOT/ {print $NF; exit}')
+  ttft_val=$(echo "${out}" | awk '/P99 TTFT/ {print $NF; exit}')
 
   # `vllm bench serve` exits 0 while reporting failed requests, and still
   # prints the three metric lines -- as zeros. Ingested, those are
   # indistinguishable from a successful measurement, which is worse than no
   # data. The most likely cause is ISL + OSL exceeding MAX_MODEL_LEN, where
   # every request fails and the run looks merely slow.
-  failed=$(echo "${out}" | awk '/Failed requests/ {print $NF}')
-  if [[ -n "${failed}" && "${failed}" != "0" ]]; then
-    echo "run ${i}: ${failed} failed request(s); refusing to record a result." >&2
-    echo "check that ISL(${ISL}) + OSL(${OSL}) < MAX_MODEL_LEN(${MAX_MODEL_LEN})." >&2
+  # Require an explicit zero. A missing field is not a pass: if the summary
+  # format changes and drops or renames this line, treating absence as success
+  # would silently disable the safeguard on exactly the runs it exists for.
+  failed=$(echo "${out}" | awk '/Failed requests/ {print $NF; exit}')
+  if [[ "${failed}" != "0" ]]; then
+    if [[ -z "${failed}" ]]; then
+      echo "run ${i}: no 'Failed requests' field in the summary; cannot confirm" >&2
+      echo "the run succeeded, so refusing to record a result." >&2
+    else
+      echo "run ${i}: ${failed} failed request(s); refusing to record a result." >&2
+      echo "check that ISL(${ISL}) + OSL(${OSL}) < MAX_MODEL_LEN(${MAX_MODEL_LEN})." >&2
+    fi
+    echo "${out}" | tail -40 >&2
     rm -f "${RESULT_CSV}" "${DETAIL_CSV}"
     exit 1
   fi
@@ -218,7 +244,7 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
   # MODEL, not MODEL_REPO: with MODEL_PATH set the server and the benchmark
   # both ran against the local path, and recording the repo id would label the
   # row with a model that was never loaded.
-  echo "${ALL2ALL_BACKEND},${MODEL},${CONCURRENCY},${ISL},${OSL},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
+  echo "${ALL2ALL_BACKEND},${MODEL},${CONCURRENCY},${ISL},${OSL},${NUM_PROMPTS},${i},${tput_val},${tpot_val},${ttft_val},${WARMUP_RUNS},${MORI_DISABLE_TOPO:-}" \
     >> "${DETAIL_CSV}"
 done
 
