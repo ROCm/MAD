@@ -1,0 +1,102 @@
+[
+    {
+        "name": "pyt_vllm_deepep_v2_deepseek-v2-lite",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "deepep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_REPO": "deepseek-ai/DeepSeek-V2-Lite",
+            "ALL2ALL_BACKEND": "deepep_v2",
+            "EP_NIC_NAME": "bnxt_re0",
+            "NCCL_SOCKET_IFNAME": "fenic0",
+            "WARMUP_RUNS": "2",
+            "MEASURED_RUNS": "3",
+            "CONCURRENCY": "16",
+            "ISL": "256",
+            "OSL": "128"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_mori_deepseek-v2-lite",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "mori_ep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_REPO": "deepseek-ai/DeepSeek-V2-Lite",
+            "ALL2ALL_BACKEND": "mori_high_throughput",
+            "EP_NIC_NAME": "bnxt_re0",
+            "NCCL_SOCKET_IFNAME": "fenic0",
+            "WARMUP_RUNS": "2",
+            "MEASURED_RUNS": "3",
+            "CONCURRENCY": "16",
+            "ISL": "256",
+            "OSL": "128"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_deepep_v2_deepseek-r1",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "deepep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_REPO": "deepseek-ai/DeepSeek-R1",
+            "ALL2ALL_BACKEND": "deepep_v2",
+            "EP_NIC_NAME": "bnxt_re0",
+            "NCCL_SOCKET_IFNAME": "fenic0",
+            "GPU_MEMORY_UTILIZATION": "0.80",
+            "WARMUP_RUNS": "2",
+            "MEASURED_RUNS": "3",
+            "CONCURRENCY": "16",
+            "ISL": "256",
+            "OSL": "128"
+        },
+        "args": ""
+    }
+]
