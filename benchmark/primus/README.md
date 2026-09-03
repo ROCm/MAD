@@ -119,14 +119,16 @@ madengine run --tags primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain --
 > **Note:** `--live-output` is optional. It streams the training logs to your terminal in real time.
 
 The tag follows the naming convention `primus_train/<backend>_<GPU_ARCH>_<MODEL_CONFIG>`, where:
-- `<backend>` is the Primus launcher: `megatron`, `torchtitan`, `megatron_bridge`, `maxtext`,
-  `maxdiffusion`, `nemo_automodel`, `diffusion`, or `moe_package`
+- `<backend>` is the Primus launcher: `megatron`, `torchtitan`, `megatron_bridge`, `nemo_automodel`,
+  `diffusion`, or `moe_package`
 - `<GPU_ARCH>` is the target accelerator (`MI300X`, `MI325X`, or `MI355X`)
 - `<MODEL_CONFIG>` matches the YAML filename under `examples/<backend>/configs/<GPU_ARCH>/`
 
 Tags are discovered from the Primus submodule at run time by
 `scripts/primus_train/get_models_json.py`, so any config present in the pinned Primus
-checkout is runnable even if it is not listed below.
+checkout is runnable even if it is not listed below. The JAX-based launchers (`maxtext`,
+`maxdiffusion`) are excluded from this discovery and are instead run via the dedicated
+`jax-maxtext` and `jax-maxdiffusion` benchmarks.
 
 ### Passing Environment Variables to the Container
 
