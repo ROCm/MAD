@@ -63,6 +63,7 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 | `models.yaml` | Model-specific CLI flags for all supported models |
 | `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
 | `benchmark_xPyD.sh` | Concurrency sweep benchmark using sglang bench_serving |
+| `rdma_counters.sh` | Samples the RDMA adapters' operation counters while the servers run (`RDMA_COUNTERS=1`) |
 | `benchmark_parser.py` | Log parser for CONCURRENCY benchmark logs |
 | `parse_to_csv.py` | Log parser for CONCURRENCY benchmark logs (emits summary CSV and madengine perf CSV) |
 
@@ -155,10 +156,12 @@ The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation 
 | `DP_MODE` | `PARALLEL_MODE` | Flags applied | Supported models |
 |-----------|-----------------|---------------|------------------|
 | `0` (default) | `tp` | `base_flags` + `tp_flags` + `prefill.tp` / `decode.tp` | All models |
-| `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1, Kimi-K2-Instruct only |
+| `1` | `dp` | `base_flags` + the model's own `dp_flags` (DP attention, plus whichever MoE all-to-all backend that entry selects) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1, Kimi-K2-Instruct (and its `-MoRI-AB` / `-DeepEP-AB` comparison variants) |
 
-- `DP_MODE=1` enables MoRI expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO).
-- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any model outside that allowlist with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for everything else.
+- `DP_MODE=1` enables expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO). The all-to-all backend comes from the model's `dp_flags`, not from the mode: most entries select `--moe-a2a-backend mori`, and `Kimi-K2-Instruct-DeepEP-AB` selects `--moe-a2a-backend deepep --deepep-mode normal`, which is the whole point of the pair.
+- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`; the two copies must be kept in step. Launching a model outside it with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for those.
+- All three Kimi entries are registered in `models.json` as `sglang-disagg-kimi-k2-instruct-overlay`, `...-mori-ab` and `...-deepep-ab`, so they are selectable from the madengine catalog rather than only through this directory's YAML. They use `run.sh` directly, which is the path they were measured on; `MODEL_PATH` still comes from the deployment, as it does for every other entry.
+- `Kimi-K2-Instruct-MoRI-AB` and `Kimi-K2-Instruct-DeepEP-AB` are configuration aliases of `Kimi-K2-Instruct`, differing only in `dp_flags`, and they resolve to its weights directory. They exist so a backend comparison can vary one flag with everything else held equal; neither is a tuned configuration, so a throughput quoted from either is a comparison point rather than a product number.
 
 ## Log Files
 
@@ -170,6 +173,16 @@ Logs are written to `${LOG_PATH}/${SLURM_JOB_ID}/`:
 | `prefill_NODE<N>.log` | Prefill server log |
 | `decode_NODE<N>.log` | Decode server log |
 | `benchmark_*_CONCURRENCY.log` / `.csv` | Benchmark results |
+| `rdma/<role>_NODE<N>.csv` | Adapter operation counters, sampled while the servers ran (`RDMA_COUNTERS=1`) |
+
+## Measuring a run
+
+Two switches, both read by `sglang_disagg_mori_io_ep.sh`:
+
+| Variable | What it does | Cost |
+|---|---|---|
+| `PROFILE_ENABLE=1` | Adds `--disable-custom-all-reduce` and `--disable-cuda-graph` to **both** roles, so collectives reach a profiler instead of being hidden inside a replayed graph or sglang's own all-reduce | Throughput. Read it from a second run without this |
+| `RDMA_COUNTERS=1` | Samples `/sys/class/infiniband/*/ports/*` into `rdma/<role>_NODE<N>.csv` while the servers run. Defaults to `PROFILE_ENABLE` | None measurable — it reads sysfs, so it is safe on a tuned run |
 
 ## Benchmarking
 
