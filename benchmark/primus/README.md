@@ -130,9 +130,30 @@ checkout is runnable even if it is not listed below. The JAX-based launchers (`m
 `maxdiffusion`) are excluded from this discovery and are instead run via the dedicated
 `jax-maxtext` and `jax-maxdiffusion` benchmarks.
 
+### Performance Environment (applied automatically)
+
+`scripts/primus_train/run.sh` applies the architecture-specific performance environment
+that Primus' own `runner/helpers/envs/` layer would set, because the `examples/run_pretrain.sh`
+launcher used for pretraining does not load it. Without this, a MAD run and a standalone
+run of the same config are not measuring the same configuration.
+
+| Variable | Applied when | Value |
+| --- | --- | --- |
+| `HSA_NO_SCRATCH_RECLAIM` | all non-JAX backends | `1` |
+| `NVTE_CK_IS_V3_ATOMIC_FP32` | `gfx942` (MI300X/MI325X) | `1` |
+| `PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32` | `gfx942` (MI300X/MI325X) | `1` |
+| `RCCL_WARP_SPEED_AUTO` | MI355X | `0` |
+| `NVTE_USE_CAST_TRANSPOSE_TRITON` | `*MXFP4*` configs | `0` |
+
+Each is applied only if unset, so anything you pass via `docker_env_vars` (below) or export
+yourself takes precedence. The effective values are echoed as `[primus_train] ...` at the
+top of the run log.
+
 ### Passing Environment Variables to the Container
 
-To pass environment variables into the running container, use the `docker_env_vars` field in `--additional-context`:
+To pass environment variables into the running container — secrets, or an override of the
+table above — use the `docker_env_vars` field in `--additional-context`. Note that a model
+card `env` / `env_vars` block is **not** read by madengine on the local Docker path:
 
 ```bash
 madengine run --tags primus_train/megatron_MI300X_llama3.1_8B-BF16-pretrain --live-output --additional-context '{"docker_env_vars": {"MAD_SECRETS_HFTOKEN": "<your_hf_token>", "HSA_NO_SCRATCH_RECLAIM": "1"}}'
