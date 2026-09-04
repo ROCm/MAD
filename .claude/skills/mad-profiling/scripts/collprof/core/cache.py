@@ -15,7 +15,7 @@ from pathlib import Path
 
 #: Bumped whenever parsing or validation changes, so caches built by the previous logic are not
 #: reused. Raising a sanity bound counts: it changes which records are kept.
-PARSE_VERSION = 9
+PARSE_VERSION = 13
 
 
 def file_signature(paths: list) -> list:
@@ -43,15 +43,25 @@ class ParseCache:
             print(f"ignoring unreadable parse cache {path}: {exc}")
             return {}
 
-    def get(self, key: str, signature: list, compute, encode=None, decode=None):
+    def get(self, key: str, signature: list, compute, encode=None, decode=None,
+            keep=None):
+        """The parsed value, from the store when its inputs are unchanged.
+
+        ``keep`` decides whether a freshly computed value is worth storing: a parse can succeed
+        and still be incomplete (these reads flap on NFS), and caching that under an unchanged
+        signature would make every later run reuse the partial parse instead of reparsing.
+        """
         entry = self.store.get(key)
         if entry and entry["signature"] == signature:
             print(f"reusing parsed {key}")
             return decode(entry["data"]) if decode else entry["data"]
 
         value = compute()
-        self.store[key] = {"signature": signature, "data": encode(value) if encode else value}
-        self.dirty = True
+        if keep is None or keep(value):
+            self.store[key] = {"signature": signature, "data": encode(value) if encode else value}
+            self.dirty = True
+        else:
+            print(f"not caching {key}: the parse was incomplete, so a rerun reparses it")
         return value
 
     def flush(self) -> None:

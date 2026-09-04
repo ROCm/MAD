@@ -191,7 +191,13 @@ if ! _weights_complete; then
             Llama-3.1-70B-Instruct) _MODEL_REPO="meta-llama/Llama-3.1-70B-Instruct" ;;
             Qwen3-Next-80B) _MODEL_REPO="Qwen/Qwen3-Next-80B-A3B-Instruct" ;;
             GPT-OSS-120B)   _MODEL_REPO="openai/gpt-oss-120b" ;;
-            Kimi-K2-Instruct) _MODEL_REPO="moonshotai/Kimi-K2-Instruct-0905" ;;
+            # The -AB entries are configuration aliases of Kimi-K2-Instruct in models.yaml and
+            # share its weights, so they stage from its repository. Without them an alias whose
+            # MODEL_PATH is empty exits here instead of downloading, which is the one case this
+            # fallback exists for. Their catalog entries also set MODEL_REPO; this covers the
+            # paths that do not go through models.json.
+            Kimi-K2-Instruct|Kimi-K2-Instruct-MoRI-AB|Kimi-K2-Instruct-DeepEP-AB)
+                            _MODEL_REPO="moonshotai/Kimi-K2-Instruct-0905" ;;
             # Non-gated mirror: the official meta-llama Llama-4 repos need a
             # per-account license grant, which an unattended run cannot obtain.
             Llama-4-Scout-17B-16E-Instruct) _MODEL_REPO="unsloth/Llama-4-Scout-17B-16E-Instruct" ;;

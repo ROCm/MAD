@@ -85,6 +85,70 @@ Read the two cases apart:
   looks like a round number repeated across ranks, a splice looks like two counts
   concatenated (`804352` and `160` arriving as `804352160`) and appears once.
 
+## Traces go bad differently from logs
+
+Everything above is about the RCCL text logs. A torch trace is gzip, one file per rank, and it
+fails in three ways that a text log does not. Each is reported and read past rather than raised on
+— the same call `resolve_traces` makes for a trace directory that turned out empty, because losing
+a 32-rank capture over one rank is the wrong trade.
+
+| symptom | exception | what it is |
+|---|---|---|
+| no gzip trailer | `EOFError` | the rank was killed at teardown; the file is otherwise whole |
+| bad bytes mid-stream | `zlib.error` — *invalid literal/length code* | damage, not a short write. Not an `OSError`, so it needs naming separately |
+| a duration that is not a number, e.g. `4.200.347` | `ValueError` | two durations spliced by a profiler flushing from several threads |
+
+The third is the log-tearing of the previous sections arriving in a trace, and it is handled the
+same way round: the **call is kept and only the duration is dropped**, because the event is in the
+file so the collective did happen, and this report holds call counts sound where it holds durations
+suspect. Nothing is inherited from the previous event, which would put a plausible number where the
+file has none.
+
+The first two truncate a rank's contribution, so that rank's **call counts become floors and its
+shares become suspect**. Normalising removes how long the capture lasted; it does not remove
+*which part* of it was lost. A cut falling between a dispatch and the combine that follows it drops
+a suffix that is not a representative sample of the mix, and the share moves with it. Treat a share
+from a truncated capture as possibly biased, and reparse for a clean one before comparing shares
+across runs.
+
+How much this matters is measurable rather than assumable, and worth measuring before either
+trusting or discarding a capture: on one DeepEP decode capture the metadata share of the exchange
+came to 92.6% over all sixteen traces and 91.6% over the ten that read clean, so the conclusion
+held — but that was a result, not a property of truncation.
+
+The report names the ranks affected, which is what tells a reader whether a per-rank imbalance is
+the run's or the capture's.
+
+### A failed read is not a corrupt file
+
+**Confirm on a second run before concluding that trace data is damaged.** Four passes over one
+unchanged DeepEP capture on NFS reported 1, then 10, then 12, then **0** unreadable files of 16.
+The files were intact throughout; the reads were flaky. A single pass — even `gzip -t` repeated on
+one file, which failed three times running inside one bad window — is too narrow a sample to call
+a file corrupt.
+
+The obvious shortcut does not work: **a tail of zero bytes does not prove the file is short.** One
+trace of this capture failed four reads in a row, and a local copy of it ended in sixteen null
+bytes — which looks exactly like a write that never finished. The source was intact: a later pass
+read all sixteen traces clean, and the copy differed from the source in its last bytes while
+matching it in length. The flaky read had returned zeros, and `cp` wrote them out without
+complaint. Compare two independent reads of the same bytes; do not trust one read of a copy, since
+the copy is itself one read.
+
+The same filesystem does it to the adapter-counter samples, which are written by a shell loop and
+read back by the report: one sample of 138 in a validation run came back as a megabyte of NUL
+bytes in the middle of an otherwise sound file. It costs one counter of one sample and the parser
+says so, but it stopped `csv` outright until it was handled — the lesson being that *every* channel
+reading from this filesystem needs the read-past-damage treatment, not just the ones that had
+produced damage so far.
+
+This is the rule from the end of this file applied to a different channel, and it cuts both ways:
+a run reporting **zero** unreadable traces is the one to quote, and a run reporting many is a
+reason to rerun the parse rather than to caveat the numbers. Where the difference matters, check
+whether it does: on that capture the metadata share of the expert exchange came to 92.6% over all
+sixteen traces and 91.6% over the ten that read clean, so the conclusion held either way and the
+damage was worth reporting rather than hiding.
+
 ## Idle ranks are not peers
 
 Per-rank figures divide by the ranks that carried traffic, not by the ranks present in

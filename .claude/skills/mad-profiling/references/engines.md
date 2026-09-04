@@ -17,7 +17,25 @@ touched — that is the whole point of the split, and the reason it is worth kee
 | `iteration_metric` | whether the engine has iterations to divide by | `iter_ms` for training, empty for serving |
 | `traces` (`TraceLayout`) | how trace files are named and which phase each belongs to | `-TP-3.trace.json.gz`, role from the profile-point log |
 | `limits` (`SanityLimits`) | the scale at which a record stops being plausible | 512 MiB per message, 64 ranks per communicator |
+| `run_config` (`RunConfigLayout`) | where the engine states the configuration it actually ran with | `server_args=ServerArgs(disable_cuda_graph=False, ...)` |
+| `steps` (`StepTimingLayout`) | how a step time is recoverable from what the engine already prints | `#running-req: 16, ..., gen throughput (token/s): 234.5` |
+| `a2a` (`A2AKernels`) | how the expert all-to-all is named in this engine's traces, when a backend carries it outside RCCL | `mori_ep_dispatch_kernel`, `deep_ep::combine` |
+| `benchmark` (`BenchmarkLayout`) | where the harness left its numbers and what its CSV calls them | `perf_*.csv`, `isl1024_osl1024_con64`, `mean_itl_ms` |
+| `counters` (`CounterLayout`) | where the RDMA adapter samples landed, and how this fabric's driver spells its operations | `rdma/decode_NODE2.csv`, `rx_write_req` against `rx_write_requests` |
 | `notes` (`ReportNotes`) | what a reader must be told to not misread the numbers | the scope of a measurement configuration |
+
+The last five are optional and default to reporting nothing: an engine that declares none of them
+produces the report it produced before they existed. They are worth filling in for anything that
+serves, because they answer questions the other channels cannot — `run_config` is what makes two
+runs comparable or not, `steps` is the only duration channel a serving run has, `a2a` is the
+only channel that names traffic a backend carries itself, and `benchmark` is where throughput
+and latency come from at all, since a profiled run's own log carries neither.
+
+`benchmark` is also the field the rule above was tested by. The comparison module began with one
+harness's schema written into it — the key shape `isl…_osl…_con…`, the metric names `mean_itl_ms`
+and `mean_ttft_ms`, the glob `perf_*.csv` — and a second serving engine would have had to edit
+`core/` to be read at all. Naming them here is what keeps the end-to-end split arithmetic over
+whatever the harness called its columns rather than over three names `core/` assumes.
 
 `notes` is the field to take seriously. Every sentence in it is a claim about how one
 engine was measured, and it is inserted into the report as written. A new engine that
@@ -75,14 +93,34 @@ produces a plausible report full of false statements.
    as damaged — the report warns about it either way, but the default should not be
    wrong for the engine.
 
+6a. **Say where the engine states its own configuration, and its step time.** Both are one
+   `guard` plus one pattern, and both answer a question no other channel can.
+   - `run_config`: the line where the engine prints its effective settings, defaults applied.
+     Prefer that over a command line — a launcher passes a subset and the framework fills in the
+     rest, and it is the filled-in value that ran.
+   - `steps`: a line carrying enough to derive a step time. For a server that logs its running
+     batch and its generation rate, the rate over the batch is the step frequency. The optional
+     `graphed` group records whether a captured graph was replayed over those steps, which is worth
+     supplying wherever the engine says: it is the configuration difference most likely to explain
+     a per-step gap, and it belongs in band rather than inferred from startup.
+
+6b. **Declare `a2a` if a backend carries collectives outside RCCL.** An expert-parallel MoE
+   backend does: MoRI over IBGDA, DeepEP over rocSHMEM, neither reaching an RCCL log nor a
+   `record_param_comms` event. Patterns are matched against trace event names, first match wins, so
+   order them from specific to general. Getting them wrong is cheap and visible — the report lists
+   the busiest unclassified device events precisely so the patterns can be corrected against a real
+   trace.
+
 7. **Write the notes.** Ask: what would a reader conclude from these numbers that is
    not true? For a measurement configuration that differs from the tuned one, for
    traffic that bypasses RCCL entirely, or for a trace window that is not an iteration,
    the answer belongs in `notes` — the fields are `rank_coverage`, `communicator`
    (`{nranks}` is substituted), `scope`, `damage_cause`, `unmarked_window`,
-   `trace_vs_log`. Leaving one empty omits the sentence, which is the honest default:
-   `damage_cause` explains why *this* engine's logs tear, so an engine that has not been
-   investigated states the count and the breakdown and claims no cause.
+   `trace_vs_log`, `step_basis`, `graphs_off`, `a2a_outside_rccl`. Leaving one empty omits the
+   sentence, which is the honest default: `damage_cause` explains why *this* engine's logs tear, so
+   an engine that has not been investigated states the count and the breakdown and claims no cause.
+   The same applies to the last three — the core reports that graph replay was off, and only the
+   engine knows whether that is a deliberate measurement setting or a fault.
 
 8. **Register it** in `engines/__init__.py`.
 

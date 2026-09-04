@@ -55,3 +55,33 @@ def test_every_registered_engine_declares_what_a_report_needs():
         if spec.iteration_metric:
             keys = {m.key for m in spec.metrics}
             assert spec.iteration_metric in keys, f"{name} counts iterations with an absent metric"
+
+
+def test_the_moe_parallelism_knobs_the_kimi_entries_set_are_classified():
+    """`models.yaml` passes these three beside `--moe-a2a-backend` on every Kimi-K2 entry, so a
+    difference the verdict lists must not then be called unable to move throughput."""
+    from collprof.engines.sglang_disagg import SPEC
+
+    perf = SPEC.run_config.perf_relevant
+    for setting in ("moe_dense_tp_size", "enable_dp_lm_head",
+                    "enable_dp_attention_local_control_broadcast"):
+        assert setting in perf, setting
+        assert setting not in SPEC.run_config.noise, setting
+
+
+def test_the_ab_catalog_entries_pin_the_kernel_variant():
+    """The pair only isolates the backend if MoRI is held to its throughput kernel.
+
+    The launcher defaults MoRI decode to low-latency by token count and DeepEP has no such path,
+    so uncontrolled the pair measures the mode too: 10.6 ms against the matched 14.7 ms.
+    """
+    import json
+    from pathlib import Path
+
+    catalog = json.loads((Path(__file__).resolve().parents[5] / "scripts" / "sglang_disagg"
+                          / "models.json").read_text())
+    ab = {m["name"]: m["env_vars"] for m in catalog if m["name"].endswith("-ab")}
+
+    assert len(ab) == 2, "the A/B pair"
+    for name, env in ab.items():
+        assert env["SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD"] == "0", name

@@ -31,6 +31,8 @@ MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
     "Kimi-K2-Instruct"
+    "Kimi-K2-Instruct-MoRI-AB"
+    "Kimi-K2-Instruct-DeepEP-AB"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -61,6 +63,8 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
     "Kimi-K2-Instruct" \
+    "Kimi-K2-Instruct-MoRI-AB" \
+    "Kimi-K2-Instruct-DeepEP-AB" \
 )
 
 # Define valid model names
@@ -75,6 +79,8 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "GPT-OSS-120B" \
     "Kimi-K2-Instruct" \
+    "Kimi-K2-Instruct-MoRI-AB" \
+    "Kimi-K2-Instruct-DeepEP-AB" \
 )
 
 model_allows_mori_ep() {
@@ -174,7 +180,21 @@ fi
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-ORIGINAL_MODEL_PATH="/shared_inference/models_blog/${MODEL_NAME}"
+# The -AB entries are configuration aliases: they vary one flag against `Kimi-K2-Instruct` and
+# share its weights, so the <root>/$MODEL_NAME paths below would fail validation. Resolved for
+# the path only -- MODEL_NAME stays the models.yaml key.
+model_weights_name() {
+    case "$1" in
+        Kimi-K2-Instruct-MoRI-AB|Kimi-K2-Instruct-DeepEP-AB) echo "Kimi-K2-Instruct" ;;
+        *) echo "$1" ;;
+    esac
+}
+MODEL_WEIGHTS_NAME="$(model_weights_name "$MODEL_NAME")"
+if [[ "$MODEL_WEIGHTS_NAME" != "$MODEL_NAME" ]]; then
+    echo "Model $MODEL_NAME is a configuration alias; looking for weights of $MODEL_WEIGHTS_NAME"
+fi
+
+ORIGINAL_MODEL_PATH="/shared_inference/models_blog/${MODEL_WEIGHTS_NAME}"
 
 echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
@@ -216,25 +236,25 @@ check_model_path() {
 }
 
 # Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
 if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
     MODEL_PATH="$MODEL_PATH_1"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 # Check /shared_inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+elif check_model_path "/shared_inference/models_blog/$MODEL_WEIGHTS_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
+elif check_model_path "$MODEL_DIR/$MODEL_WEIGHTS_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
+    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
+    echo "  - /shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "Model must be accessible from all nodes for distributed execution."
     echo "Please ensure the model is available on all allocated nodes."
@@ -440,6 +460,10 @@ docker run --rm \
     -v $HOME:$HOME \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    `# /sys/class/infiniband reaches the container as symlinks into /sys/devices; without this` \
+    `# read-only bind the targets are absent, so the adapters are listed but expose no counter` \
+    `# and rdma_counters.sh sees nothing.` \
+    -v /sys/devices:/sys/devices:ro \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size 64G \
     -v ${LOG_PATH}:/run_logs \
@@ -466,6 +490,20 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    `# Measurement controls. Without these the container never sees RDMA_COUNTERS,` \
+    `# nor the PROFILE_ENABLE it defaults from, so the sampler never starts and the` \
+    `# bind-mount above is inert. Forwarded only when set, so an unprofiled run is` \
+    `# unchanged.` \
+    ${PROFILE_ENABLE:+-e PROFILE_ENABLE=$PROFILE_ENABLE} \
+    ${RDMA_COUNTERS:+-e RDMA_COUNTERS=$RDMA_COUNTERS} \
+    ${RDMA_COUNTERS_INTERVAL:+-e RDMA_COUNTERS_INTERVAL=$RDMA_COUNTERS_INTERVAL} \
+    ${RDMA_COUNTERS_DIR:+-e RDMA_COUNTERS_DIR=$RDMA_COUNTERS_DIR} \
+    ${RCCL_LOG_DIR:+-e RCCL_LOG_DIR=$RCCL_LOG_DIR} \
+    `# Holds MoRI on its throughput kernel, which is what makes the A/B a backend comparison` \
+    `# rather than a kernel-variant one. Unforwarded, mori_ep_env.sh substitutes its default of` \
+    `# 2 * MORI_MAX_DISPATCH_TOKENS_DECODE and the alias silently runs the low-latency kernel --` \
+    `# a 4.1 ms/step difference on this model, attributed to the backend.` \
+    ${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD:+-e SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=$SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \

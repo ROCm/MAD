@@ -91,7 +91,8 @@ def _write_report_sheet(ws, report_lines: list) -> None:
             ws.column_dimensions[get_column_letter(col)].width = min(max(width + 2, 8), 46)
 
 
-def write_workbook(out_dir: Path, report_lines: list) -> Path | None:
+def write_workbook(out_dir: Path, report_lines: list,
+                   filename: str = "profile.xlsx", only: set | None = None) -> Path | None:
     """One workbook per report: the text as cells, every CSV as a sortable table.
 
     The rank x rank sheet stays a plain grid and gets a colour scale instead, which is the heatmap:
@@ -105,7 +106,7 @@ def write_workbook(out_dir: Path, report_lines: list) -> Path | None:
         from openpyxl.worksheet.table import Table, TableStyleInfo
     except ImportError:
         print(f"warning: openpyxl is not installed in {sys.executable}, so "
-              f"{out_dir}/profile.xlsx was skipped; report.md and the CSVs still hold every "
+              f"{out_dir}/{filename} was skipped; the markdown and the CSVs still hold every "
               "number. `pip install openpyxl` and rerun to get the workbook.")
         return None
 
@@ -114,6 +115,10 @@ def write_workbook(out_dir: Path, report_lines: list) -> Path | None:
     _write_report_sheet(wb.create_sheet("report"), report_lines)
 
     for csv_path in sorted(out_dir.glob("*.csv")):
+        # A single-run report owns its directory; a comparison shares a caller-named one, where an
+        # unrelated CSV becoming a sheet can collide once stems truncate to 31 characters.
+        if only is not None and csv_path.name not in only:
+            continue
         with csv_path.open() as fh:
             rows = list(csv.reader(fh))
         if not rows:
@@ -155,6 +160,7 @@ def write_workbook(out_dir: Path, report_lines: list) -> Path | None:
             # +4 leaves room for the filter button the table adds to every header cell.
             ws.column_dimensions[get_column_letter(col)].width = min(max(width + 4, 10), 46)
 
-    path = out_dir / "profile.xlsx"
+    # Not `name`: that is rebound to a sheet name inside the loop above.
+    path = out_dir / filename
     wb.save(path)
     return path

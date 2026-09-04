@@ -44,9 +44,17 @@ class Phase:
     # metric key -> node -> values. Megatron prints iteration timings from a single rank, so the
     # values are kept per node and the node that actually logged them is used.
     metrics: dict = field(default_factory=lambda: defaultdict(lambda: defaultdict(list)))
+    # node -> {setting: value}, the configuration each node reported about itself.
+    config: dict = field(default_factory=dict)
+    # node -> [StepRecord], one per logging interval the engine printed.
+    steps: dict = field(default_factory=lambda: defaultdict(list))
     # (src_rank, dst_rank, transport) -> set of channel ids
     edges: dict = field(default_factory=lambda: defaultdict(set))
     nodes: set = field(default_factory=set)
+    #: Nodes whose *shared* log was read, so a configuration line could have appeared in it.
+    #: Distinct from `nodes`, which also collects nodes seen only in per-rank RCCL files: those
+    #: cannot carry a configuration.
+    config_nodes: set = field(default_factory=set)
     ranks: set = field(default_factory=set)
     #: Which kinds of stream the collective records came from (see ``LOG_*`` in spec.py). A phase
     #: read from per-rank files may not be told it tore because its ranks shared a stdout.
@@ -68,6 +76,17 @@ class Phase:
 
     def add_metric(self, key: str, node: str, value: float) -> None:
         self.metrics[key][node].append(value)
+
+    def add_config(self, node: str, settings: dict) -> None:
+        """Record what a node reported about its own configuration.
+
+        First writer per node wins: settings are printed once at startup, so anything later is a
+        restart or a subprocess echoing its parent.
+        """
+        self.config.setdefault(node, settings)
+
+    def add_step(self, node: str, record) -> None:
+        self.steps[node].append(record)
 
     # -- aggregations ----------------------------------------------------------------------------
 
@@ -121,7 +140,9 @@ class Phase:
         return {"name": self.name, "engine": self.engine, "sizes": dict(self.sizes),
                 "per_node": dict(self.per_node), "per_rank": dict(self.per_rank),
                 "metrics": {k: dict(v) for k, v in self.metrics.items()},
+                "config": dict(self.config), "steps": dict(self.steps),
                 "edges": dict(self.edges), "nodes": self.nodes, "ranks": self.ranks,
+                "config_nodes": self.config_nodes,
                 "writers": self.writers, "damage": dict(self.damage),
                 "topo_damage": dict(self.topo_damage)}
 
@@ -133,8 +154,12 @@ class Phase:
         phase.per_rank.update(state["per_rank"])
         for key, by_node in state["metrics"].items():
             phase.metrics[key].update(by_node)
+        phase.config.update(state.get("config", {}))
+        for node, records in state.get("steps", {}).items():
+            phase.steps[node].extend(records)
         phase.edges.update(state["edges"])
         phase.nodes, phase.ranks = state["nodes"], state["ranks"]
+        phase.config_nodes = state.get("config_nodes", set())
         phase.writers = set(state.get("writers", ()))
         phase.damage.update(state["damage"])
         phase.topo_damage.update(state.get("topo_damage", {}))

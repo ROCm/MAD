@@ -170,3 +170,55 @@ Llama-4-Scout-17B-16E-Instruct:
     tp: "--disable-cuda-graph"
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+
+# The two entries below are one A/B pair and are meant to be read as a diff: they are
+# byte-identical apart from dp_flags, where the only difference is the MoE all-to-all
+# backend. Everything that moves throughput on its own -- graph capture, the static memory
+# fraction, the admission cap, the attention backend -- is deliberately the same, because a
+# backend comparison whose arms differ in any of those measures the difference in those
+# instead. See .claude/skills/mad-profiling/references/backend-comparison.md.
+#
+# Both are graph-free, which is a property of the DeepEP side rather than a choice: DeepEP's
+# normal-mode dispatch is not graph-capturable, and its low-latency kernels do not work on
+# this fabric. MoRI is held to the same setting so the comparison is about the transport.
+# Neither entry is the tuned configuration -- Kimi-K2-Instruct above is -- so a throughput
+# quoted from either is a comparison point, not a product number.
+#
+# The catalog entries in models.json pin `SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=0`
+# on both, so selecting them runs the matched-variant comparison described below rather than the
+# uncontrolled one. The threshold cannot live here: models.yaml carries flags, and this is an
+# environment variable the launcher reads.
+#
+# Launching these entries by hand -- through run_xPyD_models.slurm, or by setting MODEL_NAME
+# directly -- does NOT pick that up, because it lives in models.json rather than here. Such a run
+# compares MoRI's low-latency kernel against DeepEP's throughput one, which measures the mode as
+# much as the backend; export the threshold yourself, or go through the catalog.
+#
+# These two are NOT matched on the kernel variant by their flags alone, and that cannot be fixed
+# here, because it is not a flag. MoRI chooses between its low-latency and throughput inter-node kernels by
+# token count, and the launcher pins decode below the threshold, so this pair is MoRI's
+# low-latency kernel against DeepEP's throughput one. Setting
+# SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=0 in the manifest environment moves MoRI
+# onto its throughput kernel and matches them; measured that way the backend gap widens from
+# 10.6 to 14.7 ms a step, because MoRI's low-latency kernel is itself 4.1 ms slower here than
+# its throughput one. Read the variant off the kernel names in a profile, not off a flag --
+# .claude/skills/mad-profiling/references/backend-comparison.md, arm D'.
+Kimi-K2-Instruct-MoRI-AB:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.92 --dist-timeout 3600 --disable-cuda-graph --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
+  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192"
+  decode:
+    tp: "--disable-radix-cache --disable-cuda-graph"
+    dp: "--max-running-requests 8192 --disable-radix-cache"
+
+Kimi-K2-Instruct-DeepEP-AB:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.92 --dist-timeout 3600 --disable-cuda-graph --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
+  dp_flags: "--moe-a2a-backend deepep --deepep-mode normal --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192"
+  decode:
+    tp: "--disable-radix-cache --disable-cuda-graph"
+    dp: "--max-running-requests 8192 --disable-radix-cache"

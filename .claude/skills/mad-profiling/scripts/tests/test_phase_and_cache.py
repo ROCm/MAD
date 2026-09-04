@@ -114,3 +114,23 @@ def test_a_failed_write_leaves_the_previous_cache_intact(tmp_path: Path, monkeyp
         cache.flush()
     assert cache_path.read_bytes() == good
     assert not list(tmp_path.glob("*.tmp")), "the temporary file must not be left behind"
+
+
+def test_the_trace_cache_key_includes_the_engine(tmp_path):
+    """A trace parse carries the engine's own a2a classification and rank patterns, so keyed on
+    the files alone a cache filled under one `--engine` answers for another."""
+    import dataclasses
+
+    from collprof.core.cache import file_signature
+    from collprof.engines import primus, sglang_disagg
+
+    trace = tmp_path / "one.trace.json"
+    trace.write_text("[]\n")
+
+    def key(spec):
+        return file_signature([trace]) + [spec.name]
+
+    assert key(sglang_disagg.SPEC) != key(primus.SPEC)
+    # The same engine under a different label is a different key, which makes `--engine` safe.
+    renamed = dataclasses.replace(sglang_disagg.SPEC, name="sglang-disagg-experimental")
+    assert key(sglang_disagg.SPEC) != key(renamed)

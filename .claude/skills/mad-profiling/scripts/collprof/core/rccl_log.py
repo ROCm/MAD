@@ -17,7 +17,9 @@ from pathlib import Path
 
 from .phase import (DAMAGE_MSG_CAP, DAMAGE_NO_TAIL, DAMAGE_NRANKS_RANGE, DAMAGE_RANK_RANGE,
                     DAMAGE_TOPO_TRANSPORT, DAMAGE_TWO_RECORDS, DAMAGE_UNKNOWN_COLL, Phase)
-from .spec import NODE_FROM_PARENT, PHASE_FROM_MARKER, EngineSpec
+from .runconfig import parse_config_line
+from .spec import LOG_PER_RANK, NODE_FROM_PARENT, PHASE_FROM_MARKER, EngineSpec
+from .steps import parse_step_line
 from .units import datatype
 
 # host:pid:tid [dev] NCCL INFO <Coll>: opCount <hex> ... count <n> datatype <d> ... [nranks=<n>]
@@ -191,6 +193,72 @@ def damage_reason(m: re.Match, tail: re.Match | None, max_nranks: int) -> str | 
     return None
 
 
+#: How far into a log to look for the configuration line before giving up. A server announces
+#: itself before it serves -- on these runs the line is number 18 -- so this is ample headroom,
+#: and it keeps the scan cheap on a run that prints no such line at all.
+CONFIG_SCAN_LINES = 20000
+
+
+def scan_run_config(run_dir: Path, spec: EngineSpec,
+                    rccl_dir: Path | None = None) -> tuple[dict, dict]:
+    """``(config, nodes)`` per phase -- what a run reported, and which nodes it was asked.
+
+    A comparison needs the other run's settings and nothing else, so each log is read only until
+    it yields its configuration rather than parsed in full: a few hundred lines of a 2 GB file.
+
+    Per-rank RCCL logs are skipped, not read: they cannot carry a configuration, so for them
+    "read until it yields" is a read to the end.
+    """
+    if not spec.run_config.pattern:
+        return {}, {}
+    found: dict = {}
+    seen: dict = {}
+    for log, node, log_phase, layout in discover_logs(run_dir, spec, rccl_dir):
+        if layout.written_by == LOG_PER_RANK:
+            continue
+        # A phase announced inside the log is still a phase, tracked here the same way the full
+        # parse tracks it, so `--compare-config` works for marker-based engines too.
+        marker_guard = layout.marker_guard if layout.phase_marker else ""
+        current = log_phase
+        if not log_phase and not marker_guard:
+            continue
+        # Every node discovered for the phase, whether or not its line parsed. Returning only the
+        # ones that spoke would let three of four count as unanimous.
+        if current:
+            seen.setdefault(current, set()).add(node)
+        # Only a log whose phase comes from its name is cut short. Such a log holds one phase and
+        # states it near the top, so a line budget bounds a reference that would otherwise be read
+        # to EOF for nothing. A marker-based log holds several phases back to back and the second
+        # marker lies a whole phase past the first -- millions of lines, not thousands -- so any
+        # budget drops every phase after the first, silently and always. Nothing is saved by one
+        # here either: the giant files are the per-rank RCCL logs, and those are skipped above
+        # before being opened. What is left is one stdout a node, scanned with two substring tests
+        # a line and no regex until one of them hits.
+        cutoff = CONFIG_SCAN_LINES if log_phase else 0
+        with open_log(log) as fh:
+            for count, line in enumerate(fh, 1):
+                if cutoff and count > cutoff:
+                    print(f"warning: no {spec.run_config.guard!r} in the first "
+                          f"{CONFIG_SCAN_LINES} lines of {log.name}; not reading further, so this "
+                          "node contributes no configuration")
+                    break
+                if marker_guard and marker_guard in line:
+                    hit = layout.phase_marker.search(line)
+                    if hit:
+                        current = hit.group(1)
+                        seen.setdefault(current, set()).add(node)
+                if not current or spec.run_config.guard not in line:
+                    continue
+                settings = parse_config_line(line, spec.run_config)
+                if settings:
+                    found.setdefault(current, {}).setdefault(node, settings)
+                    # Only for a filename-derived phase. A marker-based log carries several
+                    # phases, and each announces its own configuration further down.
+                    if log_phase:
+                        break
+    return found, seen
+
+
 def parse_run(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> dict:
     """Parse every log of a run into ``{phase name: Phase}``."""
     limits = spec.limits
@@ -202,6 +270,8 @@ def parse_run(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> 
     for log, node, log_phase, layout in discover_logs(run_dir, spec, rccl_dir):
         marker_guard = layout.marker_guard if layout.phase_marker else ""
         current = phase_named(log_phase) if log_phase else None
+        if current is not None and layout.written_by != LOG_PER_RANK:
+            current.config_nodes.add(node)
         strict_tail = log_has_record_tails(log)
         with open_log(log) as fh:
             # A decode log reaches 2 GB, so every regex is guarded by a cheap substring its pattern
@@ -211,6 +281,11 @@ def parse_run(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> 
                     marker = layout.phase_marker.search(line)
                     if marker:
                         current = phase_named(marker.group(1))
+                        # This node belongs to the phase the marker just opened; without it a
+                        # marker-based engine reaches `merge_nodes` with no node set, and
+                        # agreement is judged only over the nodes whose startup line parsed.
+                        if layout.written_by != LOG_PER_RANK:
+                            current.config_nodes.add(node)
                 if current is None:
                     continue
 
@@ -258,6 +333,20 @@ def parse_run(run_dir: Path, spec: EngineSpec, rccl_dir: Path | None = None) -> 
                             continue
                         key = (int(topo.group("src")), int(topo.group("dst")), transport)
                         current.edges[key].add(int(topo.group("channel")))
+                        continue
+
+                # Both guards are checked for emptiness first: "" satisfies a substring test on
+                # every line of a 2 GB log.
+                if spec.steps.guard and spec.steps.guard in line:
+                    record = parse_step_line(line, spec.steps)
+                    if record:
+                        current.add_step(node, record)
+                        continue
+
+                if spec.run_config.guard and spec.run_config.guard in line:
+                    settings = parse_config_line(line, spec.run_config)
+                    if settings:
+                        current.add_config(node, settings)
                         continue
 
                 # No early exit: engines print several of these on one line, e.g. Megatron reports
