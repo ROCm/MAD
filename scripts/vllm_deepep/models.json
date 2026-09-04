@@ -1,0 +1,77 @@
+[
+    {
+        "name": "pyt_vllm_deepep_v2_deepseek-v2-lite",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "deepep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
+        },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-V2-Lite -e MODEL_REVISION=604d5664dddd88a0433dbae533b7fe9472482de0 -e ALL2ALL_BACKEND=deepep_v2 -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128 -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-v2-lite/aiter_build:/opt/aiter/aiter/jit/build -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-v2-lite/aiter_configs:/tmp/aiter_configs -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-v2-lite/deep_ep:/root/.deep_ep",
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_mori_deepseek-v2-lite",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "mori_ep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
+        },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-V2-Lite -e MODEL_REVISION=604d5664dddd88a0433dbae533b7fe9472482de0 -e ALL2ALL_BACKEND=mori_high_throughput -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128 -v /var/cache/mad/vllm_deepep/pyt_vllm_mori_deepseek-v2-lite/aiter_build:/opt/aiter/aiter/jit/build -v /var/cache/mad/vllm_deepep/pyt_vllm_mori_deepseek-v2-lite/aiter_configs:/tmp/aiter_configs -v /var/cache/mad/vllm_deepep/pyt_vllm_mori_deepseek-v2-lite/deep_ep:/root/.deep_ep",
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_deepep_v2_deepseek-r1",
+        "dockerfile": "../../docker/vllm_deepep_inference",
+        "scripts": "run_vllm_deepep.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_vllm_deepep.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_deepep",
+            "deepep",
+            "expert_parallel",
+            "inference"
+        ],
+        "timeout": -1,
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
+        },
+        "additional_docker_run_options": "--device=/dev/infiniband --shm-size 128g --ulimit memlock=-1 --ulimit nofile=1048576:1048576 -e MODEL_REPO=deepseek-ai/DeepSeek-R1 -e MODEL_REVISION=56d4cbbb4d29f4355bab4b9a39ccb717a14ad5ad -e ALL2ALL_BACKEND=deepep_v2 -e EP_NIC_NAME=bnxt_re0 -e NCCL_SOCKET_IFNAME=fenic0 -e GPU_MEMORY_UTILIZATION=0.80 -e WARMUP_RUNS=2 -e MEASURED_RUNS=3 -e CONCURRENCY=16 -e ISL=256 -e OSL=128 -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-r1/aiter_build:/opt/aiter/aiter/jit/build -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-r1/aiter_configs:/tmp/aiter_configs -v /var/cache/mad/vllm_deepep/pyt_vllm_deepep_v2_deepseek-r1/deep_ep:/root/.deep_ep",
+        "args": ""
+    }
+]
