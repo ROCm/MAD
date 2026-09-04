@@ -26,13 +26,31 @@ CONFIGS_GLOB = os.path.join(PRIMUS_ROOT, "examples", "*", "configs", "**", "*.ya
 # Discovering them here too would create duplicates on the wrong base image.
 JAX_BACKENDS = {"maxtext", "maxdiffusion"}
 
+# Precision is encoded in the config file name (llama3.1_8B-MXFP4-pretrain.yaml,
+# gdn_1B_BF16-pretrain.yaml). Longest token first, so MXFP8 is not matched as FP8.
+# Configs that carry no precision token (mamba_130M_pretrain.yaml, the diffusion
+# configs) report "" — madengine's convention for unknown — rather than a guess.
+# extract_primus_perf.py keeps its own copy of this table: it runs inside the
+# container, where this module's madengine import is not available.
+_PRECISION_TOKENS = ("MXFP8", "MXFP4", "BF16", "FP16", "FP8", "FP4")
+
+
+def precision_from_config_name(short_name: str) -> str:
+    """Return the madengine training_precision for a Primus config basename."""
+    upper = short_name.upper()
+    for token in _PRECISION_TOKENS:
+        if token in upper:
+            return token.lower()
+    return ""
+
 
 def list_models():
     # Default/smoke-test entry -> "primus_train/default". Lives here (not root models.json)
     # so this directory has one registration file, per madengine's models.json vs.
-    # get_models_json.py rule. HSA_NO_SCRATCH_RECLAIM etc. are not modeled here: madengine
-    # has no per-model env field, so pass them via --additional-context docker_env_vars
-    # (see benchmark/primus/README.md) instead.
+    # get_models_json.py rule. HSA_NO_SCRATCH_RECLAIM and the other arch-specific perf env
+    # are not modeled here: madengine reads no per-model env field on the local Docker path
+    # (CustomModel has none, and get_env_arg only consumes context docker_env_vars), so
+    # run.sh applies them itself from MAD_SYSTEM_GPU_ARCHITECTURE at launch time.
     models = [
         CustomModel(
             name="default",
@@ -74,7 +92,7 @@ def list_models():
                 n_gpus="8",
                 owner="mad.support@amd.com",
                 timeout=86400,
-                training_precision="bf16",
+                training_precision=precision_from_config_name(short_name),
                 tags=tags,
                 args=f"--config_path {rel_path}",
                 multiple_results="primus_perf_output.csv",

@@ -27,8 +27,9 @@ MFU fallback: Megatron 26.5+ logs (unlike Torchtitan) do not print an
 tflops / gpu_peak_tflops * 100, using dense (no-sparsity) matrix peak
 TFLOPS from AMD's published data sheets. The GPU model is read from
 MAD_SYSTEM_GPU_PRODUCT_NAME/MAD_SYSTEM_GPU_ARCHITECTURE (set by madengine
-in the container env), and precision (bf16 vs fp8) is inferred from the
-log filename (e.g. "...-FP8-pretrain.txt" vs "...-BF16-pretrain.txt").
+in the container env), and precision is inferred from the log filename
+(e.g. "...-FP8-pretrain.txt" vs "...-MXFP4-pretrain.txt"), which scales the
+peak by _PEAK_MULTIPLIER.
 If either can't be determined, model_flops_utilization is left blank
 rather than guessed.
 """
@@ -49,6 +50,22 @@ _PEAK_BF16_TFLOPS = {
     "MI300X": 1307.4,
 }
 
+# Dense peak multiplier over the BF16 dense peak, keyed on the precision token in the
+# config name. CDNA3/CDNA4 double the dense matrix rate for each halving of element
+# width: FP8 is 2x BF16, and FP4/FP6 on CDNA4 is 2x FP8 again. Longest token first so
+# MXFP8 is not matched as FP8 — the previous substring test for "fp8" scored MXFP4
+# against the BF16 peak and overstated its MFU by 4x. Kept in sync with the table in
+# get_models_json.py, which cannot be imported here: it pulls in madengine, which is
+# not installed inside the training container.
+_PEAK_MULTIPLIER = (
+    ("MXFP8", 2.0),
+    ("MXFP4", 4.0),
+    ("BF16", 1.0),
+    ("FP16", 1.0),
+    ("FP8", 2.0),
+    ("FP4", 4.0),
+)
+
 
 def _estimate_mfu(tflops: str, log_path: str) -> str | None:
     """Estimate model FLOPs utilization (%) when the log doesn't report it."""
@@ -64,9 +81,12 @@ def _estimate_mfu(tflops: str, log_path: str) -> str | None:
     if peak_bf16 is None:
         return None
 
-    is_fp8 = "fp8" in os.path.basename(log_path).lower()
-    peak = peak_bf16 * 2 if is_fp8 else peak_bf16
-    return f"{(achieved_tflops / peak * 100.0):.2f}"
+    # The log filename carries the config basename, which carries the precision. A config
+    # with no precision token (mamba_130M_pretrain, the diffusion configs) trains at the
+    # BF16 rate, so 1.0 is the right assumption rather than a refusal to report.
+    name = os.path.basename(log_path).upper()
+    multiplier = next((m for token, m in _PEAK_MULTIPLIER if token in name), 1.0)
+    return f"{(achieved_tflops / (peak_bf16 * multiplier) * 100.0):.2f}"
 
 
 def extract_metrics(log_path: str) -> dict:
