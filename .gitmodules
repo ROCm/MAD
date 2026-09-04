@@ -1,3 +1,4 @@
 [submodule "scripts/Primus"]
 	path = scripts/Primus
 	url = https://github.com/AMD-AGI/Primus
+	branch = release/v26.6

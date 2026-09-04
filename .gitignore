@@ -70,9 +70,6 @@ venv.bak/
 *.csv
 *.json
 !models.json
-!perf_super.json
-!perf_entry_super.json
-!perf_entry.json
 *.log
 *.out
 *.html
@@ -88,7 +85,7 @@ scripts/Primus/
 # runs, which puts 100+GB one careless `git add -A` away from being staged.
 hf_cache/
 run_directory/
-.jax-*_env/
+.*_env/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
