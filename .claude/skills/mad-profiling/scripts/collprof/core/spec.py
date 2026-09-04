@@ -109,6 +109,160 @@ class TraceLayout:
 
 
 @dataclass(frozen=True)
+class RunConfigLayout:
+    """How to read the configuration a run actually ran with, out of its own log.
+
+    Not the command line: a launcher assembles one command per role and a framework fills in its
+    defaults afterwards, so the only authoritative statement of what ran is the one the process
+    prints about itself. sglang prints ``server_args=ServerArgs(k=v, ...)`` once per server.
+    See references/interpretation.md.
+    """
+
+    guard: str = ""
+    #: Matches the line; group 1 is the ``k=v, k=v`` body to split into fields.
+    pattern: re.Pattern | None = None
+    #: Which of this engine's settings move throughput, which differ between any two runs without
+    #: meaning, and which must never reach an artifact. The engine's vocabulary -- `deepep_mode`
+    #: means nothing to a training engine -- so declared here rather than in `core/`.
+    perf_relevant: frozenset = frozenset()
+    noise: frozenset = frozenset()
+    secret: frozenset = frozenset()
+    #: Settings whose value is a path to the same thing under a different mount. Compared by last
+    #: component, so a remount is not a difference; calling them noise let two runs of different
+    #: models compare as identical.
+    path_valued: frozenset = frozenset()
+    #: Splits the body into ``(key, value)`` pairs. Bracketed values are matched whole: stopping at
+    #: the first comma reduced ``cuda_graph_bs=[1, 2, 4]`` to ``[1``, so two runs capturing
+    #: different batch sizes compared equal.
+    field_pattern: re.Pattern = re.compile(
+        r"(\w+)=('[^']*'|\"[^\"]*\"|\[[^]]*\]|\([^)]*\)|\{[^}]*\}|[^,()]+)")
+
+
+@dataclass(frozen=True)
+class StepInvalidator:
+    """A setting whose value breaks the derivation of a step time from batch and rate.
+
+    ``batch / rate`` is a step time only while a step emits one token per running request.
+    Speculative decoding emits several, so the quotient stays plausible and stops being a duration
+    -- and :func:`steps.batch_invariance` cannot see it, since the breakage does not scale with the
+    batch. The engine names such settings so the core can withhold the channel rather than lie.
+
+    ``benign`` are the values that leave the channel intact; any other stated value withholds it.
+    """
+
+    setting: str
+    benign: tuple[str, ...]
+    #: What is wrong with the number, in the report's own words.
+    why: str
+
+
+@dataclass(frozen=True)
+class StepTimingLayout:
+    """How to recover per-step timing from what the engine already prints while serving.
+
+    Serving has no iteration counter and, on this cluster, no rocprofv3 stats, so without this the
+    report has no duration channel at all. A server logging its running batch and generation rate
+    states its own step time, one record per logging interval per node, and it survives profiling
+    because the server computes it rather than an instrument.
+    """
+
+    guard: str = ""
+    #: Matches one logging interval. Named groups ``batch`` and ``rate`` are required; ``graphed``
+    #: is optional and records whether the engine replayed a captured graph for those steps.
+    pattern: re.Pattern | None = None
+    #: What one record covers, for the report's wording.
+    unit: str = "logging interval"
+    #: Settings that invalidate the derived step time outright. Declared per engine because the
+    #: setting's name and its harmless value are the engine's vocabulary.
+    invalidated_by: tuple[StepInvalidator, ...] = ()
+
+
+@dataclass(frozen=True)
+class A2AKernels:
+    """Patterns naming the expert all-to-all in a torch trace, per backend.
+
+    The MoE all-to-all of an expert-parallel model does not go through RCCL: MoRI drives its own
+    IBGDA path and DeepEP goes over rocSHMEM. Neither appears in an RCCL debug log, so the trace is
+    the only place the operations are named at all.
+
+    Classification is by name, so it is a discovery aid rather than a measurement: the report says
+    which patterns matched and stays silent rather than reporting a zero when none did.
+    """
+
+    #: ``(label, pattern)``; the first pattern matching an event name wins.
+    patterns: tuple[tuple[str, re.Pattern], ...] = ()
+    #: Trace event categories worth classifying. Host-side ops carry the readable names.
+    categories: tuple[str, ...] = ("kernel", "cpu_op")
+    #: ``(label, pattern)`` naming which variant of the all-to-all a kernel implements, e.g.
+    #: low-latency against throughput. Reported beside the stage because backends on different
+    #: paths are not comparable, and the kernel name shows it without trusting a flag.
+    variants: tuple[tuple[str, re.Pattern], ...] = ()
+
+
+@dataclass(frozen=True)
+class BenchmarkLayout:
+    """Where a run's benchmark numbers live, and what that engine's CSV calls them.
+
+    Throughput and latency come from a benchmark harness rather than the server log, and each
+    harness names its own columns. Declared here per ``SKILL.md``: if adding an engine requires
+    editing ``core/``, the spec is missing a field. An engine declaring nothing here loses the
+    benchmark sections rather than the run.
+    """
+
+    #: Files holding the numbers, matched against the run directory. A glob because the harness
+    #: writes the model name into the file name.
+    globs: tuple[str, ...] = ()
+    #: Matches the per-configuration key in ``model_column``; named groups ``isl``, ``osl`` and
+    #: ``con``. ``4p4d_isl8192_osl1024_con256`` is one harness's shape, not every harness's.
+    point: re.Pattern | None = None
+    model_column: str = "model"
+    metric_column: str = "metric"
+    value_column: str = "performance"
+    #: ``(metric, label, format)`` for the side-by-side table, in the order it should read.
+    metrics: tuple[tuple[str, str, str], ...] = ()
+    #: The three metrics ``E2E = TTFT + (OSL-1) x ITL`` is written over. Named per engine; leaving
+    #: any empty yields no decomposition rather than one over guessed columns.
+    e2e_metric: str = ""
+    ttft_metric: str = ""
+    itl_metric: str = ""
+
+    @property
+    def identity_metrics(self) -> tuple:
+        """The three names, or ``()`` when the engine did not declare all of them."""
+        named = (self.e2e_metric, self.ttft_metric, self.itl_metric)
+        return named if all(named) else ()
+
+
+@dataclass(frozen=True)
+class CounterLayout:
+    """Where the RDMA adapter counters of a run were sampled to, and how to group them.
+
+    Declared per engine only because the file names are the launcher's. The counter *names* are
+    the driver's -- mlx5 and bnxt_re spell the same operation differently -- so ``kinds`` is a
+    classification the engine offers, and anything unmatched is reported under ``other``.
+    """
+
+    globs: tuple[str, ...] = ()
+    #: Turns a matched file's stem into the node label the rest of the report uses.
+    node_of_name: Callable[[str], str] = lambda stem: stem
+    #: Which phase a sampled node belongs to, from its label: a comparison is per phase and the
+    #: samples are per node. The engine decides because the convention is the launcher's; the
+    #: default matches this launcher's `decode_NODE2`.
+    phase_of_node: Callable[[str, str], bool] = lambda node, phase: node.startswith(phase)
+    #: ``(label, pattern)`` over counter names; first match wins.
+    kinds: tuple[tuple[str, re.Pattern], ...] = ()
+    #: Kinds whose value is a byte volume, and kinds whose value is a count of operations. The
+    #: core divides one by the other to ask whether an operation counter tracks that adapter's
+    #: traffic at all: terabytes through four "write requests" is a counter blind to its data path.
+    volume_kinds: tuple[str, ...] = ()
+    operation_kinds: tuple[str, ...] = ()
+    #: ``label -> factor`` for counters not in the unit their label claims. `port_rcv_data` and
+    #: `port_xmit_data` are defined in **4-octet words**, so calling their raw delta "bytes" is out
+    #: by four. Per engine, since it is a property of the fabric's counters.
+    scale: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SanityLimits:
     """Bounds separating a real RCCL record from one that arrived spliced.
 
@@ -156,6 +310,14 @@ class ReportNotes:
                             "the counts below are per capture rather than per iteration")
     #: Added to the torch-trace section: why trace and log volumes are not meant to agree.
     trace_vs_log: str = ""
+    #: What one step-timing record of this engine covers, and how it was derived.
+    step_basis: str = ""
+    #: What graph replay being off means for this engine: only it knows whether that is a
+    #: deliberate measurement setting or a fault.
+    graphs_off: str = ""
+    #: Why this engine's expert all-to-all reaches no RCCL log. Naming the transports is the
+    #: engine's business.
+    a2a_outside_rccl: str = ""
 
 
 @dataclass(frozen=True)
@@ -179,3 +341,18 @@ class EngineSpec:
     iteration_metric: str = ""
     traces: TraceLayout = field(default_factory=TraceLayout)
     limits: SanityLimits = field(default_factory=SanityLimits)
+    #: How to read back the configuration the run actually used. An engine that declares none keeps
+    #: the report as it was.
+    run_config: RunConfigLayout = field(default_factory=RunConfigLayout)
+    #: How to recover per-step timing from the engine's own logging.
+    steps: StepTimingLayout = field(default_factory=StepTimingLayout)
+    #: How the expert all-to-all is named in this engine's traces.
+    a2a: A2AKernels = field(default_factory=A2AKernels)
+    #: Where this engine's benchmark numbers are and what its CSV calls them.
+    benchmark: BenchmarkLayout = field(default_factory=BenchmarkLayout)
+    #: Where the RDMA adapter counters were sampled to, when the run sampled them at all.
+    counters: CounterLayout = field(default_factory=CounterLayout)
+    #: Settings ``notes.scope`` assumes were applied for measurement, as ``(setting, expected)``.
+    #: Checked against what the run reported, so the scope note cannot assert a configuration the
+    #: run contradicts. Needs :class:`RunConfigLayout`; without it nothing is checked.
+    measurement_assumptions: tuple[tuple[str, str], ...] = ()

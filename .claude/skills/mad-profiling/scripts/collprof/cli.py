@@ -18,9 +18,11 @@ from pathlib import Path
 from . import engines
 from .core.cache import PARSE_VERSION, ParseCache, file_signature
 from .core.phase import Phase
-from .core.rccl_log import discover_logs, parse_run
+from .core.rccl_log import discover_logs, parse_run, scan_run_config
+from .core.rdma_counters import parse_counters
 from .core.report import ReportContext, emit_phase
 from .core.rocprof import parse_rocprof
+from .core.runconfig import diff_configs, merge_nodes
 from .core.spec import LOG_PER_RANK, EngineSpec
 from .core.torch_trace import parse_traces, trace_files
 from .core.units import fmt_bytes
@@ -76,6 +78,16 @@ def build_parser() -> argparse.ArgumentParser:
                          "run legitimately moves larger messages than the default expects")
     ap.add_argument("--max-nranks", type=int,
                     help="override the engine's cap on communicator width")
+    ap.add_argument("--compare-config", type=Path, metavar="RUN_DIR",
+                    help="another run to diff this one's configuration against, per phase. The "
+                         "settings that differ decide a comparison more often than the "
+                         "communication numbers do, and the report flags the ones that move "
+                         "throughput on their own. Only that run's startup lines are read")
+    ap.add_argument("--compare-noise", action="store_true",
+                    help="keep ports, hosts, seeds and the like in the configuration diff; they "
+                         "differ on any two runs and are dropped by default. It does not affect "
+                         "model or tokenizer paths, which are always compared by their final "
+                         "component so a remount is quiet and a different model is not")
     return ap
 
 
@@ -89,6 +101,49 @@ def apply_limit_overrides(spec: EngineSpec, args) -> EngineSpec:
     if not changes:
         return spec
     return dataclasses.replace(spec, limits=dataclasses.replace(spec.limits, **changes))
+
+
+#: An incomplete parse is not cached: stored under the files' unchanged signature it would be
+#: reused forever. Recomputed each time until one pass reads them all.
+def _trace_is_complete(parsed: dict) -> bool:
+    return not parsed.get("truncated")
+
+
+def no_config_reason(name: str, reference: dict, reference_nodes: dict) -> str:
+    """Why a requested `--compare-config` produced nothing for this phase.
+
+    Three outcomes, not two. `scan_run_config` returns the nodes it discovered for a phase
+    separately from the configurations it parsed, so a reference that ran the phase and stated
+    nothing readable is distinguishable from one that never ran it -- and only the first is worth
+    rereading the reference's logs over.
+    """
+    if name in reference:
+        return "this run states none, so there is nothing to compare it against."
+    if name in reference_nodes:
+        return (f"the reference ran that phase on {len(reference_nodes[name])} node(s) but none "
+                "of them stated a configuration this tooling could read.")
+    return "that phase is absent from the reference run."
+
+
+def _counters_of(counters: dict, phase: str, spec: EngineSpec) -> dict:
+    """This phase's share of a run-wide counter map, by the engine's own rule."""
+    return {node: series for node, series in counters.items()
+            if spec.counters.phase_of_node(node, phase)}
+
+
+def load_counters(run_dir: Path, spec: EngineSpec) -> dict:
+    """The RDMA counter samples of a run, or nothing when it did not take any.
+
+    Not cached: the files are kilobytes against the gigabytes the log parse handles, so a stale
+    entry would cost more than the reparse.
+    """
+    paths = [p for pattern in spec.counters.globs for p in sorted(run_dir.glob(pattern))]
+    if not paths:
+        return {}
+    series = parse_counters(paths, spec.counters)
+    sampled = sum(1 for s in series.values() if s.samples > 1)
+    print(f"RDMA counters: {len(paths)} file(s), {sampled} with a window to measure over")
+    return series
 
 
 def resolve_traces(args, spec: EngineSpec) -> dict:
@@ -171,15 +226,34 @@ def main(argv: list | None = None) -> None:
     traces = {
         phase: cache.get(
             f"traces of {[str(p) for p in paths]}",
-            file_signature([f for p in paths for f in trace_files(Path(p), spec.traces)]),
-            partial(parse_traces, paths, spec.traces))
+            # The engine belongs in the key: a trace parse carries this engine's a2a
+            # classification and rank patterns, so a cache filled under one `--engine` and read
+            # under another answers the wrong question.
+            file_signature([f for p in paths for f in trace_files(Path(p), spec.traces)])
+            + [spec.name],
+            partial(parse_traces, paths, spec.traces, spec.a2a),
+            keep=_trace_is_complete)
         for phase, paths in trace_paths.items()
     }
     rocprof = parse_rocprof(args.rocprof_dir) if args.rocprof_dir else None
+    counters = load_counters(args.run_dir, spec)
     cache.flush()
 
+    reference: dict = {}
+    reference_nodes: dict = {}
+    if args.compare_config:
+        # No --rccl-dir: that path belongs to the run being reported on, so passing it here would
+        # discover this job's logs while claiming to read the other's.
+        reference, reference_nodes = scan_run_config(args.compare_config, spec)
+        if reference:
+            print(f"configuration to compare against, from {args.compare_config}: "
+                  f"{', '.join(sorted(reference))}")
+        else:
+            print(f"warning: no configuration found under {args.compare_config}; the engine reads "
+                  "it from a startup line the reference run may predate")
+
     ctx = ReportContext(spec=spec, run_dir=args.run_dir, top=args.top, rocprof=rocprof,
-                        rocprof_dir=args.rocprof_dir,
+                        rocprof_dir=args.rocprof_dir, counters=counters,
                         command=recorded_command(argv),
                         parse_version=PARSE_VERSION)
 
@@ -190,14 +264,45 @@ def main(argv: list | None = None) -> None:
             print(f"skip {name}: no such phase in {args.run_dir} "
                   f"(found: {', '.join(sorted(phases)) or 'none'})")
             continue
-        if not phase.sizes:
-            print(f"skip {name}: phase started but logged no collectives "
-                  "(missing NCCL_DEBUG config or an early failure)")
+        # Collectives are one channel of five: an unprofiled run logs no COLL rows while still
+        # carrying step times, configuration and adapter counters. Skipped only when all are empty.
+        phase_counts = _counters_of(counters, name, spec)
+        if not (phase.sizes or phase.steps or phase.config or traces.get(name) or phase_counts):
+            print(f"skip {name}: nothing to report -- no collectives, no step records, no "
+                  "configuration, no traces and no adapter counters")
             continue
+        if not phase.sizes:
+            print(f"note {name}: no collectives logged (NCCL_DEBUG_SUBSYS without COLL, or an "
+                  "early failure); the volume sections will be absent and the rest will not")
         out = args.out_dir.parent / f"{args.out_dir.name}_{name}"
         ctx.torch_trace = traces.get(name)
         ctx.trace_dirs = tuple(Path(p).name for p in trace_paths.get(name, ()))
         ctx.empty_trace_dirs = empty_trace_dirs.get(name, ())
+        ctx.counters = phase_counts
+        # Compared phase by phase: prefill and decode run different configurations, so diffing a
+        # decode against a reference prefill would report every setting as changed.
+        if args.compare_config and name in reference and phase.config:
+            here, here_split = merge_nodes(phase.config, phase.config_nodes)
+            there, there_split = merge_nodes(reference[name],
+                                             reference_nodes.get(name))
+            ctx.config_diff = diff_configs(here, there, include_noise=args.compare_noise,
+                                           perf_relevant=spec.run_config.perf_relevant,
+                                           noise=spec.run_config.noise,
+                                           path_valued=spec.run_config.path_valued)
+            ctx.config_diff_source = str(args.compare_config)
+            ctx.config_diff_unavailable = ""
+            # A key its own nodes disagree on is absent from the merged configuration, so the pair
+            # would read as comparable on it. Carried per side so the report names the split run.
+            ctx.config_diff_split = {"this run": here_split, str(args.compare_config): there_split}
+        else:
+            # A requested comparison that could not be made must say so in the saved report, not
+            # only on the console where nobody rereads it.
+            ctx.config_diff = None
+            ctx.config_diff_unavailable = (
+                f"`--compare-config {args.compare_config}` was requested but no configuration "
+                f"could be read for phase {name!r}: "
+                + no_config_reason(name, reference, reference_nodes)
+                if args.compare_config else "")
         emit_phase(phase, out, ctx)
         totals = phase.collective_totals()
         reps = max(len(phase.active_ranks(spec.limits.idle_rank_fraction)), 1)

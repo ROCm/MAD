@@ -6,7 +6,8 @@ import dataclasses
 import shlex
 from pathlib import Path
 
-from conftest import coll_line, topo_line, trace_event, write
+from conftest import (coll_line, decode_batch_line, server_args_line, topo_line, trace_event,
+                      write)
 
 from collprof import engines
 from collprof.cli import build_parser, main
@@ -283,3 +284,155 @@ def test_a_phase_that_logged_nothing_is_skipped_with_a_reason(sglang_run: Path, 
 def test_restricting_phases_produces_only_those(sglang_run: Path, tmp_path: Path):
     reports = build(sglang_run, tmp_path / "out", ["--phases", "decode"])
     assert sorted(reports) == ["decode"]
+
+
+# -- configuration and step time -----------------------------------------------------------------
+# Both sections exist because of one Kimi-K2 MoRI-vs-DeepEP comparison whose arms also differed
+# in graph capture and static memory fraction, with no artifact saying so.
+
+
+def test_the_configuration_a_phase_ran_with_is_reported(sglang_run: Path, tmp_path: Path):
+    text = build(sglang_run, tmp_path / "out")["decode"]
+    assert "## Configuration this phase ran with" in text
+    assert "`moe_a2a_backend` | `mori`" in text
+    assert (tmp_path / "out_decode" / "run_config.csv").exists()
+
+
+def test_a_node_configured_unlike_its_role_is_named(sglang_run: Path, tmp_path: Path):
+    """Three nodes profiled and one not is a real failure mode only the settings show."""
+    log = sglang_run / "decode_NODE3.log"
+    log.write_text(server_args_line(disable_cuda_graph="True") + "\n" + log.read_text())
+    text = build(sglang_run, tmp_path / "out")["decode"]
+    assert "### Nodes of this phase disagree" in text
+    assert "decode_NODE3=`True`" in text
+
+
+def test_comparing_a_graph_free_arm_against_a_graphed_one_flags_the_difference(
+        sglang_run: Path, tmp_path: Path):
+    """The confound this section was written for: it must not come out looking comparable."""
+    reference = tmp_path / "reference"
+    for node in (2, 3):
+        write(reference / f"decode_NODE{node}.log",
+              [server_args_line(disable_cuda_graph="True", mem_fraction_static="0.92",
+                                moe_a2a_backend="'deepep'"),
+               coll_line(count=128, grank=0, pid=2000)])
+    text = build(sglang_run, tmp_path / "out", ["--compare-config", str(reference)])["decode"]
+    assert "### Difference from" in text
+    assert "`disable_cuda_graph` | `False` | `True`" in text
+    assert "moves throughput" in text
+    assert "not attributable to anything else in this report" in text
+
+
+def test_two_runs_configured_alike_are_declared_comparable(sglang_run: Path, tmp_path: Path):
+    text = build(sglang_run, tmp_path / "out", ["--compare-config", str(sglang_run)])["decode"]
+    assert "The two runs are comparable on configuration." in text
+
+
+def test_step_time_is_reported_per_node_with_the_graph_state(sglang_run: Path, tmp_path: Path):
+    text = build(sglang_run, tmp_path / "out")["decode"]
+    assert "## Step time, from the engine's own accounting" in text
+    assert "| decode_NODE2 |" in text and "replayed" in text
+    assert (tmp_path / "out_decode" / "step_times.csv").exists()
+
+
+def test_graphs_being_off_is_called_out_as_a_per_step_cost(sglang_run: Path, tmp_path: Path):
+    for node in (2, 3):
+        log = sglang_run / f"decode_NODE{node}.log"
+        write(log, [server_args_line(disable_cuda_graph="True"),
+                    coll_line(count=128, grank=0, pid=2000),
+                    decode_batch_line(batch=16, rate=80.0, graphed=False)])
+    text = build(sglang_run, tmp_path / "out")["decode"]
+    assert "Graph replay is off" in text
+    assert "does on purpose" in text, "the engine explains why, the core only reports the state"
+
+
+def test_a_silent_node_does_not_become_a_claim_that_every_step_was_ungraphed(
+        sglang_run: Path, tmp_path: Path):
+    """`graph_states` drops `None`, so `{False, None}` reduced to `{False}` and the report claimed
+    every step paid launch cost, including those of the node that never said."""
+    write(sglang_run / "decode_NODE2.log",
+          [server_args_line(disable_cuda_graph="True"), coll_line(count=128, grank=0, pid=2000),
+           decode_batch_line(batch=16, rate=80.0, graphed=False)])
+    # An older sglang, printing the interval without the `cuda graph` field.
+    write(sglang_run / "decode_NODE3.log",
+          [server_args_line(disable_cuda_graph="True"), coll_line(count=128, grank=0, pid=2001),
+           decode_batch_line(batch=16, rate=80.0, graphed=None)])
+
+    text = build(sglang_run, tmp_path / "out")["decode"]
+
+    assert "Graph replay is off" in text
+    assert "Every step here" not in text
+    assert "1 node(s) did not state theirs" in text
+
+
+def test_a_phase_without_steps_has_no_step_section(sglang_run: Path, tmp_path: Path):
+    assert "## Step time" not in build(sglang_run, tmp_path / "out")["prefill"]
+
+
+def test_an_engine_that_explains_neither_keeps_the_core_silent(sglang_run: Path, tmp_path: Path):
+    """The core reports the state; the wording around it belongs to the engine that knows why."""
+    base = engines.REGISTRY["sglang-disagg"]
+    spec = dataclasses.replace(
+        base, notes=dataclasses.replace(base.notes, step_basis="", graphs_off=""))
+    out = tmp_path / "out_decode"
+    emit_phase(parse_run(sglang_run, spec)["decode"], out,
+               ReportContext(spec=spec, run_dir=sglang_run))
+    text = (out / "report.md").read_text()
+    assert "## Step time" in text
+    assert "does on purpose" not in text, "the engine's reason for graphs being off"
+    assert "one token per running request" not in text, "the engine's basis for the step time"
+
+
+def test_a_run_without_collectives_says_so_not_zeros(sglang_run: Path, tmp_path: Path):
+    """A tuned run leaves NCCL_DEBUG_SUBSYS without COLL, so the channel is absent, not zero, and
+    an empty "Traffic by collective" table reads as a run that issued none."""
+    for node in (2, 3):
+        write(sglang_run / f"decode_NODE{node}.log",
+              [server_args_line(), decode_batch_line(batch=16, rate=80.0)])
+
+    text = build(sglang_run, tmp_path / "out")["decode"]
+
+    assert "**Not available.** This phase logged no collective records" in text
+    assert "## Step time" in text, "the channels that were collected still report"
+    for gone in ("collective_message_sizes.csv", "collective_totals.csv", "per_rank.csv"):
+        assert not (tmp_path / "out_decode" / gone).exists(), gone
+    assert (tmp_path / "out_decode" / "step_times.csv").exists()
+
+
+def test_the_file_list_names_only_files_that_exist(sglang_run: Path, tmp_path: Path):
+    """The list stayed fixed while the writing became conditional, so a run with no collective
+    records advertised four CSVs that were deliberately never written."""
+    for node in (2, 3):
+        write(sglang_run / f"decode_NODE{node}.log",
+              [server_args_line(), decode_batch_line(batch=16, rate=80.0)])
+
+    text = build(sglang_run, tmp_path / "out")["decode"]
+    out = tmp_path / "out_decode"
+    listed = {line.split("`")[1] for line in text.splitlines()
+              if line.startswith("- `") and line.split("`")[1].endswith(".csv")}
+
+    assert listed, "something was written"
+    for name in listed:
+        assert (out / name).exists(), f"{name} is listed but absent"
+
+
+def test_a_phase_without_collectives_does_not_report_zero_traffic(tmp_path: Path):
+    """A tuned run logs no COLL rows while still carrying configuration and step times. The
+    summary printed `Collectives parsed: 0` and `Traffic per rank: 0 B` for it, contradicting the
+    notice further down that the channel is unavailable."""
+    from collprof.engines import sglang_disagg
+
+    run = tmp_path / "tuned"
+    write(run / "decode_NODE2.log",
+          [server_args_line(), decode_batch_line(batch=16, rate=100.0),
+           decode_batch_line(batch=16, rate=80.0), topo_line()])
+
+    out = tmp_path / "out_decode"
+    phase = parse_run(run, sglang_disagg.SPEC)["decode"]
+    assert not phase.sizes, "nothing collective was logged"
+    emit_phase(phase, out, ReportContext(spec=sglang_disagg.SPEC, run_dir=run))
+
+    text = (out / "report.md").read_text()
+    assert "Collectives parsed" not in text
+    assert "Traffic per rank" not in text
+    assert "Collective traffic: **not available**" in text
