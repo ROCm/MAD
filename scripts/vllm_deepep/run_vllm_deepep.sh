@@ -256,7 +256,7 @@ _failed_requests() {
   echo "$1" | awk '/Failed requests/ {print $NF; exit}'
 }
 
-# RFC4126-quoting via Python's csv module rather than string concatenation:
+# RFC4180-quoting via Python's csv module rather than string concatenation:
 # MODEL is attacker-influenced-in-practice input (MODEL_PATH, or a resolved
 # Hub snapshot path) and MODEL_REVISION is an arbitrary ref -- either could
 # contain a comma, a quote, or a newline, any of which shifts columns or
@@ -266,8 +266,7 @@ _failed_requests() {
 _csv_row() {
   "${PYTHON}" -c '
 import csv, sys
-csv.writer(sys.stdout, lineterminator="
-").writerow(sys.argv[1:])
+csv.writer(sys.stdout, lineterminator=chr(10)).writerow(sys.argv[1:])
 ' "$@"
 }
 

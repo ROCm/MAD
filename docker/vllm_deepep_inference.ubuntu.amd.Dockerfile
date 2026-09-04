@@ -62,14 +62,25 @@
 #                                  linear stage; only ordering can.
 #     ENABLE_TORCHVISION_STUB      Text-only torchvision surface, for ROCm bases
 #                                  whose torchvision ABI breaks `import vllm`.
+#                                  After vLLM: this stub depends on neither
+#                                  DeepEP, AITER, nor VLLM_WHEEL (only torch,
+#                                  already in the base image), and used to sit
+#                                  before AITER, so toggling it alone
+#                                  invalidated AITER's compile and the vLLM
+#                                  install below it for no reason.
 #     RDMA_CORE_VERSION            rdma-core from source (default 63.0),
 #                                  replacing the distro packages. Empty keeps
-#                                  the base image's. Compiled in its own FROM
-#                                  stage (rdma-core-build, top of this file),
-#                                  whose only inputs are BASE_IMAGE and
+#                                  the base image's. Compiled AND installed-to-
+#                                  a-DESTDIR in its own FROM stage
+#                                  (rdma-core-build, top of this file), whose
+#                                  only inputs are BASE_IMAGE and
 #                                  RDMA_CORE_VERSION -- so unlike the others,
 #                                  it is untouched by DEEPEP_COMMIT,
-#                                  AITER_COMMIT or VLLM_WHEEL changing.
+#                                  AITER_COMMIT or VLLM_WHEEL changing. Only
+#                                  the DESTDIR payload (not the source
+#                                  checkout or the build tree's object files)
+#                                  is copied into the final stage, which
+#                                  places it and runs the provider purge.
 #
 #   Known residual coupling: DEEPEP_COMMIT changing still invalidates AITER's
 #   compile, since DeepEP precedes it in the same linear stage and neither
@@ -120,7 +131,7 @@ FROM ${BASE_IMAGE} AS rdma-core-build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG RDMA_CORE_VERSION=63.0
 RUN set -e; \
-    mkdir -p /tmp/rdma-core; \
+    mkdir -p /tmp/rdma-core-install; \
     if [ -z "${RDMA_CORE_VERSION}" ]; then \
       echo "RDMA_CORE_FROM_SOURCE <disabled, keeping base rdma-core>"; \
     else \
@@ -141,6 +152,16 @@ RUN set -e; \
         -DNO_PYVERBS=1 \
         ..; \
       ninja -j"$(nproc)"; \
+      : "Install into a DESTDIR here, in the same stage that just built the"; \
+      : "tree, rather than copying the whole source+object tree (hundreds of"; \
+      : ".o/.a files, the full git checkout, CMakeFiles/ caches) into a final-"; \
+      : "image layer and deleting it in a later RUN. That delete does not"; \
+      : "reclaim the space: each instruction is its own layer, so the earlier"; \
+      : "layer's diff -- the copied-in tree -- stays in the image's layer"; \
+      : "history regardless of what a later layer removes. DESTDIR keeps only"; \
+      : "the files the install step actually places on disk."; \
+      DESTDIR=/tmp/rdma-core-install cmake --install /tmp/rdma-core/build; \
+      cp /tmp/rdma-core/build/install_manifest.txt /tmp/rdma-core-install/; \
     fi
 
 FROM ${BASE_IMAGE}
@@ -190,38 +211,7 @@ RUN test -n "${DEEPEP_REPO}" || { echo "DEEPEP_REPO is required"; exit 1; }; \
     cp -a deep_ep/include/. "${site_dir}/include/"
 
 ###############################################################################
-# 2) Text-only torchvision surface.
-#
-# Some ROCm bases ship a torchvision whose ABI does not match the installed
-# torch. vLLM imports it transitively through a multimodal config even for
-# text-only models, so `import vllm` fails before serving starts.
-###############################################################################
-ARG ENABLE_TORCHVISION_STUB=1
-RUN if [ "${ENABLE_TORCHVISION_STUB}" = "1" ]; then \
-      set -e; \
-      site_dir="$(${PYTHON} -c "import site; print(site.getsitepackages()[0])")"; \
-      ${PYTHON} -m pip uninstall -y torchvision || true; \
-      mkdir -p "${site_dir}/torchvision/transforms"; \
-      printf '%s\n' \
-        '"""Text-only torchvision surface: import-compatible, no operators."""' \
-        '__version__ = "0.0.0+text-only"' \
-        'def _unsupported(*args, **kwargs):' \
-        '    raise NotImplementedError("text-only torchvision stub")' \
-        > "${site_dir}/torchvision/__init__.py"; \
-      printf '%s\n' \
-        'from enum import Enum' \
-        'class InterpolationMode(Enum):' \
-        '    NEAREST = "nearest"' \
-        '    BILINEAR = "bilinear"' \
-        '    BICUBIC = "bicubic"' \
-        > "${site_dir}/torchvision/transforms/__init__.py"; \
-      ${PYTHON} -c "from torchvision.transforms import InterpolationMode; print('TORCHVISION_STUB_OK')"; \
-    else \
-      echo "TORCHVISION_STUB <disabled>"; \
-    fi
-
-###############################################################################
-# 3) AITER.
+# 2) AITER.
 #
 # The get_ksplit guard returns 0 when a split has no work instead of dividing
 # by zero, which a data-parallel profile microbatch can trigger.
@@ -255,7 +245,7 @@ RUN set -e; \
       ${PYTHON} -m pip install --no-cache-dir --no-build-isolation -e .
 
 ###############################################################################
-# 4) vLLM.
+# 3) vLLM.
 #
 # After DeepEP and AITER, not combined with DeepEP's install: this is the
 # argument that changes on every "just pick up a newer wheel" rebuild, so
@@ -267,38 +257,76 @@ COPY ${VLLM_WHEEL} /tmp/vllm.whl
 RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
 
 ###############################################################################
-# 5) rdma-core, installed from the artifacts the rdma-core-build stage
-#    already compiled -- replacing the distro packages and dropping the
+# 4) Text-only torchvision surface.
+#
+# Some ROCm bases ship a torchvision whose ABI does not match the installed
+# torch. vLLM imports it transitively through a multimodal config even for
+# text-only models, so `import vllm` fails before serving starts.
+#
+# After vLLM, not between DeepEP and AITER where it used to sit: this stub
+# depends on neither of them (it only touches torch, already in the base
+# image), but sitting before AITER meant toggling ENABLE_TORCHVISION_STUB
+# alone invalidated AITER's compile and the vLLM install below it -- for a
+# component unrelated to either.
+###############################################################################
+ARG ENABLE_TORCHVISION_STUB=1
+RUN if [ "${ENABLE_TORCHVISION_STUB}" = "1" ]; then \
+      set -e; \
+      site_dir="$(${PYTHON} -c "import site; print(site.getsitepackages()[0])")"; \
+      ${PYTHON} -m pip uninstall -y torchvision || true; \
+      mkdir -p "${site_dir}/torchvision/transforms"; \
+      printf '%s\n' \
+        '"""Text-only torchvision surface: import-compatible, no operators."""' \
+        '__version__ = "0.0.0+text-only"' \
+        'def _unsupported(*args, **kwargs):' \
+        '    raise NotImplementedError("text-only torchvision stub")' \
+        > "${site_dir}/torchvision/__init__.py"; \
+      printf '%s\n' \
+        'from enum import Enum' \
+        'class InterpolationMode(Enum):' \
+        '    NEAREST = "nearest"' \
+        '    BILINEAR = "bilinear"' \
+        '    BICUBIC = "bicubic"' \
+        > "${site_dir}/torchvision/transforms/__init__.py"; \
+      ${PYTHON} -c "from torchvision.transforms import InterpolationMode; print('TORCHVISION_STUB_OK')"; \
+    else \
+      echo "TORCHVISION_STUB <disabled>"; \
+    fi
+
+###############################################################################
+# 5) rdma-core, installed from the DESTDIR payload the rdma-core-build stage
+#    already produced -- replacing the distro packages and dropping the
 #    vendor bnxt_re provider.
 #
-#    Only the install and the provider purge happen here; see the
-#    rdma-core-build stage (top of this file) for why the compile does not.
-#    It installs over the distro rdma-core rather than removing it: removing
-#    libibverbs1 and friends would leave every dependent with an unmet
-#    dependency and break apt here and in any downstream image.
+#    Only placing the payload on disk and the provider purge happen here; see
+#    the rdma-core-build stage (top of this file) for why the compile, and
+#    the cmake --install invocation itself, do not. It installs over the
+#    distro rdma-core rather than removing it: removing libibverbs1 and
+#    friends would leave every dependent with an unmet dependency and break
+#    apt here and in any downstream image.
 ###############################################################################
 ARG RDMA_CORE_VERSION=63.0
-COPY --from=rdma-core-build /tmp/rdma-core /tmp/rdma-core
-RUN if [ -n "${RDMA_CORE_VERSION}" ] && [ -f /tmp/rdma-core/build/build.ninja ]; then \
+# The DESTDIR payload only -- not the source checkout or the build tree's
+# .o/.a intermediates and CMakeFiles/ caches. Those are much larger and
+# contribute nothing at runtime; copying them here and `rm -rf`ing them in a
+# later RUN does not reclaim the space; each instruction is its own layer, so
+# the bytes this COPY adds stay in the image's layer history regardless of
+# what a later layer deletes on top.
+COPY --from=rdma-core-build /tmp/rdma-core-install /tmp/rdma-core-install
+RUN if [ -n "${RDMA_CORE_VERSION}" ] \
+    && [ -f /tmp/rdma-core-install/install_manifest.txt ]; then \
       set -e; \
-      : "Only cmake needed here: the compile already happened in"; \
-      : "rdma-core-build, so this stage installs the already-built tree"; \
-      : "rather than rebuilding it -- no compiler, linker, or -dev headers"; \
-      : "required. cmake --install, not ninja install / make install: ninja's"; \
-      : "'install' target depends on 'all', so it re-checks every build edge"; \
-      : "first -- and Docker's COPY resets every file's mtime to copy time,"; \
-      : "which reliably confuses ninja's mtime-based freshness check into"; \
-      : "relinking targets that were already built. Verified on hardware:"; \
-      : "'ninja install' on the copied tree failed on a missing link-time"; \
-      : "libsystemd.so (the runtime lib is present, the -dev symlink is not,"; \
-      : "and this stage installs neither) because it tried to relink"; \
-      : "bin/ibacm. cmake --install runs only the generated install script"; \
-      : "against files already on disk and never touches the build graph."; \
-      apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        cmake; \
-      DEBIAN_FRONTEND=noninteractive apt-get autoremove -y; \
-      rm -rf /var/lib/apt/lists/*; \
+      : "No cmake, no ninja, no compiler needed here at all: the payload is"; \
+      : "already the exact file tree the install step intended to place on"; \
+      : "disk (DESTDIR=/tmp/rdma-core-install cmake --install ... in the"; \
+      : "rdma-core-build stage), so placing it is a plain recursive copy, not"; \
+      : "a build-system operation -- which also sidesteps the mtime/relink"; \
+      : "problem a copied .ninja build tree ran into (see that stage)."; \
+      : "cp -a onto /, not just onto /usr: CMAKE_INSTALL_SYSCONFDIR=/etc and"; \
+      : "CMAKE_INSTALL_RUNDIR=/run in that stage's cmake invocation mean some"; \
+      : "files land outside the /usr prefix, and DESTDIR mirrors the full"; \
+      : "absolute layout underneath itself."; \
+      cp -a /tmp/rdma-core-install/. /; \
       : "Install over the distro packages rather than removing them. dpkg -r"; \
       : "--force-all on libibverbs1 and friends leaves every dependent with an"; \
       : "unmet dependency, so any later apt operation -- including one in a"; \
@@ -306,8 +334,6 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ] && [ -f /tmp/rdma-core/build/build.ninja ];
       : "install targets the same prefix and shadows those files, and the"; \
       : "provider cleanup below removes the part that actually matters, so the"; \
       : "removal bought nothing that is not handled here."; \
-      cmake --install /tmp/rdma-core/build; \
-      cd /tmp/rdma-core/build; \
       : "Drop every bnxt_re provider except the one this build just installed."; \
       : "The base image can ship an out-of-tree vendor provider whose name is"; \
       : "neither predictable nor tied to the rdma-core ABI (observed:"; \
@@ -317,11 +343,14 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ] && [ -f /tmp/rdma-core/build/build.ninja ];
       : "symlink alone is not enough -- ldconfig regenerates SONAME links from"; \
       : "the real file, so the .so itself must go."; \
       : "The keeper comes from cmake's install manifest, i.e. from what THIS"; \
-      : "build produced. Globbing the destination cannot distinguish a fresh"; \
-      : "provider from a stale one: a base carrying -rdmav60 would win a"; \
-      : "lexical sort against the -rdmav59 that v63 installs, and the wrong"; \
-      : "file would survive."; \
-      keep="$(grep -m1 -E '/libbnxt_re[^/]*\.so$' install_manifest.txt || true)"; \
+      : "build produced (the manifest's paths are absolute real paths even"; \
+      : "though the files were staged under DESTDIR -- that is how DESTDIR"; \
+      : "works, only the staging location moves). Globbing the destination"; \
+      : "cannot distinguish a fresh provider from a stale one: a base carrying"; \
+      : "-rdmav60 would win a lexical sort against the -rdmav59 that v63"; \
+      : "installs, and the wrong file would survive."; \
+      keep="$(grep -m1 -E '/libbnxt_re[^/]*\.so$' \
+        /tmp/rdma-core-install/install_manifest.txt || true)"; \
       test -n "${keep}" || { echo "rdma-core ${RDMA_CORE_VERSION} installed no bnxt_re provider"; exit 1; }; \
       keep_real="$(readlink -f "${keep}")"; \
       roots=""; \
@@ -339,7 +368,7 @@ RUN if [ -n "${RDMA_CORE_VERSION}" ] && [ -f /tmp/rdma-core/build/build.ninja ];
       fi; \
       ldconfig; \
       echo "IBVERBS_BNXT_KEPT ${keep}"; \
-      cd / && rm -rf /tmp/rdma-core; \
+      rm -rf /tmp/rdma-core-install; \
       echo "IBVERBS_PROVIDERS $(ls /usr/lib/x86_64-linux-gnu/libibverbs/ 2>/dev/null | tr '\n' ' ')"; \
     else \
       echo "RDMA_CORE_FROM_SOURCE <disabled, keeping base rdma-core>"; \
