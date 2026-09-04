@@ -1,6 +1,6 @@
 ---
 name: mad-profiling
-description: Profile the collective communication of a madengine run and turn the artifacts into reports. Use when the user wants to see which collectives a workload issues, how large its messages are, how balanced its ranks are, or what a profiled run costs -- for a training engine (primus/Megatron-LM) or a disaggregated inference engine (sglang PD-disagg), and for engines not yet supported, which are added as one module under scripts/collprof/engines/. Covers what a run must set to be measurable at all (NCCL_DEBUG, torch profiler points, rocprofv3, and the flags that stop a framework from bypassing every profiler), how to build per-phase reports with scripts/collective_report.py, how to rebuild a whole campaign from a catalog with scripts/regen_reports.py, how to leave a finished run's logs compressed with scripts/compress_logs.py, and how to read the numbers without overstating them (references/interpretation.md).
+description: Profile the collective communication of a madengine run and turn the artifacts into reports. Use when the user wants to see which collectives a workload issues, how large its messages are, how balanced its ranks are, or what a profiled run costs -- for a training engine (primus/Megatron-LM) or a disaggregated inference engine (sglang PD-disagg), and for engines not yet supported, which are added as one module under scripts/collprof/engines/. Covers what a run must set to be measurable at all (NCCL_DEBUG, torch profiler points, rocprofv3, RDMA adapter counters, and the flags that stop a framework from bypassing every profiler), how to build per-phase reports with scripts/collective_report.py, how to rebuild a whole campaign from a catalog with scripts/regen_reports.py, how to leave a finished run's logs compressed with scripts/compress_logs.py, and how to read the numbers without overstating them (references/interpretation.md).
 compatibility: Requires python 3.10+ for the report tooling, standard library only except openpyxl, which adds profile.xlsx and is installed with `python3 -m pip install openpyxl` into the same interpreter that runs the scripts. Profiling a run additionally requires a cluster run configured through the mad-slurm-multinode skill, RCCL/NCCL with debug output, and optionally rocprofv3 from ROCm.
 metadata:
   author: mkuznet1 (mikhail.kuznetsov@amd.com)
@@ -107,11 +107,15 @@ inherit whatever interpreter is on `PATH`. That is how a campaign once ran under
 python without `openpyxl` and lost every workbook, so a conda or venv environment is
 named here rather than assumed: `PY=~/miniforge3/envs/<env>/bin/python3`.
 
-Four artifact classes can be present, and each answers a different question. Which
+Six artifact classes can be present, and each answers a different question. Which
 ones a run produced is worth establishing before parsing, because the report's shape
 follows: RCCL debug logs (message sizes for the whole run), torch profiler traces
 (sizes and process groups per collective, for a few steps), rocprofv3 stats
-(durations, no sizes), and the benchmark or perf CSV (throughput). Details:
+(durations, no sizes), the benchmark or perf CSV (throughput), the engine's own logging
+(step time as a distribution, and the configuration each node ran with), and the RDMA
+adapter counters (how many operations of each kind crossed the fabric — verbs, not
+causality). The last two cost nothing and degrade nothing, so they are the only ones
+collectable on a tuned run. Details:
 [references/measurement-setup.md](references/measurement-setup.md).
 
 **Guard:**
@@ -195,9 +199,46 @@ the comparison states its own method: which job each number came from, what was
 different about the profiled configuration, and what the method cannot see. Copy a
 template and fill it; do not let a comparison table stand without its scope note.
 
+The configuration difference is no longer something to remember: `--compare-config`
+takes the run being compared against, reads back what each run reported about itself,
+and puts the differing settings in the report with the ones that move throughput on
+their own marked as such. Only the reference run's startup lines are read, so pointing
+it at a finished multi-gigabyte job costs nothing.
+
+```bash
+collective_report.py --run-dir <run> --out-dir reports/<name> --compare-config <other run>
+```
+
+`compare_runs.py` goes further and describes the pair rather than one run of it, which
+is the document `reports_template/model_comparison.template.md` calls the one the
+tooling cannot generate. Three of its parts are mechanical and are generated: what
+differed, where the difference comes from, and what the exchange cost.
+
+```bash
+"$PY" "$SKILL_DIR/scripts/compare_runs.py" \
+  --left <run> --right <run> --left-name MoRI --right-name DeepEP \
+  --phase decode --out-dir reports/<name>_comparison
+```
+
+`--out-dir` writes `comparison.md`, one CSV per table and `comparison.xlsx`; `--out`
+writes the markdown alone. The workbook's first sheet is the prose, so a caveat
+travels with the numbers instead of staying behind in a file nobody opens next to the
+spreadsheet. Both sides are parsed by the code that builds a single-run report, so the
+two documents cannot disagree about the same run, and two runs from different engines
+are refused rather than rendered.
+
+The end-to-end split rests on `E2E = TTFT + (OSL-1) x ITL`, an identity over the
+benchmark's own metrics rather than a fit, so its residual column is a check on the
+split. A large residual does **not** point at queueing: waiting before the first token
+is already inside TTFT and waiting after it is already inside the inter-token intervals,
+so the identity leaves no room for it. It means instead that the exported aggregates do
+not satisfy the identity — rounding, output lengths that differ from OSL, or means taken
+over different denominators — and is a check on the arithmetic rather than a mechanism.
+
 **Guard:**
-- **If two runs used different configurations** (attention backend, quantisation, profiling flags) → say so in the comparison. It is the first thing that explains a difference and the easiest to leave out.
+- **If two runs used different configurations** (attention backend, quantisation, profiling flags) → the report says so when given `--compare-config`, and a comparison written without it has to state the difference by hand. It is the first thing that explains a difference and the easiest to leave out.
 - **If a per-run figure is a throughput** → it must come from a run without profiling, and the comparison says which job that was.
+- **If the comparison is between two collective backends** (MoE all-to-all, KV transport) → [references/backend-comparison.md](references/backend-comparison.md) first. That traffic reaches no RCCL log, so the report's strongest channel is silent about the operation under test, and the arms are easy to leave unmatched on graph capture.
 
 ## Adding an engine
 
