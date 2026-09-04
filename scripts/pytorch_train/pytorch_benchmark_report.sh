@@ -233,7 +233,7 @@ elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
       if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
         BATCH_SIZE=12
         python launcher.py train_args=stable-diffusion-xl \
-          +train_args.substitute_sdpa_with_flash_attn=false \
+          train_args.substitute_sdpa_with_flash_attn=false \
           accelerate_config.fsdp_config.fsdp_backward_prefetch=NO_PREFETCH \
           accelerate_config.fsdp_config.fsdp_sharding_strategy=SHARD_GRAD_OP \
           train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG
