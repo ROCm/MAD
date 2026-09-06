@@ -234,10 +234,11 @@ WORKDIR ${WORKSPACE_DIR}
 COPY --from=rccl-builder ${RCCL_INSTALL_DIR} ${RCCL_INSTALL_DIR}
 
 # binutils for the final verification (nm / strings / readelf); libatomic1 is a
-# runtime dep of the candidate librccl.
+# runtime dep of the candidate librccl; patchelf to carry each replaced library's
+# own RUNPATH across the swap (see the sweep below).
 RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      binutils libatomic1 && \
+      binutils libatomic1 patchelf && \
     rm -rf /var/lib/apt/lists/*
 
 # ---- Primus payload (mirrors docker/primus_maxtext.ubuntu.amd.Dockerfile) ----
@@ -329,6 +330,22 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
 # ---- Stage 3: install candidate librccl over EVERY librccl on disk ----------
 # -type f, so the .so/.so.1 symlinks keep pointing at what is replaced. An empty
 # target list fails the build: such an image would run against the base library.
+#
+# EACH REPLACED FILE KEEPS ITS OWN RUNPATH. A librccl inside the ROCm pip wheels
+# resolves its DT_NEEDED libamd_smi.so.26 through a RUNPATH that reaches the sibling
+# wheel ($ORIGIN/../../_rocm_sdk_core/lib); the candidate is built for /opt/rccl and
+# carries $ORIGIN/../lib instead. Dropping the candidate in verbatim therefore leaves a
+# librccl that cannot resolve its own dependencies, and `import torch` dies in
+# rocm_sdk.initialize_process with "libamd_smi.so.26: cannot open shared object file"
+# before a single step runs. Copy the bytes, restore the destination's RUNPATH.
+#
+# The ldd gate below is the check that would have caught that at build time instead of
+# 4 minutes into a 2-node job. It compares each target BEFORE and AFTER the swap and
+# fails only on an INCREASE. An absolute "must resolve everything" test would fail a
+# perfectly good build: on this base the pristine _rocm_sdk_devel copy already reports
+# 6 unresolved deps (its RUNPATH is a row of empty entries), because it is only ever
+# dlopen'd into a namespace where those libraries are already loaded. What must not
+# happen is the swap making linkage worse than it found it.
 RUN set -e; \
     SRC="$(ls -L ${RCCL_INSTALL_DIR}/lib/librccl.so.1.0 2>/dev/null || ls -L ${RCCL_INSTALL_DIR}/lib/librccl.so)"; \
     [ -n "$SRC" ] || { echo "GATE FAIL: no librccl in ${RCCL_INSTALL_DIR}"; exit 1; }; \
@@ -337,11 +354,30 @@ RUN set -e; \
     find / -xdev -type f -name 'librccl.so*' -not -path "${RCCL_INSTALL_DIR}/*" \
       2>/dev/null > /opt/RCCL_TARGETS.txt || true; \
     [ -s /opt/RCCL_TARGETS.txt ] || { echo "GATE FAIL: no librccl found in base image"; exit 1; }; \
+    : > /opt/RCCL_PRESWAP.txt; \
+    while read -r t; do \
+      echo "$t $(ldd "$t" 2>/dev/null | grep -c 'not found' || true)" >> /opt/RCCL_PRESWAP.txt; \
+    done < /opt/RCCL_TARGETS.txt; \
     while read -r t; do \
       [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \
-      echo "  overwrite: $t"; cp -fL --remove-destination "$SRC" "$t"; \
+      rp="$(patchelf --print-rpath "$t" 2>/dev/null || true)"; \
+      echo "  overwrite: $t (rpath: ${rp:-none})"; \
+      cp -fL --remove-destination "$SRC" "$t"; \
+      if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \
+        { echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }; fi; \
     done < /opt/RCCL_TARGETS.txt; \
-    ldconfig || true
+    ldconfig || true; \
+    while read -r t before; do \
+      after="$(ldd "$t" 2>/dev/null | grep -c 'not found' || true)"; \
+      echo "  deps unresolved before=${before} after=${after}  $t"; \
+      if [ "${after:-0}" -gt "${before:-0}" ]; then \
+        echo "GATE FAIL: the swap ADDED $(( after - before )) unresolved dependencies to $t:"; \
+        ldd "$t" 2>/dev/null | grep 'not found'; \
+        echo "  The candidate was installed without the RUNPATH this location needs;"; \
+        echo "  loading it would fail at import time, before any step runs."; exit 1; \
+      fi; \
+    done < /opt/RCCL_PRESWAP.txt; \
+    echo "SWAP GATE PASS: $(wc -l < /opt/RCCL_TARGETS.txt) librccl replaced, no new unresolved deps"
 
 # ---- provenance: recorded INSIDE the image ---------------------------------
 # The build log is not carried by the image. RCCL_CMAKE_OPTIONS is recorded too:
