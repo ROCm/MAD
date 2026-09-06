@@ -1,7 +1,7 @@
 {
   "built_images": {
-    "rocm-primus-maxtext-llama3-8b-overlay": {
-      "model": "jax-maxtext/maxtext_MI355X_llama3_8B-fp8-pretrain",
+    "rocm-primus-maxtext-llama3.1-405b-overlay": {
+      "model": "jax-maxtext/maxtext_MI355X_llama3.1_405B-fp8-pretrain",
       "docker_image": "rocm/jax-training:maxtext-v26.6-<FILL_RCCL_TAG e.g. rccl-7.2.1 or rccl-develop-<sha7>>",
       "dockerfile": "docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
       "base_docker": "rocm/jax-training:maxtext-v26.6",
@@ -13,8 +13,8 @@
     }
   },
   "built_models": {
-    "rocm-primus-maxtext-llama3-8b-overlay": {
-      "name": "jax-maxtext/maxtext_MI355X_llama3_8B-fp8-pretrain",
+    "rocm-primus-maxtext-llama3.1-405b-overlay": {
+      "name": "jax-maxtext/maxtext_MI355X_llama3.1_405B-fp8-pretrain",
       "url": "",
       "dockerfile": "docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
       "scripts": "scripts/jax-maxtext/run.sh",
@@ -26,12 +26,12 @@
         "maxtext",
         "jax",
         "MI355X",
-        "llama3_8B-fp8-pretrain",
+        "llama3.1_405B-fp8-pretrain",
         "fp8",
         "training"
       ],
       "timeout": -1,
-      "args": "--config_path examples/maxtext/configs/MI355X/llama3_8B-fp8-pretrain.yaml",
+      "args": "--config_path examples/maxtext/configs/MI355X/llama3.1_405B-fp8-pretrain.yaml per_device_batch_size=1",
       "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit nofile=1048576 -v /sys:/sys:ro -v /run/udev:/run/udev:ro"
     }
   },
@@ -80,7 +80,7 @@
       "partition": "<FILL_PARTITION>",
       "account": "<FILL_ACCOUNT or remove if cluster has none>",
       "qos": "<FILL_QOS>",
-      "nodes": 2,
+      "nodes": 4,
       "gpus_per_node": 8,
       "time": "12:00:00",
       "output_dir": "./slurm_output",
@@ -91,10 +91,10 @@
       "launcher": "primus",
       "backend": "nccl",
       "port": 29500,
-      "nnodes": 2,
+      "nnodes": 4,
       "nproc_per_node": 8,
       "primus": {
-        "config_path": "examples/maxtext/configs/MI355X/llama3_8B-fp8-pretrain.yaml",
+        "config_path": "examples/maxtext/configs/MI355X/llama3.1_405B-fp8-pretrain.yaml",
         "backend": "MaxText"
       }
     },
