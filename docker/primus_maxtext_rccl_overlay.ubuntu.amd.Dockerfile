@@ -340,12 +340,14 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
 # before a single step runs. Copy the bytes, restore the destination's RUNPATH.
 #
 # The ldd gate below is the check that would have caught that at build time instead of
-# 4 minutes into a 2-node job. It compares each target BEFORE and AFTER the swap and
-# fails only on an INCREASE. An absolute "must resolve everything" test would fail a
-# perfectly good build: on this base the pristine _rocm_sdk_devel copy already reports
-# 6 unresolved deps (its RUNPATH is a row of empty entries), because it is only ever
-# dlopen'd into a namespace where those libraries are already loaded. What must not
-# happen is the swap making linkage worse than it found it.
+# 4 minutes into a 2-node job. It records the SET of unresolved sonames per target before
+# the swap and fails if the set afterwards contains any name that was not already there.
+# Comparing counts is not enough: dropping one missing soname while introducing a
+# different one leaves the count unchanged and would pass. An absolute "must resolve
+# everything" test would fail a perfectly good build instead: on this base the pristine
+# _rocm_sdk_devel copy already reports 6 unresolved deps (its RUNPATH is a row of empty
+# entries), because it is only ever dlopen'd into a namespace where those libraries are
+# already loaded. What must not happen is the swap making linkage worse than it found it.
 RUN set -e; \
     SRC="$(ls -L ${RCCL_INSTALL_DIR}/lib/librccl.so.1.0 2>/dev/null || ls -L ${RCCL_INSTALL_DIR}/lib/librccl.so)"; \
     [ -n "$SRC" ] || { echo "GATE FAIL: no librccl in ${RCCL_INSTALL_DIR}"; exit 1; }; \
@@ -355,8 +357,11 @@ RUN set -e; \
       2>/dev/null > /opt/RCCL_TARGETS.txt || true; \
     [ -s /opt/RCCL_TARGETS.txt ] || { echo "GATE FAIL: no librccl found in base image"; exit 1; }; \
     : > /opt/RCCL_PRESWAP.txt; \
+    mkdir -p /tmp/rcclswap; n=0; \
     while read -r t; do \
-      echo "$t $(ldd "$t" 2>/dev/null | grep -c 'not found' || true)" >> /opt/RCCL_PRESWAP.txt; \
+      n=$((n+1)); \
+      ldd "$t" 2>/dev/null | awk '/not found/ {print $1}' | sort -u > "/tmp/rcclswap/pre.$n"; \
+      printf '%s\t%s\n' "$n" "$t" >> /opt/RCCL_PRESWAP.txt; \
     done < /opt/RCCL_TARGETS.txt; \
     while read -r t; do \
       [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \
@@ -367,17 +372,19 @@ RUN set -e; \
         { echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }; fi; \
     done < /opt/RCCL_TARGETS.txt; \
     ldconfig || true; \
-    while read -r t before; do \
-      after="$(ldd "$t" 2>/dev/null | grep -c 'not found' || true)"; \
-      echo "  deps unresolved before=${before} after=${after}  $t"; \
-      if [ "${after:-0}" -gt "${before:-0}" ]; then \
-        echo "GATE FAIL: the swap ADDED $(( after - before )) unresolved dependencies to $t:"; \
-        ldd "$t" 2>/dev/null | grep 'not found'; \
+    while IFS="$(printf '\t')" read -r n t; do \
+      ldd "$t" 2>/dev/null | awk '/not found/ {print $1}' | sort -u > "/tmp/rcclswap/post.$n"; \
+      newmiss="$(comm -13 "/tmp/rcclswap/pre.$n" "/tmp/rcclswap/post.$n")"; \
+      echo "  unresolved sonames before=$(wc -l < "/tmp/rcclswap/pre.$n") after=$(wc -l < "/tmp/rcclswap/post.$n")  $t"; \
+      if [ -n "$newmiss" ]; then \
+        echo "GATE FAIL: the swap introduced unresolved sonames not present before on $t:"; \
+        printf '    %s\n' $newmiss; \
         echo "  The candidate was installed without the RUNPATH this location needs;"; \
         echo "  loading it would fail at import time, before any step runs."; exit 1; \
       fi; \
     done < /opt/RCCL_PRESWAP.txt; \
-    echo "SWAP GATE PASS: $(wc -l < /opt/RCCL_TARGETS.txt) librccl replaced, no new unresolved deps"
+    rm -rf /tmp/rcclswap; \
+    echo "SWAP GATE PASS: $(wc -l < /opt/RCCL_TARGETS.txt) librccl replaced, no new unresolved sonames"
 
 # ---- provenance: recorded INSIDE the image ---------------------------------
 # The build log is not carried by the image. RCCL_CMAKE_OPTIONS is recorded too:
