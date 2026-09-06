@@ -49,7 +49,8 @@
       "IBV_DRIVERS": "<FILL_DRIVER  see references/cluster-types.md>",
       "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
       "NCCL_NET_PLUGIN": "none",
-      "IBV_SHOW_WARNINGS": "1"
+      "IBV_SHOW_WARNINGS": "1",
+      "XLA_GPU_AUTOTUNE_LEVEL": "0"
     },
     "docker_mounts": {
       "/dev/infiniband": "/dev/infiniband"
@@ -116,7 +117,8 @@
       "RCCL_AINIC_ROCE": "<FILL_RCCL_AINIC_ROCE  per archetype, see references/cluster-types.md; delete this key if not needed>",
       "NCCL_NET_PLUGIN": "none",
       "NCCL_TIMEOUT": "900",
-      "OMP_NUM_THREADS": "8"
+      "OMP_NUM_THREADS": "8",
+      "XLA_GPU_AUTOTUNE_LEVEL": "0"
     },
     "debug": false,
     "docker_gpus": "0,1,2,3,4,5,6,7"

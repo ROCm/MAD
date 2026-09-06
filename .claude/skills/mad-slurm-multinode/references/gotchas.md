@@ -221,12 +221,19 @@ gated Llama repo tokenizer synthetic dataset.
   numerically stable fp8 kernel — below it, fp8 MoE runs NaN. Against that: on the retired
   MAD-native env scripts at 32 ranks, levels 1 and 2 did not finish compiling within 50 and
   90 minutes, while level 0 compiled in under a minute at no measured compute cost (962 vs
-  968 TFLOP/s/device on a 2-node control). Those two facts were measured on different stacks
-  and level 4 itself was never timed at 32 ranks, so treat neither as settled: if a 4-node
-  fp8 run appears to hang before step 1, suspect compilation and time it before changing the
-  level. The knob is `XLA_GPU_AUTOTUNE_LEVEL` (Primus reads that name, not
-  `XLA_AUTOTUNE_LEVEL`), and lowering it trades an fp8 correctness guarantee for compile
-  time.
+  968 TFLOP/s/device on a 2-node control). **Level 4 has since been observed at 24 and 32
+  ranks and it does not finish**: the run presents as a dead hang — zero steps, zero
+  `NCCL INFO`, one thread pinned at ~100 % in `libhsa-runtime64.so.1` — for hours, on the
+  stock image as well as an overlay, on fp8 and bf16 alike, and across independent node sets.
+  Sixteen ranks survive it. The same job with `XLA_GPU_AUTOTUNE_LEVEL=0` reached RCCL init in
+  about a minute and trained 50 steps. So the failure scales with rank count, not with
+  anything about the library under test — and it is indistinguishable from a hang without
+  timing it, which is why it was misdiagnosed here once as an upstream defect at >=3 hosts.
+  The knob is `XLA_GPU_AUTOTUNE_LEVEL` (Primus reads that name; the MAD-native
+  `XLA_AUTOTUNE_LEVEL` is a silent no-op under Primus, so carrying the old key across does
+  nothing), and lowering it trades an fp8 correctness guarantee for compile time. Set it in
+  BOTH env blocks — `context.docker_env_vars` and `deployment_config.env_vars` — since only
+  the first reaches the container.
 - **The tokenizer fetch fails on hosts without access to the gated Llama repos**
   ("Access denied. This repository requires approval.") and this is harmless: these cards
   train on `dataset_type: synthetic`. Do not make setup failure fatal — verified against
