@@ -339,6 +339,11 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
 # rocm_sdk.initialize_process with "libamd_smi.so.26: cannot open shared object file"
 # before a single step runs. Copy the bytes, restore the destination's RUNPATH.
 #
+# "Restore" includes restoring an EMPTY one. A destination that carried no RUNPATH resolves
+# through the loader's own search path; leaving the candidate's $ORIGIN/../lib behind would
+# silently change WHERE its dependencies come from, and the soname gate below cannot see
+# that - it checks which names are unresolved, not which file each name resolved to.
+#
 # The ldd gate below is the check that would have caught that at build time instead of
 # 4 minutes into a 2-node job. It records the SET of unresolved sonames per target before
 # the swap and fails if the set afterwards contains any name that was not already there.
@@ -369,7 +374,9 @@ RUN set -e; \
       echo "  overwrite: $t (rpath: ${rp:-none})"; \
       cp -fL --remove-destination "$SRC" "$t"; \
       if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \
-        { echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }; fi; \
+        { echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }; \
+      else patchelf --remove-rpath "$t" || \
+        { echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }; fi; \
     done < /opt/RCCL_TARGETS.txt; \
     ldconfig || true; \
     while IFS="$(printf '\t')" read -r n t; do \
