@@ -25,6 +25,14 @@ is step latency and a single straggler step — a checkpoint flush, an eval, a h
 moves a 10-sample mean by percent while the effect under test can itself be a few percent.
 The median ignores it. The two throughput metrics above keep their existing mean so their
 published numbers stay comparable across releases.
+
+The row is written for EVERY run whose log carries step timings, single- and multi-node
+alike, and is deliberately not gated behind an opt-in flag. It is additive: this parser
+writes the madengine `multiple_results` CSV, it does not print a `performance:` line into
+the log, so the two throughput rows every existing card already reports are unchanged and
+madengine's "first `performance:` match wins" scraping is not involved. The gating that
+existed in the retired MAD-native harness protected that log-line path for cards which no
+longer exist on the Primus path.
 """
 import argparse
 import csv
