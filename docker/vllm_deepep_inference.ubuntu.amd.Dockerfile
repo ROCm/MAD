@@ -38,16 +38,30 @@
 #   inside the build context; docker cannot check a COPY source in advance, so
 #   a missing file fails at that COPY.
 #
-#   BASE_IMAGE defaults to the same ROCm vLLM base the sibling disagg image
-#   uses. This recipe was validated against a THERock ROCm 7.14 / Torch 2.11
-#   base, so override it if your base predates the ROCm version DeepEP needs.
+#   BASE_IMAGE defaults to a THERock ROCm 7.14 / Torch 2.11 nightly
+#   (gfx950-dcgpu). Not the public rocm/vllm-dev tag the sibling disagg image
+#   uses: that image's distro rccl-dev package (confirmed: 2.27.7 on ROCm
+#   7.2.3) ships rccl.h/nccl.h but not nccl_device.h, which DeepEP's HIP GIN
+#   backend requires -- the build fails on that header before ever reaching
+#   DeepEP's own code. Confirmed on hardware: swapping only the Python
+#   interpreter path is not enough; the distro RCCL genuinely lacks the
+#   device-side symmetric-memory API surface this recipe needs, regardless of
+#   which base ships it. RCCL is rebuilt from source below specifically to
+#   supply that header and API on top of whatever BASE_IMAGE provides, so a
+#   predates-DeepEP base doesn't have to already carry it -- but the base
+#   still has to be recent enough for that RCCL build and DeepEP's own HIP
+#   code to compile, which is why the default is pinned to the nightly this
+#   recipe was validated against rather than a stable release tag.
 #
 #   Stages, ordered so a rebuild only pays for what actually changed:
+#     RCCL_REPO / RCCL_COMMIT      RCCL, built from source (see above for why).
+#                                  Independent of DeepEP/AITER/vLLM; its own
+#                                  FROM stage (rccl-build) for the same caching
+#                                  reason as rdma-core's.
 #     DEEPEP_REPO / DEEPEP_COMMIT  DeepEP build (EP_TARGET_HIP=1,
 #                                  EP_DISABLE_LEGACY=1). Required; the source is
-#                                  not vendored here. Comes first: nothing else
-#                                  depends on it, so it never gets invalidated
-#                                  by a later ARG.
+#                                  not vendored here. Needs the from-source RCCL
+#                                  above already placed (EP_RCCL_ROOT_DIR).
 #     AITER_COMMIT                 AITER, with the zero-token get_ksplit guard.
 #                                  After DeepEP, so a DeepEP-only change still
 #                                  invalidates this (residual coupling -- see
@@ -84,11 +98,11 @@
 #
 #   Known residual coupling: DEEPEP_COMMIT changing still invalidates AITER's
 #   compile, since DeepEP precedes it in the same linear stage and neither
-#   compile is (yet) split into its own FROM stage the way rdma-core's is.
-#   Fixing that needs multi-stage isolation of two Python-packaged components
-#   (an editable AITER install, DeepEP's compiled extension), which is a
-#   larger, riskier change than reordering -- not attempted without validating
-#   it against a real build end to end.
+#   compile is (yet) split into its own FROM stage the way rdma-core's (or
+#   RCCL's) is. Fixing that needs multi-stage isolation of two Python-packaged
+#   components (an editable AITER install, DeepEP's compiled extension), which
+#   is a larger, riskier change than reordering -- not attempted without
+#   validating it against a real build end to end.
 #
 #   Runtime notes that are easy to lose:
 #     * NCCL_CUMEM_ENABLE=1 is mandatory. Without VMM, RCCL answers
@@ -110,7 +124,50 @@
 #         -v <host>/deep_ep:/root/.deep_ep
 # =============================================================================
 
-ARG BASE_IMAGE=rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491
+ARG BASE_IMAGE=registry-sc-harbor.amd.com/framework/therock-main:1447_gfx950_7.14.0a20260603_ubuntu22.04_py3.11_pytorch_release-2.11_98563b80a0e
+
+###############################################################################
+# RCCL, built from source, independently of DeepEP/AITER/vLLM.
+#
+# DeepEP's HIP GIN backend needs nccl_device.h and device-side symmetric-
+# memory APIs. Confirmed on hardware that the distro rccl-dev package (2.27.7
+# on ROCm 7.2.3) ships rccl.h/nccl.h but not nccl_device.h -- the DeepEP build
+# fails on that header before reaching any of its own code, on any base image
+# whose RCCL is the stable distro package rather than a build carrying this
+# newer API. Rebuilding it here, rather than requiring BASE_IMAGE to already
+# have it, keeps that requirement contained to one pinned, independent stage.
+#
+# Same caching rationale as rdma-core-build: this stage's cache key is
+# BASE_IMAGE + GPU_TARGETS + RCCL_REPO + RCCL_COMMIT only.
+###############################################################################
+FROM ${BASE_IMAGE} AS rccl-build
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ARG GPU_TARGETS=gfx950
+ARG RCCL_REPO=https://github.com/ROCm/rocm-systems.git
+ARG RCCL_COMMIT=d22b8646
+RUN set -e; \
+    apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      git ca-certificates cmake ninja-build build-essential pkg-config; \
+    rm -rf /var/lib/apt/lists/*; \
+    git clone "${RCCL_REPO}" /tmp/rocm-systems; \
+    git -C /tmp/rocm-systems checkout "${RCCL_COMMIT}"; \
+    git -C /tmp/rocm-systems submodule update --init --recursive projects/rccl; \
+    cp -a /tmp/rocm-systems/projects/rccl /opt/rccl-src; \
+    rm -rf /tmp/rocm-systems; \
+    cd /opt/rccl-src; \
+    ./install.sh --amdgpu_targets "${GPU_TARGETS}"; \
+    : "install.sh places the built .so directly under build/release/, not"; \
+    : "build/release/lib/ -- confirmed on hardware (librccl.so.1.0 sits next"; \
+    : "to CMakeCache.txt, no lib/ subdirectory exists at all). EP_RCCL_ROOT_DIR"; \
+    : "is read by both DeepEP's build and the runtime overlay step below as if"; \
+    : "it were a conventional install prefix with a lib/ underneath, so a"; \
+    : "self-referencing symlink bridges the two layouts instead of changing"; \
+    : "every consumer's assumed path."; \
+    test -e /opt/rccl-src/build/release/lib || ln -s . /opt/rccl-src/build/release/lib; \
+    test -f /opt/rccl-src/build/release/include/rccl/rccl.h; \
+    test -f /opt/rccl-src/build/release/include/nccl_device.h; \
+    test -f /opt/rccl-src/build/release/lib/librccl.so.1.0
 
 ###############################################################################
 # rdma-core, compiled independently of DeepEP/AITER/vLLM.
@@ -183,7 +240,56 @@ ENV VLLM_TARGET_DEVICE=rocm \
     PYTORCH_ROCM_ARCH=${GPU_TARGETS} \
     PYTHONPATH=${PYTHONPATH}:/opt/rocm/share/amd_smi \
     EP_TARGET_HIP=1 \
-    EP_DISABLE_LEGACY=1
+    EP_DISABLE_LEGACY=1 \
+    RCCL_SRC=/opt/rccl-src \
+    EP_RCCL_ROOT_DIR=/opt/rccl-src/build/release \
+    EP_NCCL_ROOT_DIR=/opt/rccl-src/build/release
+
+###############################################################################
+# 0) Place the from-source RCCL built in rccl-build, before DeepEP -- DeepEP's
+#    setup.py reads EP_RCCL_ROOT_DIR/EP_NCCL_ROOT_DIR at build time to find
+#    nccl_device.h and link against this RCCL instead of whatever ships in
+#    ROCM_PATH.
+#
+#    Only build/release is copied, not the source checkout or the rest of the
+#    build tree: build/release is RCCL's own install-style output directory
+#    (headers + shared libs), and it is the only path EP_RCCL_ROOT_DIR and the
+#    checks above reference. Narrower than rdma-core's DESTDIR copy only in
+#    that this relies on RCCL's build system already separating that tree
+#    itself, rather than an explicit DESTDIR install step -- not verified here
+#    that nothing else under /opt/rccl-src is needed; worth confirming once
+#    against an actual build if something under build/release turns out to
+#    reference a path outside it.
+###############################################################################
+COPY --from=rccl-build /opt/rccl-src/build/release /opt/rccl-src/build/release
+RUN set -e; \
+    : "Torch resolves its own bundled librccl through RPATH, which can be a"; \
+    : "different RCCL build than the one DeepEP is about to compile against --"; \
+    : "so it is overlaid here with the same one, not left to diverge."; \
+    candidate="${EP_RCCL_ROOT_DIR}/lib/librccl.so.1.0"; \
+    if nm -D "${candidate}" 2>/dev/null | grep -qw 'U atexit'; then \
+      : "This RCCL build can reference atexit() without linking against a libc"; \
+      : "that provides it as a plain symbol; the shim below satisfies that"; \
+      : "reference via __cxa_atexit instead of patching RCCL's own build."; \
+      apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        patchelf; \
+      rm -rf /var/lib/apt/lists/*; \
+      printf '%s\n' \
+        'extern int __cxa_atexit(void (*)(void *), void *, void *);' \
+        'int atexit(void (*f)(void)) { return __cxa_atexit((void (*)(void *))f, (void *)0, (void *)0); }' \
+        > /tmp/rccl_atexit_shim.c; \
+      "${ROCM_PATH}/bin/amdclang" -shared -fPIC \
+        -o "${EP_RCCL_ROOT_DIR}/lib/librccl_atexit_shim.so" /tmp/rccl_atexit_shim.c; \
+      patchelf --add-needed librccl_atexit_shim.so "${candidate}"; \
+      patchelf --add-rpath "${EP_RCCL_ROOT_DIR}/lib" "${candidate}"; \
+      rm -f /tmp/rccl_atexit_shim.c; \
+    fi; \
+    for bundled in $(find /opt/venv -path '*/_rocm_sdk_libraries_*/lib/librccl.so.1' 2>/dev/null); do \
+      real="$(readlink -f "${bundled}")"; \
+      cp -f "${candidate}" "${real}"; \
+      echo "RCCL_BUNDLED_OVERLAY ${real} <- ${candidate}"; \
+    done
 
 ###############################################################################
 # 1) DeepEP.
@@ -253,8 +359,24 @@ RUN set -e; \
 # for DeepEP's or AITER's compile.
 ###############################################################################
 ARG VLLM_WHEEL=vllm.whl
-COPY ${VLLM_WHEEL} /tmp/vllm.whl
-RUN ${PYTHON} -m pip install --no-deps /tmp/vllm.whl && rm -f /tmp/vllm.whl
+# Copied into a directory, not renamed to a fixed /tmp/vllm.whl: confirmed on
+# hardware that pip's wheel installer parses the compatibility tags (python
+# ABI, platform) out of the FILENAME per PEP 427 before it looks at the
+# wheel's own metadata, and rejects a name that doesn't fit that shape --
+# "Invalid wheel filename (wrong number of parts): 'vllm'" -- regardless of
+# what the file actually contains. Renaming to a fixed name broke this
+# unconditionally, for every wheel, on every build.
+#
+# No --no-deps: confirmed by inspecting this wheel's own METADATA that torch,
+# torchvision and numpy are not declared Requires-Dist at all (vLLM's ROCm
+# build handles them outside pip's normal dependency graph), so a plain
+# install cannot touch the base image's ROCm-specific builds of them -- and
+# --no-deps was silently dropping everything it DOES declare (regex,
+# cachetools, fastapi, ...), so `import vllm` failed on the first of those,
+# ModuleNotFoundError: No module named 'regex', confirmed on hardware.
+COPY ${VLLM_WHEEL} /tmp/
+RUN wheel="/tmp/$(basename "${VLLM_WHEEL}")"; \
+    ${PYTHON} -m pip install "${wheel}" && rm -f "${wheel}"
 
 ###############################################################################
 # 4) Text-only torchvision surface.
