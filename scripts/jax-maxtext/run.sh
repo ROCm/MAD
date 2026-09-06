@@ -54,24 +54,28 @@ fi
 # EXP is required by run_pretrain.sh. --config_path must also be stripped from the
 # forwarded args: run_pretrain.sh appends leftovers to the training command and it is
 # not a valid MaxText flag.
+# Stripped unconditionally. Doing it only when PRIMUS_CONFIG_PATH is unset left the
+# flag in the forwarded args on exactly the path that sets it: madengine's
+# `launcher: primus` exports PRIMUS_CONFIG_PATH, every discovered model card carries
+# `args: --config_path <rel>`, so run_pretrain.sh appended `--config_path ...` to the
+# training command and MaxText died with
+# "ValueError: 'config_path' not in 'emb_dim', ..." before step 1 on every multi-node run.
 forward_args=()
-if [[ -n "${PRIMUS_CONFIG_PATH:-}" ]]; then
-  export EXP="$PRIMUS_CONFIG_PATH"
-  forward_args=("$@")
-else
-  export EXP=""
-  args=("$@")
-  i=0
-  while [[ $i -lt ${#args[@]} ]]; do
-    if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
-      export EXP="${args[i+1]}"
-      i=$((i + 2))
-      continue
-    fi
-    forward_args+=("${args[i]}")
-    i=$((i + 1))
-  done
-fi
+args=("$@")
+cli_config=""
+i=0
+while [[ $i -lt ${#args[@]} ]]; do
+  if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
+    cli_config="${args[i+1]}"
+    i=$((i + 2))
+    continue
+  fi
+  forward_args+=("${args[i]}")
+  i=$((i + 1))
+done
+# The launcher's value wins: when madengine sets it, that is the authoritative config
+# for the deployment, and the card's args are just how the same path reaches a local run.
+export EXP="${PRIMUS_CONFIG_PATH:-$cli_config}"
 
 if [[ -z "$EXP" ]]; then
   echo "ERROR: --config_path or PRIMUS_CONFIG_PATH required." >&2
