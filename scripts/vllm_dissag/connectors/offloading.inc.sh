@@ -15,8 +15,7 @@
 #
 # Either backend can add a filesystem tier below the CPU tier via OFFLOAD_DISK_PATH
 # (GPU -> CPU RAM -> disk):
-#   native  -> an OffloadingConnector TieringOffloadingSpec with an `fs` secondary tier
-#              (mirrors the llm-d ROCm native guide).
+#   native  -> an OffloadingConnector TieringOffloadingSpec with an `fs` secondary tier.
 #   lmcache -> LMCache (LRU) spills CPU-evicted chunks to its local_disk.
 # A per-host subdir is appended so the prefill and decode nodes don't collide on a
 # shared mount.
@@ -31,7 +30,7 @@
 
 KV_OFFLOAD="${KV_OFFLOAD:-none}"
 OFFLOAD_BACKEND="${OFFLOAD_BACKEND:-native}"
-OFFLOAD_CPU_BYTES="${OFFLOAD_CPU_BYTES:-107374182400}"
+export OFFLOAD_CPU_BYTES="${OFFLOAD_CPU_BYTES:-107374182400}"
 
 kv_offload_enabled() {
     [[ "${KV_OFFLOAD:-none}" != "none" ]]
@@ -72,25 +71,18 @@ kv_offload_wrap() {
         printf '%s' "$base_json"
         return 0
     fi
-    _kv_offload_validate
 
-    OFFLOAD_BACKEND="${OFFLOAD_BACKEND}" OFFLOAD_CPU_BYTES="${OFFLOAD_CPU_BYTES}" \
     _OFFLOAD_FS_DIR="$(_kv_offload_fs_dir)" \
     _BASE_JSON="${base_json}" python3 - <<'PY'
 import json, os
 base = json.loads(os.environ["_BASE_JSON"])
-# vLLM's MultiConnector rebuilds each sub-connector as
-# KVTransferConfig(**sub_dict, engine_id=engine_id) (multi_connector.py
-# _get_connector_classes_and_configs). It reads engine_id via dict.get() WITHOUT
-# popping it, so a sub-connector dict that still carries an "engine_id" key raises
-# "got multiple values for keyword argument 'engine_id'". Lift engine_id off the
-# base dict to the outer MultiConnector; vLLM's fallback (ktc.get("engine_id",
-# outer.engine_id)) then re-applies it to the base (and offload) sub-connector.
+# MultiConnector passes engine_id to each sub-connector as a kwarg; a sub-dict
+# still carrying "engine_id" raises "got multiple values". Pop it here and set it
+# on the outer dict; vLLM re-applies it to sub-connectors via its fallback.
 engine_id = base.pop("engine_id", None)
 backend = os.environ["OFFLOAD_BACKEND"]
 if backend == "lmcache":
-    # LMCache is configured entirely via the process env (LMCACHE_*), so the
-    # sub-connector dict is just the connector name + role. See kv_offload_setup_env.
+    # LMCache reads its config from the env (LMCACHE_*); see kv_offload_setup_env.
     offload = {
         "kv_connector": "LMCacheConnectorV1",
         "kv_role": "kv_both",
@@ -99,8 +91,7 @@ else:
     extra = {"cpu_bytes_to_use": int(os.environ["OFFLOAD_CPU_BYTES"])}
     fs_dir = os.environ.get("_OFFLOAD_FS_DIR", "")
     if fs_dir:
-        # Filesystem tier below the CPU tier (GPU -> CPU RAM -> fs). Mirrors the llm-d
-        # ROCm native guide: a TieringOffloadingSpec whose secondary tier is an fs store.
+        # Filesystem tier: GPU -> CPU RAM -> fs, via TieringOffloadingSpec.
         extra["spec_name"] = "TieringOffloadingSpec"
         extra["block_size"] = 256
         extra["secondary_tiers"] = [{
@@ -127,20 +118,15 @@ print(json.dumps(multi))
 PY
 }
 
-# Export the process env the active offload backend needs before `vllm serve`, and
-# create the filesystem-tier dir when OFFLOAD_DISK_PATH is set (both backends use it).
-# native: OffloadingConnector is fully configured via its JSON dict, so the only side
-#   effect is creating the fs-tier dir its config points at.
-# lmcache: LMCache reads its tier config from the environment, so export the CPU-tier
-#   size + the determinism/metrics vars the llm-d guide validated, plus the disk tier.
-# Passthrough: a submit-time export of any of these wins (`${VAR:-default}`).
+# Export env vars the active offload backend reads before `vllm serve`, and create
+# the filesystem-tier dir when OFFLOAD_DISK_PATH is set. Submit-time exports win.
 kv_offload_setup_env() {
     kv_offload_enabled || return 0
 
     local disk_dir=""
     if [[ -n "${OFFLOAD_DISK_PATH:-}" ]]; then
         disk_dir="$(_kv_offload_fs_dir)"
-        mkdir -p "${disk_dir}" 2>/dev/null || true
+        mkdir -p "${disk_dir}" || echo "[kv_offload] WARNING: failed to create ${disk_dir}" >&2
     fi
 
     if [[ "${OFFLOAD_BACKEND}" != "lmcache" ]]; then
@@ -152,13 +138,11 @@ kv_offload_setup_env() {
     # Stable hashing across workers so prefix keys match; LMCache prometheus multiproc dir.
     export PYTHONHASHSEED="${PYTHONHASHSEED:-123}"
     export PROMETHEUS_MULTIPROC_DIR="${PROMETHEUS_MULTIPROC_DIR:-/tmp/lmcache_prometheus}"
-    mkdir -p "${PROMETHEUS_MULTIPROC_DIR}" 2>/dev/null || true
+    mkdir -p "${PROMETHEUS_MULTIPROC_DIR}" || echo "[kv_offload] WARNING: failed to create ${PROMETHEUS_MULTIPROC_DIR}" >&2
     echo "[kv_offload] lmcache CPU tier: LMCACHE_MAX_LOCAL_CPU_SIZE=${LMCACHE_MAX_LOCAL_CPU_SIZE} GB/worker" \
          "PROMETHEUS_MULTIPROC_DIR=${PROMETHEUS_MULTIPROC_DIR}"
 
-    # Optional filesystem tier below the CPU tier. LMCache (LRU) spills CPU-evicted
-    # chunks here instead of dropping them; retrieval checks CPU then disk. Sharded
-    # per-GPU by LMCache (local_disk_path_sharding=by_gpu).
+    # Optional disk tier: LMCache spills CPU-evicted chunks here (LRU, per-GPU sharded).
     [[ -n "${disk_dir}" ]] || return 0
     export LMCACHE_LOCAL_DISK="${disk_dir}"
     export LMCACHE_MAX_LOCAL_DISK_SIZE="${LMCACHE_MAX_LOCAL_DISK_SIZE:-0.0}"

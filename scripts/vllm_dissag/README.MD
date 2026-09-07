@@ -132,19 +132,22 @@ export CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep
 
 ### Tiered prefix caching (`KV_OFFLOAD`)
 
+> **Scope: `CONNECTOR=rixl WIDE_EP=0` (TP) only.** EP paths do not support `KV_OFFLOAD`.
+
 An orthogonal overlay that attaches a CPU-RAM KV tier (GPU KV → host, for prefix reuse)
-*on top of* the disagg P/D connector, by composing both via vLLM's `MultiConnector`. The
+*on top of* the NIXL disagg connector, by composing both via vLLM's `MultiConnector`. The
 tier's backend is selectable via `OFFLOAD_BACKEND`:
 
 - **`lmcache`** — LMCache's `LMCacheConnectorV1`, sized by `LMCACHE_MAX_LOCAL_CPU_SIZE`.
+  **Validated and optimal** on `Llama-3.1-405B-Instruct-FP8-KV` (1P/1D, TP=8).
 - **`native`** (code default) — vLLM's built-in `OffloadingConnector`, sized by `OFFLOAD_CPU_BYTES`.
+  Functional but not benchmarked; prefer `lmcache`.
 
 Either backend can add a filesystem tier below the CPU tier (GPU → CPU RAM → disk) via
-`OFFLOAD_DISK_PATH`: `native` attaches an `OffloadingConnector` `TieringOffloadingSpec` `fs`
-secondary tier; `lmcache` (LRU) spills CPU-evicted chunks to its `local_disk`. Mirrors the
-llm-d `tiered-prefix-cache` guide ([llm-d#2154](https://github.com/llm-d/llm-d/pull/2154)).
-The **validated / recommended** path is `lmcache` + `cpu`; the other cells are functional but
-not benchmarked here.
+`OFFLOAD_DISK_PATH`: `native` attaches a `TieringOffloadingSpec` `fs` secondary tier;
+`lmcache` (LRU) spills CPU-evicted chunks to its `local_disk`. Neither disk path is
+validated — set `OFFLOAD_DISK_PATH` only if you have a node-local fast disk and accept
+that it is experimental.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -172,17 +175,15 @@ sbatch -N 2 -n 2 --nodelist=<node0,node1> run_xPyD_models.slurm
 
 When `KV_OFFLOAD!=none` the launcher forces `--enable-prefix-caching` (offloading is
 meaningless without it); pair it with a small `--kv-cache-memory-bytes` cap so HBM KV
-actually evicts into the CPU tier. Validated with `Llama-3.1-405B-Instruct-FP8-KV`
-(1P/1D, TP=8) on the NIXL (`rixl`) path.
+actually evicts into the CPU tier.
 
 **Image requirements.** `native` needs an image whose vLLM ships `OffloadingConnector` +
 `MultiConnector` (e.g. `vllm/vllm-openai-rocm:v0.26.0`). `lmcache` **additionally** needs
 `lmcache` (v0.5.3+) installed — the stock image does **not** ship it, and `LMCacheConnectorV1`
-will fail to import without it. Build one from source (LMCache built with `BUILD_WITH_HIP=1`,
-`PYTORCH_ROCM_ARCH=gfx942` for MI300) and point `DOCKER_IMAGE_NAME` at it; the llm-d
-`docker/Dockerfile.rocm-lmcache` recipe is a working reference. LMCache reads its tier config
-from the process env (`LMCACHE_MAX_LOCAL_CPU_SIZE`, `PYTHONHASHSEED`, `PROMETHEUS_MULTIPROC_DIR`),
-all forwarded into the container by the slurm.
+will fail to import without it. Build one from source (`BUILD_WITH_HIP=1`,
+`PYTORCH_ROCM_ARCH=gfx942` for MI300) and point `DOCKER_IMAGE_NAME` at it. LMCache reads
+its tier config from the process env (`LMCACHE_MAX_LOCAL_CPU_SIZE`, `PYTHONHASHSEED`,
+`PROMETHEUS_MULTIPROC_DIR`), all forwarded into the container by the slurm.
 
 Each followed by:
 ```bash

@@ -101,6 +101,35 @@ _hasnot "$N" "OffloadingConnector" "no OffloadingConnector when offload disabled
 _has    "$N" "--no-enable-prefix-caching" "prefix caching stays off (base recipe)"
 
 echo ""
+echo "=== KV_OFFLOAD=cpu lmcache + OFFLOAD_DISK_PATH (disk tier; rixl TP 405B) ==="
+LD="$(_argv_off rixl 0 '' Llama-3.1-405B-Instruct-FP8-KV /m/L405 cpu lmcache /mnt/kv)"
+_has    "$LD" "LMCacheConnectorV1" "lmcache connector present on lmcache+disk path"
+_hasnot "$LD" "OffloadingConnector" "no native connector on lmcache+disk path"
+_has    "$LD" "NixlConnector"       "base NixlConnector preserved"
+_has    "$LD" "--enable-prefix-caching" "prefix caching enabled"
+
+echo ""
+echo "=== invalid KV_OFFLOAD / OFFLOAD_BACKEND rejected by driver ==="
+_exits_nonzero() {
+  local desc="$1"; shift
+  local rc
+  "$@" >/dev/null 2>&1; rc=$?
+  [[ "$rc" != "0" ]] && { printf "  PASS  %s\n" "$desc"; pass=$((pass+1)); } \
+                     || { printf "  FAIL  %s (expected non-zero)\n" "$desc"; fail=$((fail+1)); }
+}
+_kv_driver_exit() {  # KV_OFFLOAD [OFFLOAD_BACKEND]
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR=rixl WIDE_EP=0 EP_BACKEND= \
+    MODEL_NAME=Llama-3.1-405B-Instruct-FP8-KV MODEL_PATH=/m/L405 \
+    KV_OFFLOAD="$1" ${2:+OFFLOAD_BACKEND="$2"} \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh"
+}
+_exits_nonzero "KV_OFFLOAD=bad rejected"      _kv_driver_exit bad
+_exits_nonzero "OFFLOAD_BACKEND=bad rejected" _kv_driver_exit cpu bad
+
+echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
