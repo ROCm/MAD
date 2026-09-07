@@ -630,6 +630,7 @@ docker run --rm \
     ${PC_OSL:+-e PC_OSL=$PC_OSL} \
     ${PC_NUM_PROMPTS:+-e PC_NUM_PROMPTS=$PC_NUM_PROMPTS} \
     ${PC_CON:+-e PC_CON=$PC_CON} \
+    ${PC_CON_LIST:+-e PC_CON_LIST="$PC_CON_LIST"} \
     ${PC_SEED:+-e PC_SEED=$PC_SEED} \
     ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
