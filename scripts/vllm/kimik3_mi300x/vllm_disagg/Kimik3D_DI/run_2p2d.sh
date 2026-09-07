@@ -174,6 +174,18 @@ fi
 
 echo "[disagg] node=$(hostname -s) role=$ROLE dp_addr=$DP_ADDR kv_role=${KV_ROLE:-none} backend=$BACKEND"
 
+# ROCtx profiling addon (kimik3_profiling/). Mount only when RUN_PROFILE=1.
+PROF_MOUNT=""
+if [ "${RUN_PROFILE:-0}" = "1" ]; then
+  PROF_MOUNT="-v $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/kimik3_profiling:/kimik3_profiling:ro"
+  echo "[disagg] RUN_PROFILE=1 -> rocprofv3 capture enabled (dir base ${ROCPROF_DIR_BASE:-/logs/rocprof})"
+  # Under rocprofv3 the prefill DP worker-init is timing-sensitive; stale /dev/shm
+  # segments + SysV IPC from a previous serve cause a WorkerProc init crash on the
+  # producer role. Clear them before the profiled boot (validated: fixes the crash).
+  rm -f /dev/shm/* 2>/dev/null || true
+  ipcrm -a 2>/dev/null || true
+fi
+
 docker run -d --name "$CONTAINER" \
   --network host --ipc host \
   --device /dev/kfd --device /dev/dri --device /dev/infiniband --group-add video \
@@ -230,9 +242,15 @@ docker run -d --name "$CONTAINER" \
   -e VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
   -e KVCFG_B64="$KVCFG_B64" \
   -e QUANT_CONFIG="$QUANT_CONFIG" \
+  -e RUN_PROFILE="${RUN_PROFILE:-0}" -e MORIIO_REQID_MAP="${MORIIO_REQID_MAP:-1}" \
+  -e ROCPROF="${ROCPROF:-1}" -e ROCPROF_FLAGS="${ROCPROF_FLAGS:---kernel-trace --marker-trace}" \
+  -e MORI_ROCTX="${MORI_ROCTX:-1}" -e MORI_ROCTX_TRANSFER="${MORI_ROCTX_TRANSFER:-1}" \
+  -e ROCPROF_DIR_BASE="${ROCPROF_DIR_BASE:-/logs/rocprof}" -e NODE_RANK="${NODE_RANK:-0}" \
+  -e SLURM_JOB_ID="${SLURM_JOB_ID:-0}" -e ROLE="$ROLE" \
   -v "$MODEL_DIR":/model:ro -v "$LOGHOST":/logs \
   -v "$JIT_HOST":/opt/vllm_cache \
   ${READBACK_PATCH_HOST:+-v ${READBACK_PATCH_HOST}:/readback_patch:ro} \
+  ${PROF_MOUNT} \
   ${BNXT_MOUNTS} \
   --entrypoint bash \
   "$IMAGE" -c "
@@ -270,8 +288,26 @@ docker run -d --name "$CONTAINER" \
         /usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/moriio/ 2>/dev/null \
         && echo '[disagg] readback connector patch applied' || echo '[disagg] readback patch cp failed'
     fi
+    # ROCtx profiling addon: apply reqid patch + build the rocprofv3 capture prefix.
+    PROF_PREFIX=\"\"
+    if [ \"\${RUN_PROFILE:-0}\" = \"1\" ] && [ -d /kimik3_profiling ]; then
+      echo '[disagg] RUN_PROFILE=1 -> applying reqid patch + rocprof prefix'
+      MORIIO_DIR=/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/moriio
+      # MORIIO_REQID_MAP is an INDEPENDENT switch: 1 = source-instrument the connector
+      # to emit moriio_reqid_map lines (request<->write_uid join); 0 = kernels+markers
+      # only, connector source untouched. Decoupled from RUN_PROFILE on purpose.
+      if [ \"\${MORIIO_REQID_MAP:-1}\" = \"1\" ]; then
+        echo '[disagg] MORIIO_REQID_MAP=1 -> applying reqid source patch'
+        python3 /kimik3_profiling/patch_moriio_reqid_map.py --moriio-dir \"\$MORIIO_DIR\" \
+          || { echo '[disagg] ERROR: reqid patch failed (anchors drifted?)'; exit 1; }
+      else
+        echo '[disagg] MORIIO_REQID_MAP=0 -> skipping reqid patch (connector source untouched)'
+      fi
+      source /kimik3_profiling/hooks.sh
+      PROF_PREFIX=\"\$(moriio_rocprof_prefix \${ROLE})\"
+    fi
     echo '[disagg] launching vllm serve...'
-    vllm serve /model --served-model-name kimi-k3 --tensor-parallel-size ${TP_SIZE} \
+    \${PROF_PREFIX} vllm serve /model --served-model-name kimi-k3 --tensor-parallel-size ${TP_SIZE} \
       --data-parallel-size ${DP_SIZE} --data-parallel-size-local ${DP_LOCAL} \
       --data-parallel-address ${DP_ADDR} --data-parallel-rpc-port ${RPC_PORT} ${START} ${HEADLESS} \
       --enable-expert-parallel --all2all-backend ${BACKEND} \
