@@ -30,6 +30,7 @@
 #   with DeepSeek-R1 FP8 at TP=1 / DP=8 / EP=8 on a single node.
 #
 #   docker build -f docker/vllm_deepep_inference.ubuntu.amd.Dockerfile \
+#     --build-arg BASE_IMAGE=<image, see below -- no usable default> \
 #     --build-arg DEEPEP_REPO=<url> --build-arg DEEPEP_COMMIT=<sha> \
 #     --build-arg VLLM_WHEEL=<path/to/vllm-*.whl relative to the build context> \
 #     -t <your-registry>/vllm-deepep:local .
@@ -38,20 +39,35 @@
 #   inside the build context; docker cannot check a COPY source in advance, so
 #   a missing file fails at that COPY.
 #
-#   BASE_IMAGE defaults to a THERock ROCm 7.14 / Torch 2.11 nightly
-#   (gfx950-dcgpu). Not the public rocm/vllm-dev tag the sibling disagg image
-#   uses: that image's distro rccl-dev package (confirmed: 2.27.7 on ROCm
-#   7.2.3) ships rccl.h/nccl.h but not nccl_device.h, which DeepEP's HIP GIN
-#   backend requires -- the build fails on that header before ever reaching
-#   DeepEP's own code. Confirmed on hardware: swapping only the Python
-#   interpreter path is not enough; the distro RCCL genuinely lacks the
-#   device-side symmetric-memory API surface this recipe needs, regardless of
-#   which base ships it. RCCL is rebuilt from source below specifically to
-#   supply that header and API on top of whatever BASE_IMAGE provides, so a
-#   predates-DeepEP base doesn't have to already carry it -- but the base
-#   still has to be recent enough for that RCCL build and DeepEP's own HIP
-#   code to compile, which is why the default is pinned to the nightly this
-#   recipe was validated against rather than a stable release tag.
+#   BASE_IMAGE has no usable default -- you must supply one. It needs:
+#     * A recent-enough ROCm/Torch/HIP toolchain to compile RCCL's device-side
+#       symmetric-memory API and DeepEP's own HIP code. The public
+#       rocm/vllm-dev tag the sibling disagg image uses is NOT recent enough:
+#       confirmed on hardware that its distro rccl-dev package (2.27.7 on ROCm
+#       7.2.3) ships rccl.h/nccl.h but not nccl_device.h, and DeepEP's HIP GIN
+#       backend needs that header. RCCL is rebuilt from source below
+#       specifically to supply it on top of whatever BASE_IMAGE provides, so
+#       the base does not need to already carry DeepEP support itself -- only
+#       a toolchain new enough to compile that RCCL build and DeepEP's code
+#       against it.
+#     * A gfx950 (MI350X) target and, if you rely on the ${PYTHON} default
+#       below, a `/opt/venv` virtualenv at that path (THERock-style images lay
+#       out this way; override PYTHON if yours doesn't).
+#
+#   Why no default: an earlier revision of this file pinned BASE_IMAGE to a
+#   specific tag on an internal nightly-build registry
+#   (registry-sc-harbor.amd.com/framework/therock-main), matching whatever
+#   image this recipe had been validated against at the time. That tag is
+#   already gone from the registry as of this writing -- confirmed via the
+#   registry's own tags/list API, which no longer lists it alongside tags from
+#   the same window that are still present. This registry evidently keeps only
+#   a rolling set of recent nightly builds, so ANY tag pinned here would go
+#   the same way on its own schedule, not just that one -- the previous
+#   default only ever looked validated because specific cluster nodes still
+#   had that exact tag cached locally from months ago, not because the
+#   reference was durably resolvable. A required build arg fails loudly and
+#   immediately for whoever builds, which beats a hardcoded reference that
+#   works today and silently stops working later for everyone else.
 #
 #   Stages, ordered so a rebuild only pays for what actually changed:
 #     RCCL_REPO / RCCL_COMMIT      RCCL, built from source (see above for why).
@@ -124,7 +140,13 @@
 #         -v <host>/deep_ep:/root/.deep_ep
 # =============================================================================
 
-ARG BASE_IMAGE=registry-sc-harbor.amd.com/framework/therock-main:1447_gfx950_7.14.0a20260603_ubuntu22.04_py3.11_pytorch_release-2.11_98563b80a0e
+# No real default: see the header above for why a pinned tag is not durable
+# here. Docker cannot validate an ARG used directly in FROM before the FROM
+# line runs (no test -n check like DEEPEP_REPO/DEEPEP_COMMIT get below), so
+# this placeholder exists to make the resulting failure legible instead of a
+# bare "invalid reference format" -- if you see this string in a build error,
+# you forgot --build-arg BASE_IMAGE=...
+ARG BASE_IMAGE=REQUIRED-set-build-arg-BASE_IMAGE-see-Dockerfile-header-for-what-it-needs
 
 ###############################################################################
 # RCCL, built from source, independently of DeepEP/AITER/vLLM.

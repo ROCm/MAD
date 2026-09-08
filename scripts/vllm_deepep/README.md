@@ -23,7 +23,16 @@ of one comparison arm. Model-card names are unique; tags are not.
 
 The image is not built here — supply it with `DOCKER_IMAGE_NAME`. Build it from
 `docker/vllm_deepep_inference.ubuntu.amd.Dockerfile`; that file documents the
-required build args (`DEEPEP_REPO`, `DEEPEP_COMMIT`, `VLLM_WHEEL`).
+required build args (`BASE_IMAGE`, `DEEPEP_REPO`, `DEEPEP_COMMIT`,
+`VLLM_WHEEL`).
+
+`BASE_IMAGE` has no default — deliberately, see the Dockerfile header. It
+needs a ROCm/Torch/HIP toolchain new enough to build RCCL's device-side
+symmetric-memory API and DeepEP's own HIP code (gfx950/MI350X); the public
+`rocm/vllm-dev` tag the sibling disagg image uses is not new enough. Pass it
+the same way as the other build args, e.g. via `madengine build --additional-
+context '{"docker_build_arg": {"BASE_IMAGE": "..."}}'` or by setting
+`docker_build_arg` directly on the model card.
 
 ## Why both arms run AITER fused MoE
 
