@@ -282,26 +282,37 @@ check_model_path() {
 
     echo "Checking $check_name: $path"
 
-    # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
+    # One task per node. The probe always exits 0 and reports per-node: a missing
+    # path is an expected outcome of a fallback chain, not a step failure, and a
+    # non-zero srun here leaves a "<jobid>.N bash FAILED 1:0" row in sacct that
+    # reads as a fault in an otherwise healthy job.
+    local out
+    out="$(srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
         if [ -d '$path' ]; then
             echo \"\$(hostname): ✓ Found $path\"
-            exit 0
         else
             echo \"\$(hostname): ✗ Missing $path\"
-            exit 1
         fi
-    "
-
-    # Check if all nodes succeeded (exit code 0)
+        exit 0
+    ")"
     local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "✓ $check_name available on ALL nodes"
-        return 0
-    else
-        echo "✗ $check_name NOT available on all nodes"
+    [ -n "$out" ] && echo "$out"
+
+    # srun itself failing, or reporting from fewer nodes than were allocated,
+    # must not read as "available" -- that would send the job on to load weights
+    # from a path some rank cannot see.
+    if [ $exit_code -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
+        echo "✗ $check_name could not be checked (srun exit $exit_code)"
         return 1
     fi
+    local n_found
+    n_found=$(printf '%s\n' "$out" | grep -c 'Found')
+    if [ "$n_found" -eq "$SLURM_NNODES" ]; then
+        echo "✓ $check_name available on ALL nodes"
+        return 0
+    fi
+    echo "✗ $check_name NOT available on all nodes ($n_found/$SLURM_NNODES)"
+    return 1
 }
 
 # Check /mnt/m2m_nobackup/models_blog first

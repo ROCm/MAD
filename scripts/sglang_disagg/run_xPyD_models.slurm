@@ -253,39 +253,53 @@ check_model_path() {
     
     echo "Checking $check_name: $path"
     
-    # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then 
+    # One task per node. The probe always exits 0 and reports per-node: a missing
+    # path is an expected outcome of a fallback chain, not a step failure, and a
+    # non-zero srun here leaves a "<jobid>.N bash FAILED 1:0" row in sacct that
+    # reads as a fault in an otherwise healthy job.
+    local out
+    out="$(srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
+        if [ -d '$path' ]; then
             echo \"\$(hostname): ✓ Found $path\"
-            exit 0
-        else 
+        else
             echo \"\$(hostname): ✗ Missing $path\"
-            exit 1
         fi
-    "
-    
-    # Check if all nodes succeeded (exit code 0)
+        exit 0
+    ")"
     local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "✓ $check_name available on ALL nodes"
-        return 0
-    else
-        echo "✗ $check_name NOT available on all nodes"
+    [ -n "$out" ] && echo "$out"
+
+    # srun itself failing, or reporting from fewer nodes than were allocated,
+    # must not read as "available" -- that would send the job on to load weights
+    # from a path some rank cannot see.
+    if [ $exit_code -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
+        echo "✗ $check_name could not be checked (srun exit $exit_code)"
         return 1
     fi
+    local n_found
+    n_found=$(printf '%s\n' "$out" | grep -c 'Found')
+    if [ "$n_found" -eq "$SLURM_NNODES" ]; then
+        echo "✓ $check_name available on ALL nodes"
+        return 0
+    fi
+    echo "✗ $check_name NOT available on all nodes ($n_found/$SLURM_NNODES)"
+    return 1
 }
 
-# Check /shared_inference/models_blog first. Every check_model_path miss costs a
-# full multi-node srun round trip and leaves a "<jobid>.N bash FAILED 1:0" row in
-# sacct that reads as a fault, so the location the models actually live in is
-# probed first (it is ORIGINAL_MODEL_PATH above).
-if check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+# Check /mnt/m2m_nobackup/models_blog first: it is per-node local NVMe, while
+# /shared_inference is NFS shared by the whole cluster (scripts/common/
+# preflight_weights.sh:2-5). Loading Qwen3-32B off NFS measured 683s -- 67% of a
+# 1015s bring-up, ~92 MB/s per node with both nodes reading the same 63 GB -- so
+# the local copy is worth a probe even though it is not present on every node.
+# The probe no longer leaves a failed sacct step, so a miss costs only its own
+# round trip.
+if check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then
+    MODEL_PATH="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /mnt/m2m_nobackup/models_blog
-elif check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+# Check /shared_inference/models_blog (NFS, uniform)
+elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
