@@ -1,0 +1,142 @@
+[
+    {
+        "name": "pyt_large_ep_bench_1n",
+        "dockerfile": "../../docker/large_ep_benchmark",
+        "scripts": "run_benchmark.sbatch",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "large_ep",
+            "deepep",
+            "mori_ep",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "IBDEVICES": "mlx5_0",
+            "SKIP_DEEPEP": "0"
+        },
+        "args": "-N 1 -n 1"
+    },
+    {
+        "name": "pyt_large_ep_bench_1n_mori_only",
+        "dockerfile": "../../docker/large_ep_benchmark",
+        "scripts": "run_benchmark.sbatch",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "large_ep",
+            "large_ep_scaling",
+            "mori_ep",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "IBDEVICES": "mlx5_0",
+            "SKIP_DEEPEP": "1"
+        },
+        "args": "-N 1 -n 1"
+    },
+    {
+        "name": "pyt_large_ep_bench_2n",
+        "dockerfile": "../../docker/large_ep_benchmark",
+        "scripts": "run_benchmark.sbatch",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "large_ep",
+            "deepep",
+            "mori_ep",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "IBDEVICES": "mlx5_0",
+            "SKIP_DEEPEP": "0"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_large_ep_bench_2n_mori_only",
+        "dockerfile": "../../docker/large_ep_benchmark",
+        "scripts": "run_benchmark.sbatch",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "large_ep",
+            "large_ep_scaling",
+            "mori_ep",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "IBDEVICES": "mlx5_0",
+            "SKIP_DEEPEP": "1"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_large_ep_bench_4n_mori_only",
+        "dockerfile": "../../docker/large_ep_benchmark",
+        "scripts": "run_benchmark.sbatch",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "large_ep",
+            "large_ep_scaling",
+            "mori_ep",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "IBDEVICES": "mlx5_0",
+            "SKIP_DEEPEP": "1"
+        },
+        "args": "-N 4 -n 4"
+    }
+]

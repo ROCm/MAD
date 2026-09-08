@@ -1,9 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 ###############################################################################
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,45 +25,103 @@
 #
 #################################################################################
 
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
+# Wrapper for Primus JAX/MaxText pretrain when run via madengine (local, SLURM, K8s).
+# Sets EXP from PRIMUS_CONFIG_PATH or --config_path, runs Primus examples/run_pretrain.sh
+# with BACKEND=MaxText, then extracts tps/tflops into primus_perf_output.csv for
+# madengine multiple_results. MaxText-only: no Megatron/TorchTitan logic here.
+set -e
 
-# Parse named arguments
-while [[ "$#" -gt 0 ]]; do
-    case $1 in
-    	--model_repo) MODEL_REPO="$2"; shift ;;
-    	*) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-    case $1 in
-      --quantization) QUANTIZATION="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
-    esac
-    shift
-done
+# madengine invokes this as `cd run_directory && bash run.sh ...`.
+RUN_DIR="$(pwd)"
 
-echo "Model repo: $MODEL_REPO"
-
-if [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-8b" ]]; then
-  model="Llama-3.1-8B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.1-70b" ]]; then
-  model="Llama-3.1-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-3.3-70b" ]]; then
-  model="Llama-3.3-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-7b" ]]; then
-  model="Llama-2-7B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_llama-2-70b" ]]; then
-  model="Llama-2-70B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_deepseek-v2-lite-16b" ]]; then
-  model="DeepSeek-V2-lite"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_mixtral-8x7b" ]]; then
-  model="Mixtral-8x7B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_qwen3-14b" ]]; then
-  model="Qwen3-14B"
-elif [[ "$MODEL_REPO" == "jax_maxtext_train_qwen3-30b-a3b" ]]; then
-  model="Qwen3-30B-A3B"
+# Primus root: repo checkout, then image COPY / K8s ConfigMap extract, then env, then legacy paths.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+if [[ -f "$script_dir/../Primus/examples/run_pretrain.sh" ]]; then
+  export PRIMUS_ROOT="$(cd "$script_dir/../Primus" && pwd)"
+elif [[ -f "/workspace/Primus/examples/run_pretrain.sh" ]]; then
+  export PRIMUS_ROOT="/workspace/Primus"
+elif [[ -n "${PRIMUS_ROOT:-}" ]]; then
+  :
+elif [[ -f "/opt/primus/examples/run_pretrain.sh" ]]; then
+  export PRIMUS_ROOT="/opt/primus"
+elif [[ -f "/workspace/examples/run_pretrain.sh" ]]; then
+  export PRIMUS_ROOT="/workspace"
+else
+  echo "ERROR: Could not find Primus run_pretrain.sh. Set PRIMUS_ROOT or use a repo with scripts/Primus submodule." >&2
+  exit 1
 fi
 
-./jax-maxtext_benchmark_setup.sh -m $model
-./jax-maxtext_benchmark_report.sh -m $model -q $QUANTIZATION
+# EXP is required by run_pretrain.sh. --config_path must also be stripped from the
+# forwarded args: run_pretrain.sh appends leftovers to the training command and it is
+# not a valid MaxText flag.
+forward_args=()
+if [[ -n "${PRIMUS_CONFIG_PATH:-}" ]]; then
+  export EXP="$PRIMUS_CONFIG_PATH"
+  forward_args=("$@")
+else
+  export EXP=""
+  args=("$@")
+  i=0
+  while [[ $i -lt ${#args[@]} ]]; do
+    if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
+      export EXP="${args[i+1]}"
+      i=$((i + 2))
+      continue
+    fi
+    forward_args+=("${args[i]}")
+    i=$((i + 1))
+  done
+fi
 
-echo "performance: 1 pass"
+if [[ -z "$EXP" ]]; then
+  echo "ERROR: --config_path or PRIMUS_CONFIG_PATH required." >&2
+  exit 1
+fi
+
+# Makes run_pretrain.sh launch primus/cli train pretrain rather than torchrun.
+export BACKEND="MaxText"
+
+# Use the image-baked MaxText (/workspace/maxtext) rather than Primus's
+# third_party/maxtext checkout. The image build installs matching XLA/JAX/TE
+# wheels alongside MaxText; using a mismatched third_party copy can trigger
+# hipblaslt Tensile kernel failures on gfx950.
+export MAXTEXT_PATH="${MAXTEXT_PATH:-/workspace/maxtext}"
+export BACKEND_PATH="${BACKEND_PATH:-$MAXTEXT_PATH}"
+
+# The image already satisfies requirements-jax.txt (installed at build time), so the
+# per-run pip install has nothing to do. Skipping it keeps launches off the network and
+# stops a resolve from moving pinned versions under a benchmark. PRIMUS_SKIP_PIP=0 restores it.
+export PRIMUS_SKIP_PIP="${PRIMUS_SKIP_PIP:-1}"
+
+# HF_TOKEN for Primus prepare: explicit, then MAD convention, then madengine v2.
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  export HF_TOKEN
+elif [[ -n "${MAD_SECRETS_HFTOKEN:-}" ]]; then
+  export HF_TOKEN="$MAD_SECRETS_HFTOKEN"
+elif [[ -n "${MAD_SECRET_HFTOKEN:-}" ]]; then
+  export HF_TOKEN="$MAD_SECRET_HFTOKEN"
+fi
+
+# This wrapper deliberately exports no perf/arch env. All XLA_FLAGS and NVTE/HIP/HSA
+# tunables, including the arch-gated ones, are applied in-process before JAX init by
+# primus/backends/maxtext/env_spec.py. MAD only picks the config and finds the log.
+
+# I/O contract, not a knob: tells Primus where to write the log this wrapper parses.
+mkdir -p "$RUN_DIR/output"
+export TRAIN_LOG="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
+
+# EXP paths are relative to PRIMUS_ROOT. No exec: the perf extractor runs after training.
+# The `||` is what keeps set -e from exiting here, so a failed run still gets parsed.
+cd "$PRIMUS_ROOT"
+exitcode=0
+bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "${forward_args[@]}" || exitcode=$?
+
+# madengine resolves multiple_results against its own CWD (the parent of run_directory)
+# and deletes run_directory before parsing perf, so the CSV must go to the parent.
+PERF_OUT="$RUN_DIR/../primus_perf_output.csv"
+if [[ -f "$TRAIN_LOG" ]]; then
+  extract_script="${script_dir}/extract_maxtext_perf.py"
+  [[ -f "$RUN_DIR/extract_maxtext_perf.py" ]] && extract_script="$RUN_DIR/extract_maxtext_perf.py"
+  python3 "$extract_script" "$TRAIN_LOG" "$PERF_OUT" || true
+fi
+exit "$exitcode"

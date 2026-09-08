@@ -1,0 +1,17 @@
+[
+    {
+        "name": "pyt_huggingface_gpt2",
+        "dockerfile": "../../docker/pyt_huggingface",
+        "scripts": "run.sh",
+        "url": "https://github.com/huggingface/transformers",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "fp16",
+        "tags": [
+            "pyt",
+            "fp16",
+            "gpt2"
+        ],
+        "args": ""
+    }
+]

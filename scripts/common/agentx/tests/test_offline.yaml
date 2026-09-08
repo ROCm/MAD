@@ -1,0 +1,17 @@
+# Test config for run_offline.sh - includes my_corpus for testing source=corpus path.
+# This is NOT the example config used in production; see agentic.example.yaml for that.
+run:
+  scenario: inferencex-agentx-mvp
+  concurrency: [8, 16]
+  timeout_sec: 900
+
+workloads:
+  # Testing source=corpus resolution (no preset -> no pre-gate verification)
+  - name: my_corpus
+    source: corpus
+    input_dir: /tmp/agentx_corpora/conformance_256k
+
+  # Testing source=profile with preset
+  - name: test_profile
+    source: profile
+    preset: conformance_256k

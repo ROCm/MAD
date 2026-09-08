@@ -95,6 +95,7 @@
     VLLM_USE_BREAKABLE_CUDAGRAPH: 0
   extra_args:
     --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
 
 - benchmark: serving
   model:

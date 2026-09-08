@@ -29,7 +29,12 @@ connector_init() {
         # rixl/TP ports
         SERVER_PORT=2584; SERVE_PORT="${SERVER_PORT}"
         KV_PORT=14600
-        CONTAINER_BARRIER_PORT=5000
+        # Container-creation barrier port. Env-overridable (BARRIER_PORT) so it can
+        # be moved off the collision-prone default 5000: the launcher's `fuser -k`
+        # cleanup targets this port on the host (host networking), so a stale host
+        # service on 5000 would otherwise be killed. Residual risk: the host-side
+        # fuser still kills whatever holds this port for the launching user.
+        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-5000}"
     fi
 
     PROXY_TYPE="${PROXY_TYPE:-vllm_router}"
@@ -273,6 +278,16 @@ _rixl_launch_deepep() {
 
     connector_setup_env "${backend}"
 
+    # Agentic gating: the default sweep keeps prefix caching OFF via the hardcoded
+    # --no-enable-prefix-caching below. The agentic trace-replay path
+    # (BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh) — or ENABLE_PREFIX_CACHE=1 —
+    # STRIPS that flag so prefix caching is ON. Gated so the default (non-agentic)
+    # sweep argv is byte-for-byte unchanged.
+    local _prefix_cache_flag="--no-enable-prefix-caching"
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
+        _prefix_cache_flag=""
+    fi
+
     local extra_args=()
     if [[ "$role" == "master" ]]; then
         extra_args+=(--api-server-count=8 --data-parallel-start-rank 0)
@@ -309,7 +324,7 @@ _rixl_launch_deepep() {
                 --data-parallel-rpc-port "${RPC_PORT}" \
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
-                --no-enable-prefix-caching --block-size 1 \
+                ${_prefix_cache_flag} --block-size 1 \
                 --gpu-memory-utilization 0.8 \
                 --kv-cache-dtype fp8 \
                 --enable-expert-parallel \
@@ -331,7 +346,7 @@ _rixl_launch_deepep() {
         --data-parallel-rpc-port "${RPC_PORT}" \
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
-        --no-enable-prefix-caching --block-size 1 \
+        ${_prefix_cache_flag} --block-size 1 \
         --gpu-memory-utilization 0.8 \
         --kv-cache-dtype fp8 \
         --enable-expert-parallel \
@@ -358,6 +373,13 @@ connector_wait_workers_ready() {
 
 connector_start_proxy() {
     local PREFILL_ARGS="" DECODE_ARGS="" PREFILL_PORTS="" DECODE_PORTS="" i
+    # Agentic replay: point aiperf at the backend vLLM servers' /metrics (SERVER_PORT)
+    # for prefill+decode masters. Gated on the agentic path so the default sweep is
+    # unaffected. Consumed by scripts/common/agentic_lib.sh (aiperf --server-metrics).
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+        export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVER_PORT} ${DECODE_MASTER_ADDR}:${SERVER_PORT}}"
+        echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+    fi
     for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do PREFILL_ARGS+="${IP_ARRAY[$i]} "; PREFILL_PORTS+="$SERVER_PORT "; done
     for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do DECODE_ARGS+="${IP_ARRAY[$i]} "; DECODE_PORTS+="$SERVER_PORT "; done
 

@@ -1,0 +1,22 @@
+# Runtime artifacts from madengine runs. The primus dockerfiles build with the repo
+# root as context and copy only scripts/Primus, so none of this belongs in the build.
+# hf_cache matters most: scripts/jax-maxdiffusion/run.sh caches weights there, and
+# flux/wan checkpoints push it past 100GB, which docker would otherwise send to the
+# daemon on every rebuild.
+.git
+.venv
+hf_cache/
+run_directory/
+output/
+logs/
+.*_env/
+.jax-*_env/
+*.csv
+*.log
+*.jsonl
+perf_metrics_*.jsonl
+scripts/jax-maxtext/output/
+scripts/jax-maxdiffusion/output/
+**/.jax_cache/
+**/core.*
+scripts/Primus/data/

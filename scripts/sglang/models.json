@@ -1,0 +1,58 @@
+[
+    {
+        "name": "pyt_sglang_deepseek-r1-distill-qwen-32b",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1-Distill-Qwen-32B.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 28800,
+        "args": "--model_repo deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --test_option latency --num_gpu 8 --datatype bfloat16 --dataset random --batch_size 1,8,32 --lat_input_output_len '128:128;128:1024;1024:128;1024:1024'"
+    },
+    {
+        "name": "pyt_sglang_kimi-k3",
+        "dockerfile": "../../docker/pyt_sglang_kimi_k3",
+        "scripts": "run_kimi_k3.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant nospec"
+    },
+    {
+        "name": "pyt_sglang_kimi-k3_dspark",
+        "dockerfile": "../../docker/pyt_sglang_kimi_k3",
+        "scripts": "run_kimi_k3.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
+    }
+]

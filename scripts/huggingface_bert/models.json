@@ -1,0 +1,16 @@
+[
+    {
+        "name": "pyt_huggingface_bert",
+        "dockerfile": "../../docker/pyt_huggingface",
+        "scripts": "run.sh",
+        "url": "https://github.com/huggingface/transformers",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "bert"
+        ],
+        "args": ""
+    }
+]

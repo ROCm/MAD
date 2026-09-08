@@ -1,0 +1,23 @@
+[
+    {
+        "name": "pyt_huggingface_stable_diffusion_xl_2k_lora_finetuning",
+        "dockerfile": "../../docker/pyt_training_huggingface",
+        "scripts": "run.sh",
+        "url": "https://github.com/huggingface/diffusers",
+        "data": "huggingface",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "fp16",
+        "multiple_results": "results_pyt_huggingface_stable_diffusion_xl_lora._finetuning.csv",
+        "timeout": -1,
+        "tags": [
+            "training",
+            "perf",
+            "pyt",
+            "lora",
+            "diffusers",
+            "stable-diffusion-xl"
+        ],
+        "args": ""
+    }
+]
