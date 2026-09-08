@@ -2,8 +2,8 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8",
         "url": "",
-        "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
-        "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
@@ -42,8 +42,8 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
         "url": "",
-        "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
-        "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
@@ -83,8 +83,8 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_wideep_moriep",
         "url": "",
-        "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
-        "scripts": "scripts/vllm_multinode/run_multinode.slurm",
+        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",

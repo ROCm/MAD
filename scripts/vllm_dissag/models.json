@@ -503,8 +503,8 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3",
         "url": "",
-        "dockerfile": "docker/pyt_vllm_kimi_k3_mi300x",
-        "scripts": "scripts/vllm_dissag/run_xPyD_models.slurm",
+        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
