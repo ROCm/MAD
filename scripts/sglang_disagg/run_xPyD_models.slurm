@@ -7,7 +7,9 @@
 # NCCL ibv_modify_qp timeouts on cross-rail node pairs.
 #
 # --switches=2: allow up to 2 IB switches (rails). select_same_rail_nodes() below
-# enforces per-role rail consistency. Set --switches=1 to force single rail.
+# verifies the allocation actually landed on one leaf whenever USE_CX7_NICS=1, and
+# aborts before any GPU time is spent if it did not. Set --switches=1 to ask the
+# scheduler for a single rail up front instead of checking after the fact.
 #SBATCH --switches=2
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
@@ -156,6 +158,80 @@ TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
 echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
+# ------------------------
+# Same-rail placement check
+# ------------------------
+# mori_ep_env.sh selects the 8x CX7 400G rail NICs when USE_CX7_NICS=1, and those
+# require same-rail nodes; a cross-rail pair makes NCCL time out inside
+# ibv_modify_qp. base_flags carries --watchdog-timeout 1000000, so that timeout is a
+# hang, not a failure: the job would sit burning its allocation to the time limit.
+# Detect it in seconds instead, before any container starts.
+#
+# Bypass with REQUIRE_SAME_RAIL=0. Worth knowing: this reads SLURM's topology tree,
+# which is only as good as topology.conf. If that describes the management network
+# rather than the CX7 fabric, this check is conservative rather than correct.
+select_same_rail_nodes() {
+    if [ "${USE_CX7_NICS:-0}" != "1" ]; then
+        echo "[rail] USE_CX7_NICS != 1: mlx5_1 is cross-rail safe, no rail check needed"
+        return 0
+    fi
+    if [ "${REQUIRE_SAME_RAIL:-1}" != "1" ]; then
+        echo "[rail] REQUIRE_SAME_RAIL=0: skipping the same-rail check"
+        return 0
+    fi
+
+    local topo
+    topo=$(scontrol show topology 2>/dev/null)
+    if [ -z "$topo" ]; then
+        echo "[rail] WARNING: no SLURM topology reported; cannot verify same-rail placement"
+        return 0
+    fi
+
+    local node line leaf leafname nodelist members first_leaf="" mismatch=0
+    for node in $ALL_NODES; do
+        leaf=""
+        while IFS= read -r line; do
+            case "$line" in *Level=0*) ;; *) continue ;; esac
+            leafname=${line#*SwitchName=}; leafname=${leafname%% *}
+            nodelist=${line#*Nodes=};      nodelist=${nodelist%% *}
+            members=$(scontrol show hostnames "$nodelist" 2>/dev/null)
+            if echo "$members" | grep -qx -- "$node"; then
+                leaf="$leafname"
+                break
+            fi
+        done <<< "$topo"
+
+        if [ -z "$leaf" ]; then
+            echo "[rail] WARNING: $node is in no Level=0 switch; cannot verify placement"
+            return 0
+        fi
+        echo "[rail] $node -> $leaf"
+        if [ -z "$first_leaf" ]; then
+            first_leaf="$leaf"
+        elif [ "$leaf" != "$first_leaf" ]; then
+            mismatch=1
+        fi
+    done
+
+    if [ "$mismatch" -eq 1 ]; then
+        echo ""
+        echo "✗ FATAL ERROR: the allocated nodes span more than one leaf switch, and"
+        echo "  USE_CX7_NICS=1 selects the 8x CX7 400G rail NICs, which require same-rail"
+        echo "  nodes (scripts/sglang_disagg/mori_ep_env.sh:8-16). A cross-rail pair hangs"
+        echo "  in NCCL ibv_modify_qp rather than failing, so this run is stopped now"
+        echo "  instead of burning the allocation."
+        echo ""
+        echo "  Resubmit (placement is not pinned), or set --switches=1 in the #SBATCH"
+        echo "  directives, or set USE_CX7_NICS=0 for the cross-rail-safe mlx5_1"
+        echo "  management NIC, or set REQUIRE_SAME_RAIL=0 to bypass this check."
+        exit 1
+    fi
+
+    echo "[rail] all $TOTAL_NODES nodes on leaf $first_leaf; CX7 rail NICs are safe"
+}
+
+select_same_rail_nodes
+
 # Function to check model path on all nodes
 check_model_path() {
     local path=$1
@@ -185,15 +261,17 @@ check_model_path() {
     fi
 }
 
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
+# Check /shared_inference/models_blog first. Every check_model_path miss costs a
+# full multi-node srun round trip and leaves a "<jobid>.N bash FAILED 1:0" row in
+# sacct that reads as a fault, so the location the models actually live in is
+# probed first (it is ORIGINAL_MODEL_PATH above).
+if check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared_inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+# Check /mnt/m2m_nobackup/models_blog
+elif check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then
+    MODEL_PATH="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
