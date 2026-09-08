@@ -27,8 +27,9 @@ CON="8 16 32 64 128 256 512"
 IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}"
 echo "Benchmarking iterations: $BENCHMARK_ITR" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 # seq, not {1..$BENCHMARK_ITR}: brace expansion happens before parameter expansion, so the
-# brace form iterates once over the literal string "{1..2}". Job 252775 ran with
-# BENCHMARK_ITR=2, logged "iter: {1..2}", and swept each concurrency exactly once.
+# brace form iterates once over the literal 6-char string "{1..$BENCHMARK_ITR}", so the
+# variable is silently ignored and every concurrency is swept exactly once whatever it
+# is set to -- visible in the log as "iter: {1..N}" instead of "iter: 1".
 # scripts/vllm_dissag/benchmark_xPyD.sh already uses the seq form.
 for i in $(seq 1 "${BENCHMARK_ITR:-1}"); do
     sleep 60

@@ -47,7 +47,6 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
         # carries no RUNNING line anyway. Once benchmark_xPyD.sh loops properly the marker
         # exists, parsing starts there, and sections[0] holds the FIRST sweep cell's RUNNING
         # line -- so the guard silently dropped the lowest-concurrency point from every CSV.
-        # Replayed on job 252775's log: 7 rows before, 6 after, con=8 missing.
         #
         # Including it is safe for both layouts: a preamble with no RUNNING line leaves the
         # config unset, and a section with no config is skipped below.

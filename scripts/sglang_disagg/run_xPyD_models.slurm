@@ -288,9 +288,11 @@ check_model_path() {
 
 # Check /mnt/m2m_nobackup/models_blog first: it is per-node local NVMe, while
 # /shared_inference is NFS shared by the whole cluster (scripts/common/
-# preflight_weights.sh:2-5). Loading Qwen3-32B off NFS measured 683s -- 67% of a
-# 1015s bring-up, ~92 MB/s per node with both nodes reading the same 63 GB -- so
-# the local copy is worth a probe even though it is not present on every node.
+# preflight_weights.sh:2-5). Weight load off NFS has measured as the largest
+# single component of bring-up, well over half of it: every node pulls the full
+# checkpoint over the same export at the same time, so per-node bandwidth is a
+# fraction of the link. The local copy is worth a probe even though it is not
+# present on every node.
 # The probe no longer leaves a failed sacct step, so a miss costs only its own
 # round trip.
 if check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then

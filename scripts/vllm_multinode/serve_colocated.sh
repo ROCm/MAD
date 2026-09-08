@@ -88,9 +88,9 @@ serve_args=(
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
     # Separate field from the one above: --distributed-timeout-seconds only
-    # reaches the device/NCCL groups, while the startup barrier that killed
-    # job 239755 runs on the gloo CPU group and takes its deadline from this
-    # one. Unset, both fall back to PyTorch's stock 1800s.
+    # reaches the device/NCCL groups, while the startup barrier that has been
+    # killing colocated runs here is on the gloo CPU group and takes its deadline
+    # from this one. Unset, both fall back to PyTorch's stock 1800s.
     --cpu-distributed-timeout-seconds "${CPU_DISTRIBUTED_TIMEOUT_SECONDS:-7200}"
 )
 [[ -n "${KV_CACHE_DTYPE:-}" ]]        && serve_args+=(--kv-cache-dtype "${KV_CACHE_DTYPE}")
@@ -122,9 +122,9 @@ fi
 # -----------------------------------------------------------------------------
 # Checkpoint page-cache pre-warm. OFF by default -- it made things worse here.
 # The idea was to even out the cross-node gap that breaks vLLM's all-or-nothing
-# startup barrier by faulting the checkpoint in before it. In practice job 240624
-# never got past this block: both nodes were still reading at the 7200s pipeline
-# timeout, so vllm serve never launched at all.
+# startup barrier by faulting the checkpoint in before it. In practice a run with
+# it enabled never got out of this block: both nodes were still reading when the
+# pipeline timeout fired, so vllm serve never launched at all.
 # The flaw is that this reads the WHOLE checkpoint on EVERY node, while PP2xTP8
 # means each node only ever loads its own shard. On a 1453 GiB checkpoint that is
 # ~4x the necessary I/O against one NFS export, with both nodes competing for it
@@ -216,9 +216,9 @@ trap 'touch "${SHUTDOWN_FLAG}" 2>/dev/null || true' EXIT
 echo "[colocated] head waiting for 'Application startup complete.' in ${LOG}"
 _TIMEOUT="${LOG_WAIT_TIMEOUT_SECONDS:-4000}"; _elapsed=0
 until grep -Fq "Application startup complete." "${LOG}" 2>/dev/null; do
-    # A dead engine used to be indistinguishable from a slow one: job 239755's
-    # head sat here for the full 4000s polling a log whose writer had already
-    # died 20 minutes earlier, and reported a timeout instead of the traceback.
+    # A dead engine used to be indistinguishable from a slow one: the head would
+    # sit here for the full timeout polling a log whose writer had already died
+    # minutes earlier, then report a timeout instead of the traceback.
     if ! _alive "${WORKER_PID}"; then
         echo "[colocated] vllm serve exited after ${_elapsed}s without becoming ready. Tail:" >&2
         tail -80 "${LOG}" >&2
