@@ -39,17 +39,30 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     current_concurrency = None
     
     for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in previous sections (from RUNNING line)
-        if i > 1:
-            prev_section = sections[i-1]
-            
-            # Extract config: prompts  isl <num> osl <num> con <num>
-            config_match = re.search(r'RUNNING: prompts\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)', prev_section)
-            if config_match:
-                current_input_seq_len = int(config_match.group(1))
-                current_output_seq_len = int(config_match.group(2))
-                current_concurrency = int(config_match.group(3))
-        
+        # Look for configuration in the preceding section (from its RUNNING line).
+        #
+        # sections[0] is included deliberately. It was skipped by an `if i > 1` guard, which
+        # was harmless only while the log had no "iter: 1" marker: the search for that marker
+        # failed, parsing started at byte 0, and sections[0] was the pre-warmup preamble that
+        # carries no RUNNING line anyway. Once benchmark_xPyD.sh loops properly the marker
+        # exists, parsing starts there, and sections[0] holds the FIRST sweep cell's RUNNING
+        # line -- so the guard silently dropped the lowest-concurrency point from every CSV.
+        # Replayed on job 252775's log: 7 rows before, 6 after, con=8 missing.
+        #
+        # Including it is safe for both layouts: a preamble with no RUNNING line leaves the
+        # config unset, and a section with no config is skipped below.
+        prev_section = sections[i-1]
+
+        # Extract config: prompts  isl <num> osl <num> con <num>
+        # The prompt count between "prompts" and "isl" is optional: logs written before
+        # benchmark_xPyD.sh printed $p_con there have two spaces and nothing between them.
+        # Both forms must parse, or a rerun over an archived log yields an empty CSV.
+        config_match = re.search(r'RUNNING: prompts\s+(?:\d+\s+)?isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)', prev_section)
+        if config_match:
+            current_input_seq_len = int(config_match.group(1))
+            current_output_seq_len = int(config_match.group(2))
+            current_concurrency = int(config_match.group(3))
+    
         # Extract Total token throughput (tok/s) from benchmark result section
         throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
         throughput = float(throughput_match.group(1)) if throughput_match else None

@@ -487,7 +487,11 @@ export DP_MODE=$DP_MODE
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
-export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
+# Default 1, not 2. The 2 was never honoured: benchmark_xPyD.sh looped over the literal
+# "{1..$BENCHMARK_ITR}", so every run so far has swept once. Now that the loop works,
+# leaving the default at 2 would double every sweep's wall clock as a side effect of a
+# bug fix. 1 preserves observed behaviour and matches vllm_dissag/benchmark_xPyD.sh:5.
+export BENCHMARK_ITR=${BENCHMARK_ITR:-1}
 export SKIP_BENCHMARK
 export SKIP_CURL_TEST
 
