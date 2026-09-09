@@ -80,3 +80,25 @@
   arch_overrides:
     gfx942:
       dtype: float16
+
+- benchmark: serving
+  model:
+    CohereLabs/c4ai-command-r7b-12-2024
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+- benchmark: serving
+  model:
+    CohereLabs/command-a-plus-05-2026-bf16
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
