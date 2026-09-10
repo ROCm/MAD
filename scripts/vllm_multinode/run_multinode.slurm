@@ -83,8 +83,11 @@ done
 
 : "${DOCKER_IMAGE_NAME:?set DOCKER_IMAGE_NAME to the vLLM image to run}"
 MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)}"
-MODEL_DIR="${MODEL_DIR:-/shared_inference/models_blog/}"
-MODEL_PATH="${MODEL_PATH:-${MODEL_DIR%/}/${MODEL_NAME}}"
+# Left unresolved here on purpose: the NVMe-vs-NFS choice below needs the node
+# list, which is not known until node discovery. An explicit MODEL_DIR or
+# MODEL_PATH still wins -- the probe only fills in a value nobody supplied.
+MODEL_DIR="${MODEL_DIR:-}"
+MODEL_PATH="${MODEL_PATH:-}"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-/shared_inference/${USER_NAME}/model_blog_logs}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
@@ -135,6 +138,69 @@ for NODE in $SELECTED_NODES; do
 done
 IPADDRS=$(echo "${IPS[*]}" | tr ' ' ',')
 
+# ------------------------
+# Weight location: local NVMe first, NFS second
+# ------------------------
+# /mnt/m2m_nobackup is per-node local NVMe and is NOT uniform across the cluster;
+# /shared_inference is one NFS export every node reads at once. This launcher used
+# to hardcode the NFS path, so a colocated run always pulled its checkpoint over
+# NFS even on nodes that already held a local copy -- and it is the only one of the
+# three launchers that did. scripts/sglang_disagg/run_xPyD_models.slurm and
+# scripts/vllm_dissag/run_xPyD_models.slurm have both probed NVMe first for a while.
+#
+# The probe requires the path on EVERY allocated node. A partial hit is useless
+# here: ranks share one MODEL_PATH, so one node without the copy fails the run.
+#
+# The srun body always exits 0. A missing path is an expected outcome of a fallback
+# chain, not a step failure, and a non-zero srun leaves a "<jobid>.N bash FAILED 1:0"
+# row that reads as a fault in an otherwise healthy job.
+_probe_model_dir() {
+    local dir=$1
+    local out
+    out="$(srun --nodes="$NUM_NODES" --ntasks="$NUM_NODES" --nodelist="$SELECTED_NODELIST" \
+             --time=00:02:00 /bin/bash -c "
+        if [ -d '$dir/$MODEL_NAME' ] && [ -n \"\$(ls -A '$dir/$MODEL_NAME' 2>/dev/null)\" ]; then
+            echo \"\$(hostname -s) FOUND\"
+        else
+            echo \"\$(hostname -s) MISSING\"
+        fi
+        exit 0
+    " 2>/dev/null)"
+    local rc=$?
+    [ -n "$out" ] && echo "$out" | sed 's/^/    /'
+    # srun failing, or reporting from fewer nodes than were allocated, must not read
+    # as "available" -- that would send ranks at a path some of them cannot see.
+    if [ $rc -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
+        echo "  x could not probe $dir (srun exit $rc)"
+        return 1
+    fi
+    local n_found
+    n_found=$(printf '%s\n' "$out" | grep -c 'FOUND')
+    if [ "$n_found" -eq "$NUM_NODES" ]; then
+        echo "  + $dir available on all $NUM_NODES node(s)"
+        return 0
+    fi
+    echo "  x $dir not on all nodes ($n_found/$NUM_NODES)"
+    return 1
+}
+
+if [ -n "$MODEL_PATH" ]; then
+    echo "  weights    : MODEL_PATH set explicitly, skipping the location probe"
+elif [ -n "$MODEL_DIR" ]; then
+    MODEL_PATH="${MODEL_DIR%/}/${MODEL_NAME}"
+    echo "  weights    : MODEL_DIR set explicitly, skipping the location probe"
+else
+    echo "  weights    : locating ${MODEL_NAME}"
+    if _probe_model_dir /mnt/m2m_nobackup/models_blog; then
+        MODEL_DIR=/mnt/m2m_nobackup/models_blog
+    else
+        MODEL_DIR=/shared_inference/models_blog
+        echo "  -> falling back to NFS; expect weight load to dominate bring-up"
+    fi
+    MODEL_PATH="${MODEL_DIR%/}/${MODEL_NAME}"
+fi
+echo "  weights    : ${MODEL_PATH}"
+
 mkdir -p "$LOG_PATH"
 
 export DOCKER_CONT_NAME="colocated_${MODEL_NAME}_${SLURM_JOB_ID}"
@@ -143,6 +209,13 @@ export TP_SIZE PP_SIZE ENABLE_EP ALL2ALL_BACKEND GPUS_PER_NODE
 export BENCHMARK_SCRIPT_FILE LOG_PATH USER_NAME
 export NNODES="$NUM_NODES"
 export MAD_SCRIPTS_MOUNT=/mad_scripts
+
+# Only mount local NVMe when it is actually there. Docker auto-creates a DIRECTORY
+# at a bind-mount source that does not exist, so an unconditional -v would shadow
+# the path with an empty directory on a node that has no such mount -- turning a
+# clean NFS fallback into a confusing empty-model-dir failure. Evaluated per node
+# inside the srun body below, not here on the batch host.
+export _NVME_ROOT=/mnt/m2m_nobackup
 
 # Knobs CI needs to tune (timeouts, pre-warm) are not worth a new -e line and a
 # MAD PR each. COLOCATED_FORWARD_ENV names them, comma-separated, and the srun
@@ -191,6 +264,14 @@ for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*;
 done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+
+# Same -d guard, same reason as the RDMA mounts above.
+# Defaulted, not bare: this body is a separate shell and an unset name under
+# `set -u` is a fatal error, not an empty string. That exact mistake with
+# COLOCATED_FORWARD_ENV killed every run of this script before it loaded a model.
+_NVME_ROOT="${_NVME_ROOT:-/mnt/m2m_nobackup}"
+_NVME_MOUNT=""
+[ -d "$_NVME_ROOT" ] && _NVME_MOUNT="-v $_NVME_ROOT:$_NVME_ROOT"
 
 # Host-local compilation cache dirs (ext4, survive container restarts).
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
@@ -242,6 +323,7 @@ docker run --rm \
     -v $LOG_PATH:/run_logs \
     -v '"$MAD_SCRIPTS_DIR"':$MAD_SCRIPTS_MOUNT \
     -v /shared_inference:/shared_inference \
+    ${_NVME_MOUNT} \
     -v /tmp/vllm_cache:/tmp/vllm_cache \
     $_JIT_CACHE_MOUNT \
     $_RDMA_MOUNTS \
