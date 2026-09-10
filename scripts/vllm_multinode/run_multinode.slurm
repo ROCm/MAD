@@ -149,6 +149,14 @@ export MAD_SCRIPTS_MOUNT=/mad_scripts
 # body below forwards whatever it names into the container.
 # Anything arriving via sbatch --export=ALL is already exported; re-export here
 # so a value set inside this script also survives into srun.
+#
+# Default it to empty FIRST. `export NAME` on an unset variable marks the name for
+# export without giving it a value, so the variable stays unset -- and this script
+# runs under `set -u`, which makes the expansion below a fatal error rather than an
+# empty loop. Nothing sets this name: not the pipeline, not any model card. It is
+# an optional knob, so its absence is the normal case, and the launcher died on
+# that normal case before it reached a single line of workload setup.
+: "${COLOCATED_FORWARD_ENV:=}"
 export COLOCATED_FORWARD_ENV
 for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; done
 
