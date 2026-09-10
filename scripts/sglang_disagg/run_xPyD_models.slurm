@@ -130,8 +130,18 @@ esac
 export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
 echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 
-MODEL_NAME="${MODEL_NAME:-None}"
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Site config: filesystem roots, partition, fabric device, ports, timeouts.
+# Sourced, so `environment > these defaults`, which is what lets the STANDALONE
+# and MADENGINE CI paths drive this script identically -- both speak only
+# environment variables, and this file just fills what neither of them set.
+# Model-specific performance flags stay in models.yaml, not here.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
+    echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
+    exit 1
+fi
+. "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 
 validate_model_name() {
   local is_valid_model=false
@@ -246,78 +256,11 @@ select_same_rail_nodes() {
 
 select_same_rail_nodes
 
-# Function to check model path on all nodes
-check_model_path() {
-    local path=$1
-    local check_name=$2
-    
-    echo "Checking $check_name: $path"
-    
-    # One task per node. The probe always exits 0 and reports per-node: a missing
-    # path is an expected outcome of a fallback chain, not a step failure, and a
-    # non-zero srun here leaves a "<jobid>.N bash FAILED 1:0" row in sacct that
-    # reads as a fault in an otherwise healthy job.
-    local out
-    out="$(srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then
-            echo \"\$(hostname): ✓ Found $path\"
-        else
-            echo \"\$(hostname): ✗ Missing $path\"
-        fi
-        exit 0
-    ")"
-    local exit_code=$?
-    [ -n "$out" ] && echo "$out"
 
-    # srun itself failing, or reporting from fewer nodes than were allocated,
-    # must not read as "available" -- that would send the job on to load weights
-    # from a path some rank cannot see.
-    if [ $exit_code -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
-        echo "✗ $check_name could not be checked (srun exit $exit_code)"
-        return 1
-    fi
-    local n_found
-    n_found=$(printf '%s\n' "$out" | grep -c 'Found')
-    if [ "$n_found" -eq "$SLURM_NNODES" ]; then
-        echo "✓ $check_name available on ALL nodes"
-        return 0
-    fi
-    echo "✗ $check_name NOT available on all nodes ($n_found/$SLURM_NNODES)"
-    return 1
-}
-
-# Check /mnt/m2m_nobackup/models_blog first: it is per-node local NVMe, while
-# /shared_inference is NFS shared by the whole cluster (scripts/common/
-# preflight_weights.sh:2-5). Weight load off NFS has measured as the largest
-# single component of bring-up, well over half of it: every node pulls the full
-# checkpoint over the same export at the same time, so per-node bandwidth is a
-# fraction of the link. The local copy is worth a probe even though it is not
-# present on every node.
-# The probe no longer leaves a failed sacct step, so a miss costs only its own
-# round trip.
-if check_model_path "/mnt/m2m_nobackup/models_blog/$MODEL_NAME" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared_inference/models_blog (NFS, uniform)
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-else
-    echo ""
-    echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "Model must be accessible from all nodes for distributed execution."
-    echo "Please ensure the model is available on all allocated nodes."
-    exit 1
-fi
+# Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
+# explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
+# load from one path, so a partial hit fails the run deep into bring-up.
+cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""
@@ -364,17 +307,15 @@ export SLURM_NODELIST="$NEW_SLURM_NODELIST"
 
 # Keep other SLURM variables as they were or set defaults
 export SLURM_TASKS_PER_NODE="1(x$NUM_NODES)"
-export SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-/home/ravgupta}"
-export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME:-m2m}"
+# SLURM_SUBMIT_DIR, SLURM_CLUSTER_NAME, SLURM_JOB_PARTITION, SLURM_JOB_ACCOUNT,
+# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh. The rest
+# are per-job and stay here. (SLURM_SUBMIT_DIR used to default to one person's
+# home directory, which only ever worked for that account.)
 export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
-export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION:-amd-rccl}"
 export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_QOS="${SLURM_JOB_QOS:-normal}"
-export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT:-amd-rccl}"
 export SLURM_NTASKS_PER_NODE=1
 export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
 export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
 export SLURM_JOB_NAME="${SLURM_JOB_NAME:-${xP}p${yD}d_bench-serving}"
 
 echo ""
@@ -416,7 +357,7 @@ MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE
 # match every address), so when it is empty we skip the prefix match and go
 # straight to the first-address fallback. Fall back to the first address if no
 # matching address is present; fail fast if empty.
-FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
+# Default set in cluster.sh (site fact).
 # Escape regex-special chars so the prefix is matched literally, anchored at start.
 FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
 MASTER_ADDR_RAW="$MASTER_ADDR"

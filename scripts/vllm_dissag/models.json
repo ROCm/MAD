@@ -17,7 +17,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -28,7 +29,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_deepseek-r1",
@@ -48,7 +54,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -59,7 +66,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_deepseek-v3-5layer",
@@ -79,7 +91,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -90,7 +103,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_llama-3.1-405b-fp8",
@@ -110,7 +128,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -121,7 +140,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_llama-3.3-70b-fp8",
@@ -141,7 +165,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -152,7 +177,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_gpt-oss-120b",
@@ -172,7 +202,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -183,7 +214,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_deepseek-v3",
@@ -203,7 +239,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -214,7 +251,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_deepseek-r1",
@@ -234,7 +276,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -245,7 +288,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_deepseek-v3-5layer",
@@ -265,7 +313,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -276,7 +325,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_glm-5.1-fp8",
@@ -296,7 +350,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -307,7 +362,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_glm-5.1-fp8_niah",
@@ -328,7 +388,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -339,7 +400,12 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_SCRIPT": "niah"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3",
@@ -359,7 +425,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -370,7 +437,12 @@
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-r1",
@@ -390,7 +462,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -401,7 +474,12 @@
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3-5layer",
@@ -421,7 +499,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -432,7 +511,12 @@
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3",
@@ -453,7 +537,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -465,7 +550,12 @@
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer",
@@ -486,7 +576,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -498,7 +589,12 @@
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3",

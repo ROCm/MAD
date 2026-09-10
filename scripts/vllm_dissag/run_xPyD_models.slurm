@@ -57,6 +57,18 @@ _resolve_script_dir() {
 SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
+# Site config: filesystem roots, partition, fabric device, ports, timeouts.
+# Sourced, so `environment > these defaults`, which is what lets the STANDALONE
+# and MADENGINE CI paths drive this script identically -- both speak only
+# environment variables, and this file just fills what neither of them set.
+# Model-specific performance flags stay in models.yaml, not here.
+MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
+    echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
+    exit 1
+fi
+. "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+
 REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
@@ -106,7 +118,6 @@ DEEPEP_VALID_MODELS=( \
     "DeepSeek-R1" \
 )
 
-MODEL_NAME="${MODEL_NAME:-None}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -259,7 +270,7 @@ yD="${yD:-1}" #-> Number of Decode  NODES (a pool may span >1 node)
 # (non-expert) weights do not fit a single GPU. See vllm_disagg.sh topology math.
 TP_SIZE="${TP_SIZE:-1}"
 
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# MODEL_DIR / MODEL_NAME defaults come from cluster.sh.
 
 
 # ------------------------
@@ -276,70 +287,11 @@ echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Function to check model path on all nodes
-check_model_path() {
-    local path=$1
-    local check_name=$2
 
-    echo "Checking $check_name: $path"
-
-    # One task per node. The probe always exits 0 and reports per-node: a missing
-    # path is an expected outcome of a fallback chain, not a step failure, and a
-    # non-zero srun here leaves a "<jobid>.N bash FAILED 1:0" row in sacct that
-    # reads as a fault in an otherwise healthy job.
-    local out
-    out="$(srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then
-            echo \"\$(hostname): ✓ Found $path\"
-        else
-            echo \"\$(hostname): ✗ Missing $path\"
-        fi
-        exit 0
-    ")"
-    local exit_code=$?
-    [ -n "$out" ] && echo "$out"
-
-    # srun itself failing, or reporting from fewer nodes than were allocated,
-    # must not read as "available" -- that would send the job on to load weights
-    # from a path some rank cannot see.
-    if [ $exit_code -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
-        echo "✗ $check_name could not be checked (srun exit $exit_code)"
-        return 1
-    fi
-    local n_found
-    n_found=$(printf '%s\n' "$out" | grep -c 'Found')
-    if [ "$n_found" -eq "$SLURM_NNODES" ]; then
-        echo "✓ $check_name available on ALL nodes"
-        return 0
-    fi
-    echo "✗ $check_name NOT available on all nodes ($n_found/$SLURM_NNODES)"
-    return 1
-}
-
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared-inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-else
-    echo ""
-    echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "Model must be accessible from all nodes for distributed execution."
-    echo "Please ensure the model is available on all allocated nodes."
-    exit 1
-fi
+# Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
+# explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
+# load from one path, so a partial hit fails the run deep into bring-up.
+cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""
@@ -402,12 +354,11 @@ export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME}"
 export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
 export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION}"
 export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_QOS="${SLURM_JOB_QOS:-normal}"
 export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT}"
 export SLURM_NTASKS_PER_NODE=1
 export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
 export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
+# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh.
 export SLURM_JOB_NAME="${SLURM_JOB_NAME:-1p1d_bench-serving}"
 
 echo ""
