@@ -40,7 +40,7 @@
 
 # madengine passes the base via docker_build_arg, which is how the v26.6 sweep put both
 # maxtext and maxdiffusion on one unified CI image so their numbers share a toolchain.
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.6
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.7
 FROM $BASE_DOCKER
 
 USER root
