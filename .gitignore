@@ -97,3 +97,7 @@ run_directory/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
+
+# NFS silly-rename placeholders: created when a file is replaced while open, and swept in by
+# a blanket `git add`. One reached PR #224 as a byte-identical stale copy of a sampler script.
+.nfs*

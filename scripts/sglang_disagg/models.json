@@ -687,5 +687,67 @@
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
         "args": "-N 2 -n 2"
+    },
+    {
+        "name": "sglang-disagg-kimi-k2-instruct-mori-ab",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-Kimi-K2-Instruct-MoRI-AB.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "kimi-k2",
+            "moe",
+            "ep-internode",
+            "rccl-tp",
+            "mori-a2a",
+            "backend-comparison"
+        ],
+        "timeout": 28800,
+        "env_vars": {
+            "MODEL_NAME": "Kimi-K2-Instruct-MoRI-AB",
+            "MODEL_REPO": "moonshotai/Kimi-K2-Instruct-0905",
+            "DP_MODE": "1",
+            "RUN_MORI": "1",
+            "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD": "0"
+        },
+        "args": ""
+    },
+    {
+        "name": "sglang-disagg-kimi-k2-instruct-deepep-ab",
+        "url": "",
+        "dockerfile": "../../docker/sglang_disagg_inference_full_overlay",
+        "scripts": "run.sh",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_sglang-disagg-Kimi-K2-Instruct-DeepEP-AB.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "disaggregated",
+            "kimi-k2",
+            "moe",
+            "ep-internode",
+            "rccl-tp",
+            "deepep-a2a",
+            "backend-comparison"
+        ],
+        "timeout": 28800,
+        "env_vars": {
+            "MODEL_NAME": "Kimi-K2-Instruct-DeepEP-AB",
+            "MODEL_REPO": "moonshotai/Kimi-K2-Instruct-0905",
+            "DP_MODE": "1",
+            "RUN_MORI": "1",
+            "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD": "0"
+        },
+        "args": ""
     }
 ]

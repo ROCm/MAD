@@ -170,3 +170,47 @@ Llama-4-Scout-17B-16E-Instruct:
     tp: "--disable-cuda-graph"
   decode:
     tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+
+# The two entries below are one A/B pair: byte-identical apart from dp_flags, where the only
+# difference is the MoE all-to-all backend. Graph capture, the static memory fraction, the
+# admission cap and the attention backend are held the same; arms differing in any of those
+# measure that. See .claude/skills/mad-profiling/references/backend-comparison.md.
+#
+# Both are graph-free, a property of the DeepEP side: its normal-mode dispatch is not
+# graph-capturable and its low-latency kernels do not work on this fabric. MoRI is held to the
+# same setting. Neither entry is the tuned configuration -- Kimi-K2-Instruct above is -- so a
+# throughput quoted from either is a comparison point, not a product number.
+#
+# Their flags cannot match the two on the MoRI kernel variant: it is not a flag. MoRI picks its
+# low-latency or throughput inter-node kernel by token count, and the launcher pins decode below
+# the threshold, so as written this is MoRI's low-latency kernel against DeepEP's throughput one
+# -- which measures the mode as much as the backend.
+#
+# SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=0 in the manifest environment moves MoRI
+# onto its throughput kernel and matches them: the backend gap widens from 10.6 to 14.7 ms a
+# step, MoRI's low-latency kernel being 4.1 ms slower here than its throughput one. Read it off
+# kernel names in a profile, not a flag -- backend-comparison.md, arm D'.
+#
+# The models.json catalog entries pin that threshold to 0 on both, so selecting them there runs
+# the matched comparison. It cannot live here: models.yaml carries flags, not environment.
+# Launching by hand -- run_xPyD_models.slurm, or MODEL_NAME directly -- does not pick it up;
+# export the threshold yourself, or use the catalog.
+Kimi-K2-Instruct-MoRI-AB:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.92 --dist-timeout 3600 --disable-cuda-graph --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
+  dp_flags: "--moe-a2a-backend mori --deepep-mode normal --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192"
+  decode:
+    tp: "--disable-radix-cache --disable-cuda-graph"
+    dp: "--max-running-requests 8192 --disable-radix-cache"
+
+Kimi-K2-Instruct-DeepEP-AB:
+  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.92 --dist-timeout 3600 --disable-cuda-graph --tool-call-parser kimi_k2 --disable-shared-experts-fusion"
+  dp_flags: "--moe-a2a-backend deepep --deepep-mode normal --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
+  prefill:
+    tp: "--disable-cuda-graph"
+    dp: "--max-running-requests 8192"
+  decode:
+    tp: "--disable-radix-cache --disable-cuda-graph"
+    dp: "--max-running-requests 8192 --disable-radix-cache"
