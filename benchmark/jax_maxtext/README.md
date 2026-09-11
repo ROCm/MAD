@@ -89,7 +89,7 @@ madengine run --tags jax-maxdiffusion/maxdiffusion_MI300X_flux_dev-pretrain --ke
 
 MAD starts a container named `container_ci-<mad_model>`. Inside it, `run.sh` sets `EXP` from `--config_path` and calls Primus `examples/run_pretrain.sh` with `BACKEND=MaxText` or `BACKEND=MaxDiffusion`, skipping the per-run `pip install` (`PRIMUS_SKIP_PIP=1`) so a launch stays off the network. `MAD_SECRETS_HFTOKEN` is forwarded to Primus as `HF_TOKEN`.
 
-Performance is parsed by `extract_maxtext_perf.py` / `extract_maxdiffusion_perf.py` into `primus_perf_output.csv`, which madengine collects as `multiple_results` and aggregates into `~/MAD/perf.csv`. Values are averaged over the trailing steps and reported per GPU: MaxText writes `tok_per_s_per_gpu` and `TFLOPS_per_gpu`; MaxDiffusion writes `fps_per_gpu`, `images_per_sec_per_gpu`, and `TFLOPS_per_gpu`.
+Performance is parsed by `extract_maxtext_perf.py` / `extract_maxdiffusion_perf.py` into `primus_perf_output.csv`, which madengine collects as `multiple_results` and aggregates into `~/MAD/perf.csv`. Values are averaged after skipping warmup steps and reported per GPU. MaxText writes `tok_per_s_per_gpu` and `TFLOPS_per_gpu`. MaxDiffusion copies Primus's published per-device rates: `fps_per_gpu` (samples), `images_per_sec_per_gpu` (frames, when Primus emits them), `tok_per_s_per_gpu` (when Primus emits tokens), and `TFLOPS_per_gpu`.
 
 For training flags, configs, and `primus-cli` (including Slurm), use the [Primus JAX MaxText training guide](https://github.com/AMD-AGI/Primus/blob/main/docs/02-user-guide/jax-maxtext-training.md).
 

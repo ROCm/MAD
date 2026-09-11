@@ -3,44 +3,31 @@
 Extract JAX/MaxDiffusion performance metrics and write a madengine
 multiple_results CSV (one row per metric).
 
-MaxDiffusion writes per-step metrics two ways:
+Primus's ``maxdiffusion.throughput`` patch publishes per-device throughput at
+train time. This script copies those numbers into madengine ``multiple_results``;
+it does not recompute fps/frames from batch size or the config dump.
 
-  1. A per-step stdout line (parsed as a fallback)::
+Sources, preferred first:
 
-       completed step: 12, seconds: 0.83, TFLOP/s/device: 210.4, loss: 0.123
+  1. JSON-lines ``metrics_file`` (config.metrics_file). run.sh points
+     ``PERF_METRICS_FILE`` at a path that outlives madengine's run-dir cleanup
+     and passes it here via --metrics-file. Keys::
 
-     Under the Primus launcher this line does NOT reliably reach the captured
-     training log (raw ``print`` from maxdiffusion.max_logging is dropped while
-     the trainer runs), so it cannot be relied on.
+       perf/per_device_tflops_per_sec
+       perf/samples_per_second_per_device   -> fps_per_gpu
+       perf/frames_per_second_per_device    -> images_per_sec_per_gpu
+       perf/tokens_per_second_per_device    -> tok_per_s_per_gpu
 
-  2. A JSON-lines metrics file, written directly by the trainer when
-     ``config.metrics_file`` is set (``max_utils.write_metrics_locally`` ->
-     ``train_utils.write_metrics``). Each line is a dict, e.g.::
+  2. The per-step log line, as a fallback::
 
-       {"perf/step_time_seconds": 0.83, "perf/per_device_tflops": 174.7,
-        "perf/per_device_tflops_per_sec": 210.4, "learning/loss": 0.123,
-        "step": 12.0, "run_name": "wan2.1_1.3b_pretrain"}
+       completed step: 18, seconds: 11.722, TFLOP/s/device: 348.548,
+       Tokens/s/device: 6756.526, Samples/s/device: 0.0853,
+       Frames/s/device: 7.251, loss: 1.540
 
-     This bypasses stdout entirely and is the PREFERRED source. run.sh points
-     ``PERF_METRICS_FILE`` (-> config metrics_file) at a path in the persisted
-     run dir and passes it here via --metrics-file.
+     Tokens and Frames are omitted for families Primus does not define them for.
 
-Throughput is derived per the retired jax-maxdiffusion_benchmark_report.py:
-   fps_per_gpu             = per_device_batch_size / avg_seconds_per_step
-   images_per_sec_per_gpu  = per_device_batch_size * num_frames / avg_seconds_per_step
-   TFLOPS_per_gpu          = avg TFLOP/s/device
-
-batch size and frame count are read from the training log's config dump
-(both the "Config param <name>: <value>" and the Primus
-"<name> : <value> (<type>)" formats are recognized). Averages skip warmup steps.
-
-Output CSV format (model, performance, metric) — matches
-scripts/jax-maxtext/extract_maxtext_perf.py so both feed madengine
-multiple_results (primus_perf_output.csv) identically:
-  model,performance,metric
-  wan2.1_1.3b-pretrain,7.23,fps_per_gpu
-  wan2.1_1.3b-pretrain,585.6,images_per_sec_per_gpu
-  wan2.1_1.3b-pretrain,210.4,TFLOPS_per_gpu
+Averages skip the first SKIP_WARMUP steps. Existing CSV names are kept so MAD
+dashboards do not break; tok_per_s_per_gpu is added when Primus emitted tokens.
 """
 import argparse
 import csv
@@ -48,68 +35,48 @@ import json
 import re
 import sys
 
-# Trailing per-step samples: skip the first SKIP_WARMUP steps, then average.
 SKIP_WARMUP = 2
 
+# Primus patch order: TFLOP/s, optional Tokens/s, Samples/s, optional Frames/s.
 _STEP_RE = re.compile(
-    r"completed step:\s*(\d+),\s*seconds:\s*([0-9][0-9.eE+-]*),\s*TFLOP/s/device:\s*([0-9][0-9.eE+-]*)"
+    r"completed step:\s*\d+,\s*"
+    r"seconds:\s*(?P<seconds>[0-9][0-9.eE+-]*),\s*"
+    r"TFLOP/s/device:\s*(?P<tflops>[0-9][0-9.eE+-]*)"
+    r"(?:,\s*Tokens/s/device:\s*(?P<tokens>[0-9][0-9.eE+-]*))?"
+    r"(?:,\s*Samples/s/device:\s*(?P<samples>[0-9][0-9.eE+-]*))?"
+    r"(?:,\s*Frames/s/device:\s*(?P<frames>[0-9][0-9.eE+-]*))?"
 )
 
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _config_param(content: str, name: str):
-    # MaxDiffusion "Config param <name>: <value>" (raw print) ...
-    m = re.search(rf"Config param {re.escape(name)}:\s*(.+)", content)
-    if m:
-        return _ANSI_RE.sub("", m.group(1)).strip()
-    # ... or the Primus config dump "<name>  : <value> (<type>)" format.
-    m = re.search(rf"(?:^|\]|\s){re.escape(name)}\s*:\s*(.+?)\s*\((?:bool|int|float|str|list|NoneType|tuple|dict)\)", content, re.MULTILINE)
-    return _ANSI_RE.sub("", m.group(1)).strip() if m else None
+_JSON_KEYS = {
+    "tflops": "perf/per_device_tflops_per_sec",
+    "samples": "perf/samples_per_second_per_device",
+    "frames": "perf/frames_per_second_per_device",
+    "tokens": "perf/tokens_per_second_per_device",
+}
 
 
-def _parse_frames(raw):
-    if raw is None:
-        return None
-    t = str(raw).strip().lower()
-    if t in ("", "none", "null"):
+def _as_float(value):
+    if value is None:
         return None
     try:
-        return int(float(t))
-    except ValueError:
+        return float(value)
+    except (TypeError, ValueError):
         return None
 
 
-def _effective_num_frames(content: str) -> float:
-    """Frames used for throughput. FLUX (image) = 1; WAN uses synthetic-override
-    logic (synthetic_override_num_frames when dataset_type=synthetic, else
-    num_frames / data_frames)."""
-    model_name = (_config_param(content, "model_name") or "").lower()
-    pretrained = (_config_param(content, "pretrained_model_name_or_path") or "").lower()
-    if "flux" in f"{model_name} {pretrained}":
-        return 1.0
+def _avg(steps, key):
+    values = [s[key] for s in steps if s.get(key) is not None]
+    if not values:
+        return None
+    return sum(values) / len(values)
 
-    dataset_type = (_config_param(content, "dataset_type") or "").strip().lower()
-    override = _parse_frames(_config_param(content, "synthetic_override_num_frames"))
-    num_frames = _parse_frames(_config_param(content, "num_frames"))
-    data_frames = _parse_frames(_config_param(content, "data_frames"))
 
-    if dataset_type == "synthetic" and override is not None:
-        chosen = override
-    elif num_frames is not None:
-        chosen = num_frames
-    elif data_frames is not None:
-        chosen = data_frames
-    else:
-        chosen = None
-    return float(chosen) if chosen is not None else 1.0
+def _fmt(value):
+    return f"{value:.4f}" if value is not None else None
 
 
 def _samples_from_metrics_file(metrics_file: str):
-    """Return (seconds[], tflops[]) parsed from the JSON-lines metrics file, or
-    ([], []) if the file is missing/empty/unparseable."""
-    seconds, tflops = [], []
+    steps = []
     try:
         with open(metrics_file, "r", encoding="utf-8", errors="ignore") as f:
             for raw in f:
@@ -120,25 +87,37 @@ def _samples_from_metrics_file(metrics_file: str):
                     d = json.loads(raw)
                 except ValueError:
                     continue
-                s = d.get("perf/step_time_seconds")
-                t = d.get("perf/per_device_tflops_per_sec")
-                if s is None or t is None:
+                tflops = _as_float(d.get(_JSON_KEYS["tflops"]))
+                if tflops is None:
                     continue
-                try:
-                    seconds.append(float(s))
-                    tflops.append(float(t))
-                except (TypeError, ValueError):
-                    continue
+                steps.append(
+                    {
+                        "tflops": tflops,
+                        "samples": _as_float(d.get(_JSON_KEYS["samples"])),
+                        "frames": _as_float(d.get(_JSON_KEYS["frames"])),
+                        "tokens": _as_float(d.get(_JSON_KEYS["tokens"])),
+                    }
+                )
     except OSError:
-        return [], []
-    return seconds, tflops
+        return []
+    return steps
 
 
 def _samples_from_log(content: str):
-    matches = _STEP_RE.findall(content)
-    seconds = [float(m[1]) for m in matches]
-    tflops = [float(m[2]) for m in matches]
-    return seconds, tflops
+    steps = []
+    for m in _STEP_RE.finditer(content):
+        tflops = _as_float(m.group("tflops"))
+        if tflops is None:
+            continue
+        steps.append(
+            {
+                "tflops": tflops,
+                "samples": _as_float(m.group("samples")),
+                "frames": _as_float(m.group("frames")),
+                "tokens": _as_float(m.group("tokens")),
+            }
+        )
+    return steps
 
 
 def extract_metrics(log_path: str, metrics_file: str = "") -> dict:
@@ -149,42 +128,28 @@ def extract_metrics(log_path: str, metrics_file: str = "") -> dict:
         print(f"Error reading log {log_path}: {e}", file=sys.stderr)
         content = ""
 
-    # Prefer the JSON-lines metrics file; fall back to the stdout log line.
-    seconds, tflops = ([], [])
+    steps = []
     source = ""
     if metrics_file:
-        seconds, tflops = _samples_from_metrics_file(metrics_file)
-        if seconds:
+        steps = _samples_from_metrics_file(metrics_file)
+        if steps:
             source = "metrics_file"
-    if not seconds:
-        seconds, tflops = _samples_from_log(content)
-        if seconds:
+    if not steps:
+        steps = _samples_from_log(content)
+        if steps:
             source = "log"
 
-    if not seconds:
+    if not steps:
         return {}
 
-    # Drop warmup (compile) steps, then average.
-    v_seconds = seconds[SKIP_WARMUP:] or seconds
-    v_tflops = tflops[SKIP_WARMUP:] or tflops
-    avg_seconds = sum(v_seconds) / len(v_seconds)
-    avg_tflops = sum(v_tflops) / len(v_tflops)
-
-    batch_raw = _config_param(content, "per_device_batch_size")
-    try:
-        batch = float(batch_raw) if batch_raw is not None else 1.0
-    except ValueError:
-        batch = 1.0
-    frames = _effective_num_frames(content)
-
-    fps = batch / avg_seconds if avg_seconds > 0 else 0.0
-    images_per_sec = batch * frames / avg_seconds if avg_seconds > 0 else 0.0
+    window = steps[SKIP_WARMUP:] or steps
     return {
-        "fps": f"{fps:.4f}",
-        "images_per_sec": f"{images_per_sec:.4f}",
-        "tflops": f"{avg_tflops:.4f}",
+        "fps": _fmt(_avg(window, "samples")),
+        "images_per_sec": _fmt(_avg(window, "frames")),
+        "tps": _fmt(_avg(window, "tokens")),
+        "tflops": _fmt(_avg(window, "tflops")),
         "_source": source,
-        "_nsteps": str(len(v_seconds)),
+        "_nsteps": str(len(window)),
     }
 
 
@@ -201,7 +166,7 @@ def main():
     args = parser.parse_args()
 
     metrics = extract_metrics(args.log_path, args.metrics_file)
-    if not metrics:
+    if not metrics or metrics.get("tflops") is None:
         print(
             "Error: no MaxDiffusion perf metrics found. Looked in metrics-file "
             f"'{args.metrics_file}' and for 'completed step: ..., TFLOP/s/device: ...' "
@@ -210,21 +175,26 @@ def main():
         )
         sys.exit(1)
 
-    rows = [
-        {"model": args.model_id, "performance": metrics["fps"], "metric": "fps_per_gpu"},
-        {"model": args.model_id, "performance": metrics["images_per_sec"], "metric": "images_per_sec_per_gpu"},
-        {"model": args.model_id, "performance": metrics["tflops"], "metric": "TFLOPS_per_gpu"},
-    ]
+    rows = []
+    if metrics.get("fps") is not None:
+        rows.append({"model": args.model_id, "performance": metrics["fps"], "metric": "fps_per_gpu"})
+    if metrics.get("images_per_sec") is not None:
+        rows.append(
+            {"model": args.model_id, "performance": metrics["images_per_sec"], "metric": "images_per_sec_per_gpu"}
+        )
+    if metrics.get("tps") is not None:
+        rows.append({"model": args.model_id, "performance": metrics["tps"], "metric": "tok_per_s_per_gpu"})
+    rows.append({"model": args.model_id, "performance": metrics["tflops"], "metric": "TFLOPS_per_gpu"})
 
     with open(args.output_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["model", "performance", "metric"])
         writer.writeheader()
         writer.writerows(rows)
 
+    summary = ", ".join(f"{r['metric']}={r['performance']}" for r in rows)
     print(
         f"Wrote {args.output_csv}: {len(rows)} rows from {metrics.get('_source', '?')} "
-        f"({metrics.get('_nsteps', '?')} steps; fps_per_gpu={rows[0]['performance']}, "
-        f"images_per_sec_per_gpu={rows[1]['performance']}, TFLOPS_per_gpu={rows[2]['performance']})"
+        f"({metrics.get('_nsteps', '?')} steps; {summary})"
     )
 
 

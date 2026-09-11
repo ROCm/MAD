@@ -111,9 +111,9 @@ export HF_HOME="${HF_HOME:-/myworkspace/hf_cache}"
 mkdir -p "$RUN_DIR/output"
 export TRAIN_LOG="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 
-# The trainer writes per-step JSON metrics here (configs bind metrics_file to it). This is
-# the reliable perf source: the per-step stdout line does not survive the Primus launcher's
-# stdout handling. Parent of run_directory, so it outlives madengine's cleanup.
+# The trainer writes per-step JSON metrics here (configs bind metrics_file to it), including
+# Primus throughput scalars. Preferred over the step log. Parent of run_directory, so it
+# outlives madengine's cleanup.
 export PERF_METRICS_FILE="$RUN_DIR/../perf_metrics_$(basename "$EXP" .yaml).jsonl"
 rm -f "$PERF_METRICS_FILE"
 
