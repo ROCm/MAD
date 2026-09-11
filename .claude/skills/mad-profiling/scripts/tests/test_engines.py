@@ -55,3 +55,57 @@ def test_every_registered_engine_declares_what_a_report_needs():
         if spec.iteration_metric:
             keys = {m.key for m in spec.metrics}
             assert spec.iteration_metric in keys, f"{name} counts iterations with an absent metric"
+
+
+def test_the_moe_parallelism_knobs_the_kimi_entries_set_are_classified():
+    """The MoE parallelism knobs the Kimi-K2 entries set are perf-relevant, not noise."""
+    from collprof.engines.sglang_disagg import SPEC
+
+    perf = SPEC.run_config.perf_relevant
+    for setting in ("moe_dense_tp_size", "enable_dp_lm_head",
+                    "enable_dp_attention_local_control_broadcast"):
+        assert setting in perf, setting
+        assert setting not in SPEC.run_config.noise, setting
+
+
+def test_the_ab_catalog_entries_pin_the_kernel_variant():
+    """Both A/B catalog entries pin MoRI to its throughput kernel, so the pair isolates the
+    backend rather than the dispatch mode."""
+    import json
+    from pathlib import Path
+
+    catalog = json.loads((Path(__file__).resolve().parents[5] / "scripts" / "sglang_disagg"
+                          / "models.json").read_text())
+    ab = {m["name"]: m["env_vars"] for m in catalog if m["name"].endswith("-ab")}
+
+    assert len(ab) == 2, "the A/B pair"
+    for name, env in ab.items():
+        assert env["SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD"] == "0", name
+
+
+def test_the_ab_pair_differs_only_by_the_backend_flag():
+    """The two `-AB` entries' `dp_flags` differ only by the backend name, keeping the pair
+    one-factor."""
+    import re
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[5] / "scripts" / "sglang_disagg"
+            / "models.yaml").read_text()
+    flags = {}
+    name = None
+    for line in text.splitlines():
+        hit = re.match(r"^(\S+):\s*$", line)
+        if hit:
+            name = hit.group(1)
+        elif name and "dp_flags:" in line:
+            flags.setdefault(name, line.split("dp_flags:", 1)[1].strip().strip('"'))
+
+    pair = {n: f for n, f in flags.items() if n.endswith("-AB")}
+    assert len(pair) == 2, f"the A/B pair, got {sorted(pair)}"
+
+    # Positionally. As sets, swapping two option values passes: the same words are present.
+    left, right = (f.split() for _n, f in sorted(pair.items()))
+    assert len(left) == len(right), f"different flag counts: {left} against {right}"
+    differ = [(a, b) for a, b in zip(left, right) if a != b]
+    assert differ == [("deepep", "mori")] or differ == [("mori", "deepep")], \
+        f"only the backend may differ, got {differ}"

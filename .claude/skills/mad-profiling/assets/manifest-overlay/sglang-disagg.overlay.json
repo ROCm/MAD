@@ -1,19 +1,7 @@
 {
-  "_comment": "What an sglang PD-disaggregated manifest from mad-slurm-multinode needs added to become measurable. Merge into the base manifest, do not use standalone: `jq -s '.[0] * .[1]' base.json sglang-disagg.overlay.json > run_manifest_prof.json`. Fill every <FILL_...> first, and add the /run_logs bind by hand as the README describes -- it is an edit to a string the base manifest already has, which a merge cannot express. PROFILE_ENABLE=1 is the single switch: MAD's scripts/sglang_disagg/sglang_disagg_mori_io_ep.sh reads it and adds --disable-custom-all-reduce to both roles and --disable-cuda-graph to decode, in the MODEL_CONFIG strings every node interpolates. Setting those flags at a launch site instead profiled three nodes out of four (job 25824). Explanations live in _comment_* keys beside a block, never inside it: madengine turns each key of an env block into a variable.",
+  "_comment": "What an sglang PD-disaggregated manifest from mad-slurm-multinode needs added to become measurable. Merge into the base manifest, do not use standalone: `jq -s '.[0] * .[1]' base.json sglang-disagg.overlay.json > run_manifest_prof.json`. Fill every <FILL_...> first, and add the /run_logs bind by hand as the README describes -- it is an edit to a string the base manifest already has, which a merge cannot express. PROFILE_ENABLE=1 is the single switch: MAD's scripts/sglang_disagg/sglang_disagg_mori_io_ep.sh reads it and adds --disable-custom-all-reduce and --disable-cuda-graph to both roles, in the MODEL_CONFIG strings every node interpolates. RDMA_COUNTERS=1 samples the adapters alongside; it degrades nothing, so it is also the one line here worth keeping on a tuned run. It needs `-v /sys/devices:/sys/devices:ro` appended to additional_docker_run_options BY HAND: this overlay cannot do it, because a jq merge replaces that string rather than appending to it -- the same limitation as the /run_logs bind above. Without the mount /sys/class/infiniband reaches the container as symlinks whose targets are absent, and the sampler finds ten adapters and no counters (measured). Setting those flags at a launch site instead profiled three nodes out of four (job 25824). Explanations live in _comment_* keys beside a block, never inside it: madengine turns each key of an env block into a variable.",
   "context": {
-    "_comment_tools": "Kept for symmetry with the training overlay. On this cluster serving runs produced no rocprofv3 CSVs at all even with a graceful shutdown, so their reports are volume-only and expected to be; drop the block unless kernel durations are being chased. <FILL_PROF_ROOT> is a shared-FS directory for this run's profiling artifacts, e.g. /shared/rundir/prof_sgl_llama70b_2p2d.",
-    "tools": [
-      {
-        "name": "rocprofv3_communication",
-        "cmd": "bash -c 'set -o pipefail; host=$(hostname); local_dir=/tmp/rocprof_$host; out_dir=<FILL_PROF_ROOT>/rocprof/$host; mkdir -p \"$local_dir\" \"$out_dir\"; bash ../scripts/common/tools/rocprof_wrapper.sh --kernel-trace --rccl-trace --stats --output-format csv -d \"$local_dir\" -- \"$@\"; rc=$?; find \"$local_dir\" -name \"*_stats.csv\" -exec cp {} \"$out_dir/\" \\; ; rm -rf \"$local_dir\"; exit $rc' _"
-      },
-      {
-        "name": "gpu_info_power_profiler"
-      },
-      {
-        "name": "gpu_info_vram_profiler"
-      }
-    ],
+    "_comment_tools": "No `tools` block here on purpose. madengine wraps the model run command, which for a disaggregated launcher is `bash run.sh` -- the orchestration, not the work: a four-node run profiled 668 shell helpers and no server, so the block cost a slower job and produced nothing. Wrapping the server itself was then tried from the launcher and the servers would not unwind under the profiler either; see references/measurement-setup.md before adding either back. The power and VRAM profilers, if wanted, belong in a block of their own.",
     "_comment_docker_env_vars": "The base template ships NCCL_DEBUG=WARN, which logs nothing to parse. SGLANG_TORCH_PROFILER_DIR is what makes /start_profile write anything: without it the profile point is a silent no-op. RCCL_LOG_DIR gives each server process its own RCCL file (NCCL_DEBUG_FILE) instead of eight ranks overwriting each other in one stdout, which is where the torn records and the invented topology edges come from; it must sit under /run_logs so the analysis outside the container can read it. PROFILE_ROLES decides which reports exist, one per role, and the role's log is also where the tooling reads which trace directory belongs to which role. PROFILE_CONCURRENCY matches the benchmark point being characterised.",
     "docker_env_vars": {
       "NCCL_DEBUG": "INFO",
@@ -23,6 +11,7 @@
       "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
       "SGLANG_PROFILE_WITH_STACK": "False",
       "PROFILE_ENABLE": "1",
+      "RDMA_COUNTERS": "1",
       "PROFILE_ROLES": "prefill decode",
       "PROFILE_STEPS": "5",
       "PROFILE_ISL": "1024",
@@ -40,6 +29,7 @@
       "SGLANG_TORCH_PROFILER_DIR": "/run_logs/torchprof",
       "SGLANG_PROFILE_WITH_STACK": "False",
       "PROFILE_ENABLE": "1",
+      "RDMA_COUNTERS": "1",
       "PROFILE_ROLES": "prefill decode",
       "PROFILE_STEPS": "5",
       "PROFILE_ISL": "1024",

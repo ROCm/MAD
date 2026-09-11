@@ -7,9 +7,31 @@ silent about others, and most of the ways to be wrong here come from combining t
 
 | channel | window | supports | does not support |
 |---|---|---|---|
-| RCCL debug log | the whole run, including setup and weight loading | message sizes, call counts, per-rank and per-node volume, connectivity | any duration |
-| torch profiler trace | the few steps a profile point covered | size, dtype and process group per collective; the collective mix | rates; its own durations |
+| RCCL debug log | the whole run, including setup and weight loading | message sizes, call counts, per-rank and per-node volume, connectivity | any duration; anything a backend carries outside RCCL |
+| torch profiler trace | the few steps a profile point covered | size, dtype and process group per collective; the collective mix; which named operations ran | rates; its own durations |
 | rocprofv3 | a whole process, all phases, initialisation included | host API and device kernel durations | message sizes; per-phase attribution |
+| engine step log | every logging interval of the run, profiled or not | step time as a distribution, per node, and whether graphs were replayed | attribution of that time to anything |
+| reported configuration | the run's startup | what each node actually ran with, defaults applied | why it was set that way |
+| RDMA adapter counters | from the first sample to the last, which the launcher brackets around the servers | how much crossed the fabric, and in what verbs: bytes, packets, writes, reads, atomics | per-rank or per-kernel attribution; which user of the NIC it belonged to; causality |
+
+### What the counter channel is for, and what it cannot say
+
+The only channel that reaches traffic RCCL never sees — an expert all-to-all on its own transport.
+Three limits are structural:
+
+* **Per adapter and per node.** Never per rank, never per kernel. A node's GPUs share what its
+  NICs report, and nothing here divides that up.
+* **Every user of the NIC is included**, the KV transfer among them. An absolute count is a
+  **ceiling** for any one exchange, not a measurement of it.
+* **Verbs, not causality.** Reads and atomics in quantity are positive evidence of a protocol
+  that waits for replies; their absence proves nothing, because a reply can itself be a write and
+  an acknowledgement is neither verb.
+
+The load-bearing use is comparative: two arms serving the same requests, where the other traffic
+is common-mode and the difference is the exchange. Even then the operation counts are comparable
+only when both arms' transports increment the same counters -- one that posts through a path the
+adapter's verb counters do not see reports a handful of writes for a terabyte, and the comparison
+drops that row rather than showing it.
 
 ## Why no bandwidth is derived anywhere
 
@@ -49,6 +71,11 @@ All of these are by construction, and the reports say so:
 - **A steady-state window in the traces.** sglang's `/start_profile` emits no
   `ProfilerStep` markers, so a capture is an unmarked window holding roughly one forward
   pass. The mix and the sizes are sound; the counts are per capture, not per iteration.
+- **The expert all-to-all, in RCCL terms.** A MoE backend carries its own transport — MoRI over
+  IBGDA, DeepEP over rocSHMEM — so the exchange appears in no RCCL log and in no
+  `record_param_comms` event. The trace names those operations and the report classifies them by
+  name: a discovery aid, not a measurement. It reports what matched and stays silent rather than
+  reporting zero when nothing did.
 
 ## Comparing runs and models
 
@@ -70,7 +97,13 @@ Normalise before comparing, and say what by:
   is what the size mix table ranks.
 - **State the configuration difference first.** Attention backend, quantisation and
   profiling flags explain more differences than anything in the communication numbers, and
-  are the easiest thing to leave out of a comparison.
+  are the easiest thing to leave out of a comparison. `--compare-config <other run>` puts them in
+  the report and marks the ones that move throughput on their own. A comparison of two collective
+  backends has its own file: [backend-comparison.md](backend-comparison.md).
+- **Prefer the step time to a throughput ratio.** At fixed concurrency a decode throughput is
+  determined by the step time, so quoting both as evidence double-counts one measurement. The step
+  time is also a distribution: a gap constant across intervals is a fixed per-step cost, one that
+  grows with the batch is volume-limited.
 
 ## A checklist for a claim
 

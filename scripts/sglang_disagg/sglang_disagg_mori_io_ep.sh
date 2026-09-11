@@ -13,6 +13,8 @@ MORI_DP_MODE1_ALLOWED_MODELS=(
     "DeepSeek-V3"
     "DeepSeek-R1"
     "Kimi-K2-Instruct"
+    "Kimi-K2-Instruct-MoRI-AB"
+    "Kimi-K2-Instruct-DeepEP-AB"
 )
 
 mori_model_allows_dp_mode_one() {
@@ -309,16 +311,18 @@ DECODE_MODEL_CONFIG+=" --disaggregation-transfer-backend ${_TRANSFER_BACKEND}"
 # record_param_comms events. Job 25815 profiled 1 call and 4 B per rank -- the startup barrier and
 # nothing else. Routing TP through RCCL makes that traffic visible and comparable with Primus.
 #
-# --disable-cuda-graph on decode: a replayed HIP graph dispatches one packet, so the collectives
-# captured inside it reach no profiler, and rocprofv3 aborts the capture itself with
-# HSA_STATUS_ERROR_INVALID_PACKET_FORMAT (job 25806 died at bs=1). Prefill already runs graph-free
-# through models.yaml.
+# --disable-cuda-graph on both roles: a replayed HIP graph dispatches one packet, so its
+# collectives reach no profiler, and rocprofv3 aborts on HSA_STATUS_ERROR_INVALID_PACKET_FORMAT
+# (job 25806 died at bs=1).
+#
+# Decode alone missed graphs a models.yaml DP prefill block captures (`Kimi-K2-Instruct`:
+# `--cuda-graph-bs $(seq 1 3)`); set here, not there, so a tuned configuration is not degraded.
 #
 # Both cost performance, so throughput has to be read from a run without PROFILE_ENABLE.
 if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
-    PREFILL_MODEL_CONFIG+=" --disable-custom-all-reduce"
+    PREFILL_MODEL_CONFIG+=" --disable-custom-all-reduce --disable-cuda-graph"
     DECODE_MODEL_CONFIG+=" --disable-custom-all-reduce --disable-cuda-graph"
-    echo "[profile] measurement flags added: TP through RCCL, decode without HIP graphs"
+    echo "[profile] measurement flags added: TP through RCCL, no HIP graphs in either role"
 fi
 
 # Give each server process its own RCCL log instead of eight of them interleaving in the node's
@@ -340,7 +344,7 @@ fi
 # A directory RCCL cannot write to is worse than none: it drops the output instead of falling back
 # to stdout, and the run finishes with no RCCL data at all. Check before trusting it.
 if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
-    [[ "${RCCL_LOG_DIR}" == "auto" ]] && RCCL_LOG_DIR="/run_logs/${SLURM_JOB_ID:-local}/rccl"
+    [[ "${RCCL_LOG_DIR}" == "auto" ]] && RCCL_LOG_DIR="/run_logs/${SLURM_JOB_ID:-0}/rccl"
     if (( NODE_RANK < xP )); then _rccl_role="prefill"; else _rccl_role="decode"; fi
     mkdir -p "${RCCL_LOG_DIR}" 2>/dev/null && chmod 0777 "${RCCL_LOG_DIR}" 2>/dev/null
     if [[ -w "${RCCL_LOG_DIR}" ]]; then
@@ -352,6 +356,140 @@ if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
         echo "[profile]          RCCL keeps logging to stdout" >&2
     fi
 fi
+
+# Adapter counters, sampled for the whole life of this node's server: the all-to-all reaches no
+# RCCL log, so this is the only channel that says how much crossed the fabric. It counts verbs,
+# not causality -- reads and atomics in quantity show a protocol that waits, but their absence
+# shows nothing, since a reply can itself be a write.
+#
+# Reading sysfs perturbs nothing, so RDMA_COUNTERS=1 without PROFILE_ENABLE measures a
+# configuration anyone would actually deploy. Defaults on while profiling.
+RDMA_COUNTERS="${RDMA_COUNTERS:-${PROFILE_ENABLE:-0}}"
+_rdma_sampler_pid=""
+_rdma_counters_out=""
+_start_rdma_counters() {
+    [[ "${RDMA_COUNTERS}" == "1" ]] || return 0
+    # Same fallback as the server logs: off SLURM both go to /run_logs/0, so the samples stay in
+    # the directory holding the logs of the run that produced them.
+    local _dir="${RDMA_COUNTERS_DIR:-/run_logs/${SLURM_JOB_ID:-0}/rdma}"
+    local _role
+    if (( NODE_RANK < xP )); then _role="prefill"; else _role="decode"; fi
+    mkdir -p "${_dir}" 2>/dev/null && chmod 0777 "${_dir}" 2>/dev/null
+    if [[ ! -w "${_dir}" ]]; then
+        echo "[profile] WARNING: RDMA counter directory ${_dir} is not writable; channel skipped" >&2
+        return 0
+    fi
+    _rdma_counters_out="${_dir}/${_role}_NODE${NODE_RANK}.csv"
+    # Before backgrounding, not by the child. The sampler clears these when it truncates, but the
+    # parent starts polling immediately, so on a requeue it could see the previous attempt's
+    # `.started` before the child was even scheduled -- satisfying the baseline wait with a marker
+    # for a window that no longer exists.
+    if ! rm -f "${_rdma_counters_out}.started" "${_rdma_counters_out}.failed"; then
+        echo "[profile] WARNING: cannot clear stale markers beside ${_rdma_counters_out};" \
+             "counter channel skipped rather than started on a window we cannot bound" >&2
+        return 0
+    fi
+    # Only the adapters this run was given (a node here has ten, the deployment names eight):
+    # another job's traffic would be noise in a channel that measures a difference. All three
+    # lists, because the transports name their own: IB_DEVICES is the KV transfer's, the expert
+    # exchange reads MORI_RDMA_DEVICES and RCCL reads NCCL_IB_HCA. They default to the same set
+    # here, so overriding one of them is what this guards against. The sampler merges them.
+    "${MOONCAKE_COOKBOOK_PATH}/rdma_counters.sh" \
+        --out "${_dir}/${_role}_NODE${NODE_RANK}.csv" \
+        --devices "${IB_DEVICES:-}" \
+        --devices "${MORI_RDMA_DEVICES:-}" \
+        --devices "${NCCL_IB_HCA:-}" \
+        --interval "${RDMA_COUNTERS_INTERVAL:-30}" &
+    _rdma_sampler_pid=$!
+    echo "[profile] RDMA counters -> ${_rdma_counters_out} (pid ${_rdma_sampler_pid})"
+    # Do not return until the baseline sample is on disk. Backgrounding and going straight to the
+    # server left the first sample racing startup, and anything the adapters carried before it
+    # lands inside the baseline instead of the delta -- a window that silently starts late while
+    # claiming to cover the server's life.
+    local _deadline=$(( $(date +%s) + ${RDMA_COUNTERS_START_TIMEOUT_S:-60} ))
+    while (( $(date +%s) < _deadline )); do
+        # The sampler's marker, not the line count: rows arrive one echo at a time, so a
+        # non-empty file only means the baseline has *begun* and the counters written after the
+        # server starts would take their baseline late.
+        [[ -f "${_rdma_counters_out}.started" ]] \
+            && { echo "[profile] RDMA baseline sample taken"; return 0; }
+        # The sampler exiting is not always a failure: a host with no RDMA leaves a header and
+        # exits 0. A status is, and `_stop_rdma_counters` would only notice it at the end.
+        if ! kill -0 "${_rdma_sampler_pid}" 2>/dev/null; then
+            local _st=0
+            wait "${_rdma_sampler_pid}" 2>/dev/null || _st=$?
+            (( _st == 0 )) && { echo "[profile] RDMA sampler found nothing to sample"; }
+            (( _st != 0 )) && {
+                echo "[profile] WARNING: RDMA sampler exited ${_st} before its first sample" >&2
+                echo "sampler exited ${_st}" > "${_rdma_counters_out}.failed" 2>/dev/null || true
+            }
+            _rdma_sampler_pid=""
+            return 0
+        fi
+        sleep 0.2
+    done
+    # Marked, not just warned about. Left unmarked, the sampler keeps running and the report sees
+    # an ordinary multi-sample file whose window starts after the server -- an undercount that
+    # looks like a whole run.
+    echo "[profile] WARNING: no RDMA baseline sample within" \
+         "${RDMA_COUNTERS_START_TIMEOUT_S:-60}s; the window starts after the server" >&2
+    echo "no baseline sample before the server started" \
+        > "${_rdma_counters_out}.failed" 2>/dev/null || true
+}
+
+# SIGTERM rather than SIGKILL: the sampler takes one last sample on it, so the window closes where
+# the server stopped.
+_stop_rdma_counters() {
+    [[ -n "${_rdma_sampler_pid}" ]] || return 0
+    local _status=0
+    # A server that outlived its shutdown kept putting traffic on these adapters, so the window
+    # does not end where the run does. Marked through the same file the sampler's own failure
+    # uses, which the report already reads as "a floor, not a total".
+    if (( _shutdown_failures > 0 )); then
+        echo "[profile] WARNING: ${_shutdown_failures} server(s) survived shutdown;" \
+             "the counter window is not this run's" >&2
+        echo "shutdown failed for ${_shutdown_failures} server(s)" \
+            > "${_rdma_counters_out}.failed" 2>/dev/null || true
+    fi
+    kill -TERM "${_rdma_sampler_pid}" 2>/dev/null || true
+    wait "${_rdma_sampler_pid}" 2>/dev/null || _status=$?
+    # The sampler traps TERM to exit 0 after its last sample, so a non-zero status here is a real
+    # failure to write, not the shutdown; unflagged, the samples that did land would look like
+    # the whole window. Recorded beside the file as well as logged: the report is where the claim
+    # is finally made.
+    if (( _status != 0 )); then
+        echo "[profile] WARNING: RDMA sampler exited ${_status}; its window is incomplete" >&2
+        echo "sampler exited ${_status}" > "${_rdma_counters_out}.failed" 2>/dev/null || true
+    fi
+    _rdma_sampler_pid=""
+}
+
+# Everything this script started, on every exit and not only the orderly one: the readiness
+# timeouts and worker failure paths leave before their `_shutdown_server` call, and the container
+# teardown hard-kills the servers -- a killed server writes no profiler output. Servers go first
+# and the sampler last, so its window covers them.
+#
+# Idempotent: `_shutdown_server` on a dead pid returns at once and `_stop_rdma_counters` clears
+# the pid it holds.
+#: Before this attempt writes anything, so a log left by a previous one can be told apart: a
+#: live server keeps writing, so its mtime climbs past this within seconds, while a stale file's
+#: is frozen. A heuristic across nodes -- the mtime is the writer's clock -- but the alternative
+#: is trusting a shared path that a requeue reuses.
+_attempt_start_ts=$(date +%s)
+_running_servers=()
+_cleanup_on_exit() {
+    local _status=$? _pid
+    for _pid in "${_running_servers[@]}"; do
+        [[ -n "$_pid" ]] && _shutdown_server "$_pid" "server ${_pid} (exit cleanup)"
+    done
+    _stop_rdma_counters
+    # An orderly exit is not orderly if something is still running: without this the job reports
+    # success and the counter files look like a finished measurement.
+    if (( _shutdown_failures > 0 )) && (( _status == 0 )); then
+        exit 1
+    fi
+}
+trap _cleanup_on_exit EXIT
 
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG
 
@@ -515,6 +653,32 @@ setup_sglang_worker_env() {
 # _dbg: timestamped debug trace (NODE_RANK + wall-clock prefix).
 _dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
 
+# _launch_server CMD LOG_PATH ROLE
+# Start one sglang server in the background and leave its **own** pid in `_launched_pid`.
+#
+# The pid matters: with `eval "$CMD" | tee -a "$LOG" &`, `$!` is the *last* command -- the `tee`.
+# `_shutdown_server` then SIGINTed tee, saw the pid gone and reported a clean stop while the
+# server died on a broken pipe without unwinding.
+#
+# Three shapes, each measured with a child that prints when its SIGINT handler fires:
+#   `eval "$CMD" | tee -a log &`  -> $! is tee; the server never hears the signal
+#   `eval "$CMD" >> log &`        -> $! is a bash subshell, which ignores SIGINT as an async job
+#   `eval "exec $CMD" >> log &`   -> $! is the server; it ran its handler and exited
+# The third runs now; the tee was redundant anyway, its stdout went to /dev/null.
+#
+# `set -m` for the launch alone: without job control the background job joins this shell's process
+# group and only the pid we hold can be signalled. Monitor mode gives the job its own group, with
+# id equal to the pid, so `_shutdown_server` can signal the server and its forked children.
+_launch_server() {
+    local _cmd="$1" _log="$2" _role="$3"
+    set -m
+    eval "exec ${_cmd}" >> "$_log" 2>&1 &
+    _launched_pid=$!
+    set +m
+    # Registered for the exit trap, which covers the paths that never reach `_shutdown_server`.
+    _running_servers+=("$_launched_pid")
+}
+
 # _shutdown_server PID [LABEL]
 # Stop a server and do not return until it is actually gone. SIGINT first, because sglang's
 # launch_server unwinds its scheduler subprocesses on it, which is what lets a profiler flush:
@@ -523,32 +687,92 @@ _dbg() { echo "[debug $(date +%T) NODE${NODE_RANK}] $*"; }
 # "[rocprofv3] finalizing after signal" (job 25815). Escalation keeps a wedged server from
 # hanging the job. Flushing kernel-trace stats takes far longer than a plain exit, hence the
 # wider budget while profiling.
+# _log_is_this_attempt FILE -- false for a log the previous attempt left behind. The barrier reads
+# a shared path that a requeue reuses, so a stale "scheduler died" line used to end the new run
+# before its server had started.
+_log_is_this_attempt() {
+    [[ -f "$1" ]] || return 1
+    local _m
+    _m=$(stat -c %Y "$1" 2>/dev/null) || return 1
+    (( _m >= _attempt_start_ts ))
+}
+
+# _server_died LOG -- true when a server's log shows it will never print the ready signal.
+# The barrier below polls for that signal and nothing else, so a server that died early is waited
+# on until the router timeout and then the wall clock: job 241090 spent four hours on a prefill
+# that was gone at two. Remote roles' pids live on another node, so the log is the common channel.
+_SERVER_DEATH_SIGNS="${_SERVER_DEATH_SIGNS:-scheduler died during initialization|torch.OutOfMemoryError|The memory capacity is unbalanced|CUDA error: out of memory}"
+_server_died() {
+    [[ -f "$1" ]] || return 1
+    grep -qE "${_SERVER_DEATH_SIGNS}" "$1" 2>/dev/null
+}
+
+# _server_gone PID -- true only when neither the process group nor the pid still exists.
+_server_gone() {
+    kill -0 -- "-$1" 2>/dev/null && return 1
+    kill -0 "$1" 2>/dev/null && return 1
+    return 0
+}
+
+# _wait_gone PID SECONDS -- poll until the whole group is gone, or give up. One helper for all
+# three signals, so "gone" is checked the same way each time instead of per-signal.
+_shutdown_failures=0
+
+_wait_gone() {
+    local _i
+    for ((_i = 1; _i <= $2; _i++)); do
+        _server_gone "$1" && return 0
+        sleep 1
+    done
+    return 1
+}
+
 _shutdown_server() {
-    local _pid="$1" _label="${2:-server}" _grace _i
+    local _pid="$1" _label="${2:-server}" _grace
     if [[ "${PROFILE_ENABLE:-0}" == "1" ]]; then
         _grace="${SHUTDOWN_GRACE_S:-300}"
     else
         _grace="${SHUTDOWN_GRACE_S:-30}"
     fi
 
-    kill -INT "$_pid" 2>/dev/null || { _dbg "${_label} (pid=${_pid}) already gone"; return 0; }
-    for ((_i = 1; _i <= _grace; _i++)); do
-        if ! kill -0 "$_pid" 2>/dev/null; then
-            _dbg "${_label} (pid=${_pid}) exited on SIGINT after ${_i}s"
-            return 0
-        fi
-        sleep 1
-    done
+    # The process group, falling back to the pid: `_launch_server` gives each server its own group
+    # so this reaches the whole tree, and the fallback covers a pid that is not a group leader.
+    kill -INT -- "-${_pid}" 2>/dev/null \
+        || kill -INT "$_pid" 2>/dev/null \
+        || { _dbg "${_label} (pid=${_pid}) already gone"; return 0; }
+    # "Gone" means the whole group, not just its leader: a scheduler child outliving the leader is
+    # exactly the case the escalation below is for.
+    if _wait_gone "$_pid" "$_grace"; then
+        _dbg "${_label} (pid=${_pid}) exited on SIGINT"
+        return 0
+    fi
 
     _dbg "${_label} (pid=${_pid}) still alive after ${_grace}s, sending SIGTERM"
-    kill -TERM "$_pid" 2>/dev/null
-    for ((_i = 1; _i <= 30; _i++)); do
-        kill -0 "$_pid" 2>/dev/null || { _dbg "${_label} exited on SIGTERM"; return 0; }
-        sleep 1
-    done
+    kill -TERM -- "-${_pid}" 2>/dev/null || kill -TERM "$_pid" 2>/dev/null
+    # A profiled process writes its output after the last child is gone, and a validation run was
+    # SIGKILLed one second short of that, so the SIGTERM wait is wider while profiling.
+    local _term_grace=30
+    [[ "${PROFILE_ENABLE:-0}" == "1" ]] && _term_grace=180
+    if _wait_gone "$_pid" "$_term_grace"; then
+        _dbg "${_label} exited on SIGTERM"
+        return 0
+    fi
 
     _dbg "${_label} (pid=${_pid}) ignored SIGTERM, sending SIGKILL"
-    kill -KILL "$_pid" 2>/dev/null
+    kill -KILL -- "-${_pid}" 2>/dev/null || kill -KILL "$_pid" 2>/dev/null
+    # SIGKILL is not instant: teardown is asynchronous and can stall in uninterruptible kernel
+    # work. Returning here broke this function's one promise -- that the group is gone -- and let
+    # the caller stop the counter sampler while servers were still running.
+    if _wait_gone "$_pid" "${KILL_GRACE_S:-30}"; then
+        _dbg "${_label} exited on SIGKILL"
+        return 0
+    fi
+    # Recorded here, not returned only: `return 1` was ineffective because there is no `errexit`
+    # and every call site invokes this as a bare command. A counter written while servers still
+    # run is not this run's window, so the failure has to outlive the call.
+    echo "[profile] WARNING: ${_label} (pid=${_pid}) survived SIGKILL" >&2
+    _shutdown_failures=$(( _shutdown_failures + 1 ))
+    return 1
 }
 
 # _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]
@@ -631,9 +855,10 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     } | tee "$PREFILL_LOG"
     _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
     set -x
-    eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    _start_rdma_counters
+    _launch_server "$_prefill_cmd" "$PREFILL_LOG" prefill
     set +x
-    _node0_prefill_pid=$!
+    _node0_prefill_pid=$_launched_pid
     _dbg "prefill server started pid=${_node0_prefill_pid}"
 
     # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
@@ -648,7 +873,13 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
         echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
         for ((i = 0; i < xP; i++)); do
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+            until _log_is_this_attempt "$LOG_FILE" \
+                    && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
+                    echo "ERROR: prefill NODE${i} died before becoming ready (${LOG_FILE})" >&2
+                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                    exit 1
+                fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
                     echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})" >&2
@@ -661,7 +892,13 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
         done
         for ((i = xP; i <= xP + yD - 1; i++)); do
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+            until _log_is_this_attempt "$LOG_FILE" \
+                    && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
+                    echo "ERROR: decode NODE${i} died before becoming ready (${LOG_FILE})" >&2
+                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                    exit 1
+                fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
                     echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})" >&2
@@ -678,7 +915,13 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
         echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
         for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+            until _log_is_this_attempt "$LOG_FILE" \
+                    && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
+                    echo "ERROR: ${_log_label} died before becoming ready (${LOG_FILE})" >&2
+                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                    exit 1
+                fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
                     echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
@@ -708,9 +951,18 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     echo "========== ROUTER_CMD (NODE_RANK=0, DP_MODE=${DP_MODE}) ==========" >&2
     echo "$ROUTER_CMD"
     set -x
-    eval "$ROUTER_CMD" 2>&1 | tee "/run_logs/${SLURM_JOB_ID:-0}/proxy_NODE${NODE_RANK}.log" >/dev/null &
+    # Through `_launch_server` like the two roles: the router was the last pipeline launch, so
+    # `$!` was its `tee` and `_shutdown_server` signalled that instead -- job 239268 shows "proxy
+    # still alive after 300s" while the tee had died in the first second.
+    _proxy_log="/run_logs/${SLURM_JOB_ID:-0}/proxy_NODE${NODE_RANK}.log"
+    # Truncated here, because `_launch_server` appends and nothing else writes this file. The two
+    # roles' logs are emptied by the `tee` that writes their command header; the router has none,
+    # so a requeue under the same job id -- or any local run, where the path is fixed -- would
+    # splice the next attempt onto the last one.
+    : > "$_proxy_log"
+    _launch_server "$ROUTER_CMD" "$_proxy_log" proxy
     set +x
-    proxy_pid=$!
+    proxy_pid=$_launched_pid
     echo "Router (sglang_router) started pid=${proxy_pid} (DP_MODE=${DP_MODE})"
 
     #_bench_host="${BENCHMARK_ROUTER_HOST:-127.0.0.1}"
@@ -822,6 +1074,7 @@ PY
 
     echo "Stopping the co-located prefill server (pid=${_node0_prefill_pid})"
     _shutdown_server "${_node0_prefill_pid}" "prefill NODE${NODE_RANK}"
+    _stop_rdma_counters
 
     if [[ "${benchmark_status}" -ne 0 ]]; then
         echo "ERROR: benchmark failed with status ${benchmark_status}" >&2
@@ -884,9 +1137,10 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     } | tee "$PREFILL_LOG"
     _dbg "launching prefill server (PREFILL_NODE_RANK=${PREFILL_NODE_RANK}, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
     set -x
-    eval "$PREFILL_CMD" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+    _start_rdma_counters
+    _launch_server "$PREFILL_CMD" "$PREFILL_LOG" prefill
     set +x
-    prefill_pid=$!
+    prefill_pid=$_launched_pid
     _dbg "prefill server started pid=${prefill_pid}"
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
@@ -907,6 +1161,7 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
 
     echo "Stopping the prefill server"
     _shutdown_server "${prefill_pid}" "prefill NODE${NODE_RANK}"
+    _stop_rdma_counters
 
 elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-default})"
@@ -971,9 +1226,10 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     } | tee "$DECODE_LOG"
     _dbg "launching decode server (DECODE_NODE_RANK=${DECODE_NODE_RANK}, DECODE_TP_SIZE=${DECODE_TP_SIZE})"
     set -x
-    eval "$DECODE_CMD" 2>&1 | tee -a "$DECODE_LOG" >/dev/null &
+    _start_rdma_counters
+    _launch_server "$DECODE_CMD" "$DECODE_LOG" decode
     set +x
-    decode_pid=$!
+    decode_pid=$_launched_pid
     _dbg "decode server started pid=${decode_pid}"
 
     _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
@@ -994,6 +1250,7 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
 
     echo "Stopping the decode server"
     _shutdown_server "${decode_pid}" "decode NODE${NODE_RANK}"
+    _stop_rdma_counters
 
 else
     echo "ERROR: NODE_RANK=${NODE_RANK} out of range (expected 0..$((xP + yD))) for xP=${xP} yD=${yD}" >&2

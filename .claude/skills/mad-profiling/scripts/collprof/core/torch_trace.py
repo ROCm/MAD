@@ -13,15 +13,17 @@ from __future__ import annotations
 
 import gzip
 import re
+import zlib
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
 
-from .spec import TraceLayout
+from .spec import A2AKernels, TraceLayout
 from .units import TORCH_DTYPE_BYTES
 
 RE_TRACE_DUR = re.compile(r'"ts":\s*[\d.]+,\s*"dur":\s*([\d.]+)')
 RE_TRACE_CAT = re.compile(r'"cat":\s*"([^"]+)"')
+RE_TRACE_NAME = re.compile(r'"name":\s*"([^"]+)"')
 RE_TRACE_ARGS = re.compile(
     r'"Collective name":\s*"(?P<coll>[^"]+)".*?"In msg nelems":\s*(?P<nin>\d+).*?'
     r'"Out msg nelems":\s*(?P<nout>\d+).*?"Group size":\s*(?P<group>\d+).*?'
@@ -47,9 +49,44 @@ def canonical_collective(name: str) -> str:
     return name
 
 
+def classify_a2a(name: str, a2a: A2AKernels) -> str:
+    """The expert-all-to-all stage an event name belongs to, or "" when it belongs to none."""
+    for label, pattern in a2a.patterns:
+        if pattern.search(name):
+            return label
+    return ""
+
+
+def trace_is_complete(parsed: dict) -> bool:
+    """Whether a trace parse may be cached under its files' signature.
+
+    Not when a trace was truncated, and not when a duration came back malformed: both are
+    transient read damage that biases the shares, and a cached one is reused for ever under an
+    unchanged signature -- against the report's own advice to reparse.
+    """
+    return not parsed.get("truncated") and not parsed.get("malformed")
+
+
+def trace_cache_key(paths, spec) -> list:
+    """Cache key for a parsed trace set: the files, and the engine that classified them.
+
+    Shared by both CLIs. Built in each of them separately, the engine was left out of one.
+    """
+    from .cache import file_signature
+    return (file_signature([f for p in paths for f in trace_files(Path(p), spec.traces)])
+            + [spec.name])
+
+
 def trace_files(path: Path, layout: TraceLayout) -> list:
-    """The trace files a path stands for: itself if a file, everything matching if a directory."""
+    """The trace files a path stands for: itself if a file, everything matching if a directory.
+
+    A path that is neither raises, which both callers use as their existence check; returning a
+    name for a missing file instead crashes later in ``parse_traces``.
+    """
     if not path.is_dir():
+        # is_file(), not "exists": a FIFO or device node would also pass and fail at open time.
+        if not path.is_file():
+            raise FileNotFoundError(f"no trace file at {path}")
         return [path]
     files: list = []
     for pattern in layout.file_globs:
@@ -70,12 +107,29 @@ def rank_of(name: str, layout: TraceLayout) -> int:
     return -1
 
 
-def parse_traces(paths: list, layout: TraceLayout) -> dict:
+def _until_truncated(fh, trace: Path, truncated: list):
+    """Yield a trace's lines, stopping where the stream stops being readable instead of raising.
+
+    One file per rank, so one bad file must not cost the whole capture. Both a missing gzip
+    trailer (``EOFError``) and corrupt bytes mid-stream (``zlib.error``) are caught.
+    """
+    try:
+        yield from fh
+    except (EOFError, OSError, zlib.error) as exc:
+        truncated.append(trace.name)
+        print(f"warning: {trace.name} stops being readable ({type(exc).__name__}), keeping what "
+              "it held up to that point")
+
+
+def parse_traces(paths: list, layout: TraceLayout, a2a: A2AKernels | None = None) -> dict:
     """Extract per-collective sizes, process groups and ranks from one phase's traces.
 
     Chrome-trace events span several lines and the duration sits on the line right before the args,
     so a line scan keyed on the args line is enough -- and far cheaper than loading a 300 MB JSON
     document. A single serving trace runs to ~15M lines, of which a handful carry a collective.
+
+    When the engine declares :class:`~collprof.core.spec.A2AKernels`, events are also classified
+    by name into expert all-to-all stages, which reach no RCCL log.
     """
     files: list = []
     for path in paths:
@@ -83,31 +137,84 @@ def parse_traces(paths: list, layout: TraceLayout) -> dict:
 
     # (collective, process_group, total_bytes, dtype) -> [calls, dur_us]
     events: dict = defaultdict(lambda: [0, 0.0])
+    # (a2a stage, category) -> [calls, dur_us], and the same category's total, for the share.
+    a2a_events: dict = defaultdict(lambda: [0, 0.0])
+    # (a2a stage, event name) -> [calls, dur_us]. The name says which variant of the exchange ran.
+    a2a_names: dict = defaultdict(lambda: [0, 0.0])
+    category_us: dict = defaultdict(float)
+    # Event name -> device time, for the names no pattern claimed. A pattern set matching nothing
+    # is the expected state on a new backend, and these names are what it takes to extend it.
+    unmatched_us: dict = defaultdict(float)
     ranks: list = []
     group_size = 0
     steps: set = set()
+    # Files whose stream ended early. Named rather than counted, so a per-rank imbalance can be
+    # told apart from a truncated capture.
+    truncated: list = []
+    # File -> how many durations did not parse as a number, and one example. Spliced durations are
+    # unrecoverable, but dropping them silently would lower a share.
+    malformed: dict = defaultdict(lambda: [0, ""])
 
     for trace in files:
         ranks.append(rank_of(trace.name, layout))
         last_dur = 0.0
         last_cat = ""
+        last_name = ""
         opener = (partial(gzip.open, trace, "rt") if trace.suffix == ".gz"
                   else partial(trace.open))
         with opener(errors="ignore") as fh:
-            for line in fh:
+            for line in _until_truncated(fh, trace, truncated):
                 # Each step shows up in more than one event, so collect ids rather than count.
                 if "ProfilerStep#" in line:
                     step = RE_TRACE_STEP.search(line)
                     if step:
                         steps.add(step.group(1))
+                # A new event begins, so nothing of the previous one carries into it. `cat` is
+                # optional, so without this reset a category-less event inherits the previous
+                # `cat` and inflates that denominator.
+                if '"ph"' in line:
+                    last_cat = ""
+                    last_name = ""
+                    last_dur = 0.0
                 if '"cat"' in line:
                     cat = RE_TRACE_CAT.search(line)
                     if cat:
                         last_cat = cat.group(1)
+                # Independently of the category: a pretty-printer may break the line between them,
+                # leaving a kernel counted into the category total with no name.
+                if '"name"' in line:
+                    name = RE_TRACE_NAME.search(line)
+                    if name:
+                        last_name = name.group(1)
                 if '"dur"' in line:
                     dur = RE_TRACE_DUR.search(line)
                     if dur:
-                        last_dur = float(dur.group(1))
+                        try:
+                            last_dur = float(dur.group(1))
+                        except ValueError:
+                            # Zero rather than the previous event's duration, and fall through
+                            # rather than skip: an a2a kernel is counted on this line and nowhere
+                            # else, so skipping would drop the call too.
+                            last_dur = 0.0
+                            seen = malformed[trace.name]
+                            seen[0] += 1
+                            seen[1] = seen[1] or dur.group(1)
+                        if a2a and a2a.patterns and last_cat in a2a.categories:
+                            category_us[last_cat] += last_dur
+                            stage = classify_a2a(last_name, a2a)
+                            if stage:
+                                row = a2a_events[(stage, last_cat)]
+                                row[0] += 1
+                                row[1] += last_dur
+                                # Kept per name as well, since the name says which variant ran.
+                                # Device events only: a host-side `cpu_op` overlaps the kernel it
+                                # launched, so counting both double-counts the overlap.
+                                if last_cat == "kernel":
+                                    named = a2a_names[(stage, last_name)]
+                                    named[0] += 1
+                                    named[1] += last_dur
+                            elif last_cat == "kernel":
+                                unmatched_us[last_name] += last_dur
                         continue
                 if '"Collective name"' not in line:
                     continue
@@ -133,4 +240,7 @@ def parse_traces(paths: list, layout: TraceLayout) -> dict:
     # Distinct rank ids, not one per file: several replicas of a phase are captured at once and
     # each numbers its ranks from zero, so the raw list read as [0, 0, 1, 1, ...] for two replicas.
     return {"events": dict(events), "ranks": sorted(set(ranks)), "files": len(files),
-            "steps": len(steps), "group_size": group_size}
+            "steps": len(steps), "group_size": group_size,
+            "a2a": dict(a2a_events), "a2a_names": dict(a2a_names),
+            "category_us": dict(category_us), "unmatched_us": dict(unmatched_us),
+            "truncated": truncated, "malformed": dict(malformed)}
