@@ -114,3 +114,24 @@ def test_a_failed_write_leaves_the_previous_cache_intact(tmp_path: Path, monkeyp
         cache.flush()
     assert cache_path.read_bytes() == good
     assert not list(tmp_path.glob("*.tmp")), "the temporary file must not be left behind"
+
+
+def test_the_trace_cache_key_includes_the_engine(tmp_path):
+    """The trace cache key includes the engine name, so a cache filled under one `--engine`
+    cannot answer for another."""
+    import dataclasses
+
+    from collprof.core.torch_trace import trace_cache_key
+    from collprof.engines import primus, sglang_disagg
+
+    (tmp_path / "one.trace.json").write_text("[]\n")
+
+    # The builder both CLIs call, not a copy of it: reconstructing the key here passed even
+    # when `cli.py` left the engine out.
+    def key(spec):
+        return trace_cache_key([tmp_path], spec)
+
+    assert key(sglang_disagg.SPEC) != key(primus.SPEC)
+    # The same engine under a different label is a different key, which makes `--engine` safe.
+    renamed = dataclasses.replace(sglang_disagg.SPEC, name="sglang-disagg-experimental")
+    assert key(sglang_disagg.SPEC) != key(renamed)

@@ -58,6 +58,43 @@ def trace_event(coll: str = "allreduce", nin: int = 512, nout: int = 512, group:
     )
 
 
+def server_args_line(**overrides) -> str:
+    """The line sglang prints about itself at startup, defaults already applied."""
+    settings = {"model_path": "'/models/Kimi-K2'", "attention_backend": "'aiter'",
+                "moe_a2a_backend": "'mori'", "disable_cuda_graph": "False",
+                "mem_fraction_static": "0.73", "max_running_requests": "8192", "port": "30000"}
+    settings.update({k: str(v) for k, v in overrides.items()})
+    body = ", ".join(f"{k}={v}" for k, v in settings.items())
+    return f"[2026-08-05 12:00:00] server_args=ServerArgs({body})"
+
+
+def decode_batch_line(batch: int = 16, rate: float = 100.0, graphed: bool | None = True) -> str:
+    """One decode logging interval; ``graphed=None`` is the older line, without ``cuda graph``."""
+    graph = f"cuda graph: {graphed}, " if graphed is not None else ""
+    return (f"[2026-08-05 12:00:01 TP0] Decode batch. #running-req: {batch}, #token: 8192, "
+            f"token usage: 0.05, {graph}gen throughput (token/s): {rate}, #queue-req: 0")
+
+
+def named_trace_event(name: str, cat: str = "kernel", dur: float = 100.0) -> str:
+    """A chrome-trace event carrying only a name, as a non-collective kernel does."""
+    return (
+        '    {\n'
+        f'      "ph": "X", "cat": "{cat}", "name": "{name}", "pid": 1, "tid": 7,\n'
+        f'      "ts": 2000.0, "dur": {dur}\n'
+        '    },'
+    )
+
+
+def uncategorised_trace_event(name: str = "unknown", dur: float = 100.0) -> str:
+    """An event without the optional Chrome-trace ``cat`` field, which is legal."""
+    return (
+        '    {\n'
+        f'      "ph": "X", "name": "{name}", "pid": 1, "tid": 7,\n'
+        f'      "ts": 3000.0, "dur": {dur}\n'
+        '    },'
+    )
+
+
 def write(path: Path, lines: list, compress: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "\n".join(lines) + "\n"
@@ -74,12 +111,16 @@ def sglang_run(tmp_path: Path) -> Path:
     run = tmp_path / "25999"
     for role, nodes in (("prefill", (0, 1)), ("decode", (2, 3))):
         for node in nodes:
-            lines = []
+            lines = [server_args_line()]
             for rank in range(8):
                 # Decode moves smaller messages more often, as it does in a real run.
                 count = 1024 if role == "prefill" else 128
                 calls = 2 if role == "prefill" else 4
                 lines += [coll_line(count=count, grank=rank, pid=2000 + rank)] * calls
+            # Only decode logs its generation rate.
+            if role == "decode":
+                lines += [decode_batch_line(batch=16, rate=100.0),
+                          decode_batch_line(batch=16, rate=80.0)]
             lines.append(topo_line())
             write(run / f"{role}_NODE{node}.log", lines)
     for role in ("prefill", "decode"):
