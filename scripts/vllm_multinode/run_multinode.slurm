@@ -153,6 +153,7 @@ cluster_resolve_model_path || exit 1
 echo "  weights    : ${MODEL_PATH}"
 
 mkdir -p "$LOG_PATH"
+cluster_mark_dir "$LOG_PATH" "per-job logs from multinode vLLM runs (one directory per SLURM job id)"
 
 export DOCKER_CONT_NAME="colocated_${MODEL_NAME}_${SLURM_JOB_ID}"
 export MODEL_NAME MODEL_PATH MASTER_ADDR MASTER_PORT IPADDRS SERVE_PORT
@@ -247,6 +248,7 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY="${_IMG_KEY:-noimg}"
     _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
+    cluster_mark_dir "$_JIT_CACHE_HOST" "JIT/Triton/AITER kernel cache for one docker image; rebuilt on demand"
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache"
 else

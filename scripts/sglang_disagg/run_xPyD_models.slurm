@@ -412,6 +412,7 @@ echo "SKIP_BENCHMARK=${SKIP_BENCHMARK} SKIP_CURL_TEST=${SKIP_CURL_TEST} (sglang_
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
+cluster_mark_dir "$LOG_PATH" "per-job logs from sglang disaggregated runs (one directory per SLURM job id)"
     echo "Created directory: $LOG_PATH"
 else
     echo "Directory already exists: $LOG_PATH"

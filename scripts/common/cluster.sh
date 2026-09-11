@@ -205,6 +205,48 @@ cluster_resolve_model_path() {
     return 1
 }
 
+# cluster_mark_dir <dir> <one-line description>
+#
+# Leave a note saying what wrote here and whether it is safe to delete.
+#
+# Everything CI creates on shared storage accumulates: per-job log directories,
+# per-image JIT caches, staged image tarballs. None of it is ever read by a human
+# who was not already looking for it, and none of it says so. Someone else
+# eventually finds a directory holding tens of gigabytes under an account that is
+# not theirs and has no way to judge whether deleting it breaks a running job --
+# so it is left alone, forever, by everyone.
+#
+# CACHEDIR.TAG is the existing convention on this filesystem (there is one in
+# /shared_inference/models_blog) and backup tools skip directories carrying it.
+# The README is for the person with the du output and a full disk.
+#
+# Written once and never rewritten, so this costs nothing on the runs after the
+# first and never clobbers a note someone has edited.
+cluster_mark_dir() {
+    local dir="$1"
+    local what="${2:-CI working data}"
+    [ -d "$dir" ] || return 0
+    [ -e "$dir/README.ci" ] && return 0
+
+    # The tag body is specified by the Cache Directory Tagging Standard; tools
+    # match on this exact first line.
+    printf 'Signature: 8a477f597d28d172789f06886806bc55\n# Cache directory created by MAD CI.\n' \
+        > "$dir/CACHEDIR.TAG" 2>/dev/null || true
+
+    {
+        echo "What: ${what}"
+        echo "Written by: MAD CI (${USER:-unknown}) via ${0##*/}"
+        echo "First created: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+        echo "Safe to delete when no job is running. Nothing here is an input to a"
+        echo "future run: logs are archived by the build that produced them, and"
+        echo "caches are rebuilt on demand (slower first run, then back to normal)."
+        echo ""
+        echo "Contents accumulate and are not pruned automatically."
+    } > "$dir/README.ci" 2>/dev/null || true
+    return 0
+}
+
 # cluster_nvme_mount
 #
 # Echoes the docker -v flag for local NVMe, or nothing when this node has no such
