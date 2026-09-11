@@ -216,13 +216,18 @@ done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 
-# Same -d guard, same reason as the RDMA mounts above.
-# Inline, not cluster.sh's helper: this body runs in a SEPARATE shell on the
-# compute node, where cluster.sh has not been sourced, so calling the function
-# here would be a "command not found". Same -d guard and same reason as the RDMA
-# mounts above -- docker auto-creates a directory at a missing bind source and
-# would shadow the model with an empty one. NVME_ROOT is defaulted rather than
-# bare because an unset name under `set -u` is fatal, not empty.
+# Inline rather than the helper in cluster.sh: this body runs in a SEPARATE shell
+# on the compute node, where cluster.sh has not been sourced, so calling the
+# function here would be a "command not found". Same -d guard and same reason as
+# the RDMA mounts above -- docker auto-creates a directory at a missing bind
+# source and would shadow the model with an empty one. NVME_ROOT is defaulted
+# rather than bare because an unset name under `set -u` is fatal, not empty.
+#
+# NOTE: no apostrophes anywhere in this block. The whole srun body is a
+# single-quoted string, so one apostrophe -- even inside a comment -- closes it,
+# and every $VAR after that point is expanded by the BATCH shell instead of this
+# one. That is not a syntax error, so bash -n does not see it; it surfaces at run
+# time as "unbound variable" naming a variable that is plainly assigned above.
 NVME_ROOT="${NVME_ROOT:-/mnt/m2m_nobackup}"
 _NVME_MOUNT=""
 [ -d "$NVME_ROOT" ] && _NVME_MOUNT="-v $NVME_ROOT:$NVME_ROOT"
