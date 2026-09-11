@@ -118,14 +118,29 @@ cluster_check_model_path() {
     local path="$1"
     local label="${2:-$1}"
     local nodes="${SLURM_NNODES:-1}"
+    local model_label="${path##*/}"
     local out rc n_found
 
+    # Four outcomes, not two. "Missing" alone cannot distinguish a node with no
+    # local NVMe mount at all from a node that has the mount but was never given
+    # this model -- and those need completely different fixes, one from the
+    # cluster team and one from whoever stages weights. Reporting them the same
+    # way is why that question keeps getting argued from memory.
+    #
+    # EMPTY is its own case because a staged directory can exist while holding
+    # nothing: a `[ -d ]` test alone would pick it over a working NFS copy.
     echo "Checking ${label}: ${path}"
     out="$(srun --nodes="${nodes}" --ntasks="${nodes}" /bin/bash -c "
-        if [ -d '${path}' ] && [ -n \"\$(ls -A '${path}' 2>/dev/null)\" ]; then
-            echo \"\$(hostname): + Found ${path}\"
+        _p='${path}'
+        _d=\"\$(dirname \"\$_p\")\"
+        if [ ! -d \"\$_d\" ]; then
+            echo \"\$(hostname): - no \$_d on this node (not mounted)\"
+        elif [ ! -d \"\$_p\" ]; then
+            echo \"\$(hostname): - \$_d present, ${model_label} NOT staged\"
+        elif [ -z \"\$(ls -A \"\$_p\" 2>/dev/null)\" ]; then
+            echo \"\$(hostname): - \$_p exists but is EMPTY\"
         else
-            echo \"\$(hostname): - Missing ${path}\"
+            echo \"\$(hostname): + Found \$_p\"
         fi
         exit 0
     " 2>/dev/null)"
