@@ -17,12 +17,19 @@
 #                a shape can take minutes to compile; without warmup that lands on the
 #                first scored request -> false 0/10 or timeout. Warmup failures are
 #                tolerated (logged, not fatal). Set 0 to disable.
+#
+# Reasoning models need headroom. Scoring reads the reasoning trace as well as the
+# answer, so if max_tokens runs out mid-trace the response is truncated and only the
+# earliest needles appear -- indistinguishable from a genuine retrieval miss unless
+# finish_reason is recorded. Observed on Kimi-K3 at 2048: two of four context sizes
+# scored 1/10, both listing only ANIMALS[0]. Hence the finish= field, and raise
+# NIAH_MAXTOK for reasoning models.
 import os, sys, json, random, urllib.request
 
 URL = os.environ.get("NIAH_URL", "http://127.0.0.1:30000/v1/chat/completions")
 MODEL = os.environ.get("NIAH_MODEL", "")
 WORDS = [int(x) for x in os.environ.get("NIAH_WORDS", "2000,8000,20000,35000").split(",") if x.strip()]
-MAXTOK = int(os.environ.get("NIAH_MAXTOK", "2048"))
+MAXTOK = int(os.environ.get("NIAH_MAXTOK", "8192"))
 TIMEOUT = float(os.environ.get("NIAH_TIMEOUT", "1800"))
 # Needle layout is seeded, so a single run is deterministic (bit-exact repro on the
 # same stack). Run multiple seeds to distinguish real accuracy from single-needle
@@ -77,23 +84,24 @@ def _request(n_words, seed, max_tokens, timeout):
     req = urllib.request.Request(URL, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())["choices"][0]["message"], None
+            choice = json.loads(r.read())["choices"][0]
+            return choice["message"], (choice.get("finish_reason") or "unknown"), None
     except Exception as e:
-        return None, str(e)
+        return None, None, str(e)
 
 
 def warmup(n_words):
     """One throwaway request per length so first-hit compile happens off the scored path.
     Never fatal: a warmup timeout just means the shape is still compiling; the scored
     request will pay whatever remains (bounded by NIAH_TIMEOUT)."""
-    _, err = _request(n_words, seed=0, max_tokens=8, timeout=WARMUP_TIMEOUT)
+    _, _, err = _request(n_words, seed=0, max_tokens=8, timeout=WARMUP_TIMEOUT)
     status = "ok" if err is None else ("timeout/err: %s" % err)
     print("words=%6d  [warmup] %s" % (n_words, status), flush=True)
 
 
 def run(n_words, seed=0):
     # Sentinel: None = timeout/transport error (NOT a wrong answer); int = score 0..10.
-    msg, err = _request(n_words, seed, MAXTOK, TIMEOUT)
+    msg, finish, err = _request(n_words, seed, MAXTOK, TIMEOUT)
     if err is not None:
         print("words=%6d  seed=%d  TIMEOUT/ERROR  %s" % (n_words, seed, err), flush=True)
         return None
@@ -103,8 +111,9 @@ def run(n_words, seed=0):
             + (msg.get("reasoning_content") or "") + " "
             + (msg.get("reasoning") or "")).lower()
     found = sorted(a for a in ANIMALS if a in text)
-    print("words=%6d  seed=%d  found=%2d/10  %s" % (n_words, seed, len(found), found), flush=True)
-    return len(found)
+    print("words=%6d  seed=%d  found=%2d/10  finish=%s  %s"
+          % (n_words, seed, len(found), finish, found), flush=True)
+    return (len(found), finish)
 
 
 def main():
@@ -131,10 +140,15 @@ def main():
             print("  words=%6d  NO-RESULT (%d/%d timed out or errored — likely cold compile; "
                   "raise NIAH_TIMEOUT or keep NIAH_WARMUP=1)" % (n, n_to, len(scored)), flush=True)
             continue
-        mean = sum(vals) / len(vals)
+        counts = [c for c, _ in vals]
+        n_trunc = sum(1 for _, f in vals if f == "length")
+        mean = sum(counts) / len(counts)
         extra = ("  [%d timeout/err excluded]" % n_to) if n_to else ""
+        if n_trunc:
+            # A truncated answer scores low for lack of room, not lack of retrieval.
+            extra += "  (TRUNCATED in %d/%d: raise NIAH_MAXTOK)" % (n_trunc, len(vals))
         print("  words=%6d  mean=%.1f/10  min=%d  max=%d  (n=%d)%s"
-              % (n, mean, min(vals), max(vals), len(vals), extra), flush=True)
+              % (n, mean, min(counts), max(counts), len(counts), extra), flush=True)
 
 
 if __name__ == "__main__":

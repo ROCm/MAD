@@ -1,0 +1,21 @@
+{
+  "_comment": "Site config for the 4-node DISAGGREGATED Kimi-K3 MI300X tag: pyt_vllm_disagg_mori_kimi-k3 (2 prefill + 2 decode)",
+  "_usage": "madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --use-image \"$IMG\" --additional-context-file benchmark/kimi_k3/mi300x/slurm-config.disagg.json",
+  "_note_results_dir": "Differs from the colocated config: this launcher lives in scripts/vllm_dissag/ and copies its CSV to <script dir>/perf_Kimi-K3.csv.",
+  "_note_env_vars": "MODEL_DIR defaults to /shared_inference/models_blog/ and weights are read from $MODEL_DIR/Kimi-K3. LOG_PATH defaults to /shared_inference/$USER/model_blog_logs. Override both unless your cluster has /shared_inference. Every key under env_vars becomes an `export` in the generated SBATCH wrapper, so keep it to real variables.",
+
+  "slurm": {
+    "partition": "CHANGE-ME",
+    "nodes": 4,
+    "gpus_per_node": 8,
+    "time": "24:00:00",
+    "exclusive": true,
+    "output_dir": "./slurm_results",
+    "results_dir": "./scripts/vllm_dissag"
+  },
+
+  "env_vars": {
+    "MODEL_DIR": "CHANGE-ME",
+    "LOG_PATH": "CHANGE-ME"
+  }
+}

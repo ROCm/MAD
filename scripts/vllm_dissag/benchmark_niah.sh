@@ -28,11 +28,17 @@ for _i in $(seq 1 60); do
 done
 [ "$_ready" = 1 ] || echo "[niah] WARN: router readiness not confirmed in 300s; proceeding (warmup will absorb)"
 
+# The model tag to request MUST equal the server's served_model_name, or every
+# request 404s and the whole sweep is recorded as FAILURE.
+#   * vllm_dissag passes no --served-model-name, so vLLM defaults it to MODEL_PATH.
+#   * vllm_multinode passes --served-model-name "$MODEL_NAME" and exports NIAH_MODEL
+#     to match.
+# Hence: honour NIAH_MODEL when the launcher sets it, else fall back to MODEL_PATH.
 # The server registers the model under its path (served_model_name = MODEL_PATH).
 # NIAH_WARMUP=1 (harness default): first-hit JIT compiles off the scored path so a cold
 # boot does not produce false 0/10 or timeouts on the first scored request.
 NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}/v1/chat/completions" \
-NIAH_MODEL="${MODEL_PATH}" \
+NIAH_MODEL="${NIAH_MODEL:-${MODEL_PATH}}" \
 NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
 NIAH_SEEDS="${NIAH_SEEDS:-0,1,2}" \
 NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
@@ -40,9 +46,12 @@ NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
 NIAH_WARMUP="${NIAH_WARMUP:-1}" \
   python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
 
-# Generate madengine perf.csv rows from NIAH results (mirrors benchmark_xPyD.sh)
-python3 "$NIXL_COOKBOOK_PATH/parse_to_csv.py" "${LOG}" --niah \
-    --perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv --model-name "${MODEL_NAME}" \
-    2>&1 | tee -a "${LOG}"
+# Emit the madengine perf.csv so an accuracy run reports a metric like a
+# throughput run does (one row per context size, needles found /10). Without
+# this, BENCHMARK_SCRIPT=niah produces logs only and the model's
+# multiple_results CSV is never written.
+python3 "${DIR}/parse_to_csv.py" "${LOG}" --niah \
+        --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" \
+        --model-name "${MODEL_NAME}" 2>&1 | tee -a "${LOG}"
 
 echo "NIAH results -> ${LOG}"

@@ -14,6 +14,15 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SLURM="$DIR/run_xPyD_models.slurm"
 pass=0; fail=0
 
+# emit argv for a cell at a given NODE_RANK (xP=1 yD=1: rank 0 prefill, rank 1 decode)
+_argv_at() { # rank connector wide_ep ep_backend model model_path
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK="$1" xP=1 yD=1 CONNECTOR="$2" WIDE_EP="$3" EP_BACKEND="$4" \
+    MODEL_NAME="$5" MODEL_PATH="$6" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+
 # emit argv for a cell
 _argv() { # connector wide_ep ep_backend model model_path
   env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
@@ -46,6 +55,42 @@ _has    "$B" "--block-size" "has --block-size"
 _has    "$B" "16" "block-size value 16 present"
 _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
+
+echo ""
+echo "=== moriio + wideEP (Kimi-K3, gfx942 a8w4 SiTUv2) ==="
+# Kimi-K3 on gfx942 must requantise the MoE to int4: without --quantization-config
+# the a16w4 SiTUv2 heuristic kernel cannot be codegen'd and vLLM dies with
+# "LLVM ERROR: Do not know how to expand this operator's operand!" inside
+# determine_available_memory (benchmark/kimi_k3/mi300x/README.md:160).
+K="$(_argv_at 0 moriio 1 mori Kimi-K3 /m/Kimi-K3)"
+_has    "$K" "--quantization-config" "prefill: has --quantization-config"
+_has    "$K" "int4_per_group_32" "prefill: MoE requantised to int4_per_group_32"
+_has    "$K" "--enable-expert-parallel" "prefill: has --enable-expert-parallel (wideEP-only model)"
+_has    "$K" "--reasoning-parser" "prefill: has --reasoning-parser"
+_has    "$K" "kimi_k3" "prefill: reasoning parser is kimi_k3"
+_has    "$K" '"cudagraph_mode":"NONE"' "prefill: cudagraph_mode NONE"
+_has    "$K" "mori_high_throughput" "prefill: all2all = mori_high_throughput"
+_has    "$K" '"kv_role":"kv_producer"' "prefill: kv_role = kv_producer"
+_count  "$K" "--compilation-config" 1 "prefill: exactly one --compilation-config"
+_hasnot "$K" "mori_low_latency" "prefill: not the decode all2all backend"
+
+KD="$(_argv_at 1 moriio 1 mori Kimi-K3 /m/Kimi-K3)"
+_has    "$KD" "--quantization-config" "decode: has --quantization-config"
+_has    "$KD" '"cudagraph_mode":"PIECEWISE"' "decode: cudagraph_mode PIECEWISE"
+_has    "$KD" "mori_low_latency" "decode: all2all = mori_low_latency"
+_has    "$KD" '"kv_role":"kv_consumer"' "decode: kv_role = kv_consumer"
+_count  "$KD" "--compilation-config" 1 "decode: exactly one --compilation-config"
+_hasnot "$KD" "mori_high_throughput" "decode: not the prefill all2all backend"
+
+# Kimi-K3 is wideEP-only; moriio+TP for it is untested and must stay gated.
+# Scoped to the array's own line: "Kimi-K3" also appears in MORI_EP_VALID_MODELS,
+# so grepping the whole file would pass even with Kimi-K3 removed from this gate.
+W="$(grep -m1 '^WIDE_EP_ONLY_MODELS=' "$SLURM")"
+_has "$W" 'WIDE_EP_ONLY_MODELS=' "slurm declares WIDE_EP_ONLY_MODELS"
+_has "$W" '"Kimi-K3"' "slurm gates Kimi-K3 as wideEP-only"
+# MORI_EP_VALID_MODELS is a line-continued array, so take the whole block.
+M="$(sed -n '/^MORI_EP_VALID_MODELS=/,/^)/p' "$SLURM")"
+_has "$M" '"Kimi-K3"' "slurm accepts Kimi-K3 as a MoRI-EP model"
 
 echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="

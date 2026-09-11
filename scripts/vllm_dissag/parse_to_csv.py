@@ -112,8 +112,58 @@ def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
     print(f"Saved {len(results)} benchmark configurations to {output_file}")
 
 
+def _workload_config_columns():
+    """Descriptive columns naming the shape the benchmark ran at.
+
+    These are workload CONFIGURATION, not run metadata: madengine knows where a job
+    ran (nodes, GPUs, image, launcher) but not the parallelism the workload chose.
+    Path A's run_vllm.py carries the same kind of columns (tp, dtype, bs), so a
+    narrow CSV is the right home for them — unlike the topology fields that used to
+    be hand-written into deployment_type, which madengine owns.
+
+    Only non-empty values are emitted, so a launcher that does not set them produces
+    no stray columns.
+    """
+    import os
+    cols = {}
+    tp = os.environ.get('TP_SIZE')
+    pp = os.environ.get('PP_SIZE')
+    if tp:
+        cols['tp'] = tp
+    if pp:
+        cols['pp'] = pp
+    if os.environ.get('ENABLE_EP') == '1' or os.environ.get('WIDE_EP') == '1':
+        cols['ep_backend'] = (
+            os.environ.get('ALL2ALL_BACKEND')
+            or os.environ.get('VLLM_ALL2ALL_BACKEND')
+            or 'enabled'
+        )
+    xP, yD = os.environ.get('xP'), os.environ.get('yD')
+    if xP and yD and yD != '0':
+        cols['prefill_decode'] = f'{xP}P{yD}D'
+    return cols
+
+
 def _get_run_metadata(pipeline: str = "vllm"):
-    """Collect run metadata from environment variables."""
+    """Collect run metadata from environment variables (LEGACY full-schema path).
+
+    Only used by save_perf_csv(narrow=False), i.e. by model cards that do not declare
+    `multiple_results` and whose CSV madengine reads directly with no metadata to
+    merge. Cards on the narrow contract get all of this from madengine instead, which
+    is authoritative; prefer migrating rather than extending this function.
+
+    Two launchers share this parser, and they describe their topology differently:
+
+      * vllm_dissag  -> disaggregated, xP prefill + yD decode nodes.
+      * vllm_multinode -> COLOCATED, one instance spanning NNODES nodes. It exports
+        xP=1 yD=0 purely so the shared benchmark log filenames stay unique.
+
+    Deriving the topology from xP/yD is therefore only valid for the disagg path;
+    on the colocated path it reported a 2-node/16-GPU run as `disagg_1P0D` with
+    1 node and 8 GPUs. NNODES is exported by both launchers and is authoritative,
+    and a launcher whose shape is not "xP prefill + yD decode" states its own
+    deployment_type/tags via PERF_DEPLOYMENT_TYPE / PERF_TAGS.
+    """
     import os
     xP = os.environ.get('xP', '1')
     yD = os.environ.get('yD', '1')
@@ -129,17 +179,26 @@ def _get_run_metadata(pipeline: str = "vllm"):
     else:
         backend = 'nixl'
 
+    def _as_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    gpus_per_node = _as_int(gpus, 8)
+    nnodes = _as_int(os.environ.get('NNODES'), _as_int(xP, 1) + _as_int(yD, 1))
+
     return {
         'pipeline': pipeline,
-        'deployment_type': f'disagg_{xP}P{yD}D',
-        'tags': f'{pipeline}_disagg,{backend}',
-        'n_gpus': str(int(xP) * int(gpus) + int(yD) * int(gpus)),
-        'nnodes': str(int(xP) + int(yD)),
-        'gpus_per_node': gpus,
+        'deployment_type': os.environ.get('PERF_DEPLOYMENT_TYPE') or f'disagg_{xP}P{yD}D',
+        'tags': os.environ.get('PERF_TAGS') or f'{pipeline}_disagg,{backend}',
+        'n_gpus': str(nnodes * gpus_per_node),
+        'nnodes': str(nnodes),
+        'gpus_per_node': str(gpus_per_node),
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', 'gfx942'),
     }
 
 
@@ -207,10 +266,49 @@ def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
 
 
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
-                  model_name: str = "", pipeline: str = "vllm"):
-    """Save results in madengine perf.csv format."""
+                  model_name: str = "", pipeline: str = "vllm", narrow: bool = False):
+    """Save throughput results for madengine.
+
+    Two schemas, selected by `narrow`:
+
+    * narrow=True  -- the preferred contract. The workload reports only what it
+      measured and madengine merges in the run metadata it already owns, via the
+      model card's `multiple_results` declaration. Same contract as the templated
+      launchers, so rows from different launchers stay comparable.
+    * narrow=False -- legacy, and still the default. Writes the full 29-column
+      perf.csv with metadata assembled from the environment by _get_run_metadata().
+      Required by the disagg model cards that do NOT declare `multiple_results`:
+      madengine reads their CSV directly from a conventional path, with no metadata
+      to merge, so a narrow CSV there would lose every descriptive column.
+
+    To migrate a model: declare `multiple_results` on its card and pass --narrow.
+    """
     if not results:
         print("No results to save to perf.csv.")
+        return
+
+    if narrow:
+        config_cols = _workload_config_columns()
+        fieldnames = (['model', 'benchmark', 'inp', 'out', 'max_concurrency',
+                       'performance', 'metric'] + list(config_cols))
+        with open(output_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for (input_tokens, output_tokens, concurrency), data in sorted(
+                results.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])
+            ):
+                row = {
+                    'model': model_name,
+                    'benchmark': 'throughput_sweep',
+                    'inp': data['input_tokens'],
+                    'out': data['output_tokens'],
+                    'max_concurrency': data['concurrency'],
+                    'performance': f"{data['max_throughput']:.2f}",
+                    'metric': 'tok/s',
+                }
+                row.update(config_cols)
+                writer.writerow(row)
+        print(f"Saved {len(results)} rows (narrow schema) to {output_file}")
         return
 
     meta = _get_run_metadata(pipeline)
@@ -255,6 +353,10 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
+    parser.add_argument('--narrow', action='store_true',
+                        help='Emit a narrow results CSV (model/performance/metric[/status]) for a model card '
+                             'declaring multiple_results, letting madengine supply the run metadata. '
+                             'Ignored with --niah, which is always narrow.')
 
     args = parser.parse_args()
 
@@ -296,7 +398,7 @@ def main():
     save_to_csv(results, output_file)
 
     if args.perf_csv:
-        save_perf_csv(results, args.perf_csv, args.model_name)
+        save_perf_csv(results, args.perf_csv, args.model_name, narrow=args.narrow)
 
     print(f"\nSummary:")
     print(f"  Total unique configurations: {len(results)}")

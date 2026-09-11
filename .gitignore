@@ -73,6 +73,8 @@ venv.bak/
 !perf_super.json
 !perf_entry_super.json
 !perf_entry.json
+# Checked-in madengine site-config templates (not results)
+!benchmark/kimi_k3/mi300x/slurm-config.*.json
 *.log
 *.out
 *.html

@@ -26,7 +26,12 @@ CON="8 16 32 64 128 256 512"
 # ISL/OSL combinations — override via BENCHMARK_COMBINATIONS env var (space-separated, e.g. "1024/1024 8192/1024")
 IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}"
 echo "Benchmarking iterations: $BENCHMARK_ITR" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
-for i in {1..$BENCHMARK_ITR}; do
+# seq, not {1..$BENCHMARK_ITR}: brace expansion happens before parameter expansion, so the
+# brace form iterates once over the literal 6-char string "{1..$BENCHMARK_ITR}", so the
+# variable is silently ignored and every concurrency is swept exactly once whatever it
+# is set to -- visible in the log as "iter: {1..N}" instead of "iter: 1".
+# scripts/vllm_dissag/benchmark_xPyD.sh already uses the seq form.
+for i in $(seq 1 "${BENCHMARK_ITR:-1}"); do
     sleep 60
     echo "RUNNING: the benchserving script for iter: $i" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
     for combo in "${COMBINATIONS[@]}"; do
@@ -36,7 +41,8 @@ for i in {1..$BENCHMARK_ITR}; do
            if [ "$p_con" -lt 16 ]; then
                p_con=16
            fi
-           echo "RUNNING: prompts $prompts isl $isl osl $osl con $con" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+           # $prompts was never set; the prompt count for this cell is $p_con.
+           echo "RUNNING: prompts $p_con isl $isl osl $osl con $con" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
            python3 -m sglang.bench_serving \
            --model $MODEL_PATH \
            --backend sglang \
