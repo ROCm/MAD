@@ -54,7 +54,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install "xfuser>=0.4.1"
 
 # ROCm gpg key
-RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+#RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
+    && mkdir -p /etc/apt/keyrings \
+    && wget -qO- https://repo.radeon.com/rocm/rocm.gpg.key \
+        | gpg --dearmor --yes -o /etc/apt/keyrings/rocm.gpg \
+    && . /etc/os-release \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/latest ${VERSION_CODENAME} main" \
+        > /etc/apt/sources.list.d/rocm.list \
+    && printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' \
+        > /etc/apt/preferences.d/rocm-pin-600 \
+    && apt-get update
 RUN apt update && apt install -y \
     unzip \
     jq
@@ -62,10 +72,9 @@ RUN apt update && apt install -y \
 # add locale en_US.UTF-8
 RUN apt-get install -y locales
 RUN locale-gen en_US.UTF-8
-
 # Install flash attention
 ARG BUILD_FA="1"
-ARG FA_BRANCH="v3.0.0.r1-cktile"
+#ARG FA_BRANCH="v3.0.0.r1-cktile"
 ARG FA_REPO="https://github.com/ROCm/flash-attention.git"
 RUN if [ "$BUILD_FA" = "1" ]; then \
     cd ${WORKSPACE_DIR} \
@@ -89,4 +98,3 @@ RUN cd $WORKSPACE_DIR \
 
 # Display installed packages for verification
 RUN pip list
-
