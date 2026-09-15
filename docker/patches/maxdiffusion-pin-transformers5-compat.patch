@@ -1,0 +1,144 @@
+Bring the pinned MaxDiffusion commit up on transformers 5 / huggingface_hub 1.
+
+MAXDIFFUSION_COMMIT (68e0696) predates the upstream fixes for both halves of
+the transformers 5 upgrade, so the FLUX text encoder patch alone is not enough
+to get the pinned tree running. Two independent breakages, both already fixed
+on maxdiffusion main and mirrored here:
+
+1. Top-level transformers Flax imports raise on v5, before the model is even
+   constructed:
+     * max_utils.py                     -> FlaxCLIPTextModel, FlaxCLIPTextPreTrainedModel
+     * pipelines/pipeline_flax_utils.py -> FlaxPreTrainedModel
+     * pipelines/wan/wan_pipeline.py    -> FlaxCLIPVisionModel, from the
+       transformers.models.clip.modeling_flax_clip module v5 deletes outright
+   The first two are on the FLUX import chain (flux_pipeline imports
+   FlaxDiffusionPipeline from pipeline_flax_utils; the trainer imports
+   max_utils); the third breaks WAN. The isinstance and issubclass call sites
+   are guarded too, so a None class object never reaches them. WAN only uses
+   FlaxCLIPVisionModel for image-to-video and already tolerates it failing to
+   load, so leaving it None degrades to that existing path.
+
+2. transformers 5 requires huggingface_hub >= 1, which removed the
+   use_auth_token kwarg. Three call sites pass it straight to a hub API and
+   raise TypeError when loading the FLUX VAE and transformer:
+     * configuration_utils.py             -> hf_hub_download
+     * models/modeling_flax_utils.py      -> hf_hub_download
+     * pipelines/pipeline_flax_utils.py   -> snapshot_download
+   Renamed to token=, matching upstream. The remaining use_auth_token kwargs in
+   the tree are passed between maxdiffusion functions, which still accept them.
+
+Drop this patch once MAXDIFFUSION_COMMIT moves past those upstream fixes.
+
+diff --git a/src/maxdiffusion/configuration_utils.py b/src/maxdiffusion/configuration_utils.py
+index c432d674..b748918b 100644
+--- a/src/maxdiffusion/configuration_utils.py
++++ b/src/maxdiffusion/configuration_utils.py
+@@ -394,7 +394,7 @@ class ConfigMixin:
+             proxies=proxies,
+             resume_download=resume_download,
+             local_files_only=local_files_only,
+-            use_auth_token=use_auth_token,
++            token=use_auth_token,
+             user_agent=user_agent,
+             subfolder=subfolder,
+             revision=revision,
+diff --git a/src/maxdiffusion/max_utils.py b/src/maxdiffusion/max_utils.py
+index 04b3869f..f4de727f 100644
+--- a/src/maxdiffusion/max_utils.py
++++ b/src/maxdiffusion/max_utils.py
+@@ -46,7 +46,12 @@ from flax.typing import (
+ from flax.linen import partitioning as nn_partitioning
+ from flax.training import train_state
+ from jax.experimental import mesh_utils
+-from transformers import (FlaxCLIPTextModel, FlaxCLIPTextPreTrainedModel)
++try:
++  from transformers import FlaxCLIPTextModel, FlaxCLIPTextPreTrainedModel
++except ImportError:
++  # The Flax classes were removed from transformers in v5.
++  FlaxCLIPTextModel = None
++  FlaxCLIPTextPreTrainedModel = None
+ from flax import struct
+ from typing import (
+     Callable,
+@@ -336,7 +341,11 @@ def init_train_state(model, tx, weights_init_fn, params=None, training=True, eva
+   Args: model_params, model, tx, training
+   """
+   if not params:
+-    if isinstance(model, FlaxCLIPTextModel) or isinstance(model, FlaxCLIPTextPreTrainedModel):
++    if FlaxCLIPTextModel is not None and FlaxCLIPTextPreTrainedModel is not None:
++      is_clip_model = isinstance(model, FlaxCLIPTextModel) or isinstance(model, FlaxCLIPTextPreTrainedModel)
++    else:
++      is_clip_model = False
++    if is_clip_model:
+       params = weights_init_fn()
+     else:
+       params = weights_init_fn(eval_only=eval_only)
+diff --git a/src/maxdiffusion/models/modeling_flax_utils.py b/src/maxdiffusion/models/modeling_flax_utils.py
+index 5e08a2eb..408fd0ea 100644
+--- a/src/maxdiffusion/models/modeling_flax_utils.py
++++ b/src/maxdiffusion/models/modeling_flax_utils.py
+@@ -379,7 +379,7 @@ class FlaxModelMixin(PushToHubMixin):
+             proxies=proxies,
+             resume_download=resume_download,
+             local_files_only=local_files_only,
+-            use_auth_token=use_auth_token,
++            token=use_auth_token,
+             user_agent=user_agent,
+             subfolder=subfolder,
+             revision=revision,
+diff --git a/src/maxdiffusion/pipelines/pipeline_flax_utils.py b/src/maxdiffusion/pipelines/pipeline_flax_utils.py
+index da3a755b..dc75722d 100644
+--- a/src/maxdiffusion/pipelines/pipeline_flax_utils.py
++++ b/src/maxdiffusion/pipelines/pipeline_flax_utils.py
+@@ -41,7 +41,11 @@ from ..utils import (
+ )
+ 
+ 
+-from transformers import FlaxPreTrainedModel
++try:
++  from transformers import FlaxPreTrainedModel
++except ImportError:
++  # FlaxPreTrainedModel was removed from top-level transformers in transformers >= 5.0.0.
++  FlaxPreTrainedModel = None
+ 
+ INDEX_FILE = "diffusion_flax_model.bin"
+ 
+@@ -368,7 +372,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
+           resume_download=resume_download,
+           proxies=proxies,
+           local_files_only=local_files_only,
+-          use_auth_token=use_auth_token,
++          token=use_auth_token,
+           revision=revision,
+           allow_patterns=allow_patterns,
+           ignore_patterns=ignore_patterns,
+@@ -514,7 +518,7 @@ class FlaxDiffusionPipeline(ConfigMixin, PushToHubMixin):
+               quant=quant,
+           )
+           params[name] = loaded_params
+-        elif issubclass(class_obj, FlaxPreTrainedModel):
++        elif FlaxPreTrainedModel is not None and issubclass(class_obj, FlaxPreTrainedModel):
+           if from_pt:
+             # TODO(Suraj): Fix this in Transformers. We should be able to use `_do_init=False` here
+             loaded_sub_model = load_method(loadable_folder, from_pt=from_pt)
+diff --git a/src/maxdiffusion/pipelines/wan/wan_pipeline.py b/src/maxdiffusion/pipelines/wan/wan_pipeline.py
+index 7c0314b4..5b277de8 100644
+--- a/src/maxdiffusion/pipelines/wan/wan_pipeline.py
++++ b/src/maxdiffusion/pipelines/wan/wan_pipeline.py
+@@ -41,7 +41,15 @@ import re
+ import torch
+ import qwix
+ from transformers import CLIPImageProcessor
+-from transformers.models.clip.modeling_flax_clip import FlaxCLIPVisionModel
++try:
++  from transformers.models.clip.modeling_flax_clip import FlaxCLIPVisionModel
++except ModuleNotFoundError:
++  # transformers v5 removed the Flax CLIP module. WAN only uses this encoder
++  # for image-to-video, and already tolerates it failing to load.
++  try:
++    from transformers import FlaxCLIPVisionModel
++  except ImportError:
++    FlaxCLIPVisionModel = None
+ import PIL
+ 
+ 

@@ -67,6 +67,15 @@ RUN rm -rf /workspace/Primus
 COPY scripts/Primus/ /workspace/Primus/
 
 RUN test -f /workspace/Primus/examples/run_pretrain.sh
+
+# Primus's FLUX config still names the third-party Flax mirrors of CLIP-L and
+# T5-XXL, which hold no PyTorch weights and so cannot be read once the text
+# encoders run under Torchax. Repoint it at the text_encoder and text_encoder_2
+# subfolders of the official black-forest-labs/FLUX.1-dev repo, the same weights
+# maxdiffusion's own base_flux_dev.yml names. Same model, first-party copy.
+# Submitted to Primus separately; this comes out when the submodule pin carries it.
+COPY docker/patches/primus-flux-torch-text-encoders.patch /tmp/
+RUN cd /workspace/Primus && git apply /tmp/primus-flux-torch-text-encoders.patch
 RUN test -d /workspace/Primus/primus/backends/maxdiffusion \
     || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus main branch." >&2 && exit 1)
 
@@ -76,9 +85,53 @@ RUN python3 -c "import maxdiffusion, os; print('maxdiffusion ->', os.path.dirnam
 RUN grep -q "preload before Transformer Engine" /workspace/maxdiffusion/src/maxdiffusion/train_utils.py \
     || (echo "ERROR: /workspace/maxdiffusion is missing or lacks the TF-preload patch." >&2 && exit 1)
 
+# The base pins transformers 4.57.3, which carries CVE-2026-4372, CVE-2026-5241
+# and CVE-2026-9856; 5.10.0 is the first release fixing all three. v5 dropped
+# every Flax implementation, including the FlaxCLIPTextModel and
+# FlaxT5EncoderModel that FLUX's text encoders imported, so the patches below
+# run FLUX's PyTorch CLIP-L and T5-XXL encoders under JAX through Torchax
+# instead. The transformers upgrade itself comes after Primus's requirements,
+# further down, because those pin the vulnerable version.
+#
+# Both patches are rebased onto the maxdiffusion commit Primus pins at
+# third_party/maxdiffusion, which is the commit the base's tree is checked out
+# at. The rev-parse guard makes a pin bump fail the build loudly rather than
+# apply these to a tree they were never rebased onto.
+ARG MAXDIFFUSION_COMMIT=68e069659f0af80694559e29939a17f879fe7f6a
+COPY docker/patches/maxdiffusion-pin-transformers5-compat.patch /tmp/
+COPY docker/patches/maxdiffusion-flux-transformers5.patch /tmp/
+RUN cd $MAXDIFFUSION_PATH && \
+    if [ "$(git rev-parse HEAD)" != "${MAXDIFFUSION_COMMIT}" ]; then \
+      echo "ERROR: base ships maxdiffusion $(git rev-parse HEAD), patches expect ${MAXDIFFUSION_COMMIT}." >&2; \
+      exit 1; \
+    fi && \
+    git apply /tmp/maxdiffusion-pin-transformers5-compat.patch && \
+    git apply /tmp/maxdiffusion-flux-transformers5.patch && \
+    pip3 install -e . --no-deps
+
 # Primus's own requirements, not maxdiffusion's, which the base already covers.
 # Installed here rather than on every run: run.sh sets PRIMUS_SKIP_PIP=1 so a
 # launch stays off the network. On this base it adds loguru.
 RUN pip3 install --no-cache-dir -r /workspace/Primus/requirements-maxdiffusion.txt
+
+# After Primus's requirements on purpose: requirements-maxdiffusion.txt pins
+# transformers==4.57.3, so upgrading any earlier just gets downgraded straight
+# back onto the CVEs. The upgrade also pulls huggingface_hub 1.x over the base's
+# 0.36.2, which is why the compat patch renames use_auth_token -> token.
+#
+# torchax goes in with --no-deps, or it pulls its own torch and jax over the
+# ROCm builds this base ships. It is version-pinned because it dispatches
+# against private torch overloads: 0.0.13 imports cleanly on this base's torch
+# 2.12.0, but breaks on torch >= 2.14, which dropped the Dimname overloads it
+# references at import time.
+RUN pip3 install --no-cache-dir "transformers>=5.10.0" && \
+    pip3 install --no-cache-dir --no-deps "torchax==0.0.13"
+
+# Ship a vulnerable image never again silently: fail the build if anything above
+# reorders, or adds another requirements file that pins transformers back down.
+RUN python3 -c "import transformers; from packaging.version import Version; \
+v = Version(transformers.__version__); \
+assert v >= Version('5.10.0'), f'transformers {v} still carries CVE-2026-4372, CVE-2026-5241 and CVE-2026-9856'; \
+print('transformers', v, 'OK')"
 
 RUN pip3 list 2>/dev/null || true

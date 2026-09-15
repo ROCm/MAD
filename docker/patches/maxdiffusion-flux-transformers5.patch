@@ -1,0 +1,862 @@
+diff --git a/src/maxdiffusion/checkpointing/flux_checkpointer.py b/src/maxdiffusion/checkpointing/flux_checkpointer.py
+index 78ad000b..c7c03d42 100644
+--- a/src/maxdiffusion/checkpointing/flux_checkpointer.py
++++ b/src/maxdiffusion/checkpointing/flux_checkpointer.py
+@@ -30,7 +30,10 @@ from maxdiffusion import (
+ from maxdiffusion.models.flux.transformers.transformer_flux_flax import FluxTransformer2DModel
+ from ..pipelines.flux.flux_pipeline import FluxPipeline
+ 
+-from transformers import (CLIPTokenizer, FlaxCLIPTextModel, FlaxT5EncoderModel, AutoTokenizer)
++from maxdiffusion.models.flux.text_encoders.torchax_text_encoders import (
++    load_clip_encoder_and_tokenizer,
++    load_t5_encoder_and_tokenizer,
++)
+ 
+ from maxdiffusion.checkpointing.checkpointing_utils import (create_orbax_checkpoint_manager)
+ from maxdiffusion.models.flux.util import load_flow_model
+@@ -187,12 +190,8 @@ class FluxCheckpointer(ABC):
+       context = nullcontext()
+ 
+     with context:
+-      clip_encoder = FlaxCLIPTextModel.from_pretrained(self.config.clip_model_name_or_path, dtype=self.config.weights_dtype)
+-      clip_tokenizer = CLIPTokenizer.from_pretrained(self.config.clip_model_name_or_path, max_length=77, use_fast=True)
+-      t5_encoder = FlaxT5EncoderModel.from_pretrained(self.config.t5xxl_model_name_or_path, dtype=self.config.weights_dtype)
+-      t5_tokenizer = AutoTokenizer.from_pretrained(
+-          self.config.t5xxl_model_name_or_path, model_max_length=self.config.max_sequence_length, use_fast=True
+-      )
++      clip_encoder, clip_tokenizer = load_clip_encoder_and_tokenizer(self.config)
++      t5_encoder, t5_tokenizer = load_t5_encoder_and_tokenizer(self.config)
+ 
+       vae, vae_params = FlaxAutoencoderKL.from_pretrained(
+           self.config.pretrained_model_name_or_path,
+@@ -251,16 +250,8 @@ class FluxCheckpointer(ABC):
+         context = nullcontext()
+ 
+       with context:
+-        clip_encoder = FlaxCLIPTextModel.from_pretrained(
+-            self.config.clip_model_name_or_path, dtype=self.config.weights_dtype
+-        )
+-        clip_tokenizer = CLIPTokenizer.from_pretrained(self.config.clip_model_name_or_path, max_length=77, use_fast=True)
+-        t5_encoder = FlaxT5EncoderModel.from_pretrained(
+-            self.config.t5xxl_model_name_or_path, dtype=self.config.weights_dtype
+-        )
+-        t5_tokenizer = AutoTokenizer.from_pretrained(
+-            self.config.t5xxl_model_name_or_path, model_max_length=self.config.max_sequence_length, use_fast=True
+-        )
++        clip_encoder, clip_tokenizer = load_clip_encoder_and_tokenizer(self.config)
++        t5_encoder, t5_tokenizer = load_t5_encoder_and_tokenizer(self.config)
+ 
+         vae = FlaxAutoencoderKL.from_config(
+             model_configs[0]["vae_config"],
+diff --git a/src/maxdiffusion/configs/base_flux_dev.yml b/src/maxdiffusion/configs/base_flux_dev.yml
+index 7a508095..693d63b3 100644
+--- a/src/maxdiffusion/configs/base_flux_dev.yml
++++ b/src/maxdiffusion/configs/base_flux_dev.yml
+@@ -28,8 +28,14 @@ save_config_to_gcs: False
+ log_period: 100
+ 
+ pretrained_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
+-clip_model_name_or_path: 'ariG23498/clip-vit-large-patch14-text-flax'
+-t5xxl_model_name_or_path: 'ariG23498/t5-v1-1-xxl-flax'
++# The text encoders are the PyTorch checkpoints, run under JAX through Torchax:
++# transformers 5 ships no Flax implementations.
++clip_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
++clip_model_subfolder: 'text_encoder'
++clip_tokenizer_subfolder: 'tokenizer'
++t5xxl_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
++t5xxl_model_subfolder: 'text_encoder_2'
++t5xxl_tokenizer_subfolder: 'tokenizer_2'
+ 
+ # Flux params
+ flux_name: "flux-dev"
+diff --git a/src/maxdiffusion/configs/base_flux_dev_multi_res.yml b/src/maxdiffusion/configs/base_flux_dev_multi_res.yml
+index 1aba7431..dcb414b7 100644
+--- a/src/maxdiffusion/configs/base_flux_dev_multi_res.yml
++++ b/src/maxdiffusion/configs/base_flux_dev_multi_res.yml
+@@ -28,8 +28,14 @@ save_config_to_gcs: False
+ log_period: 100
+ 
+ pretrained_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
+-clip_model_name_or_path: 'ariG23498/clip-vit-large-patch14-text-flax'
+-t5xxl_model_name_or_path: 'ariG23498/t5-v1-1-xxl-flax'
++# The text encoders are the PyTorch checkpoints, run under JAX through Torchax:
++# transformers 5 ships no Flax implementations.
++clip_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
++clip_model_subfolder: 'text_encoder'
++clip_tokenizer_subfolder: 'tokenizer'
++t5xxl_model_name_or_path: 'black-forest-labs/FLUX.1-dev'
++t5xxl_model_subfolder: 'text_encoder_2'
++t5xxl_tokenizer_subfolder: 'tokenizer_2'
+ 
+ # Flux params
+ flux_name: "flux-dev"
+diff --git a/src/maxdiffusion/configs/base_flux_schnell.yml b/src/maxdiffusion/configs/base_flux_schnell.yml
+index 9ae39971..d9952fa4 100644
+--- a/src/maxdiffusion/configs/base_flux_schnell.yml
++++ b/src/maxdiffusion/configs/base_flux_schnell.yml
+@@ -28,8 +28,14 @@ save_config_to_gcs: False
+ log_period: 100
+ 
+ pretrained_model_name_or_path: 'black-forest-labs/FLUX.1-schnell'
+-clip_model_name_or_path: 'ariG23498/clip-vit-large-patch14-text-flax'
+-t5xxl_model_name_or_path: 'ariG23498/t5-v1-1-xxl-flax'
++# The text encoders are the PyTorch checkpoints, run under JAX through Torchax:
++# transformers 5 ships no Flax implementations.
++clip_model_name_or_path: 'black-forest-labs/FLUX.1-schnell'
++clip_model_subfolder: 'text_encoder'
++clip_tokenizer_subfolder: 'tokenizer'
++t5xxl_model_name_or_path: 'black-forest-labs/FLUX.1-schnell'
++t5xxl_model_subfolder: 'text_encoder_2'
++t5xxl_tokenizer_subfolder: 'tokenizer_2'
+ 
+ # Flux params
+ flux_name: "flux-schnell"
+diff --git a/src/maxdiffusion/generate_flux.py b/src/maxdiffusion/generate_flux.py
+index 28c94f19..2dd2d224 100644
+--- a/src/maxdiffusion/generate_flux.py
++++ b/src/maxdiffusion/generate_flux.py
+@@ -29,13 +29,18 @@ import flax.linen as nn
+ from chex import Array
+ from einops import rearrange
+ from flax.linen import partitioning as nn_partitioning
+-from transformers import (CLIPTokenizer, FlaxCLIPTextModel, T5EncoderModel, FlaxT5EncoderModel, AutoTokenizer)
++from transformers import (CLIPTokenizer, AutoTokenizer)
+ 
+ from maxdiffusion import FlaxAutoencoderKL, pyconfig, max_logging
++from maxdiffusion.models.flux.text_encoders.torchax_text_encoders import (
++    TorchaxCLIPTextEncoder,
++    TorchaxT5TextEncoder,
++    load_clip_encoder_and_tokenizer,
++    load_t5_encoder_and_tokenizer,
++)
+ from maxdiffusion.models.flux.transformers.transformer_flux_flax import FluxTransformer2DModel
+ from maxdiffusion.train_utils import transformer_engine_context
+ from maxdiffusion.max_utils import (
+-    device_put_replicated,
+     get_memory_allocations,
+     create_device_mesh,
+     get_flash_block_sizes,
+@@ -193,7 +198,7 @@ def prepare_latents(
+ 
+ 
+ def get_clip_prompt_embeds(
+-    prompt: Union[str, List[str]], num_images_per_prompt: int, tokenizer: CLIPTokenizer, text_encoder: FlaxCLIPTextModel
++    prompt: Union[str, List[str]], num_images_per_prompt: int, tokenizer: CLIPTokenizer, text_encoder: TorchaxCLIPTextEncoder
+ ):
+   prompt = [prompt] if isinstance(prompt, str) else prompt
+   batch_size = len(prompt)
+@@ -207,10 +212,9 @@ def get_clip_prompt_embeds(
+       return_tensors="np",
+   )
+ 
+-  text_input_ids = text_inputs.input_ids
++  text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
+ 
+-  prompt_embeds = text_encoder(text_input_ids, params=text_encoder.params, train=False)
+-  prompt_embeds = prompt_embeds.pooler_output
++  prompt_embeds = text_encoder(text_input_ids)
+   prompt_embeds = jnp.tile(prompt_embeds, (batch_size * num_images_per_prompt, 1))
+   return prompt_embeds
+ 
+@@ -219,7 +223,7 @@ def get_t5_prompt_embeds(
+     prompt: Union[str, List[str]],
+     num_images_per_prompt: int,
+     tokenizer: AutoTokenizer,
+-    text_encoder: T5EncoderModel,
++    text_encoder: TorchaxT5TextEncoder,
+     max_sequence_length: int = 512,
+ ):
+   prompt = [prompt] if isinstance(prompt, str) else prompt
+@@ -233,10 +237,8 @@ def get_t5_prompt_embeds(
+       padding="max_length",
+       return_tensors="np",
+   )
+-  text_input_ids = text_inputs.input_ids
+-  prompt_embeds = text_encoder(text_input_ids, attention_mask=None, output_hidden_states=False)["last_hidden_state"]
+-  dtype = text_encoder.dtype
+-  prompt_embeds = prompt_embeds.astype(dtype)
++  text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
++  prompt_embeds = text_encoder(text_input_ids)
+   _, seq_len, _ = prompt_embeds.shape
+   # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
+   prompt_embeds = jnp.tile(prompt_embeds, (1, num_images_per_prompt, 1))
+@@ -248,9 +250,9 @@ def encode_prompt(
+     prompt: Union[str, List[str]],
+     prompt_2: Union[str, List[str]],
+     clip_tokenizer: CLIPTokenizer,
+-    clip_text_encoder: FlaxCLIPTextModel,
++    clip_text_encoder: TorchaxCLIPTextEncoder,
+     t5_tokenizer: AutoTokenizer,
+-    t5_text_encoder: T5EncoderModel,
++    t5_text_encoder: TorchaxT5TextEncoder,
+     num_images_per_prompt: int = 1,
+     max_sequence_length: int = 512,
+ ):
+@@ -328,24 +330,12 @@ def run(config):
+     )
+ 
+     # LOAD TEXT ENCODERS
+-    clip_text_encoder = FlaxCLIPTextModel.from_pretrained(
+-        config.pretrained_model_name_or_path, subfolder="text_encoder", from_pt=True, dtype=config.weights_dtype
+-    )
+-    clip_tokenizer = CLIPTokenizer.from_pretrained(
+-        config.pretrained_model_name_or_path, subfolder="tokenizer", dtype=config.weights_dtype
+-    )
+-
+-    t5_encoder = FlaxT5EncoderModel.from_pretrained(config.t5xxl_model_name_or_path, dtype=config.weights_dtype)
+-    t5_tokenizer = AutoTokenizer.from_pretrained(
+-        config.t5xxl_model_name_or_path, max_length=config.max_sequence_length, use_fast=True
+-    )
++    clip_text_encoder, clip_tokenizer = load_clip_encoder_and_tokenizer(config)
++    t5_encoder, t5_tokenizer = load_t5_encoder_and_tokenizer(config)
+ 
+     encoders_sharding = NamedSharding(mesh, P())
+-    partial_device_put_replicated = functools.partial(device_put_replicated, sharding=encoders_sharding)
+-    clip_text_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), clip_text_encoder.params)
+-    clip_text_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, clip_text_encoder.params)
+-    t5_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), t5_encoder.params)
+-    t5_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, t5_encoder.params)
++    clip_text_encoder.place_params(encoders_sharding)
++    t5_encoder.place_params(encoders_sharding)
+ 
+     prompt_embeds, pooled_prompt_embeds, text_ids = encode_prompt(
+         prompt=config.prompt,
+@@ -379,8 +369,7 @@ def run(config):
+     pooled_prompt_embeds = jax.device_put(pooled_prompt_embeds, data_sharding)
+ 
+     if config.offload_encoders:
+-      cpus = jax.devices("cpu")
+-      t5_encoder.params = jax.device_put(t5_encoder.params, device=cpus[0])
++      t5_encoder.offload_params()
+ 
+     get_memory_allocations()
+     # evaluate shapes
+diff --git a/src/maxdiffusion/generate_flux_multi_res.py b/src/maxdiffusion/generate_flux_multi_res.py
+index 33179295..39604a30 100644
+--- a/src/maxdiffusion/generate_flux_multi_res.py
++++ b/src/maxdiffusion/generate_flux_multi_res.py
+@@ -28,12 +28,17 @@ import jax.numpy as jnp
+ import flax.linen as nn
+ from chex import Array
+ from flax.linen import partitioning as nn_partitioning
+-from transformers import (CLIPTokenizer, FlaxCLIPTextModel, T5EncoderModel, FlaxT5EncoderModel, AutoTokenizer)
++from transformers import (CLIPTokenizer, AutoTokenizer)
+ 
+ from maxdiffusion import FlaxAutoencoderKL, pyconfig, max_logging
++from maxdiffusion.models.flux.text_encoders.torchax_text_encoders import (
++    TorchaxCLIPTextEncoder,
++    TorchaxT5TextEncoder,
++    load_clip_encoder_and_tokenizer,
++    load_t5_encoder_and_tokenizer,
++)
+ from maxdiffusion.models.flux.transformers.transformer_flux_flax import FluxTransformer2DModel
+ from maxdiffusion.max_utils import (
+-    device_put_replicated,
+     get_memory_allocations,
+     create_device_mesh,
+     get_flash_block_sizes,
+@@ -225,7 +230,7 @@ def tokenize_clip(prompt: Union[str, List[str]], tokenizer: CLIPTokenizer):
+ 
+ 
+ def get_clip_prompt_embeds(
+-    prompt: Union[str, List[str]], num_images_per_prompt: int, tokenizer: CLIPTokenizer, text_encoder: FlaxCLIPTextModel
++    prompt: Union[str, List[str]], num_images_per_prompt: int, tokenizer: CLIPTokenizer, text_encoder: TorchaxCLIPTextEncoder
+ ):
+   prompt = [prompt] if isinstance(prompt, str) else prompt
+   batch_size = len(prompt)
+@@ -239,10 +244,9 @@ def get_clip_prompt_embeds(
+       return_tensors="np",
+   )
+ 
+-  text_input_ids = text_inputs.input_ids
++  text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
+ 
+-  prompt_embeds = text_encoder(text_input_ids, params=text_encoder.params, train=False)
+-  prompt_embeds = prompt_embeds.pooler_output
++  prompt_embeds = text_encoder(text_input_ids)
+   prompt_embeds = jnp.tile(prompt_embeds, (batch_size * num_images_per_prompt, 1))
+   return prompt_embeds
+ 
+@@ -265,7 +269,7 @@ def get_t5_prompt_embeds(
+     prompt: Union[str, List[str]],
+     num_images_per_prompt: int,
+     tokenizer: AutoTokenizer,
+-    text_encoder: T5EncoderModel,
++    text_encoder: TorchaxT5TextEncoder,
+     max_sequence_length: int = 512,
+ ):
+   prompt = [prompt] if isinstance(prompt, str) else prompt
+@@ -279,10 +283,8 @@ def get_t5_prompt_embeds(
+       padding="max_length",
+       return_tensors="np",
+   )
+-  text_input_ids = text_inputs.input_ids
+-  prompt_embeds = text_encoder(text_input_ids, attention_mask=None, output_hidden_states=False)["last_hidden_state"]
+-  dtype = text_encoder.dtype
+-  prompt_embeds = prompt_embeds.astype(dtype)
++  text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
++  prompt_embeds = text_encoder(text_input_ids)
+   _, seq_len, _ = prompt_embeds.shape
+   # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
+   prompt_embeds = jnp.tile(prompt_embeds, (1, num_images_per_prompt, 1))
+@@ -294,9 +296,9 @@ def encode_prompt(
+     prompt: Union[str, List[str]],
+     prompt_2: Union[str, List[str]],
+     clip_tokenizer: CLIPTokenizer,
+-    clip_text_encoder: FlaxCLIPTextModel,
++    clip_text_encoder: TorchaxCLIPTextEncoder,
+     t5_tokenizer: AutoTokenizer,
+-    t5_text_encoder: T5EncoderModel,
++    t5_text_encoder: TorchaxT5TextEncoder,
+     num_images_per_prompt: int = 1,
+     max_sequence_length: int = 512,
+ ):
+@@ -365,24 +367,12 @@ def run(config):
+   num_channels_latents = transformer.in_channels // 4
+ 
+   # LOAD TEXT ENCODERS
+-  clip_text_encoder = FlaxCLIPTextModel.from_pretrained(
+-      config.pretrained_model_name_or_path, subfolder="text_encoder", from_pt=True, dtype=config.weights_dtype
+-  )
+-  clip_tokenizer = CLIPTokenizer.from_pretrained(
+-      config.pretrained_model_name_or_path, subfolder="tokenizer", dtype=config.weights_dtype
+-  )
+-
+-  t5_encoder = FlaxT5EncoderModel.from_pretrained(config.t5xxl_model_name_or_path, dtype=config.weights_dtype)
+-  t5_tokenizer = AutoTokenizer.from_pretrained(
+-      config.t5xxl_model_name_or_path, max_length=config.max_sequence_length, use_fast=True
+-  )
++  clip_text_encoder, clip_tokenizer = load_clip_encoder_and_tokenizer(config)
++  t5_encoder, t5_tokenizer = load_t5_encoder_and_tokenizer(config)
+ 
+   encoders_sharding = NamedSharding(mesh, P())
+-  partial_device_put_replicated = functools.partial(device_put_replicated, sharding=encoders_sharding)
+-  clip_text_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), clip_text_encoder.params)
+-  clip_text_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, clip_text_encoder.params)
+-  t5_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), t5_encoder.params)
+-  t5_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, t5_encoder.params)
++  clip_text_encoder.place_params(encoders_sharding)
++  t5_encoder.place_params(encoders_sharding)
+ 
+   def validate_inputs(latents, latent_image_ids, prompt_embeds, text_ids, timesteps, guidance, pooled_prompt_embeds):
+     print("latents.shape: ", latents.shape, latents.dtype)
+@@ -460,7 +450,7 @@ def run(config):
+     for _ in range(2):
+       s0 = time.perf_counter()
+       if config.offload_encoders:
+-        t5_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, t5_encoder.params)
++        t5_encoder.place_params(encoders_sharding)
+         max_logging.log(f"Moving encoder to TPU time: {(time.perf_counter() - s0)}")
+       prompt_embeds, pooled_prompt_embeds, text_ids = encode_prompt(
+           prompt=config.prompt,
+@@ -474,8 +464,7 @@ def run(config):
+       )
+       if config.offload_encoders:
+         s1 = time.perf_counter()
+-        cpus = jax.devices("cpu")
+-        t5_encoder.params = jax.device_put(t5_encoder.params, device=cpus[0])
++        t5_encoder.offload_params()
+         max_logging.log(f"Text encoding offload time: {(time.perf_counter() - s1)}")
+       text_encoding_time_final = time.perf_counter() - s0
+       max_logging.log(f"text encoding time: {text_encoding_time_final}")
+diff --git a/src/maxdiffusion/models/flux/text_encoders/__init__.py b/src/maxdiffusion/models/flux/text_encoders/__init__.py
+new file mode 100644
+index 00000000..11f31009
+--- /dev/null
++++ b/src/maxdiffusion/models/flux/text_encoders/__init__.py
+@@ -0,0 +1,15 @@
++"""
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++     https://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++"""
+diff --git a/src/maxdiffusion/models/flux/text_encoders/torchax_text_encoders.py b/src/maxdiffusion/models/flux/text_encoders/torchax_text_encoders.py
+new file mode 100644
+index 00000000..78be4fec
+--- /dev/null
++++ b/src/maxdiffusion/models/flux/text_encoders/torchax_text_encoders.py
+@@ -0,0 +1,168 @@
++# Copyright 2026 Google LLC
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#      https://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""FLUX text encoders (CLIP-L, T5-XXL) running under JAX through Torchax.
++
++transformers dropped its Flax implementations in v5, so FLUX loads the
++PyTorch encoders and traces them into JAX here, the same way LTX2 wraps
++Gemma 3 and WAN wraps UMT5. Both encoders are frozen: training only calls
++them to precompute prompt embeddings before the transformer sees a batch.
++"""
++
++from typing import Optional, Tuple
++
++import jax
++import jax.numpy as jnp
++import torch
++from torchax import default_env, interop
++from transformers import AutoTokenizer, CLIPTextModel, CLIPTokenizer, T5EncoderModel
++
++CLIP_TOKENIZER_MAX_LENGTH = 77
++
++TORCH_DTYPE_MAP = {
++    "bfloat16": torch.bfloat16,
++    "float16": torch.float16,
++    "float32": torch.float32,
++}
++
++
++def _torch_dtype(jax_dtype) -> torch.dtype:
++  name = jax_dtype.name if hasattr(jax_dtype, "name") else str(jax_dtype)
++  if name not in TORCH_DTYPE_MAP:
++    raise ValueError(f"Unsupported text encoder dtype: {name}. Supported values are: {list(TORCH_DTYPE_MAP.keys())}")
++  return TORCH_DTYPE_MAP[name]
++
++
++class _TorchaxTextEncoder(interop.JittableModule):
++  """Common Torchax plumbing for the frozen FLUX text encoders."""
++
++  def __init__(self, model: torch.nn.Module, jax_dtype: jnp.dtype):
++    super().__init__(model)
++    self.jax_dtype = jax_dtype
++
++  @classmethod
++  def from_torch(cls, model: torch.nn.Module, jax_dtype: jnp.dtype) -> "_TorchaxTextEncoder":
++    model.eval()
++    with default_env():
++      return cls(model.to("jax"), jax_dtype)
++
++  def place_params(self, device_or_sharding) -> None:
++    """Move the frozen weights onto `device_or_sharding`.
++
++    Torchax holds the weights as torch views over JAX arrays, so the placement
++    goes through `jax_view`/`torch_view`. A `Sharding` target is built with
++    `make_array_from_callback` (as `max_utils.device_put_replicated` does),
++    because each host only holds its own full copy of these weights and
++    `device_put` cannot span non-addressable devices.
++    """
++
++    def place(leaf):
++      if isinstance(device_or_sharding, jax.sharding.Sharding):
++        return jax.make_array_from_callback(leaf.shape, device_or_sharding, lambda index: leaf[index])
++      return jax.device_put(leaf, device_or_sharding)
++
++    self.params = interop.torch_view(jax.tree_util.tree_map(place, interop.jax_view(self.params)))
++
++  def offload_params(self) -> None:
++    """Park the weights in host memory until the next encode call."""
++    self.place_params(jax.devices("cpu")[0])
++
++
++class TorchaxCLIPTextEncoder(_TorchaxTextEncoder):
++  """Wraps `transformers.CLIPTextModel`, returning FLUX's pooled embedding."""
++
++  def __call__(self, input_ids: jax.Array) -> jax.Array:
++    with default_env():
++      pooler_output = self.functional_call(
++          self._pooler_output,
++          params=self.params,
++          buffers=self.buffers,
++          input_ids=interop.torch_view(input_ids),
++      )
++    return interop.jax_view(pooler_output).astype(self.jax_dtype)
++
++  @staticmethod
++  def _pooler_output(model, input_ids):
++    # Returning the tensor rather than the output dataclass keeps the result a
++    # plain pytree that `interop.jax_view` can convert.
++    return model(input_ids=input_ids).pooler_output
++
++
++class TorchaxT5TextEncoder(_TorchaxTextEncoder):
++  """Wraps `transformers.T5EncoderModel`, returning the last hidden state."""
++
++  def __call__(self, input_ids: jax.Array, attention_mask: Optional[jax.Array] = None) -> jax.Array:
++    with default_env():
++      last_hidden_state = self.functional_call(
++          self._last_hidden_state,
++          params=self.params,
++          buffers=self.buffers,
++          input_ids=interop.torch_view(input_ids),
++          attention_mask=None if attention_mask is None else interop.torch_view(attention_mask),
++      )
++    return interop.jax_view(last_hidden_state).astype(self.jax_dtype)
++
++  @staticmethod
++  def _last_hidden_state(model, input_ids, attention_mask):
++    return model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
++
++
++def _optional_subfolder(config, key) -> str:
++  """Read a subfolder key that a config predating the PyTorch weights may not carry.
++
++  pyconfig raises ValueError for a key it does not hold, which getattr's default
++  cannot absorb, so an older config would fail here rather than fall back to the
++  repository root.
++  """
++  try:
++    return getattr(config, key) or ""
++  except (AttributeError, KeyError, ValueError):
++    return ""
++
++
++def load_clip_encoder_and_tokenizer(config) -> Tuple[TorchaxCLIPTextEncoder, CLIPTokenizer]:
++  """Load FLUX's CLIP-L text encoder and its tokenizer from PyTorch weights."""
++  subfolder = _optional_subfolder(config, "clip_model_subfolder")
++  # `dtype` rather than the deprecated `torch_dtype`: transformers 5 documents
++  # only the former. Eager attention keeps the graph traceable under Torchax.
++  encoder = CLIPTextModel.from_pretrained(
++      config.clip_model_name_or_path,
++      subfolder=subfolder,
++      dtype=_torch_dtype(config.weights_dtype),
++      attn_implementation="eager",
++  )
++  tokenizer = CLIPTokenizer.from_pretrained(
++      config.clip_model_name_or_path,
++      subfolder=_optional_subfolder(config, "clip_tokenizer_subfolder"),
++      model_max_length=CLIP_TOKENIZER_MAX_LENGTH,
++  )
++  return TorchaxCLIPTextEncoder.from_torch(encoder, config.weights_dtype), tokenizer
++
++
++def load_t5_encoder_and_tokenizer(config) -> Tuple[TorchaxT5TextEncoder, AutoTokenizer]:
++  """Load FLUX's T5-XXL text encoder and its tokenizer from PyTorch weights."""
++  subfolder = _optional_subfolder(config, "t5xxl_model_subfolder")
++  encoder = T5EncoderModel.from_pretrained(
++      config.t5xxl_model_name_or_path,
++      subfolder=subfolder,
++      dtype=_torch_dtype(config.weights_dtype),
++      attn_implementation="eager",
++  )
++  tokenizer = AutoTokenizer.from_pretrained(
++      config.t5xxl_model_name_or_path,
++      subfolder=_optional_subfolder(config, "t5xxl_tokenizer_subfolder"),
++      model_max_length=config.max_sequence_length,
++      use_fast=True,
++  )
++  return TorchaxT5TextEncoder.from_torch(encoder, config.weights_dtype), tokenizer
+diff --git a/src/maxdiffusion/pipelines/flux/flux_pipeline.py b/src/maxdiffusion/pipelines/flux/flux_pipeline.py
+index 15b2c4f5..d8887de3 100644
+--- a/src/maxdiffusion/pipelines/flux/flux_pipeline.py
++++ b/src/maxdiffusion/pipelines/flux/flux_pipeline.py
+@@ -18,7 +18,7 @@ from typing import List, Optional, Union, Callable
+ import jax
+ import jax.numpy as jnp
+ import math
+-from transformers import (CLIPTokenizer, FlaxCLIPTextModel, FlaxT5EncoderModel, AutoTokenizer)
++from transformers import (CLIPTokenizer, AutoTokenizer)
+ from einops import rearrange
+ from jax.typing import DTypeLike
+ from chex import Array
+@@ -28,6 +28,7 @@ from flax.linen import partitioning as nn_partitioning
+ from maxdiffusion.utils import logging
+ 
+ from ...models import FlaxAutoencoderKL
++from ...models.flux.text_encoders.torchax_text_encoders import (TorchaxCLIPTextEncoder, TorchaxT5TextEncoder)
+ from ...schedulers import (FlaxEulerDiscreteScheduler)
+ from ..pipeline_flax_utils import FlaxDiffusionPipeline
+ from maxdiffusion.models.flux.transformers.transformer_flux_flax import FluxTransformer2DModel
+@@ -43,10 +44,10 @@ class FluxPipeline(FlaxDiffusionPipeline):
+ 
+   def __init__(
+       self,
+-      t5_encoder: FlaxCLIPTextModel,
+-      clip_encoder: FlaxCLIPTextModel,
++      t5_encoder: TorchaxT5TextEncoder,
++      clip_encoder: TorchaxCLIPTextEncoder,
+       vae: FlaxAutoencoderKL,
+-      t5_tokenizer: FlaxT5EncoderModel,
++      t5_tokenizer: AutoTokenizer,
+       clip_tokenizer: CLIPTokenizer,
+       flux: FluxTransformer2DModel,
+       scheduler: FlaxEulerDiscreteScheduler,
+@@ -163,7 +164,7 @@ class FluxPipeline(FlaxDiffusionPipeline):
+       prompt: Union[str, List[str]],
+       num_images_per_prompt: int,
+       tokenizer: CLIPTokenizer,
+-      text_encoder: FlaxCLIPTextModel,
++      text_encoder: TorchaxCLIPTextEncoder,
+   ):
+     prompt = [prompt] if isinstance(prompt, str) else prompt
+     text_inputs = tokenizer(
+@@ -176,10 +177,9 @@ class FluxPipeline(FlaxDiffusionPipeline):
+         return_tensors="np",
+     )
+ 
+-    text_input_ids = text_inputs.input_ids
++    text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
+ 
+-    prompt_embeds = text_encoder(text_input_ids, params=text_encoder.params, train=False)
+-    prompt_embeds = prompt_embeds.pooler_output
++    prompt_embeds = text_encoder(text_input_ids)
+     prompt_embeds = jnp.tile(prompt_embeds, (num_images_per_prompt, 1))
+     return prompt_embeds
+ 
+@@ -188,7 +188,7 @@ class FluxPipeline(FlaxDiffusionPipeline):
+       prompt: Union[str, List[str]],
+       num_images_per_prompt: int,
+       tokenizer: AutoTokenizer,
+-      text_encoder: FlaxT5EncoderModel,
++      text_encoder: TorchaxT5TextEncoder,
+       max_sequence_length: int = 512,
+       encode_in_batches=False,
+       encode_batch_size=None,
+@@ -205,27 +205,22 @@ class FluxPipeline(FlaxDiffusionPipeline):
+         padding="max_length",
+         return_tensors="np",
+     )
+-    text_input_ids = text_inputs.input_ids
++    text_input_ids = jnp.asarray(text_inputs.input_ids, dtype=jnp.int32)
+     if encode_in_batches:
+       prompt_embeds = None
+       for i in range(0, text_input_ids.shape[0], encode_batch_size):
+-        batch_prompt_embeds = text_encoder(
+-            text_input_ids[i : i + encode_batch_size], attention_mask=None, output_hidden_states=False
+-        )["last_hidden_state"]
++        batch_prompt_embeds = text_encoder(text_input_ids[i : i + encode_batch_size])
+         if prompt_embeds is None:
+           prompt_embeds = batch_prompt_embeds
+         else:
+           prompt_embeds = jnp.concatenate([prompt_embeds, batch_prompt_embeds])
+     else:
+-      prompt_embeds = text_encoder(text_input_ids, attention_mask=None, output_hidden_states=False)["last_hidden_state"]
++      prompt_embeds = text_encoder(text_input_ids)
+       _, seq_len, _ = prompt_embeds.shape
+       # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
+       prompt_embeds = jnp.tile(prompt_embeds, (1, num_images_per_prompt, 1))
+       prompt_embeds = jnp.reshape(prompt_embeds, (batch_size * num_images_per_prompt, seq_len, -1))
+ 
+-    dtype = text_encoder.dtype
+-    prompt_embeds = prompt_embeds.astype(dtype)
+-
+     return prompt_embeds
+ 
+   def encode_prompt(
+@@ -233,9 +228,9 @@ class FluxPipeline(FlaxDiffusionPipeline):
+       prompt: Union[str, List[str]],
+       prompt_2: Union[str, List[str]],
+       clip_tokenizer: CLIPTokenizer,
+-      clip_text_encoder: FlaxCLIPTextModel,
++      clip_text_encoder: TorchaxCLIPTextEncoder,
+       t5_tokenizer: AutoTokenizer,
+-      t5_text_encoder: FlaxT5EncoderModel,
++      t5_text_encoder: TorchaxT5TextEncoder,
+       num_images_per_prompt: int = 1,
+       max_sequence_length: int = 512,
+       encode_in_batches: bool = False,
+diff --git a/src/maxdiffusion/tests/flux_text_encoder_parity_test.py b/src/maxdiffusion/tests/flux_text_encoder_parity_test.py
+new file mode 100644
+index 00000000..c0822b6c
+--- /dev/null
++++ b/src/maxdiffusion/tests/flux_text_encoder_parity_test.py
+@@ -0,0 +1,117 @@
++"""
++Copyright 2026 Google LLC
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++     https://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++"""
++
++# Parity between eager PyTorch and the Torchax-traced FLUX text encoders. The
++# models here are small randomly-initialized stand-ins, so the test runs on CPU
++# without touching the hub: what is under test is the Torchax wrapper, not the
++# CLIP or T5 weights.
++
++import unittest
++
++import jax
++import jax.numpy as jnp
++import numpy as np
++import torch
++from absl.testing import absltest
++from transformers import CLIPTextConfig, CLIPTextModel, T5Config, T5EncoderModel
++
++from ..models.flux.text_encoders.torchax_text_encoders import TorchaxCLIPTextEncoder, TorchaxT5TextEncoder
++
++SEQ_LEN = 16
++BATCH_SIZE = 2
++VOCAB_SIZE = 99
++
++
++def _input_ids():
++  ids = np.random.default_rng(0).integers(3, VOCAB_SIZE, size=(BATCH_SIZE, SEQ_LEN), dtype=np.int32)
++  # CLIP pools at the EOS position, so every sequence needs one.
++  ids[:, -1] = 2
++  return ids
++
++
++def _tiny_clip_text_model():
++  torch.manual_seed(0)
++  config = CLIPTextConfig(
++      vocab_size=VOCAB_SIZE,
++      hidden_size=32,
++      intermediate_size=37,
++      num_hidden_layers=2,
++      num_attention_heads=4,
++      max_position_embeddings=SEQ_LEN,
++      bos_token_id=0,
++      pad_token_id=1,
++      eos_token_id=2,
++      attn_implementation="eager",
++  )
++  return CLIPTextModel(config).eval()
++
++
++def _tiny_t5_encoder_model():
++  torch.manual_seed(0)
++  config = T5Config(
++      vocab_size=VOCAB_SIZE,
++      d_model=32,
++      d_ff=37,
++      d_kv=8,
++      num_layers=2,
++      num_heads=4,
++      is_encoder_decoder=False,
++      attn_implementation="eager",
++  )
++  return T5EncoderModel(config).eval()
++
++
++class FluxTextEncoderParityTest(unittest.TestCase):
++  """Compares Torchax outputs against the eager PyTorch reference."""
++
++  def test_clip_pooled_output_matches_eager(self):
++    input_ids = _input_ids()
++    model = _tiny_clip_text_model()
++    with torch.no_grad():
++      expected = model(input_ids=torch.from_numpy(input_ids).long()).pooler_output.numpy()
++
++    encoder = TorchaxCLIPTextEncoder.from_torch(model, jnp.float32)
++    actual = encoder(jnp.asarray(input_ids, dtype=jnp.int32))
++
++    self.assertEqual(actual.shape, expected.shape)
++    np.testing.assert_allclose(np.asarray(actual), expected, atol=1e-4, rtol=1e-4)
++
++  def test_t5_last_hidden_state_matches_eager(self):
++    input_ids = _input_ids()
++    model = _tiny_t5_encoder_model()
++    with torch.no_grad():
++      expected = model(input_ids=torch.from_numpy(input_ids).long()).last_hidden_state.numpy()
++
++    encoder = TorchaxT5TextEncoder.from_torch(model, jnp.float32)
++    actual = encoder(jnp.asarray(input_ids, dtype=jnp.int32))
++
++    self.assertEqual(actual.shape, expected.shape)
++    np.testing.assert_allclose(np.asarray(actual), expected, atol=1e-4, rtol=1e-4)
++
++  def test_place_and_offload_params_preserve_outputs(self):
++    input_ids = jnp.asarray(_input_ids(), dtype=jnp.int32)
++    encoder = TorchaxT5TextEncoder.from_torch(_tiny_t5_encoder_model(), jnp.float32)
++    before = np.asarray(encoder(input_ids))
++
++    encoder.place_params(jax.devices()[0])
++    np.testing.assert_allclose(np.asarray(encoder(input_ids)), before, atol=1e-6, rtol=1e-6)
++
++    encoder.offload_params()
++    np.testing.assert_allclose(np.asarray(encoder(input_ids)), before, atol=1e-6, rtol=1e-6)
++
++
++if __name__ == "__main__":
++  absltest.main()
+diff --git a/src/maxdiffusion/tests/text_encoders_test.py b/src/maxdiffusion/tests/text_encoders_test.py
+index c91bca9a..aaa06ad7 100644
+--- a/src/maxdiffusion/tests/text_encoders_test.py
++++ b/src/maxdiffusion/tests/text_encoders_test.py
+@@ -19,14 +19,19 @@ import unittest
+ import pytest
+ from absl.testing import absltest
+ 
+-from transformers import CLIPTokenizer, FlaxCLIPTextModel
+-from transformers import T5TokenizerFast, FlaxT5EncoderModel
++import jax.numpy as jnp
++import torch
++from transformers import CLIPTokenizer, CLIPTextModel
++from transformers import T5TokenizerFast, T5EncoderModel
+ 
+ from ..generate_flux import get_clip_prompt_embeds, get_t5_prompt_embeds
++from ..models.flux.text_encoders.torchax_text_encoders import TorchaxCLIPTextEncoder, TorchaxT5TextEncoder
+ 
+ IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
+ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+ 
++FLUX_DEV = "black-forest-labs/FLUX.1-dev"
++
+ 
+ class TextEncoderTest(unittest.TestCase):
+   """Test text encoders"""
+@@ -36,9 +41,12 @@ class TextEncoderTest(unittest.TestCase):
+ 
+   @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Don't run smoke tests on Github Actions")
+   def test_flux_t5_text_encoder(self):
+-    text_encoder = FlaxT5EncoderModel.from_pretrained("ariG23498/t5-v1-1-xxl-flax")
++    text_encoder = TorchaxT5TextEncoder.from_torch(
++        T5EncoderModel.from_pretrained(FLUX_DEV, subfolder="text_encoder_2", dtype=torch.bfloat16),
++        jnp.bfloat16,
++    )
+ 
+-    tokenizer_2 = T5TokenizerFast.from_pretrained("ariG23498/t5-v1-1-xxl-flax")
++    tokenizer_2 = T5TokenizerFast.from_pretrained(FLUX_DEV, subfolder="tokenizer_2")
+ 
+     embeds = get_t5_prompt_embeds("A dog on a skateboard", 2, tokenizer_2, text_encoder)
+ 
+@@ -46,10 +54,11 @@ class TextEncoderTest(unittest.TestCase):
+ 
+   @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Don't run smoke tests on Github Actions")
+   def test_flux_clip_text_encoder(self):
+-    text_encoder = FlaxCLIPTextModel.from_pretrained(
+-        "black-forest-labs/FLUX.1-dev", subfolder="text_encoder", from_pt=True, dtype="bfloat16"
++    text_encoder = TorchaxCLIPTextEncoder.from_torch(
++        CLIPTextModel.from_pretrained(FLUX_DEV, subfolder="text_encoder", dtype=torch.bfloat16),
++        jnp.bfloat16,
+     )
+-    tokenizer = CLIPTokenizer.from_pretrained("black-forest-labs/FLUX.1-dev", subfolder="tokenizer", dtype="bfloat16")
++    tokenizer = CLIPTokenizer.from_pretrained(FLUX_DEV, subfolder="tokenizer")
+     embeds = get_clip_prompt_embeds("A cat riding a skateboard", 2, tokenizer, text_encoder)
+     assert embeds.shape == (2, 768)
+ 
+diff --git a/src/maxdiffusion/trainers/flux_trainer.py b/src/maxdiffusion/trainers/flux_trainer.py
+index 6cda5682..d738fa0e 100644
+--- a/src/maxdiffusion/trainers/flux_trainer.py
++++ b/src/maxdiffusion/trainers/flux_trainer.py
+@@ -88,11 +88,8 @@ class FluxTrainer(FluxCheckpointer):
+ 
+       # move params to accelerator
+       encoders_sharding = NamedSharding(self.mesh, P(None))
+-      partial_device_put_replicated = partial(max_utils.device_put_replicated, sharding=encoders_sharding)
+-      pipeline.clip_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), pipeline.clip_encoder.params)
+-      pipeline.clip_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, pipeline.clip_encoder.params)
+-      pipeline.t5_encoder.params = jax.tree_util.tree_map(lambda x: x.astype(jnp.bfloat16), pipeline.t5_encoder.params)
+-      pipeline.t5_encoder.params = jax.tree_util.tree_map(partial_device_put_replicated, pipeline.t5_encoder.params)
++      pipeline.clip_encoder.place_params(encoders_sharding)
++      pipeline.t5_encoder.place_params(encoders_sharding)
+ 
+       vae_state, vae_state_mesh_shardings = self.create_vae_state(
+           pipeline=pipeline, params=params, checkpoint_item_name=VAE_STATE_KEY, is_training=False
