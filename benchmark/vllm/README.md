@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.2.3
--   ✅ vLLM 0.28.0
+-   ✅ vLLM 0.29.0
 -   ✅ PyTorch 2.12.0 (2.12.0+git6bbd260)
 -   ✅ hipBLASLt 1.0
 
@@ -58,7 +58,7 @@ To override the benchmark configs, specify a certain benchmark to use, or add yo
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.28.0
+docker pull vllm/vllm-openai-rocm:v0.29.0
 ```
 
 ### MAD-integrated benchmarking
@@ -132,24 +132,6 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_qwen3.5-397b-a17b             | [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B) |
 | pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
 
->[!NOTE]
->`pyt_vllm_kimi-k3` is the one exception to the shared Docker image above. It builds from
->the model-specific `vllm/vllm-openai-rocm:kimi-k3` image via
->[docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile).
->It needs an 8x MI350X/MI355X (gfx950) node — the ~1680 GB minimum footprint does not fit a
->single 8x MI300X node — and the checkpoint is ~1.56 TB, so make sure `HF_HUB_CACHE` has room.
->It is deliberately not tagged `vllm_default`; run it explicitly:
->
->```sh
->madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output
->```
->
->The config tracks the [MI355X recipe profile](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x)
->for a text-only serving run, with two intentional deviations: MAD adds
->`--no-enable-prefix-caching` for benchmark hygiene (as it does for every model here), and the
->gsm8k accuracy stage is disabled because K3's always-on reasoning is returned inline over
->`/v1/completions` and exhausts the generation budget.
-
 
 ### Standalone benchmarking              
 -----------------------------
@@ -158,9 +140,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.28.0
+docker pull vllm/vllm-openai-rocm:v0.29.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.28.0
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.29.0
 ```
 
 >[!NOTE]
@@ -375,6 +357,9 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.29.0
+- Updated Kimi K3 to use upstream image
 
 v0.28.0
 - Added Cohere Command R7B and Command A+ to the extended benchmark suite
