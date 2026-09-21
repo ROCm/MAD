@@ -15,13 +15,16 @@ import glob
 import subprocess
 import sys
 
+# This file lives in scripts/jax-maxtext; Primus submodule is scripts/Primus
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.normpath(os.path.join(THIS_DIR, "..")))
+from jax_host_device import ARCH_SKIP_GPU, config_dir_allowed, detect_host_sku, log_sku_filter
+
 try:
     from madengine.utils.discover_models import CustomModel  # madengine v2
 except ImportError:
     from madengine.tools.discover_models import CustomModel  # madengine v1
 
-# This file lives in scripts/jax-maxtext; Primus submodule is scripts/Primus
-THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIMUS_ROOT = os.path.normpath(os.path.join(THIS_DIR, "..", "Primus"))
 FETCH_SCRIPT = os.path.normpath(os.path.join(THIS_DIR, "..", "..", "tools", "fetch_primus.sh"))
 CONFIGS_GLOB = os.path.join(PRIMUS_ROOT, "examples", "maxtext", "configs", "**", "*.yaml")
@@ -36,12 +39,6 @@ DOCKERFILE = "../../docker/primus_maxtext"
 # filename (the part before the first '-', e.g. "llama3.1_405B-fp8-pretrain" ->
 # "llama3.1_405B"). Override with JAX_MAXTEXT_INCLUDE_MULTINODE=1 to discover them.
 MULTINODE_MODELS = {"grok1", "llama3.1_405B", "mixtral_8x22B"}
-
-# Device -> GPU arch that should SKIP that device's configs (madengine skip_gpu_arch).
-# MI300X configs are tuned for gfx942 and skipped on gfx950; MI355X configs are tuned
-# for gfx950 and skipped on gfx942. So a single discovery works on both host types:
-# only the host-appropriate configs run, the others are recorded as SKIPPED.
-ARCH_SKIP_GPU = {"MI300X": "gfx950", "MI355X": "gfx942"}
 
 
 def _precision_from_name(short_name: str) -> str:
@@ -107,13 +104,17 @@ def list_models():
     if not _have_primus():
         return models
     include_multinode = os.environ.get("JAX_MAXTEXT_INCLUDE_MULTINODE", "") not in ("", "0")
+    sku = detect_host_sku()
+    log_sku_filter(sku)
     for yaml_path in sorted(glob.glob(CONFIGS_GLOB)):
         rel_path = os.path.relpath(yaml_path, PRIMUS_ROOT)
         # Path shape: examples/maxtext/configs/<arch>/<file>.yaml
         parts = rel_path.split(os.sep)
         if len(parts) < 5:
             continue
-        arch = parts[3]       # MI300X, MI355X, etc.
+        arch = parts[3]       # MI300X, MI325X, MI355X, etc.
+        if not config_dir_allowed(arch, sku):
+            continue
         short_name = os.path.splitext(os.path.basename(yaml_path))[0]
         # Skip multi-node-only models unless explicitly requested.
         base_model = short_name.split("-")[0]

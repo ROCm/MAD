@@ -26,9 +26,9 @@
 #################################################################################
 
 # Wrapper for Primus JAX/MaxDiffusion pretrain when run via madengine (local, SLURM, K8s).
-# Sets EXP from PRIMUS_CONFIG_PATH or --config_path, runs Primus examples/run_pretrain.sh
-# with BACKEND=MaxDiffusion, then extracts fps/tflops into primus_perf_output.csv for
-# madengine multiple_results. Same shape as scripts/jax-maxtext/run.sh.
+# Sets EXP from PRIMUS_CONFIG_PATH or --config_path, runs `primus-cli direct`
+# (AMD-AGI/Primus#999 retired examples/run_pretrain.sh), then extracts perf into
+# primus_perf_output.csv for madengine multiple_results. Same shape as jax-maxtext/run.sh.
 set -e
 
 # madengine invokes this as `cd run_directory && bash run.sh ...`.
@@ -36,23 +36,23 @@ RUN_DIR="$(pwd)"
 
 # Primus root: repo checkout, then image COPY / K8s ConfigMap extract, then env, then legacy paths.
 script_dir="$(cd "$(dirname "$0")" && pwd)"
-if [[ -f "$script_dir/../Primus/examples/run_pretrain.sh" ]]; then
+if [[ -f "$script_dir/../Primus/primus-cli" ]]; then
   export PRIMUS_ROOT="$(cd "$script_dir/../Primus" && pwd)"
-elif [[ -f "/workspace/Primus/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/workspace/Primus/primus-cli" ]]; then
   export PRIMUS_ROOT="/workspace/Primus"
-elif [[ -n "${PRIMUS_ROOT:-}" ]]; then
+elif [[ -n "${PRIMUS_ROOT:-}" && -f "${PRIMUS_ROOT}/primus-cli" ]]; then
   :
-elif [[ -f "/opt/primus/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/opt/primus/primus-cli" ]]; then
   export PRIMUS_ROOT="/opt/primus"
-elif [[ -f "/workspace/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/workspace/primus-cli" ]]; then
   export PRIMUS_ROOT="/workspace"
 else
-  echo "ERROR: Could not find Primus run_pretrain.sh. Set PRIMUS_ROOT or use a repo with scripts/Primus submodule." >&2
+  echo "ERROR: Could not find Primus primus-cli. Set PRIMUS_ROOT or use a repo with scripts/Primus checkout." >&2
   exit 1
 fi
 
-# EXP is required by run_pretrain.sh. --config_path must also be stripped from the
-# forwarded args: run_pretrain.sh appends leftovers to the training command and it is
+# EXP is the Primus YAML. --config_path must also be stripped from the
+# forwarded args: leftovers become primus-cli training overrides, and it is
 # not a valid MaxDiffusion flag.
 forward_args=()
 if [[ -n "${PRIMUS_CONFIG_PATH:-}" ]]; then
@@ -78,7 +78,7 @@ if [[ -z "$EXP" ]]; then
   exit 1
 fi
 
-# Makes run_pretrain.sh launch primus/cli train pretrain rather than torchrun.
+# Backend hint if the YAML has no framework field. Config path is what primus-cli uses.
 export BACKEND="MaxDiffusion"
 
 export MAXDIFFUSION_PATH="${MAXDIFFUSION_PATH:-/workspace/maxdiffusion}"
@@ -111,9 +111,9 @@ export HF_HOME="${HF_HOME:-/myworkspace/hf_cache}"
 mkdir -p "$RUN_DIR/output"
 export TRAIN_LOG="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 
-# The trainer writes per-step JSON metrics here (configs bind metrics_file to it). This is
-# the reliable perf source: the per-step stdout line does not survive the Primus launcher's
-# stdout handling. Parent of run_directory, so it outlives madengine's cleanup.
+# The trainer writes per-step JSON metrics here (configs bind metrics_file to it), including
+# Primus throughput scalars. Preferred over the step log. Parent of run_directory, so it
+# outlives madengine's cleanup.
 export PERF_METRICS_FILE="$RUN_DIR/../perf_metrics_$(basename "$EXP" .yaml).jsonl"
 rm -f "$PERF_METRICS_FILE"
 
@@ -123,11 +123,12 @@ rm -f "$PERF_METRICS_FILE"
 export PYTHONUNBUFFERED=1
 export PYTHONFAULTHANDLER=1
 
-# EXP paths are relative to PRIMUS_ROOT. No exec: the perf extractor runs after training.
+# Config paths are relative to PRIMUS_ROOT. No exec: the perf extractor runs after training.
 # The `||` is what keeps set -e from exiting here, so a failed run still gets parsed.
 cd "$PRIMUS_ROOT"
 exitcode=0
-bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "${forward_args[@]}" || exitcode=$?
+bash "$PRIMUS_ROOT/primus-cli" direct --log_file "$TRAIN_LOG" -- \
+  train pretrain --config "$EXP" "${forward_args[@]}" || exitcode=$?
 
 # madengine resolves multiple_results against its own CWD (the parent of run_directory)
 # and deletes run_directory before parsing perf, so the CSV must go to the parent.

@@ -111,8 +111,11 @@ export HF_HOME=/workspace/huggingface
 export ROCBLAS_USE_HIPBLASLT=1
 export DISABLE_ADDMM_CUDA_LT=0
 export HIP_FORCE_DEV_KERNARG=1
-export TORCH_NCCL_HIGH_PRIORITY=0
-export GPU_MAX_HW_QUEUES=8
+export HSA_ENABLE_SDMA="${HSA_ENABLE_SDMA:-1}"
+export HSA_NO_SCRATCH_RECLAIM="${HSA_NO_SCRATCH_RECLAIM:-1}"
+export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-2}"
+export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
+export TORCH_NCCL_HIGH_PRIORITY="${TORCH_NCCL_HIGH_PRIORITY:-1}"
 export WANDB_DISABLED=true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -196,7 +199,6 @@ if [[ "$TRAINING_MODE" == "pretrain" && "$MODEL_REPO" == "DLRM" ]]; then
 
 elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
     echo "[INFO] Executing post-training benchmark..."
-    export HSA_NO_SCRATCH_RECLAIM=1
 
     if [ "$MODEL_REPO" == "Flux" ]; then
       echo "[INFO] Benchmarking FLUX training"
@@ -233,7 +235,7 @@ elif [[ "$TRAINING_MODE" == "posttrain" ]]; then
       if [[ "$DEVICE" == "MI355X" || "$DEVICE" == "MI350X" ]]; then
         BATCH_SIZE=12
         python launcher.py train_args=stable-diffusion-xl \
-          +train_args.substitute_sdpa_with_flash_attn=false \
+          train_args.substitute_sdpa_with_flash_attn=false \
           accelerate_config.fsdp_config.fsdp_backward_prefetch=NO_PREFETCH \
           accelerate_config.fsdp_config.fsdp_sharding_strategy=SHARD_GRAD_OP \
           train_args.train_batch_size=$BATCH_SIZE |& tee $TRAIN_LOG

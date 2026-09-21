@@ -37,21 +37,21 @@
 # Check Primus out first with tools/fetch_primus.sh. It is gitignored here and baked from
 # the build context, which keeps git auth for a private repo out of the build. That script
 # initializes no submodules: third_party/maxdiffusion at the same commit is unpatched, and
-# run_pretrain.sh would select it over the base's tree if MAXDIFFUSION_PATH were ever unset.
+# prepare.py would select it over the base's tree if MAXDIFFUSION_PATH were ever unset.
 #
 # Build from the repo root, as madengine does for dockerfile paths containing "primus":
 #   docker build -f docker/primus_maxdiffusion.ubuntu.amd.Dockerfile .
 
 # madengine passes the base via docker_build_arg, which is how the v26.6 sweep put both
 # maxtext and maxdiffusion on one unified CI image so their numbers share a toolchain.
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.6
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.7
 FROM $BASE_DOCKER
 
 USER root
 ENV WORKSPACE_DIR=/workspace
 # The Primus repo root, not /workspace: run.sh resolves examples/ relative to it.
 ENV PRIMUS_ROOT=/workspace/Primus
-# Pin the base's patched tree; run_pretrain.sh would otherwise default to
+# Pin the base's patched tree; prepare.py would otherwise default to
 # $PRIMUS_ROOT/third_party/maxdiffusion and insert it at sys.path[0].
 ENV MAXDIFFUSION_PATH=/workspace/maxdiffusion
 # Transformer Engine must load only its JAX extension (torch is present too).
@@ -66,9 +66,9 @@ LABEL mad.launcher=primus
 RUN rm -rf /workspace/Primus
 COPY scripts/Primus/ /workspace/Primus/
 
-RUN test -f /workspace/Primus/examples/run_pretrain.sh
+RUN test -f /workspace/Primus/primus-cli
 RUN test -d /workspace/Primus/primus/backends/maxdiffusion \
-    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus main branch." >&2 && exit 1)
+    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus jax-maxtext-v26.7." >&2 && exit 1)
 
 # Prove the base's stack is really there, so a wrong base fails the build instead
 # of step 0 of a training run. The patch fixes a segfault on TE import order.

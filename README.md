@@ -13,7 +13,7 @@ Below are blueprints of supported models along with their documentation.
 |-----------|-------------|--------|
 | [**Kimi-K3 inference (vLLM / SGLang / ATOM)**](benchmark/kimi_k3/README.md) | Kimi-K3 (2.8T) day-0 inference on MI350X/MI355X across three frameworks | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
 | [**xDiT diffusion inference**](benchmark/xdit/README.md) | Diffusion Transformer inference using xDiT | FLUX.1, FLUX.1 Kontext, FLUX.2, FLUX.2 Klein, HunyuanVideo, HunyuanVideo 1.5, LTX-2, Stable Diffusion 3.5, Wan 2.1, Wan 2.2, Z-Image Turbo |
-| [**JAX MaxText training**](benchmark/jax_maxtext/README.md) | Train LLMs on AMD Instinct GPUs using JAX MaxText | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Mixtral-8x7B |
+| [**JAX training (MaxText + MaxDiffusion)**](benchmark/jax_maxtext/README.md) | Train LLMs and diffusion models on AMD Instinct GPUs using JAX, via Primus | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Gemma4 26B/31B, Mixtral-8x7B, Qwen3 14B/30B-A3B, FLUX.1-dev, WAN 2.1 1.3B/14B |
 | [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Kimi-K3, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
 | [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B, Kimi-K3 |
 | [**PyTorch training**](benchmark/pytorch_train/README.md) | Train LLMs on AMD Instinct GPUs using AMD's Primus | Llama 2/3/3.1/3.2/3.3/4, GPT-OSS 20B/120B, Qwen2/2.5/3, Flux, SDXL, DLRM, and others |

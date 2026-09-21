@@ -27,7 +27,6 @@
 import pandas as pd
 import argparse
 import csv
-import os
 
 parser = argparse.ArgumentParser(description='Convert pytorch train output format to MAD csv output format')
 parser.add_argument("--mode", type=str, help="pretrain or posttrain")
@@ -73,15 +72,23 @@ else:
     print(f"Supported models: DLRM (pretrain), {', '.join(SUPPORTED_DIFFUSION_MODELS)} (posttrain)")
     exit(1)
 
-if not os.path.exists(output_file) or os.stat(output_file).st_size == 0:
-    mode = 'w'
-else:
-    mode = 'a'
-with open(output_file, mode=mode, newline='') as file:
+with open(output_file, mode="w", newline="") as file:
     print("Preparing to write performance data...")
     print("Data: ", data)
-    writer = csv.DictWriter(file, fieldnames=['model','performance','metric', 'mode', 'precision', 'batch_size', 'seq_len', 'device', 'num_gpus'])
-    if mode == 'w':
-        writer.writeheader()
+    writer = csv.DictWriter(
+        file,
+        fieldnames=[
+            "model",
+            "performance",
+            "metric",
+            "mode",
+            "precision",
+            "batch_size",
+            "seq_len",
+            "device",
+            "num_gpus",
+        ],
+    )
+    writer.writeheader()
     writer.writerows(data)
     print("Completed writing to output file")
