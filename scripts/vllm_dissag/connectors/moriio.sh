@@ -723,6 +723,8 @@ connector_start_proxy() {
         echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
         echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
+        # ROUTER_PREFILL_POLICY / ROUTER_DECODE_POLICY: per-model opt-in via models.yaml env:
+        # (round_robin for every model that does not set them).
         local -a _router_args=(
             --host 0.0.0.0
             --port "${ROUTER_PORT}"

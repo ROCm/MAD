@@ -30,10 +30,10 @@ _run_gate() {
     # --- mirror of run_xPyD_models.slurm gate (keep in sync) ---
     VALID_MODELS=( "Llama-3.1-405B-Instruct-FP8-KV" "amd-Llama-3.3-70B-Instruct-FP8-KV" \
       "DeepSeek-V3" "DeepSeek-V3-5layer" "gpt-oss-120b" "DeepSeek-R1" "Qwen3-32B" "Qwen3-30B-A3B" \
-      "GLM-5.1-FP8" )
-    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+      "GLM-5.1-FP8" "GLM-5.3-Flash-FP8-gfx942" )
+    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.3-Flash-FP8-gfx942" )
     DEEPEP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
-    WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+    WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.3-Flash-FP8-gfx942" )
     MODEL_NAME="${MODEL_NAME:-None}"
     _in(){ local n="$1"; shift; for x in "$@"; do [[ "$n" == "$x" ]] && return 0; done; return 1; }
     _in "$MODEL_NAME" "${VALID_MODELS[@]}" || { echo REJECT; exit 0; }
@@ -94,6 +94,11 @@ _case ALLOW  "GLM moriio wideEP(mori)"  GLM-5.1-FP8                       moriio
 _case REJECT "GLM moriio TP"            GLM-5.1-FP8                       moriio 0
 _case REJECT "GLM rixl TP"              GLM-5.1-FP8                       rixl   0
 _case REJECT "GLM rixl wideEP(deepep)"  GLM-5.1-FP8                       rixl   1
+# GLM-5.3-Flash-FP8-gfx942 — moriio wideEP only (no TP, no DeepEP)
+_case ALLOW  "GLM53 moriio wideEP(mori)" GLM-5.3-Flash-FP8-gfx942          moriio 1
+_case REJECT "GLM53 moriio TP"           GLM-5.3-Flash-FP8-gfx942          moriio 0
+_case REJECT "GLM53 rixl TP"             GLM-5.3-Flash-FP8-gfx942          rixl   0
+_case REJECT "GLM53 rixl wideEP(deepep)" GLM-5.3-Flash-FP8-gfx942          rixl   1
 # cross-pairs
 _case REJECT "DSV3 moriio+deepep xpair" DeepSeek-V3                       moriio 1 deepep
 _case REJECT "DSV3 rixl+mori xpair"     DeepSeek-V3                       rixl   1 mori
