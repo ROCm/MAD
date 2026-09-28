@@ -88,6 +88,7 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Flash-FP8-gfx942" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +97,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Flash-FP8-gfx942" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -182,7 +184,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.3-Flash-FP8-gfx942" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -648,6 +650,7 @@ docker run --rm \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
