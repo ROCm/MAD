@@ -143,6 +143,17 @@ def _get_run_metadata(pipeline: str = "sglang"):
     }
 
 
+PERF_CSV_FIELDNAMES = [
+    'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
+    'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
+    'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
+    'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
+    'build_duration', 'test_duration', 'dataname', 'data_provider_type',
+    'data_size', 'data_download_duration', 'build_number',
+    'additional_docker_run_options',
+]
+
+
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
                   model_name: str = "", pipeline: str = "sglang"):
     """Save results in madengine perf.csv format."""
@@ -152,15 +163,7 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
 
     meta = _get_run_metadata(pipeline)
 
-    fieldnames = [
-        'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
-        'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
-        'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
-        'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
-        'build_duration', 'test_duration', 'dataname', 'data_provider_type',
-        'data_size', 'data_download_duration', 'build_number',
-        'additional_docker_run_options',
-    ]
+    fieldnames = PERF_CSV_FIELDNAMES
 
     with open(output_file, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -181,6 +184,68 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
     print(f"Saved {len(results)} rows to perf.csv: {output_file}")
 
 
+def agentic_perf_rows(json_path: str):
+    """(performance, metric, status) rows for one agentic aggregate JSON.
+
+    The agentic replay (scripts/common/agentic_lib.sh) writes an aggregate JSON and no
+    perf.csv, so madengine collected nothing from a run that had measured throughput,
+    latency and cache hit rate (build 145: "0 perf files, 0 successful, 0 failed").
+    Values are read as the JSON states them. Status follows the replay's own validator
+    (validate_agentic_result.sh): FAILURE when nothing succeeded, when the error rate is
+    above AGENTIC_MAX_ERROR_RATE (default 0.10), or when the run marked itself invalid.
+    """
+    import json
+    import os
+    with open(json_path) as f:
+        d = json.load(f)
+    workload = os.path.basename(os.path.dirname(os.path.abspath(json_path)))
+    rm = d.get('request_metrics') or {}
+    lat = rm.get('latency') or {}
+    tput = rm.get('throughput') or {}
+    acct = d.get('request_accounting') or {}
+    total = acct.get('records_total') or d.get('num_requests_total') or 0
+    ok = d.get('num_requests_successful') or 0
+    errors = acct.get('records_error_dropped') or 0
+    max_err = float(os.environ.get('AGENTIC_MAX_ERROR_RATE', '0.10'))
+    invalid = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(json_path)), 'RUN_INVALID.json'))
+    failed = ok == 0 or invalid or (total and errors / total > max_err)
+    status = 'FAILURE' if failed else 'SUCCESS'
+    tag = f"agentic {workload}, {ok}/{total} requests"
+
+    def p50(name):
+        return (lat.get(name) or {}).get('p50')
+
+    rows = [
+        ((tput.get('total') or {}).get('tokens_per_second'), f"tok/s total ({tag})"),
+        ((tput.get('output') or {}).get('tokens_per_second'), f"tok/s output ({tag})"),
+        (None if p50('ttft') is None else p50('ttft') * 1000.0, f"ms TTFT p50 ({tag})"),
+        (None if p50('tpot') is None else p50('tpot') * 1000.0, f"ms TPOT p50 ({tag})"),
+        (None if p50('e2el') is None else p50('e2el') * 1000.0, f"ms E2E latency p50 ({tag})"),
+    ]
+    hit = ((d.get('server_metrics') or {}).get('cache') or {}).get('gpu_cache_hit_rate')
+    if hit is not None:
+        rows.append((hit * 100.0, f"% GPU prefix-cache hit ({tag})"))
+    return [(f"{v:.2f}", m, status) for v, m in rows if v is not None]
+
+
+def save_agentic_perf_csv(json_paths, output_file: str, model_name: str = "",
+                          pipeline: str = "sglang"):
+    """Write the agentic aggregate JSON(s) as madengine perf.csv rows."""
+    meta = _get_run_metadata(pipeline)
+    n = 0
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDNAMES)
+        writer.writeheader()
+        for path in json_paths:
+            for performance, metric, status in agentic_perf_rows(path):
+                row = {'model': model_name, 'performance': performance,
+                       'metric': metric, 'status': status}
+                row.update(meta)
+                writer.writerow(row)
+                n += 1
+    print(f"Saved {n} agentic rows to perf.csv: {output_file}")
+
+
 def main():
     """Main function."""
     import sys
@@ -191,8 +256,17 @@ def main():
     parser.add_argument('-o', '--output', type=str, help='Output CSV file name (default: <log_file>_results.csv)')
     parser.add_argument('--perf-csv', type=str, help='Also generate madengine perf.csv at this path')
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
+    parser.add_argument('--agentic-json', nargs='+', metavar='JSON',
+                        help='Write agentic aggregate JSON(s) to --perf-csv (log_file is then ignored)')
 
     args = parser.parse_args()
+
+    if args.agentic_json:
+        if not args.perf_csv:
+            print("Error: --agentic-json requires --perf-csv")
+            sys.exit(1)
+        save_agentic_perf_csv(args.agentic_json, args.perf_csv, args.model_name)
+        return
 
     log_file = args.log_file
 
