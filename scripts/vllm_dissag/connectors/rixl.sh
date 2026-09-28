@@ -254,14 +254,23 @@ _rixl_launch_tp() {
                 --port "${SERVER_PORT}" \
                 --trust-remote-code \
                 --kv-transfer-config "${kv_config}" \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
                 "${cfg_args[@]}"
         WORKER_PID=0; return 0
     fi
 
+    # GPU_MEMORY_UTILIZATION is resolved by vllm_disagg.sh (submit-time, then models.yaml,
+    # then the launcher's topology-aware fallback) and the moriio connector passes it; this
+    # one did not, so TP ran at vLLM's built-in default. That default is 0.92 in this image:
+    # 164.6 GiB of KV cache per GPU on llama-3.3-70B, and the first RCCL all-reduce then
+    # failed with "unhandled cuda error" at 178-179 of 191 GiB used (SLURM job 446044), or
+    # start-up refused outright when a GPU was not almost empty (445932). Placed before the
+    # model's own flags, so a models.yaml tp: flag still wins.
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
         --kv-transfer-config "${kv_config}" \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
         "${cfg_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
     WORKER_PID=$!
@@ -327,7 +336,7 @@ _rixl_launch_deepep() {
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
                 ${_prefix_cache_flag} --block-size 1 \
-                --gpu-memory-utilization 0.8 \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
                 --kv-cache-dtype fp8 \
                 --enable-expert-parallel \
                 --all2all-backend "${backend}" \
@@ -349,7 +358,7 @@ _rixl_launch_deepep() {
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
         ${_prefix_cache_flag} --block-size 1 \
-        --gpu-memory-utilization 0.8 \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
         --kv-cache-dtype fp8 \
         --enable-expert-parallel \
         --all2all-backend "${backend}" \

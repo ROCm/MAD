@@ -320,6 +320,22 @@ else
 fi
 
 echo ""
+echo "=== rixl passes the resolved GPU_MEMORY_UTILIZATION (as moriio does) ==="
+# SLURM jobs 445932 / 446044: rixl/TP passed no --gpu-memory-utilization, so vLLM used its
+# built-in 0.92 and RCCL had no room for its first all-reduce.
+Rt="$(_argv rixl 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)"
+_hasadj "$Rt" "--gpu-memory-utilization" "0.8" "rixl TP: launcher fallback reaches vllm serve"
+Rd="$(_argv rixl 1 deepep DeepSeek-V3 /m/DSV3)"
+_hasadj "$Rd" "--gpu-memory-utilization" "0.8" "rixl deepep: launcher fallback reaches vllm serve"
+Ro="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR=rixl WIDE_EP=0 EP_BACKEND='' \
+    MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV MODEL_PATH=/m/Llama MASTER_ADDR=10.0.0.1 \
+    IPADDRS=10.0.0.1,10.0.0.2 GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router \
+    ROUTER_PORT=30000 GPU_MEMORY_UTILIZATION=0.7 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f')"
+_hasadj "$Ro" "--gpu-memory-utilization" "0.7" "rixl TP: a submit-time GPU_MEMORY_UTILIZATION wins"
+_count "$Ro" "--gpu-memory-utilization" 1 "rixl TP: the flag appears once"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"
