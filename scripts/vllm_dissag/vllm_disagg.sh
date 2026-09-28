@@ -196,7 +196,16 @@ JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID}/ABORTED"
 # Lines vLLM prints only when a server has died during start-up.
 _FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start'
 
+# The last lines of a dead vLLM server are the API server's traceback, which only says
+# "See root cause above"; the worker exception and RCCL's own NCCL WARN lines come
+# earlier (SLURM job 445932 printed 80 lines of traceback and none of the cause). So
+# the first error lines come first, then the tail.
+_SERVER_ERROR_LINE_RE='Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped'
+
 _print_log_tail() {  # <file> <label>
+    echo "----- first error lines of ${2} (${1}) -----"
+    grep -nE "${_SERVER_ERROR_LINE_RE}" "$1" 2>/dev/null \
+        | grep -vE 'Traceback|raise |^[0-9]+:\s*\^' | head -n 40 || true
     echo "----- last 80 lines of ${2} (${1}) -----"
     tail -n 80 "$1" 2>/dev/null || echo "(no log at $1)"
     echo "----- end of ${2} -----"

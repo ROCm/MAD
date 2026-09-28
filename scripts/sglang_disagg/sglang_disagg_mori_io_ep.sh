@@ -101,6 +101,15 @@ host_name=$(hostname)
 JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
 # Lines SGLang prints only when a server has died.
 _FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
+# First error lines, then the tail: the tail of a dead server is its traceback, and the
+# cause is usually earlier.
+_print_server_log() {  # <file>
+    echo "----- first error lines of $1 -----"
+    grep -nE 'Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped' "$1" 2>/dev/null \
+        | grep -vE 'Traceback|raise ' | head -n 40 || true
+    echo "----- last 80 lines of $1 -----"
+    tail -n 80 "$1" 2>/dev/null || true
+}
 _job_fail() {  # <reason>
     echo "ERROR: $1" >&2
     echo "NODE${NODE_RANK} (${host_name}): $1" >> "${JOB_ABORT_FILE}" 2>/dev/null || true
@@ -443,12 +452,12 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "prefill NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
                 fi
                 [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for prefill NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
@@ -460,12 +469,12 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "decode NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
                 fi
                 [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for decode NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
@@ -481,12 +490,12 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
                 if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "${_log_label} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
                 fi
                 [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for ${_log_label}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _print_server_log "$LOG_FILE"
                     _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
