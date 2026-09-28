@@ -178,14 +178,52 @@ _dryrun_emit() {
     echo "===END==="
 }
 
+# -----------------------------------------------------------------------------
+# Failing a job so that every node, and the CI log, finds out.
+#
+# /run_logs is the job's shared log directory ($LOG_PATH on the host), so a marker
+# written there by one node is visible to the others. Every barrier below watches it
+# (socket_barrier.py --abort-file): before, a node that gave up exited alone, and the
+# nodes waiting on it looped until the job's wall clock (SLURM job 442891 held four
+# nodes for hours after its prefill master had failed).
+#
+# The server logs themselves only exist under /run_logs. The CI sees this script's
+# stdout, so a failure prints the tail of the log that explains it -- without that,
+# "Timeout (4000s)" was the whole diagnosis, and the CUDA OOM behind it had to be
+# fetched from the cluster by hand.
+# -----------------------------------------------------------------------------
+JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID}/ABORTED"
+# Lines vLLM prints only when a server has died during start-up.
+_FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start'
+
+_print_log_tail() {  # <file> <label>
+    echo "----- last 80 lines of ${2} (${1}) -----"
+    tail -n 80 "$1" 2>/dev/null || echo "(no log at $1)"
+    echo "----- end of ${2} -----"
+}
+
+_job_fail() {  # <reason>: tell the other nodes, then stop this one
+    echo "ERROR: $1" | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
+    echo "NODE${NODE_RANK} (${host_name:-$(hostname)}): $1" >> "${JOB_ABORT_FILE}" 2>/dev/null || true
+    exit 1
+}
+
 _wait_log_signal_or_fail() {
     local LOG_FILE="$1" LABEL="$2" SEARCH_SIGNAL="$3" TIMEOUT_SECONDS="$4" SLEEP_SECONDS="$5"
     local ELAPSED=0
     until grep -Fq "${SEARCH_SIGNAL}" "${LOG_FILE}" 2>/dev/null; do
+        # A dead server never logs the signal; it used to take the full timeout to
+        # notice (the Kimi-K3 prefill died at 17:16 and the wait gave up at 17:55).
+        if grep -Eq "${_FATAL_SERVER_LOG_RE}" "${LOG_FILE}" 2>/dev/null; then
+            _print_log_tail "${LOG_FILE}" "${LABEL}"
+            _job_fail "${LABEL} failed to start after ${ELAPSED}s (see the log tail above): ${LOG_FILE}"
+        fi
+        if [ -f "${JOB_ABORT_FILE}" ]; then
+            _job_fail "stopped waiting for ${LABEL}: $(head -n1 "${JOB_ABORT_FILE}")"
+        fi
         if [ "${ELAPSED}" -ge "${TIMEOUT_SECONDS}" ]; then
-            echo "Timeout (${TIMEOUT_SECONDS}s): '${SEARCH_SIGNAL}' not found in ${LABEL}: ${LOG_FILE}" \
-                | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
-            exit 1
+            _print_log_tail "${LOG_FILE}" "${LABEL}"
+            _job_fail "Timeout (${TIMEOUT_SECONDS}s): '${SEARCH_SIGNAL}' not found in ${LABEL}: ${LOG_FILE}"
         fi
         sleep "${SLEEP_SECONDS}"; ELAPSED=$((ELAPSED + SLEEP_SECONDS))
     done
@@ -195,7 +233,9 @@ _wait_log_signal_or_fail() {
 wait_for_proxy_and_cleanup() {
     local worker_pid="$1" label="$2"
     echo "Waiting for proxy server to be up..."
-    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${MASTER_ADDR} --node-ports $PROXY_PORT
+    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${MASTER_ADDR} --node-ports $PROXY_PORT \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "the proxy on ${MASTER_ADDR}:${PROXY_PORT} never came up for the ${label}"
     echo "Waiting until proxy server closes..."
     python $NIXL_COOKBOOK_PATH/socket_wait.py --remote-ip ${MASTER_ADDR} --remote-port $PROXY_PORT
     echo "Killing the ${label} server"
@@ -290,8 +330,15 @@ connector_init
 echo "-----------------------------Printing node specific details ----------------------"
 echo "IPADDRS = ${IPADDRS}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
-echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
-echo "EP_TP_SIZE=${EP_TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * _EP_TP)) decode=$((DECODE_DP_SIZE * _EP_TP)))"
+# The DP sizes only mean something on the wideEP path; the TP path takes its degree from
+# the model's tp: flags and never reads them. Printed unconditionally they read as a DP8
+# layout on a TP8 run (build 134).
+if parallelism_is_wide_ep; then
+    echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
+    echo "EP_TP_SIZE=${EP_TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * _EP_TP)) decode=$((DECODE_DP_SIZE * _EP_TP)))"
+else
+    echo "TP mode: tensor-parallel degree from models.yaml (${MODEL_CONFIG_PREFILL:-no prefill flags} | ${MODEL_CONFIG_DECODE:-no decode flags})"
+fi
 echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MASTER_ADDR}"
 [ -n "${PREFILL_POD_HOSTS}" ] && echo "PREFILL_POD_HOSTS=${PREFILL_POD_HOSTS}  DECODE_POD_HOSTS=${DECODE_POD_HOSTS}"
 
@@ -307,7 +354,9 @@ if [[ "${DRY_RUN:-0}" != "1" ]]; then
     echo "Waiting at the container creation barrier on $host_name"
     python $NIXL_COOKBOOK_PATH/socket_barrier.py \
         --local-ip ${host_ip} --local-port ${_BARRIER_PORT} --enable-port \
-        --node-ips ${IPADDRS} --node-ports ${_BARRIER_PORT}
+        --node-ips ${IPADDRS} --node-ports ${_BARRIER_PORT} \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "container creation barrier on port ${_BARRIER_PORT} failed on ${host_name}"
     connector_runtime_patch
 fi
 

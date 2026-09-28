@@ -29,12 +29,14 @@ connector_init() {
         # rixl/TP ports
         SERVER_PORT=2584; SERVE_PORT="${SERVER_PORT}"
         KV_PORT=14600
-        # Container-creation barrier port. Env-overridable (BARRIER_PORT) so it can
-        # be moved off the collision-prone default 5000: the launcher's `fuser -k`
-        # cleanup targets this port on the host (host networking), so a stale host
-        # service on 5000 would otherwise be killed. Residual risk: the host-side
-        # fuser still kills whatever holds this port for the launching user.
-        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-5000}"
+        # Container-creation barrier port. Env-overridable (BARRIER_PORT). The default
+        # was 5000, which this comment already called collision-prone: on the OCI hosts
+        # something the job cannot kill holds 5000, and the barrier "passed" on both
+        # nodes by connecting to it (build 134). 15000 is the port this connector's
+        # wideEP branch already uses for the same barrier, and the launcher's cleanup
+        # already frees it (run_xPyD_models.slurm: fuser -k 15000/tcp). The two
+        # branches never run in the same job.
+        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-15000}"
     fi
 
     PROXY_TYPE="${PROXY_TYPE:-vllm_router}"
@@ -360,14 +362,28 @@ _rixl_launch_deepep() {
 }
 
 connector_wait_workers_ready() {
+    # Same knob and default as the moriio connector.
+    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-4000}" SLEEP_SECONDS=10 SEARCH_SIGNAL="Application startup complete."
     if parallelism_is_wide_ep; then
         echo "Waiting for prefill & decode master servers to start..."
-        local TIMEOUT_SECONDS=4000 SLEEP_SECONDS=10 SEARCH_SIGNAL="Application startup complete."
         _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/prefill_NODE0.log" "prefill master" "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
         _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/decode_NODE${xP}.log" "decode master" "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
     else
         echo "Waiting for all prefill and decode servers to be up . . ."
-        python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${IPADDRS} --node-ports $SERVER_PORT
+        # Every TP node serves on its own and logs to <role>_NODE<rank>.log. Wait on the
+        # logs first: the port check alone had no timeout and could not tell a server
+        # that is still loading from one that died (build 134: both servers failed engine
+        # init and this loop waited until the job was cancelled). The port check below
+        # then confirms each server is reachable from here, as it always did.
+        local _n _role
+        for (( _n = 0; _n < xP + yD; _n++ )); do
+            if (( _n < xP )); then _role=prefill; else _role=decode; fi
+            _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/${_role}_NODE${_n}.log" "${_role} server on NODE${_n}" \
+                "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
+        done
+        python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${IPADDRS} --node-ports $SERVER_PORT \
+            --abort-file "${JOB_ABORT_FILE}" --timeout 300 \
+            || _job_fail "a server logged start-up but its port ${SERVER_PORT} is not reachable from ${host_name}"
     fi
 }
 
@@ -428,7 +444,10 @@ connector_start_proxy() {
     fi
 
     echo "Waiting for proxy server to be up . . ."
-    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${host_ip} --node-ports $PROXY_PORT
+    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${host_ip} --node-ports $PROXY_PORT \
+        --abort-file "${JOB_ABORT_FILE}" --timeout "${LOG_WAIT_TIMEOUT_SECONDS:-4000}" \
+        || { _print_log_tail "/run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log" "proxy"; \
+             _job_fail "the proxy never opened ${host_ip}:${PROXY_PORT}"; }
     echo "Proxy Server ($PROXY_TYPE) Ready for benchmarking on ${host_name}:${host_ip}:${PROXY_PORT}"
     sleep 10
 }

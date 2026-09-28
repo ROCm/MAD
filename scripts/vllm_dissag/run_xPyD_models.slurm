@@ -349,7 +349,11 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
-echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$EP_TP_SIZE (wideEP)"
+if [[ "${WIDE_EP:-0}" == "1" ]]; then
+    echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$EP_TP_SIZE (wideEP)"
+else
+    echo "Parallelism: TP (WIDE_EP=0) -> degree from the model's tp: flags in models.yaml"
+fi
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -524,7 +528,7 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
-fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT:-15000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
