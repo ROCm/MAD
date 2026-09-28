@@ -103,12 +103,27 @@ JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
 _FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
 # First error lines, then the tail: the tail of a dead server is its traceback, and the
 # cause is usually earlier.
+# Who holds this node's GPU memory, from the kernel (readable inside the container): the
+# failure in SLURM job 445932 was "free memory on startup is less than desired" on 3 of 8
+# GPUs, and nothing in the log could say what held it.
+_print_gpu_snapshot() {
+    echo "----- GPU memory on $(hostname) -----"
+    local d
+    for d in /sys/class/drm/card*/device; do
+        [ -r "$d/mem_info_vram_used" ] || continue
+        echo "$(basename "$(dirname "$d")"): $(( $(cat "$d/mem_info_vram_used") >> 30 )) GiB used of $(( $(cat "$d/mem_info_vram_total") >> 30 )) GiB"
+    done
+    echo "----- processes holding GPU memory (KFD; host pids) -----"
+    ls /sys/class/kfd/kfd/proc 2>/dev/null | tr '\n' ' '; echo
+    command -v rocm-smi >/dev/null 2>&1 && rocm-smi --showpids 2>/dev/null | grep -vE '^=+|^\s*$' | head -n 30 || true
+}
 _print_server_log() {  # <file>
     echo "----- first error lines of $1 -----"
     grep -nE 'Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped' "$1" 2>/dev/null \
         | grep -vE 'Traceback|raise ' | head -n 40 || true
     echo "----- last 80 lines of $1 -----"
     tail -n 80 "$1" 2>/dev/null || true
+    _print_gpu_snapshot
 }
 # Everything this launcher started, children first. A node that gives up must not leave
 # its servers running: they hold the container's output pipe, so the container -- and
