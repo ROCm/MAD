@@ -92,6 +92,21 @@ python3 -c "import yaml"  >/dev/null 2>&1 || pip install pyyaml
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
 
+# Failing the job so every node, and the CI log, finds out. /run_logs is the job's
+# shared log directory, so a marker one node writes there is seen by the others;
+# every socket_barrier below watches it. Before, a node that gave up exited alone and
+# the nodes waiting on it looped until the job's wall clock: in SLURM job 443011 the
+# decode server hit "Scheduler hit an exception" at 17:56, the router wait timed out
+# 4000s later, and the job still ran to its 6-hour TIMEOUT.
+JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
+# Lines SGLang prints only when a server has died.
+_FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
+_job_fail() {  # <reason>
+    echo "ERROR: $1" >&2
+    echo "NODE${NODE_RANK} (${host_name}): $1" >> "${JOB_ABORT_FILE}" 2>/dev/null || true
+    exit 1
+}
+
 if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
     echo "ERROR: PARALLEL_MODE must be 'dp' or 'tp' (got: ${PARALLEL_MODE})"
     exit 1
@@ -295,7 +310,9 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-port ${BARRIER_PORT} \
     --enable-port \
     --node-ips ${IPADDRS} \
-    --node-ports ${BARRIER_PORT}
+    --node-ports ${BARRIER_PORT} \
+    --abort-file "${JOB_ABORT_FILE}" \
+    || _job_fail "container creation barrier on port ${BARRIER_PORT} failed on ${host_name}"
 
 
 # =============================================================================
@@ -425,10 +442,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "prefill NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for prefill NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -438,10 +459,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "decode NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for decode NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -455,10 +480,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "${_log_label} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for ${_log_label}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    tail -n 80 "$LOG_FILE" 2>/dev/null || true
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -669,7 +698,9 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
@@ -751,7 +782,9 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
