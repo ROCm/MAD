@@ -110,9 +110,25 @@ _print_server_log() {  # <file>
     echo "----- last 80 lines of $1 -----"
     tail -n 80 "$1" 2>/dev/null || true
 }
+# Everything this launcher started, children first. A node that gives up must not leave
+# its servers running: they hold the container's output pipe, so the container -- and
+# the SLURM job -- stayed up until the wall clock. In SLURM job 445932 NODE1's decode
+# server had started fine; NODE0 failed, NODE1's barrier gave up and exited, and the
+# decode server kept the job alive until it was cancelled.
+_kill_tree() {  # <pid>
+    local c
+    for c in $(pgrep -P "$1" 2>/dev/null); do _kill_tree "$c"; done
+    kill "$1" 2>/dev/null || true
+}
+_kill_own_processes() {
+    local p
+    for p in $(pgrep -P $$ 2>/dev/null); do _kill_tree "$p"; done
+}
+
 _job_fail() {  # <reason>
     echo "ERROR: $1" >&2
     echo "NODE${NODE_RANK} (${host_name}): $1" >> "${JOB_ABORT_FILE}" 2>/dev/null || true
+    _kill_own_processes
     exit 1
 }
 
