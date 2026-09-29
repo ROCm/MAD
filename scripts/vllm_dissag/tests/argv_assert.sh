@@ -336,6 +336,14 @@ Ro="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
 _hasadj "$Ro" "--gpu-memory-utilization" "0.7" "rixl TP: a submit-time GPU_MEMORY_UTILIZATION wins"
 _count "$Ro" "--gpu-memory-utilization" 1 "rixl TP: the flag appears once"
 
+echo "=== llama-70B TP: RCCL's MSCCL path is off (its scratch buffers filled the GPU) ==="
+# The same export vllm_disagg.sh runs before vllm serve, taken from the script itself.
+_YENV="$(awk '/_yaml_env="\$\(python3 - <<.PY.$/{f=1;next} f&&/^PY$/{exit} f' "$DIR/vllm_disagg.sh")"
+_yexp() { MODELS_YAML="$DIR/models.yaml" MODEL_NAME="$1" python3 -c "$_YENV"; }
+_has    "$(_yexp amd-Llama-3.3-70B-Instruct-FP8-KV)" "export RCCL_MSCCL_ENABLE=0" "llama-70B exports RCCL_MSCCL_ENABLE=0"
+_hasnot "$(_yexp Qwen3-32B)" "RCCL_MSCCL_ENABLE" "scoped to llama-70B (Qwen3-32B unchanged)"
+_hasnot "$(RCCL_MSCCL_ENABLE=1 MODELS_YAML="$DIR/models.yaml" MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV python3 -c "$_YENV")" "RCCL_MSCCL_ENABLE" "a submit-time RCCL_MSCCL_ENABLE still wins"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

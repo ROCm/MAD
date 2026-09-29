@@ -66,6 +66,15 @@ Llama-3.1-405B-Instruct-FP8-KV:
 amd-Llama-3.3-70B-Instruct-FP8-KV:
   env:
     VLLM_USE_V1: "1"
+    # --disable-custom-all-reduce (below) sends every TP all-reduce through RCCL, and on
+    # MI300X RCCL takes its MSCCL path for them. During vLLM's compile/warmup MSCCL
+    # allocated a 20 MiB scratch buffer per all-reduce and kept every one (msccl_setup.cc
+    # :550, 1721 of them, 38.31 GiB on one GPU) until the GPU was full: "HIP failure: out
+    # of memory" / "NCCL error: unhandled cuda error" on the first all-reduce, whatever
+    # GPU_MEMORY_UTILIZATION was (SLURM jobs 446044, 446332, 446532). RCCL's standard
+    # algorithms do not do this. The other TP recipes keep vLLM's custom all-reduce and
+    # never reach this path.
+    RCCL_MSCCL_ENABLE: "0"
     VLLM_V1_USE_PREFILL_DECODE_ATTENTION: "1"
     AMDGCN_USE_BUFFER_OPS: "1"
     VLLM_ROCM_USE_AITER: "1"
