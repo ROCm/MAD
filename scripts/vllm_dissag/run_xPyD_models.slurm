@@ -626,6 +626,16 @@ _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
 if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
 echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
+# Stop this node container when the task is signalled. scancel sends SIGTERM here, but
+# the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
+# SIGTERM, so a cancelled job left its container running and holding every GPU: SLURM job
+# 446532 was cancelled and its container kept 1535 GB on useocpm2m-097-014. docker run
+# runs in the background so the trap fires as soon as the signal lands.
+_stop_container() {
+    docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
+    docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
+}
+trap "_stop_container; exit 143" TERM INT
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -768,7 +778,12 @@ docker run --rm \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
-    "
+    " &
+_docker_pid=$!
+wait "$_docker_pid"
+_docker_rc=$?
+trap - TERM INT
+exit "$_docker_rc"
 '
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 
