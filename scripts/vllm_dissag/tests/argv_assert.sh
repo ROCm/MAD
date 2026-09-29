@@ -321,7 +321,7 @@ fi
 
 echo ""
 echo "=== rixl passes the resolved GPU_MEMORY_UTILIZATION (as moriio does) ==="
-# SLURM jobs 445932 / 446044: rixl/TP passed no --gpu-memory-utilization, so vLLM used its
+# rixl/TP used to pass no --gpu-memory-utilization, so vLLM used its
 # built-in 0.92 and RCCL had no room for its first all-reduce.
 Rt="$(_argv rixl 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)"
 _hasadj "$Rt" "--gpu-memory-utilization" "0.8" "rixl TP: launcher fallback reaches vllm serve"
@@ -345,7 +345,7 @@ _hasnot "$(_yexp Qwen3-32B)" "RCCL_MSCCL_ENABLE" "scoped to llama-70B (Qwen3-32B
 _hasnot "$(RCCL_MSCCL_ENABLE=1 MODELS_YAML="$DIR/models.yaml" MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV python3 -c "$_YENV")" "RCCL_MSCCL_ENABLE" "a submit-time RCCL_MSCCL_ENABLE still wins"
 
 echo "=== rixl deepep honours the recipe's KV knobs (as moriio does) ==="
-# SLURM job 445925: DeepSeek-V3 on rixl/deepep ran with a hardcoded --block-size 1 and GPU-faulted.
+# DeepSeek-V3 on rixl/deepep used to run with a hardcoded --block-size 1 and GPU-faulted.
 Kd="$(_argv rixl 1 deepep DeepSeek-V3 /m/DSV3)"
 _hasadj "$Kd" "--block-size" "16" "rixl deepep DeepSeek-V3: KV_BLOCK_SIZE=16 from models.yaml"
 _hasadj "$Kd" "--kv-cache-memory-bytes" "20000000000" "rixl deepep DeepSeek-V3: KV_CACHE_MEMORY_BYTES from models.yaml"

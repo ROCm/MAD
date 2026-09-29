@@ -263,8 +263,8 @@ _rixl_launch_tp() {
     # then the launcher's topology-aware fallback) and the moriio connector passes it; this
     # one did not, so TP ran at vLLM's built-in default. That default is 0.92 in this image:
     # 164.6 GiB of KV cache per GPU on llama-3.3-70B, and the first RCCL all-reduce then
-    # failed with "unhandled cuda error" at 178-179 of 191 GiB used (SLURM job 446044), or
-    # start-up refused outright when a GPU was not almost empty (445932). Placed before the
+    # failed with "unhandled cuda error" at 178-179 of 191 GiB used, or
+    # start-up refused outright when a GPU was not almost empty. Placed before the
     # model's own flags, so a models.yaml tp: flag still wins.
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
@@ -327,7 +327,7 @@ _rixl_launch_deepep() {
     # This path hardcoded --block-size 1 and --kv-cache-dtype fp8 and dropped
     # KV_CACHE_MEMORY_BYTES, so DeepSeek-V3 -- whose recipe sets KV_BLOCK_SIZE=16 and
     # KV_CACHE_MEMORY_BYTES because "the block=1 + AITER-MLA fp8 decode kernel GPU-faults"
-    # (moriio.sh) -- ran in exactly that combination: SLURM job 445925 logged "Memory
+    # (moriio.sh) -- ran in exactly that combination: a run logged "Memory
     # access fault by GPU" on all eight decode GPUs after loading the AITER MLA kernel.
     # The defaults are what was hardcoded, so recipes that set none of these are unchanged.
     local _block="${KV_BLOCK_SIZE:-1}" _kvdtype="${KV_CACHE_DTYPE:-fp8}"

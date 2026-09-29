@@ -456,8 +456,8 @@ echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 # Stop this node container when the task is signalled. scancel sends SIGTERM here, but
 # the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
-# SIGTERM, so a cancelled job left its container running and holding every GPU: SLURM job
-# 446532 was cancelled and its container kept 1535 GB on useocpm2m-097-014. docker run
+# SIGTERM, so a cancelled job left its container running and holding every GPU: one
+# cancelled job left its container holding 1535 GB on a node. docker run
 # runs in the background so the trap fires as soon as the signal lands.
 _stop_container() {
     docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1

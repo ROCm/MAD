@@ -13,8 +13,8 @@ parser.add_argument("--enable-port", action="store_true", help="Enable opening a
 parser.add_argument("--node-ips", required=True, help="Comma-separated list of node IPs.")
 parser.add_argument("--node-ports", required=True, help="Comma-separated list of ports to check.")
 # Both default to the old behaviour (wait forever, nothing to watch). Without them a node
-# whose peer had already given up waited here until the job's wall clock: in SLURM job
-# 442891 the prefill master timed out at 17:55 and the other three nodes sat in this loop
+# whose peer had already given up waited here until the job's wall clock: in one run
+# the prefill master timed out and the other three nodes sat in this loop
 # until the job was cancelled by hand.
 parser.add_argument("--timeout", type=float, default=0,
                     help="Give up (exit 1) after this many seconds; 0 waits forever.")

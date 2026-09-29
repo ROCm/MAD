@@ -184,7 +184,7 @@ _dryrun_emit() {
 # /run_logs is the job's shared log directory ($LOG_PATH on the host), so a marker
 # written there by one node is visible to the others. Every barrier below watches it
 # (socket_barrier.py --abort-file): before, a node that gave up exited alone, and the
-# nodes waiting on it looped until the job's wall clock (SLURM job 442891 held four
+# nodes waiting on it looped until the job's wall clock (one run held four
 # nodes for hours after its prefill master had failed).
 #
 # The server logs themselves only exist under /run_logs. The CI sees this script's
@@ -195,20 +195,20 @@ _dryrun_emit() {
 JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID}/ABORTED"
 # Lines vLLM prints only when a server has died during start-up. A worker whose collective
 # failed (RCCL "[FATAL ERROR]: HIP failure", vLLM "RuntimeError: NCCL error") can leave
-# the engine hung rather than exited, so neither engine line ever appears: SLURM jobs
-# 446332 and 446532 failed their first all-reduce ~17 min in and waited out the 4000s.
+# the engine hung rather than exited, so neither engine line ever appears: two runs
+# failed their first all-reduce ~17 min in and waited out the 4000s.
 _FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start|RuntimeError: NCCL error|\[FATAL ERROR\]: HIP failure'
 
 # The last lines of a dead vLLM server are the API server's traceback, which only says
 # "See root cause above"; the worker exception and RCCL's own NCCL WARN lines come
-# earlier (SLURM job 445932 printed 80 lines of traceback and none of the cause). So
+# earlier (one run printed 80 lines of traceback and none of the cause). So
 # the first error lines come first, then the tail. A GPU fault prints "Memory access
-# fault by GPU", which says neither Error nor Exception (SLURM job 446997 printed only the
+# fault by GPU", which says neither Error nor Exception (one run printed only the
 # knock-on "RuntimeError: cancelled").
 _SERVER_ERROR_LINE_RE='Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped|Memory access fault|died unexpectedly'
 
-# Who holds this node's GPU memory, from the kernel (readable inside the container): the
-# failure in SLURM job 445932 was "free memory on startup is less than desired" on 3 of 8
+# Who holds this node's GPU memory, from the kernel (readable inside the container): one
+# failure was "free memory on startup is less than desired" on 3 of 8
 # GPUs, and nothing in the log could say what held it.
 _print_gpu_snapshot() {
     echo "----- GPU memory on $(hostname) -----"
@@ -225,8 +225,8 @@ _print_gpu_snapshot() {
 _print_log_tail() {  # <file> <label>
     echo "----- first error lines of ${2} (${1}) -----"
     # Each distinct message once (pid and timestamp ignored), and without vLLM's
-    # "Failed to import Triton kernels" warning, which healthy runs print too: in SLURM
-    # jobs 447074 and 447442 its repeats filled all 40 lines and hid the real error.
+    # "Failed to import Triton kernels" warning, which healthy runs print too: in two
+    # runs its repeats filled all 40 lines and hid the real error.
     grep -nE "${_SERVER_ERROR_LINE_RE}" "$1" 2>/dev/null \
         | grep -vE 'Traceback|raise |^[0-9]+:\s*\^|Failed to import Triton kernels' \
         | awk '{ k = $0; sub(/^[0-9]+:/, "", k); gsub(/pid=[0-9]+/, "", k);
@@ -240,7 +240,7 @@ _print_log_tail() {  # <file> <label>
 
 # Everything this launcher started, children first. A node that gives up must not leave
 # its servers running: they hold the container's output pipe, so the container -- and
-# the SLURM job -- stayed up until the wall clock. In SLURM job 445932 NODE1's decode
+# the SLURM job -- stayed up until the wall clock. In one run NODE1's decode
 # server had started fine; NODE0 failed, NODE1's barrier gave up and exited, and the
 # decode server kept the job alive until it was cancelled.
 _descendants() {  # <pid>: every process below it, children first
@@ -248,7 +248,7 @@ _descendants() {  # <pid>: every process below it, children first
     for c in $(pgrep -P "$1" 2>/dev/null); do _descendants "$c"; echo "$c"; done
 }
 # SIGTERM first, then SIGKILL whatever is left after a grace period. vLLM workers wedged
-# in a failed HIP/RCCL call ignore SIGTERM: in SLURM job 446532 both nodes gave up and the
+# in a failed HIP/RCCL call ignore SIGTERM: in one run both nodes gave up and the
 # job still ran on, holding its nodes, until it was cancelled by hand.
 _kill_own_processes() {
     local pids p i

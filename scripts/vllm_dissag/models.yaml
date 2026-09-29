@@ -71,7 +71,7 @@ amd-Llama-3.3-70B-Instruct-FP8-KV:
     # allocated a 20 MiB scratch buffer per all-reduce and kept every one (msccl_setup.cc
     # :550, 1721 of them, 38.31 GiB on one GPU) until the GPU was full: "HIP failure: out
     # of memory" / "NCCL error: unhandled cuda error" on the first all-reduce, whatever
-    # GPU_MEMORY_UTILIZATION was (SLURM jobs 446044, 446332, 446532). RCCL's standard
+    # GPU_MEMORY_UTILIZATION was, in three runs. RCCL's standard
     # algorithms do not do this. The other TP recipes keep vLLM's custom all-reduce and
     # never reach this path.
     RCCL_MSCCL_ENABLE: "0"

@@ -95,7 +95,7 @@ host_name=$(hostname)
 # Failing the job so every node, and the CI log, finds out. /run_logs is the job's
 # shared log directory, so a marker one node writes there is seen by the others;
 # every socket_barrier below watches it. Before, a node that gave up exited alone and
-# the nodes waiting on it looped until the job's wall clock: in SLURM job 443011 the
+# the nodes waiting on it looped until the job's wall clock: in one run the
 # decode server hit "Scheduler hit an exception" at 17:56, the router wait timed out
 # 4000s later, and the job still ran to its 6-hour TIMEOUT.
 JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
@@ -103,8 +103,8 @@ JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
 _FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
 # First error lines, then the tail: the tail of a dead server is its traceback, and the
 # cause is usually earlier.
-# Who holds this node's GPU memory, from the kernel (readable inside the container): the
-# failure in SLURM job 445932 was "free memory on startup is less than desired" on 3 of 8
+# Who holds this node's GPU memory, from the kernel (readable inside the container): one
+# failure was "free memory on startup is less than desired" on 3 of 8
 # GPUs, and nothing in the log could say what held it.
 _print_gpu_snapshot() {
     echo "----- GPU memory on $(hostname) -----"
@@ -130,7 +130,7 @@ _print_server_log() {  # <file>
 }
 # Everything this launcher started, children first. A node that gives up must not leave
 # its servers running: they hold the container's output pipe, so the container -- and
-# the SLURM job -- stayed up until the wall clock. In SLURM job 445932 NODE1's decode
+# the SLURM job -- stayed up until the wall clock. In one run NODE1's decode
 # server had started fine; NODE0 failed, NODE1's barrier gave up and exited, and the
 # decode server kept the job alive until it was cancelled.
 _descendants() {  # <pid>: every process below it, children first
@@ -138,7 +138,7 @@ _descendants() {  # <pid>: every process below it, children first
     for c in $(pgrep -P "$1" 2>/dev/null); do _descendants "$c"; echo "$c"; done
 }
 # SIGTERM first, then SIGKILL whatever is left after a grace period. vLLM workers wedged
-# in a failed HIP/RCCL call ignore SIGTERM: in SLURM job 446532 both nodes gave up and the
+# in a failed HIP/RCCL call ignore SIGTERM: in one run both nodes gave up and the
 # job still ran on, holding its nodes, until it was cancelled by hand.
 _kill_own_processes() {
     local pids p i
