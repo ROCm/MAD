@@ -11,8 +11,8 @@ for _cand in \
         bash "$_cand" --backend sglang "$@"; _rc=$?
         # Publish the run's metrics where madengine collects them, as benchmark_xPyD.sh
         # does for the sweep: the replay writes an aggregate JSON and no perf.csv, so a
-        # run that measured throughput, latency and cache hit reported "0 perf files"
-        # (build 145). One set of rows per workload; see parse_to_csv.py.
+        # run that measured throughput, latency and cache hit reported "0 perf files".
+        # One set of rows per workload; see parse_to_csv.py.
         if [ -n "${SLURM_JOB_ID:-}" ] && [ "${DRY_RUN:-0}" != "1" ]; then
             mapfile -t _agg < <(find "/run_logs/${SLURM_JOB_ID}" -maxdepth 2 -type f \
                 -name "agentic_${SLURM_JOB_ID}_*.json" 2>/dev/null | sort)

@@ -131,8 +131,8 @@ export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
 echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
-# Sourced, so `environment > these defaults`, which is what lets the STANDALONE
-# and MADENGINE CI paths drive this script identically -- both speak only
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

@@ -353,7 +353,7 @@ def agentic_perf_rows(json_path: str):
 
     The agentic replay (scripts/common/agentic_lib.sh) writes an aggregate JSON and no
     perf.csv, so madengine collected nothing from a run that had measured throughput,
-    latency and cache hit rate (build 145: "0 perf files, 0 successful, 0 failed").
+    latency and cache hit rate ("0 perf files, 0 successful, 0 failed").
     Values are read as the JSON states them. Status follows the replay's own validator
     (validate_agentic_result.sh): FAILURE when nothing succeeded, when the error rate is
     above AGENTIC_MAX_ERROR_RATE (default 0.10), or when the run marked itself invalid.

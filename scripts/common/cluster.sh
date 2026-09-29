@@ -12,11 +12,11 @@
 #       environment  >  the defaults below
 #
 # That one property is what lets the same model card run identically under both
-# CI paths, because both of them speak only environment variables:
+# ways of launching it, because both of them speak only environment variables:
 #
-#   STANDALONE  the Jenkins pipeline writes standalone_env.sh, sources it, and
-#               submits with `sbatch --export=ALL`.
-#   MADENGINE   madengine merges the card's env_vars into the sbatch script it
+#   sbatch      the caller exports the card's env_vars and submits the batch
+#               script with `sbatch --export=ALL`.
+#   madengine   madengine merges the card's env_vars into the sbatch script it
 #               generates (madengine deployment/slurm.py, _build_env_vars).
 #
 # Neither path has to know about this file. Whatever either one sets wins;
@@ -27,8 +27,8 @@
 # fabric device names, port numbers, timeouts.
 #
 # What has to be known BEFORE a job is submitted -- the partition to ask for, GPUs per
-# node, exclusivity -- is in clusters/<name>.json instead, which the CI pipeline turns
-# into the job's allocation for both paths. The partition appears in both on purpose:
+# node, exclusivity -- is in clusters/<name>.json instead: pass it to madengine as
+# --additional-context-file, or read it for the sbatch options (clusters/README.md). The partition appears in both on purpose:
 # there it picks the allocation, here it is only a default for running a launcher by
 # hand outside sbatch (see the slurm section below). Keep them in step.
 # WHAT DOES NOT: model-specific performance flags. Those live in models.yaml,
@@ -429,7 +429,7 @@ cluster_nvme_mount() {
 # The model card's skip_gpu_arch says the same thing to an orchestrator, but only
 # the orchestrator reads it, and on SLURM it runs on a login node with no GPU to
 # compare against. So the launcher checks for itself, on the nodes it was given.
-# Because it happens here, it is identical under STANDALONE and MADENGINE.
+# Because it happens here, it is identical whether madengine or plain sbatch submitted the job.
 
 # _cluster_local_gpu_arch
 #

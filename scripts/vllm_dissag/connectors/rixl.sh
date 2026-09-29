@@ -32,7 +32,7 @@ connector_init() {
         # Container-creation barrier port. Env-overridable (BARRIER_PORT). The default
         # was 5000, which this comment already called collision-prone: on the OCI hosts
         # something the job cannot kill holds 5000, and the barrier "passed" on both
-        # nodes by connecting to it (build 134). 15000 is the port this connector's
+        # nodes by connecting to it. 15000 is the port this connector's
         # wideEP branch already uses for the same barrier, and the launcher's cleanup
         # already frees it (run_xPyD_models.slurm: fuser -k 15000/tcp). The two
         # branches never run in the same job.
@@ -394,7 +394,7 @@ connector_wait_workers_ready() {
         echo "Waiting for all prefill and decode servers to be up . . ."
         # Every TP node serves on its own and logs to <role>_NODE<rank>.log. Wait on the
         # logs first: the port check alone had no timeout and could not tell a server
-        # that is still loading from one that died (build 134: both servers failed engine
+        # that is still loading from one that died (both servers once failed engine
         # init and this loop waited until the job was cancelled). The port check below
         # then confirms each server is reachable from here, as it always did.
         local _n _role

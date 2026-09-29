@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A multinode card must say the same thing about GPUs in both places it says it.
 
-  skip_gpu_arch  on the card: read by orchestrators (madengine, the Jenkins
+  skip_gpu_arch  on the card: read by orchestrators (madengine, or a CI
                  preflight) BEFORE an allocation, to skip the card.
   GPU_ARCHS      on the recipe: read by the launcher (cluster_require_gpu_arch in
                  cluster.sh) ON the allocation, to refuse the wrong nodes. For

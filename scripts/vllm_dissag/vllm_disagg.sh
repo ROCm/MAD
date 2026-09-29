@@ -394,7 +394,7 @@ echo "IPADDRS = ${IPADDRS}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 # The DP sizes only mean something on the wideEP path; the TP path takes its degree from
 # the model's tp: flags and never reads them. Printed unconditionally they read as a DP8
-# layout on a TP8 run (build 134).
+# layout on a TP8 run.
 if parallelism_is_wide_ep; then
     echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
     echo "EP_TP_SIZE=${EP_TP_SIZE}  DP_PER_NODE=${DP_PARALLEL_SIZE_LOCAL}  (EP width per pool: prefill=$((PREFILL_DP_SIZE * _EP_TP)) decode=$((DECODE_DP_SIZE * _EP_TP)))"

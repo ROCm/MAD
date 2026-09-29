@@ -85,8 +85,8 @@ done
 : "${DOCKER_IMAGE_NAME:?set DOCKER_IMAGE_NAME to the vLLM image to run}"
 MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)}"
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
-# Sourced, so `environment > these defaults`, which is what lets the STANDALONE
-# and MADENGINE CI paths drive this script identically -- both speak only
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
 #
@@ -194,13 +194,13 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; do
 #
 #   1. No apostrophes. The body is ONE single-quoted string. An apostrophe closes
 #      it, the text after escapes as shell words, and bash -c receives a truncated
-#      script. Build 56 died on the word cluster.sh<apostrophe>s. Build 72 died on a
-#      comment of mine that quoted an error message containing quoted words: the
+#      script. One run died on the word cluster.sh<apostrophe>s, another on a
+#      comment that quoted an error message containing quoted words: the
 #      body ended mid-comment, docker run was never in it, and the job failed with
 #      no container output at all.
 #
 #   2. No comments inside a backslash continuation. The backslash splices the
-#      comment onto the command, ending it there; build 61 died that way, with
+#      comment onto the command, ending it there; a run died that way, with
 #      docker run losing its image argument.
 #
 # Checked by scripts/common/check_continuations.py and the srun quote checker.
@@ -390,10 +390,10 @@ rm -f "$_ENV_FILE"
 # docker daemon rather than to this job: scancel kills this script and the srun
 # under it, and the container carries on holding its GPU memory. The node then
 # looks occupied to the next job with no SLURM job on it to explain why, which is
-# what build 93 hit --
+# what the next job hit --
 #     RuntimeError: The memory capacity is unbalanced.
 #                   Some GPUs may be occupied by other processes.
-# -- after build 93 itself had been cancelled at the 4 hour wall clock.
+# -- after the earlier job had been cancelled at the 4 hour wall clock.
 #
 # So every run that ends early now cleans up after itself instead of leaving the
 # mess for whoever allocates the node next. Idempotent, so the explicit call below

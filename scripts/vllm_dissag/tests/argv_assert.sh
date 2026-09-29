@@ -297,8 +297,8 @@ _has "$(cat "$SLURM")" 'CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"
 
 echo ""
 echo "=== GPU-arch gate (cluster_require_gpu_arch) ==="
-# Runs on the batch node under both CI paths, so this is where MADENGINE and
-# STANDALONE agree on which GPUs a recipe may use. MAD_GPU_ARCH stands in for the
+# Runs on the batch node whether madengine or plain sbatch submitted the job, so
+# this is where the two agree on which GPUs a recipe may use. MAD_GPU_ARCH stands in for the
 # probe. Strict mode, because run_multinode.slurm sources cluster.sh under it.
 _gate() { # detected allowed [extra env]
   env -i PATH="$PATH" HOME="$HOME" MAD_GPU_ARCH="$1" ${3:+$3} bash -c \

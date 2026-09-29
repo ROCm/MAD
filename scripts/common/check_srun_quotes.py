@@ -11,9 +11,9 @@ An apostrophe inside that -- including one in a comment -- closes the string. Th
 text after it escapes as shell words and `bash -c` receives a TRUNCATED script,
 silently. `bash -n` accepts the result: it is valid, just not what was written.
 
-Two builds died this way. Build 56 on the word cluster.sh<apostrophe>s, which
+Two runs died this way. One on the word cluster.sh<apostrophe>s, which
 surfaced as "unbound variable" naming a variable assigned a few lines above,
-because the assignment had run in the other shell. Build 72 on a comment quoting
+because the assignment had run in the other shell. The other on a comment quoting
 an error message that itself contained quoted words:
 
     #   docker: 'docker run' requires at least 1 argument

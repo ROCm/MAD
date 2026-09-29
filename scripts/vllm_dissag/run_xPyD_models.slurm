@@ -58,8 +58,8 @@ SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
-# Sourced, so `environment > these defaults`, which is what lets the STANDALONE
-# and MADENGINE CI paths drive this script identically -- both speak only
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

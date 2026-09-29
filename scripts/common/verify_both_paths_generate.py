@@ -1,10 +1,10 @@
 """Both paths must produce a runnable invocation of the SAME launcher.
 
-STANDALONE  : Jenkins sbatches standalone_wrapper_*.slurm, which runs run_multinode.slurm
-MADENGINE   : madengine slurm_multi generates madengine_<name>.sh, which runs the same script
+sbatch      : the batch script is submitted directly, and runs run_multinode.slurm
+madengine   : madengine slurm_multi generates madengine_<name>.sh, which runs the same script
 
-Builds 62 and 63 died because the madengine half could not even write its script
-when the card name was namespaced. This drives the real generator against the real
+Runs died because the madengine half could not even write its script when the card
+name was namespaced. This drives the real generator against the real
 card, so a regression on either side shows up without a cluster.
 """
 import json, sys, tempfile, os
@@ -40,7 +40,7 @@ print(f"     file  : madengine_{safe}.sh")
 ok1 = "/" not in safe
 print(f"     one path segment: {ok1}")
 
-print("\n2. the path that ENOENT'd in build 62 now writes")
+print("\n2. the path that used to fail with ENOENT now writes")
 out = Path(work) / "slurm_results"; out.mkdir(parents=True)
 target = out / f"madengine_{safe}.sh"
 target.write_text("#!/bin/bash\n")
@@ -48,11 +48,11 @@ ok2 = target.is_file() and target.parent == out
 print(f"     wrote {target.name} directly under slurm_results: {ok2}")
 
 print("\n3. both paths name the SAME launcher script")
-standalone_script = card["scripts"]                     # what Jenkins sbatches
+standalone_script = card["scripts"]                     # what plain sbatch submits
 madengine_script = model["scripts"]                     # what slurm_multi runs
 ok3 = standalone_script == madengine_script == "run_multinode.slurm"
-print(f"     STANDALONE -> {standalone_script}")
-print(f"     MADENGINE  -> {madengine_script}")
+print(f"     sbatch     -> {standalone_script}")
+print(f"     madengine  -> {madengine_script}")
 print(f"     same launcher: {ok3}")
 
 print("\n4. that launcher is syntactically sound and free of both hazard classes")

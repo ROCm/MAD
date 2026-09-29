@@ -72,7 +72,7 @@ def bind_port():
     node's check then connected to whatever else was listening on that port and counted
     it as this node being ready. On OCI port 5000 is held on the hosts by something the
     job cannot kill, so the rixl/TP barrier passed on both nodes without either one
-    having opened it (build 134).
+    having opened it.
     """
     global server_socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
