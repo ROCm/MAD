@@ -120,7 +120,10 @@ _print_gpu_snapshot() {
 _print_server_log() {  # <file>
     echo "----- first error lines of $1 -----"
     grep -nE 'Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped|Memory access fault|died unexpectedly' "$1" 2>/dev/null \
-        | grep -vE 'Traceback|raise ' | head -n 40 || true
+        | grep -vE 'Traceback|raise |Failed to import Triton kernels' \
+        | awk '{ k = $0; sub(/^[0-9]+:/, "", k); gsub(/pid=[0-9]+/, "", k);
+                 gsub(/[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]/, "", k);
+                 if (!seen[k]++) print }' | head -n 40 || true
     echo "----- last 80 lines of $1 -----"
     tail -n 80 "$1" 2>/dev/null || true
     _print_gpu_snapshot

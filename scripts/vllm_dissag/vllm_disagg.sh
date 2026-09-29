@@ -224,8 +224,14 @@ _print_gpu_snapshot() {
 
 _print_log_tail() {  # <file> <label>
     echo "----- first error lines of ${2} (${1}) -----"
+    # Each distinct message once (pid and timestamp ignored), and without vLLM's
+    # "Failed to import Triton kernels" warning, which healthy runs print too: in SLURM
+    # jobs 447074 and 447442 its repeats filled all 40 lines and hid the real error.
     grep -nE "${_SERVER_ERROR_LINE_RE}" "$1" 2>/dev/null \
-        | grep -vE 'Traceback|raise |^[0-9]+:\s*\^' | head -n 40 || true
+        | grep -vE 'Traceback|raise |^[0-9]+:\s*\^|Failed to import Triton kernels' \
+        | awk '{ k = $0; sub(/^[0-9]+:/, "", k); gsub(/pid=[0-9]+/, "", k);
+                 gsub(/[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]/, "", k);
+                 if (!seen[k]++) print }' | head -n 40 || true
     echo "----- last 80 lines of ${2} (${1}) -----"
     tail -n 80 "$1" 2>/dev/null || echo "(no log at $1)"
     echo "----- end of ${2} -----"
