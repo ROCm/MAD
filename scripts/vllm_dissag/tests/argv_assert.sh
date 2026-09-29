@@ -344,6 +344,16 @@ _has    "$(_yexp amd-Llama-3.3-70B-Instruct-FP8-KV)" "export RCCL_MSCCL_ENABLE=0
 _hasnot "$(_yexp Qwen3-32B)" "RCCL_MSCCL_ENABLE" "scoped to llama-70B (Qwen3-32B unchanged)"
 _hasnot "$(RCCL_MSCCL_ENABLE=1 MODELS_YAML="$DIR/models.yaml" MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV python3 -c "$_YENV")" "RCCL_MSCCL_ENABLE" "a submit-time RCCL_MSCCL_ENABLE still wins"
 
+echo "=== rixl deepep honours the recipe's KV knobs (as moriio does) ==="
+# SLURM job 445925: DeepSeek-V3 on rixl/deepep ran with a hardcoded --block-size 1 and GPU-faulted.
+Kd="$(_argv rixl 1 deepep DeepSeek-V3 /m/DSV3)"
+_hasadj "$Kd" "--block-size" "16" "rixl deepep DeepSeek-V3: KV_BLOCK_SIZE=16 from models.yaml"
+_hasadj "$Kd" "--kv-cache-memory-bytes" "20000000000" "rixl deepep DeepSeek-V3: KV_CACHE_MEMORY_BYTES from models.yaml"
+_hasadj "$Kd" "--kv-cache-dtype" "fp8" "rixl deepep DeepSeek-V3: KV_CACHE_DTYPE from models.yaml"
+_count "$Kd" "--block-size" 1 "rixl deepep: --block-size appears once"
+Km="$(_argv moriio 1 mori DeepSeek-V3 /m/DSV3)"
+_hasadj "$Km" "--block-size" "16" "moriio DeepSeek-V3: same block size (reference)"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

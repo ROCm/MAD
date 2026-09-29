@@ -323,6 +323,17 @@ _rixl_launch_deepep() {
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
 
+    # KV knobs from the model's models.yaml env:, as the moriio connector applies them.
+    # This path hardcoded --block-size 1 and --kv-cache-dtype fp8 and dropped
+    # KV_CACHE_MEMORY_BYTES, so DeepSeek-V3 -- whose recipe sets KV_BLOCK_SIZE=16 and
+    # KV_CACHE_MEMORY_BYTES because "the block=1 + AITER-MLA fp8 decode kernel GPU-faults"
+    # (moriio.sh) -- ran in exactly that combination: SLURM job 445925 logged "Memory
+    # access fault by GPU" on all eight decode GPUs after loading the AITER MLA kernel.
+    # The defaults are what was hardcoded, so recipes that set none of these are unchanged.
+    local _block="${KV_BLOCK_SIZE:-1}" _kvdtype="${KV_CACHE_DTYPE:-fp8}"
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "deepep" "${log_prefix}" "${role}" \
             vllm serve "${MODEL_PATH}" \
@@ -335,9 +346,10 @@ _rixl_launch_deepep() {
                 --data-parallel-rpc-port "${RPC_PORT}" \
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
-                ${_prefix_cache_flag} --block-size 1 \
+                ${_prefix_cache_flag} --block-size "${_block}" \
                 --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
-                --kv-cache-dtype fp8 \
+                "${mem_args[@]}" \
+                --kv-cache-dtype "${_kvdtype}" \
                 --enable-expert-parallel \
                 --all2all-backend "${backend}" \
                 ${DBO_ARGS} \
@@ -357,9 +369,10 @@ _rixl_launch_deepep() {
         --data-parallel-rpc-port "${RPC_PORT}" \
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
-        ${_prefix_cache_flag} --block-size 1 \
+        ${_prefix_cache_flag} --block-size "${_block}" \
         --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
-        --kv-cache-dtype fp8 \
+        "${mem_args[@]}" \
+        --kv-cache-dtype "${_kvdtype}" \
         --enable-expert-parallel \
         --all2all-backend "${backend}" \
         ${DBO_ARGS} \
