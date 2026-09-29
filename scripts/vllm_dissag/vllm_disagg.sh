@@ -176,6 +176,9 @@ _dryrun_emit() {
     local a
     for a in "$@"; do printf '%s\n' "$a"; done
     echo "===END==="
+    # The AITER env the server would start with, after the argv block so argv readers
+    # (awk up to ===END===) are unaffected; tests/argv_assert.sh checks it per connector.
+    env | grep -E '^VLLM_(ROCM_USE_AITER|USE_AITER)' | sort | sed 's/^/===ENV /'
 }
 
 # -----------------------------------------------------------------------------

@@ -145,12 +145,19 @@ _rixl_setup_env_deepep() {
     export VLLM_USE_V1=1
     export VLLM_LOGGING_LEVEL=INFO
     export VLLM_ALL2ALL_BACKEND="${backend}"
-    export VLLM_ROCM_USE_AITER=1
-    export VLLM_ROCM_USE_AITER_MLA=1
-    export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
-    export VLLM_ROCM_USE_AITER_RMSNORM=1
+    # AITER knobs from the model's models.yaml env:, as the moriio connector applies them.
+    # These were hardcoded, so DeepSeek-V3 -- whose recipe sets VLLM_ROCM_USE_AITER_MLA=0
+    # because "the block=1 + AITER-MLA fp8 decode kernel GPU-faults" -- still ran the
+    # ROCM_AITER_MLA backend here, and decode logged "Memory access fault by GPU" on
+    # every GPU once it loaded the AITER MLA kernel, even with block 16 (after 52ab5e1).
+    # moriio honours the recipe, runs TRITON_MLA and passes. The defaults are what was
+    # hardcoded, so recipes that set none of these are unchanged.
+    export VLLM_ROCM_USE_AITER="${VLLM_ROCM_USE_AITER:-1}"
+    export VLLM_ROCM_USE_AITER_MLA="${VLLM_ROCM_USE_AITER_MLA:-1}"
+    export VLLM_ROCM_USE_AITER_PAGED_ATTN="${VLLM_ROCM_USE_AITER_PAGED_ATTN:-0}"
+    export VLLM_ROCM_USE_AITER_RMSNORM="${VLLM_ROCM_USE_AITER_RMSNORM:-1}"
     export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
-    export VLLM_USE_AITER_TRITON_SILU_MUL=0
+    export VLLM_USE_AITER_TRITON_SILU_MUL="${VLLM_USE_AITER_TRITON_SILU_MUL:-0}"
     export VLLM_SERVER_DEV_MODE=0
     export VLLM_ROCM_USE_AITER_MOE=0
     export VLLM_ENGINE_READY_TIMEOUT_S=3600
@@ -306,10 +313,15 @@ _rixl_launch_deepep() {
         extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
     fi
 
+    # Decode cudagraph mode and capture sizes from the recipe (DECODE_CUDAGRAPH_MODE, then
+    # VLLM_CUDAGRAPH_MODE), as moriio reads them. FULL_DECODE_ONLY, the old hardcoded mode,
+    # stays the default; DeepSeek-V3's recipe asks for PIECEWISE, the mode it passes in
+    # with TRITON_MLA on moriio.
     local compile_args=()
     if [[ "$log_prefix" == "decode" ]]; then
-        compile_args+=(--compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","custom_ops":["+quant_fp8"]}')
-        compile_args+=(--cudagraph-capture-sizes 1 2 4 8 16 32 64 128 256)
+        local _cg_mode="${DECODE_CUDAGRAPH_MODE:-${VLLM_CUDAGRAPH_MODE:-FULL_DECODE_ONLY}}"
+        compile_args+=(--compilation-config '{"cudagraph_mode":"'"${_cg_mode}"'","custom_ops":["+quant_fp8"]}')
+        compile_args+=(--cudagraph-capture-sizes ${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256})
     else
         compile_args+=(--enforce-eager)
     fi

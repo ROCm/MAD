@@ -383,6 +383,36 @@ _count "$Kd" "--block-size" 1 "rixl deepep: --block-size appears once"
 Km="$(_argv moriio 1 mori DeepSeek-V3 /m/DSV3)"
 _hasadj "$Km" "--block-size" "16" "moriio DeepSeek-V3: same block size (reference)"
 
+echo "=== rixl deepep honours the recipe's AITER and cudagraph knobs (as moriio does) ==="
+# With block 16 fixed, rixl/deepep decode still GPU-faulted: setup_env hardcoded
+# VLLM_ROCM_USE_AITER_MLA=1 over the recipe's 0, so it ran ROCM_AITER_MLA (moriio: TRITON_MLA).
+# _dryrun_emit prints the server's AITER env as "===ENV K=V" lines after the argv.
+_raw_at() { # rank connector wide_ep ep_backend model model_path [VAR=value ...]
+  local r="$1" c="$2" w="$3" e="$4" m="$5" p="$6"; shift 6
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK="$r" xP=1 yD=1 CONNECTOR="$c" WIDE_EP="$w" EP_BACKEND="$e" \
+    MODEL_NAME="$m" MODEL_PATH="$p" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 "$@" \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null
+}
+KdD="$(_raw_at 1 rixl 1 deepep DeepSeek-V3 /m/DSV3)"
+KdP="$(_raw_at 0 rixl 1 deepep DeepSeek-V3 /m/DSV3)"
+KmD="$(_raw_at 1 moriio 1 mori DeepSeek-V3 /m/DSV3)"
+_has    "$KdD" "===ENV VLLM_ROCM_USE_AITER_MLA=0" "rixl deepep DeepSeek-V3 decode: AITER MLA off from models.yaml"
+_has    "$KdP" "===ENV VLLM_ROCM_USE_AITER_MLA=0" "rixl deepep DeepSeek-V3 prefill: AITER MLA off from models.yaml"
+_has    "$KmD" "===ENV VLLM_ROCM_USE_AITER_MLA=0" "moriio DeepSeek-V3 decode: AITER MLA off (reference)"
+_has    "$KdD" "===ENV VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0" "rixl deepep: shared-experts fusion stays off"
+_has    "$KdD" '"cudagraph_mode":"PIECEWISE"' "rixl deepep DeepSeek-V3 decode: cudagraph PIECEWISE from models.yaml"
+_hasnot "$KdD" "FULL_DECODE_ONLY" "rixl deepep DeepSeek-V3 decode: no FULL_DECODE_ONLY"
+_count  "$KdD" "--compilation-config" 1 "rixl deepep decode: exactly one --compilation-config"
+_count  "$KdD" "--cudagraph-capture-sizes" 1 "rixl deepep decode: exactly one --cudagraph-capture-sizes"
+_has    "$KdP" "--enforce-eager" "rixl deepep prefill: still eager"
+_hasnot "$KdP" "--compilation-config" "rixl deepep prefill: no --compilation-config"
+# A submit-time value still wins over the recipe (the recipe env yields to it).
+KdO="$(_raw_at 1 rixl 1 deepep DeepSeek-V3 /m/DSV3 VLLM_ROCM_USE_AITER_MLA=1 DECODE_CUDAGRAPH_MODE=FULL_DECODE_ONLY)"
+_has    "$KdO" "===ENV VLLM_ROCM_USE_AITER_MLA=1" "rixl deepep: a submit-time VLLM_ROCM_USE_AITER_MLA wins"
+_has    "$KdO" '"cudagraph_mode":"FULL_DECODE_ONLY"' "rixl deepep: a submit-time DECODE_CUDAGRAPH_MODE wins"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"
