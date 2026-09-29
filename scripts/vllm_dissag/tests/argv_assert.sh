@@ -320,6 +320,35 @@ else
 fi
 
 echo ""
+echo "=== GLM-5.1 1P/1D runs TP8 within each pool, as its card says ==="
+# The cards passed at 1P/1D with each pool TP8 x one DP rank. When wideEP moved from
+# TP_SIZE to EP_TP_SIZE (default 1) they silently became TP1 x 8 DP ranks, and decode
+# crashed in MoRI EP setup with every GPU holding the full non-expert weights. The card
+# now carries EP_TP_SIZE; this reads the card itself, so a card edit shows up here.
+_glm_card_env() { # card name -> KEY=VALUE lines of its env_vars
+  python3 -c 'import json,sys
+for m in json.load(open(sys.argv[1])):
+    if m["name"] == sys.argv[2]:
+        for k, v in m["env_vars"].items():
+            if k != "DOCKER_IMAGE_NAME": print("%s=%s" % (k, v))' "$DIR/models.json" "$1"
+}
+for _card in pyt_vllm_disagg_mori_glm-5.1-fp8 pyt_vllm_disagg_mori_glm-5.1-fp8_niah; do
+  mapfile -t _genv < <(_glm_card_env "$_card")
+  for _rank in 0 1; do
+    G="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" "${_genv[@]}" \
+        DRY_RUN=1 NODE_RANK="$_rank" MODEL_PATH=/m/GLM MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+        GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+        bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f')"
+    _hasadj "$G" "--tensor-parallel-size" "8" "$_card rank $_rank: TP8"
+    _hasadj "$G" "--data-parallel-size" "1" "$_card rank $_rank: one DP rank per pool"
+    _hasnot "$G" "-tp 1" "$_card rank $_rank: not TP1"
+  done
+  # The pod-host list EP_TP_SIZE>1 adds is the one peer host, which is where rank 0 went anyway.
+  _has "$G" '"moriio_pod_hosts":"10.0.0.1"' "$_card decode: pod hosts = the prefill master only"
+done
+_has "$(grep -A15 '^GLM-5.1-FP8:' "$DIR/models.yaml")" 'KV_BLOCK_SIZE: "1"' "GLM recipe unchanged (block 1)"
+
+echo ""
 echo "=== rixl passes the resolved GPU_MEMORY_UTILIZATION (as moriio does) ==="
 # rixl/TP used to pass no --gpu-memory-utilization, so vLLM used its
 # built-in 0.92 and RCCL had no room for its first all-reduce.
