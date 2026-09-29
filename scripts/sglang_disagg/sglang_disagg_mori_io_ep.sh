@@ -130,14 +130,24 @@ _print_server_log() {  # <file>
 # the SLURM job -- stayed up until the wall clock. In SLURM job 445932 NODE1's decode
 # server had started fine; NODE0 failed, NODE1's barrier gave up and exited, and the
 # decode server kept the job alive until it was cancelled.
-_kill_tree() {  # <pid>
+_descendants() {  # <pid>: every process below it, children first
     local c
-    for c in $(pgrep -P "$1" 2>/dev/null); do _kill_tree "$c"; done
-    kill "$1" 2>/dev/null || true
+    for c in $(pgrep -P "$1" 2>/dev/null); do _descendants "$c"; echo "$c"; done
 }
+# SIGTERM first, then SIGKILL whatever is left after a grace period. vLLM workers wedged
+# in a failed HIP/RCCL call ignore SIGTERM: in SLURM job 446532 both nodes gave up and the
+# job still ran on, holding its nodes, until it was cancelled by hand.
 _kill_own_processes() {
-    local p
-    for p in $(pgrep -P $$ 2>/dev/null); do _kill_tree "$p"; done
+    local pids p i
+    pids="$(_descendants $$)"
+    [ -n "$pids" ] || return 0
+    kill $pids 2>/dev/null || true
+    for i in $(seq 1 15); do
+        p=""; for p in $pids; do kill -0 "$p" 2>/dev/null && break; p=""; done
+        [ -z "$p" ] && return 0
+        sleep 1
+    done
+    kill -9 $pids 2>/dev/null || true
 }
 
 _job_fail() {  # <reason>
