@@ -413,6 +413,13 @@ KdO="$(_raw_at 1 rixl 1 deepep DeepSeek-V3 /m/DSV3 VLLM_ROCM_USE_AITER_MLA=1 DEC
 _has    "$KdO" "===ENV VLLM_ROCM_USE_AITER_MLA=1" "rixl deepep: a submit-time VLLM_ROCM_USE_AITER_MLA wins"
 _has    "$KdO" '"cudagraph_mode":"FULL_DECODE_ONLY"' "rixl deepep: a submit-time DECODE_CUDAGRAPH_MODE wins"
 
+echo "=== Kimi-K3 (MI300X) KV cache fits beside its weights ==="
+# 40e9 of KV cache on top of 148.56 GiB of TP2 weights and the 16 GiB MoRI heap OOMed
+# prefill start-up on every GPU; the recipe now asks for 16e9.
+KkP="$(_argv_at 0 moriio 1 mori Kimi-K3 /m/K3)"
+_hasadj "$KkP" "--kv-cache-memory-bytes" "16000000000" "moriio Kimi-K3 prefill: 16e9 KV cache bytes"
+_count  "$KkP" "--kv-cache-memory-bytes" 1 "moriio Kimi-K3 prefill: --kv-cache-memory-bytes appears once"
+
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"
