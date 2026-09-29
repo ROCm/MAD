@@ -25,6 +25,12 @@
 #
 # WHAT BELONGS HERE: facts about the cluster -- filesystem roots, the partition,
 # fabric device names, port numbers, timeouts.
+#
+# What has to be known BEFORE a job is submitted -- the partition to ask for, GPUs per
+# node, exclusivity -- is in clusters/<name>.json instead, which the CI pipeline turns
+# into the job's allocation for both paths. The partition appears in both on purpose:
+# there it picks the allocation, here it is only a default for running a launcher by
+# hand outside sbatch (see the slurm section below). Keep them in step.
 # WHAT DOES NOT: model-specific performance flags. Those live in models.yaml,
 # keyed by model name, and are the launcher's business rather than the site's.
 #
