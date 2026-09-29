@@ -202,8 +202,10 @@ _FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to sta
 # The last lines of a dead vLLM server are the API server's traceback, which only says
 # "See root cause above"; the worker exception and RCCL's own NCCL WARN lines come
 # earlier (SLURM job 445932 printed 80 lines of traceback and none of the cause). So
-# the first error lines come first, then the tail.
-_SERVER_ERROR_LINE_RE='Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped'
+# the first error lines come first, then the tail. A GPU fault prints "Memory access
+# fault by GPU", which says neither Error nor Exception (SLURM job 446997 printed only the
+# knock-on "RuntimeError: cancelled").
+_SERVER_ERROR_LINE_RE='Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped|Memory access fault|died unexpectedly'
 
 # Who holds this node's GPU memory, from the kernel (readable inside the container): the
 # failure in SLURM job 445932 was "free memory on startup is less than desired" on 3 of 8
