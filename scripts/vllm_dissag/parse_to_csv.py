@@ -20,7 +20,8 @@ from collections import defaultdict
 def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     """Parse benchmark log file and extract results, keeping max throughput per configuration."""
     results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None,
-                                    'output_tokens': None, 'max_throughput': 0.0})
+                                    'output_tokens': None, 'max_throughput': 0.0,
+                                    'failed': 0, 'stalled': False})
 
     with open(log_file, 'r') as f:
         content = f.read()
@@ -43,33 +44,37 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     current_output_seq_len = None
     current_concurrency = None
 
-    for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in previous sections (from [RUNNING] line)
-        if i > 1:
-            prev_section = sections[i-1]
+    # A result block belongs to the LAST [RUNNING] header before it, which is in the text
+    # since the previous result (sections[i-1]; for the first result, sections[0]). Taking
+    # the first header there mislabelled results: when a cell stalls and prints no result,
+    # the next cell's text holds both headers, so its throughput was filed under the
+    # stalled cell's concurrency and its own row vanished. Skipping sections[0] dropped
+    # the first measured cell of every sweep.
+    for i, section in enumerate(sections[1:], 1):
+        prev_section = sections[i-1]
 
-            # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-            config_match = re.search(
-                r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
-                prev_section
-            )
+        # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
+        headers = re.findall(
+            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
+            prev_section
+        )
+        if headers:
+            current_input_seq_len, current_output_seq_len, current_concurrency = map(int, headers[-1])
+        else:
             # Fallback: extract from Namespace(...) in vllm bench serve output
-            if not config_match:
-                isl_m = re.search(r'random_input_len=(\d+)', prev_section)
-                osl_m = re.search(r'random_output_len=(\d+)', prev_section)
-                con_m = re.search(r'max_concurrency=(\d+)', prev_section)
-                if isl_m and osl_m and con_m:
-                    config_match = type('Match', (), {
-                        'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
-                    })()
-            if config_match:
-                current_input_seq_len = int(config_match.group(1))
-                current_output_seq_len = int(config_match.group(2))
-                current_concurrency = int(config_match.group(3))
+            isl_m = re.findall(r'random_input_len=(\d+)', prev_section)
+            osl_m = re.findall(r'random_output_len=(\d+)', prev_section)
+            con_m = re.findall(r'max_concurrency=(\d+)', prev_section)
+            if isl_m and osl_m and con_m:
+                current_input_seq_len = int(isl_m[-1])
+                current_output_seq_len = int(osl_m[-1])
+                current_concurrency = int(con_m[-1])
 
         # Extract Total token throughput (tok/s) from benchmark result section
         throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
         throughput = float(throughput_match.group(1)) if throughput_match else None
+        failed_match = re.search(r'Failed requests:\s+([\d,]+)', section)
+        failed = int(failed_match.group(1).replace(',', '')) if failed_match else 0
 
         # Only process if we have a valid configuration from [RUNNING] line and throughput
         if current_input_seq_len and current_output_seq_len and current_concurrency and throughput is not None:
@@ -78,12 +83,26 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
             results[config_key]['concurrency'] = current_concurrency
             results[config_key]['input_tokens'] = current_input_seq_len
             results[config_key]['output_tokens'] = current_output_seq_len
+            results[config_key]['failed'] = max(results[config_key]['failed'], failed)
 
             # Keep the maximum throughput
             if throughput > results[config_key]['max_throughput']:
                 results[config_key]['max_throughput'] = throughput
 
+    # A cell that hit benchmark_xPyD.sh's timeout prints no result block, only
+    # "[STALL] isl=<I> osl=<O> con=<C> timed out"; it gets a zero-throughput row, so a
+    # sweep that stopped answering cannot pass by omission.
+    for isl, osl, con in re.findall(r'\[STALL\]\s+isl=(\d+)\s+osl=(\d+)\s+con=(\d+)', content):
+        key = (int(isl), int(osl), int(con))
+        results[key].update({'concurrency': key[2], 'input_tokens': key[0],
+                             'output_tokens': key[1], 'stalled': True})
+
     return results
+
+
+def cell_failed(data: Dict) -> bool:
+    """A sweep cell failed if it stalled, lost any request, or measured no throughput."""
+    return data['stalled'] or data['failed'] > 0 or data['max_throughput'] <= 0
 
 
 def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
@@ -340,7 +359,7 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
                 'model': model_name,
                 'performance': f"{data['max_throughput']:.2f}",
                 'metric': f"tok/s (isl={data['input_tokens']} osl={data['output_tokens']} con={data['concurrency']})",
-                'status': 'SUCCESS',
+                'status': 'FAILURE' if cell_failed(data) else 'SUCCESS',
             }
             row.update(meta)
             writer.writerow(row)
