@@ -144,10 +144,9 @@ Per-config overrides use a top-level `env:` block in the experiment YAML
 | --- | --- | --- |
 | `HSA_NO_SCRATCH_RECLAIM` | `base_env.sh` | `1` |
 | `NCCL_PXN_DISABLE` | `base_env.sh` | `1` |
-| `NVTE_CK_IS_V3_ATOMIC_FP32` | `MI300X.sh` / `MI325X.sh` (gfx942) | `1` |
-| `PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32` | `MI300X.sh` / `MI325X.sh` (gfx942) | `1` |
+| `PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32` | `base_env.sh` | `0` |
 | `RCCL_WARP_SPEED_AUTO` | `MI355X.sh` / `MI350X.sh` (gfx950) | `0` |
-| `NVTE_USE_CAST_TRANSPOSE_TRITON` | `base_env.sh` (MLPerf scripts may set `0`) | `1` |
+| `NVTE_USE_CAST_TRANSPOSE_TRITON` | `base_env.sh`; MI355X MXFP4 YAML `env:` sets `0` | `1` |
 
 `${VAR:-…}` in the GPU files (and YAML `env:` applied later) still lets
 `docker_env_vars` or a host export take precedence.

@@ -92,44 +92,33 @@ check_dockerfile_requires_primus_cli() {
 }
 
 check_primus_gpu_env_files() {
-  local mi300x="$PRIMUS_ROOT/runner/helpers/envs/MI300X.sh"
-  local mi350x="$PRIMUS_ROOT/runner/helpers/envs/MI350X.sh"
-  # Optional: these files live in Primus, not MAD. Skip on a stock submodule.
-  [[ -f "$mi300x" && -f "$mi350x" ]] || return 0
-  assert_file_contains "$mi300x" \
-    'NVTE_CK_IS_V3_ATOMIC_FP32="\$\{NVTE_CK_IS_V3_ATOMIC_FP32:-1\}"'
-  assert_file_contains "$mi300x" \
-    'PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32="\$\{PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32:-1\}"'
-  assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI325X.sh" \
-    'NVTE_CK_IS_V3_ATOMIC_FP32="\$\{NVTE_CK_IS_V3_ATOMIC_FP32:-1\}"'
-  assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI325X.sh" \
-    'PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32="\$\{PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32:-1\}"'
+  # gfx942 atomics stay at Primus base_env.sh defaults (Primus #1178 leaves
+  # MI300X.sh / MI325X.sh unchanged), so only the gfx950 WarpSpeed override is asserted.
   assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI355X.sh" \
     'RCCL_WARP_SPEED_AUTO=\$\{RCCL_WARP_SPEED_AUTO:-0\}'
-  assert_file_contains "$mi350x" \
+  assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI350X.sh" \
     'RCCL_WARP_SPEED_AUTO=\$\{RCCL_WARP_SPEED_AUTO:-0\}'
 }
 
-check_mxfp4_yaml_env() {
-  # Optional: stock release/v26.7 MXFP4 YAMLs do not set this (base_env.sh defaults
-  # to 1). Skip unless a checkout actually declares env.NVTE_USE_CAST_TRANSPOSE_TRITON.
-  local llama_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml"
-  local flux_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/diffusion/flux_12b_ddp_energon_schnell_resample_te_spec_mxfp4.yaml"
-  [[ -f "$llama_yaml" && -f "$flux_yaml" ]] || return 0
-  python3 -c 'import yaml' 2>/dev/null || return 0
+yaml_env_has_cast_transpose_zero() {
+  local yaml="$1"
   python3 -c '
 import sys, yaml
-checked = 0
-for path in sys.argv[1:]:
-    env = (yaml.safe_load(open(path)) or {}).get("env") or {}
-    if "NVTE_USE_CAST_TRANSPOSE_TRITON" not in env:
-        continue
-    checked += 1
-    val = str(env.get("NVTE_USE_CAST_TRANSPOSE_TRITON"))
-    if val != "0":
-        raise SystemExit(f"{path}: expected env.NVTE_USE_CAST_TRANSPOSE_TRITON=0, got {val!r}")
-raise SystemExit(0)
-' "$llama_yaml" "$flux_yaml"
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+env = cfg.get("env") or {}
+val = str(env.get("NVTE_USE_CAST_TRANSPOSE_TRITON", ""))
+if val != "0":
+    raise SystemExit(f"{sys.argv[1]}: expected env.NVTE_USE_CAST_TRANSPOSE_TRITON=0, got {val!r}")
+' "$yaml"
+}
+
+check_mxfp4_yaml_env() {
+  # Primus #1179 bakes NVTE_USE_CAST_TRANSPOSE_TRITON=0 into the MXFP4 YAML env: blocks.
+  local llama_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml"
+  local flux_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/diffusion/flux_12b_ddp_energon_schnell_resample_te_spec_mxfp4.yaml"
+  python3 -c 'import yaml' 2>/dev/null || return 0
+  yaml_env_has_cast_transpose_zero "$llama_yaml"
+  yaml_env_has_cast_transpose_zero "$flux_yaml"
 }
 
 check_gpu_model_mapping() {
@@ -150,9 +139,8 @@ check_explicit_gpu_model_override() (
 )
 
 check_fla_pretrain_hook() {
+  # Primus #1181: FLA Triton autotune patch on the primus-cli pretrain path.
   local hook="$PRIMUS_ROOT/runner/helpers/hooks/train/pretrain/z_patch_fla_triton_autotune.sh"
-  # Optional: FLA hook is a Primus-side patch, not part of this MAD change.
-  [[ -f "$hook" ]] || return 0
   assert_file_contains "$hook" 'patch_fla_triton_autotune_hang.sh'
   assert_file_contains "$hook" 'hylo_\*|kda_\*|gdn_\*'
 }
