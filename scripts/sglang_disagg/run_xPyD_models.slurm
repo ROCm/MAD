@@ -546,5 +546,21 @@ _docker_rc=$?
 trap - TERM INT
 exit "$_docker_rc"
 '
+_srun_rc=$?
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+
+# The job's verdict. This script used to end with the cleanup srun above, so its exit status,
+# and the SLURM job's, was the cleanup's: a run whose servers died at start-up and produced no
+# results still ended COMPLETED, and madengine collected "0 successful, 0 failed" as a pass.
+# A node's container exits non-zero when its server or benchmark fails (passing runs exit 0 on
+# every node), and a benchmark that ran writes /run_logs/$SLURM_JOB_ID/perf.csv (= $LOG_PATH on
+# the host). SKIP_BENCHMARK=1 serves without benchmarking, so it has no results to require.
+if [ "$_srun_rc" -ne 0 ]; then
+    echo "ERROR: a node's container exited with status ${_srun_rc}; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
+    exit "$_srun_rc"
+fi
+if [ "${SKIP_BENCHMARK}" != "1" ] && [ ! -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
+    echo "ERROR: no perf CSV at ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv; the benchmark produced no parseable results." >&2
+    exit 1
+fi
 
