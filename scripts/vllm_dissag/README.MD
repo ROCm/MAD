@@ -99,6 +99,15 @@ Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. 
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
 can reach.
 
+`DeepSeek-V4-Flash-FP8` and `DeepSeek-V4-Pro-FP8` use a prebuilt internal image instead
+of a from-source build. `docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it
+by digest and lists what it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes
+in-source, AITER 10f8874, MoRI 07bdace, vllm-router). Submit with the same digest:
+
+```bash
+export DOCKER_IMAGE_NAME=rocm/pytorch-private:vllm-recent-source-basem-v0290-aiter-10f8874-mori07bdace-tk@sha256:49e87adaece784e040dde49b79852b0fdbc515696619d559296a9397ecfd9137
+```
+
 ## Quick start
 
 ```bash
