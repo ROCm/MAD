@@ -48,9 +48,9 @@
 #   copying their site-packages over a separately installed AITER, so the image
 #   has one base and no second image to pull.
 #
-#   Build (context = repo root):
+#   Build (the image copies nothing from the build context, so any context works):
 #     docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
-#       --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 -t <registry>/vllm-kimi-k3:gfx942 .
+#       --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 -t <registry>/vllm-kimi-k3:gfx942 docker
 #
 #   WITH_NIXL=1 (default) adds UCX/RIXL/rocSHMEM/DeepEP for the rixl connector;
 #   the Kimi recipes run moriio, so =0 is a faster build with the same serving path.
