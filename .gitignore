@@ -69,8 +69,6 @@ venv.bak/
 # Results
 *.csv
 *.json
-# Cluster profiles are inputs, not generated output (see scripts/common/clusters/README.md).
-!scripts/common/clusters/*.json
 !models.json
 !perf_super.json
 !perf_entry_super.json

@@ -27,10 +27,9 @@
 # fabric device names, port numbers, timeouts.
 #
 # What has to be known BEFORE a job is submitted -- the partition to ask for, GPUs per
-# node, exclusivity -- is in clusters/<name>.json instead: pass it to madengine as
-# --additional-context-file, or read it for the sbatch options (clusters/README.md). The partition appears in both on purpose:
-# there it picks the allocation, here it is only a default for running a launcher by
-# hand outside sbatch (see the slurm section below). Keep them in step.
+# node, exclusivity -- is the submitter's: madengine's SLURM presets (amd-rccl, 8 GPUs per
+# node, exclusive) or the sbatch options you pass. The partition here is only a default for
+# running a launcher by hand outside sbatch (see the slurm section below).
 # WHAT DOES NOT: model-specific performance flags. Those live in models.yaml,
 # keyed by model name, and are the launcher's business rather than the site's.
 #

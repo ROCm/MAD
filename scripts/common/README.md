@@ -18,7 +18,7 @@ job the same allocation and the same environment:
 | The card: launcher, node count, image recipe, environment | `scripts/<dir>/models.json` |
 | The recipe: serve flags and env per model (vLLM disagg) | `scripts/vllm_dissag/models.yaml` |
 | The image | `docker/<name>.ubuntu.amd.Dockerfile`, named by the card's `dockerfile` |
-| The cluster's allocation defaults | `scripts/common/clusters/<cluster>.json` ([README](clusters/README.md)) |
+| The allocation defaults: partition, GPUs per node, exclusive | madengine's SLURM presets (`amd-rccl`, 8, exclusive); override in `--additional-context` |
 | The cluster's in-job facts: weights, fabric, ports | `scripts/common/cluster.sh` |
 
 The environment the launcher starts with is layered, weakest first:
@@ -36,21 +36,19 @@ where the compute nodes can pull it:
 pip install git+https://github.com/ROCm/madengine.git
 export MAD_DOCKERHUB_USER=<user> MAD_DOCKERHUB_PASSWORD=<token>
 madengine build --tags pyt_vllm_disagg_mori_deepseek-v3 --registry docker.io/<namespace> \
-    --additional-context-file scripts/common/clusters/m2m.json \
-    --manifest-output build_manifest.json
+    --additional-context '{"slurm": {}}' --manifest-output build_manifest.json
 ```
 
 Then, from the SLURM login node, run it:
 
 ```bash
 madengine run --manifest-file build_manifest.json \
-    --additional-context-file scripts/common/clusters/m2m.json \
     --additional-context '{"slurm": {"nodes": 2, "time": "06:00:00"}}' \
     --timeout 21600 --live-output -o perf.csv
 ```
 
-- **`--additional-context`** is merged over the cluster profile key by key. Put the run's
-  shape and any overrides there:
+- **`--additional-context`** is merged over madengine's SLURM presets key by key; a `slurm`
+  key is what makes madengine submit to SLURM. Put the run's shape and any overrides there:
   - `slurm.nodes`, `slurm.time`, `slurm.nodelist`
   - `env_vars` for the benchmark knobs or the topology, e.g.
     `{"env_vars": {"xP": "2", "yD": "2", "DURATION": "900"}}`
@@ -72,8 +70,8 @@ sbatch --partition=amd-rccl --nodes=2 --ntasks=2 --gpus-per-node=8 --exclusive \
        --time=06:00:00 --export=ALL run_xPyD_models.slurm
 ```
 
-- **Options:** the `sbatch` options come from the cluster profile's `slurm` block, plus the
-  run's node count and time; see the [mapping table](clusters/README.md).
+- **Options:** the partition, GPUs per node and `--exclusive` are madengine's SLURM presets;
+  add the run's node count and time.
 - **`--time`:** each launcher's own `#SBATCH --time=24:00:00` exceeds most partition limits,
   so pass it.
 - **Image access:** the launcher pulls `DOCKER_IMAGE_NAME` on every node and tolerates a failed
