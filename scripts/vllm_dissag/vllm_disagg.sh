@@ -199,8 +199,10 @@ JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID}/ABORTED"
 # Lines vLLM prints only when a server has died during start-up. A worker whose collective
 # failed (RCCL "[FATAL ERROR]: HIP failure", vLLM "RuntimeError: NCCL error") can leave
 # the engine hung rather than exited, so neither engine line ever appears: two runs
-# failed their first all-reduce ~17 min in and waited out the 4000s.
-_FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start|RuntimeError: NCCL error|\[FATAL ERROR\]: HIP failure'
+# failed their first all-reduce ~17 min in and waited out the 4000s. A worker that runs
+# out of GPU memory during start-up does the same: one decode worker's OOM in cudagraph
+# capture left the engine waiting ~55 min for vLLM's own engine-ready timeout.
+_FATAL_SERVER_LOG_RE='Engine core initialization failed|EngineCore failed to start|RuntimeError: NCCL error|\[FATAL ERROR\]: HIP failure|torch\.OutOfMemoryError'
 
 # The last lines of a dead vLLM server are the API server's traceback, which only says
 # "See root cause above"; the worker exception and RCCL's own NCCL WARN lines come

@@ -334,6 +334,10 @@ _kimi_k3_recipe_env: &kimi_k3_recipe_env
   GPU_MEMORY_UTILIZATION: "0.88"        # 0.88 leaves the 16 GiB MoRI shmem heap
   PREFILL_CUDAGRAPH_MODE: "NONE"
   DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  # Capture only the batch sizes decode can run: --max-num-seqs is 8. With the default
+  # sizes (up to 256), decode ran out of memory on its first (largest) capture, in AITER's
+  # fused-MoE workspace, with ~9 GiB left after weights and the KV cache.
+  CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8"
   VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
   PREFILL_MORI_BACKEND: "mori_high_throughput"
   DECODE_MORI_BACKEND: "mori_low_latency"

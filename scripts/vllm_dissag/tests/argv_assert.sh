@@ -419,6 +419,18 @@ echo "=== Kimi-K3 (MI300X) KV cache fits beside its weights ==="
 KkP="$(_argv_at 0 moriio 1 mori Kimi-K3 /m/K3)"
 _hasadj "$KkP" "--kv-cache-memory-bytes" "16000000000" "moriio Kimi-K3 prefill: 16e9 KV cache bytes"
 _count  "$KkP" "--kv-cache-memory-bytes" 1 "moriio Kimi-K3 prefill: --kv-cache-memory-bytes appears once"
+# Decode captured cudagraphs up to 256 with --max-num-seqs 8 and ran out of memory on the
+# largest capture; it now captures only the sizes it can run.
+KkD="$(_argv_at 1 moriio 1 mori Kimi-K3 /m/K3)"
+_hasre  "$(tr '\n' ' ' <<<"$KkD")" "--cudagraph-capture-sizes 1 2 4 8 --" "moriio Kimi-K3 decode: captures 1 2 4 8 only"
+_hasadj "$KkD" "--max-num-seqs" "8" "moriio Kimi-K3 decode: --max-num-seqs 8 (the capture sizes' ceiling)"
+
+echo "=== the start-up watch fails fast on a worker's CUDA OOM ==="
+# One decode worker's OOM left the engine hung until vLLM's 3600s engine-ready timeout.
+_FRE="$(grep -E "^_FATAL_SERVER_LOG_RE=" "$DIR/vllm_disagg.sh" | sed -E "s/^_FATAL_SERVER_LOG_RE='(.*)'$/\1/")"
+_oom='(Worker_DP3_TP1_EP7 pid=4147) ERROR 09-30 00:44:26 torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.00 GiB.'
+grep -Eq -- "$_FRE" <<<"$_oom" && { echo "  PASS  a worker's torch.OutOfMemoryError is fatal"; pass=$((pass+1)); } || { echo "  FAIL  a worker's torch.OutOfMemoryError is fatal"; fail=$((fail+1)); }
+grep -Eq -- "$_FRE" <<<"INFO 09-30 00:17:10 [gpu_worker.py:491] Initial free memory 172.74 GiB" && { echo "  FAIL  an ordinary memory INFO line is not fatal"; fail=$((fail+1)); } || { echo "  PASS  an ordinary memory INFO line is not fatal"; pass=$((pass+1)); }
 
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
