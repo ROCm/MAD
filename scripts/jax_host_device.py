@@ -89,6 +89,7 @@ def config_dir_allowed(device_dir, sku=None):
 
 
 def log_sku_filter(sku=None):
+    """Warn only when the host SKU could not be detected; stay quiet otherwise."""
     if sku is None:
         sku = detect_host_sku()
     if not sku:
@@ -98,13 +99,3 @@ def log_sku_filter(sku=None):
             "to avoid duplicate jobs.",
             file=sys.stderr,
         )
-        return
-    if sku == "all":
-        print("JAX_HOST_DEVICE=all: discovering every device directory.", file=sys.stderr)
-        return
-    dirs = ",".join(sorted(SKU_CONFIG_DIRS.get(sku, {sku})))
-    print(
-        "host GPU product %s: discovering Primus configs under %s only "
-        "(JAX_HOST_DEVICE=all to include every directory)." % (sku, dirs),
-        file=sys.stderr,
-    )
