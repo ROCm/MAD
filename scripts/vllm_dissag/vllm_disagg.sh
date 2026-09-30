@@ -176,9 +176,10 @@ _dryrun_emit() {
     local a
     for a in "$@"; do printf '%s\n' "$a"; done
     echo "===END==="
-    # The AITER env the server would start with, after the argv block so argv readers
+    # The AITER env the server would start with, and the served model name clients must
+    # request, after the argv block so argv readers
     # (awk up to ===END===) are unaffected; tests/argv_assert.sh checks it per connector.
-    env | grep -E '^VLLM_(ROCM_USE_AITER|USE_AITER)' | sort | sed 's/^/===ENV /'
+    env | grep -E '^(VLLM_(ROCM_USE_AITER|USE_AITER)|SERVED_MODEL_NAME=)' | sort | sed 's/^/===ENV /'
 }
 
 # -----------------------------------------------------------------------------
@@ -375,6 +376,26 @@ PY
     echo "[vllm_disagg] model flags (${PARALLEL_MODE}): prefill='${MODEL_CONFIG_PREFILL}' decode='${MODEL_CONFIG_DECODE}'"
 fi
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
+
+# The name clients must request is the one the servers register: the recipe's
+# --served-model-name when its flags set one, else vLLM's default, MODEL_PATH. The NIAH
+# client assumed the latter, so on Kimi-K3-MXFP4 (whose recipe serves "kimi-k3") every
+# request came back 404 "The model <path> does not exist". Read from the recipe rather
+# than from the router's /v1/models, which 503s under MoRIIO service discovery.
+SERVED_MODEL_NAME="$(python3 - "${MODEL_CONFIG_DECODE} ${MODEL_CONFIG_PREFILL}" <<'PY'
+import shlex, sys
+try:
+    a = shlex.split(sys.argv[1])
+except ValueError:
+    a = []
+for i, x in enumerate(a):
+    if x == "--served-model-name" and i + 1 < len(a):
+        print(a[i + 1]); break
+    if x.startswith("--served-model-name="):
+        print(x.split("=", 1)[1]); break
+PY
+)"
+export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_PATH}}"
 
 # Tokenize models.yaml flag strings without bash eval (JSON in --quantization-config breaks eval).
 _model_config_to_array() {

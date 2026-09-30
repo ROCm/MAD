@@ -30,15 +30,17 @@ done
 
 # The model tag to request MUST equal the server's served_model_name, or every
 # request 404s and the whole sweep is recorded as FAILURE.
-#   * vllm_dissag passes no --served-model-name, so vLLM defaults it to MODEL_PATH.
+#   * vllm_dissag serves the recipe's --served-model-name when it sets one (Kimi-K3-MXFP4:
+#     "kimi-k3"), else vLLM's default, MODEL_PATH; vllm_disagg.sh resolves that into
+#     SERVED_MODEL_NAME.
 #   * vllm_multinode passes --served-model-name "$MODEL_NAME" and exports NIAH_MODEL
 #     to match.
-# Hence: honour NIAH_MODEL when the launcher sets it, else fall back to MODEL_PATH.
-# The server registers the model under its path (served_model_name = MODEL_PATH).
+# Hence: honour NIAH_MODEL when the launcher sets it, else SERVED_MODEL_NAME, else
+# MODEL_PATH.
 # NIAH_WARMUP=1 (harness default): first-hit JIT compiles off the scored path so a cold
 # boot does not produce false 0/10 or timeouts on the first scored request.
 NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}/v1/chat/completions" \
-NIAH_MODEL="${NIAH_MODEL:-${MODEL_PATH}}" \
+NIAH_MODEL="${NIAH_MODEL:-${SERVED_MODEL_NAME:-${MODEL_PATH}}}" \
 NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
 NIAH_SEEDS="${NIAH_SEEDS:-0,1,2}" \
 NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \

@@ -413,6 +413,13 @@ KdO="$(_raw_at 1 rixl 1 deepep DeepSeek-V3 /m/DSV3 VLLM_ROCM_USE_AITER_MLA=1 DEC
 _has    "$KdO" "===ENV VLLM_ROCM_USE_AITER_MLA=1" "rixl deepep: a submit-time VLLM_ROCM_USE_AITER_MLA wins"
 _has    "$KdO" '"cudagraph_mode":"FULL_DECODE_ONLY"' "rixl deepep: a submit-time DECODE_CUDAGRAPH_MODE wins"
 
+echo "=== benchmark clients request the name the servers register ==="
+# Kimi-K3-MXFP4's recipe serves "kimi-k3"; NIAH asked for MODEL_PATH and every request 404'd.
+_has "$(_raw_at 0 moriio 1 mori Kimi-K3-MXFP4 /m/K3)" "===ENV SERVED_MODEL_NAME=kimi-k3" "Kimi-K3-MXFP4: served name from the recipe's --served-model-name"
+_has "$(_raw_at 0 moriio 1 mori DeepSeek-V3 /m/DSV3)" "===ENV SERVED_MODEL_NAME=/m/DSV3" "DeepSeek-V3: no --served-model-name, so MODEL_PATH (vLLM's default)"
+_has "$(_raw_at 0 moriio 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)" "===ENV SERVED_MODEL_NAME=/m/Llama" "Llama TP: unchanged, MODEL_PATH"
+_has "$(grep -F 'NIAH_MODEL=' "$DIR/benchmark_niah.sh")" 'NIAH_MODEL="${NIAH_MODEL:-${SERVED_MODEL_NAME:-${MODEL_PATH}}}"' "NIAH requests SERVED_MODEL_NAME unless NIAH_MODEL is set"
+
 echo "=== the start-up watch fails fast on a worker's CUDA OOM ==="
 # One decode worker's OOM left the engine hung until vLLM's 3600s engine-ready timeout.
 _FRE="$(grep -E "^_FATAL_SERVER_LOG_RE=" "$DIR/vllm_disagg.sh" | sed -E "s/^_FATAL_SERVER_LOG_RE='(.*)'$/\1/")"
