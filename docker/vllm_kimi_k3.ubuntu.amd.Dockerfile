@@ -25,60 +25,64 @@
 #
 #################################################################################
 # =============================================================================
-# pyt_vllm_kimi_k3_mi355x.ubuntu.amd.Dockerfile
+# vllm_kimi_k3.ubuntu.amd.Dockerfile
 #
-#   Kimi-K3 native-MXFP4 wide-EP + MoRIIO disaggregated serving on MI355X / gfx950.
-#   Sibling of pyt_vllm_kimi_k3_mi300x: same MoRI, vLLM and router pins, so the two
-#   images differ only where the GPU does.
+#   The one Kimi-K3 image for every Kimi-K3 vLLM card, on MI300X (gfx942) and
+#   MI355X (gfx950), colocated multinode and disaggregated alike. It replaces
+#   pyt_vllm_kimi_k3_mi300x, pyt_vllm_kimi_k3_mi355x and vllm_disagg_inference.kimik3,
+#   which were the same stack apart from the GPU arch and a few pins
+#   (vLLM, MoRI and AITER were identical in all three).
+#
+#   GPU ARCH. Built for exactly one arch, MAD_SYSTEM_GPU_ARCHITECTURE (gfx942 or
+#   gfx950): madengine passes it, and the MAD CI pipeline sets it from the compute
+#   nodes it probed. Everything arch-specific follows it: MoRI's JIT target, the
+#   vLLM compile, and, with WITH_NIXL=1, rocSHMEM and DeepEP. Runtime differences
+#   between the arches (AITER MLA gfx950-only, int4 MoE requant on gfx942) are
+#   recipe knobs in scripts/*/models.yaml, not build steps.
+#
+#   AITER. Built from source at the commit the Kimi-K3 release images ship:
+#   ROCm/aiter 68e42f5f (0.1.17.dev395, "k3-for-amd"). Both earlier donor images,
+#   amdsiloai/vllm:kimi-k3-mi325x-release-v2 and vllm/vllm-openai-rocm:kimi-k3,
+#   carry that same layer (digest e2b3951e36ca), with its Kimi-K3 tuned MoE
+#   configs, aiter.ops.triton.conv, and flydsl 0.2.4. Building it here replaces
+#   copying their site-packages over a separately installed AITER, so the image
+#   has one base and no second image to pull.
 #
 #   Build (context = repo root):
-#     docker build -f docker/pyt_vllm_kimi_k3_mi355x.ubuntu.amd.Dockerfile \
-#       -t <your-registry>/vllm-kimi-k3-mi355x:local .
-#     export DOCKER_IMAGE_NAME=<your-registry>/vllm-kimi-k3-mi355x:local
+#     docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
+#       --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 -t <registry>/vllm-kimi-k3:gfx942 .
 #
-#   Named pyt_vllm_kimi_k3_mi355x, not vllm_disagg_inference.*: madengine builds every
-#   file matching `<card dockerfile>.*`, and the generic disagg cards already glob
-#   vllm_disagg_inference.*.
+#   WITH_NIXL=1 (default) adds UCX/RIXL/rocSHMEM/DeepEP for the rixl connector;
+#   the Kimi recipes run moriio, so =0 is a faster build with the same serving path.
 #
-# WHAT DIFFERS FROM THE MI300X IMAGE, AND WHY
-#   - gfx950 has scaled-MXFP4 MFMA, so the MoE runs natively. The vLLM fork selects
-#     that path itself on gfx950 (mxfp4.py _use_k3_situ_aiter); the gfx942 int4
-#     requant only engages with an explicit --quantization-config, which the MI355X
-#     recipe does not pass. AITER MLA works here, so the recipe leaves it on.
-#   - AITER donor: vllm/vllm-openai-rocm:kimi-k3, pinned by digest. The MI300X file's
-#     donor, amdsiloai/vllm:kimi-k3-mi325x-release-v2, is this same image plus three
-#     vLLM .py files and one ENV (all 33 layers shared), so the grafted aiter,
-#     aiter_meta and flydsl trees are identical bits under an honest name. They are
-#     built for gfx942;gfx950 - the same trees the single-node MI355X Kimi-K3 card runs.
-#   - No flydsl 0.2.4 re-pin after the graft. It exists for the gfx942 int4 path
-#     (_setup_kernel_k3_situ_gfx942); the donor's 0.2.2 is what the working gfx950
-#     image runs.
-#   - GFX_COMPILATION_ARCH=gfx950, which sets the image's MORI_GPU_ARCHS default. The
-#     launcher also forwards the arch it detects on the nodes, so MoRI JIT-builds for
-#     the GPU it actually runs on either way.
-#   - PYTORCH_ROCM_ARCH is inert in both files: the base image exports
-#     PYTORCH_ROCM_ARCH=gfx90a;gfx942;gfx950 as an ENV, which wins over an ARG of the
-#     same name, so vLLM is compiled for gfx950 regardless.
+# STATUS
+#   gfx942 (MI300X): the stack the Kimi-K3 cards run today; single-needle NIAH passed
+#   10K-900K on 2 prefill + 2 decode nodes with these pins (PR #193), with AITER
+#   supplied by grafting the same 68e42f5f build this file now compiles.
+#   gfx950 (MI355X): BRING-UP, NOT VALIDATED. Nothing shows MoRIIO disagg with
+#   Kimi-K3 has run on gfx950: the vLLM ref is the fork's gfx942 branch. The same
+#   stack has run MoRIIO + MoRI-EP on gfx950 for GLM, which needed EP16
+#   startup-deadlock gates and a MoRI combine fix that are NOT in this vLLM ref, and
+#   ionic NICs needed a patched MoRI. Expect the first gfx950 runs to find those.
 #
-# STATUS: BRING-UP, NOT VALIDATED
-#   Nothing shows MoRIIO disagg with Kimi-K3 has run on gfx950: the vLLM ref is the
-#   fork's gfx942 branch, validated on MI300X only. The same stack has run MoRIIO +
-#   MoRI-EP on gfx950 for GLM, which needed EP16 startup-deadlock gates and a MoRI
-#   combine fix that are NOT in this vLLM ref, and ionic NICs needed a patched MoRI.
-#   Expect the first runs to find those. Every pin is otherwise the MI300X file's.
+# NO RUNTIME PATCHERS
+#   All Kimi-K3 MoRIIO connector fixes (4-KV-cache-group block routing, multi-chunk
+#   compute-progress prefill gate, KDA gather sync-free) are committed in the vLLM
+#   source this builds (VLLM_REF below). Nothing patches site-packages at start.
+#
+# PINNING
+#   Every source is pinned to an immutable commit SHA, not a branch name: these are
+#   personal forks whose branches can be force-pushed or deleted, and MAD needs the
+#   image to be rebuildable to the same bits a year from now. The human-readable
+#   branch each SHA came from is in the comment above it.
 # =============================================================================
 
 # Image ARGs consumed by FROM must be declared before the first FROM (buildkit
 # global scope); declaring them later scopes them to a single stage and the second
 # FROM resolves blank.
 #
-# K3-aware AITER donor (step 5b). Public, anonymously pullable. Same ROCm 7.2.3 +
-# torch 2.11 base as BASE_IMAGE, so the grafted trees are ABI-compatible.
-ARG PROVEN_K3_IMAGE=vllm/vllm-openai-rocm:kimi-k3@sha256:5aa7e626ff73672f5ca7aae46754570488c23d33ca1ac90756a1d2d1a3fe099b
 # Open ROCm vLLM CI base - same one the shared disagg image builds on.
 ARG BASE_IMAGE=rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491
-
-FROM ${PROVEN_K3_IMAGE} AS proven_k3_aiter
 
 FROM ${BASE_IMAGE}
 
@@ -106,12 +110,21 @@ ARG SETUPTOOLS_CONSTRAINT="setuptools<80"
 RUN printf '%s\n' "${SETUPTOOLS_CONSTRAINT}" > /etc/pip-constraints.txt
 ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
 
-ARG GFX_COMPILATION_ARCH="gfx950"
-ARG PYTORCH_ROCM_ARCH="gfx950"
+# The GPU this image is built for. No default: an image built for the wrong arch
+# fails at runtime, so the build refuses to guess. K3_GFX_ARCH carries it to each
+# build step (named so it is not read as a fixed arch by madengine's Dockerfile
+# arch check, which parses GFX_COMPILATION_ARCH / PYTORCH_ROCM_ARCH / GPU_ARCHS).
+ARG MAD_SYSTEM_GPU_ARCHITECTURE
+ENV K3_GFX_ARCH=${MAD_SYSTEM_GPU_ARCHITECTURE}
+RUN case "${K3_GFX_ARCH}" in \
+      gfx942|gfx950) echo "Kimi-K3 image for ${K3_GFX_ARCH}" ;; \
+      *) echo "MAD_SYSTEM_GPU_ARCHITECTURE must be gfx942 or gfx950, got '${K3_GFX_ARCH}'" >&2; exit 1 ;; \
+    esac && mkdir -p /app && echo "GPU_ARCH=${K3_GFX_ARCH}" >> /app/versions.txt
 ARG MAX_JOBS=32
 ARG NVCC_THREADS=8
-# K3 uses the moriio connector only; default the NIXL/RIXL transport layer OFF.
-ARG WITH_NIXL=0
+# UCX/RIXL/rocSHMEM/DeepEP for the rixl connector. On by default so the image serves
+# every connector; the Kimi recipes use moriio, and =0 builds faster without it.
+ARG WITH_NIXL=1
 ARG NIC_COMPILATION_ARCH="cx7"
 
 # -----------------------------------------------------------------------------
@@ -123,7 +136,7 @@ ARG NIC_COMPILATION_ARCH="cx7"
 ARG MORI_REPO=https://github.com/ROCm/mori.git
 # tag v1.2.2
 ARG MORI_REF=fe12a11a7d6c6acd0771b772366ed9ed5e0d3d44
-ENV MORI_GPU_ARCHS=${GFX_COMPILATION_ARCH}
+ENV MORI_GPU_ARCHS=${K3_GFX_ARCH}
 # UMBP needs gRPC headers absent from this base and is unrelated to EP dispatch.
 ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
@@ -141,30 +154,30 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     rm -rf /tmp/mori-src
 
 # -----------------------------------------------------------------------------
-# 2. AITER 0.1.19 + flydsl 0.2.4 (K3 pins; see header for why 0.1.16.post3 fails).
-#    0.1.19 also carries the #3658 top_k_top_p HSA-fault fix needed for DP-EP disagg.
-#    Then invalidate the prewarmed JIT cache compiled against the old .so.
+# 2. AITER from source at the Kimi-K3 release commit, and flydsl 0.2.4.
+#    68e42f5f carries the Kimi-K3 tuned MoE configs (kimik3_{a8w4,fp4}_tuned_fmoe,
+#    without which K3's MoE profiling shape falls back to a heuristic FlyDSL kernel
+#    that aborts LLVM), aiter.ops.triton.conv (K3's vision tower), and the #3658
+#    top_k_top_p fix DP-EP disagg needs. K3's int4 SiTUv2 path on gfx942
+#    (_setup_kernel_k3_situ_gfx942 -> compile_moe_gemm1) needs flydsl >= 0.2.4.
+#    Same build as the GLM-5.1 image's AITER step; kernels JIT for the GPU at runtime.
 # -----------------------------------------------------------------------------
-ARG AITER_VERSION=0.1.19
-ARG AITER_WHEEL_URL="https://github.com/ROCm/aiter/releases/download/v0.1.19/amd_aiter-0.1.19%2Brocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-RUN echo "Bumping AITER to ${AITER_VERSION} from ${AITER_WHEEL_URL}" && \
-    _W="/tmp/$(basename "${AITER_WHEEL_URL}" | sed 's/%2B/+/g')" && \
-    curl -fL --retry 3 --retry-delay 2 -o "${_W}" "${AITER_WHEEL_URL}" && \
+ARG AITER_REPO=https://github.com/ROCm/aiter.git
+# branch k3-for-amd (carlushuang/aiter-k3) = ROCm/aiter 0.1.17.dev395
+ARG AITER_REF=68e42f5f461556596ae294200f1a3f13378c8582
+RUN rm -rf /tmp/aiter-src && \
+    git clone --recursive "${AITER_REPO}" /tmp/aiter-src && \
+    cd /tmp/aiter-src && git checkout "${AITER_REF}" && \
+    git submodule update --init --recursive && \
     (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
-    pip install --no-deps "${_W}" && \
-    pip install "flydsl==0.2.4" && \
-    rm -f "${_W}" && \
-    python3 - <<'PYEOF'
-from importlib.metadata import version as v, PackageNotFoundError
-vm = None
-for n in ("amd-aiter", "amd_aiter", "aiter"):
-    try: vm = v(n); break
-    except PackageNotFoundError: pass
-assert vm and vm.split("+", 1)[0].startswith("0.1.19"), f"AITER not 0.1.19: {vm!r}"
-print("AITER OK:", vm)
-PYEOF
-RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache" && \
-    echo "AITER_VERSION=${AITER_VERSION}" >> /app/versions.txt
+    GPU_ARCHS="${K3_GFX_ARCH}" pip install --no-build-isolation --no-deps -v . && \
+    pip install --no-deps --force-reinstall "flydsl==0.2.4" && \
+    python3 -c "import importlib.metadata as m; v=m.version('amd-aiter'); \
+assert '68e42f5f' in v, v; assert m.version('flydsl')=='0.2.4'; \
+f=[str(x) for x in m.files('amd-aiter') if str(x).startswith('aiter/ops/triton/conv/')]; \
+assert f, 'aiter.ops.triton.conv missing'; print('AITER OK', v, '+ flydsl 0.2.4')" && \
+    echo "AITER_REF=${AITER_REF}" >> /app/versions.txt && \
+    rm -rf /tmp/aiter-src /opt/vllm_cache/aiter_jit /root/.aiter
 
 # -----------------------------------------------------------------------------
 # 3. vLLM: full source compile of the K3 + MoRIIO branch. All K3 connector fixes
@@ -185,7 +198,7 @@ ARG VLLM_REPO=https://github.com/raviguptaamd/vllm.git
 # branch kimi-k3-wideep-disagg-fullsource-v3 @ 2026-08-11
 ARG VLLM_REF=862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543
 ENV VLLM_TARGET_DEVICE=rocm \
-    PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
+    PYTORCH_ROCM_ARCH=${K3_GFX_ARCH} \
     MAX_JOBS=${MAX_JOBS}
 # MAX_JOBS/NVCC_THREADS are set INLINE on the pip line: under the legacy builder
 # the ENV above does not reach the pip build subprocess, and vLLM's setup.py
@@ -209,7 +222,7 @@ def get(names):
         except PackageNotFoundError: pass
     return None
 av = get(("amd-aiter", "amd_aiter", "aiter"))
-assert av and av.split("+", 1)[0].startswith("0.1.19"), f"AITER downgraded: {av!r}"
+assert av and "68e42f5f" in av, f"AITER replaced by the vLLM install: {av!r}"
 import mori, mori.io, mori.ops
 print("Post-vLLM check OK: AITER", av, "+ MoRI importable")
 PYEOF
@@ -222,8 +235,8 @@ PYEOF
 #    Same source the shared disagg image uses; pinned to its SHA here.
 # -----------------------------------------------------------------------------
 ARG ROUTER_REPO=https://github.com/raviguptaamd/router.git
-# branch ravgupta/discovery-dp-rank-roundrobin
-ARG ROUTER_REF=6409ac1409410f54c5ed39791aadc69ce80b7bf3
+# branch ravgupta/discovery-dp-rank-roundrobin @ 2026-08-24 (the 2P2D KV-notify fix)
+ARG ROUTER_REF=82dc9811af17412e6e24b5942a5486bc502df23a
 ARG RUST_TOOLCHAIN=1.88.0
 RUN if ! command -v cargo >/dev/null 2>&1; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}"; \
@@ -239,8 +252,8 @@ RUN if ! command -v cargo >/dev/null 2>&1; then \
     rm -rf /tmp/vllm-router-src
 
 # -----------------------------------------------------------------------------
-# 4b. Optional NIXL/RIXL transport (WITH_NIXL=1). OFF by default for K3 - the
-#     recipe runs the moriio connector only. Identical to the shared disagg image.
+# 4b. NIXL/RIXL transport (WITH_NIXL=1, the default). Identical to the shared disagg
+#     image, with rocSHMEM pinned as it pins it.
 # -----------------------------------------------------------------------------
 ENV _ROCM_DIR=/opt/rocm \
     _UCX_SOURCE=https://github.com/ROCm/ucx.git \
@@ -250,6 +263,7 @@ ENV _ROCM_DIR=/opt/rocm \
     _RIXL_BRANCH=f33a5599 \
     _RIXL_INSTALL_DIR=/usr/local/RIXL/install \
     _NIXLBENCH_INSTALL_DIR=/usr/local/RIXL
+ARG ROCSHMEM_REF=9c43b23229cf2f835b838f72c0d1af3d4876167c
 RUN if [ "${WITH_NIXL}" != "1" ]; then \
       echo "WITH_NIXL=${WITH_NIXL}: skipping UCX/RIXL/rocSHMEM/DeepEP (MoRI-EP only)"; \
     else set -e && \
@@ -278,13 +292,13 @@ RUN if [ "${WITH_NIXL}" != "1" ]; then \
                     --config-settings=setup-args="-Ducx_path=${_UCX_INSTALL_DIR}" \
                     --config-settings=setup-args="-Ddisable_gds_backend=true" . && \
       cd /tmp && git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && \
-        cd rocm-systems && git sparse-checkout set --cone projects/rocshmem && git checkout develop && \
+        cd rocm-systems && git sparse-checkout set --cone projects/rocshmem && git checkout "${ROCSHMEM_REF}" && \
         mkdir -p /tmp/rocshmem-build && cd /tmp/rocshmem-build && \
         /tmp/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
-          -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS="${GFX_COMPILATION_ARCH}" && \
+          -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS="${K3_GFX_ARCH}" && \
       cd /tmp && git clone https://github.com/ROCm/DeepEP.git && cd DeepEP && \
-        PYTORCH_ROCM_ARCH="${GFX_COMPILATION_ARCH}" CFLAGS="-O3 -fPIC" \
-          CXXFLAGS="-O3 -fPIC --offload-arch=${GFX_COMPILATION_ARCH}" HIP_CXX_FLAGS="-O3 -fPIC" \
+        PYTORCH_ROCM_ARCH="${K3_GFX_ARCH}" CFLAGS="-O3 -fPIC" \
+          CXXFLAGS="-O3 -fPIC --offload-arch=${K3_GFX_ARCH}" HIP_CXX_FLAGS="-O3 -fPIC" \
           python3 setup.py --variant rocm --nic "${NIC_COMPILATION_ARCH}" build develop && \
       echo "WITH_NIXL build complete" >> /app/versions.txt && \
       rm -rf /tmp/ucx /tmp/googletest-1.14.0 /tmp/v1.14.0.tar.gz /tmp/rocm-systems /tmp/rocshmem-build; \
@@ -311,37 +325,6 @@ ENV AITER_JIT_DIR=/opt/vllm_cache/aiter_jit \
     VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
     TRITON_CACHE_DIR=/opt/vllm_cache/triton \
     COMGR_CACHE_DIR=/opt/vllm_cache/comgr
-
-# -----------------------------------------------------------------------------
-# 5b. K3-AWARE AITER GRAFT (same trees the single-node MI355X Kimi-K3 image runs).
-#     The 0.1.19 release wheel has no Kimi-K3 MoE tuning. At K3's MoE profiling
-#     shape (M = EP x max_tokens = 131072, N=3584, K=3072, SiTUv2, mxfp4) it finds
-#     no tuned FlyDSL config and falls back to a heuristic kernel whose
-#     buffer.load.lds intrinsic aborts LLVM ("Do not know how to expand this
-#     operator's operand!"). The worker then dies natively inside
-#     determine_available_memory with no Python traceback and engine init fails.
-#     PROVEN_K3_IMAGE ships a K3-aware AITER: kimik3_{a8w4,fp4}_tuned_fmoe.csv
-#     model configs, working MXFP4->CK/int4 routing, and prebuilt hsaco in
-#     aiter_meta. Grafting its aiter + aiter_meta trees over the 0.1.19 install
-#     makes K3 MXFP4 MoE compile.
-#     Placed AFTER the vLLM/router layers so edits here do not invalidate the
-#     ~40-minute vLLM compile cache.
-# -----------------------------------------------------------------------------
-RUN rm -rf /usr/local/lib/python3.12/dist-packages/aiter \
-           /usr/local/lib/python3.12/dist-packages/aiter_meta \
-           /usr/local/lib/python3.12/dist-packages/flydsl \
-           /usr/local/lib/python3.12/dist-packages/aiter*.dist-info \
-           /usr/local/lib/python3.12/dist-packages/amd_aiter*.dist-info 2>/dev/null || true
-COPY --from=proven_k3_aiter /usr/local/lib/python3.12/dist-packages/aiter      /usr/local/lib/python3.12/dist-packages/aiter
-COPY --from=proven_k3_aiter /usr/local/lib/python3.12/dist-packages/aiter_meta /usr/local/lib/python3.12/dist-packages/aiter_meta
-COPY --from=proven_k3_aiter /usr/local/lib/python3.12/dist-packages/flydsl     /usr/local/lib/python3.12/dist-packages/flydsl
-# flydsl stays at the donor's 0.2.2, the version the gfx950 image serves K3 with. The
-# MI300X file re-pins 0.2.4 here for the gfx942-only int4 path, which never runs on gfx950.
-# Drop step 2's 0.2.4 metadata so pip reports the version actually on disk.
-RUN rm -rf /usr/local/lib/python3.12/dist-packages/flydsl-*.dist-info && \
-    echo "FLYDSL=donor $(python3 -c 'import flydsl,sys; print(getattr(flydsl, "__version__", "?"))' 2>/dev/null)" >> /app/versions.txt
-RUN rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && \
-    echo "AITER_GRAFT=proven_k3 (kimik3 tuned fmoe configs)" >> /app/versions.txt
 
 # -----------------------------------------------------------------------------
 # 6. CRITICAL: scrub build-time MoRI JIT state. The `import mori` verifications

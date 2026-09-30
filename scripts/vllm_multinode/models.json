@@ -2,7 +2,7 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -44,7 +44,7 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -80,7 +80,7 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -123,7 +123,7 @@
     {
         "name": "pyt_vllm_kimi-k3_mi300x_wideep_moriep",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",

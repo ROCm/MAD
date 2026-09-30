@@ -459,7 +459,7 @@ Kimi-K3-MXFP4:
 
 # ============================ Kimi-K3 native MXFP4 on MI355X / gfx950 ============================
 # BRING-UP RECIPE, NOT VALIDATED. MoRIIO disagg with Kimi-K3 has only run on MI300X; see
-# docker/pyt_vllm_kimi_k3_mi355x.ubuntu.amd.Dockerfile STATUS for what a first run may hit.
+# docker/vllm_kimi_k3.ubuntu.amd.Dockerfile STATUS for what a first gfx950 run may hit.
 # The launcher refuses it on any GPU but gfx950 (GPU_ARCHS), as the MI300X recipes refuse gfx950.
 #
 # What changes from the MI300X recipes, and why:

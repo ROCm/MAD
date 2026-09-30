@@ -287,8 +287,9 @@ Reference standalone launcher: the Kimi-K3 disagg recipe in PR#241 (out of tree;
 
 ### Docker image
 
-Kimi-K3-MXFP4 uses its own in-tree
-`docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile` (a K3-specialized sibling of the generalized `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`)
-(vLLM branch `kimi-k3-wideep-disagg-fullsource-v3`, MoRI `--no-build-isolation`, vllm-router).
-Upstream integration adds **launcher + yaml + docs + Dockerfile**; operators build/tag
-`kimik3-wideep-disagg:latest` separately and pass `DOCKER_IMAGE_NAME` to slurm.
+Every Kimi-K3 card (MI300X and MI355X, disagg and colocated) builds one in-tree
+`docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`, a K3-pinned sibling of the generalized
+`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`: vLLM fork `862bfd8`
+(`kimi-k3-wideep-disagg-fullsource-v3`), MoRI v1.2.2, AITER 68e42f5f from source, the
+DP-rank vllm-router, built for `MAD_SYSTEM_GPU_ARCHITECTURE`. Operators building by hand
+tag it themselves and pass `DOCKER_IMAGE_NAME` to slurm.

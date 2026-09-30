@@ -123,9 +123,10 @@ Two knobs are **not** settable through the config file on this launcher:
 
 ## Image
 
-`docker/pyt_vllm_kimi_k3_mi300x.ubuntu.amd.Dockerfile` builds the whole stack from
-public sources on the open ROCm vLLM CI base: MoRI 1.2.2, AITER 0.1.19 +
-flydsl 0.2.4, vLLM with the K3/MoRIIO fixes, and the DP-rank/KV-notify vllm-router.
+`docker/vllm_kimi_k3.ubuntu.amd.Dockerfile` builds the whole stack from
+public sources on the open ROCm vLLM CI base, for `MAD_SYSTEM_GPU_ARCHITECTURE=gfx942`:
+MoRI 1.2.2, AITER 68e42f5f (the Kimi-K3 release commit) + flydsl 0.2.4, vLLM with the
+K3/MoRIIO fixes, and the DP-rank/KV-notify vllm-router.
 Every source is pinned to an immutable commit SHA.
 
 It also grafts a K3-aware AITER from the public `amdsiloai/vllm:kimi-k3-mi325x-release-v2`

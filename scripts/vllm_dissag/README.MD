@@ -55,22 +55,23 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
-| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `docker/pyt_vllm_kimi_k3_mi300x` image; card `pyt_vllm_disagg_mori_kimi-k3` |
-| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; needs `kimik3-wideep-disagg` image (built in-tree from `docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile`); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
-| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `docker/pyt_vllm_kimi_k3_mi355x` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
+| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
+| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
+| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `docker/vllm_kimi_k3` image (built for gfx950); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
 
 Standalone reference launcher (debug / OCI): the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
 See [ARCHITECTURE.md — Kimi-K3 worker taxonomy](ARCHITECTURE.md#5-kimi-k3-mxfp4-worker-taxonomy-w1w5) for W1–W5 ↔ `NODE_RANK` mapping.
 
-**Docker image (in-tree):** build from
-`docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile` (the folded-in Kimi-K3 disagg image, ex-PR#241 recipe).
-MAD integration is launcher + yaml + this Dockerfile; the vLLM fork and connector fixes are pinned as its build args.
+**Docker image (in-tree):** every Kimi-K3 card builds `docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`,
+for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950; madengine and the MAD CI
+pipeline pass it). MAD integration is launcher + yaml + this Dockerfile; the vLLM fork, AITER
+and connector fixes are pinned in it by commit.
 
 ```bash
 # Build (once per cluster / after vLLM pin change), from the MAD repo root:
-docker build -f docker/vllm_disagg_inference.kimik3.ubuntu.amd.Dockerfile \
-  --build-arg VLLM_REF=kimi-k3-wideep-disagg-fullsource-v3 \
+docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
+  --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 \
   -t kimik3-wideep-disagg:latest .
 
 # Run via unified launcher (sbatch options, --export included, go BEFORE the script;

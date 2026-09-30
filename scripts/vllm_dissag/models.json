@@ -614,7 +614,7 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi300x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -656,7 +656,7 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4",
         "url": "",
-        "dockerfile": "../../docker/vllm_disagg_inference.kimik3",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -698,7 +698,7 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x",
         "url": "",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3_mi355x",
+        "dockerfile": "../../docker/vllm_kimi_k3",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
