@@ -163,11 +163,15 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
 #    Same build as the GLM-5.1 image's AITER step; kernels JIT for the GPU at runtime.
 # -----------------------------------------------------------------------------
 ARG AITER_REPO=https://github.com/ROCm/aiter.git
-# branch k3-for-amd (carlushuang/aiter-k3) = ROCm/aiter 0.1.17.dev395
+# The release images built it from branch k3-for-amd of a fork that is not public. The
+# commit is in ROCm/aiter's fork network but on none of its branches, so a clone does not
+# have it ("reference is not a tree"); fetching it by SHA does. --tags brings the release
+# tags its version is derived from (the images report 0.1.17.dev395+g68e42f5f4; tags
+# added upstream since then change the version number, not the code).
 ARG AITER_REF=68e42f5f461556596ae294200f1a3f13378c8582
-RUN rm -rf /tmp/aiter-src && \
-    git clone --recursive "${AITER_REPO}" /tmp/aiter-src && \
-    cd /tmp/aiter-src && git checkout "${AITER_REF}" && \
+RUN rm -rf /tmp/aiter-src && mkdir -p /tmp/aiter-src && cd /tmp/aiter-src && \
+    git init -q && git remote add origin "${AITER_REPO}" && \
+    git fetch -q --tags origin "${AITER_REF}" && git checkout -q FETCH_HEAD && \
     git submodule update --init --recursive && \
     (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
     GPU_ARCHS="${K3_GFX_ARCH}" pip install --no-build-isolation --no-deps -v . && \
