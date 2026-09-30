@@ -13,13 +13,29 @@ from collections import defaultdict
 
 
 def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
-    """Parse benchmark log file and extract results, keeping max throughput per configuration."""
-    results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None, 
-                                    'output_tokens': None, 'max_throughput': 0.0})
-    
+    """Parse benchmark log file and extract results, keeping max throughput per configuration.
+
+    The log is read cell by cell. Each sweep cell starts with a line from benchmark_xPyD.sh:
+
+        RUNNING: prompts <N> isl <ISL> osl <OSL> con <CON>
+
+    and owns the text up to the next such line. A cell's result is the
+    "Serving Benchmark Result" block inside its own text, so a cell that printed none is
+    recorded as a failed cell instead of disappearing, and a result is never filed under
+    another cell's concurrency. (Reading the header before each result block did both: when a
+    cell aborted before its result, e.g. a warmup that got "Bad Gateway" from a dead server,
+    that cell had no row at all.)
+
+    sglang.bench_serving prints "Successful requests" but no failed count, so a cell's failed
+    requests are its prompt count minus its successful ones.
+    """
+    results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None,
+                                    'output_tokens': None, 'max_throughput': 0.0,
+                                    'failed': 0, 'no_result': False})
+
     with open(log_file, 'r') as f:
         content = f.read()
-    
+
     # Find the start of the first iteration (ignore warmup)
     first_iter_match = re.search(r'RUNNING: the benchserving script for iter: 1', content)
     if not first_iter_match:
@@ -27,60 +43,54 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
         start_pos = 0
     else:
         start_pos = first_iter_match.start()
-    
+
     # Process only from first iteration onwards
     content = content[start_pos:]
-    
-    # Split by benchmark result sections
-    sections = re.split(r'============ Serving Benchmark Result ============', content)
-    
-    current_input_seq_len = None
-    current_output_seq_len = None
-    current_concurrency = None
-    
-    for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in the preceding section (from its RUNNING line).
-        #
-        # sections[0] is included deliberately. It was skipped by an `if i > 1` guard, which
-        # was harmless only while the log had no "iter: 1" marker: the search for that marker
-        # failed, parsing started at byte 0, and sections[0] was the pre-warmup preamble that
-        # carries no RUNNING line anyway. Once benchmark_xPyD.sh loops properly the marker
-        # exists, parsing starts there, and sections[0] holds the FIRST sweep cell's RUNNING
-        # line -- so the guard silently dropped the lowest-concurrency point from every CSV.
-        #
-        # Including it is safe for both layouts: a preamble with no RUNNING line leaves the
-        # config unset, and a section with no config is skipped below.
-        prev_section = sections[i-1]
 
-        # Extract config: prompts  isl <num> osl <num> con <num>
-        # The prompt count between "prompts" and "isl" is optional: logs written before
-        # benchmark_xPyD.sh printed $p_con there have two spaces and nothing between them.
-        # Both forms must parse, or a rerun over an archived log yields an empty CSV.
-        config_match = re.search(r'RUNNING: prompts\s+(?:\d+\s+)?isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)', prev_section)
-        if config_match:
-            current_input_seq_len = int(config_match.group(1))
-            current_output_seq_len = int(config_match.group(2))
-            current_concurrency = int(config_match.group(3))
-    
-        # Extract Total token throughput (tok/s) from benchmark result section
-        throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
-        throughput = float(throughput_match.group(1)) if throughput_match else None
-        
-        # Only process if we have a valid configuration from RUNNING line and throughput
-        if current_input_seq_len and current_output_seq_len and current_concurrency and throughput is not None:
-            config_key = (current_input_seq_len, current_output_seq_len, current_concurrency)
-            
-            # Update results for this configuration
-            # Always use values from RUNNING line (isl, osl, con)
-            results[config_key]['concurrency'] = current_concurrency
-            results[config_key]['input_tokens'] = current_input_seq_len
-            results[config_key]['output_tokens'] = current_output_seq_len
-            
-            # Keep the maximum throughput
-            if throughput > results[config_key]['max_throughput']:
-                results[config_key]['max_throughput'] = throughput
-    
+    # The prompt count between "prompts" and "isl" is optional: logs written before
+    # benchmark_xPyD.sh printed $p_con there have two spaces and nothing between them.
+    # Both forms must parse, or a rerun over an archived log yields an empty CSV.
+    headers = list(re.finditer(
+        r'RUNNING: prompts\s+(?:(\d+)\s+)?isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)', content))
+
+    for n, header in enumerate(headers):
+        end = headers[n + 1].start() if n + 1 < len(headers) else len(content)
+        cell = content[header.end():end]
+        prompts = int(header.group(1)) if header.group(1) else None
+        isl, osl, con = int(header.group(2)), int(header.group(3)), int(header.group(4))
+
+        config_key = (isl, osl, con)
+        data = results[config_key]
+        # Always use values from the RUNNING line (isl, osl, con)
+        data['concurrency'] = con
+        data['input_tokens'] = isl
+        data['output_tokens'] = osl
+
+        if '============ Serving Benchmark Result ============' not in cell:
+            data['no_result'] = True
+            continue
+
+        # Extract Total token throughput (tok/s) from the cell's result block
+        throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', cell)
+        if not throughput_match:
+            data['no_result'] = True
+            continue
+        throughput = float(throughput_match.group(1))
+
+        successful_match = re.search(r'Successful requests:\s+(\d+)', cell)
+        if prompts is not None and successful_match:
+            data['failed'] = max(data['failed'], prompts - int(successful_match.group(1)))
+
+        # Keep the maximum throughput
+        if throughput > data['max_throughput']:
+            data['max_throughput'] = throughput
+
     return results
+
+
+def cell_failed(data: Dict) -> bool:
+    """A sweep cell failed if it printed no result, lost any request, or measured no throughput."""
+    return data['no_result'] or data['failed'] > 0 or data['max_throughput'] <= 0
 
 
 def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
@@ -176,7 +186,7 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
                 'model': model_name,
                 'performance': f"{data['max_throughput']:.2f}",
                 'metric': f"tok/s (isl={data['input_tokens']} osl={data['output_tokens']} con={data['concurrency']})",
-                'status': 'SUCCESS',
+                'status': 'FAILURE' if cell_failed(data) else 'SUCCESS',
             }
             row.update(meta)
             writer.writerow(row)
