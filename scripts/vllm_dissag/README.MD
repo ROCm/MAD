@@ -55,6 +55,7 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `DeepSeek-V4-Flash-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | own image (`dsv4` Dockerfile, prebuilt, pinned by digest); 1P/1D EP8 |
 
 ## Prerequisites
 
@@ -99,12 +100,11 @@ Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. 
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
 can reach.
 
-DeepSeek-V4 (Flash-FP8 / Pro-FP8) will use a prebuilt internal image instead of a
-from-source build. `docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it by
-digest and lists what it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes in-source,
-AITER 10f8874, MoRI 07bdace, vllm-router). The image is staged ahead of the model recipes:
-the launcher rejects the DSV4 model names until their `models.yaml` entries and allowlist
-lines land. Once they do, submit with the same digest:
+DeepSeek-V4 uses a prebuilt internal image instead of a from-source build.
+`docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it by digest and lists what
+it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes in-source, AITER 10f8874, MoRI
+07bdace, vllm-router). `DeepSeek-V4-Flash-FP8` has a recipe; `DeepSeek-V4-Pro-FP8` does not
+yet, so the launcher still rejects it. Submit with the same digest:
 
 ```bash
 export DOCKER_IMAGE_NAME=rocm/pytorch-private:vllm-recent-source-basem-v0290-aiter-10f8874-mori07bdace-tk@sha256:49e87adaece784e040dde49b79852b0fdbc515696619d559296a9397ecfd9137

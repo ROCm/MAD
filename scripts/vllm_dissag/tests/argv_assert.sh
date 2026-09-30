@@ -61,6 +61,19 @@ _has    "$(cat "$SLURM")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BA
 _count  "$(grep -F 'kv-transfer-config' -A1 <<<"$P" | tail -1 | python3 -c 'import json,sys; json.load(sys.stdin); print("ok")' 2>/dev/null)" "ok" 1 "kv-transfer-config is valid JSON"
 
 echo ""
+echo "=== moriio + wideEP (DeepSeek-V4-Flash-FP8) ==="
+V="$(_argv moriio 1 mori DeepSeek-V4-Flash-FP8 /m/DSV4 | tr '\n' ' ')"
+_has    "$V" "--tokenizer-mode deepseek_v4" "prefill: --tokenizer-mode deepseek_v4"
+_has    "$V" "--block-size 256" "prefill: --block-size 256"
+_has    "$V" "--kv-cache-dtype fp8_e4m3" "prefill: --kv-cache-dtype fp8_e4m3"
+_has    "$V" "--max-num-batched-tokens 1024" "prefill: --max-num-batched-tokens 1024"
+_count  "$V" "--compilation-config" 1 "prefill: exactly one --compilation-config"
+VD="$(_argv moriio 1 mori DeepSeek-V4-Flash-FP8 /m/DSV4 NODE_RANK=1 | tr '\n' ' ')"
+_has    "$VD" '"cudagraph_mode":"FULL_DECODE_ONLY"' "decode: FULL_DECODE_ONLY cudagraph"
+_has    "$VD" "--cudagraph-capture-sizes 1 2 4" "decode: capture sizes 1 2 4"
+_has    "$VD" "mori_low_latency" "decode all2all = mori_low_latency"
+
+echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
