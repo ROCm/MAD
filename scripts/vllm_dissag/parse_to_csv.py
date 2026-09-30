@@ -18,10 +18,19 @@ from collections import defaultdict
 
 
 def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
-    """Parse benchmark log file and extract results, keeping max throughput per configuration."""
+    """Parse benchmark log file and extract results, keeping max throughput per configuration.
+
+    The log is read cell by cell. Each cell starts with a [RUNNING] line from
+    benchmark_xPyD.sh or benchmark_long_context.sh and owns the text up to the next one, so a cell's result is the
+    "Serving Benchmark Result" block inside its own text. A cell that printed none (it hit the
+    harness timeout and logged [STALL], or `vllm bench serve` itself failed, e.g. its warmup
+    got an error from a dead server) is recorded as a failed cell instead of disappearing, and
+    a result is never filed under another cell's concurrency. Reading the header before each
+    result block did both of those wrong, and dropped the first cell of every sweep.
+    """
     results = defaultdict(lambda: {'concurrency': None, 'input_tokens': None,
                                     'output_tokens': None, 'max_throughput': 0.0,
-                                    'failed': 0, 'stalled': False})
+                                    'failed': 0, 'stalled': False, 'no_result': False})
 
     with open(log_file, 'r') as f:
         content = f.read()
@@ -37,72 +46,53 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     # Process only from first iteration onwards
     content = content[start_pos:]
 
-    # Split by benchmark result sections
-    sections = re.split(r'============ Serving Benchmark Result ============', content)
+    # Two header forms, one per harness:
+    #   benchmark_xPyD.sh:          [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON> (timeout <T>s)
+    #   benchmark_long_context.sh:  [RUNNING] isl=<ISL> osl=<OSL> con=<CON> warmups=<W> prompts=<N> ...
+    headers = sorted(
+        [(m.start(), m.end(), m.group(1), m.group(2), m.group(3)) for m in re.finditer(
+            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)', content)]
+        + [(m.start(), m.end(), m.group(1), m.group(2), m.group(3)) for m in re.finditer(
+            r'\[RUNNING\]\s+isl=(\d+)\s+osl=(\d+)\s+con=(\d+)', content)])
 
-    current_input_seq_len = None
-    current_output_seq_len = None
-    current_concurrency = None
+    for n, (_, header_end, isl, osl, con) in enumerate(headers):
+        end = headers[n + 1][0] if n + 1 < len(headers) else len(content)
+        cell = content[header_end:end]
+        isl, osl, con = int(isl), int(osl), int(con)
 
-    # A result block belongs to the LAST [RUNNING] header before it, which is in the text
-    # since the previous result (sections[i-1]; for the first result, sections[0]). Taking
-    # the first header there mislabelled results: when a cell stalls and prints no result,
-    # the next cell's text holds both headers, so its throughput was filed under the
-    # stalled cell's concurrency and its own row vanished. Skipping sections[0] dropped
-    # the first measured cell of every sweep.
-    for i, section in enumerate(sections[1:], 1):
-        prev_section = sections[i-1]
+        config_key = (isl, osl, con)
+        data = results[config_key]
+        data['concurrency'] = con
+        data['input_tokens'] = isl
+        data['output_tokens'] = osl
 
-        # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-        headers = re.findall(
-            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
-            prev_section
-        )
-        if headers:
-            current_input_seq_len, current_output_seq_len, current_concurrency = map(int, headers[-1])
-        else:
-            # Fallback: extract from Namespace(...) in vllm bench serve output
-            isl_m = re.findall(r'random_input_len=(\d+)', prev_section)
-            osl_m = re.findall(r'random_output_len=(\d+)', prev_section)
-            con_m = re.findall(r'max_concurrency=(\d+)', prev_section)
-            if isl_m and osl_m and con_m:
-                current_input_seq_len = int(isl_m[-1])
-                current_output_seq_len = int(osl_m[-1])
-                current_concurrency = int(con_m[-1])
+        if re.search(r'\[STALL\]', cell):
+            data['stalled'] = True
+        if '============ Serving Benchmark Result ============' not in cell:
+            data['no_result'] = True
+            continue
 
-        # Extract Total token throughput (tok/s) from benchmark result section
-        throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
-        throughput = float(throughput_match.group(1)) if throughput_match else None
-        failed_match = re.search(r'Failed requests:\s+([\d,]+)', section)
-        failed = int(failed_match.group(1).replace(',', '')) if failed_match else 0
+        # Extract Total token throughput (tok/s) from the cell's result block
+        throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', cell)
+        if not throughput_match:
+            data['no_result'] = True
+            continue
+        throughput = float(throughput_match.group(1))
+        failed_match = re.search(r'Failed requests:\s+([\d,]+)', cell)
+        if failed_match:
+            data['failed'] = max(data['failed'], int(failed_match.group(1).replace(',', '')))
 
-        # Only process if we have a valid configuration from [RUNNING] line and throughput
-        if current_input_seq_len and current_output_seq_len and current_concurrency and throughput is not None:
-            config_key = (current_input_seq_len, current_output_seq_len, current_concurrency)
-
-            results[config_key]['concurrency'] = current_concurrency
-            results[config_key]['input_tokens'] = current_input_seq_len
-            results[config_key]['output_tokens'] = current_output_seq_len
-            results[config_key]['failed'] = max(results[config_key]['failed'], failed)
-
-            # Keep the maximum throughput
-            if throughput > results[config_key]['max_throughput']:
-                results[config_key]['max_throughput'] = throughput
-
-    # A cell that hit benchmark_xPyD.sh's timeout prints no result block, only
-    # "[STALL] isl=<I> osl=<O> con=<C> timed out"; it gets a zero-throughput row, so a
-    # sweep that stopped answering cannot pass by omission.
-    for isl, osl, con in re.findall(r'\[STALL\]\s+isl=(\d+)\s+osl=(\d+)\s+con=(\d+)', content):
-        key = (int(isl), int(osl), int(con))
-        results[key].update({'concurrency': key[2], 'input_tokens': key[0],
-                             'output_tokens': key[1], 'stalled': True})
+        # Keep the maximum throughput
+        if throughput > data['max_throughput']:
+            data['max_throughput'] = throughput
 
     return results
 
 
 def cell_failed(data: Dict) -> bool:
-    """A sweep cell failed if it stalled, lost any request, or measured no throughput."""
-    return data['stalled'] or data['failed'] > 0 or data['max_throughput'] <= 0
+    """A sweep cell failed if it stalled, printed no result, lost any request, or measured no
+    throughput."""
+    return data['stalled'] or data['no_result'] or data['failed'] > 0 or data['max_throughput'] <= 0
 
 
 def save_to_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str):
@@ -226,27 +216,45 @@ def _get_run_metadata(pipeline: str = "vllm"):
 def parse_niah_log(log_file: str) -> Dict[int, Dict]:
     """Parse NIAH benchmark log file and extract retrieval results per context length.
 
-    Scans for summary lines emitted by benchmark_niah.py:
+    Scans the summary lines emitted by benchmark_niah.py, one per context length:
       words=  2000  mean=9.7/10  min=9  max=10  (n=3)
-    Returns {n_words: {'mean': float, 'min': int, 'max': int, 'n': int}}.
+      words=  2000  mean=9.5/10  min=9  max=10  (n=2)  [1 timeout/err excluded]
+      words=  2000  NO-RESULT (3/3 timed out or errored ...)
+    Returns {n_words: {'mean', 'min', 'max', 'n', 'errors', 'no_result'}}. A length whose
+    every request errored has a NO-RESULT entry rather than no entry, so it cannot pass by
+    being absent; `errors` counts requests that timed out or errored, which the mean excludes.
     """
     results = {}
     with open(log_file, 'r') as f:
         for line in f:
-            # Match:   words=  2000  mean=9.7/10  min=9  max=10  (n=3)
             m = re.search(
                 r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\s+\(n=(\d+)\)',
                 line
             )
             if m:
-                n_words = int(m.group(1))
-                results[n_words] = {
+                excluded = re.search(r'\[(\d+) timeout/err excluded\]', line)
+                results[int(m.group(1))] = {
                     'mean': float(m.group(2)),
                     'min': int(m.group(3)),
                     'max': int(m.group(4)),
                     'n': int(m.group(5)),
+                    'errors': int(excluded.group(1)) if excluded else 0,
+                    'no_result': False,
+                }
+                continue
+            m = re.search(r'words=\s*(\d+)\s+NO-RESULT\s+\((\d+)/(\d+)', line)
+            if m:
+                results[int(m.group(1))] = {
+                    'mean': 0.0, 'min': 0, 'max': 0, 'n': int(m.group(3)),
+                    'errors': int(m.group(2)), 'no_result': True,
                 }
     return results
+
+
+def niah_length_failed(data: Dict) -> bool:
+    """A context length failed if any of its requests timed out or errored. A low retrieval
+    score is a measurement, not a failure."""
+    return data['no_result'] or data['errors'] > 0
 
 
 def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
@@ -278,7 +286,7 @@ def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
                 'model': model_name,
                 'performance': f"{data['mean']:.1f}",
                 'metric': f"retrieval/10 (niah words={n_words} seeds={data['n']})",
-                'status': 'SUCCESS',
+                'status': 'FAILURE' if niah_length_failed(data) else 'SUCCESS',
             }
             row.update(meta)
             writer.writerow(row)
