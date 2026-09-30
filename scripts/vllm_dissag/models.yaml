@@ -308,14 +308,8 @@ GLM-5.1-FP8:
 #   - MAX_NUM_BATCHED_TOKENS stays at 2048: 8192 corrupts generation on this stack,
 #     and the giant profiling shape at 16384 crashes LLVM codegen in the heuristic
 #     FlyDSL kernel.
-#   - KV_CACHE_MEMORY_BYTES=16e9 (~1.13M-token GPU KV cache). It also skips the boot
-#     profiling forward. The 137.5 GiB above is an estimate; a run measured 148.56 GiB
-#     of weights per GPU and 172.6 GiB free before loading (the MoRI heap already
-#     taken), which leaves ~24 GiB. The earlier 40e9 (37.25 GiB, a 2.84M-token cache for
-#     single requests beyond ~600K tokens) failed prefill start-up with CUDA OOM on
-#     every GPU. 16e9 leaves ~9 GiB for activations, decode cudagraphs and RCCL, and
-#     still covers --max-model-len 1000000; Kimi-K3-MXFP4 at this TP2 x DP8 layout
-#     passes NIAH to 280K tokens with 8e9.
+#   - KV_CACHE_MEMORY_BYTES=40e9 gives a 2.84M-token GPU KV cache, required for
+#     single requests beyond ~600K tokens. It also skips the boot profiling forward.
 _kimi_k3_recipe_env: &kimi_k3_recipe_env
   EP_TP_SIZE: "2"                       # TP2 x DP8 per pool (see WHY TP2 above)
   GPU_ARCHS: "gfx942"                   # int4 requant + MLA-off are gfx942 workarounds
@@ -330,14 +324,10 @@ _kimi_k3_recipe_env: &kimi_k3_recipe_env
   VLLM_SSM_CONV_STATE_LAYOUT: "DS"      # KDA (Kimi-Delta-Attention) conv state layout
   KV_BLOCK_SIZE: "16"
   KV_CACHE_DTYPE: "fp8"
-  KV_CACHE_MEMORY_BYTES: "16000000000"  # ~1.13M-token KV cache; 40e9 OOMs (see above)
+  KV_CACHE_MEMORY_BYTES: "40000000000"  # 2.84M-token KV cache; needed for >600K ctx
   GPU_MEMORY_UTILIZATION: "0.88"        # 0.88 leaves the 16 GiB MoRI shmem heap
   PREFILL_CUDAGRAPH_MODE: "NONE"
   DECODE_CUDAGRAPH_MODE: "PIECEWISE"
-  # Capture only the batch sizes decode can run: --max-num-seqs is 8. With the default
-  # sizes (up to 256), decode ran out of memory on its first (largest) capture, in AITER's
-  # fused-MoE workspace, with ~9 GiB left after weights and the KV cache.
-  CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8"
   VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
   PREFILL_MORI_BACKEND: "mori_high_throughput"
   DECODE_MORI_BACKEND: "mori_low_latency"
