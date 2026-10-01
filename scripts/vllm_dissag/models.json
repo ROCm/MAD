@@ -406,6 +406,70 @@
         "args": "-N 2 -n 2"
     },
     {
+        "name": "pyt_vllm_disagg_mori_deepseek-v4-flash-fp8_2p2d",
+        "dockerfile": "../../docker/vllm_disagg_inference.dsv4",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-recent-source-basem-v0290-aiter-10f8874-mori07bdace-tk@sha256:49e87adaece784e040dde49b79852b0fdbc515696619d559296a9397ecfd9137",
+            "MODEL_NAME": "DeepSeek-V4-Flash-FP8",
+            "xP": "2",
+            "yD": "2",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_CON": "1 8 16 32",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 4 -n 4"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_deepseek-v4-flash-fp8_4p4d",
+        "dockerfile": "../../docker/vllm_disagg_inference.dsv4",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "rocm/pytorch-private:vllm-recent-source-basem-v0290-aiter-10f8874-mori07bdace-tk@sha256:49e87adaece784e040dde49b79852b0fdbc515696619d559296a9397ecfd9137",
+            "MODEL_NAME": "DeepSeek-V4-Flash-FP8",
+            "xP": "4",
+            "yD": "4",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_CON": "1 8 16 32",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 8 -n 8"
+    },
+    {
         "name": "pyt_vllm_disagg_mori_deepseek-v4-pro-fp8",
         "dockerfile": "../../docker/vllm_disagg_inference.dsv4",
         "scripts": "run_xPyD_models.slurm",
