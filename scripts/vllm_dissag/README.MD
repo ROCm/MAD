@@ -61,9 +61,11 @@ path).
 
 - A Slurm cluster with `xP + yD` nodes (minimum 2: `xP=1`, `yD=1`), 8 GPUs/node.
 - A Docker image with vLLM + the KV connector(s) + NIC drivers. See **Building the Docker image**.
-- Model weights present on all allocated nodes under `/mnt/m2m_nobackup/models_blog/` or
-  `/shared_inference/models_blog/` (or set `MODEL_DIR`).
-- A shared filesystem for logs.
+- Model weights present on all allocated nodes at `<dir>/$MODEL_NAME`. The launcher checks
+  `/mnt/m2m_nobackup/models_blog/`, then `/shared_inference/models_blog/`, then `MODEL_DIR`.
+- A shared filesystem for logs. Slurm writes `slurm-<jobid>.out` to
+  `/shared_inference/$USER/model_blog_logs/`, which must exist before you submit (or pass
+  `sbatch --output=...`). Run logs go to `LOG_PATH/<jobid>/` (same directory by default).
 
 ## Building the Docker image
 
@@ -104,11 +106,23 @@ DeepSeek-V4 uses a prebuilt internal image instead of a from-source build.
 `docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it by digest and lists what
 it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes in-source, AITER 10f8874, MoRI
 07bdace, vllm-router). `DeepSeek-V4-Flash-FP8` has a recipe; `DeepSeek-V4-Pro-FP8` does not
-yet, so the launcher still rejects it. Submit with the same digest:
+yet, so the launcher still rejects it. The image is private: every node must be
+`docker login`-ed with pull access to `rocm/pytorch-private` (the launcher ignores pull
+errors, so a missing login shows up later as "Unable to find image"). Submit with the same
+digest:
 
 ```bash
+mkdir -p /shared_inference/$USER/model_blog_logs
 export DOCKER_IMAGE_NAME=rocm/pytorch-private:vllm-recent-source-basem-v0290-aiter-10f8874-mori07bdace-tk@sha256:49e87adaece784e040dde49b79852b0fdbc515696619d559296a9397ecfd9137
+export MODEL_NAME=DeepSeek-V4-Flash-FP8 xP=1 yD=1 RUN_MORI=1 RUN_DEEPEP=0
+BENCHMARK_CON="1 8 16 32" BENCHMARK_COMBINATIONS=1024/1024 \
+  sbatch -A <account> -p <partition> --qos=<qos> --time=04:00:00 -N 2 -n 2 run_xPyD_models.slurm
+BENCHMARK_SCRIPT=niah \
+  sbatch -A <account> -p <partition> --qos=<qos> --time=04:00:00 -N 2 -n 2 run_xPyD_models.slurm
 ```
+
+Boot plus the sweep takes over an hour; use a QoS that is not preempted, since a requeued job
+overwrites its `LOG_PATH/<jobid>/` directory.
 
 ## Quick start
 
