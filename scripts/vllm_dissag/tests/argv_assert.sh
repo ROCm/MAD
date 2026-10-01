@@ -15,11 +15,12 @@ SLURM="$DIR/run_xPyD_models.slurm"
 pass=0; fail=0
 
 # emit argv for a cell
-_argv() { # connector wide_ep ep_backend model model_path
+_argv() { # connector wide_ep ep_backend model model_path [NAME=VALUE ...]
   env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH="$5" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    "${@:6}" \
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
@@ -46,6 +47,18 @@ _has    "$B" "--block-size" "has --block-size"
 _has    "$B" "16" "block-size value 16 present"
 _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
+
+echo ""
+echo "=== MoRIIO transfer knobs reach kv_connector_extra_config ==="
+# vLLM >= v0.29 reads these only from extra_config; the env vars alone are ignored.
+_has    "$B" '"qp_per_transfer":4' "default qp_per_transfer in extra_config"
+_has    "$B" '"num_workers":4' "default num_workers in extra_config"
+_hasnot "$B" '"post_batch_size"' "post_batch_size absent when unset"
+P="$(_argv moriio 1 mori DeepSeek-V3 /m/DSV3 VLLM_MORIIO_QP_PER_TRANSFER=2 VLLM_MORIIO_POST_BATCH_SIZE=8)"
+_has    "$P" '"qp_per_transfer":2' "qp_per_transfer env override reaches extra_config"
+_has    "$P" '"post_batch_size":8' "post_batch_size present when set"
+_has    "$(cat "$SLURM")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=' "slurm forwards VLLM_MORIIO_POST_BATCH_SIZE"
+_count  "$(grep -F 'kv-transfer-config' -A1 <<<"$P" | tail -1 | python3 -c 'import json,sys; json.load(sys.stdin); print("ok")' 2>/dev/null)" "ok" 1 "kv-transfer-config is valid JSON"
 
 echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="

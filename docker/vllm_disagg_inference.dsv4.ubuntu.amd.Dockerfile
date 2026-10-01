@@ -45,9 +45,10 @@
 # it boots but fails the DSV4 MoRIIO KV transfer. Pin by digest; the tag has been
 # re-pushed and different digests carry different fixes.
 #
-# Runtime switches read by the baked code (set per model in scripts/vllm_dissag/models.yaml):
-#   DSV4_TRANSFER_ATTN   default 0 — the recipe sets 1; 0 skips the full-attention KV
-#                        transfer and long-context retrieval fails.
+# Runtime switches read by the baked code (a DSV4 recipe must set these in its
+# scripts/vllm_dissag/models.yaml env:):
+#   DSV4_TRANSFER_ATTN   default 0 — a DSV4 recipe MUST set 1; 0 skips the full-attention
+#                        KV transfer and long-context retrieval fails.
 #   MORI_TRIM_DISPATCH   default 1 — sizes the expert GEMM to live tokens, not the full
 #                        MoRI recv buffer (decode ITL ~24 ms vs ~290 ms at con=1, EP8).
 # =============================================================================
