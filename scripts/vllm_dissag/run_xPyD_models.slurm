@@ -7,6 +7,7 @@
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
 #SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
 #SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
+#SBATCH --open-mode=append      # keep earlier attempts' output when a preempted job is requeued
 
 
 # ------------------------
@@ -462,6 +463,11 @@ if [ ! -d "$LOG_PATH" ]; then
 else
     echo "Directory already exists: $LOG_PATH"
 fi
+# A requeued job reuses its job ID; move the previous attempt's run logs aside so they survive.
+if [[ "${SLURM_RESTART_COUNT:-0}" -gt 0 && -d "$LOG_PATH/$SLURM_JOB_ID" ]]; then
+    mv "$LOG_PATH/$SLURM_JOB_ID" "$LOG_PATH/${SLURM_JOB_ID}.attempt$((SLURM_RESTART_COUNT - 1))"
+    echo "Requeue ${SLURM_RESTART_COUNT}: previous run logs moved to $LOG_PATH/${SLURM_JOB_ID}.attempt$((SLURM_RESTART_COUNT - 1))"
+fi
 
 export CONNECTOR_ENV_ARGS="$CONNECTOR_ENV_ARGS"
 export LOG_PATH=$LOG_PATH
@@ -488,7 +494,9 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+# --kill-on-bad-exit: if one rank's docker run fails (e.g. exit 125), end the step instead
+# of leaving the other ranks waiting at the container barrier until the time limit.
+srun --kill-on-bad-exit=1 --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
@@ -516,6 +524,9 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY="${_IMG_KEY:-noimg}";
     _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+    # Every container on this node was stopped above, so any AITER build lock left here
+    # is from a killed/preempted run and would make the next compile wait forever.
+    rm -rf "$_JIT_CACHE_HOST"/aiter_jit/build/lock_* 2>/dev/null || true;
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
 else
@@ -527,10 +538,10 @@ _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
