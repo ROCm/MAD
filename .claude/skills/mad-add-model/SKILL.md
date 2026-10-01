@@ -115,7 +115,7 @@ For the shared-framework layout, skip Steps 3, 4 and 6: the Dockerfile,
 
 2. **Read existing similar Dockerfiles** for base image references:
    - For PyTorch: Read `docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile`
-   - For JAX: Read `docker/jax_maxtext.ubuntu.amd.Dockerfile`
+   - For JAX: Read `docker/primus_maxtext.ubuntu.amd.Dockerfile`
    - For vLLM: Read `docker/pyt_vllm.ubuntu.amd.Dockerfile`
    - For SGLang: Read `docker/pyt_sglang.ubuntu.amd.Dockerfile`
    - For ATOM: Read `docker/pyt_atom.ubuntu.amd.Dockerfile`

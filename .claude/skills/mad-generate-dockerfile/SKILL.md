@@ -27,7 +27,7 @@ the output is identical whichever agent runs this skill.
 | `--framework` | Use for | Reference Dockerfile (for current `base_image`) |
 |---|---|---|
 | `pytorch` | Generic PyTorch workloads (incl. diffusion models needing ROCm flash-attention) | `docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile` |
-| `jax` | JAX / MaxText | `docker/jax_maxtext.ubuntu.amd.Dockerfile` |
+| `jax` | JAX / MaxText | `docker/primus_maxtext.ubuntu.amd.Dockerfile` |
 | `vllm` | vLLM inference | `docker/pyt_vllm.ubuntu.amd.Dockerfile` |
 | `sglang` | SGLang inference | `docker/pyt_sglang.ubuntu.amd.Dockerfile` |
 | `atom` | ATOM inference | `docker/pyt_atom.ubuntu.amd.Dockerfile` |

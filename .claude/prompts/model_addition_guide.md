@@ -175,7 +175,7 @@ madengine run --tags pyt_vllm_llama-3.2-8b
 
 ### JAX MaxText
 
-**Dockerfile:** Use `docker/jax_maxtext`
+**Dockerfile:** Use `docker/primus_maxtext`
 
 **Script:** Reuse `scripts/jax-maxtext/run.sh`
 
