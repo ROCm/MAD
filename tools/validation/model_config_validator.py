@@ -159,7 +159,8 @@ class ModelConfigValidator:
 
         # timeout must be a number if present
         if 'timeout' in model_entry:
-            if not isinstance(model_entry['timeout'], (int, float)):
+            timeout = model_entry['timeout']
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
                 self.errors.append(f"Field 'timeout' must be a number")
 
         # args must be present and a string (the runtime indexes model['args']

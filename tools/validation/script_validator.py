@@ -59,9 +59,11 @@ class ScriptValidator:
 
     def _check_shebang(self, content: str):
         """Check for proper shebang"""
-        if not content.startswith('#!/bin/bash'):
+        first_line = content.split('\n', 1)[0].strip()
+        if first_line not in ('#!/bin/bash', '#!/usr/bin/env bash'):
             self.errors.append(
-                "Missing or incorrect shebang. Should be: #!/bin/bash"
+                "Missing or incorrect shebang. Should be: #!/bin/bash "
+                "or #!/usr/bin/env bash"
             )
 
     def _check_license_header(self, content: str):
