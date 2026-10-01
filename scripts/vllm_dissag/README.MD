@@ -56,6 +56,7 @@ path).
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 | `DeepSeek-V4-Flash-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | own image (`dsv4` Dockerfile, prebuilt, pinned by digest); 1P/1D EP8 |
+| `DeepSeek-V4-Pro-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | same `dsv4` image as Flash; 1P/1D EP8 |
 
 ## Prerequisites
 
@@ -105,8 +106,8 @@ can reach.
 DeepSeek-V4 uses a prebuilt internal image instead of a from-source build.
 `docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it by digest and lists what
 it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes in-source, AITER 10f8874, MoRI
-07bdace, vllm-router). `DeepSeek-V4-Flash-FP8` has a recipe; `DeepSeek-V4-Pro-FP8` does not
-yet, so the launcher still rejects it. The image is private: every node must be
+07bdace, vllm-router). `DeepSeek-V4-Flash-FP8` and `DeepSeek-V4-Pro-FP8` both serve from
+it. The image is private: every node must be
 `docker login`-ed with pull access to `rocm/pytorch-private` (the launcher ignores pull
 errors, so a missing login shows up later as "Unable to find image"). Submit with the same
 digest:

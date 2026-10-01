@@ -89,6 +89,7 @@ VALID_MODELS=( \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
     "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -98,6 +99,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
     "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -184,7 +186,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "DeepSeek-V4-Flash-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "DeepSeek-V4-Flash-FP8" "DeepSeek-V4-Pro-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
