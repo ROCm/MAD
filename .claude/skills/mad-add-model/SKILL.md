@@ -153,29 +153,48 @@ For the shared-framework layout, skip Steps 3, 4 and 6: the Dockerfile,
    - Output performance metrics (`echo "performance: <value> <unit>"`)
    - Handle errors
 
-3. **For vLLM models:**
+3. **Keep `{script_dir}` self-contained.** At run time only the directory
+   holding the configured script is copied into the container
+   (`tools/run_models.py`), so every helper `run.sh` calls (Python drivers,
+   config files) must live in `{script_dir}`. A vLLM model that just needs
+   `scripts/vllm/run_vllm.py` and its `configs/` belongs in the
+   shared-framework layout instead (Step 2b).
+
+4. **For vLLM models** (workload-specific layout), call vLLM directly rather
+   than `run_vllm.py`:
    ```bash
    #!/bin/bash
    set -ex
    
    export HF_HUB_CACHE="/myworkspace"
    
+   TP=1
+   INPUT_LEN=1024
+   OUTPUT_LEN=1024
+   NUM_PROMPTS=500
+   
    # Parse arguments
    while [[ "$#" -gt 0 ]]; do
        case $1 in
            --model_repo) MODEL="$2"; shift ;;
-           --config) CONFIG="$2"; shift ;;
-           --benchmark) BENCHMARK="$2"; shift ;;
+           --tp) TP="$2"; shift ;;
+           --input_len) INPUT_LEN="$2"; shift ;;
+           --output_len) OUTPUT_LEN="$2"; shift ;;
+           --num_prompts) NUM_PROMPTS="$2"; shift ;;
            *) echo "Unknown parameter: $1"; exit 1 ;;
        esac
        shift
    done
    
-   # Run vLLM benchmark
-   python3 -u run_vllm.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK
+   # Run vLLM throughput benchmark
+   vllm bench throughput --model "$MODEL" -tp "$TP" \
+       --input-len "$INPUT_LEN" --output-len "$OUTPUT_LEN" \
+       --num-prompts "$NUM_PROMPTS" --output-json throughput.json
+   
+   python3 -c "import json; print('performance: %.2f tokens/s' % json.load(open('throughput.json'))['tokens_per_second'])"
    ```
 
-4. **Save** it and make it executable (`chmod +x {script_dir}/run.sh`)
+5. **Save** it and make it executable (`chmod +x {script_dir}/run.sh`)
 
 ### Step 5: Register in models.json
 

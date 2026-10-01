@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git build-essential cmake ninja-build ccache libssl-dev pkg-config curl ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     pip install meson==0.64.0 "pybind11[global]" tqdm prettytable && \
-    pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true && \
+    (pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true) && \
     rm -rf /tmp/mori-src && \
     git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
     cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
@@ -116,7 +116,7 @@ RUN rm -rf /tmp/vllm-src && \
     git clone "${VLLM_REPO}" /tmp/vllm-src && \
     cd /tmp/vllm-src && git checkout "${VLLM_REF}" && \
     echo "VLLM_REF=${VLLM_REF}@$(git rev-parse HEAD)" >> ${WORKSPACE_DIR}/versions.txt && \
-    pip uninstall -y vllm 2>/dev/null || true && \
+    (pip uninstall -y vllm 2>/dev/null || true) && \
     pip install --no-deps --no-build-isolation -v . && \
     python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
     rm -rf /tmp/vllm-src
