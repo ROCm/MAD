@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 ###############################################################################
-ARG BASE_DOCKER={{ base_image | default('rocm/atom:latest') }}
+ARG BASE_DOCKER={{ base_image | default('rocm/atom-dev:latest') }}
 FROM $BASE_DOCKER
 
 USER root

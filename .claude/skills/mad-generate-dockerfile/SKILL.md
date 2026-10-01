@@ -92,7 +92,7 @@ assume defaults and continue on your own.
    ```bash
    python3 .claude/skills/mad-generate-dockerfile/scripts/render_dockerfile.py \
      --framework vllm \
-     --context '{"base_image": "vllm/vllm-openai-rocm:v0.23.0", "pip_packages": ["foo==1.0"]}'
+     --context '{"base_image": "vllm/vllm-openai-rocm:v0.28.0", "pip_packages": ["foo==1.0"]}'
    ```
    Fix any `ERROR`/`WARNING` lines (a warning means a context key the
    template does not use, usually a typo).

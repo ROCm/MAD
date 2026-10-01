@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 ###############################################################################
-ARG BASE_DOCKER={{ base_image | default('rocm/pytorch-xdit:v26.7') }}
+ARG BASE_DOCKER={{ base_image | default('rocm/pytorch-xdit:v26.8') }}
 FROM ${BASE_DOCKER} AS base
 
 # No WORKDIR override: keep the upstream xDiT image's default, as
