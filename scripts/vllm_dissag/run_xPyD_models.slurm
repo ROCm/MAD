@@ -524,9 +524,6 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_KEY="${_IMG_KEY:-noimg}";
     _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
-    # Every container on this node was stopped above, so any AITER build lock left here
-    # is from a killed/preempted run and would make the next compile wait forever.
-    rm -rf "$_JIT_CACHE_HOST"/aiter_jit/build/lock_* 2>/dev/null || true;
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
 else
@@ -705,6 +702,11 @@ docker run --rm \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
+        # Every container on this node was stopped above, so any AITER build lock left in the
+        # persistent cache is from a killed/preempted run and would make the next compile wait
+        # forever. Cleared in here because the cache is root-owned.
+        echo jit-cache: clearing stale AITER build locks in ${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build
+        rm -rfv ${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build/lock_* 2>/dev/null
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
