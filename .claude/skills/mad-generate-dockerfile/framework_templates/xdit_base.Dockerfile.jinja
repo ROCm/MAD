@@ -31,18 +31,18 @@ FROM ${BASE_DOCKER} AS base
 # docker/pyt_xdit.ubuntu.amd.Dockerfile does.
 USER root
 
-RUN apt-get update && apt install -y lshw{% if apt_packages %} {{ apt_packages | join(' ') }}{% endif %} \
+RUN apt-get update && apt install -y lshw{% if apt_packages %} {{ apt_packages | map('shquote') | join(' ') }}{% endif %} \
     && rm -rf /var/lib/apt/lists/*
 
 {% if pip_packages %}
-RUN pip install --no-cache-dir {{ pip_packages | join(' ') }}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
 {% endif %}
 
 {% if git_repos %}
 {% for repo in git_repos %}
-RUN git clone {{ repo.url }} {{ repo.path }}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
 {% if repo.checkout %}
-RUN cd {{ repo.path }} && git checkout {{ repo.checkout }}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
 {% endif %}
 {% endfor %}
 {% endif %}

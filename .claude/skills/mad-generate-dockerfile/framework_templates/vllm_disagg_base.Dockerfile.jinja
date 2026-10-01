@@ -53,7 +53,7 @@ RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true
 
 {% if apt_packages %}
-RUN apt-get update && apt-get install -y {{ apt_packages | join(' ') }} \
+RUN apt-get update && apt-get install -y {{ apt_packages | map('shquote') | join(' ') }} \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
@@ -99,7 +99,7 @@ RUN echo "Installing AITER from ${AITER_WHEEL_URL}" && \
 {% endif %}
 
 {% if pip_packages %}
-RUN pip install --no-cache-dir {{ pip_packages | join(' ') }}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
 {% endif %}
 
 {% if vllm_repo and vllm_ref %}
@@ -211,9 +211,9 @@ ENV LD_LIBRARY_PATH="/usr/local/ucx/lib:/usr/local/lib:/usr/local/RIXL/install/l
 
 {% if git_repos %}
 {% for repo in git_repos %}
-RUN git clone {{ repo.url }} {{ repo.path }}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
 {% if repo.checkout %}
-RUN cd {{ repo.path }} && git checkout {{ repo.checkout }}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
 {% endif %}
 {% endfor %}
 {% endif %}

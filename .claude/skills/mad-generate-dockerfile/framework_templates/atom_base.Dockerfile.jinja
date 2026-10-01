@@ -33,19 +33,19 @@ RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 
 {% if apt_packages %}
-RUN apt update && apt install -y {{ apt_packages | join(' ') }} \
+RUN apt update && apt install -y {{ apt_packages | map('shquote') | join(' ') }} \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
 {% if pip_packages %}
-RUN pip install --no-cache-dir {{ pip_packages | join(' ') }}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
 {% endif %}
 
 {% if git_repos %}
 {% for repo in git_repos %}
-RUN git clone {{ repo.url }} {{ repo.path }}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
 {% if repo.checkout %}
-RUN cd {{ repo.path }} && git checkout {{ repo.checkout }}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
 {% endif %}
 {% endfor %}
 {% endif %}

@@ -46,7 +46,7 @@ RUN apt-get update && \
     openmpi-bin libopenmpi-dev \
     libpci-dev libdw1 locales \
     libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
-    cmake{% if apt_packages %} {{ apt_packages | join(' ') }}{% endif %} \
+    cmake{% if apt_packages %} {{ apt_packages | map('shquote') | join(' ') }}{% endif %} \
     && rm -rf /var/lib/apt/lists/*
 
 # MoRI: the base image ships a git checkout at /sgl-workspace/mori.
@@ -71,14 +71,14 @@ RUN if [ "${INSTALL_MORI}" = "1" ]; then \
 WORKDIR $WORKSPACE_DIR
 
 {% if pip_packages %}
-RUN pip install --no-cache-dir {{ pip_packages | join(' ') }}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
 {% endif %}
 
 {% if git_repos %}
 {% for repo in git_repos %}
-RUN git clone {{ repo.url }} {{ repo.path }}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
 {% if repo.checkout %}
-RUN cd {{ repo.path }} && git checkout {{ repo.checkout }}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
 {% endif %}
 {% endfor %}
 {% endif %}

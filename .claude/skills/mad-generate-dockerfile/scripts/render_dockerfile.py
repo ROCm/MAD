@@ -25,6 +25,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import sys
 from typing import Dict, List
 
@@ -47,12 +48,16 @@ def make_env():
         import jinja2
     except ImportError:
         sys.exit("ERROR: jinja2 is not installed. Install it with: pip install jinja2")
-    return jinja2.Environment(
+    env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(TEMPLATES_DIR),
         trim_blocks=True,
         lstrip_blocks=True,
         keep_trailing_newline=True,
     )
+    # Values spliced into RUN lines must be shell-quoted, or a spec like
+    # "foo>=2" is parsed as a redirection and ";" can inject commands.
+    env.filters["shquote"] = lambda v: shlex.quote(str(v))
+    return env
 
 
 def template_variables(env, framework: str) -> List[str]:
