@@ -1,122 +1,159 @@
-# Large EP Microbenchmarking (MoRI-EP & DeepEP)
+# Large EP Microbenchmark (MoRI-EP)
+
+This benchmark measures the expert-parallel (EP) communication used by Mixture-of-Experts models: **dispatch** (sending each token to the GPUs that hold its selected experts) and **combine** (sending the expert outputs back), on 1 to N nodes with AMD Instinct GPUs and InfiniBand (Slurm).
 
 ## Overview
 
-These scripts run microbenchmarks for **MoRI-EP** (MoRI collective engine) and **DeepEP** (expert-parallel / MoE communication) on a Slurm cluster with AMD Instinct accelerators and InfiniBand (CX7) networking. The benchmarks validate collective performance and low-latency behavior in both intranode and internode configurations.
+- **Library**: [MoRI-EP](https://github.com/ROCm/mori). [DeepEP](https://github.com/ROCm/DeepEP) (on [rocSHMEM](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocshmem)) is deprecated in this benchmark and off by default; see [DeepEP (deprecated)](#deepep-deprecated).
+- **Tests**: dispatch and combine, each with MoRI's normal and low-latency paths. One node runs the intranode tests (xGMI); two or more nodes run the internode tests (RDMA).
+- **Environment**: 1, 2 or 4 nodes, one Docker container per node, InfiniBand (`mlx5_0` by default)
+- **What it produces**: per-test logs and a `perf.csv` with RDMA bandwidth and latency for each test
 
-The Docker image is built from the MAD repository and is intended for use on clusters with **Mellanox CX7** NICs and compatible AMD GPUs (e.g., gfx942). You can adjust the Dockerfile for different NICs or GPU architectures as needed.
-
-## Why this benchmarking?
-
-- **Validate communication stacks** — Before running large training or inference workloads (e.g., MoE models, distributed LLMs), microbenchmarks confirm that MoRI and DeepEP collectives achieve expected throughput and latency on your cluster. Regressions in drivers, ROCm, or NIC firmware show up here first.
-- **Tune and qualify hardware** — Results help tune environment variables (e.g., `ROCSHMEM_HEAP_SIZE`, `IBDEVICES`), compare NIC/GPU configurations, and qualify new nodes or fabrics (intranode vs internode, normal vs low-latency paths).
-- **Regression and CI** — These scripts can be used in CI or release validation to ensure that updates to MoRI, DeepEP, rocSHMEM, or the ROCm stack do not degrade collective performance.
-- **Research and development** — Microbenchmark data supports optimization of collective algorithms, FP8/low-latency paths, and scaling studies across nodes.
-
-## MoRI and DeepEP: background and links
-
-### MoRI (Modular RDMA Interface)
-
-**MoRI** is a communication backend for the ROCm platform that optimizes **inter-node collective operations** on GPU clusters. It uses RDMA (Remote Direct Memory Access) for efficient GPU-to-GPU communication across nodes and supports standard collectives. MoRI is used in distributed inference (e.g., with SGLang / vLLM on AMD Instinct).
-
-| Resource | Link |
-|----------|------|
-| **MoRI (GitHub)** | [ROCm/mori](https://github.com/ROCm/mori) |
-
-### DeepEP and rocSHMEM
-
-**DeepEP** is a high-performance communication library for **Mixture-of-Experts (MoE)** and **expert parallelism**, providing GPU **all-to-all** primitives with optional FP8/BF16 support. The AMD ROCm version uses xGMI/Infinity Fabric for intranode communication and InfiniBand/RoCE for internode communication. DeepEP builds on **rocSHMEM** (ROCm OpenSHMEM), an intra-kernel networking library that provides GPU-centric, OpenSHMEM-like APIs and a symmetric heap on GPU memory, enabling better communication–computation overlap than host-driven networking.
-
-| Resource | Link |
-|----------|------|
-| **DeepEP (GitHub)** | [ROCm/DeepEP](https://github.com/ROCm/DeepEP) |
-| **rocSHMEM — What is rocSHMEM? (ROCm docs)** | [rocSHMEM introduction](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/introduction.html) |
-| **rocSHMEM (GitHub)** | [ROCm/ROC_SHMEM](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocshmem) |
-
-## Benchmarks Covered
-
-| Scope       | Mode        | DeepEP | MoRI-EP |
-|------------|-------------|--------|---------|
-| Intranode  | Normal      | ✅     | ✅      |
-| Intranode  | Low latency | ✅     | ✅      |
-| Internode  | Normal      | ✅     | ✅      |
-| Internode  | Low latency | ✅     | ✅      |
-
-- **Intranode**: Single-node multi-process collectives.
-- **Internode**: Multi-node collectives over InfiniBand.
-- **Low latency**: FP8/low-latency collective paths (e.g., rocSHMEM heap and MoRI FP8).
+Run it before large MoE training or inference jobs, or after a driver, ROCm, MoRI or NIC firmware change, to confirm EP communication still performs as expected.
 
 ## Prerequisites
 
-- Slurm cluster with AMD Instinct nodes.
-- **CX7** (or compatible) InfiniBand NICs; scripts assume InfiniBand devices are available.
-- Docker available on compute nodes (or use a container runtime configured for your cluster).
+- Slurm cluster with AMD Instinct nodes (the default image targets gfx942)
+- InfiniBand NICs (`mlx5`) on each node
+- Docker on the compute nodes, with InfiniBand device access
+- Shared storage at `/shared_inference` (the default log location)
 
-## How to Run
+## Model cards
 
-### 1. Build the Docker image
+`models.json` defines three cards. All run MoRI only and differ in node count; together they form a scaling series (tag `large_ep_scaling`).
 
-Build from the **MAD repository root** (not from this script directory). The default Dockerfile targets **gfx942** and **CX7**; edit `docker/large_ep_benchmark.ubuntu.amd.Dockerfile` if your cluster uses a different GPU arch or NIC.
+| Card                              | Nodes | Tests                         |
+| --------------------------------- | ----- | ----------------------------- |
+| `pyt_large_ep_bench_1n_mori_only` | 1     | Intranode, normal and low latency |
+| `pyt_large_ep_bench_2n_mori_only` | 2     | Internode, normal and low latency |
+| `pyt_large_ep_bench_4n_mori_only` | 4     | Internode, normal and low latency |
+
+## Result files
+
+Benchmark outputs are written to `/shared_inference/<user>/model_blog_logs/<job_id>/` (override with `LOG_PATH`).
+
+| Artifact                                       | Description                                         |
+| ---------------------------------------------- | --------------------------------------------------- |
+| `mori_internode_<rank>.txt`                     | Internode normal path, one file per node            |
+| `mori_ll_internode_<rank>.txt`                  | Internode low-latency path (`--kernel-type v1_ll`)  |
+| `mori_intranode_results.log`                   | Intranode normal path (1 node)                      |
+| `mori_1N_ll_results.log`                       | Intranode low-latency path, FP8 data (1 node)       |
+| `ep_bench_results.log`                         | Combined console output of the run                  |
+| `perf.csv`                                     | madengine perf rows, generated by `parse_ep_to_csv.py` |
+
+Only rank 0 prints MoRI's result tables, so the `_1` (and higher) files contain setup output only.
+
+## Quick Start (madengine)
+
+Run both commands from **this directory** (`scripts/large-ep-benchmark`):
 
 ```bash
-# From MAD repository root
-docker build -f docker/large_ep_benchmark.ubuntu.amd.Dockerfile -t ep-benchmarking:latest .
+madengine build --tags pyt_large_ep_bench_2n_mori_only \
+                --registry <namespace>/<repo> --build-on-compute \
+                --additional-context '{"slurm": {"partition": "<your-partition>"}}'
+madengine run   --tags pyt_large_ep_bench_2n_mori_only \
+                --manifest-file build_manifest.json
 ```
 
-### 2. Set environment variables
+`build` compiles the image in its own 1-node Slurm job and pushes it. `run` then takes a separate allocation (the partition from `build`; the rest from the `slurm` block in `models.json`: the card's node count, 8 GPUs per node, 4 hours), pulls the image on every node, runs the tests, and collects `perf.csv`.
 
-| Variable       | Description                          | Example              |
-|----------------|--------------------------------------|----------------------|
-| `DOCKER_IMAGE` | Docker image to run on the cluster   | `ep-benchmarking:latest` |
-| `IBDEVICES`    | InfiniBand device(s) for rocSHMEM   | `mlx5_0` (default)   |
+**Notes**
 
-Optional:
+- Set your cluster's Slurm partition with `--additional-context` on `build`, as above; the model cards do not set one, and madengine otherwise uses `gpu`.
 
-- `LOG_PATH`: Directory for benchmark logs (default: `./logs` in the current working directory).
+- `--registry` takes a Docker Hub namespace such as `myorg/myrepo`; madengine
+  prefixes `docker.io/` and tags the image `<registry>:<card name>`. The
+  registry is what carries the image from the build job to the run job.
+- Export `MAD_DOCKERHUB_USER` and `MAD_DOCKERHUB_PASSWORD` (a Docker Hub PAT)
+  before `build`, or put them in `credential.json`. An ambient `docker login`
+  only reaches the build node if `$HOME` is on shared storage.
+- `--build-on-compute` keeps the build off the login node. It requires
+  `--registry`, and reuses `slurm.time` from the model card as its own limit.
+- Pass `--additional-context` to `build`, not `run`. On `build` it is merged into the card's `slurm` block; on `run` it replaces the whole block, so the job loses its partition, node count and time limit.
+- If the job stays pending behind madengine's node health check, disable it at build time with `--additional-context '{"slurm": {"partition": "<your-partition>", "enable_node_check": false}}'`.
 
-### 3. Submit the Slurm job
+### Reusing an already-pushed image
 
-Navigate to the scripts directory and submit the job. The script supports **1 to N nodes**; Slurm allocates the nodes and the job runs both intranode and internode tests when multiple nodes are requested.
+If an image has already been pushed, point `build` at it. This only regenerates the manifest; it does not rebuild:
+
+```bash
+madengine build --tags pyt_large_ep_bench_2n_mori_only \
+                --use-image docker.io/<namespace>/<repo>:<tag> \
+                --additional-context '{"slurm": {"partition": "<your-partition>"}}'
+madengine run   --tags pyt_large_ep_bench_2n_mori_only \
+                --manifest-file build_manifest.json
+```
+
+The benchmark scripts are bind-mounted from the checkout at runtime rather than baked into the image, so local edits to `run_ep_bench.sh` or `parse_ep_to_csv.py` take effect without a rebuild. Rebuild only when the Dockerfile changes.
+
+### Interpreting the results
+
+A healthy multi-node run produces 8 `perf.csv` rows: dispatch and combine, for the normal and low-latency paths, each with an RDMA bandwidth (GB/s) and a latency (us) row. If a test fails, the job exits non-zero and that test's rows are missing.
+
+- **Best, not average:** MoRI prints Best, Worst and Average rows across all GPUs and rounds; `perf.csv` reports the Best row. The full tables are in the logs.
+- **"Low latency" differs by node count:** on one node it is the same benchmark with FP8 data (`--dtype fp8_e4m3_fnuz`); on two or more nodes it is a separate kernel (`--kernel-type v1_ll`) with bf16 data. Don't compare the two directly.
+
+## Quick Start (manual)
+
+### 1. Build Docker image
+
+From the repository root:
+
+```bash
+docker build --network=host -f docker/large_ep_benchmark.ubuntu.amd.Dockerfile -t ep-benchmarking:latest ./docker
+```
+
+The image is built on the SGLang ROCm 10 base `lmsysorg/sglang:v0.5.20-rocm10-mi30x` (override with `--build-arg BASE_DOCKER=...`), with each component pinned by a Dockerfile `ARG` and gated by an `INSTALL_*` flag (any value other than `1` skips that build):
+
+| Component | Pin                                 | Flag (default)       |
+| --------- | ----------------------------------- | -------------------- |
+| MoRI      | `v1.2.3.post1` (`67632e80`)         | `INSTALL_MORI` (`1`) |
+| rocSHMEM  | `develop` as of 2026-10-01 (`62324a88`) | `INSTALL_DEEPEP` (`0`) |
+| DeepEP    | `main` as of 2026-10-01 (`0f63d3e9`)    | `INSTALL_DEEPEP` (`0`) |
+
+To push to Docker Hub:
+
+```bash
+docker tag ep-benchmarking:latest <your-repo>/large-ep-benchmark:latest
+docker push <your-repo>/large-ep-benchmark:latest
+```
+
+### 2. Run the benchmark via Slurm
+
+Submit `run_benchmark.sbatch` from this directory. The node count selects the tests: `-N 1` runs the intranode tests, `-N 2` or more runs the internode tests.
 
 ```bash
 cd scripts/large-ep-benchmark
 
-export DOCKER_IMAGE=ep-benchmarking:latest
-export IBDEVICES=mlx5_0
-
-sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch
+export DOCKER_IMAGE=<your-repo>/large-ep-benchmark:latest
+sbatch -p <partition> -N 2 run_benchmark.sbatch
 ```
 
-**Examples:**
+**Environment variables:**
 
-- Single node (intranode only):
-  ```bash
-  sbatch -p <partition> -N 1 run_benchmark.sbatch
-  ```
+| Variable            | Default                                    | Description                                              |
+| ------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| `DOCKER_IMAGE`      | `ep-benchmarking:latest`                   | Image to pull and run on every node                      |
+| `DOCKER_IMAGE_NAME` | *(unset)*                                  | Takes precedence over `DOCKER_IMAGE`; set by madengine   |
+| `IBDEVICES`         | `mlx5_0`                                   | InfiniBand device(s)                                     |
+| `LOG_PATH`          | `/shared_inference/<user>/model_blog_logs` | Log directory; each job writes to `<LOG_PATH>/<job_id>/` |
+| `SKIP_DEEPEP`       | `1`                                        | Set to `0` to also run the deprecated DeepEP tests       |
 
-- Multi-node (intranode and internode):
-  ```bash
-  sbatch -p <partition> -N 4 run_benchmark.sbatch
-  ```
+Slurm stdout/stderr go to `ep_bench_slurm_job.out` and `ep_bench_slurm_job.err` in the submit directory. The script's built-in time limit is 4 hours; pass `-t` to change it.
 
->[!NOTE]
-> Ensure the partition and account allow the requested number of nodes and that compute nodes have Docker (or the configured container runtime) and access to the built image (e.g., via a registry or shared image path).
+## DeepEP (deprecated)
 
-## Output and logs
+DeepEP is off by default and no model card runs it. To run it, build the image with `--build-arg INSTALL_DEEPEP=1` (rocSHMEM and DeepEP are compiled for **CX7** NICs) and run with `SKIP_DEEPEP=0`. This adds DeepEP's intranode, internode and low-latency tests (`intranode_results.log`, `internode_<rank>.txt`, `low-latency-<rank>.log`). `parse_ep_to_csv.py` only partly understands DeepEP's output, so most DeepEP results appear in the logs but not in `perf.csv`.
 
-- Slurm stdout/stderr: `ep_bench_slurm_job.out` and `ep_bench_slurm_job.err` in the directory where `sbatch` was run.
-- Benchmark logs are written under `LOG_PATH` (default: `./logs`), including:
-  - `ep_bench_results.log` — main run log
-  - `intranode_results.log` / `mori_intranode_results.log` — intranode DeepEP and MoRI
-  - `internode_<rank>.txt`, `low-latency-<rank>.log` — internode and low-latency results
+## Project Structure
 
-
-## Summary
-
-| Step | Action |
-|------|--------|
-| 1    | Build image from MAD root: `docker build -f docker/large_ep_benchmark.ubuntu.amd.Dockerfile -t ep-benchmarking:latest .` |
-| 2    | Set `DOCKER_IMAGE` and `IBDEVICES` (and optionally `LOG_PATH`) |
-| 3    | From `scripts/large-ep-benchmark`, run: `sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch` |
-
-For different GPU architectures or NICs, update the Dockerfile and rebuild before submitting jobs.
+```
+large-ep-benchmark/
+├── README.md
+├── models.json               # madengine model cards (slurm_multi launcher)
+├── run_benchmark.sbatch      # Slurm launcher (madengine slurm_multi, or sbatch)
+├── run_ep_bench.sh           # Per-node benchmark runner (inside the container)
+├── parse_ep_to_csv.py        # Convert benchmark logs -> madengine perf.csv
+├── docker -> ../../docker    # Build context for madengine build
+└── utils/                    # Socket barrier helpers
+```

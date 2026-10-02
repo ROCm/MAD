@@ -9,9 +9,9 @@
 USER_NAME=$(whoami)
 PWD=$(pwd)
 LOG_PATH=${LOG_PATH:-"/shared_inference/${USER_NAME}/model_blog_logs"}
-DOCKER_IMAGE=${DOCKER_IMAGE:-ep-benchmarking:latest}
+DOCKER_IMAGE=${DOCKER_IMAGE_NAME:-${DOCKER_IMAGE:-ep-benchmarking:latest}}
 IBDEVICES=${IBDEVICES:-mlx5_0}
-SKIP_DEEPEP=${SKIP_DEEPEP:-0}
+SKIP_DEEPEP=${SKIP_DEEPEP:-1}
 
 # ------------------------
 # SLURM Environment Variables
@@ -113,14 +113,22 @@ docker run --rm \
     -e SKIP_DEEPEP=$SKIP_DEEPEP \
     -e MAD_REPO_PATH=$MAD_REPO_PATH \
     -e MAD_REPO_EP_SCRIPTS=$MAD_REPO_EP_SCRIPTS \
+    -e DOCKER_IMAGE=$DOCKER_IMAGE \
     --entrypoint /bin/bash \
     --name ep-bench \
     $DOCKER_IMAGE -c "
+        set -o pipefail
         echo Inside docker container ....
         echo ${MAD_REPO_PATH}
         $MAD_REPO_PATH/run_ep_bench.sh 2>&1 | tee /run_logs/ep_bench_results.log
 "
 '
+BENCH_RC=$?
 
 srun bash -c 'docker stop ep-bench 2>/dev/null || true; docker rm -f ep-bench 2>/dev/null || true'
+
+if [ "$BENCH_RC" -ne 0 ]; then
+    echo "ERROR: benchmark failed on one or more nodes (srun exit $BENCH_RC)" >&2
+fi
+exit $BENCH_RC
 
