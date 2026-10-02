@@ -8,11 +8,15 @@ This benchmark measures KV cache transfer throughput across multiple backends (N
 - **Environment**: 2 nodes, Docker containers, InfiniBand (`mlx5_0` by default)
 - **What it produces**: A sweep from `--start-size` through `--stop-size`, with JSON per backend, a merged CSV, and an interactive HTML report that compares backends across transfer sizes
 
+
+
 ## Prerequisites
 
 - Two nodes with network connectivity (Slurm, Kubernetes, or bare-metal)
 - Docker with InfiniBand device access
 - ROCm-capable GPUs (for vLLM/KV cache estimator)
+
+
 
 ## Result files
 
@@ -56,27 +60,28 @@ any backend that produced no results.
   `build` merges it with the model card's `slurm` block, whereas a `slurm`
   block passed to `run` replaces that block entirely.
 - `--registry` takes a Docker Hub namespace such as `myorg/myrepo`; madengine
-  prefixes `docker.io/` and tags the image
-  `<registry>:pyt_kvcache_transfer_bench_all`. The registry is what carries the
-  image from the build job to the run job.
+prefixes `docker.io/` and tags the image
+`<registry>:pyt_kvcache_transfer_bench_all`. The registry is what carries the
+image from the build job to the run job.
 - Export `MAD_DOCKERHUB_USER` and `MAD_DOCKERHUB_PASSWORD` (a Docker Hub PAT)
-  before `build`, or put them in `credential.json`. An ambient `docker login`
-  only reaches the build node if `$HOME` is on shared storage.
+before `build`, or put them in `credential.json`. An ambient `docker login`
+only reaches the build node if `$HOME` is on shared storage.
 - `--build-on-compute` keeps the build off the login node. It requires
-  `--registry`, and reuses `slurm.time` from the model card as its own limit,
-  override with `--additional-context '{"slurm":{"time":"06:00:00"}}'` if the
-  from-source build needs longer.
+`--registry`, and reuses `slurm.time` from the model card as its own limit,
+override with `--additional-context '{"slurm":{"time":"06:00:00"}}'` if the
+from-source build needs longer.
 - The sweep doubles from `START_SIZE` (4KB) to `STOP_SIZE` (1GB), both in bytes,
-  set in the `env_vars` of `models.json`. Override them for one run with e.g.
-  `madengine run ... --additional-context '{"env_vars": {"STOP_SIZE": "4294967296"}}'`.
-  MoRI caps its sweep at 2GB (it rejects single transfers above `UINT32_MAX`),
-  so sizes above that come from NIXL and Mooncake only.
+set in the `env_vars` of `models.json`. Override them for one run with e.g.
+`madengine run ... --additional-context '{"env_vars": {"STOP_SIZE": "4294967296"}}'`.
+MoRI caps its sweep at 2GB (it rejects single transfers above `UINT32_MAX`),
+so sizes above that come from NIXL and Mooncake only.
+
+
 
 ### Reusing an already-pushed image
 
 The image takes ~20 minutes to build from source. If one has already been
-pushed, skip `--build-on-compute` and point `build` at it — this only
-regenerates the manifest, it does not rebuild:
+pushed, skip `--build-on-compute` and point `build` at it. This only regenerates the manifest, it does not rebuild:
 
 ```bash
 madengine build --tags pyt_kvcache_transfer_bench_all \
@@ -86,23 +91,13 @@ madengine run   --tags pyt_kvcache_transfer_bench_all \
                 --manifest-file build_manifest.json
 ```
 
-The benchmark scripts are bind-mounted from the checkout at runtime rather than
-baked into the image, so local edits to `run_node.sh` / `backends/` take effect
+The benchmark scripts are bind-mounted from the checkout at runtime rather than  
+baked into the image, so local edits to `run_node.sh` / `backends/` take effect  
 without a rebuild. Rebuild only when the Dockerfile changes.
 
-### Interpreting the results
-
-A healthy run has each backend contributing 19 rows (4KB → 1GB). A backend that
-produces no results is recorded as an explicit `FAILURE` row instead. For
-Mooncake this usually means it was built with `-DUSE_HIP=ON` but without
-`-DENABLE_MULTI_PROTOCOL=ON`, so cross-node writes fail with
-`hipIpcOpenMemHandle failed`.
-
-Throughput is measured in a single pass per size, so expect run-to-run noise at
-the large end — individual sizes above ~16MB have been seen to swing by 50% or
-more between otherwise identical runs. Compare curve shapes, not single points.
-
 ## Quick Start (manual)
+
+
 
 ### 1. Build Docker Image
 
@@ -114,11 +109,13 @@ docker build --network=host -f docker/kvcache_transfer_bench.ubuntu.amd.Dockerfi
 
 The image is built on the SGLang ROCm 10 base `lmsysorg/sglang:v0.5.20-rocm10-mi30x` (`lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` also works, via `--build-arg BASE_DOCKER=...`), with each engine pinned by a Dockerfile `ARG` and gated by `INSTALL_MORI` / `INSTALL_MOONCAKE` / `INSTALL_NIXL` (default `1`; any other value skips that build and keeps whatever the base image ships):
 
-| Component | Pin                                                                |
-| --------- | ------------------------------------------------------------------ |
-| MoRI      | `v1.2.3.post1` (`67632e80`)                                        |
-| Mooncake  | `v0.3.13.post1` (`71973589`), built with `-DENABLE_MULTI_PROTOCOL=ON` |
+
+| Component | Pin                                                                                         |
+| --------- | ------------------------------------------------------------------------------------------- |
+| MoRI      | `v1.2.3.post1` (`67632e80`)                                                                 |
+| Mooncake  | `v0.3.13.post1` (`71973589`), built with `-DENABLE_MULTI_PROTOCOL=ON`                       |
 | NIXL      | `v1.4.1` (`778edd1d`) + ROCm fix `fe3244c8` (ai-dynamo/nixl#2191), over ROCm/ucx `da3fac2a` |
+
 
 To push to Docker Hub:
 
@@ -126,6 +123,8 @@ To push to Docker Hub:
 docker tag kv-cache-unified:latest <your-repo>/kv-cache-transfer-bench:latest
 docker push <your-repo>/kv-cache-transfer-bench:latest
 ```
+
+
 
 ### 2. Run the Benchmark via Slurm
 
@@ -156,7 +155,7 @@ sbatch [sbatch options] scripts/run.slurm [benchmark options]
 | ------------ | ------------------------------------------------------------------- |
 | `--nodelist` | Comma-separated node names (e.g. `node-hostname-1,node-hostname-2`) |
 | `-t`         | Time limit (e.g. `-t 08:00:00`); required on some clusters          |
-| `-N 2`       | Number of nodes; required |
+| `-N 2`       | Number of nodes; required                                           |
 
 
 **Example:**
@@ -180,6 +179,8 @@ salloc -N 2 -n 2 --ntasks-per-node=1 --time=08:00:00
 cd kvcache_transfer_bench
 bash scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
 ```
+
+
 
 ### 3. Run on Non-Slurm Clusters (e.g. Kubernetes, Bare-Metal)
 
@@ -228,6 +229,8 @@ docker run --rm --device /dev/dri --device /dev/kfd --device /dev/infiniband \
     --shared-folder /workspace/kvcache_transfer_bench \
     --backends nixl,mori,mooncake --start-size 4096 --stop-size 1073741824 --ibdevice mlx5_0
 ```
+
+
 
 ### 4. Generate KV Cache Estimator Data (Optional)
 
@@ -280,6 +283,8 @@ python kv_cache_estimator.py --config qwen3_8b_config.yaml --output-dir kv_cache
 ```bash
 python scripts/merge_results.py --input-dir <results_dir> --kv-cache-estimator-file <results_dir>/kv_cache_estimator.csv
 ```
+
+
 
 ## Project Structure
 
