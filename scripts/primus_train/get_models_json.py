@@ -26,10 +26,6 @@ CONFIGS_GLOB = os.path.join(PRIMUS_ROOT, "examples", "*", "configs", "**", "*.ya
 # Discovering them here too would create duplicates on the wrong base image.
 JAX_BACKENDS = {"maxtext", "maxdiffusion"}
 
-# --train_iters is a Megatron-style override. TorchTitan uses training.steps and the other
-# launchers have their own keys, so leave those recipes at their pinned iteration settings.
-TRAIN_ITERS_LAUNCHERS = {"megatron", "megatron_bridge"}
-
 # Precision is encoded in the config file name (llama3.1_8B-MXFP4-pretrain.yaml,
 # gdn_1B_BF16-pretrain.yaml). Longest token first, so MXFP8 is not matched as FP8.
 # Configs that carry no precision token (mamba_130M_pretrain.yaml, the diffusion
@@ -84,9 +80,6 @@ def list_models():
         short_name = os.path.splitext(os.path.basename(yaml_path))[0]
         # discover_models prefixes with dirname (primus_train/), so no prefix here
         name = f"{launcher}_{arch}_{short_name}"
-        model_args = f"--config_path {rel_path}"
-        if launcher in TRAIN_ITERS_LAUNCHERS:
-            model_args += " --train_iters 3000"
         tags = ["primus", launcher, arch, short_name]
         models.append(
             CustomModel(
@@ -100,7 +93,7 @@ def list_models():
                 timeout=86400,
                 training_precision=precision_from_config_name(short_name),
                 tags=tags,
-                args=model_args,
+                args=f"--config_path {rel_path}",
                 multiple_results="primus_perf_output.csv",
             )
         )
