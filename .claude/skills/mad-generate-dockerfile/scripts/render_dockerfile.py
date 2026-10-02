@@ -80,9 +80,30 @@ def load_context(raw: str) -> Dict:
     return context
 
 
+def iter_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for v in value:
+            yield from iter_strings(v)
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from iter_strings(v)
+
+
+def is_ref(value) -> bool:
+    """A repo URL or git ref: non-empty string with no whitespace."""
+    return isinstance(value, str) and bool(value) and not re.search(r"\s", value)
+
+
 def check_context(context: Dict, known: List[str]) -> List[str]:
     """Return errors for malformed values; warn about keys the template ignores."""
     errors = []
+    # shlex.quote cannot help here: Docker ends an instruction at a newline, so
+    # one inside any value would start a new instruction in the Dockerfile.
+    for key, value in sorted(context.items()):
+        if any(re.search(r"[\x00-\x1f\x7f]", s) for s in iter_strings(value)):
+            errors.append(f"'{key}' must not contain newlines or control characters")
     for key in ("apt_packages", "pip_packages"):
         value = context.get(key)
         if value is not None and not (
@@ -92,9 +113,21 @@ def check_context(context: Dict, known: List[str]) -> List[str]:
     repos = context.get("git_repos")
     if repos is not None:
         if not isinstance(repos, list) or not all(
-            isinstance(r, dict) and r.get("url") and r.get("path") for r in repos
+            isinstance(r, dict)
+            and is_ref(r.get("url"))
+            and isinstance(r.get("path"), str)
+            and r["path"]
+            and (r.get("checkout") is None or is_ref(r["checkout"]))
+            for r in repos
         ):
-            errors.append("'git_repos' must be a list of objects with 'url' and 'path'")
+            errors.append(
+                "'git_repos' must be a list of objects with string 'url' and 'path' "
+                "(and optional string 'checkout'); url/checkout must not contain whitespace"
+            )
+    # These land unquoted in ARG/ENV lines, where whitespace would break parsing.
+    for key in sorted(k for k in context if k.endswith(("_repo", "_ref", "_branch"))):
+        if not is_ref(context[key]):
+            errors.append(f"'{key}' must be a non-empty string without whitespace")
     for key in sorted(set(context) - set(known)):
         print(f"WARNING: context key '{key}' is not used by this template", file=sys.stderr)
     return errors

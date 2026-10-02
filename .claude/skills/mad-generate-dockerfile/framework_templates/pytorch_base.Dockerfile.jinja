@@ -54,9 +54,9 @@ RUN if [ "$BUILD_FA" = "1" ]; then \
     cd ${WORKSPACE_DIR} \
     && pip uninstall -y flash-attention \
     && rm -rf flash-attention \
-    && git clone ${FA_REPO} \
+    && git clone "${FA_REPO}" \
     && cd flash-attention \
-    && git checkout ${FA_BRANCH} \
+    && git checkout "${FA_BRANCH}" \
     && git submodule update --init \
     && GPU_ARCHS=${HIP_ARCHITECTURES} python3 setup.py bdist_wheel --dist-dir=dist \
     && pip install dist/*.whl \
