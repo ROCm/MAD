@@ -93,7 +93,7 @@ def list_models():
                 timeout=86400,
                 training_precision=precision_from_config_name(short_name),
                 tags=tags,
-                args=f"--config_path {rel_path}",
+                args=f"--config_path {rel_path} --train_iters 3000",
                 multiple_results="primus_perf_output.csv",
             )
         )
