@@ -148,8 +148,9 @@ Per-config overrides use a top-level `env:` block in the experiment YAML
 | `RCCL_WARP_SPEED_AUTO` | `MI355X.sh` / `MI350X.sh` (gfx950) | `0` |
 | `NVTE_USE_CAST_TRANSPOSE_TRITON` | `base_env.sh`; MI355X MXFP4 YAML `env:` sets `0` | `1` |
 
-`${VAR:-…}` in the GPU files (and YAML `env:` applied later) still lets
-`docker_env_vars` or a host export take precedence.
+`${VAR:-…}` defaults in the GPU files let `docker_env_vars` or a host export take
+precedence. A YAML `env:` value is different: Primus `TrainRuntime` assigns it to
+`os.environ` unconditionally after the shell environment is loaded, so it overrides both.
 
 ### Passing Environment Variables to the Container
 

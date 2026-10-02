@@ -127,7 +127,7 @@ def extract_metrics(
     tps = tflops = mfu = None
     elapsed_ms = global_batch = None
     parsed_seq = seq_length
-    parsed_gpus = num_gpus
+    log_gpus = None
 
     # Torchtitan format regexes
     tt_tps_re = re.compile(r"tps:\s*([0-9][0-9.,eE+-]*)")
@@ -161,10 +161,10 @@ def extract_metrics(
                     m = seq_arg_re.search(line)
                     if m:
                         parsed_seq = int(m.group(1))
-                if parsed_gpus is None:
+                if log_gpus is None:
                     m = world_arg_re.search(line) or world_env_re.search(line)
                     if m:
-                        parsed_gpus = int(m.group(1))
+                        log_gpus = int(m.group(1))
                 m = seq_inline_re.search(line)
                 if m:
                     parsed_seq = int(m.group(1))
@@ -220,6 +220,8 @@ def extract_metrics(
         print(f"Error reading log {log_path}: {e}", file=sys.stderr)
         return {}
 
+    # Global world_size from the log beats the CLI value, which is only the local GPU count.
+    parsed_gpus = log_gpus if log_gpus is not None else num_gpus
     if tps is None:
         tps = _derive_bridge_tps(elapsed_ms, global_batch, parsed_seq, parsed_gpus)
     if tflops is None:

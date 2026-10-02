@@ -66,6 +66,15 @@ def test_bridge_unenriched_computes_tps() -> None:
         assert metrics["tflops"] == "123.4"
 
 
+def test_log_world_size_overrides_cli_fallback() -> None:
+    # Multi-node: run.sh passes the local GPU count (8); the log reports the global 16.
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _write(Path(tmp), BRIDGE_UNENRICHED.replace("world_size ................................ 8", "world_size ................................ 16"))
+        metrics = _mod.extract_metrics(str(log), num_gpus=8)
+        expected = 8192 * 32 / (450.2 / 1000.0) / 16
+        assert abs(float(metrics["tps"]) - expected) < 0.15
+
+
 def test_bridge_uses_cli_overrides_when_args_missing() -> None:
     line = (
         "iteration 10/200 | elapsed time per iteration (ms): 200.0 | "
