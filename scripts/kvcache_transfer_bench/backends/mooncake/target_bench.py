@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Mooncake Benchmark - Target Node
-Same approach as mori/rixl: shared-folder coordination, one port per size, per-size run then teardown.
+Same approach as mori/nixl: shared-folder coordination, one port per size, per-size run then teardown.
 Starts metadata server once; for each size: allocates VRAM, registers with Mooncake TransferEngine,
 signals ready, waits for initiator_done, then cleans up.
-CLI args match rixl/mori; other params (protocol, device, gpu_id, ports) are hardcoded or from env.
+CLI args match nixl/mori; other params (protocol, device, gpu_id, ports) are hardcoded or from env.
 """
 
 import argparse
@@ -73,7 +73,7 @@ def stop_metadata_server():
 def main():
     global SHARED_DIR, _metadata_proc
 
-    parser = argparse.ArgumentParser(description="Mooncake Benchmark Target (same args as rixl/mori)")
+    parser = argparse.ArgumentParser(description="Mooncake Benchmark Target (same args as nixl/mori)")
     add_common_bench_args(parser, default_shared="shared")
     args = parser.parse_args()
 
@@ -81,7 +81,7 @@ def main():
     test_sizes = generate_test_sizes(args.start_size, args.end_size)
     hostname = sock.gethostname()
     target_node = args.target_node or hostname
-    # Hardcoded / from env (same style as rixl/mori)
+    # Hardcoded / from env (same style as nixl/mori)
     metadata_port = 8000
     port_base = 15000
     protocol = "rdma"
