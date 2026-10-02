@@ -86,13 +86,6 @@ madengine run   --tags pyt_large_ep_bench_2n_mori_only \
 
 The benchmark scripts are bind-mounted from the checkout at runtime rather than baked into the image, so local edits to `run_ep_bench.sh` or `parse_ep_to_csv.py` take effect without a rebuild. Rebuild only when the Dockerfile changes.
 
-### Interpreting the results
-
-A healthy multi-node run produces 8 `perf.csv` rows: dispatch and combine, for the normal and low-latency paths, each with an RDMA bandwidth (GB/s) and a latency (us) row. If a test fails, the job exits non-zero and that test's rows are missing.
-
-- **Best, not average:** MoRI prints Best, Worst and Average rows across all GPUs and rounds; `perf.csv` reports the Best row. The full tables are in the logs.
-- **"Low latency" differs by node count:** on one node it is the same benchmark with FP8 data (`--dtype fp8_e4m3_fnuz`); on two or more nodes it is a separate kernel (`--kernel-type v1_ll`) with bf16 data. Don't compare the two directly.
-
 ## Quick Start (manual)
 
 ### 1. Build Docker image
