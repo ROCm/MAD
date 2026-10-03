@@ -32,6 +32,7 @@ drives the offline bench_one_batch / bench_offline_throughput path.
 """
 
 import os
+import sys
 import csv
 import json
 import yaml

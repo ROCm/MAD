@@ -35,6 +35,7 @@ import signal
 import argparse
 import itertools
 import subprocess
+import sys
 from typing import List, Dict
 
 SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'bs', 'num_prompts', 'max_concurrency']
