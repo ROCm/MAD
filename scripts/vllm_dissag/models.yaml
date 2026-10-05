@@ -281,3 +281,52 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+
+# -----------------------------------------------------------------------------
+# GLM-5.3-Flash (Glm5NextForConditionalGeneration): MLA + DeepSeek Sparse
+# Attention (DSA) + KDA linear attention hybrid. Served disaggregated 1P/1D in
+# TP4 (MoRIIO KV only) or EP8 (DP8 + expert-parallel + allgather/reducescatter
+# MoE dispatch). See scripts/vllm_dissag/glm53_flash/README.md + RESULTS.md.
+#
+# IMAGE CONTRACT: the MoRIIO MLA KV block-mapping fix must be IN-SOURCE in the
+# image's vLLM (moriio_layout.py / moriio_connector.py). Build from
+# docker/vllm_disagg_inference.glmv53flash.ubuntu.amd.Dockerfile, whose VLLM_REF
+# pin (branch glm53-flash-moriio-mla-fix) IS the contract. An image without it
+# boots and serves but returns silently wrong long-range output (NIAH fails).
+#
+# THE TWO CORRECTNESS KNOBS:
+#   - KV_BLOCK_SIZE=1              DSA sparse indexer requires block-size 1.
+#   - --max-num-batched-tokens >= max-model-len   single-chunk prefill: the
+#     MoRIIO connector transfers only the final prefill chunk's KV, so any prompt
+#     longer than one chunk loses earlier KV on decode -> recall fails past the
+#     chunk size. Set per role below (prefill needs it; a large decode batch is
+#     fine at these lengths). Verified exact needle recall to 100K tokens (TP4).
+GLM-5.3-Flash:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "1"
+    KV_CACHE_DTYPE: "auto"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "NONE"
+    # DSA sparse-indexer logits-buffer cap. 4096 lets the single-chunk indexer
+    # run without M-dim sub-chunking on this stack; pair with the VRAM headroom
+    # below (util 0.40 EP8 / 0.50 TP4) so the indexer code-object load does not
+    # hit HSA_STATUS_ERROR_OUT_OF_RESOURCES at long context.
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "4096"
+    # EP8 MoE dispatch over allgather/reducescatter (not mori a2a): the patched
+    # mori shmem crashes in the MoRI-EP all2all path on this image, and AgRs
+    # dispatch keeps DP8 + expert-parallel + MoRIIO KV disagg working. For TP4
+    # this is unused. True MoRI-EP a2a needs a mori rebuild (follow-up).
+    VLLM_ALL2ALL_BACKEND: "allgather_reducescatter"
+  # GLM tool/reasoning parsers (both roles).
+  dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string"
+  tp_flags: ""
+  prefill:
+    tp: "--max-num-batched-tokens 262144"
+    dp: "--max-num-batched-tokens 32768"
+  decode:
+    tp: ""
+    dp: "--max-num-seqs 128"
