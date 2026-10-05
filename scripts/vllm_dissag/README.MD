@@ -81,9 +81,10 @@ docker build -t <your-registry>/vllm-disagg:local \
 ```
 
 That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`. `WITH_NIXL=1` (default) builds every transport (moriio TP/wideEP + rixl
-NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image
-(moriio + deepep-from-base, faster build).
+`GLM-5.1-FP8` and the two DeepSeek-V4 models (see below). `WITH_NIXL=1` (default) builds
+every transport (moriio TP/wideEP + rixl NIXL TP + DeepEP wideEP); add
+`--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio + deepep-from-base, faster
+build).
 
 `GLM-5.1-FP8` needs its own per-model image, because its vLLM/AITER/MoRI pins differ
 from the DeepSeek-V3/R1 stack the shared Dockerfile is pinned to:
