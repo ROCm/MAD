@@ -74,6 +74,29 @@ _has    "$VD" "--cudagraph-capture-sizes 1 2 4" "decode: capture sizes 1 2 4"
 _has    "$VD" "mori_low_latency" "decode all2all = mori_low_latency"
 
 echo ""
+echo "=== moriio + wideEP (DeepSeek-V4-Pro-FP8) ==="
+V="$(_argv moriio 1 mori DeepSeek-V4-Pro-FP8 /m/DSV4P | tr '\n' ' ')"
+_has    "$V" "--tokenizer-mode deepseek_v4" "prefill: --tokenizer-mode deepseek_v4"
+_has    "$V" "--block-size 256" "prefill: --block-size 256"
+_has    "$V" "--kv-cache-dtype fp8_e4m3" "prefill: --kv-cache-dtype fp8_e4m3"
+_has    "$V" "--max-num-batched-tokens 1024" "prefill: --max-num-batched-tokens 1024"
+_count  "$V" "--compilation-config" 1 "prefill: exactly one --compilation-config"
+VD="$(_argv moriio 1 mori DeepSeek-V4-Pro-FP8 /m/DSV4P NODE_RANK=1 | tr '\n' ' ')"
+_has    "$VD" "--max-num-batched-tokens 1024" "decode: --max-num-batched-tokens 1024"
+_has    "$VD" '"cudagraph_mode":"FULL_DECODE_ONLY"' "decode: FULL_DECODE_ONLY cudagraph"
+_has    "$VD" "--cudagraph-capture-sizes 1 2 4" "decode: capture sizes 1 2 4"
+_has    "$VD" "mori_low_latency" "decode all2all = mori_low_latency"
+# env: is exported inside the container, not part of the argv; read it from models.yaml.
+PE="$(python3 - "$DIR/models.yaml" <<'PY'
+import sys, yaml
+for k, v in (yaml.safe_load(open(sys.argv[1]))["DeepSeek-V4-Pro-FP8"]["env"]).items():
+    print(f"{k}={v}")
+PY
+)"
+_has    "$PE" "MORI_SHMEM_HEAP_SIZE=17179869184" "env: 16 GiB MoRI heap (32 GiB OOMs at EP8)"
+_has    "$PE" "DSV4_TRANSFER_ATTN=1" "env: DSV4_TRANSFER_ATTN=1"
+
+echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
