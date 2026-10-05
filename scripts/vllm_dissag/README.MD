@@ -125,8 +125,8 @@ BENCHMARK_SCRIPT=niah \
   sbatch -A <account> -p <partition> --qos=<qos> --time=04:00:00 -N 2 -n 2 run_xPyD_models.slurm
 ```
 
-Boot plus the sweep takes over an hour; use a QoS that is not preempted, since a requeued job
-overwrites its `LOG_PATH/<jobid>/` directory.
+Boot plus the sweep takes over an hour; prefer a QoS that is not preempted, since a requeued job
+restarts from scratch (its earlier run logs are kept in `LOG_PATH/<jobid>.attempt<N>/`).
 
 ## Quick start
 
