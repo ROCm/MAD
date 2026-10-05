@@ -242,10 +242,27 @@ scaleout_gbs_override() {
 # multi-node ranks rendezvous with different shapes and deadlocks the collectives.
 run_primus() {
   local config="$1"; shift
+  # Optional knobs the deployment sets through context.docker_env_vars. Unset
+  # means "whatever the config ships", so every model that calls run_primus()
+  # behaves as before. They go last because Primus builds the override map as a
+  # dict, so the final occurrence of a key wins.
+  local knobs=()
+  if [[ -n "${PRIMUS_TRAIN_ITERS:-}" ]]; then
+    knobs+=(--train_iters "$PRIMUS_TRAIN_ITERS")
+  fi
+  # A perf gate wants steady iterations, not a trace: the profiler window costs
+  # 3x the baseline iteration and leaves the next ones elevated while the trace
+  # is written.
+  if [[ "${PRIMUS_DISABLE_PROFILE:-0}" == "1" ]]; then
+    knobs+=(--profile false --use_pytorch_profiler false)
+  fi
+  if [[ ${#knobs[@]} -gt 0 ]]; then
+    echo "[INFO] Primus CLI knobs from environment: ${knobs[*]}"
+  fi
   bash runner/primus-cli direct \
     --log_file "/tmp/primus_$MODEL_REPO.log" \
     -- train pretrain \
-    --config "$config" "$@" 2>&1 | tee "$TRAIN_LOG"
+    --config "$config" "$@" "${knobs[@]}" 2>&1 | tee "$TRAIN_LOG"
 }
 
 cd /workspace/Primus
