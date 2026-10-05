@@ -527,6 +527,7 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
             "xP": "1",
             "yD": "1",
             "RUN_MORI": "1",
@@ -562,6 +563,7 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
             "xP": "1",
             "yD": "1",
             "RUN_MORI": "1",
@@ -597,6 +599,7 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
             "xP": "1",
             "yD": "1",
             "RUN_MORI": "1",
@@ -635,6 +638,7 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
             "xP": "1",
             "yD": "1",
             "RUN_MORI": "1",
@@ -672,6 +676,7 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
             "xP": "1",
             "yD": "1",
             "RUN_MORI": "1",
