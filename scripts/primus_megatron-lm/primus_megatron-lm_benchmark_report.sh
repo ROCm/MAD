@@ -1127,15 +1127,19 @@ elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
     # every layer of a virtual chunk (36 layers / (PP2 * VP2) = 9) buys the rest
     # of the headroom. Keyed on the real DEVICE, not CONFIG_DEVICE, so the
     # overrides follow the hardware.
+    # The 16-GPU minimum needs the same overrides on any HBM size: TP1 x PP2
+    # fixes model parallelism at 2, so DP is 8 there against 16 at 32 GPUs, and
+    # the distributed optimizer's 12/DP bytes/param cost ~6 GB/GPU more. At
+    # mbs 8 that does not fit 288GB either.
     MEM_OVERRIDE=""
-    if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" || "$NUM_GPUS" -le 16 ]]; then
       if [[ "$DATATYPE" == "FP8" ]]; then
         MBS=1
       else
         MBS=2
       fi
       MEM_OVERRIDE="--micro_batch_size $MBS --recompute_num_layers 9"
-      echo "[INFO] $DEVICE memory overrides: $MEM_OVERRIDE"
+      echo "[INFO] Memory overrides ($DEVICE, $NUM_GPUS GPUs): $MEM_OVERRIDE"
     fi
     GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
     run_primus "$EXP" $MEM_OVERRIDE $GBS_OVERRIDE
