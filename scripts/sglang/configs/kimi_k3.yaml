@@ -57,8 +57,7 @@
   inp: 8192
   out: 1024
   dtype: bfloat16
-  max_concurrency: 4 8
-#  max_concurrency: 1 4 8 16 32 64 128 256
+  max_concurrency: 1 4 8 16 32 64 128 256
   env: &k3_env
     SGLANG_USE_AITER: 1
     SGLANG_AITER_K3_OPT: 1
