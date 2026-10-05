@@ -6,7 +6,7 @@
 # `madengine build` uses context `.` for models whose dockerfile path contains "primus"
 # (see DockerBuilder.get_context_path in madengine).
 #
-# PRIMUS_ROOT is /workspace/Primus (Primus repo root: examples/run_pretrain.sh, examples/<backend>/…).
+# PRIMUS_ROOT is /workspace/Primus (Primus repo root: primus-cli, examples/<backend>/…).
 # WORKSPACE_DIR is the generic working directory /workspace; madengine places manifests and
 # run_directory there. Do not set PRIMUS_ROOT=/workspace — that would collide with those files.
 #
@@ -16,7 +16,7 @@
 #
 # Local Docker / SLURM: bind-mount or shared filesystem provides scripts/Primus; run.sh prefers
 # that checkout when present, else uses PRIMUS_ROOT from this image.
-ARG BASE_DOCKER=rocm/primus:v26.6
+ARG BASE_DOCKER=rocm/primus:v26.7
 
 FROM $BASE_DOCKER
 
@@ -37,6 +37,7 @@ RUN rm -rf /workspace/Primus
 # Bake Primus from the build context (submodule). No git clone — matches CI and local builds.
 COPY scripts/Primus/ /workspace/Primus/
 
-RUN test -f /workspace/Primus/examples/run_pretrain.sh
+# v26.6: runner/primus-cli. v26.7+ (Primus #999): primus-cli at the repo root.
+RUN test -f /workspace/Primus/runner/primus-cli || test -f /workspace/Primus/primus-cli
 
 RUN pip3 list 2>/dev/null || true
