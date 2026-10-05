@@ -8,7 +8,7 @@ For how MaxText training itself works — supported models, required settings, `
 
 Do not treat this README as a second copy of that material. Primus has no equivalent MaxDiffusion user guide yet, so for MaxDiffusion the configs under `examples/maxdiffusion/configs/` are the reference.
 
-For ROCm, JAX, Transformer Engine, hipBLASLt, RCCL, MaxText commit, and the rest of the `rocm/jax-training:maxtext-*` stack, use the Primus **[release notes](https://github.com/AMD-AGI/Primus/blob/main/docs/01-getting-started/release-notes.md)**. They are the single source of truth for image contents; look up the section for the tag you are running. Both MAD dockerfiles currently default to `rocm/jax-training:maxtext-v26.7`, which also carries the MaxDiffusion stack.
+For ROCm, JAX, Transformer Engine, hipBLASLt, RCCL, MaxText commit, and the rest of the `rocm/jax-training:maxtext-*` stack, use the Primus **[release notes](https://github.com/AMD-AGI/Primus/blob/main/docs/01-getting-started/release-notes.md)**. They are the single source of truth for image contents; look up the section for the tag you are running. Both MAD dockerfiles currently default to `rocm/jax-training:maxtext-v26.8`, which also carries the MaxDiffusion stack.
 
 ## Quick start
 
@@ -36,7 +36,7 @@ bash tools/fetch_primus.sh
 # or: git submodule update --init scripts/Primus
 ```
 
-`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `jax-maxtext-v26.7`, the branch that matches `rocm/jax-training:maxtext-v26.7`. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
+`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `jax-maxtext-v26.8`, the branch that matches `rocm/jax-training:maxtext-v26.8`. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
 
 Cloning MAD with `--recursive` is **not** required. Primus `third_party/` submodules are not used for MAD builds: the base image ships `/workspace/maxtext` and `/workspace/maxdiffusion`, and each `run.sh` pins `MAXTEXT_PATH` / `MAXDIFFUSION_PATH` at those paths so a mismatched `third_party` copy cannot be picked up.
 
