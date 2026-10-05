@@ -30,8 +30,8 @@ _run_gate() {
     # --- mirror of run_xPyD_models.slurm gate (keep in sync) ---
     VALID_MODELS=( "Llama-3.1-405B-Instruct-FP8-KV" "amd-Llama-3.3-70B-Instruct-FP8-KV" \
       "DeepSeek-V3" "DeepSeek-V3-5layer" "gpt-oss-120b" "DeepSeek-R1" "Qwen3-32B" "Qwen3-30B-A3B" \
-      "GLM-5.1-FP8" )
-    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+      "GLM-5.1-FP8" "MiMo-V2.6-Flash-RL" )
+    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "MiMo-V2.6-Flash-RL" )
     DEEPEP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
     WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
     MODEL_NAME="${MODEL_NAME:-None}"
@@ -94,6 +94,11 @@ _case ALLOW  "GLM moriio wideEP(mori)"  GLM-5.1-FP8                       moriio
 _case REJECT "GLM moriio TP"            GLM-5.1-FP8                       moriio 0
 _case REJECT "GLM rixl TP"              GLM-5.1-FP8                       rixl   0
 _case REJECT "GLM rixl wideEP(deepep)"  GLM-5.1-FP8                       rixl   1
+# MiMo-V2.6-Flash-RL — TP and moriio wideEP; not DeepEP
+_case ALLOW  "MiMo moriio wideEP(mori)" MiMo-V2.6-Flash-RL                moriio 1
+_case ALLOW  "MiMo moriio TP"           MiMo-V2.6-Flash-RL                moriio 0
+_case ALLOW  "MiMo rixl TP"             MiMo-V2.6-Flash-RL                rixl   0
+_case REJECT "MiMo rixl wideEP(deepep)" MiMo-V2.6-Flash-RL                rixl   1
 # cross-pairs
 _case REJECT "DSV3 moriio+deepep xpair" DeepSeek-V3                       moriio 1 deepep
 _case REJECT "DSV3 rixl+mori xpair"     DeepSeek-V3                       rixl   1 mori

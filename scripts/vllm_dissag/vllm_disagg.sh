@@ -86,7 +86,15 @@ IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
-host_ip=$(hostname -I | awk '{print $1}')
+# Local node IP. Default: first `hostname -I` address. NODE_IP_IFACE=<iface> picks that
+# interface's IPv4 instead (see run_xPyD_models.slurm) -- needed where the first address is
+# a non-routable point-to-point backend NIC.
+if [[ -n "${NODE_IP_IFACE:-}" ]]; then
+    # `ip` is not in every image; read the interface address with a SIOCGIFADDR ioctl.
+    host_ip=$(python3 -c 'import fcntl,socket,struct,sys; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); print(socket.inet_ntoa(fcntl.ioctl(s.fileno(),0x8915,struct.pack("256s",sys.argv[1][:15].encode()))[20:24]))' "${NODE_IP_IFACE}")
+else
+    host_ip=$(hostname -I | awk '{print $1}')
+fi
 host_name=$(hostname)
 
 # =============================================================================
