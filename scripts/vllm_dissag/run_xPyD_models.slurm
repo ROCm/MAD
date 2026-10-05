@@ -256,12 +256,15 @@ xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Checkpoint directory name, when it differs from the models.yaml key MODEL_NAME
+# (e.g. an arch-suffixed recipe over a shared checkpoint). Unset keeps MODEL_NAME.
+MODEL_WEIGHTS_NAME="${MODEL_WEIGHTS_NAME:-$MODEL_NAME}"
 
 
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-echo "Looking for model: $MODEL_NAME"
+echo "Looking for model: $MODEL_NAME (weights dir: $MODEL_WEIGHTS_NAME)"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
@@ -301,25 +304,25 @@ check_model_path() {
 }
 
 # Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
 if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
     MODEL_PATH="$MODEL_PATH_1"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 # Check /shared-inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+elif check_model_path "/shared_inference/models_blog/$MODEL_WEIGHTS_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
+elif check_model_path "$MODEL_DIR/$MODEL_WEIGHTS_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
+    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
+    echo "  - /shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "Model must be accessible from all nodes for distributed execution."
     echo "Please ensure the model is available on all allocated nodes."

@@ -110,7 +110,9 @@ Its `models.yaml` entry runs MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-i
 (`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; every other model keeps
 `round_robin`) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
 sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID`.
-`..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
+`..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. The checkpoint
+directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards set
+`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
 `NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0`. The per-NIC steps (detect the devices, what to
 export, how to verify) are in [`skills/moriio-nics-thor2`](skills/moriio-nics-thor2/SKILL.md) (Broadcom Thor2) and
 [`skills/moriio-nics-cx7`](skills/moriio-nics-cx7/SKILL.md) (ConnectX-7).

@@ -147,6 +147,42 @@ PY
 )"
 _has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942]" "models.yaml: GLM-5.3-Flash-FP8-gfx942 is the ONLY router-policy opt-in"
 
+# The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
+# with srun stubbed to "find" only the directory FOUND on every node.
+echo ""
+echo "=== slurm MODEL_PATH probe: MODEL_WEIGHTS_NAME (default MODEL_NAME) ==="
+_PROBE_SH="$(mktemp)"; trap 'rm -f "$_PROBE_SH"' EXIT
+cat > "$_PROBE_SH" <<'SH'
+scontrol() { printf 'n1\nn2\n'; }
+srun() { [[ "$*" == *"[ -d '${FOUND}' ]"* ]]; }
+SH
+awk '/^MODEL_WEIGHTS_NAME=/{f=1} f; /^echo "Final MODEL_PATH/{exit}' "$SLURM" >> "$_PROBE_SH"
+echo 'echo "RESOLVED=$MODEL_PATH"' >> "$_PROBE_SH"
+_probe() { # found_dir model_name [weights_name] -> resolved MODEL_PATH ("" if fatal)
+  env -i PATH="$PATH" SLURM_NNODES=2 FOUND="$1" MODEL_NAME="$2" ${3:+MODEL_WEIGHTS_NAME="$3"} \
+    bash "$_PROBE_SH" 2>/dev/null | sed -n 's/^RESOLVED=//p'
+}
+_eq() { [[ "$1" == "$2" ]] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (got '%s' want '%s')\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
+_NV=/mnt/m2m_nobackup/models_blog; _SH=/shared_inference/models_blog
+_eq "$(_probe "$_NV/GLM-5.1-FP8" GLM-5.1-FP8)" "$_NV/GLM-5.1-FP8" "probe: unset MODEL_WEIGHTS_NAME resolves MODEL_NAME (NVMe)"
+_eq "$(_probe "$_NV/GLM-5.3-Flash-FP8" GLM-5.3-Flash-FP8-gfx942 GLM-5.3-Flash-FP8)" "$_NV/GLM-5.3-Flash-FP8" "probe: GLM-5.3 gfx942 resolves the GLM-5.3-Flash-FP8 dir on NVMe"
+_eq "$(_probe "$_SH/GLM-5.3-Flash-FP8" GLM-5.3-Flash-FP8-gfx942 GLM-5.3-Flash-FP8)" "$_SH/GLM-5.3-Flash-FP8" "probe: GLM-5.3 gfx942 falls back to the shared-FS dir"
+_eq "$(_probe "$_NV/GLM-5.3-Flash-FP8" GLM-5.3-Flash-FP8-gfx942)" "" "probe: without MODEL_WEIGHTS_NAME the gfx942 key finds no weights"
+_CARDS_WN="$(python3 - "$DIR/models.json" <<'PY'
+import json, sys
+print(sorted({(c["env_vars"]["MODEL_NAME"], c["env_vars"]["MODEL_WEIGHTS_NAME"])
+              for c in json.load(open(sys.argv[1])) if "MODEL_WEIGHTS_NAME" in c.get("env_vars", {})}))
+PY
+)"
+_eq "$_CARDS_WN" "[('GLM-5.3-Flash-FP8-gfx942', 'GLM-5.3-Flash-FP8')]" "models.json: only the GLM-5.3 gfx942 cards set MODEL_WEIGHTS_NAME (=GLM-5.3-Flash-FP8)"
+_CARDS_MISS="$(python3 - "$DIR/models.json" <<'PY'
+import json, sys
+print(len([c for c in json.load(open(sys.argv[1]))
+           if c["env_vars"]["MODEL_NAME"] == "GLM-5.3-Flash-FP8-gfx942" and "MODEL_WEIGHTS_NAME" not in c["env_vars"]]))
+PY
+)"
+_eq "$_CARDS_MISS" "0" "models.json: every GLM-5.3 gfx942 card sets MODEL_WEIGHTS_NAME"
+
 echo ""
 echo "======================================================"
 echo "  argv_assert: ${pass} passed, ${fail} failed"
