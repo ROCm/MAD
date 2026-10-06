@@ -55,7 +55,7 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
-| `DeepSeek-V4-Flash-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | own image (`dsv4` Dockerfile, prebuilt, pinned by digest); 1P/1D EP8, 2P/2D EP16, 4P/4D EP32 |
+| `DeepSeek-V4-Flash-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | own image (`dsv4` Dockerfile; recipes pin the prebuilt image by digest); 1P/1D EP8, 2P/2D EP16, 4P/4D EP32 |
 | `DeepSeek-V4-Pro-FP8` | MoE + sparse MLA | 3 (moriio wideEP only) | same `dsv4` image as Flash; 1P/1D EP8 |
 
 ## Prerequisites
@@ -104,11 +104,11 @@ Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. 
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
 can reach.
 
-DeepSeek-V4 uses a prebuilt internal image instead of a from-source build.
-`docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile` pins it by digest and lists what
-it contains (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes in-source, AITER 10f8874, MoRI
-07bdace, vllm-router). `DeepSeek-V4-Flash-FP8` and `DeepSeek-V4-Pro-FP8` both serve from
-it. At 2P/2D and 4P/4D, vllm-router only routes to the master node's 8 decode ranks, so
+DeepSeek-V4 has its own image. `docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile`
+builds it from source (vLLM v0.29.0 with the DSV4 MoRI/MoRIIO fixes baked in at build time,
+AITER 10f8874, MoRI 07bdace, vllm-router); see its header for the pins and build command.
+The recipes run the prebuilt internal image by digest, which every validation run used.
+`DeepSeek-V4-Flash-FP8` and `DeepSeek-V4-Pro-FP8` both serve from it. At 2P/2D and 4P/4D, vllm-router only routes to the master node's 8 decode ranks, so
 serving capacity is 32 concurrent requests (8 ranks x max-num-seqs 4) whatever the EP width;
 the sweeps stop at 32. Using every node's ranks needs a router/connector change that is not
 in this image. The image is private: every node must be
