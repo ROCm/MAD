@@ -97,7 +97,7 @@ madengine build --tags primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain 
 The base Docker image is defined in `docker/primus.ubuntu.amd.Dockerfile`. To use a different base image (e.g., a newer Primus release), edit the `BASE_DOCKER` argument at the top of that file:
 
 ```dockerfile
-ARG BASE_DOCKER=rocm/primus:v26.7
+ARG BASE_DOCKER=rocm/primus:v26.8
 ```
 
 > **Note:** `MAD_SYSTEM_GPU_ARCHITECTURE` is automatically detected at runtime via `rocminfo`. You do not need to provide it during the build step.
@@ -194,7 +194,7 @@ madengine discover --tags torchtitan
 
 ## 5. Supported Models
 
-Tables below are generated from the pinned Primus submodule (`release/v26.7`) and list every
+Tables below are generated from the pinned Primus submodule (`release/v26.8`) and list every
 config `madengine discover` will report. The `Model` column is derived from the config filename
 (with precision appended when the config has one); the `Tag` column is what you pass to
 `madengine build` / `madengine run`.
@@ -218,9 +218,9 @@ config `madengine discover` will report. The `Model` column is derived from the 
 
 You can also check the Primus repository directly for the latest supported configs:
 
-- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI300X)
-- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI325X)
-- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI355X)
+- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI300X)
+- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI325X)
+- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI355X)
 
 #### MI300X Configs (88)
 
@@ -527,9 +527,9 @@ You can also check the Primus repository directly for the latest supported confi
 
 You can also check the Primus repository directly for the latest supported configs:
 
-- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI300X)
-- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI325X)
-- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI355X)
+- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI300X)
+- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI325X)
+- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI355X)
 
 #### MI300X Configs (25)
 
@@ -631,12 +631,12 @@ in the Primus repository.
 
 | Backend | MI300X | MI325X | MI355X | Configs |
 | --- | --- | --- | --- | --- |
-| Megatron-Bridge | 9 | — | 9 | [`examples/megatron_bridge/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron_bridge/configs) |
-| MaxText | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/maxtext/configs) |
-| MaxDiffusion | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/maxdiffusion/configs) |
-| NeMo-AutoModel | — | — | 4 | [`examples/nemo_automodel/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/nemo_automodel/configs) |
-| Diffusion | — | — | 6 | [`examples/diffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/diffusion/configs) |
-| MoE-Package | — | — | 2 | [`examples/moe_package/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/moe_package/configs) |
+| Megatron-Bridge | 9 | — | 9 | [`examples/megatron_bridge/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron_bridge/configs) |
+| MaxText | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxtext/configs) |
+| MaxDiffusion | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxdiffusion/configs) |
+| NeMo-AutoModel | — | — | 4 | [`examples/nemo_automodel/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/nemo_automodel/configs) |
+| Diffusion | — | — | 6 | [`examples/diffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/diffusion/configs) |
+| MoE-Package | — | — | 2 | [`examples/moe_package/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/moe_package/configs) |
 
 > **Note:** MaxDiffusion and MaxText are JAX backends and NeMo-AutoModel requires the
 > `third_party/Automodel` submodule; see the Primus documentation for their prerequisites.
