@@ -231,7 +231,7 @@ connector_launch_worker() {
                     "${mem_args[@]}" \
                     --kv-cache-dtype "${_kvdtype}" \
                     --block-size "${_block}" \
-                    ${_prefix_cache_flag} \
+                    --no-enable-prefix-caching \
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
@@ -251,7 +251,7 @@ connector_launch_worker() {
             "${mem_args[@]}" \
             --kv-cache-dtype "${_kvdtype}" \
             --block-size "${_block}" \
-            ${_prefix_cache_flag} \
+            --no-enable-prefix-caching \
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \

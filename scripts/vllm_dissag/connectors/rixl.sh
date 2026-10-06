@@ -240,6 +240,22 @@ _rixl_launch_tp() {
     local engine_id
     if [[ "$log_prefix" == "prefill" ]]; then engine_id="pd-run"; else engine_id="pd-decode"; fi
     local kv_config; kv_config=$(_rixl_kv_config_tp "${kv_role}" "${engine_id}")
+    kv_config=$(kv_offload_wrap "${kv_config}")
+    kv_offload_setup_env
+
+    # Prefix caching: off by default; on when KV_OFFLOAD is active, agentic path, or ENABLE_PREFIX_CACHE=1.
+    local _pc=0
+    [[ "${ENABLE_PREFIX_CACHE:-0}" == "1" ]] && _pc=1
+    [[ "${BENCHMARK_SCRIPT:-}" == "agentic" ]] && _pc=1
+    kv_offload_enabled && _pc=1
+    local _prefix_cache_arg="--no-enable-prefix-caching"
+    [[ "$_pc" == "1" ]] && _prefix_cache_arg="--enable-prefix-caching"
+
+    # Optional context cap + HBM KV cap; emitted only when set at submit time.
+    local mml_args=()
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     # Per-model config string (from models.yaml; tokenized as the legacy eval did)
     local cfg_args=()
@@ -251,6 +267,9 @@ _rixl_launch_tp() {
             vllm serve "${MODEL_PATH}" \
                 --port "${SERVER_PORT}" \
                 --trust-remote-code \
+                "${_prefix_cache_arg}" \
+                "${mml_args[@]}" \
+                "${mem_args[@]}" \
                 --kv-transfer-config "${kv_config}" \
                 "${cfg_args[@]}"
         WORKER_PID=0; return 0
@@ -259,6 +278,9 @@ _rixl_launch_tp() {
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
+        "${_prefix_cache_arg}" \
+        "${mml_args[@]}" \
+        "${mem_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         "${cfg_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
