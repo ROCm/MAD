@@ -242,6 +242,7 @@ scaleout_gbs_override() {
 # multi-node ranks rendezvous with different shapes and deadlocks the collectives.
 run_primus() {
   local config="$1"; shift
+  PRIMUS_KNOBS_HONOURED=1
   # Optional knobs the deployment sets through context.docker_env_vars. Unset
   # means "whatever the config ships", so every model that calls run_primus()
   # behaves as before. They go last because Primus builds the override map as a
@@ -264,6 +265,26 @@ run_primus() {
     -- train pretrain \
     --config "$config" "$@" "${knobs[@]}" 2>&1 | tee "$TRAIN_LOG"
 }
+
+# PRIMUS_TRAIN_ITERS and PRIMUS_DISABLE_PROFILE only reach Primus through
+# run_primus(). Most models in this script still invoke `primus-cli direct`
+# themselves and never pass through it, and there the two variables are simply
+# ignored -- which means a full-length run where a short one was asked for, and
+# a profiled run where the profiler was meant to be off. Both look like a
+# plain, successful run, so say it out loud instead.
+PRIMUS_KNOBS_HONOURED=0
+warn_if_knobs_ignored() {
+  if [[ -z "${PRIMUS_TRAIN_ITERS:-}" && "${PRIMUS_DISABLE_PROFILE:-0}" != "1" ]]; then
+    return 0
+  fi
+  if [[ "$PRIMUS_KNOBS_HONOURED" == "1" ]]; then
+    return 0
+  fi
+  echo "[WARN] PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE are set, but $MODEL_REPO" \
+       "launches primus-cli directly rather than through run_primus(), so they" \
+       "had no effect on this run."
+}
+trap warn_if_knobs_ignored EXIT
 
 cd /workspace/Primus
 
