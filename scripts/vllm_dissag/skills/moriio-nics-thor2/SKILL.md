@@ -54,7 +54,7 @@ export MORI_SOCKET_IFNAME=eno0                                             # the
 ```bash
 cd MAD/scripts/vllm_dissag
 export DOCKER_IMAGE_NAME=rocmshared/vllm-glm53flash:glmv5.3-flash.gfx942
-export MODEL_NAME=GLM-5.3-Flash-FP8-gfx942 CONNECTOR=moriio WIDE_EP=1 xP=1 yD=1
+export MODEL_NAME=GLM-5.3-Flash-FP8-gfx942 MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8 CONNECTOR=moriio WIDE_EP=1 xP=1 yD=1
 sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
 ```
 
