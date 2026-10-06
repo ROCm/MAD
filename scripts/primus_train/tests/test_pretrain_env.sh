@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-# Regression test: MAD primus_train pretrain env must match primus-cli
-# (runner/helpers/envs/base_env.sh + MI355X.sh). ROCM-31034.
+# Regression: MAD primus_train must not copy Primus performance env.
+# Env lives in Primus runner/helpers/envs/ and YAML env:; run.sh only maps
+# MAD GPU context to PRIMUS_GPU_MODEL and launches primus-cli.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUN_SH="$SCRIPT_DIR/../run.sh"
-
-performance_block() {
-  awk '
-    /^# Architecture-aware performance environment$/ { capture = 1 }
-    /^echo "\[primus_train\] suite=/ { exit }
-    capture { print }
-  ' "$RUN_SH"
-}
+PRIMUS_ROOT="$(cd "$SCRIPT_DIR/../../Primus" && pwd)"
 
 assert_eq() {
   local expected="$1"
@@ -25,108 +19,139 @@ assert_eq() {
   fi
 }
 
-eval_env() (
+assert_file_contains() {
+  local path="$1"
+  local pattern="$2"
+  if ! grep -qE -- "$pattern" "$path"; then
+    echo "Expected $path to match /$pattern/" >&2
+    return 1
+  fi
+}
+
+assert_file_not_contains() {
+  local path="$1"
+  local pattern="$2"
+  if grep -qE -- "$pattern" "$path"; then
+    echo "Expected $path not to match /$pattern/" >&2
+    return 1
+  fi
+}
+
+gpu_model_block() {
+  awk '
+    /^# GPU model for primus-env.sh$/ { capture = 1 }
+    /^# end GPU model for primus-env.sh$/ { print; exit }
+    capture { print }
+  ' "$RUN_SH"
+}
+
+eval_gpu_model() (
   local arch="$1"
   local gpu_name="$2"
-  local backend="${3:-megatron}"
-  local exp="${4:-examples/megatron/configs/MI355X/gdn_1B_BF16-pretrain.yaml}"
+  unset PRIMUS_GPU_MODEL
   export MAD_SYSTEM_GPU_ARCHITECTURE="$arch"
   export MAD_SYSTEM_GPU_PRODUCT_NAME="$gpu_name"
-  export BACKEND="$backend" EXP="$exp"
-  unset NCCL_PXN_DISABLE RCCL_WARP_SPEED_AUTO HSA_NO_SCRATCH_RECLAIM
-  unset NVTE_CK_IS_V3_ATOMIC_FP32 PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32
-  unset NVTE_USE_CAST_TRANSPOSE_TRITON
-  eval "$(performance_block)"
-  printf '%s\n' \
-    "NCCL_PXN_DISABLE=${NCCL_PXN_DISABLE-<unset>}" \
-    "RCCL_WARP_SPEED_AUTO=${RCCL_WARP_SPEED_AUTO-<unset>}" \
-    "HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM-<unset>}" \
-    "NVTE_CK_IS_V3_ATOMIC_FP32=${NVTE_CK_IS_V3_ATOMIC_FP32-<unset>}" \
-    "NVTE_USE_CAST_TRANSPOSE_TRITON=${NVTE_USE_CAST_TRANSPOSE_TRITON-<unset>}"
+  eval "$(gpu_model_block)"
+  printf '%s\n' "${PRIMUS_GPU_MODEL-<unset>}"
 )
 
-check_cli_parity_mi355x() {
-  mapfile -t lines < <(eval_env gfx950 "AMD Instinct MI355X")
-  declare -A got=()
-  for line in "${lines[@]}"; do
-    got["${line%%=*}"]="${line#*=}"
-  done
-  assert_eq "1" "${got[NCCL_PXN_DISABLE]}" "NCCL_PXN_DISABLE"
-  assert_eq "0" "${got[RCCL_WARP_SPEED_AUTO]}" "RCCL_WARP_SPEED_AUTO"
-  assert_eq "1" "${got[HSA_NO_SCRATCH_RECLAIM]}" "HSA_NO_SCRATCH_RECLAIM"
+check_run_sh_does_not_copy_env() {
+  assert_file_not_contains "$RUN_SH" 'export[[:space:]]+NVTE_CK_IS_V3_ATOMIC_FP32'
+  assert_file_not_contains "$RUN_SH" 'export[[:space:]]+NCCL_PXN_DISABLE'
+  assert_file_not_contains "$RUN_SH" 'export[[:space:]]+HSA_NO_SCRATCH_RECLAIM'
+  assert_file_not_contains "$RUN_SH" 'export[[:space:]]+RCCL_WARP_SPEED_AUTO'
+  assert_file_not_contains "$RUN_SH" 'export[[:space:]]+NVTE_USE_CAST_TRANSPOSE_TRITON'
+  assert_file_not_contains "$RUN_SH" 'examples/run_pretrain.sh'
 }
 
-check_cli_parity_gfx950_mi350x() {
-  mapfile -t lines < <(eval_env gfx950 "AMD Instinct MI350X")
-  declare -A got=()
-  for line in "${lines[@]}"; do
-    got["${line%%=*}"]="${line#*=}"
-  done
-  assert_eq "1" "${got[NCCL_PXN_DISABLE]}" "NCCL_PXN_DISABLE"
-  assert_eq "0" "${got[RCCL_WARP_SPEED_AUTO]}" "RCCL_WARP_SPEED_AUTO"
+check_run_sh_always_primus_cli() {
+  assert_file_contains "$RUN_SH" 'primus-cli'
+  # A single launch path: train "$suite" covers pretrain and posttrain,
+  # including megatron_bridge pretrain.
+  assert_file_contains "$RUN_SH" 'train "\$suite" --config'
+  if grep -q 'examples/run_pretrain.sh' "$RUN_SH"; then
+    echo "run.sh must not invoke examples/run_pretrain.sh" >&2
+    return 1
+  fi
 }
 
-check_gfx942_atomics() {
-  mapfile -t lines < <(eval_env gfx942 "AMD Instinct MI300X")
-  declare -A got=()
-  for line in "${lines[@]}"; do
-    got["${line%%=*}"]="${line#*=}"
-  done
-  assert_eq "1" "${got[NVTE_CK_IS_V3_ATOMIC_FP32]}" "NVTE_CK_IS_V3_ATOMIC_FP32"
-  assert_eq "<unset>" "${got[RCCL_WARP_SPEED_AUTO]}" "RCCL_WARP_SPEED_AUTO"
+check_run_sh_extracts_bridge_pretrain() {
+  # Megatron-Bridge pretrain (mamba) omits tokens/s/GPU. seq_length lives under
+  # pre_trainer, not only post_trainer; --num-gpus is required to derive TPS.
+  assert_file_contains "$RUN_SH" '\("pre_trainer", "post_trainer"\)'
+  assert_file_contains "$RUN_SH" '--num-gpus'
 }
 
-check_mxfp4_override() {
-  mapfile -t lines < <(eval_env gfx950 "AMD Instinct MI355X" megatron \
-    "examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml")
-  declare -A got=()
-  for line in "${lines[@]}"; do
-    got["${line%%=*}"]="${line#*=}"
-  done
-  assert_eq "0" "${got[NVTE_USE_CAST_TRANSPOSE_TRITON]}" \
-    "NVTE_USE_CAST_TRANSPOSE_TRITON"
+check_dockerfile_requires_primus_cli() {
+  local dockerfile="$SCRIPT_DIR/../../../docker/primus.ubuntu.amd.Dockerfile"
+  if ! grep -qE -- '/workspace/Primus/(runner/)?primus-cli' "$dockerfile"; then
+    echo "Expected $dockerfile to require primus-cli" >&2
+    return 1
+  fi
+  assert_file_not_contains "$dockerfile" 'examples/run_pretrain.sh'
 }
 
-# Image / base_env.sh default NVTE_USE_CAST_TRANSPOSE_TRITON=1. The published
-# MI355X MXFP4 command prefixes =0; ${VAR:-0} would keep the pre-set 1.
-check_mxfp4_overrides_preset_one() (
-  export NVTE_USE_CAST_TRANSPOSE_TRITON=1
+check_primus_gpu_env_files() {
+  # gfx942 atomics stay at Primus base_env.sh defaults (Primus #1178 leaves
+  # MI300X.sh / MI325X.sh unchanged), so only the gfx950 WarpSpeed override is asserted.
+  assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI355X.sh" \
+    'RCCL_WARP_SPEED_AUTO=\$\{RCCL_WARP_SPEED_AUTO:-0\}'
+  assert_file_contains "$PRIMUS_ROOT/runner/helpers/envs/MI350X.sh" \
+    'RCCL_WARP_SPEED_AUTO=\$\{RCCL_WARP_SPEED_AUTO:-0\}'
+}
+
+yaml_env_has_cast_transpose_zero() {
+  local yaml="$1"
+  python3 -c '
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+env = cfg.get("env") or {}
+val = str(env.get("NVTE_USE_CAST_TRANSPOSE_TRITON", ""))
+if val != "0":
+    raise SystemExit(f"{sys.argv[1]}: expected env.NVTE_USE_CAST_TRANSPOSE_TRITON=0, got {val!r}")
+' "$yaml"
+}
+
+check_mxfp4_yaml_env() {
+  # Primus #1179 bakes NVTE_USE_CAST_TRANSPOSE_TRITON=0 into the MXFP4 YAML env: blocks.
+  local llama_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml"
+  local flux_yaml="$PRIMUS_ROOT/examples/megatron/configs/MI355X/diffusion/flux_12b_ddp_energon_schnell_resample_te_spec_mxfp4.yaml"
+  python3 -c 'import yaml' 2>/dev/null || return 0
+  yaml_env_has_cast_transpose_zero "$llama_yaml"
+  yaml_env_has_cast_transpose_zero "$flux_yaml"
+}
+
+check_gpu_model_mapping() {
+  assert_eq "MI300X" "$(eval_gpu_model gfx942 "AMD Instinct MI300X")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI325X" "$(eval_gpu_model gfx942 "AMD Instinct MI325X")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI355X" "$(eval_gpu_model gfx950 "AMD Instinct MI355X")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI350X" "$(eval_gpu_model gfx950 "AMD Instinct MI350X")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI300X" "$(eval_gpu_model gfx942 "")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI355X" "$(eval_gpu_model gfx950 "")" "PRIMUS_GPU_MODEL"
+}
+
+check_explicit_gpu_model_override() (
+  export PRIMUS_GPU_MODEL="keep-me"
   export MAD_SYSTEM_GPU_ARCHITECTURE=gfx950
   export MAD_SYSTEM_GPU_PRODUCT_NAME="AMD Instinct MI355X"
-  export BACKEND=megatron
-  export EXP="examples/megatron/configs/MI355X/llama3.1_8B-MXFP4-pretrain.yaml"
-  eval "$(performance_block)"
-  assert_eq "0" "$NVTE_USE_CAST_TRANSPOSE_TRITON" \
-    "NVTE_USE_CAST_TRANSPOSE_TRITON"
+  eval "$(gpu_model_block)"
+  assert_eq "keep-me" "$PRIMUS_GPU_MODEL" "PRIMUS_GPU_MODEL"
 )
 
-check_non_mxfp4_keeps_preset_one() (
-  export NVTE_USE_CAST_TRANSPOSE_TRITON=1
-  export MAD_SYSTEM_GPU_ARCHITECTURE=gfx950
-  export MAD_SYSTEM_GPU_PRODUCT_NAME="AMD Instinct MI355X"
-  export BACKEND=megatron
-  export EXP="examples/megatron/configs/MI355X/gdn_1B_BF16-pretrain.yaml"
-  eval "$(performance_block)"
-  assert_eq "1" "$NVTE_USE_CAST_TRANSPOSE_TRITON" \
-    "NVTE_USE_CAST_TRANSPOSE_TRITON"
-)
+check_fla_pretrain_hook() {
+  # Primus #1181: FLA Triton autotune patch on the primus-cli pretrain path.
+  local hook="$PRIMUS_ROOT/runner/helpers/hooks/train/pretrain/z_patch_fla_triton_autotune.sh"
+  assert_file_contains "$hook" 'patch_fla_triton_autotune_hang.sh'
+  assert_file_contains "$hook" 'hylo_\*|kda_\*|gdn_\*'
+}
 
-check_explicit_override() (
-  export NCCL_PXN_DISABLE="keep-me"
-  export RCCL_WARP_SPEED_AUTO="keep-rccl"
-  export MAD_SYSTEM_GPU_ARCHITECTURE=gfx950
-  export MAD_SYSTEM_GPU_PRODUCT_NAME="AMD Instinct MI355X"
-  export BACKEND=megatron EXP="examples/megatron/configs/MI355X/gdn_1B_BF16-pretrain.yaml"
-  eval "$(performance_block)"
-  assert_eq "keep-me" "$NCCL_PXN_DISABLE" "NCCL_PXN_DISABLE"
-  assert_eq "keep-rccl" "$RCCL_WARP_SPEED_AUTO" "RCCL_WARP_SPEED_AUTO"
-)
-
-check_cli_parity_mi355x
-check_cli_parity_gfx950_mi350x
-check_gfx942_atomics
-check_mxfp4_override
-check_mxfp4_overrides_preset_one
-check_non_mxfp4_keeps_preset_one
-check_explicit_override
-echo "primus_train pretrain env matches primus-cli defaults and honors overrides."
+check_run_sh_does_not_copy_env
+check_run_sh_always_primus_cli
+check_run_sh_extracts_bridge_pretrain
+check_dockerfile_requires_primus_cli
+check_primus_gpu_env_files
+check_mxfp4_yaml_env
+check_gpu_model_mapping
+check_explicit_gpu_model_override
+check_fla_pretrain_hook
+echo "primus_train uses primus-cli; Primus GPU env files and MXFP4 YAML env: are the source of truth."
