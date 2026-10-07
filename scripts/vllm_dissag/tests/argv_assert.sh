@@ -197,6 +197,8 @@ print("[" + ",".join(sorted(m for m, c in y.items()
 PY
 )"
 _has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942]" "models.yaml: GLM-5.3-Flash-FP8-gfx942 is the ONLY router-policy opt-in"
+_has "$(cat "$SLURM")" '${ROUTER_PREFILL_POLICY:+-e ROUTER_PREFILL_POLICY=' "slurm forwards ROUTER_PREFILL_POLICY override"
+_has "$(cat "$SLURM")" '${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=' "slurm forwards ROUTER_DECODE_POLICY override"
 
 # The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
 # with srun stubbed to "find" only the directory FOUND on every node.
