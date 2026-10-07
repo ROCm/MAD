@@ -80,7 +80,7 @@ docker build -t <your-registry>/vllm-disagg:local \
 ```
 
 That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and benchmarks
+`GLM-5.1-FP8`, `GLM-5.3-Flash-FP8-gfx942`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and benchmarks
 on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
 builds every transport (moriio TP/wideEP + rixl NIXL TP + DeepEP wideEP); add
 `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio + deepep-from-base,
@@ -164,17 +164,14 @@ docker build --ulimit nofile=1048576:1048576 -t <your-registry>/vllm-disagg:glmv
 
 Its `models.yaml` entry runs MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-in in
 `connectors/moriio.sh`), MTP on both legs, and routes both legs with `consistent_hash`
-(`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; every other model keeps
-`round_robin`) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
+(`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; the default is `round_robin`,
+and both can be overridden at submit time) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
 sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID`.
 `..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. The checkpoint
 directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards set
 `MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
-`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0`. The per-NIC steps (detect the devices, what to
-export, how to verify) are in [`skills/moriio-nics-thor2`](skills/moriio-nics-thor2/SKILL.md) (Broadcom Thor2) and
-[`skills/moriio-nics-cx7`](skills/moriio-nics-cx7/SKILL.md) (ConnectX-7).
-Validation results on MI325X and MI300X (accuracy, perf, AgentX):
-[`results/GLM-5.3-Flash-FP8-gfx942_20260927.html`](results/GLM-5.3-Flash-FP8-gfx942_20260927.html).
+`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0` (per the recipe author; not re-validated
+here). The harness defaults match ConnectX-7 hosts.
 Short prompts (under ~2K tokens) need vLLM `6a0cb9395797` or later on the fork branch: earlier pins zeroed the decode
 leg's freshly allocated KV blocks after the MoRIIO READ had already filled them, so short requests looped or
 answered wrongly (GSM8K 6.4%; 96.4% with the fix). Long-context results are unchanged.
