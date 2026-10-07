@@ -553,7 +553,8 @@
             "inference",
             "gfx942",
             "mi300x",
-            "mi325x"
+            "mi325x",
+            "niah"
         ],
         "timeout": -1,
         "distributed": {
