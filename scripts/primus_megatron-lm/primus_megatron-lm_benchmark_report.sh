@@ -242,11 +242,49 @@ scaleout_gbs_override() {
 # multi-node ranks rendezvous with different shapes and deadlocks the collectives.
 run_primus() {
   local config="$1"; shift
+  PRIMUS_KNOBS_HONOURED=1
+  # Optional knobs the deployment sets through context.docker_env_vars. Unset
+  # means "whatever the config ships", so every model that calls run_primus()
+  # behaves as before. They go last because Primus builds the override map as a
+  # dict, so the final occurrence of a key wins.
+  local knobs=()
+  if [[ -n "${PRIMUS_TRAIN_ITERS:-}" ]]; then
+    knobs+=(--train_iters "$PRIMUS_TRAIN_ITERS")
+  fi
+  # A perf gate wants steady iterations, not a trace: the profiler window costs
+  # 3x the baseline iteration and leaves the next ones elevated while the trace
+  # is written.
+  if [[ "${PRIMUS_DISABLE_PROFILE:-0}" == "1" ]]; then
+    knobs+=(--profile false --use_pytorch_profiler false)
+  fi
+  if [[ ${#knobs[@]} -gt 0 ]]; then
+    echo "[INFO] Primus CLI knobs from environment: ${knobs[*]}"
+  fi
   bash runner/primus-cli direct \
     --log_file "/tmp/primus_$MODEL_REPO.log" \
     -- train pretrain \
-    --config "$config" "$@" 2>&1 | tee "$TRAIN_LOG"
+    --config "$config" "$@" "${knobs[@]}" 2>&1 | tee "$TRAIN_LOG"
 }
+
+# PRIMUS_TRAIN_ITERS and PRIMUS_DISABLE_PROFILE only reach Primus through
+# run_primus(). Most models in this script still invoke `primus-cli direct`
+# themselves and never pass through it, and there the two variables are simply
+# ignored -- which means a full-length run where a short one was asked for, and
+# a profiled run where the profiler was meant to be off. Both look like a
+# plain, successful run, so say it out loud instead.
+PRIMUS_KNOBS_HONOURED=0
+warn_if_knobs_ignored() {
+  if [[ -z "${PRIMUS_TRAIN_ITERS:-}" && "${PRIMUS_DISABLE_PROFILE:-0}" != "1" ]]; then
+    return 0
+  fi
+  if [[ "$PRIMUS_KNOBS_HONOURED" == "1" ]]; then
+    return 0
+  fi
+  echo "[WARN] PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE are set, but $MODEL_REPO" \
+       "launches primus-cli directly rather than through run_primus(), so they" \
+       "had no effect on this run."
+}
+trap warn_if_knobs_ignored EXIT
 
 cd /workspace/Primus
 
@@ -1127,15 +1165,19 @@ elif [ "$MODEL_REPO" == "GPT-OSS-120B" ]; then
     # every layer of a virtual chunk (36 layers / (PP2 * VP2) = 9) buys the rest
     # of the headroom. Keyed on the real DEVICE, not CONFIG_DEVICE, so the
     # overrides follow the hardware.
+    # The 16-GPU minimum needs the same overrides on any HBM size: TP1 x PP2
+    # fixes model parallelism at 2, so DP is 8 there against 16 at 32 GPUs, and
+    # the distributed optimizer's 12/DP bytes/param cost ~6 GB/GPU more. At
+    # mbs 8 that does not fit 288GB either.
     MEM_OVERRIDE=""
-    if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" ]]; then
+    if [[ "$DEVICE" == "MI300X" || "$DEVICE" == "MI325X" || "$NUM_GPUS" -le 16 ]]; then
       if [[ "$DATATYPE" == "FP8" ]]; then
         MBS=1
       else
         MBS=2
       fi
       MEM_OVERRIDE="--micro_batch_size $MBS --recompute_num_layers 9"
-      echo "[INFO] $DEVICE memory overrides: $MEM_OVERRIDE"
+      echo "[INFO] Memory overrides ($DEVICE, $NUM_GPUS GPUs): $MEM_OVERRIDE"
     fi
     GBS_OVERRIDE=$(scaleout_gbs_override "$MBS" "$GBS")
     run_primus "$EXP" $MEM_OVERRIDE $GBS_OVERRIDE
