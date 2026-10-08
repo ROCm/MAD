@@ -1,0 +1,235 @@
+# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) {{ year }} Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+###############################################################################
+# Disaggregated prefill-decode vLLM image. Reference build:
+# docker/vllm_disagg_inference.ubuntu.amd.Dockerfile
+#
+# Runtime recipe / RDMA platform env is NOT baked in; the launcher applies it
+# at run time (see scripts/vllm_dissag/connectors/*.env and models.yaml).
+###############################################################################
+ARG BASE_DOCKER={{ base_image | default('rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491') }}
+FROM ${BASE_DOCKER}
+
+# Specify entrypoint to override upstream
+ENTRYPOINT []
+
+USER root
+ENV WORKSPACE_DIR=/app
+RUN mkdir -p $WORKSPACE_DIR
+WORKDIR $WORKSPACE_DIR
+
+ARG GFX_COMPILATION_ARCH="{{ gfx_arch | default('gfx942') }}"
+ARG PYTORCH_ROCM_ARCH="{{ gfx_arch | default('gfx942') }}"
+ARG MAX_JOBS={{ max_jobs | default(32) }}
+# NIXL/RIXL transport for the rixl connector. 1 => build UCX/RIXL/rocSHMEM/DeepEP.
+# Set --build-arg WITH_NIXL=0 for a lean MoRI-EP-only image.
+ARG WITH_NIXL={{ '0' if with_nixl is false else '1' }}
+ARG NIC_COMPILATION_ARCH="{{ nic_arch | default('cx7') }}"
+
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
+    sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true
+
+{% if apt_packages %}
+RUN apt-get update && apt-get install -y {{ apt_packages | map('shquote') | join(' ') }} \
+    && rm -rf /var/lib/apt/lists/*
+{% endif %}
+
+{% if build_mori is not false %}
+# -----------------------------------------------------------------------------
+# MoRI: replace the base's bundled MoRI with MORI_REPO @ MORI_REF.
+# Do NOT pass USE_IONIC=OFF / USE_BNXT=OFF: disabling NIC backends produced a
+# MoRI that deadlocked at the cross-node EP all-to-all init.
+# -----------------------------------------------------------------------------
+ARG MORI_REPO={{ mori_repo | default('https://github.com/ROCm/mori.git') }}
+ARG MORI_REF={{ mori_ref | default('v1.2.1') }}
+ENV MORI_GPU_ARCHS=${GFX_COMPILATION_ARCH}
+# UMBP needs gRPC (not in the base) and is unrelated to the EP kernels.
+ENV BUILD_UMBP=OFF BUILD_UMBP_SPDK=OFF
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git build-essential cmake ninja-build ccache libssl-dev pkg-config curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install meson==0.64.0 "pybind11[global]" tqdm prettytable && \
+    (pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true) && \
+    rm -rf /tmp/mori-src && \
+    git clone --recursive "${MORI_REPO}" /tmp/mori-src && \
+    cd /tmp/mori-src && git checkout "${MORI_REF}" && git submodule update --init --recursive && \
+    BUILD_UMBP=OFF pip install . && \
+    python3 -c "import mori, mori.io, mori.ops; print('MoRI OK at', mori.__path__[0])" && \
+    echo "MORI_REF=${MORI_REF}@$(git -C /tmp/mori-src rev-parse HEAD)" >> ${WORKSPACE_DIR}/versions.txt && \
+    rm -rf /tmp/mori-src
+{% endif %}
+
+{% if aiter_wheel_url %}
+# -----------------------------------------------------------------------------
+# AITER: install a prebuilt wheel, then invalidate the stale prewarmed AITER JIT
+# cache compiled against the old .so.
+# -----------------------------------------------------------------------------
+ARG AITER_WHEEL_URL="{{ aiter_wheel_url }}"
+RUN echo "Installing AITER from ${AITER_WHEEL_URL}" && \
+    _W="/tmp/$(basename "${AITER_WHEEL_URL}" | sed 's/%2B/+/g')" && \
+    curl -fL --retry 3 --retry-delay 2 -o "${_W}" "${AITER_WHEEL_URL}" && \
+    (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
+    pip install --no-deps "${_W}" && \
+    rm -f "${_W}" && \
+    rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache" && \
+    echo "AITER=$(pip show amd-aiter 2>/dev/null | grep '^Version:' | awk '{print $2}')" >> ${WORKSPACE_DIR}/versions.txt
+{% endif %}
+
+{% if pip_packages %}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
+{% endif %}
+
+{% if vllm_repo and vllm_ref %}
+# -----------------------------------------------------------------------------
+# vLLM: full source compile (the base ships a different commit, so a .py-only
+# overlay would be ABI-mismatched). Build only committed refs.
+# -----------------------------------------------------------------------------
+ARG VLLM_REPO={{ vllm_repo }}
+ARG VLLM_REF={{ vllm_ref }}
+ENV VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} \
+    MAX_JOBS=${MAX_JOBS}
+RUN rm -rf /tmp/vllm-src && \
+    git clone "${VLLM_REPO}" /tmp/vllm-src && \
+    cd /tmp/vllm-src && git checkout "${VLLM_REF}" && \
+    echo "VLLM_REF=${VLLM_REF}@$(git rev-parse HEAD)" >> ${WORKSPACE_DIR}/versions.txt && \
+    (pip uninstall -y vllm 2>/dev/null || true) && \
+    pip install --no-deps --no-build-isolation -v . && \
+    python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
+    rm -rf /tmp/vllm-src
+{% if build_mori is not false %}
+
+# Cross-check MoRI survived the vLLM install (no silent downgrade).
+RUN python3 -c "import mori, mori.io, mori.ops; print('Post-vLLM check OK: MoRI importable')"
+{% endif %}
+{% endif %}
+
+{% if router_repo and router_ref %}
+# -----------------------------------------------------------------------------
+# vllm-router built in, so no external router binary is needed.
+# -----------------------------------------------------------------------------
+ARG ROUTER_REPO={{ router_repo }}
+ARG ROUTER_REF={{ router_ref }}
+ARG RUST_TOOLCHAIN={{ rust_toolchain | default('1.88.0') }}
+RUN if ! command -v cargo >/dev/null 2>&1; then \
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}"; \
+    fi && \
+    export PATH="/root/.cargo/bin:${PATH}" && \
+    rm -rf /tmp/vllm-router-src && \
+    git clone --filter=blob:none "${ROUTER_REPO}" /tmp/vllm-router-src && \
+    cd /tmp/vllm-router-src && git checkout "${ROUTER_REF}" && \
+    cargo build --release && \
+    install -m 755 target/release/vllm-router /usr/local/bin/vllm-router && \
+    vllm-router --help >/dev/null && \
+    echo "VLLM_ROUTER_REF=${ROUTER_REPO}@${ROUTER_REF}@$(git -C /tmp/vllm-router-src rev-parse HEAD)" >> ${WORKSPACE_DIR}/versions.txt && \
+    rm -rf /tmp/vllm-router-src
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# WITH_NIXL=1: UCX + RIXL(+nixlbench) + rocSHMEM + DeepEP from source, so the
+# rixl connector (NIXL TP + DeepEP wideEP) is present. Single guarded RUN so
+# WITH_NIXL=0 skips it entirely (no layers, no cost).
+# -----------------------------------------------------------------------------
+ENV _ROCM_DIR=/opt/rocm \
+    _UCX_SOURCE=https://github.com/ROCm/ucx.git \
+    _UCX_BRANCH={{ ucx_ref | default('da3fac2a') }} \
+    _UCX_INSTALL_DIR=/usr/local/ucx/ \
+    _RIXL_SOURCE=https://github.com/ROCm/RIXL.git \
+    _RIXL_BRANCH={{ rixl_ref | default('f33a5599') }} \
+    _RIXL_INSTALL_DIR=/usr/local/RIXL/install \
+    _NIXLBENCH_INSTALL_DIR=/usr/local/RIXL
+RUN if [ "${WITH_NIXL}" != "1" ]; then \
+      echo "WITH_NIXL=${WITH_NIXL}: skipping UCX/RIXL/rocSHMEM/DeepEP"; \
+    else set -e && \
+      echo "WITH_NIXL=1: building UCX + RIXL + rocSHMEM + DeepEP" && \
+      apt-get update && apt-get install -y \
+        autoconf automake libtool autogen pkg-config m4 gcc make \
+        librdmacm-dev rdmacm-utils infiniband-diags ibverbs-utils perftest ethtool \
+        libibverbs-dev rdma-core strace libgflags-dev \
+        libaio-dev liburing-dev libcpprest-dev libgrpc-dev libgrpc++-dev \
+        libprotobuf-dev protobuf-compiler-grpc wget && \
+      rm -rf /var/lib/apt/lists/* && \
+      pip install meson==0.64.0 "pybind11[global]" pyyaml && \
+      # UCX
+      cd /tmp && git clone "${_UCX_SOURCE}" && cd ucx && git checkout "${_UCX_BRANCH}" && \
+        ./autogen.sh && mkdir -p build && cd build && \
+        ../configure --prefix="${_UCX_INSTALL_DIR}" --with-rocm="${_ROCM_DIR}" \
+          --disable-go --disable-java --disable-assertions --enable-mt && \
+        make -j && make install && \
+      # googletest (RIXL dep)
+      cd /tmp && wget -q https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz && \
+        tar -xzf v1.14.0.tar.gz && cd googletest-1.14.0 && mkdir -p build && cd build && \
+        cmake -DBUILD_SHARED_LIBS=on .. && make -j && make install && \
+      # RIXL + python bindings
+      cd /tmp && git clone "${_RIXL_SOURCE}" && cd RIXL && git checkout "${_RIXL_BRANCH}" && \
+        meson setup build/ --prefix="${_RIXL_INSTALL_DIR}" -Ducx_path="${_UCX_INSTALL_DIR}" \
+          -Ddisable_gds_backend=true -Dcudapath_inc="${_ROCM_DIR}/include" -Dcudapath_lib="${_ROCM_DIR}/lib" && \
+        cd build && ninja && ninja install && cd /tmp/RIXL && \
+        pip install --config-settings=setup-args="-Dcudapath_inc=${_ROCM_DIR}/include" \
+                    --config-settings=setup-args="-Dcudapath_lib=${_ROCM_DIR}/lib" \
+                    --config-settings=setup-args="-Ducx_path=${_UCX_INSTALL_DIR}" \
+                    --config-settings=setup-args="-Ddisable_gds_backend=true" . && \
+      # rocSHMEM (DeepEP dep)
+      cd /tmp && git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && \
+        cd rocm-systems && git sparse-checkout set --cone projects/rocshmem && git checkout develop && \
+        mkdir -p /tmp/rocshmem-build && cd /tmp/rocshmem-build && \
+        /tmp/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
+          -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS="${GFX_COMPILATION_ARCH}" && \
+      # DeepEP (build develop against the installed vLLM/torch)
+      cd /tmp && git clone https://github.com/ROCm/DeepEP.git && cd DeepEP && \
+        PYTORCH_ROCM_ARCH="${GFX_COMPILATION_ARCH}" CFLAGS="-O3 -fPIC" \
+          CXXFLAGS="-O3 -fPIC --offload-arch=${GFX_COMPILATION_ARCH}" HIP_CXX_FLAGS="-O3 -fPIC" \
+          python3 setup.py --variant rocm --nic "${NIC_COMPILATION_ARCH}" build develop && \
+      echo "WITH_NIXL build complete" >> ${WORKSPACE_DIR}/versions.txt && \
+      rm -rf /tmp/ucx /tmp/googletest-1.14.0 /tmp/v1.14.0.tar.gz /tmp/rocm-systems /tmp/rocshmem-build; \
+    fi
+ENV LD_LIBRARY_PATH="/usr/local/ucx/lib:/usr/local/lib:/usr/local/RIXL/install/lib:${LD_LIBRARY_PATH}" \
+    PATH="/usr/local/ucx/bin:${PATH}"
+
+{% if git_repos %}
+{% for repo in git_repos %}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
+{% if repo.checkout %}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# JIT/compile cache locations; mount target for the launcher's persistent host cache.
+ENV AITER_JIT_DIR=/opt/vllm_cache/aiter_jit \
+    VLLM_CACHE_ROOT=/opt/vllm_cache/vllm \
+    TRITON_CACHE_DIR=/opt/vllm_cache/triton \
+    COMGR_CACHE_DIR=/opt/vllm_cache/comgr
+
+# CRITICAL: scrub build-time MoRI JIT state. The `import mori` checks above leave
+# stale .hsaco.lock files under /root/.mori/jit whose owner PID is gone, which
+# DEADLOCKS MoriAll2AllManager at ep:0 init at runtime.
+RUN rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori && \
+    echo "JIT_SCRUBBED: /root/.mori + /tmp/mori_jit_* cleared at build end" >> ${WORKSPACE_DIR}/versions.txt
+
+# record configuration for posterity
+RUN cat ${WORKSPACE_DIR}/versions.txt 2>/dev/null | tail -20 || true
+RUN pip3 list

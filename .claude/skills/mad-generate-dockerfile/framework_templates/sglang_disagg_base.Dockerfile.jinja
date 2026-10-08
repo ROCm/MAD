@@ -1,0 +1,87 @@
+# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
+###############################################################################
+#
+# MIT License
+#
+# Copyright (c) {{ year }} Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+###############################################################################
+ARG BASE_DOCKER={{ base_image | default('lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x') }}
+FROM $BASE_DOCKER
+
+USER root
+ENV WORKSPACE_DIR=/sgl-workspace
+
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
+
+ENV PYTHONPATH=$PYTHONPATH:/sgl-workspace/mori:/sgl-workspace/aiter:
+
+ARG GPU_ARCH={{ gpu_arch | default('gfx942') }}
+WORKDIR $WORKSPACE_DIR
+
+RUN pip install --upgrade sglang-router
+
+# RDMA / MPI / gRPC dependencies for disaggregated prefill-decode transport
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    git ibverbs-utils libibverbs-dev \
+    openmpi-bin libopenmpi-dev \
+    libpci-dev libdw1 locales \
+    libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
+    cmake{% if apt_packages %} {{ apt_packages | map('shquote') | join(' ') }}{% endif %} \
+    && rm -rf /var/lib/apt/lists/*
+
+# MoRI: the base image ships a git checkout at /sgl-workspace/mori.
+WORKDIR /sgl-workspace/mori
+
+ARG MORI_COMMIT="{{ mori_commit | default('158c7e8335a0b19b3f1f422ff134d7869252135e') }}"
+# Set INSTALL_MORI=1 to build/install MoRI at MORI_COMMIT; any other value skips it.
+ARG INSTALL_MORI={{ '0' if install_mori is false else '1' }}
+
+RUN if [ "${INSTALL_MORI}" = "1" ]; then \
+      echo "INSTALL_MORI=1: installing MoRI at ${MORI_COMMIT}" \
+      && git checkout main \
+      && git fetch origin \
+      && git pull origin main \
+      && git checkout ${MORI_COMMIT} \
+      && pip install -r requirements-build.txt \
+      && pip install -e . ; \
+    else \
+      echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; \
+    fi
+
+WORKDIR $WORKSPACE_DIR
+
+{% if pip_packages %}
+RUN pip install --no-cache-dir {{ pip_packages | map('shquote') | join(' ') }}
+{% endif %}
+
+{% if git_repos %}
+{% for repo in git_repos %}
+RUN git clone {{ repo.url | shquote }} {{ repo.path | shquote }}
+{% if repo.checkout %}
+RUN cd {{ repo.path | shquote }} && git checkout {{ repo.checkout | shquote }}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# record configuration for posterity
+RUN pip3 list
