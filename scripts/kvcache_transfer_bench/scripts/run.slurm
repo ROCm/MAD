@@ -1,14 +1,6 @@
 #!/bin/bash
 set +x
 
-#SBATCH --job-name=kv_cache_perf_bench
-#SBATCH -N 2
-#SBATCH -n 2
-#SBATCH --ntasks-per-node=1
-#SBATCH --time=08:00:00         # Time limit (HH:MM:SS); override with sbatch -t
-#SBATCH --output="kv_cache_perf_bench_%j.out"
-#SBATCH --error="kv_cache_perf_bench_%j.err"
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --start-size)
@@ -41,18 +33,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Script dir: directory containing this slurm_launcher.sbatch
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 START_SIZE=${START_SIZE:-4096} # 4KB
 STOP_SIZE=${STOP_SIZE:-1073741824} # 1GB
 BENCH_BACKENDS=${BENCH_BACKENDS:-all}
-DOCKER_IMAGE=${DOCKER_IMAGE_ARG:?DOCKER_IMAGE_ARG must be set and non-empty}
-IBDEVICES=${IBDEVICES:-mlx5_0}
+DOCKER_IMAGE=${DOCKER_IMAGE_ARG:-${DOCKER_IMAGE_NAME:?Set DOCKER_IMAGE_NAME (env) or pass --docker-image}}
+IBDEVICES=${IBDEVICES:-${IBDEVICE:-mlx5_0}}
 SYNC_PORT=${SYNC_PORT:-9999}
 KV_CACHE_TEST_PATH=/workspace/kvcache_transfer_bench
 
-PROJECT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 KV_CACHE_TEST_REPO="$(cd "$PROJECT_DIR" && pwd)/"
 DOCKER_CONTAINER_NAME=container_kv_transfer_perf_bench
 # Get node names from Slurm (recover from SLURM_JOB_ID if SLURM_NODELIST is empty)
@@ -97,6 +88,11 @@ srun --cpu-bind=none /bin/bash -c '
 LOCAL_HOSTNAME=$(hostname)
 LOCAL_IP=$(hostname -I | awk '"'"'{print $1}'"'"')
 
+# Run metadata for to_perf_csv.py; madengine does not export it into the
+# container. Slurm may report the GRES count as "gpu:8", hence the strip.
+GPUS_PER_NODE=${SLURM_GPUS_PER_NODE##*:}
+[ -n "$GPUS_PER_NODE" ] || GPUS_PER_NODE=$(ls -d /dev/dri/renderD* 2>/dev/null | wc -l)
+
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -119,8 +115,26 @@ docker run --rm \
     -e SLURM_SUBMIT_DIR='"$SLURM_SUBMIT_DIR"' \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
     -e NODE_RANK=$SLURM_PROCID \
+    -e DOCKER_IMAGE_NAME='"$DOCKER_IMAGE"' \
+    -e GPUS_PER_NODE=$GPUS_PER_NODE \
+    -e MAD_SYSTEM_GPU_ARCHITECTURE='"${MAD_SYSTEM_GPU_ARCHITECTURE:-}"' \
     --name '"$DOCKER_CONTAINER_NAME"' \
     '"$DOCKER_IMAGE"' /bin/bash -c "'"$DRIVER_SCRIPT"' --node1 '"${NODE1}"' --node2 '"${NODE2}"' --kv-cache-test-path '"$KV_CACHE_TEST_PATH"' --shared-folder '"$KV_CACHE_TEST_PATH"' --backends '"${BENCH_BACKENDS:-all}"' --start-size '"$START_SIZE"' --stop-size '"$STOP_SIZE"' --sync-port '"$SYNC_PORT"' --ibdevice '"$IBDEVICES"'"
 '
+BENCH_RC=$?
 
 srun --cpu-bind=none /bin/bash -c 'docker stop '"$DOCKER_CONTAINER_NAME"' 2>/dev/null || true; docker rm '"$DOCKER_CONTAINER_NAME"' 2>/dev/null || true'
+
+if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ "$SLURM_SUBMIT_DIR" != "$PROJECT_DIR" ]; then
+    PERF_SRC="$PROJECT_DIR/slurm_output/perf_csv"
+    if [ -d "$PERF_SRC" ]; then
+        mkdir -p "$SLURM_SUBMIT_DIR/slurm_output/perf_csv"
+        cp "$PERF_SRC"/*.csv "$SLURM_SUBMIT_DIR/slurm_output/perf_csv/" 2>/dev/null \
+            && echo "INFO: copied perf csv -> $SLURM_SUBMIT_DIR/slurm_output/perf_csv/"
+    fi
+fi
+
+if [ "$BENCH_RC" -ne 0 ]; then
+    echo "ERROR: benchmark failed on one or more nodes (srun exit $BENCH_RC)" >&2
+fi
+exit $BENCH_RC

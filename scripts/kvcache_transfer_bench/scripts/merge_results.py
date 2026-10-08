@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-process benchmark results: merge results_rixl.json, results_mori.json,
+Post-process benchmark results: merge results_nixl.json, results_mori.json,
 and results_mooncake.json from a shared directory into:
   - results_merged.json  (combined, normalized list)
   - results_merged.csv   (pivot: one row per transfer size, one column per backend)
@@ -17,15 +17,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 RESULT_FILES = [
-    "results_rixl.json",
+    "results_nixl.json",
     "results_mori.json",
     "results_mooncake.json",
 ]
 
-BACKENDS = ["rixl", "mori", "mooncake"]
+BACKENDS = ["nixl", "mori", "mooncake"]
 
 BACKEND_COLORS = {
-    "rixl": "#4472C4",
+    "nixl": "#4472C4",
     "mori": "#ED7D31",
     "mooncake": "#A5A5A5",
 }
@@ -51,7 +51,7 @@ def _normalize_result(entry: dict) -> dict | None:
     { backend, transfer_size, throughput_gbs, timestamp }
 
     Mori uses flat keys: transfer_size, throughput
-    RIXL/Mooncake use nested: test_parameters.size_bytes, results.bandwidth_gbs_avg
+    NIXL/Mooncake use nested: test_parameters.size_bytes, results.bandwidth_gbs_avg
     """
     backend = entry.get("backend", "").strip().lower()
 

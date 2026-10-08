@@ -2,9 +2,9 @@
 """
 MORI Benchmark - Target Node (node_rank=0 = INITIATOR in mori terms)
 
-Runs one torchrun per size (like RIXL/Mooncake): for each size, signal ready,
+Runs one torchrun per size (like NIXL/Mooncake): for each size, signal ready,
 run MORI benchmark with --iters=128 --warmup-iters=100, parse results, write
-in RIXL-style format (bandwidth_gbs_avg) for merge_results.
+in NIXL-style format (bandwidth_gbs_avg) for merge_results.
 """
 
 import argparse
@@ -21,7 +21,7 @@ from common.utils import add_common_bench_args, append_result_to_file, collect_v
 
 SHARED_DIR = None
 NUM_ITERS = 128
-MAX_BUFFER_SIZE = 1073741824  # 1 GB — 2 GB (2^31) overflows signed int32 in RDMA paths
+MAX_BUFFER_SIZE = 2147483648  # 2 GB: MoRI rejects single transfers above UINT32_MAX (4 GiB - 1)
 
 
 def parse_mori_output_all(output: str) -> list:
@@ -69,7 +69,7 @@ def main():
     original_end_size = args.end_size
     if args.end_size > MAX_BUFFER_SIZE:
         print(f"WARNING: Clamping sweep to {MAX_BUFFER_SIZE} bytes "
-              f"(2 GB overflows signed int32 in RDMA paths)")
+              f"(MoRI rejects single transfers above UINT32_MAX)")
         args.end_size = MAX_BUFFER_SIZE
 
     test_sizes = generate_test_sizes(args.start_size, args.end_size)
