@@ -252,7 +252,13 @@ RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update && \
 RUN rm -rf /workspace/Primus
 COPY scripts/Primus/ /workspace/Primus/
 
-RUN test -f /workspace/Primus/examples/run_pretrain.sh
+# primus-cli and not examples/run_pretrain.sh: AMD-AGI/Primus#999 retired that
+# script, and scripts/jax-maxtext/run.sh has driven `primus-cli direct` since.
+# Gating on the retired file makes this build fail on any PRIMUS_REF new enough
+# to have dropped it -- jax-maxtext-v26.8 already has -- while passing on refs
+# where the thing we actually run might be missing. primus-cli is present in
+# both v26.7.0 and jax-maxtext-v26.8.
+RUN test -f /workspace/Primus/primus-cli
 RUN test -f /workspace/Primus/requirements-jax.txt
 
 # Prove the base's stack is really there, so a wrong base fails the build instead
