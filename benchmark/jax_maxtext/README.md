@@ -36,7 +36,7 @@ bash tools/fetch_primus.sh
 # or: git submodule update --init scripts/Primus
 ```
 
-`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `jax-maxtext-v26.7`, the branch that matches `rocm/jax-training:maxtext-v26.7`. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
+`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `v26.7.0`, the tag that matches `rocm/jax-training:maxtext-v26.7`. It used to name the `jax-maxtext-v26.7` branch, which upstream has since deleted. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
 
 Cloning MAD with `--recursive` is **not** required. Primus `third_party/` submodules are not used for MAD builds: the base image ships `/workspace/maxtext` and `/workspace/maxdiffusion`, and each `run.sh` pins `MAXTEXT_PATH` / `MAXDIFFUSION_PATH` at those paths so a mismatched `third_party` copy cannot be picked up.
 
