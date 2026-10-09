@@ -35,6 +35,7 @@ import signal
 import argparse
 import itertools
 import subprocess
+import sys
 from typing import List, Dict
 
 SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'bs', 'num_prompts', 'max_concurrency']
@@ -432,15 +433,71 @@ def main():
                 os.environ['HF_TOKEN'] = MAD_SECRETS_HFTOKEN
             else:
                 print("Warning: MAD_SECRETS_HFTOKEN is not set. If a gated model is used, please set MAD_SECRETS_HFTOKEN=<your-huggingface-token>")
+            # Use CHECK_LOCAL_DATA env var to control whether to check for local data
+            # By default, this is set to False and can be enabled through madengine additional_context
+            CHECK_LOCAL_DATA = os.environ.get('CHECK_LOCAL_DATA', 'false').lower() == 'true'
+
             # Use dataprovider if present for model weights
-            if MAD_DATAHOME := os.environ.get('MAD_DATAHOME'):
-                model = MAD_DATAHOME
+            if CHECK_LOCAL_DATA and (MAD_DATAHOME := os.environ.get('MAD_DATAHOME')) and os.path.exists(os.path.join(MAD_DATAHOME, model)):
+                model = os.path.join(MAD_DATAHOME, model)
+                print("Found MAD_DATAHOME")
             elif config.get('extra_args', {}).get('--load-format', None) == 'dummy':
                 print("Found --load-format dummy in config, using dummy weights for benchmarking")
             else:
-                # Explicitly download model before running benchmarks for easier debugging
-                download_command=f"hf download {model} --exclude \"original/*\" \"*.tf\" \"*.onnx\" \"*.flax\" \"*.rust\""
-                subprocess.run(download_command, shell=True, check=True)
+                # Explicitly pre-download the model so `vllm serve` loads from a COMPLETE
+                # local cache. Otherwise a transient HF-Hub stall during model load hangs
+                # the server (the root cause of intermittent large-model profiling failures).
+                # NOTE: the old `hf download {model} --exclude <globs>` CLI form silently
+                # fetched 0 files on newer hf CLIs (the globs were parsed as explicit
+                # filenames), so nothing was actually pre-staged. Use the Python API with
+                # bounded retries instead (respects HF_HOME / HF_TOKEN / HF_HUB_ENABLE_HF_TRANSFER).
+                print("Explicitly pre-downloading model from HF Hub")
+                _ignore = ["original/*", "*.tf", "*.onnx", "*.flax", "*.rust"]
+                # Enable the Rust-accelerated HF downloader (hf_transfer) to avoid the multi-hour
+                # stalls observed on very large (1T) checkpoints with the default Python downloader.
+                # Best-effort: install it if missing (upstream images ship without it) and only set
+                # the env flag once it is available, so the download never breaks when it isn't.
+                try:
+                    import hf_transfer  # noqa: F401
+                    _have_hft = True
+                except Exception:
+                    _r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "hf_transfer"],
+                                        check=False, timeout=300)
+                    _have_hft = (_r.returncode == 0)
+                if _have_hft:
+                    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+                    print("hf_transfer enabled (accelerated HF download)")
+                else:
+                    print("hf_transfer unavailable; using default HF downloader")
+                # Run snapshot_download in a subprocess with a hard wall-clock timeout. A silently
+                # stalled HF connection makes the in-process call hang indefinitely (observed: a ~12h CI
+                # hang stuck at 71/185 files) — a plain try/except retry can NOT catch that because no
+                # exception is ever raised. subprocess.run(timeout=...) SIGKILLs the stalled child, and
+                # snapshot_download resumes from the partial cache on the next attempt, so progress is
+                # monotonic across retries. Per-attempt timeout is tunable via PREDOWNLOAD_TIMEOUT_SEC.
+                _dl_script = (
+                    "from huggingface_hub import snapshot_download; "
+                    f"snapshot_download({model!r}, ignore_patterns={_ignore!r}, max_workers=16)"
+                )
+                _dl_timeout = int(os.environ.get("PREDOWNLOAD_TIMEOUT_SEC", "3600"))
+                _dl_ok = False
+                for _attempt in range(1, 6):
+                    try:
+                        subprocess.run([sys.executable, "-c", _dl_script],
+                                       check=True, timeout=_dl_timeout)
+                        _dl_ok = True
+                        break
+                    except subprocess.TimeoutExpired:
+                        print(f"HF pre-download attempt {_attempt}/5 stalled >{_dl_timeout}s — killed; "
+                              f"retrying (resumes from partial cache)...", flush=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"HF pre-download attempt {_attempt}/5 failed (exit {e.returncode}); "
+                              f"retrying...", flush=True)
+                        time.sleep(min(30 * _attempt, 120))
+                if not _dl_ok:
+                    raise RuntimeError(
+                        f"Model pre-download did not complete after 5 attempts "
+                        f"({_dl_timeout}s wall-clock each)")
             
             # concatenate env vars and extra args into the corresponding strings
             env_vars = config.get("env", {})
