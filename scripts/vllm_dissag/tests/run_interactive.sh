@@ -34,13 +34,38 @@ mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
 # on local NVMe for speed. Keyed by the image ID so a new image (different kernels/ABI)
 # starts a fresh cache instead of reusing stale .so's; set JIT_CACHE_HOST to override, or
 # JIT_CACHE_PERSIST=0 to disable and fall back to an ephemeral in-container cache.
+# Resolve EP_TP_SIZE from the recipe (TP within each EP pool; unset/1 = plain wideEP) so the
+# host-side JIT-cache role split matches the in-container launcher. env/-e wins.
+if [[ -z "${EP_TP_SIZE:-}" && -n "${MODEL_NAME:-}" && -f "${NIXL_REPO_DIR}/models.yaml" ]]; then
+  EP_TP_SIZE="$(MODELS_YAML="${NIXL_REPO_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
 if [[ "${JIT_CACHE_PERSIST:-1}" == "1" ]]; then
     _IMG_KEY="$(docker image inspect --format '{{.Id}}' "$DOCKER_IMAGE_NAME" 2>/dev/null | sed 's/^sha256://; s/[^a-f0-9]//g' | cut -c1-12)"
     _IMG_KEY="${_IMG_KEY:-noimg}"
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}"
+    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches
+    # (same logic as run_xPyD_models.slurm; missing this caused PIECEWISE decode hang — F25).
+    if (( ${EP_TP_SIZE:-1} > 1 )) && [[ "${JIT_CACHE_SPLIT_ROLE:-1}" == "1" ]]; then
+        if [[ "${NODE_RANK:-0}" -lt "${xP:-1}" ]]; then
+            _JIT_ROLE="prefill"
+        else
+            _JIT_ROLE="decode"
+        fi
+        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}"
+    else
+        _JIT_CACHE_HOST="${_JIT_BASE}"
+    fi
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache"
-    echo "JIT cache (persistent, image ${_IMG_KEY}): ${_JIT_CACHE_HOST} -> /opt/vllm_cache"
+    echo "JIT cache (persistent, image ${_IMG_KEY}${_JIT_ROLE:+/${_JIT_ROLE}}): ${_JIT_CACHE_HOST} -> /opt/vllm_cache"
 else
     _JIT_CACHE_MOUNT=""
 fi
@@ -49,14 +74,14 @@ fi
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
@@ -90,6 +115,7 @@ docker run --rm \
     -e BENCHMARK_ITR=${BENCHMARK_ITR:-1} \
     -e BENCHMARK_CON="${BENCHMARK_CON}" \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
+    ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     -e IPADDRS=$IPADDRS \
     -e CONNECTOR=$CONNECTOR \
     -e WIDE_EP=$WIDE_EP \
@@ -97,7 +123,7 @@ docker run --rm \
     -e PROXY_TYPE=${PROXY_TYPE:-vllm_router} \
     -e ROUTER_PORT=${ROUTER_PORT:-30000} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
-    -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
+    ${GPU_MEMORY_UTILIZATION:+-e GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION} \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
     -e MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-eth0} \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
@@ -108,6 +134,8 @@ docker run --rm \
     -e HSA_ENABLE_IPC_MODE_LEGACY=${HSA_ENABLE_IPC_MODE_LEGACY:-0} \
     -e MORI_GPU_ARCHS=${MORI_GPU_ARCHS:-gfx942} \
     -e HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-1} \
+    ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
+    ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}

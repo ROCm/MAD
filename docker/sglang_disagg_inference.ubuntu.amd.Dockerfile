@@ -36,6 +36,10 @@ WORKDIR /sgl-workspace
 
 RUN pip install --upgrade sglang-router
 
+# Runtime deps of the disagg launcher and proxy. Baked in so the launcher scripts
+# do not have to install them on every node of every run.
+RUN pip install py-spy flask pyyaml
+
 WORKDIR /sgl-workspace/mori
 
 ARG MORI_COMMIT="158c7e8335a0b19b3f1f422ff134d7869252135e"

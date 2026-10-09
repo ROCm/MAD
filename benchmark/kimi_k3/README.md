@@ -12,6 +12,11 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 | **SGLang** | `pyt_sglang_kimi-k3` | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` | [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3) |
 | **ATOM** | `pyt_atom_kimi-k3` | `rocm/atom-dev:rocm7.2.4_ubuntu24.04_py3.12_pytorch2.10.0_20260727_kimi_k3` | ROCm ATOM |
 
+> **On MI300X (gfx942)?** All four models above carry `skip_gpu_arch: gfx942` —
+> the ~1.5 TB checkpoint does not fit a single 8-GPU MI300X node, so K3 needs
+> multi-node sharding there. See [`mi300x/`](mi300x/README.md) for the 2-node
+> colocated and 4-node prefill/decode-disaggregated recipes.
+
 ## Hardware requirements
 
 - **8x MI350X or MI355X** (TP8)

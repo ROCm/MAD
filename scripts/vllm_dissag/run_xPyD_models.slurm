@@ -57,6 +57,18 @@ _resolve_script_dir() {
 SCRIPT_DIR="$(_resolve_script_dir)"
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
+# Site config: filesystem roots, partition, fabric device, ports, timeouts.
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
+# environment variables, and this file just fills what neither of them set.
+# Model-specific performance flags stay in models.yaml, not here.
+MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
+    echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
+    exit 1
+fi
+. "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+
 REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
 for f in "${REQUIRED_FILES[@]}"; do
     if [[ ! -f "$f" ]]; then
@@ -88,6 +100,9 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "Kimi-K3" \
+    "Kimi-K3-MXFP4" \
+    "Kimi-K3-MXFP4-MI355X" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +111,9 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "Kimi-K3" \
+    "Kimi-K3-MXFP4" \
+    "Kimi-K3-MXFP4-MI355X" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -105,7 +123,6 @@ DEEPEP_VALID_MODELS=( \
     "DeepSeek-R1" \
 )
 
-MODEL_NAME="${MODEL_NAME:-None}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -182,7 +199,8 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+# Kimi-K3 and Kimi-K3-MXFP4 are wideEP-only as well (see their models.yaml blocks).
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -250,10 +268,48 @@ export DOCKER_IMAGE_NAME
 NIXL_REPO_DIR=$(pwd)
 LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
-xP="${xP:-1}" #-> Number of Prefill Servers
-yD="${yD:-1}" #-> Number of Decode Servers
+xP="${xP:-1}" #-> Number of Prefill NODES (a pool may span >1 node)
+yD="${yD:-1}" #-> Number of Decode  NODES (a pool may span >1 node)
+# MODEL_DIR / MODEL_NAME defaults come from cluster.sh.
+# EP_TP_SIZE: tensor-parallel degree within each DP rank on the wideEP path. Default 1
+# keeps the historical one-DP-rank-per-GPU layout; >1 only when the replicated
+# (non-expert) weights do not fit a single GPU. See vllm_disagg.sh topology math.
+# Not TP_SIZE: cluster.sh (sourced above) defaults that to GPUS_PER_NODE for the
+# colocated launcher.
+# Resolve it from the recipe (TP within each EP pool; unset/1 = plain wideEP) so
+# submit-time topology/JIT decisions match the in-container launcher. env/-e still wins.
+#
+# _recipe_env KEY: the value of KEY in this model's models.yaml env: block, or empty.
+# The in-container launcher exports that whole block itself; the few keys below
+# are needed earlier, on the batch node, to size the job and gate it.
+_recipe_env() {
+  [[ -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]] || return 0
+  MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" KEY="$1" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get(os.environ["KEY"], ""))
+PY
+}
+[[ -z "${EP_TP_SIZE:-}" ]] && EP_TP_SIZE="$(_recipe_env EP_TP_SIZE)"
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
 
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# GPU_ARCHS: the architectures this model's recipe is written for (models.yaml).
+# Checked against the allocated nodes before anything expensive happens -- see
+# cluster_require_gpu_arch in cluster.sh. The model card's skip_gpu_arch states the
+# same thing for orchestrators; tests/argv_assert.sh keeps the two consistent.
+[[ -z "${GPU_ARCHS:-}" ]] && GPU_ARCHS="$(_recipe_env GPU_ARCHS)"
+export GPU_ARCHS
+
+# TP-within-EP (EP_TP_SIZE>1) is only valid on the wideEP MoRIIO path. Per-pool sizing is
+# validated in vllm_disagg.sh (EP_TP_SIZE must divide GPUS_PER_NODE). Recommended shape: 2P/2D.
+if (( ${EP_TP_SIZE:-1} > 1 )); then
+  if [[ "$WIDE_EP" != "1" || "$CONNECTOR" != "moriio" ]]; then
+    echo "Error: EP_TP_SIZE=${EP_TP_SIZE} (TP-within-EP) requires CONNECTOR=moriio WIDE_EP=1." >&2
+    exit 1
+  fi
+fi
+
 
 
 # ------------------------
@@ -270,59 +326,21 @@ echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Function to check model path on all nodes
-check_model_path() {
-    local path=$1
-    local check_name=$2
 
-    echo "Checking $check_name: $path"
-
-    # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then
-            echo \"\$(hostname): ✓ Found $path\"
-            exit 0
-        else
-            echo \"\$(hostname): ✗ Missing $path\"
-            exit 1
-        fi
-    "
-
-    # Check if all nodes succeeded (exit code 0)
-    local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "✓ $check_name available on ALL nodes"
-        return 0
-    else
-        echo "✗ $check_name NOT available on all nodes"
-        return 1
-    fi
-}
-
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared-inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-else
-    echo ""
-    echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "Model must be accessible from all nodes for distributed execution."
-    echo "Please ensure the model is available on all allocated nodes."
-    exit 1
+# Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
+cluster_report_rdma_rails
+# MoRI JIT-compiles its EP kernels for MORI_GPU_ARCHS. connectors/moriio.env pins it to
+# gfx942, which on MI355X builds kernels for the wrong GPU. Follow the detected arch
+# unless the submitter set it (the later -e wins in docker run).
+if [ -z "${MORI_GPU_ARCHS:-}" ] && [ -n "${MAD_GPU_ARCH:-}" ]; then
+  CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"
 fi
+
+# Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
+# explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
+# load from one path, so a partial hit fails the run deep into bring-up.
+cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""
@@ -331,6 +349,11 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+if [[ "${WIDE_EP:-0}" == "1" ]]; then
+    echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$EP_TP_SIZE (wideEP)"
+else
+    echo "Parallelism: TP (WIDE_EP=0) -> degree from the model's tp: flags in models.yaml"
+fi
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -352,6 +375,19 @@ echo "SLURM_NTASKS: $SLURM_NTASKS"
 
 # Get the full nodelist and extract first NUM_NODES
 FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+
+# NUM_NODES comes from xP+yD, not from the allocation, so a short allocation used
+# to be truncated by the `head` below into a silently wrong topology: pools would
+# be built from nodes that were never allocated, and the run would fail much later
+# with a confusing connector timeout. Fail here instead, while the cause is obvious.
+_AVAILABLE_NODES=$(echo "$FULL_NODELIST" | grep -c .)
+if [ "$_AVAILABLE_NODES" -lt "$NUM_NODES" ]; then
+    echo "Error: topology needs ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but the allocation has ${_AVAILABLE_NODES}." >&2
+    echo "       Size the allocation to match: 'distributed.nnodes' in the model card," >&2
+    echo "       'sbatch -N ${NUM_NODES}', or 'salloc -N ${NUM_NODES}'." >&2
+    exit 1
+fi
+
 SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n $NUM_NODES)
 NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
 
@@ -370,12 +406,11 @@ export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME}"
 export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
 export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION}"
 export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_QOS="${SLURM_JOB_QOS:-normal}"
 export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT}"
 export SLURM_NTASKS_PER_NODE=1
 export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
 export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
+# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh.
 export SLURM_JOB_NAME="${SLURM_JOB_NAME:-1p1d_bench-serving}"
 
 echo ""
@@ -458,6 +493,7 @@ echo "REPO Directory is ${NIXL_REPO_DIR}"
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
+cluster_mark_dir "$LOG_PATH" "per-job logs from vLLM disaggregated runs (one directory per SLURM job id)"
     echo "Created directory: $LOG_PATH"
 else
     echo "Directory already exists: $LOG_PATH"
@@ -492,7 +528,7 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
-fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT:-15000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
@@ -514,8 +550,31 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
     _IMG_KEY="${_IMG_KEY:-noimg}";
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches.
+    if (( ${EP_TP_SIZE:-1} > 1 )) && [ "${JIT_CACHE_SPLIT_ROLE:-1}" = "1" ]; then
+        if [ "${SLURM_PROCID}" -lt "${xP}" ]; then
+            _JIT_ROLE="prefill";
+        else
+            _JIT_ROLE="decode";
+        fi
+        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}";
+    else
+        _JIT_CACHE_HOST="${_JIT_BASE}";
+    fi
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
+    # Inline, not cluster_mark_dir: this runs in the srun body, a separate shell on
+    # the compute node where cluster.sh was never sourced, so the function is not
+    # defined here and would fail with "command not found" once per node.
+    if [ ! -e "$_JIT_CACHE_HOST/README.ci" ]; then
+        printf "Signature: 8a477f597d28d172789f06886806bc55\n# Cache directory created by MAD CI.\n" \
+            > "$_JIT_CACHE_HOST/CACHEDIR.TAG" 2>/dev/null || true
+        printf "%s\n%s\n\n%s\n" \
+            "What: JIT/Triton/AITER kernel cache for one docker image" \
+            "Written by: MAD CI disagg launcher" \
+            "Safe to delete when no job is running; it is rebuilt on demand." \
+            > "$_JIT_CACHE_HOST/README.ci" 2>/dev/null || true
+    fi
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
 else
@@ -526,11 +585,17 @@ fi
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
+# -f, not -e: docker creates a DIRECTORY at a bind-mount source that does not
+# exist, so on a node lacking one of these libs the first run leaves an empty
+# directory behind and every later run mounts a directory over a file inside the
+# image, which docker rejects ("not a directory"). Self-propagating and per-node,
+# so it presents as an intermittent failure. Full note in
+# scripts/vllm_multinode/run_multinode.slurm.
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
@@ -561,6 +626,16 @@ _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
 if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
 echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
+# Stop this node container when the task is signalled. scancel sends SIGTERM here, but
+# the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
+# SIGTERM, so a cancelled job left its container running and holding every GPU: one
+# cancelled job left its container holding 1535 GB on a node. docker run
+# runs in the background so the trap fires as soon as the signal lands.
+_stop_container() {
+    docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
+    docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
+}
+trap "_stop_container; exit 143" TERM INT
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -586,6 +661,7 @@ docker run --rm \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
+    -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e NNODES=$NNODES \
     -e NODE_RANK=$SLURM_PROCID \
     -e MASTER_ADDR=$MASTER_ADDR \
@@ -615,6 +691,9 @@ docker run --rm \
     ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
     -e xP=$xP \
     -e yD=$yD \
+    -e EP_TP_SIZE=$EP_TP_SIZE \
+    ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
+    ${GPUS_PER_NODE:+-e GPUS_PER_NODE=$GPUS_PER_NODE} \
     -e USER_NAME=$USER_NAME \
     -e MODEL_NAME=$MODEL_NAME \
     -e BENCHMARK_ITR=$BENCHMARK_ITR \
@@ -641,7 +720,7 @@ docker run --rm \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
-    ${NIAH_WORDS:+-e NIAH_WORDS=$NIAH_WORDS} \
+    ${NIAH_WORDS:+-e NIAH_WORDS="$NIAH_WORDS"} \
     ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
     ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
     ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
@@ -682,6 +761,9 @@ docker run --rm \
     ${ROCSHMEM_HEAP_SIZE:+-e ROCSHMEM_HEAP_SIZE=$ROCSHMEM_HEAP_SIZE} \
     ${ROCSHMEM_MAX_NUM_CONTEXTS:+-e ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS} \
     ${LOG_WAIT_TIMEOUT_SECONDS:+-e LOG_WAIT_TIMEOUT_SECONDS=$LOG_WAIT_TIMEOUT_SECONDS} \
+    ${NCCL_DEBUG:+-e NCCL_DEBUG=$NCCL_DEBUG} \
+    ${NCCL_DEBUG_SUBSYS:+-e NCCL_DEBUG_SUBSYS=$NCCL_DEBUG_SUBSYS} \
+    ${NCCL_DEBUG_FILE:+-e NCCL_DEBUG_FILE=$NCCL_DEBUG_FILE} \
     ${TRITON_CACHE_DIR:+-e TRITON_CACHE_DIR=$TRITON_CACHE_DIR} \
     ${VLLM_CACHE_ROOT:+-e VLLM_CACHE_ROOT=$VLLM_CACHE_ROOT} \
     ${COMGR_CACHE_DIR:+-e COMGR_CACHE_DIR=$COMGR_CACHE_DIR} \
@@ -696,7 +778,31 @@ docker run --rm \
     $DOCKER_IMAGE_NAME -c "
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
-    "
+    " &
+_docker_pid=$!
+wait "$_docker_pid"
+_docker_rc=$?
+trap - TERM INT
+exit "$_docker_rc"
 '
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+
+# Publish the perf CSV where madengine collects it. benchmark_xPyD.sh /
+# benchmark_niah.sh write /run_logs/$SLURM_JOB_ID/perf.csv inside the container
+# (= $LOG_PATH on the host), but madengine resolves a model's `multiple_results`
+# against the JOB DIRECTORY it launched us from - so copy it there under the
+# declared name. Harmless for entries that do not declare multiple_results.
+_PERF_SRC="${LOG_PATH}/${SLURM_JOB_ID}/perf.csv"
+_PERF_DST="$(pwd)/perf_${MODEL_NAME}.csv"
+if [ -f "$_PERF_SRC" ]; then
+    cp "$_PERF_SRC" "$_PERF_DST"
+    echo "perf CSV -> ${_PERF_DST} ($(( $(wc -l < "$_PERF_DST") - 1 )) rows)"
+else
+    # Exit non-zero: a run with no parseable results is a failure. Reporting it
+    # as success makes madengine record exit_code=0 and collect "0 successful,
+    # 0 failed", which is indistinguishable from a clean run. See the longer
+    # note in scripts/vllm_multinode/run_multinode.slurm.
+    echo "ERROR: no perf CSV at ${_PERF_SRC}; the benchmark produced no parseable results." >&2
+    exit 1
+fi
 

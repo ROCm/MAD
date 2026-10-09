@@ -1,0 +1,49 @@
+# Way 4 for pyt_vllm_kimi-k3_mi300x_pp2xtp8, expressed by layer.
+#
+# This file exists to be COMPARED, not to introduce new behaviour. It carries
+# exactly the values that card already carries in env_vars, split by who creates
+# them, so a run of the way-4 twin card and a run of the original must produce the
+# same environment and the same perf_Kimi-K3.csv. If they differ, way 4 is not the
+# front end it claims to be.
+#
+# Deliberately NOT named mad-config.yaml. The default name is picked up by
+# convention for every card in this directory, which would make way 4 active for
+# the two cards that are the control. The twin card points here explicitly with
+# env_vars.MAD_CONFIG, so nothing else in this directory changes.
+#
+# See docs/distributed-config.md in madengine.
+version: 1
+
+# No site: block. Site facts are a property of the RUN, not of a model card, and
+# madengine composes them from Hydra config groups (--config +profile=...,
+# --config +env=...) or from cluster.sh. A card is the wrong place to describe a
+# cluster, and this file now refuses a site: block rather than ignoring one.
+#
+# REQUIRE_LOCAL_WEIGHTS moves into model: below, which is where it belonged: it
+# is a fact about Kimi-K3 being 1.5T, not about this cluster. The cluster half --
+# which local root, and whether one exists -- is cluster.sh's.
+model:
+  id: moonshotai/Kimi-K3
+  local_name: Kimi-K3          # the on-disk directory name, what cluster.sh resolves
+  # Created by: whoever tuned this model on this hardware.
+  env:
+    # 1.5T of weights: loading over shared storage does not fit the wall clock
+    # this partition allows, so the run must fail rather than quietly use NFS.
+    REQUIRE_LOCAL_WEIGHTS: '1'
+    MODEL_NAME: Kimi-K3
+    TP_SIZE: '8'
+    PP_SIZE: '2'
+    ENABLE_EP: '0'
+    AITER_SITUV2_A8W4: '1'
+    COLOCATED_EXTRA_ARGS: >-
+      --reasoning-parser kimi_k3 --mm-encoder-tp-mode data
+      --safetensors-load-strategy prefetch --max-model-len 1000000
+      --max-num-seqs 8 --max-num-batched-tokens 2048
+      --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
+
+benchmark:
+  # Created by: whoever defines the measurement.
+  - kind: niah
+    env:
+      BENCHMARK_SCRIPT: niah
+      NIAH_WORDS: '10000,50000,100000,200000'
