@@ -68,7 +68,7 @@ COPY scripts/Primus/ /workspace/Primus/
 
 RUN test -f /workspace/Primus/primus-cli
 RUN test -d /workspace/Primus/primus/backends/maxdiffusion \
-    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus jax-maxtext-v26.7." >&2 && exit 1)
+    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus v26.7.0." >&2 && exit 1)
 
 # Prove the base's stack is really there, so a wrong base fails the build instead
 # of step 0 of a training run. The patch fixes a segfault on TE import order.
