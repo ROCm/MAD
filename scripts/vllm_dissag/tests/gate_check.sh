@@ -3,9 +3,10 @@
 # Verifies the (MODEL x CONNECTOR x WIDE_EP x EP_BACKEND) enablement gate in
 # run_xPyD_models.slurm accepts exactly the supported combos and rejects the rest.
 #
-# Strategy: source the slurm's model lists + axis/validation logic in a harness that
-# stops right after the gate (never reaches docker/srun), then assert exit status.
-# This runs the REAL gate code path, so a future edit to the lists/gate is caught.
+# Strategy: re-run a hand-kept MIRROR of the slurm's model lists + axis/validation logic
+# in a harness that stops right after the gate (never reaches docker/srun), then assert
+# the verdict. NOTE the mirror is a copy, not the real code path: editing the lists in
+# run_xPyD_models.slurm without editing the mirror below will NOT be caught here.
 #
 # Usage: bash tests/gate_check.sh   (exit 0 = all pass)
 set -u
@@ -28,10 +29,11 @@ _run_gate() {
     set -u
     # --- mirror of run_xPyD_models.slurm gate (keep in sync) ---
     VALID_MODELS=( "Llama-3.1-405B-Instruct-FP8-KV" "amd-Llama-3.3-70B-Instruct-FP8-KV" \
-      "DeepSeek-V3" "DeepSeek-V3-5layer" "gpt-oss-120b" "DeepSeek-R1" "Qwen3-32B" "Qwen3-30B-A3B" )
-    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+      "DeepSeek-V3" "DeepSeek-V3-5layer" "gpt-oss-120b" "DeepSeek-R1" "Qwen3-32B" "Qwen3-30B-A3B" \
+      "GLM-5.1-FP8" )
+    MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
     DEEPEP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
-    WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+    WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
     MODEL_NAME="${MODEL_NAME:-None}"
     _in(){ local n="$1"; shift; for x in "$@"; do [[ "$n" == "$x" ]] && return 0; done; return 1; }
     _in "$MODEL_NAME" "${VALID_MODELS[@]}" || { echo REJECT; exit 0; }
@@ -87,6 +89,11 @@ _case ALLOW  "DSV3 rixl wideEP(deepep)" DeepSeek-V3                       rixl  
 _case ALLOW  "R1 moriio wideEP"         DeepSeek-R1                       moriio 1
 _case REJECT "DSV3 moriio TP"           DeepSeek-V3                       moriio 0
 _case REJECT "DSV3 rixl TP"             DeepSeek-V3                       rixl   0
+# GLM-5.1-FP8 — moriio wideEP only (no TP, no DeepEP)
+_case ALLOW  "GLM moriio wideEP(mori)"  GLM-5.1-FP8                       moriio 1
+_case REJECT "GLM moriio TP"            GLM-5.1-FP8                       moriio 0
+_case REJECT "GLM rixl TP"              GLM-5.1-FP8                       rixl   0
+_case REJECT "GLM rixl wideEP(deepep)"  GLM-5.1-FP8                       rixl   1
 # cross-pairs
 _case REJECT "DSV3 moriio+deepep xpair" DeepSeek-V3                       moriio 1 deepep
 _case REJECT "DSV3 rixl+mori xpair"     DeepSeek-V3                       rixl   1 mori

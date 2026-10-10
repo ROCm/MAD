@@ -1,0 +1,15 @@
+[
+    {
+        "name": "pyt_clip_inference",
+        "dockerfile": "../../docker/pyt_clip_inference",
+        "scripts": "run.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "inference"
+        ],
+        "args": "--tunableop off"
+    }
+]

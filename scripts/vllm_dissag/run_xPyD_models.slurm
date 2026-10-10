@@ -87,6 +87,7 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "GLM-5.1-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -94,6 +95,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "GLM-5.1-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -179,7 +181,8 @@ WIDE_EP="${WIDE_EP:-0}"
 # the MoRI-EP / DeepEP recipe (block=16, MLA off, per-role cudagraph). Running them
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
+# GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -427,11 +430,17 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # Benchmark script selector: BENCHMARK_SCRIPT tag -> file run by the launcher.
 #   sweep        (default) -> benchmark_xPyD.sh         (general concurrency sweep)
 #   long_context           -> benchmark_long_context.sh (per-shape warmup, c=1-first)
+#   agentic                -> benchmark_agentic.sh      (aiperf agentic trace replay)
+# The launcher/connectors auto-enable prefix caching + server /metrics when
+# BENCHMARK_SCRIPT=agentic.
+#   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context)" >&2; exit 1 ;;
+    agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
+    niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -470,6 +479,7 @@ export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 export BENCHMARK_ITR=$BENCHMARK_ITR
 export BENCHMARK_CON="${BENCHMARK_CON}"
 export BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}"
+export BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT}"
 export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE}"
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
@@ -482,7 +492,7 @@ srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
-fuser -k 5000/tcp 2>/dev/null || true;
+fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
@@ -525,13 +535,31 @@ done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
     for _vlib in $_LIBDIR/${_pattern}; do
-        [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
+        # matching one of these globs, and docker then bind-mounts a directory onto a
+        # file target -> "not a directory" -> container create exit 125.
+        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
 done
 
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+# AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
+[ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="${AGENTIC_CONFIG/#$HOME/$HOME}"
+
+# GPU_MEMORY_UTILIZATION precedence:
+#   1. Submit-time `-e GPU_MEMORY_UTILIZATION=X` (explicit override)
+#   2. models.yaml env: block (static per-model value)
+#   3. Launcher fallback below (topology-aware: 0.70 at EP>=32, else 0.8)
+#
+# Models needing topology-dependent values (e.g., GLM) should OMIT the key from
+# yaml and use the fallback. Models needing a static value can specify it in yaml.
+# The 0.70 at EP>=32 accounts for larger MoRI dispatch/combine buffers at high EP
+# width; measured on GLM but applies to any MoRI model as a safe default.
+_EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
+if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
+echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
 docker run --rm \
     --device /dev/dri \
@@ -564,6 +592,27 @@ docker run --rm \
     -e MASTER_PORT=$MASTER_PORT \
     -e MODEL_PATH=$MODEL_PATH \
     -e NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH \
+    -e NIXL_REPO_DIR=$NIXL_REPO_DIR \
+    ${AGENTIC_CONC:+-e AGENTIC_CONC=$AGENTIC_CONC} \
+    ${DURATION:+-e DURATION=$DURATION} \
+    ${AGENTIC_PORT:+-e AGENTIC_PORT=$AGENTIC_PORT} \
+    ${MODEL_PREFIX:+-e MODEL_PREFIX=$MODEL_PREFIX} \
+    ${WEKA_LOADER_OVERRIDE:+-e WEKA_LOADER_OVERRIDE=$WEKA_LOADER_OVERRIDE} \
+    ${AIPERF_UNSAFE_OVERRIDE:+-e AIPERF_UNSAFE_OVERRIDE=$AIPERF_UNSAFE_OVERRIDE} \
+    ${AGENTIC_CACHE_WARMUP_DURATION:+-e AGENTIC_CACHE_WARMUP_DURATION=$AGENTIC_CACHE_WARMUP_DURATION} \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${AGENTIC_CONFIG:+-e AGENTIC_CONFIG=$AGENTIC_CONFIG} \
+    ${AGENTIC_WORKLOAD:+-e AGENTIC_WORKLOAD=$AGENTIC_WORKLOAD} \
+    ${SUITE_CORPUS_DIR:+-e SUITE_CORPUS_DIR=$SUITE_CORPUS_DIR} \
+    ${SUITE_CORPUS_FORCE:+-e SUITE_CORPUS_FORCE=$SUITE_CORPUS_FORCE} \
+    ${AGENTIC_STRICT_CONTEXT:+-e AGENTIC_STRICT_CONTEXT=$AGENTIC_STRICT_CONTEXT} \
+    ${AGENTIC_HF_ISL_TAIL:+-e AGENTIC_HF_ISL_TAIL=$AGENTIC_HF_ISL_TAIL} \
+    ${AIPERF_PIN:+-e AIPERF_PIN=$AIPERF_PIN} \
+    ${AGENTIC_UTILS_PIN:+-e AGENTIC_UTILS_PIN=$AGENTIC_UTILS_PIN} \
+    ${HF_HOME:+-e HF_HOME=$HF_HOME} \
+    ${ENABLE_SERVER_METRICS:+-e ENABLE_SERVER_METRICS=$ENABLE_SERVER_METRICS} \
+    ${ENABLE_PREFIX_CACHE:+-e ENABLE_PREFIX_CACHE=$ENABLE_PREFIX_CACHE} \
+    ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
     -e xP=$xP \
     -e yD=$yD \
     -e USER_NAME=$USER_NAME \
@@ -578,6 +627,7 @@ docker run --rm \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
+    ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
@@ -589,7 +639,15 @@ docker run --rm \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
+    ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${NIAH_WORDS:+-e NIAH_WORDS=$NIAH_WORDS} \
+    ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
+    ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
+    ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
+    ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
+    ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
+    ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
@@ -613,7 +671,8 @@ docker run --rm \
     ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
     ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
     ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
-    -e GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8} \
+    ${GPU_MEMORY_UTILIZATION:+-e GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION} \
+    -e _GPU_MEM_UTIL_LAUNCHER_DEFAULT=$_GPU_MEM_UTIL_LAUNCHER_DEFAULT \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
     ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
     ${HIP_FORCE_DEV_KERNARG:+-e HIP_FORCE_DEV_KERNARG=$HIP_FORCE_DEV_KERNARG} \

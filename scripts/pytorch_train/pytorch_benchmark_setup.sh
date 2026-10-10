@@ -26,15 +26,13 @@
 #################################################################################
 export HF_HOME=/workspace/huggingface
 
-# Usage function
 usage() {
     echo "Usage: $0 -m MODEL_NAME"
-    echo "  -m: Model name (Llama-3.1-8B, Llama-3.1-70B, Llama-3.3-70B, Flux, or empty for all models)"
-    echo "  Example: $0 -m Llama-3.1-8B"
+    echo "  -m: Model name (Flux, Stable-Diffusion-XL, Mochi-1, Hunyuan-video, Wan2_1-i2v, DLRM, or empty for all)"
+    echo "  Example: $0 -m Flux"
     exit 1
 }
 
-# Parse named arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -m) MODEL_NAME="$2"; shift ;;
@@ -43,10 +41,9 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-echo "Model repo: $MODEL_NAME"
+echo "Model: $MODEL_NAME"
 echo "Setup script starting in directory $(pwd)"
 
-# Check if HF_TOKEN is set
 if [ -z "$HF_TOKEN" ]; then
     echo "ERROR: HF_TOKEN environment variable is not set"
     echo "Please set your Hugging Face token: export HF_TOKEN=your_token_here"
@@ -55,47 +52,6 @@ fi
 
 hf auth login --token $HF_TOKEN
 
-TORCHTITAN_DIR="/workspace/torchtitan"
-TORCHTUNE_DIR="/workspace/torchtune"
-
-if [[ "$MODEL_NAME" == "Llama-3.1-8B" ]]; then
-  echo "Building torchtitan dependencies for $MODEL_NAME"
-  echo "Torchtitan directory path: $TORCHTITAN_DIR"
-  cd $TORCHTITAN_DIR
-  
-  # Download tokenizer files
-  python scripts/download_tokenizer.py --repo_id meta-llama/Llama-3.1-8B --hf_token=$HF_TOKEN
-fi 
-
-if [[ "$MODEL_NAME" == "Llama-3.1-70B" ]]; then
-  echo "Building torchtitan dependencies for $MODEL_NAME"
-  echo "Torchtitan directory path: $TORCHTITAN_DIR"
-  cd $TORCHTITAN_DIR
-  
-  # Download tokenizer files
-  python scripts/download_tokenizer.py --repo_id meta-llama/Llama-3.1-8B --hf_token=$HF_TOKEN
-
-  echo "Building torchtune dependencies for $MODEL_NAME"
-  echo "Torchtune directory path: $TORCHTUNE_DIR"
-  cd $TORCHTUNE_DIR
-  hf download meta-llama/Llama-3.1-70B-Instruct \
-    --local-dir ./models/Llama-3.1-70B-Instruct \
-    --exclude 'original/*.pth'
-  python dataset.py
-fi
-
-if [[ "$MODEL_NAME" == "Llama-3.3-70B" ]]; then
-  echo "Building torchtune dependencies for $MODEL_NAME"
-  echo "Torchtune directory path: $TORCHTUNE_DIR"
-  cd $TORCHTUNE_DIR
-  hf login --token $HF_TOKEN --add-to-git-credential
-  hf download meta-llama/Llama-3.3-70B-Instruct \
-          --local-dir ./models/Llama-3.3-70B-Instruct \
-          --exclude 'original/*.pth'
-  python dataset.py
-fi
-
-# Dependency for Flux
 if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" || "$MODEL_NAME" == "Mochi-1" || "$MODEL_NAME" == "Hunyuan-video" || "$MODEL_NAME" == "Wan2_1-i2v" ]]; then
   echo "Building AMDiffusionBenchmark dependencies for $MODEL_NAME"
   cd /workspace/AMDiffusionBenchmark
@@ -103,34 +59,13 @@ if [[ "$MODEL_NAME" == "Flux" || "$MODEL_NAME" == "Stable-Diffusion-XL" || "$MOD
   make download_assets
 fi
 
-# Dependency for DLRM (Needed?)
 if [[ "$MODEL_NAME" == "DLRM" ]]; then
   echo "Building dependencies for $MODEL_NAME"
   cd /workspace/DLRMBenchmark
 fi
 
 if [[ -z "$MODEL_NAME" ]]; then
-  echo "Building dependencies for all models"
-  TORCHTITAN_DIR="/workspace/torchtitan"
-  cd $TORCHTITAN_DIR
-
-  # Download tokenizer files
-  python scripts/download_tokenizer.py --repo_id meta-llama/Llama-3.1-8B --hf_token=$HF_TOKEN
-  
-  TORCHTUNE_DIR="/workspace/torchtune"
-  cd $TORCHTUNE_DIR
-  # Llama 3.1 70B 
-  hf login --token $HF_TOKEN --add-to-git-credential
-  hf download meta-llama/Llama-3.1-70B-Instruct \
-          --local-dir ./models/Llama-3.1-70B-Instruct \
-          --exclude 'original/*.pth'
-  # Llama 3.3 70B 
-  hf login --token $HF_TOKEN --add-to-git-credential
-  hf download meta-llama/Llama-3.3-70B-Instruct \
-          --local-dir ./models/Llama-3.3-70B-Instruct \
-          --exclude 'original/*.pth'
-  python dataset.py
-
+  echo "Building dependencies for all supported models"
   cd /workspace/AMDiffusionBenchmark
   huggingface-cli login --token $HF_TOKEN --add-to-git-credential
   make download_assets

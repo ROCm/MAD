@@ -31,135 +31,27 @@ export HF_TOKEN=$MAD_SECRETS_HFTOKEN
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model_repo) MODEL_REPO="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
 done
 
 echo "=hyper params start="
 echo $MODEL_REPO
-#echo $TRAINING_MODE
-#echo $DATATYPE
-#echo $SEQUENCE_LENGTH
 echo "=hyper params end="
 
-datatypes=("BF16" "FP8")
-sequence_lengths=("8192")
+datatypes=("BF16")
+sequence_lengths=("256")
 
-# Convert from MAD repo names to standalone script names and set training tasks
-if [[ "$MODEL_REPO" == "pyt_train_llama-2-7b" ]]; then
-  model="Llama-2-7B"
-  tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-2-13b" ]]; then
-  model="Llama-2-13B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-2-70b" ]]; then
-  model="Llama-2-70B"
-  tasks=("finetune_lora" "finetune_qlora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3-8b" ]]; then
-  model="Llama-3-8B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3-70b" ]]; then
-  model="Llama-3-70B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-8b" ]]; then
-  model="Llama-3.1-8B"
-  # tasks=("pretrain" "HF_pretrain" "finetune_fw" "finetune_lora")
-  # tasks=("pretrain")
-  #tasks=("HF_pretrain")
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-70b" ]]; then
-  model="Llama-3.1-70B"
-  #datatypes=("FP8")
-  # tasks=("pretrain" "finetune_fw" "finetune_lora")
-  #tasks=("pretrain")
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.1-405b" ]]; then
-  model="Llama-3.1-405B"
-  tasks=("finetune_qlora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-1b" ]]; then
-  model="Llama-3.2-1B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-3b" ]]; then
-  model="Llama-3.2-3B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-11b" ]]; then
-  model="Llama-3.2-vision-11B"
-  tasks=("finetune_fw")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.2-vision-90b" ]]; then
-  model="Llama-3.2-vision-90B"
-  tasks=("finetune_fw")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-3.3-70b" ]]; then
-  model="Llama-3.3-70B"
-  tasks=("finetune_fw" "finetune_lora" "finetune_qlora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_llama-4-scout-17b-16e" ]]; then
-  model="Llama-4-scout-17B-16E"
-  tasks=("finetune_fw" "finetune_lora")
-  #tasks=("finetune_fw")
-
-elif [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
+if [[ "$MODEL_REPO" == "pyt_train_flux" ]]; then
   model="Flux"
   datatypes=("BF16")
-  tasks=("posttrain")  
+  tasks=("posttrain")
 
 elif [[ "$MODEL_REPO" == "pyt_train_stable-diffusion-xl" ]]; then
   model="Stable-Diffusion-XL"
   datatypes=("BF16")
   tasks=("posttrain")
-
-elif [[ "$MODEL_REPO" == "pyt_train_dlrm" ]]; then
-  model="DLRM"
-  datatypes=("TF32" "FP32")
-  tasks=("pretrain")
-
-elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_20b" ]]; then
-  model="GPT-OSS-20B"
-  datatypes=("BF16")
-  tasks=("HF_finetune_lora")  
-  
-elif [[ "$MODEL_REPO" == "pyt_train_gpt_oss_120b" ]]; then
-  model="GPT-OSS-120B"
-  datatypes=("BF16")
-  tasks=("HF_finetune_lora") 
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen2-1.5b" ]]; then
-  model="Qwen2-1.5B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen2-7b" ]]; then
-  model="Qwen2-7B"
-  tasks=("finetune_fw" "finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen2.5-32b" ]]; then
-  model="Qwen2.5-32B"
-  tasks=("finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen2.5-72b" ]]; then
-  model="Qwen2.5-72B"
-  tasks=("finetune_lora")
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen3-8b" ]]; then
-  model="Qwen3-8B"
-  #tasks=("finetune_fw" "finetune_lora")
-  datatypes=("FP8")
-  tasks=("finetune_fw")
-
-elif [[ "$MODEL_REPO" == "pyt_train_qwen3-32b" ]]; then
-  model="Qwen3-32B"
-  tasks=("finetune_lora")
 
 elif [[ "$MODEL_REPO" == "pyt_train_mochi-1" ]]; then
   model="Mochi-1"
@@ -175,6 +67,16 @@ elif [[ "$MODEL_REPO" == "pyt_train_wan2_1-i2v" ]]; then
   model="Wan2_1-i2v"
   datatypes=("BF16")
   tasks=("posttrain")
+
+elif [[ "$MODEL_REPO" == "pyt_train_dlrm" ]]; then
+  model="DLRM"
+  datatypes=("TF32" "FP32")
+  tasks=("pretrain")
+
+else
+  echo "Error: Unsupported model repo '$MODEL_REPO'."
+  echo "Supported: pyt_train_flux, pyt_train_stable-diffusion-xl, pyt_train_mochi-1, pyt_train_hunyuan-video, pyt_train_wan2_1-i2v, pyt_train_dlrm"
+  exit 1
 fi
 
 # Run pytorch setup script
@@ -183,14 +85,7 @@ bash ./pytorch_benchmark_setup.sh -m $model
 echo "Model: $model"
 # Loop through all combinations
 for task in "${tasks[@]}"; do
-  if [[ "$task" == "HF_pretrain" ]]; then
-    curr_datatypes=("FP8")
-  elif [[ "$task" == "finetune_lora" || "$task" == "finetune_qlora" ]]; then
-    curr_datatypes=("BF16")
-  else 
-    curr_datatypes=("${datatypes[@]}")
-  fi
-  for datatype in "${curr_datatypes[@]}"; do
+  for datatype in "${datatypes[@]}"; do
     for sequence_length in "${sequence_lengths[@]}"; do
       echo "Running: $task - $model - $datatype - $sequence_length"
       ./pytorch_benchmark_report.sh -t $task -m $model -p $datatype -s $sequence_length

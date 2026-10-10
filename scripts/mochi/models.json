@@ -1,0 +1,15 @@
+[
+    {
+        "name": "pyt_mochi_video_inference",
+        "dockerfile": "../../docker/pyt_mochi_inference",
+        "scripts": "run_mochi.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "inference"
+        ],
+        "args": "--model_repo genmo/mochi-1-preview --tunableop off"
+    }
+]
