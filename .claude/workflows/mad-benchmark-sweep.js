@@ -27,6 +27,13 @@ export const meta = {
 // `training_precision` in models.json, and for inference it is baked into the
 // pre-trained model/image. To compare precisions, list the distinct model tags.
 
+// Bash-single-quote an arbitrary string so it survives embedding in a shell command.
+// MAD allows Python-dict --additional-context (single quotes); a raw '${ctx}' wrap
+// breaks on those quotes and can inject shell metacharacters.
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
+}
+
 // --- tokenizer: split a CLI string respecting single/double quotes ---
 function tokenize(s) {
   const out = []
@@ -141,9 +148,9 @@ const results = await parallel(matrix.map((cell, i) => () => {
         merged = JSON.stringify(obj)
       } catch (e) { /* leave raw; n_gpus axis ignored for this cell */ }
     }
-    ctx = ` --additional-context '${merged}'`
+    ctx = ` --additional-context ${shellQuote(merged)}`
   } else if (cell.nGpus) {
-    ctx = ` --additional-context '{"n_gpus": "${cell.nGpus}"}'`
+    ctx = ` --additional-context ${shellQuote(JSON.stringify({ n_gpus: String(cell.nGpus) }))}`
   }
   const cmd = `madengine run ${flags.join(' ')}${ctx}`
 

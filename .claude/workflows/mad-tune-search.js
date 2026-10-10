@@ -32,6 +32,13 @@ export const meta = {
 // SEQUENTIAL evaluation: candidates are measured one at a time — parallel GPU runs
 // contend (corrupting deltas) and parallel run.sh/config edits race on the same files.
 
+// Bash-single-quote an arbitrary string so it survives embedding in a shell command.
+// MAD allows Python-dict --additional-context (single quotes); a raw '${ctx}' wrap
+// breaks on those quotes and can inject shell metacharacters.
+function shellQuote(s) {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'"
+}
+
 // --- tokenizer: split a CLI string respecting single/double quotes ---
 function tokenize(s) {
   const out = []
@@ -133,9 +140,11 @@ if (ctxObj && typeof ctxObj === 'object') {
   if (!profileToolName) profileToolName = 'rocm_trace_lite'
 }
 
-const cleanCtxFlag = cleanCtx ? ` --additional-context '${cleanCtx}'` : ''
-const profCtxFlag = profiledCtx ? ` --additional-context '${profiledCtx}'`
-  : ` --additional-context '{"tools": [{"name": "${profileToolName || 'rocm_trace_lite'}"}]}'`
+const cleanCtxFlag = cleanCtx ? ` --additional-context ${shellQuote(cleanCtx)}` : ''
+const profiledPayload = profiledCtx
+  ? profiledCtx
+  : JSON.stringify({ tools: [{ name: profileToolName || 'rocm_trace_lite' }] })
+const profCtxFlag = ` --additional-context ${shellQuote(profiledPayload)}`
 
 if (cfg._extraTags && cfg._extraTags.length)
   log(`Note: mad-tune-search tunes ONE model. Using "${tag}"; ignoring extra tags [${cfg._extraTags.join(', ')}]. Use mad-benchmark-sweep to compare multiple models.`)

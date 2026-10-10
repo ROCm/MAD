@@ -8,7 +8,7 @@ agent: mad-model-author
 allowed-tools: Bash(madengine discover *) Bash(python3 -m json.tool *) Bash(python3 *) Bash(bash *) Read Write Edit Grep Glob
 ---
 
-Add a new model to MAD named `$ARGUMENTS`. Extra context: $ARGUMENTS
+Add a new model to MAD. Full arguments: `$ARGUMENTS`
 
 ## Pre-flight
 ```!
@@ -16,8 +16,10 @@ bash ${CLAUDE_SKILL_DIR}/../mad-common/preflight.sh
 ```
 
 ## Task
-The model name is the first token of `$ARGUMENTS` (e.g. `pyt_vllm_qwen3-8b`). Use
-`$ARGUMENTS` where the full model name is needed — do not split on spaces.
+The model name is the first whitespace-delimited token of `$ARGUMENTS`
+(e.g. `pyt_vllm_qwen3-8b`). Call that token the model name. Any text after it
+is optional notes or a repo URL and must not appear in file paths, tags, or
+commands.
 
 1. Pick the CLOSEST existing model of the same framework (vLLM, PyTorch/Primus, JAX
    MaxText, xDiT, SGLang, Megatron, HuggingFace, ...) as a template — read its
@@ -27,7 +29,7 @@ The model name is the first token of `$ARGUMENTS` (e.g. `pyt_vllm_qwen3-8b`). Us
    a. A `models.json` entry. Required: `name`, `url`, `dockerfile`, `scripts`,
       `n_gpus`, `owner`, `training_precision`, `tags`. Name = `{framework}_{project}_{workload}`.
       Keep `models.json` valid JSON.
-   b. `docker/$ARGUMENTS.ubuntu.amd.Dockerfile` whose first line is exactly
+   b. `docker/<model-name>.ubuntu.amd.Dockerfile` whose first line is exactly
       `# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}`. Prefer pointing the
       `dockerfile` field at an existing same-stack Dockerfile over a near-duplicate.
    c. `scripts/<dir>/run.sh` satisfying ONE output contract:
@@ -36,10 +38,10 @@ The model name is the first token of `$ARGUMENTS` (e.g. `pyt_vllm_qwen3-8b`). Us
       - multiple results: have the script WRITE its own CSV and set
         `"multiple_results": "<that-file>.csv"` in the entry. Never mix the two.
 3. Validate: `python3 -m json.tool models.json` parses.
-4. Confirm selectable (GPU-free): `madengine discover --tags $ARGUMENTS` lists it.
+4. Confirm selectable (GPU-free): `madengine discover --tags <model-name>` lists it.
 5. Validate statically (GPU-free lint):
-   `python3 .claude/skills/mad-validate/scripts/validate.py "$ARGUMENTS"`
+   `python3 .claude/skills/mad-validate/scripts/validate.py "<model-name>"`
 
 Do NOT run `madengine run` (needs GPUs). Report the three file paths created and the
 chosen template, then state the verification command for a GPU host:
-`madengine run --tags $ARGUMENTS --live-output`.
+`madengine run --tags <model-name> --live-output`.

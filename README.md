@@ -159,7 +159,7 @@ madengine run --tags model_name --clean-docker-cache
 
 ## Claude Code Integration
 
-MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code) that cover the four most common tasks. See `CLAUDE.md` for full context and conventions.
+MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code) that cover benchmarking, profiling, tuning, adding models, reporting, and validation. See `CLAUDE.md` for full context and conventions.
 
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|

@@ -21,7 +21,18 @@ try:
 except Exception:
     pass  # fall back to cwd; works when already at repo root
 
-models = json.load(open("models.json"))
+try:
+    with open("models.json") as f:
+        models = json.load(f)
+except FileNotFoundError:
+    print("ERROR: models.json not found. Run from the MAD repo root.", file=sys.stderr)
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    print(f"ERROR: models.json is not valid JSON: {e}", file=sys.stderr)
+    sys.exit(1)
+if not isinstance(models, list):
+    print("ERROR: models.json must be a JSON array of model entries.", file=sys.stderr)
+    sys.exit(1)
 
 
 def selected(m):
