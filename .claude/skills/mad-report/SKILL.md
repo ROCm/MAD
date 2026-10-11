@@ -23,3 +23,9 @@ regression / overall pass rate), then a compact table.
 
 To generate the HTML dashboard instead:
 `madengine report to-html --csv-file-path <perf.csv>` (verify flags with `--help`).
+
+Operator and kernel reports live in `tracelens_output/tracelens_summary.json`.
+Summarize that file when the user asks about a TraceLens report. Diff two
+operator workbooks with
+`madengine report tracelens-compare <before> <after> --names before --names after`.
+A profiled `perf.csv` row is not a clean score.

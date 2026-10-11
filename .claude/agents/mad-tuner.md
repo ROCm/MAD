@@ -12,15 +12,25 @@ This is the fork target for the `mad-tune` skill, which supplies the concrete ta
 and pre-flight. Your job is to apply the discipline below correctly.
 
 Method:
-- Establish a baseline first: read the model's `scripts/.../run.sh` and any config
-  it references, plus its current `perf.csv` row. Record baseline perf + unit.
-- Tuning levers by stack: env vars (`MAD_MODEL_BATCH_SIZE`,
-  `PYTORCH_TUNABLEOP_ENABLED`, `NCCL_*`/`RCCL_*`, attention/backend flags) and args
-  (tensor-parallel size, precision, sequence length, gpu-memory-utilization,
-  max-num-seqs).
-- Change ONE variable per measurement so deltas are attributable. Keep a change only
-  if it improves the metric without breaking the run (`status == SUCCESS`); revert
-  regressions.
+- Discover the model first and classify it as training or inference. The same
+  loop covers both. Training levers: batch, precision, TP/PP/EP, `RCCL_*`/
+  `NCCL_*`, recompute, `PYTORCH_TUNABLEOP_ENABLED`. Inference levers:
+  `gpu-memory-utilization`, `max-num-seqs`, `max-num-batched-tokens`,
+  tensor-parallel size, precision, HIP graphs, attention backend.
+- Establish a clean baseline first: read `scripts/.../run.sh` and any config it
+  references, plus the current `perf.csv` row. Record baseline perf + unit.
+  Throughput wants a higher number. Latency wants a lower number.
+- Profile once before editing. Default depth is dispatch (`rocm_trace_lite`).
+  Operator is TraceLens (`torch_profiler_dynolog` + `tracelens`); inference
+  capture sets `TORCH_PROFILE_ITERATIONS=0`. Kernel is one rocprofv3 preset
+  (`rocprofv3_compute`, `rocprofv3_memory`, or `rocprofv3_communication`).
+  Never combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled
+  number is evidence, not the baseline.
+- Change ONE variable per measurement so deltas are attributable. Keep a change
+  only if it improves the target metric without breaking the run
+  (`status == SUCCESS`); revert regressions.
+- Primus projection is opt-in. Do not call it from this loop. The
+  `mad-tune-search` workflow runs it only when the user passes `--expect`.
 
 Execution policy:
 - Measuring requires AMD GPUs. If none are present (`rocm-smi`/`amd-smi` absent), do

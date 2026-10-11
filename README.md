@@ -164,13 +164,13 @@ MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|
 | `/mad-benchmark <tag>` | Manual | Build and run a madengine benchmark on AMD GPUs |
-| `/mad-profile <tag> [tool]` | Manual | Run with a profiling/tracing tool attached |
-| `/mad-tune <tag>` | Manual | Measure-change-measure tuning loop |
+| `/mad-profile <tag> [operator\|dispatch\|kernel]` | Manual | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
+| `/mad-tune <tag>` | Manual | Measure-change-measure tuning loop for training or inference |
 | `/mad-add-model <name>` | Manual | Scaffold models.json + Dockerfile + run.sh from the nearest template |
 | `/mad-report [csv]` | Auto | Summarize or compare benchmark results |
 | `/mad-validate [tag]` | Auto | GPU-free lint of models.json and file references |
 
-Larger fan-out jobs use workflows: `mad-benchmark-sweep` (parallel matrix across tags) and `mad-tune-search` (profile-informed tuning with adversarial verification).
+Larger fan-out jobs use workflows: `mad-benchmark-sweep` (parallel matrix across tags) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements). Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
 
 ## Contributing
 

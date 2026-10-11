@@ -876,7 +876,7 @@
 
       <rect x="658" y="72" width="160" height="40" rx="7" fill="#2d1f4a" stroke="#a78bfa" stroke-width="1.4" opacity="0.92"/>
       <text x="738" y="90" font-size="10" fill="#c4b5fd" text-anchor="middle" font-weight="700">mad-tune-search</text>
-      <text x="738" y="103" font-size="8" fill="#7c6bb0" text-anchor="middle">diagnose → tune</text>
+      <text x="738" y="103" font-size="8" fill="#7c6bb0" text-anchor="middle">operator → kernel</text>
 
       <!-- ── Agents (middle row, 4 agents + inline validator) ── -->
       <!-- benchmark-runner -->
@@ -975,8 +975,9 @@
     Five of the six slash commands dispatch a subagent; <code>/mad-validate</code> runs an
     <strong>inline script</strong> (no subagent, no GPU). The two workflows fan out to
     <em>multiple</em> subagent calls in parallel — <code>mad-benchmark-sweep</code> drives the
-    benchmark-runner across a tag matrix, <code>mad-tune-search</code> drives the tuner through a
-    diagnose-then-measure search — then synthesize the results. Agents that need to run madengine
+    benchmark-runner across a tag matrix, <code>mad-tune-search</code> drives the tuner through
+    operator, dispatch, and kernel profiling, then clean measurements — then synthesizes the
+    results. Agents that need to run madengine
     always check for AMD GPUs first; if none are present they produce a plan (the exact commands
     to run on a GPU host) instead of executing.
   </p>
@@ -1005,7 +1006,7 @@
     <div class="flow-row">
       <div class="flow-q">Attach a GPU profiler</div>
       <div class="flow-arrow">→</div>
-      <div class="flow-cmd">/mad-profile bert rocprofv3_compute</div>
+      <div class="flow-cmd">/mad-profile bert dispatch</div>
     </div>
     <div class="flow-row">
       <div class="flow-q">Read or compare benchmark results</div>
@@ -1205,20 +1206,20 @@ FROM $BASE_DOCKER</pre>
     </div>
     <div class="card-body">
       <p><strong>Usage</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">&lt;tag-or-model&gt;</span> [tool: rocprofv3_compute|rpd|rccl_trace|...]</pre>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">&lt;tag&gt;</span> [operator|dispatch|kernel] [tool]</pre>
 
       <p><strong>Examples</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">bert</span>
-<span class="t-cmd">/mad-profile</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">rccl_trace</span>
-<span class="t-cmd">/mad-profile</span> <span class="t-string">deepseek</span> <span class="t-string">rocprofv3_memory</span></pre>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">bert</span> <span class="t-string">dispatch</span>
+<span class="t-cmd">/mad-profile</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">operator</span>
+<span class="t-cmd">/mad-profile</span> <span class="t-string">deepseek</span> <span class="t-string">kernel</span> <span class="t-string">rocprofv3_memory</span></pre>
 
       <p><strong>What the agent does</strong></p>
       <ol>
-        <li>Picks the profiling tool (defaults to <code>rocprofv3_compute</code> if unspecified).</li>
-        <li>Builds the command with <code>--additional-context</code>:</li>
+        <li>Picks one depth. Default is <code>dispatch</code> (<code>rocm_trace_lite</code>), which covers training and inference.</li>
+        <li>Builds one madengine command. <code>rocm_trace_lite</code> and <code>rocprofv3_*</code> never share a <code>tools</code> array. Inference operator capture sets <code>TORCH_PROFILE_ITERATIONS=0</code>.</li>
       </ol>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">&lt;tag&gt;</span> <span class="t-flag">--live-output</span> \
-  <span class="t-flag">--additional-context</span> <span class="t-string">'{"tools": [{"name": "rocprofv3_compute"}]}'</span></pre>
+  <span class="t-flag">--additional-context</span> <span class="t-string">'{"tools": [{"name": "rocm_trace_lite"}]}'</span></pre>
 
       <p><strong>Available profiling tools (common subset)</strong></p>
       <div class="table-wrap">
@@ -1230,7 +1231,8 @@ FROM $BASE_DOCKER</pre>
             <tr><td><code>rocprofv3_communication</code></td><td>GPU-to-GPU communication metrics</td></tr>
             <tr><td><code>rpd</code></td><td>ROCm profiling data, timeline view</td></tr>
             <tr><td><code>rccl_trace</code></td><td>Collective communication (AllReduce, etc.)</td></tr>
-            <tr><td><code>rocm_trace_lite</code></td><td>Lightweight system trace</td></tr>
+            <tr><td><code>rocm_trace_lite</code></td><td>Dispatch timeline (any HIP training or inference run)</td></tr>
+            <tr><td><code>torch_profiler_dynolog</code> + <code>tracelens</code></td><td>Operator breakdown (PyTorch; inference uses duration capture)</td></tr>
             <tr><td><code>gpu_info_power_profiler</code></td><td>Power draw over time</td></tr>
             <tr><td><code>rocblas_trace</code> / <code>hipblaslt_trace</code></td><td>BLAS kernel calls</td></tr>
           </tbody>
@@ -1508,54 +1510,71 @@ FROM $BASE_DOCKER</pre>
           mad-tune-search
           <span class="badge badge-workflow">workflow</span>
         </div>
-        <div class="card-desc"><strong>Profiles the model to diagnose its bottleneck</strong>, then generates profiling-informed tuning candidates, measures each <strong>cleanly and sequentially</strong>, adversarially verifies deltas, and synthesizes the winning config. Accepts the same CLI-style flags as <code>/mad-benchmark</code> / <code>/mad-profile</code>.</div>
+        <div class="card-desc">Descends <strong>operator → dispatch → kernel</strong> for a training or inference model, then measures candidates <strong>cleanly and sequentially</strong>, verifies deltas, and synthesizes the winning config.</div>
       </div>
     </div>
     <div class="card-body">
       <p><strong>When to use</strong></p>
-      <p>When you want tuning driven by real profiling evidence — not guesswork — and have the workflow verify which improvements are real. The Diagnose phase classifies the workload (compute / memory / communication / launch-bound) and the proposals target that specific bottleneck.</p>
+      <p>When you want tuning driven by profiling evidence for either a training or an inference model. The search walks three madengine depths, then proposes one-lever changes at the depth that explained the bottleneck.</p>
 
       <div class="callout callout-blue">
-        <div class="callout-title">Core design — profile to diagnose, clean-run to measure</div>
+        <div class="callout-title">Core design — one profiler per run, clean runs to measure</div>
         <p>
-          Profiling plays <strong>two distinct roles</strong>. The profiler runs <strong>once</strong>
-          (Diagnose) to find <em>what</em> to tune — kernel hotspots and whether the model is compute-,
-          memory-, communication-, or launch-bound. Then it is turned <strong>off</strong> for every
-          measurement run, because tracing overhead (e.g. <code>rocm_trace_lite</code> intercepts
-          nearly all GPU ops) buries the small perf deltas tuning produces and would make the verify
-          step reject real wins. The workflow automatically splits a single
-          <code>--additional-context</code> into a <em>profiled</em> variant (keeps <code>tools</code>)
-          for Diagnose and a <em>clean</em> variant (<code>tools</code> stripped) for the baseline and
-          all candidate measurements.
+          <strong>Operator</strong> is TraceLens on a PyTorch Kineto trace
+          (<code>torch_profiler_dynolog</code> + <code>tracelens</code>). Training counts
+          <code>optimizer.step()</code>. Inference sets <code>TORCH_PROFILE_ITERATIONS=0</code>.
+          Non-PyTorch models skip this rung.
+          <strong>Dispatch</strong> is <code>rocm_trace_lite</code>, for any HIP workload.
+          <strong>Kernel</strong> is one of <code>rocprofv3_compute</code>, <code>rocprofv3_memory</code>,
+          or <code>rocprofv3_communication</code>, chosen from the dispatch class.
+          <code>rocm_trace_lite</code> and <code>rocprofv3_*</code> never share a <code>tools</code> array.
+          Baseline and candidate measurements strip <code>tools</code>, because tracing overhead
+          buries the small deltas tuning produces.
+          Primus projection is a separate opt-in (<code>--expect</code>) and stays off by default.
         </p>
       </div>
 
       <p><strong>Phases</strong></p>
       <div class="phases">
         <div class="phase-step">
-          <div class="phase-num">Phase 1</div>
+          <div class="phase-num">1</div>
           <div class="phase-name">Baseline</div>
-          <div class="phase-detail">Establish a <strong>clean</strong> baseline number (profiler off)</div>
+          <div class="phase-detail">Classify training or inference. Clean number, profiler off</div>
         </div>
         <div class="phase-step">
-          <div class="phase-num">Phase 2</div>
-          <div class="phase-name">Diagnose</div>
-          <div class="phase-detail">Profile <strong>once</strong>; read hotspots; classify the bottleneck (compute/memory/comm/launch)</div>
+          <div class="phase-num">2</div>
+          <div class="phase-name">Operator</div>
+          <div class="phase-detail">TraceLens, PyTorch only</div>
         </div>
         <div class="phase-step">
-          <div class="phase-num">Phase 3</div>
+          <div class="phase-num">3</div>
+          <div class="phase-name">Dispatch</div>
+          <div class="phase-detail"><code>rocm_trace_lite</code> timeline</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">4</div>
+          <div class="phase-name">Kernel</div>
+          <div class="phase-detail">One rocprofv3 preset</div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">5</div>
+          <div class="phase-name">Expect</div>
+          <div class="phase-detail">Primus projection, only with <code>--expect</code></div>
+        </div>
+        <div class="phase-step">
+          <div class="phase-num">6</div>
           <div class="phase-name">Propose</div>
-          <div class="phase-detail">Generate N single-lever candidates, each <strong>citing the profiling evidence</strong></div>
+          <div class="phase-detail">One lever per candidate, citing that depth</div>
         </div>
         <div class="phase-step">
-          <div class="phase-num">Phase 4</div>
+          <div class="phase-num">7</div>
           <div class="phase-name">Evaluate</div>
-          <div class="phase-detail">Measure each <strong>clean, one at a time</strong> + adversarially verify the delta inline</div>
+          <div class="phase-detail">Clean runs, one at a time, then verify</div>
         </div>
         <div class="phase-step">
-          <div class="phase-num">Phase 5</div>
+          <div class="phase-num">8</div>
           <div class="phase-name">Synthesize</div>
-          <div class="phase-detail">Pick the winning config from trustworthy results only</div>
+          <div class="phase-detail">Winning config from trustworthy results</div>
         </div>
       </div>
 
@@ -1572,28 +1591,29 @@ FROM $BASE_DOCKER</pre>
           <tbody>
             <tr><td><code>--tag NAME</code></td><td>The model to tune (<code>--tags</code> also accepted). Required.</td></tr>
             <tr><td><code>--candidates N</code></td><td>Number of single-lever candidates, 1–8 (default 4).</td></tr>
-            <tr><td><code>--target throughput|latency</code></td><td>Optimization target (default throughput).</td></tr>
-            <tr><td><code>--additional-context '{...}'</code></td><td>Split into a <em>profiled</em> variant (Diagnose) and a <em>clean</em> variant (baseline + measurements). Threaded into every command (HF token, <code>docker_env_vars</code>). A <code>tools</code> entry here sets the profiler used in Diagnose. For <code>env</code>-lever candidates the agent merges the var into the clean context's <code>docker_env_vars</code>.</td></tr>
-            <tr><td><code>--profile-tool NAME</code></td><td>Profiler for the Diagnose phase (default <code>rocm_trace_lite</code>, or taken from a <code>tools</code> entry in <code>--additional-context</code>).</td></tr>
+            <tr><td><code>--target throughput|latency</code></td><td>Optimization target (default throughput). Latency treats a lower number as better.</td></tr>
+            <tr><td><code>--depth auto|operator|dispatch|kernel</code></td><td>Default <code>auto</code> walks every applicable rung. A named depth runs that rung only.</td></tr>
+            <tr><td><code>--profile-tool NAME</code></td><td>Forces the matching rung and uses that tool. <code>rocm_trace_lite</code> → dispatch, <code>rocprofv3_*</code> → kernel, <code>torch_profiler_dynolog</code> / <code>tracelens</code> → operator.</td></tr>
+            <tr><td><code>--expect</code> / <code>--expect auto</code></td><td>Off unless passed. Asks the <code>primus-projection</code> skill for expected tokens/s on a Primus training config. Inference and other trainers skip it.</td></tr>
+            <tr><td><code>--additional-context '{...}'</code></td><td>JSON context. <code>docker_env_vars</code>, <code>slurm</code>, and <code>k8s</code> are kept. A <code>tools</code> entry is ignored; each depth builds its own. Clean measurements strip <code>tools</code>. For <code>env</code>-lever candidates the agent merges the var into <code>docker_env_vars</code>.</td></tr>
             <tr><td><code>--timeout S</code></td><td>Optional per-run timeout in seconds.</td></tr>
-            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Produce the ranked candidate plan only, no GPU. <strong>Executes by default.</strong></td></tr>
+            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Print the madengine commands and rank candidates. No GPU. <strong>Executes by default.</strong></td></tr>
           </tbody>
         </table>
       </div>
 
       <p><strong>Example invocations</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Execute (default): diagnose with rocm_trace_lite, then tune throughput clean.</span>
-<span class="t-comment"># The "tools" key drives Diagnose; it is auto-stripped for the clean measurement runs.</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--candidates</span> <span class="t-string">6</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"gpu_vendor": "AMD", "guest_os": "UBUNTU", "tools": [{"name": "rocm_trace_lite"}]}'</span>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Inference: descend operator (duration capture), dispatch, and kernel, then measure clean.</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--target</span> <span class="t-string">latency</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span>
 
-<span class="t-comment"># Pick the diagnosis profiler explicitly (e.g. memory roofline)</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--profile-tool</span> <span class="t-string">rocprofv3_memory</span>
+<span class="t-comment"># One rung only</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--depth</span> <span class="t-string">kernel</span> <span class="t-flag">--profile-tool</span> <span class="t-string">rocprofv3_memory</span>
 
-<span class="t-comment"># Plan mode — diagnose from existing trace + static config, rank candidates, no GPU run</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">bert</span> <span class="t-flag">--candidates</span> <span class="t-string">6</span> <span class="t-flag">--plan</span>
+<span class="t-comment"># Primus training, with projection numbers attached</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain</span> <span class="t-flag">--expect</span>
 
-<span class="t-comment"># Latency optimization</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--target</span> <span class="t-string">latency</span></pre>
+<span class="t-comment"># Plan mode — print commands, no GPU</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">bert</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span> <span class="t-flag">--plan</span></pre>
 
       <div class="callout callout-amber">
         <div class="callout-title">Sequential evaluation — and why</div>
@@ -1609,7 +1629,7 @@ FROM $BASE_DOCKER</pre>
       </div>
 
       <p><strong>Bottleneck → lever map (best practice)</strong></p>
-      <p>The Diagnose phase classifies the workload from kernel hotspots, which dictates the levers the proposals target:</p>
+      <p>Dispatch and kernel classify the workload, which decides the levers proposals may use. Training and inference share this table; the family only changes which of those levers exist on the model.</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Bottleneck</th><th>Profiling signal</th><th>Levers to try</th></tr></thead>

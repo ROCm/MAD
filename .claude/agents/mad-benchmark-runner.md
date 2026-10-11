@@ -17,9 +17,16 @@ Conventions (madengine v2.1.0 Typer CLI):
   before running. Confirm fuzzy intent against `models.json`.
 - Base command: `madengine run --tags <tag> --live-output`. Add `-o <path>`,
   `--timeout <s>`, or `--additional-context '{...}'` as the request implies.
-- Profiling: `--additional-context '{"tools": [{"name": "<tool>"}]}'`. The full
-  set of valid tool names is the source of truth in the madengine package at
-  `scripts/common/tools.json` (23+ tools).
+- Profiling goes through madengine, one depth per run. Never put
+  `rocm_trace_lite` and any `rocprofv3_*` name in the same `tools` array.
+  - operator: `torch_profiler_dynolog` plus `tracelens`
+    (`TRACELENS_MODE=pytorch`). Training uses `TORCH_PROFILE_ITERATIONS=5`.
+    Inference (vLLM, SGLang, serving) sets `TORCH_PROFILE_ITERATIONS=0`
+    because there is no `optimizer.step()`.
+  - dispatch: `rocm_trace_lite` only. Works for training and inference.
+  - kernel: one of `rocprofv3_compute`, `rocprofv3_memory`,
+    `rocprofv3_communication`.
+  The full tool list is `scripts/common/tools.json` in the madengine package.
 - Deploy target is inferred from the context key: `"slurm"` → SLURM,
   `"k8s"`/`"kubernetes"` → Kubernetes, neither → local Docker.
 - Build-once/run-many: `madengine build --tags <tag> [-r REGISTRY]` writes

@@ -10,20 +10,24 @@ allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash *) R
 
 Benchmark `$ARGUMENTS` with madengine.
 
+The model tag is the first whitespace-delimited token of `$ARGUMENTS`. Later
+tokens are options (output path, timeout, deploy). Use that tag token in every
+`madengine` command. Do not use `$0`.
+
 ## Pre-flight
 ```!
 bash ${CLAUDE_SKILL_DIR}/../mad-common/preflight.sh
 ```
 
 ## Task
-1. Confirm the tag matches real models via `madengine discover --tags $0`
+1. Confirm the tag matches real models via `madengine discover --tags <tag>`
    (read-only, no GPU). If the intent is fuzzy, grep `models.json` for candidates.
-2. Assemble `madengine run --tags $0 --live-output`. Add as the request implies:
+2. Assemble `madengine run --tags <tag> --live-output`. Add as the request implies:
    - `-o <path>` to keep results separately,
    - `--timeout <s>` for long training runs (default 7200),
    - profiling/deploy via `--additional-context` (a `"slurm"`/`"k8s"` key selects
      the target; neither → local Docker).
-   - Build-once/run-many split: `madengine build --tags $0 [-r REGISTRY]` writes
+   - Build-once/run-many split: `madengine build --tags <tag> [-r REGISTRY]` writes
      `build_manifest.json`, then `madengine run -m build_manifest.json` executes it.
 3. List required env vars (e.g. `export MAD_SECRETS_HFTOKEN=...` for HF models).
 4. Check for AMD GPUs (`rocm-smi`/`amd-smi`). If none are present, DO NOT run —

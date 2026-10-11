@@ -16,7 +16,8 @@ itself. Each is a `/mad-*` **skill** (`.claude/skills/`) that forks to a curated
 subagent (`.claude/agents/`); larger fan-out jobs are **workflows**
 (`.claude/workflows/`). Skills: `/mad-benchmark`, `/mad-profile`, `/mad-tune`,
 `/mad-add-model` (manual-invoke; they build/run on GPUs), and `/mad-report`,
-`/mad-validate` (read-only, auto-invocable). Shared madengine pre-flight lives in
+`/mad-validate` (read-only, auto-invocable). `/primus-projection` is manual too, and only for a Primus training tag
+(`scripts/Primus` config). `mad-tune-search` calls it when passed `--expect`. Shared madengine pre-flight lives in
 `.claude/skills/mad-common/preflight.sh`.
 
 ## The performance contract (most important convention)
@@ -105,14 +106,24 @@ inferred from which key is present:
 
 ## Profiling and tracing
 
-Add a `tools` list to `--additional-context`:
+Add a `tools` list to `--additional-context`. One depth per run. Do not put
+`rocm_trace_lite` and any `rocprofv3_*` tool in the same list.
+
+| Depth | What it answers | Tools |
+|-------|-----------------|-------|
+| operator | Which PyTorch op or module dominates | `torch_profiler_dynolog` + `tracelens` (`TRACELENS_MODE=pytorch`). Inference sets `TORCH_PROFILE_ITERATIONS=0`. |
+| dispatch | Which kernels are on the timeline | `rocm_trace_lite` |
+| kernel | Why that kernel is slow | `rocprofv3_compute`, `rocprofv3_memory`, or `rocprofv3_communication` |
 
 ```bash
-madengine run --tags <tag> --additional-context '{"tools": [{"name": "rocprofv3_compute"}]}'
+madengine run --tags <tag> --additional-context '{"tools": [{"name": "rocm_trace_lite"}]}'
 ```
 
-Common tool names: `rpd`, `rocprofv3`, `rocprofv3_compute`, `rocprofv3_memory`,
-`rocprofv3_communication`, `rocm_trace_lite`, `rccl_trace`, `gpu_info_power_profiler`.
+The same three depths cover training and inference. `/mad-profile` selects one.
+`mad-tune-search` descends operator → dispatch → kernel, then measures clean
+runs. Primus projection runs only when that workflow is passed `--expect`.
+
+Other tool names: `rpd`, `rocprofv3`, `rccl_trace`, `gpu_info_power_profiler`.
 Pre-built profiling context files live in the madengine package's
 `examples/profiling-configs/`.
 
