@@ -13,7 +13,7 @@ Profile `$ARGUMENTS`.
 The model tag is the first whitespace-delimited token of `$ARGUMENTS`. The next
 token, when it is `operator`, `dispatch`, or `kernel`, selects the depth.
 Anything after that is an explicit madengine tool name. Use the tag token in
-every `madengine` command. Do not use `$0`.
+every `madengine` command.
 
 ## Pre-flight
 ```!

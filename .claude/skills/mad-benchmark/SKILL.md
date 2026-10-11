@@ -12,7 +12,7 @@ Benchmark `$ARGUMENTS` with madengine.
 
 The model tag is the first whitespace-delimited token of `$ARGUMENTS`. Later
 tokens are options (output path, timeout, deploy). Use that tag token in every
-`madengine` command. Do not use `$0`.
+`madengine` command.
 
 ## Pre-flight
 ```!

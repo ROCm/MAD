@@ -459,7 +459,7 @@ Use the deepest rung that actually returned evidence. Cite that evidence on ever
 - Dispatch launch-bound: HIP graphs, fewer syncs, larger batch.
 - Kernel evidence: PYTORCH_TUNABLEOP_ENABLED, hipBLASLt, or the kernel flag the counters implicate.
 - Training parallelism (TP/PP/EP, RCCL_*) only when dispatch or the kernel preset shows collectives.
-- When Expect source is "projection" and recommended is set, prefer candidates from that config, best projected tokens/s first, and drop a config Projection says will not fit. Still change ONE lever per candidate.
+- When Expect source is "projection" and recommended is set, prefer candidates from that config, best projected tokens/s first, and drop a config Projection says will not fit. Read the optimization tables in scripts/Primus/skills/primus-projection/SKILL.md and propose only a lever that file lists and this config supports. Still change ONE lever per candidate.
 Each candidate returns id, change, hypothesis, evidence, depth (operator|dispatch|kernel|expect), leverKind (env|arg|config|other).`,
   { phase: 'Propose', schema: CANDS_SCHEMA }
 )
