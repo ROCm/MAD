@@ -1,0 +1,19 @@
+[
+    {
+        "name": "pyt_hy_video",
+        "dockerfile": "../../docker/pyt_hy_video",
+        "scripts": "run_720p.sh",
+        "url": "",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_pyt_hy_video.csv",
+        "tags": [
+            "pyt",
+            "inference",
+            "video"
+        ],
+        "timeout": -1,
+        "args": "--model_repo microsoft/phi-4 --test_option latency --num_gpu 1 --datatype float16"
+    }
+]

@@ -19,7 +19,7 @@ RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/vllm_disagg.sh"
 
 # cleanup any stale container/ports on this node
 docker rm -f "$DOCKER_CONT_NAME" 2>/dev/null || true
-fuser -k 5000/tcp 2>/dev/null || true
+fuser -k "${BARRIER_PORT:-5000}/tcp" 2>/dev/null || true
 fuser -k 2222/tcp 2>/dev/null || true
 fuser -k 15000/tcp 2>/dev/null || true
 fuser -k 30000/tcp 2>/dev/null || true

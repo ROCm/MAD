@@ -38,8 +38,9 @@
 # 8 * 9216 / 31.297 s = 2355.8 vs 2356.21 reported). MAD's usual 1024/1024 would
 # produce numbers that cannot be compared against the tracking issue.
 #
-# max_concurrency mirrors the issue's rows exactly (2/4/8/16/32), so each variant
-# expands into the same five measurements the tables report.
+# max_concurrency is the shared K3 sweep used for vLLM/SGLang/ATOM as well
+# (1/4/8/16/32/64/128/256). It is a superset of the issue's rows except for
+# concurrency 2, so 4/8/16/32 remain directly comparable to the tables.
 #
 # --disable-radix-cache comes from the recipe itself, not from MAD benchmark
 # hygiene, and so is spelled out in extra_args rather than forced by the runner.
@@ -56,7 +57,7 @@
   inp: 8192
   out: 1024
   dtype: bfloat16
-  max_concurrency: 2 4 8 16 32
+  max_concurrency: 1 4 8 16 32 64 128 256
   env: &k3_env
     SGLANG_USE_AITER: 1
     SGLANG_AITER_K3_OPT: 1
@@ -82,7 +83,7 @@
   inp: 8192
   out: 1024
   dtype: bfloat16
-  max_concurrency: 2 4 8 16 32
+  max_concurrency: 1 4 8 16 32 64 128 256
   env: *k3_env
   extra_args:
     <<: *k3_extra_args

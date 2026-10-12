@@ -1,0 +1,20 @@
+# Reusable HF (weka) workload preset: the canonical InferenceX AgentX-MVP
+# corpus, 256k-capped. Reference it from agentic.yaml with `preset: inferencex_256k`.
+# A source=hf preset bundles the loader + Tier 1 replay knobs (+ optional Tier 2
+# local filter) and may carry its own run knobs (concurrency sweep / duration).
+# Entry fields override these; env (AGENTIC_CONC/DURATION/MAX_MODEL_LEN) still wins.
+source: hf
+loader: semianalysis_cc_traces_weka_062126_256k   # -> ISL tail 262144 for context gating
+
+# Bundled run knobs (preset-level; an entry's concurrency/duration override these).
+concurrency: [2, 4, 8]
+duration: 900
+
+# Tier 1 replay knobs (per-workload; defaults match today's hardcoded behavior).
+num_dataset_entries: 393              # how many trace sessions to pull
+trajectory: { min: 0.25, max: 0.75 } # start-window ratio for captured traces
+
+# Tier 2 (optional): trim the downloaded corpus locally to fit a smaller model.
+# Uncomment to drop sessions with any turn over max_isl, truncate to max_turns,
+# and/or randomly sample down (seed=42). Omit for the full --public-dataset path.
+# filter: { max_isl: 200000, max_turns: 40, sample: 100 }

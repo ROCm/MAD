@@ -5,11 +5,10 @@
 # Kimi-K3 MXFP4 (gfx950 / MI355)
 - model: moonshotai/Kimi-K3
   extra_args:
-    --kv_cache_dtype: fp8
     --trust-remote-code: true
     --max-model-len: 16384
     --max-num-seqs: 64
-    --max-num-batched-tokens: 16384
+    --max-num-batched-tokens: 10240
     --gpu-memory-utilization: 0.93
     --block-size: 128
     --no-enable_prefix_caching: true
@@ -23,3 +22,5 @@
     ATOM_USE_TRITON_MOE: '0'
     AITER_FLYDSL_FORCE: '1'
     AITER_FORCE_GFX1250: '0'
+    ATOM_USE_UNIFIED_ATTN: '1'
+    ATOM_FORCE_ATTN_TRITON: '1'

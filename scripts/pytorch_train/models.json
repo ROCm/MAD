@@ -1,0 +1,99 @@
+[
+    {
+        "name": "pyt_train_flux",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Flux.csv",
+        "tags": [
+            "pyt",
+            "training"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_flux"
+    },
+    {
+        "name": "pyt_train_stable-diffusion-xl",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Stable-Diffusion-XL.csv",
+        "tags": [
+            "pyt"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_stable-diffusion-xl"
+    },
+    {
+        "name": "pyt_train_dlrm",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DLRM.csv",
+        "tags": [
+            "pyt"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_dlrm"
+    },
+    {
+        "name": "pyt_train_mochi-1",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Mochi-1.csv",
+        "tags": [
+            "pyt"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_mochi-1"
+    },
+    {
+        "name": "pyt_train_hunyuan-video",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Hunyuan-video.csv",
+        "tags": [
+            "pyt"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_hunyuan-video"
+    },
+    {
+        "name": "pyt_train_wan2_1-i2v",
+        "dockerfile": "../../docker/pytorch_train",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Wan2_1-i2v.csv",
+        "tags": [
+            "pyt"
+        ],
+        "timeout": -1,
+        "args": "--model_repo pyt_train_wan2_1-i2v"
+    }
+]

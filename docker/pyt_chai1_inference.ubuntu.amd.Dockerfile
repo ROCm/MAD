@@ -39,11 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    python3 -m pip install --upgrade pip
+    python3 -m pip install --no-cache-dir --upgrade "pip>=26.0,<26.2"  # This version is required for chai_lab installation
 
 # numpy is reinstalled because of pandas compatibility issues, remove the lines below once base image moves to numpy>1.20.3
 RUN pip3 install -U numpy
 RUN pip3 install -U scipy
+RUN pip3 install filelock requests #  predict_structure.py imports & runs
 
 # Install pip-tools to compile the requirements.in file into requirements.txt
 RUN pip install pip-tools
