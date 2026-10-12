@@ -33,6 +33,18 @@ Step Time : 0.79s GPU utilization: 62.4MODEL_TFLOP/s/GPU
 Step Time : 0.79s GPU utilization: 2254.7MODEL_TFLOP/s/GPU
 """
 
+# megatron_bridge pretrain (mamba_130M): no tokens/s/GPU, no dotted args dump.
+# seq_length is the YAML dump; world_size comes from Primus env. Last-iter
+# elapsed is the steady-state number (iter 1 is warmup).
+BRIDGE_PRETRAIN_NO_PRINTED_TPS = """\
+[Primus:Env] rank=0, world_size=8, local_rank=0, master=localhost:1234
+  seq_length: 2048
+ThroughputAverageExtension initialized with seq_len: 2048 world_size: None
+iteration        1/       3 | elapsed time per iteration (ms): 50652.0 | global batch size:    32 | lm loss: 1.097315E+01
+iteration        2/       3 | elapsed time per iteration (ms): 104.6 | global batch size:    32 | lm loss: 1.097168E+01
+iteration        3/       3 | elapsed time per iteration (ms): 88.2 | global batch size:    32 | lm loss: 7.715407E+00
+"""
+
 TORCHTITAN_LINE = """\
 step: 50  loss: 1.2  memory: 10GiB tps: 1,444  tflops: 300.32  mfu: 23.10%
 """
@@ -54,6 +66,15 @@ def test_bridge_unenriched_computes_tps() -> None:
         assert metrics["tflops"] == "123.4"
 
 
+def test_log_world_size_overrides_cli_fallback() -> None:
+    # Multi-node: run.sh passes the local GPU count (8); the log reports the global 16.
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _write(Path(tmp), BRIDGE_UNENRICHED.replace("world_size ................................ 8", "world_size ................................ 16"))
+        metrics = _mod.extract_metrics(str(log), num_gpus=8)
+        expected = 8192 * 32 / (450.2 / 1000.0) / 16
+        assert abs(float(metrics["tps"]) - expected) < 0.15
+
+
 def test_bridge_uses_cli_overrides_when_args_missing() -> None:
     line = (
         "iteration 10/200 | elapsed time per iteration (ms): 200.0 | "
@@ -63,6 +84,15 @@ def test_bridge_uses_cli_overrides_when_args_missing() -> None:
         log = _write(Path(tmp), line)
         metrics = _mod.extract_metrics(str(log), seq_length=4096, num_gpus=8)
         expected = 4096 * 16 / 0.2 / 8
+        assert abs(float(metrics["tps"]) - expected) < 0.15
+
+
+def test_bridge_pretrain_derives_tps_from_env_world_size() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        log = _write(Path(tmp), BRIDGE_PRETRAIN_NO_PRINTED_TPS)
+        metrics = _mod.extract_metrics(str(log))
+        expected = 2048 * 32 / (88.2 / 1000.0) / 8
+        assert metrics.get("tps") is not None, "expected derived TPS, got None"
         assert abs(float(metrics["tps"]) - expected) < 0.15
 
 
@@ -122,6 +152,7 @@ def test_cli_writes_csv() -> None:
 if __name__ == "__main__":
     test_bridge_unenriched_computes_tps()
     test_bridge_uses_cli_overrides_when_args_missing()
+    test_bridge_pretrain_derives_tps_from_env_world_size()
     test_printed_megatron_tps_not_overridden()
     test_bridge_model_tflop_line_fills_tflops()
     test_printed_tflops_wins_over_model_tflop_line()

@@ -1,43 +1,41 @@
 #!/usr/bin/env bash
 # Wrapper for Primus training when run via madengine (local, SLURM, or K8s).
-# Sets EXP from PRIMUS_CONFIG_PATH or --config_path, reads BACKEND and the suite
-# (pretrain/posttrain) from the config, applies the architecture-specific performance env
-# that the primus-cli launchers would have loaded, then runs Primus:
-# examples/run_pretrain.sh for pretrain, runner/primus-cli for posttrain (SFT/LoRA).
-# For HF-backed configs set HF_TOKEN
-# or MAD_SECRETS_HFTOKEN (e.g. via additional_context.docker_env_vars in madengine v2).
+# Sets EXP from PRIMUS_CONFIG_PATH or --config_path, reads the suite
+# (pretrain/posttrain) from the config, maps MAD GPU context to PRIMUS_GPU_MODEL
+# so primus-cli loads runner/helpers/envs/<GPU_MODEL>.sh, then runs:
+#   primus-cli direct -- train <suite> --config "$EXP"
+# Performance env and per-config YAML env: are owned by Primus (not copied here).
+# For HF-backed configs set HF_TOKEN or MAD_SECRETS_HFTOKEN
+# (e.g. via additional_context.docker_env_vars in madengine v2).
 # Primus root: set PRIMUS_ROOT to override; else auto-detect.
-# After training, extracts tps/tflops/mfu from log and writes primus_perf_output.csv for madengine multiple_results.
+# After training, extracts tps/tflops/mfu from log and writes primus_perf_output.csv
+# for madengine multiple_results.
 set -e
 
 # run_directory when invoked by madengine (cd run_directory && bash run.sh ...); used for output CSV
 RUN_DIR="$(pwd)"
 
-# Primus root resolution (local bind-mount, K8s ConfigMap extract, image ENV, legacy paths):
-# 1) Repo submodule scripts/Primus (sibling of scripts/primus_train)
-# 2) /workspace/Primus — Dockerfile COPY and madengine K8s init (keys Primus/examples/…)
-# 3) PRIMUS_ROOT from environment (image default)
-# 4) Legacy /opt/primus images
+# Primus root resolution (local bind-mount, K8s ConfigMap extract, image ENV, legacy paths).
+# v26.6 ships runner/primus-cli; v26.7+ (Primus #999) ships primus-cli at the repo root.
 script_dir="$(cd "$(dirname "$0")" && pwd)"
-if [[ -f "$script_dir/../Primus/examples/run_pretrain.sh" ]]; then
+if [[ -f "$script_dir/../Primus/runner/primus-cli" || -f "$script_dir/../Primus/primus-cli" ]]; then
   export PRIMUS_ROOT="$(cd "$script_dir/../Primus" && pwd)"
-elif [[ -f "/workspace/Primus/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/workspace/Primus/runner/primus-cli" || -f "/workspace/Primus/primus-cli" ]]; then
   export PRIMUS_ROOT="/workspace/Primus"
 elif [[ -n "${PRIMUS_ROOT:-}" ]]; then
   :
-elif [[ -f "/opt/primus/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/opt/primus/runner/primus-cli" || -f "/opt/primus/primus-cli" ]]; then
   export PRIMUS_ROOT="/opt/primus"
-elif [[ -f "/workspace/examples/run_pretrain.sh" ]]; then
+elif [[ -f "/workspace/runner/primus-cli" || -f "/workspace/primus-cli" ]]; then
   export PRIMUS_ROOT="/workspace"
 else
-  echo "ERROR: Could not find Primus run_pretrain.sh. Set PRIMUS_ROOT or use a repo with scripts/Primus submodule." >&2
+  echo "ERROR: Could not find Primus primus-cli. Set PRIMUS_ROOT or use a repo with scripts/Primus submodule." >&2
   exit 1
 fi
 
-# EXP (required by Primus run_pretrain.sh): prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args.
+# EXP: prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args.
 # --config_path is a wrapper-only flag that Primus' own CLI (primus/cli/main.py) does not
-# recognize, so strip it (and its value) out of forward_args, which is what actually gets
-# passed to run_pretrain.sh below instead of the raw "$@".
+# recognize, so strip it (and its value) out of forward_args.
 args=("$@")
 forward_args=()
 config_path_arg=""
@@ -60,16 +58,10 @@ else
   export EXP="examples/megatron/exp_pretrain.yaml"
 fi
 
-# BACKEND selects the runner (megatron, torchtitan, maxtext, ...) in run_pretrain.sh.
-# Primus validates it against modules.pre_trainer.framework in the EXP and aborts on
-# mismatch (examples/scripts/prepare_experiment.py), so read the framework from the config
-# rather than guessing from the directory name — that also picks up launchers added in
-# later Primus releases (maxdiffusion, nemo_automodel in v26.6) with no change here.
-# Note the directory name is not always the framework: examples/moe_package/ configs
-# declare framework: megatron.
-# pre_trainer is the usual key; SFT/post-train configs declare framework under post_trainer.
-# The same lookup yields SUITE (pretrain vs posttrain), which decides the launcher below:
-# post_trainer configs must go through `train posttrain`, not `train pretrain`.
+# Suite selects `train pretrain` vs `train posttrain`. Read framework from the
+# config rather than guessing from the directory name — examples/moe_package/
+# configs declare framework: megatron. pre_trainer is the usual key; SFT/post-train
+# configs declare framework under post_trainer.
 framework_suite="$(cd "$PRIMUS_ROOT" && python3 -c '
 import sys, yaml
 mods = (yaml.safe_load(open(sys.argv[1])) or {}).get("modules") or {}
@@ -108,77 +100,33 @@ if [[ -z "$suite" ]]; then
   esac
 fi
 
-# prepare_experiment.py compares case-insensitively, but run_pretrain.sh string-matches the
-# literals "MaxText" and "MaxDiffusion" to skip LD_LIBRARY_PATH injection and
-# HSA_NO_SCRATCH_RECLAIM for the JAX backends, so those two need exact casing.
-case "$framework" in
-  maxtext)      export BACKEND="MaxText" ;;
-  maxdiffusion) export BACKEND="MaxDiffusion" ;;
-  *)            export BACKEND="$framework" ;;
-esac
-
-# ---------------------------------------------------------------------------
-# Architecture-aware performance environment
-#
-# Primus applies these through runner/helpers/envs/ (base_env.sh + <GPU_MODEL>.sh), which
-# only the primus-cli launchers load. examples/run_pretrain.sh — the launcher used for the
-# pretrain suite below — is a thinner entrypoint that defaults some of them the other way
-# (HSA_NO_SCRATCH_RECLAIM=0, vs 1 in base_env.sh) or never sets them at all
-# (NVTE_CK_IS_V3_ATOMIC_FP32), so a MAD run and a documented standalone run were not
-# measuring the same configuration. The values below mirror the published recipes in
-# Primus docs/02-user-guide/megatron-lm-training.md and runner/helpers/envs/base_env.sh
-# (primus-cli). examples/run_pretrain.sh defaults NCCL_PXN_DISABLE to 0; primus-cli
-# defaults it to 1. If MAD leaves it unset, run_pretrain.sh keeps PXN enabled and
-# megatron pretrain (including GDN) can drop ~10–15% vs the CLI/QA path (ROCM-31034).
-# Every assignment is ${VAR:-...}-guarded, so an explicit override
-# (madengine --additional-context docker_env_vars, or the shell) still wins.
-arch="${MAD_SYSTEM_GPU_ARCHITECTURE:-}"
-gpu_name="${MAD_SYSTEM_GPU_PRODUCT_NAME:-}"
-
-# MaxText/MaxDiffusion own HSA_NO_SCRATCH_RECLAIM in their backend adapter
-# (primus/backends/maxtext/env_spec.py: gfx942 => 1, unset on gfx950); pre-setting it here
-# would override that, which is also why run_pretrain.sh skips them.
-if [[ "$BACKEND" != "MaxText" && "$BACKEND" != "MaxDiffusion" ]]; then
-  export HSA_NO_SCRATCH_RECLAIM="${HSA_NO_SCRATCH_RECLAIM:-1}"
+# GPU model for primus-env.sh
+# Map MAD GPU context to PRIMUS_GPU_MODEL so primus-cli sources
+# runner/helpers/envs/<GPU_MODEL>.sh inside Docker (rocm-smi is often missing).
+# An explicit PRIMUS_GPU_MODEL (docker_env_vars / shell) still wins.
+if [[ -z "${PRIMUS_GPU_MODEL:-}" ]]; then
+  gpu_name="${MAD_SYSTEM_GPU_PRODUCT_NAME:-}"
+  arch="${MAD_SYSTEM_GPU_ARCHITECTURE:-}"
+  case "$gpu_name" in
+    *MI325*) PRIMUS_GPU_MODEL=MI325X ;;
+    *MI355*) PRIMUS_GPU_MODEL=MI355X ;;
+    *MI350*) PRIMUS_GPU_MODEL=MI350X ;;
+    *MI300*) PRIMUS_GPU_MODEL=MI300X ;;
+    *)
+      case "$arch" in
+        gfx942*) PRIMUS_GPU_MODEL=MI300X ;;
+        gfx950*) PRIMUS_GPU_MODEL=MI355X ;;
+      esac
+      ;;
+  esac
+  [[ -n "${PRIMUS_GPU_MODEL:-}" ]] && export PRIMUS_GPU_MODEL
 fi
+# end GPU model for primus-env.sh
 
-# Match primus-cli / base_env.sh. Must be set before run_pretrain.sh, which uses
-# ${NCCL_PXN_DISABLE:-0} and would otherwise enable PXN.
-export NCCL_PXN_DISABLE="${NCCL_PXN_DISABLE:-1}"
-
-case "$arch" in
-  gfx942*)
-    # MI300X/MI325X: the documented setting for best performance on gfx942. Without fp32
-    # atomics the CK v3 backward attention kernel also produces Inf gradients there.
-    # Not needed on gfx950, which keeps the image defaults.
-    export NVTE_CK_IS_V3_ATOMIC_FP32="${NVTE_CK_IS_V3_ATOMIC_FP32:-1}"
-    export PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32="${PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32:-1}"
-    ;;
-esac
-
-# MI355X.sh sets this for gfx950 APUs. Match on arch as well as product name so
-# MI350X (same gfx950 family) and incomplete product strings still get the CLI env.
-if [[ "$gpu_name" == *MI355* || "$gpu_name" == *MI350* || "$arch" == gfx950* ]]; then
-  export RCCL_WARP_SPEED_AUTO="${RCCL_WARP_SPEED_AUTO:-0}"
-fi
-
-# MXFP4 on MI355X: Primus docs prefix NVTE_USE_CAST_TRANSPOSE_TRITON=0 on
-# primus_train/megatron_MI355X_llama3.1_8B-MXFP4-pretrain. Image / base_env.sh /
-# run_pretrain.sh default it to 1; ${VAR:-0} keeps that 1 and the Triton
-# cast-transpose kernel drops MXFP4 throughput. Force 0 for this recipe.
-exp_base="$(basename "$EXP")"
-if [[ "${exp_base^^}" == *MXFP4* ]] && \
-   [[ "$gpu_name" == *MI355* || "$gpu_name" == *MI350* || "$arch" == gfx950* || "$EXP" == *"/MI355X/"* ]]; then
-  export NVTE_USE_CAST_TRANSPOSE_TRITON=0
-fi
-
-echo "[primus_train] suite=$suite backend=$BACKEND arch=${arch:-unknown} gpu=${gpu_name:-unknown}"
-echo "[primus_train] HSA_NO_SCRATCH_RECLAIM=${HSA_NO_SCRATCH_RECLAIM:-<unset>}" \
-     "NCCL_PXN_DISABLE=${NCCL_PXN_DISABLE:-<unset>}" \
-     "NVTE_CK_IS_V3_ATOMIC_FP32=${NVTE_CK_IS_V3_ATOMIC_FP32:-<unset>}" \
-     "PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32=${PRIMUS_TURBO_ATTN_V3_ATOMIC_FP32:-<unset>}" \
-     "NVTE_USE_CAST_TRANSPOSE_TRITON=${NVTE_USE_CAST_TRANSPOSE_TRITON:-<unset>}" \
-     "RCCL_WARP_SPEED_AUTO=${RCCL_WARP_SPEED_AUTO:-<unset>}"
+echo "[primus_train] suite=$suite framework=$framework" \
+     "gpu_model=${PRIMUS_GPU_MODEL:-<unset>}" \
+     "arch=${MAD_SYSTEM_GPU_ARCHITECTURE:-unknown}" \
+     "gpu=${MAD_SYSTEM_GPU_PRODUCT_NAME:-unknown}"
 
 # HF_TOKEN for Primus prepare (HF-backed configs): use MAD_SECRETS_HFTOKEN from madengine v2
 # (set via additional_context.docker_env_vars) if HF_TOKEN not already set
@@ -189,32 +137,34 @@ elif [[ -n "${MAD_SECRETS_HFTOKEN:-}" ]]; then
 fi
 
 # Redirect Primus output/outputs to run_directory (workspace root when run via madengine).
-# No changes to Primus: we set env vars that run_pretrain.sh already honors (TRAIN_LOG, DUMP_HLO_DIR)
-# and pass --job.dump_folder so Torchtitan writes checkpoints here. output/ = logs; outputs/ = checkpoints.
+# --log_file keeps the log where the perf extractor below expects it.
 mkdir -p "$RUN_DIR/output" "$RUN_DIR/outputs"
 export TRAIN_LOG="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 export DUMP_HLO_DIR="${DUMP_HLO_DIR:-$RUN_DIR/output/xla_dump_hlo}"
 
-# Run from PRIMUS_ROOT so EXP path (e.g. examples/torchtitan/configs/...) resolves correctly.
-# Do not use exec so we can run the perf extractor after training for madengine multiple_results.
-# Pass --job.dump_folder so Torchtitan writes checkpoints to RUN_DIR/outputs (not scripts/Primus/outputs).
-# Temporarily disable -e: with it on, a non-zero exit from training would abort this script
-# immediately (via the && chain below) and skip perf extraction entirely.
+# Run from PRIMUS_ROOT so EXP path (e.g. examples/torchtitan/configs/...) resolves.
+# Do not use exec so we can run the perf extractor after training.
+# Temporarily disable -e: a non-zero exit from training would skip perf extraction.
+if [[ -f "$PRIMUS_ROOT/runner/primus-cli" ]]; then
+  PRIMUS_CLI="$PRIMUS_ROOT/runner/primus-cli"
+elif [[ -f "$PRIMUS_ROOT/primus-cli" ]]; then
+  PRIMUS_CLI="$PRIMUS_ROOT/primus-cli"
+else
+  echo "ERROR: Could not find primus-cli under $PRIMUS_ROOT." >&2
+  exit 1
+fi
 set +e
 cd "$PRIMUS_ROOT"
-if [[ "$suite" == "posttrain" ]]; then
-  # Post-training (megatron_bridge SFT/LoRA) is not reachable through run_pretrain.sh: that
-  # launcher hardcodes `train pretrain`, and its prepare step resolves to
-  # examples/<framework>/prepare.py, which does not exist for megatron_bridge — the run dies
-  # in prepare_experiment.py before training starts. The supported path is primus-cli, whose
-  # posttrain hooks (runner/helpers/hooks/train/posttrain/megatron_bridge/) install the
-  # bridge requirements and convert checkpoints first. --log_file keeps the log where the
-  # perf extractor below expects it. No --job.dump_folder: that is a Torchtitan flag.
-  bash "$PRIMUS_ROOT/runner/primus-cli" direct --log_file "$TRAIN_LOG" -- \
-    train posttrain --config "$EXP" "${forward_args[@]}"
-else
-  bash "$PRIMUS_ROOT/examples/run_pretrain.sh" "${forward_args[@]}" --job.dump_folder "$RUN_DIR/outputs"
+cli_cmd=(
+  bash "$PRIMUS_CLI" direct --log_file "$TRAIN_LOG" -- \
+    train "$suite" --config "$EXP"
+)
+# --job.dump_folder is a Torchtitan flag; other backends reject it.
+if [[ "$framework" == "torchtitan" ]]; then
+  cli_cmd+=(--job.dump_folder "$RUN_DIR/outputs")
 fi
+cli_cmd+=("${forward_args[@]}")
+"${cli_cmd[@]}"
 exitcode=$?
 set -e
 # Extract tps/tflops/mfu from training log into primus_perf_output.csv (one row: model, performance, metric, tflops, model_flops_utilization)
@@ -223,31 +173,42 @@ if [[ -f "$LOG_PATH" ]]; then
   extract_script="${script_dir}/extract_primus_perf.py"
   [[ -f "$RUN_DIR/extract_primus_perf.py" ]] && extract_script="$RUN_DIR/extract_primus_perf.py"
   extract_args=()
-  if [[ "$suite" == "posttrain" ]]; then
-    # Megatron-Bridge often omits printed TPS; the extractor can derive it from
-    # elapsed ms + global batch size when seq_length/world_size are supplied.
-    seq_length="$(cd "$PRIMUS_ROOT" && python3 -c '
-import sys, yaml
+  # Megatron-Bridge omits printed TPS on pretrain and posttrain. Derive it
+  # from elapsed ms + global batch size when seq_length/world_size are supplied.
+  # seq_length is under pre_trainer (pretrain) or post_trainer (SFT/LoRA).
+  # Values like ${PRIMUS_SEQ_LENGTH:2048} resolve to the env var or the default.
+  seq_length="$(cd "$PRIMUS_ROOT" && python3 -c '
+import os, re, sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
-ov = ((cfg.get("modules") or {}).get("post_trainer") or {}).get("overrides") or {}
-sl = ov.get("seq_length")
-print("" if sl is None else sl)
+mods = cfg.get("modules") or {}
+sl = None
+for key in ("pre_trainer", "post_trainer"):
+    ov = (mods.get(key) or {}).get("overrides") or {}
+    if "seq_length" in ov:
+        sl = ov["seq_length"]
+        break
+if sl is None:
+    raise SystemExit
+if isinstance(sl, str):
+    m = re.fullmatch(r"\$\{([^:}]+)(?::([^}]*))?\}", sl.strip())
+    if m:
+        sl = os.environ.get(m.group(1), m.group(2) or "")
+print("" if sl is None or sl == "" else sl)
 ' "$EXP" 2>/dev/null || true)"
-    vis="${HIP_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"
-    if [[ -n "$vis" ]]; then
-      num_gpus="$(awk -F',' '{print NF}' <<< "$vis")"
-    else
-      num_gpus=8
-    fi
-    [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
-    extract_args+=(--num-gpus "$num_gpus")
+  vis="${HIP_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"
+  if [[ -n "$vis" ]]; then
+    num_gpus="$(awk -F',' '{print NF}' <<< "$vis")"
+  else
+    num_gpus=8
   fi
+  [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
+  extract_args+=(--num-gpus "$num_gpus")
   set +e
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"
   extractcode=$?
   set -e
-  if [[ "$suite" == "posttrain" && "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    echo "[primus_train] posttrain log present but TPS extraction failed" >&2
+  if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
+    echo "[primus_train] training log present but TPS extraction failed" >&2
     exitcode="$extractcode"
   fi
 fi
