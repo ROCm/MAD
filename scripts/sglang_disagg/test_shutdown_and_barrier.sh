@@ -156,6 +156,30 @@ else
     bad "group not fully stopped: before=${_before} after=${_after}"
 fi
 
+echo "== a survived shutdown marks the vllm_deepep counter window untrustworthy =="
+(
+    _tmp="$(mktemp -d)"
+    eval "$(extract "$VLLM_SH" _server_gone)"
+    eval "$(extract "$VLLM_SH" _wait_gone)"
+    eval "$(extract "$VLLM_SH" _shutdown_server)"
+    eval "$(extract "$VLLM_SH" _cleanup_on_exit)"
+    _shutdown_failed=0
+    _rdma_sampler_pid=""
+    _rdma_counters_out="${_tmp}/counters.csv"
+    : > "${_rdma_counters_out}"
+    _stop_rdma_counters() { :; }
+    # A server that cannot be stopped: traffic keeps landing on the adapters, so the window the
+    # sampler closed is not this run's and the report has to withhold on it.
+    SERVER_PID=999999
+    _server_gone() { return 1; }
+    _wait_gone() { return 1; }
+    _shutdown_server() { _shutdown_failed=1; return 0; }
+    _cleanup_on_exit >/dev/null 2>&1
+    [[ -f "${_rdma_counters_out}.failed" ]] && echo "MARKED" || echo "UNMARKED"
+    rm -rf "$_tmp"
+) > /tmp/_t_marker
+check "counter file marked .failed" "$(cat /tmp/_t_marker)" "MARKED"
+
 echo
 echo "passed ${_pass}, failed ${_fail}"
 (( _fail == 0 ))

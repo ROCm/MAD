@@ -171,6 +171,80 @@ else
   MODEL_REVISION_LABEL="main"
 fi
 
+# --- measurement channels ----------------------------------------------------
+# Off by default, and deliberately: RCCL's INFO logging and the torch profiler both cost
+# throughput, so the numbers in perf_vllm_deepep.csv have to come from a run without
+# PROFILE_ENABLE. Reading the adapters' sysfs counters perturbs nothing, so RDMA_COUNTERS=1 on
+# its own measures a run whose throughput is still comparable with an unprofiled one.
+#
+# What each channel is for, and why more than one: a backend that carries its expert all-to-all
+# outside RCCL -- which is what both deepep_v2 and mori do -- is invisible to the RCCL log, so the
+# traces are the only place its kernels are named, and the adapter counters the only place its
+# bytes are counted. Any single channel would miss the thing being compared.
+PROFILE_ENABLE="${PROFILE_ENABLE:-0}"
+RDMA_COUNTERS="${RDMA_COUNTERS:-${PROFILE_ENABLE}}"
+PROFILE_DIR="${PROFILE_DIR:-${RUN_LOGS_DIR:-/run_logs}/vllm_deepep_${ALL2ALL_BACKEND}}"
+
+_rdma_sampler_pid=""
+_rdma_counters_out=""
+
+if [[ "${PROFILE_ENABLE}" == "1" ]]; then
+  mkdir -p "${PROFILE_DIR}/rccl" "${PROFILE_DIR}/traces"
+  # One file per process. The server has eight engine subprocesses and they all log; without %p
+  # they interleave into one file and every record is torn at a random point.
+  export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+  export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,GRAPH,NET,ENV,COLL}"
+  export NCCL_DEBUG_FILE="${PROFILE_DIR}/rccl/vllm.%h.%p.log"
+  # vLLM writes a trace per rank here when the profiler is started; the benchmark below is what
+  # drives it. Left unset the profiler is simply off, which is why this is inside the guard.
+  export VLLM_TORCH_PROFILER_DIR="${PROFILE_DIR}/traces"
+  echo "profiling on: RCCL logs and torch traces under ${PROFILE_DIR}"
+  echo "NOTE: throughput from a PROFILE_ENABLE=1 run is not comparable with an unprofiled one" >&2
+fi
+
+# The sampler is shared with the sglang_disagg workload rather than copied. It reads sysfs and
+# knows nothing about either engine, so one copy is correct for both; a second copy would be a
+# second place for the counter schema to drift.
+_RDMA_SAMPLER="${_RDMA_SAMPLER:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../sglang_disagg" && pwd)/rdma_counters.sh}"
+
+_start_rdma_counters() {
+  [[ "${RDMA_COUNTERS}" == "1" ]] || return 0
+  if [[ ! -x "${_RDMA_SAMPLER}" ]]; then
+    echo "RDMA_COUNTERS=1 but ${_RDMA_SAMPLER} is missing or not executable" >&2
+    return 0
+  fi
+  mkdir -p "${PROFILE_DIR}/rdma"
+  _rdma_counters_out="${PROFILE_DIR}/rdma/vllm_$(hostname -s).csv"
+  "${_RDMA_SAMPLER}" --out "${_rdma_counters_out}" \
+    --interval "${RDMA_COUNTERS_INTERVAL:-30}" &
+  _rdma_sampler_pid=$!
+  # A baseline before the server starts, or the window begins mid-run and the difference between
+  # the arms is an undercount that looks like a whole measurement.
+  local _deadline=$(( $(date +%s) + ${RDMA_COUNTERS_START_TIMEOUT_S:-60} ))
+  while (( $(date +%s) < _deadline )); do
+    [[ -s "${_rdma_counters_out}" ]] && { echo "RDMA counters: ${_rdma_counters_out}"; return 0; }
+    kill -0 "${_rdma_sampler_pid}" 2>/dev/null || break
+    sleep 0.2
+  done
+  echo "WARNING: no RDMA baseline sample before the server started; the window is a floor" >&2
+  echo "no baseline sample before the server started" \
+    > "${_rdma_counters_out}.failed" 2>/dev/null || true
+}
+
+# SIGTERM, not SIGKILL: the sampler takes one last sample on it, so the window closes where the
+# run does instead of at the second-to-last sample.
+_stop_rdma_counters() {
+  [[ -n "${_rdma_sampler_pid}" ]] || return 0
+  local _status=0
+  kill -TERM "${_rdma_sampler_pid}" 2>/dev/null || true
+  wait "${_rdma_sampler_pid}" 2>/dev/null || _status=$?
+  if (( _status != 0 )); then
+    echo "WARNING: RDMA sampler exited ${_status}; its window is incomplete" >&2
+    echo "sampler exited ${_status}" > "${_rdma_counters_out}.failed" 2>/dev/null || true
+  fi
+  _rdma_sampler_pid=""
+}
+
 # --- server -----------------------------------------------------------------
 # Refuse to start if something already answers on PORT. Otherwise a stale
 # server left by an earlier run satisfies the readiness probe below, the newly
@@ -226,8 +300,26 @@ _shutdown_server() {
     echo "server did not stop on SIG${_sig} after ${_grace}s" >&2
   done
   echo "WARNING: server ${SERVER_PID} survived SIGKILL and may still hold GPUs on $(hostname -s)" >&2
+  _shutdown_failed=1
   return 0
 }
+
+_shutdown_failed=0
+
+# Servers first and the sampler last, so the counter window covers them. A server that outlived
+# its shutdown kept putting traffic on these adapters, so the window is no longer this run's --
+# recorded through the same `.failed` marker the sampler's own failures use, which the report
+# already reads as "a floor, not a total".
+_cleanup_on_exit() {
+  _shutdown_server
+  if (( _shutdown_failed )) && [[ -n "${_rdma_counters_out}" ]]; then
+    echo "a server survived shutdown; the counter window is not this run's" \
+      > "${_rdma_counters_out}.failed" 2>/dev/null || true
+  fi
+  _stop_rdma_counters
+}
+
+_start_rdma_counters
 
 # Monitor mode for the launch alone, so the server leads its own process group. Without it the job
 # joins this script's group and `kill -- -PID` above would signal this script too.
@@ -246,7 +338,7 @@ set -m
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 set +m
-trap _shutdown_server EXIT
+trap _cleanup_on_exit EXIT
 
 echo "server pid ${SERVER_PID}, log ${SERVER_LOG}"
 

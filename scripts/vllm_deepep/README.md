@@ -178,3 +178,40 @@ backend,model,model_revision,concurrency,isl,osl,num_prompts,run,total_tok_s,med
 
 Its `model` field is the resolved model — the local path when `MODEL_PATH` is
 set, not the repo id — since that is what was actually served.
+
+## Profiling
+
+Off by default. Both switches are environment variables:
+
+| variable | default | what it turns on |
+|---|---|---|
+| `PROFILE_ENABLE` | `0` | RCCL debug logs (one file per process) and torch traces |
+| `RDMA_COUNTERS` | follows `PROFILE_ENABLE` | adapter counters sampled from sysfs |
+| `PROFILE_DIR` | `/run_logs/vllm_deepep_<backend>` | where all of it lands |
+
+`RDMA_COUNTERS=1` on its own is worth knowing about: reading sysfs perturbs nothing, so such a
+run's throughput is still comparable with an unprofiled one. `PROFILE_ENABLE=1` is not — RCCL's
+INFO logging and the torch profiler both cost throughput, so the numbers in
+`perf_vllm_deepep.csv` have to come from a run without it.
+
+More than one channel is collected because a backend that carries its expert all-to-all outside
+RCCL — which is what both `deepep_v2` and `mori` do — is invisible to the RCCL log. The traces
+are the only place its kernels are named and the adapter counters the only place its bytes are
+counted, so either channel alone would miss exactly the thing being compared.
+
+The sampler is `../sglang_disagg/rdma_counters.sh`, shared rather than copied: it reads sysfs and
+knows nothing about either engine, so a second copy would only be a second place for the counter
+schema to drift.
+
+### Not done yet: the parsing side
+
+Collection is wired; the `EngineSpec` that turns these artifacts into a report is **not written**.
+Adding one is a single module under `.claude/skills/mad-profiling/scripts/collprof/engines/` plus
+one line in its registry — nothing in `core/` changes — and the checklist is in
+`references/engines.md`.
+
+It is deliberately not written yet. That checklist opens with "read one artifact of the engine by
+hand first", and this workload targets gfx950; there is no MI350X in the cluster this was prepared
+on, so no vLLM run exists here to read. A spec whose regexes were guessed from memory would
+produce a report that parses cleanly and states things that are not true, which is worse than no
+report. Write it against the artifacts of the first real run.
