@@ -55,35 +55,33 @@ while True:
     time.sleep(20)
 PY
 
-vllm bench serve \
-    --backend openai \
-    --base-url "$MAD_LLM_D_ENDPOINT" \
+BENCH_CMD=(
+    vllm bench serve
+    --backend openai
+    --base-url "$MAD_LLM_D_ENDPOINT"
+    --model "$MAD_LLM_D_MODEL"
+    --dataset-name random
+    --random-input-len "$INPUT_LEN"
+    --random-output-len "$OUTPUT_LEN"
+    --num-prompts "$NUM_PROMPTS"
+    --max-concurrency "$MAX_CONCURRENCY"
+    --request-rate inf
+    --percentile-metrics ttft,tpot,itl,e2el
+    --seed 1
+    --save-result
+    --result-filename "$RESULT_JSON"
+)
+"${BENCH_CMD[@]}"
+
+# Same six serving rows as scripts/vllm/vllm_json_to_csv.py.
+python3 "$(dirname "$0")/llmd_bench_csv.py" \
+    --result "$RESULT_JSON" \
+    --output "$PERF_CSV" \
     --model "$MAD_LLM_D_MODEL" \
-    --dataset-name random \
-    --random-input-len "$INPUT_LEN" \
-    --random-output-len "$OUTPUT_LEN" \
+    --tensor-parallel-size "${MAD_LLM_D_TP:-1}" \
+    --input-len "$INPUT_LEN" \
+    --output-len "$OUTPUT_LEN" \
     --num-prompts "$NUM_PROMPTS" \
     --max-concurrency "$MAX_CONCURRENCY" \
-    --request-rate inf \
-    --percentile-metrics ttft,tpot,itl,e2el \
-    --seed 1 \
-    --save-result \
-    --result-filename "$RESULT_JSON"
-
-python3 - "$RESULT_JSON" "$PERF_CSV" "$MAD_LLM_D_MODEL" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-result_path, csv_name, model = sys.argv[1:]
-out = json.loads(Path(result_path).read_text())
-throughput = out.get("output_throughput", out.get("total_token_throughput"))
-print(f"performance: {throughput} tokens_per_second", flush=True)
-text = (
-    "model,performance,metric,unit\n"
-    f"{model},{throughput},throughput_gen,tok/sec\n"
-)
-# The Job copies /workspace/<csv>, the working directory, or its parent.
-for path in (Path("/workspace") / csv_name, Path(csv_name), Path("..") / csv_name):
-    path.write_text(text)
-PY
+    --dtype auto \
+    --vllm-cmd "${BENCH_CMD[*]}"
