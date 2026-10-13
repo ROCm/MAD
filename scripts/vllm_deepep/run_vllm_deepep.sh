@@ -183,6 +183,55 @@ if curl -sf "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1; then
   exit 1
 fi
 
+# _server_gone -- true only when neither the process group nor the pid still exists. The group
+# matters more than the pid here: `--data-parallel-size 8` means the server has eight engine
+# subprocesses, and those are what hold the GPUs after the parent is gone.
+_server_gone() {
+  kill -0 -- "-${SERVER_PID}" 2>/dev/null && return 1
+  kill -0 "${SERVER_PID}" 2>/dev/null && return 1
+  return 0
+}
+
+_wait_gone() {
+  local _i
+  for ((_i = 1; _i <= $1; _i++)); do
+    _server_gone && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Stop the server, and say so plainly if it did not stop.
+#
+# This replaces `trap 'kill ${SERVER_PID}'`, which was wrong in three ways: it signalled the pid
+# and not the group, so the eight engine subprocesses were never told to stop; it did not wait,
+# so this script exited and madengine tore the container down mid-teardown; and it never checked,
+# so a server left holding 8 GPUs was indistinguishable from a clean exit. On this fleet that is
+# not hypothetical -- every run of the sglang launcher on 2026-09-14 reported a server that
+# outlived its shutdown.
+#
+# Deliberately does not touch the exit status. A shutdown that happened after the last measurement
+# is not a reason to fail a run and discard its CSV; the warning is the deliverable.
+_shutdown_server() {
+  [[ -n "${SERVER_PID:-}" ]] || return 0
+  local _sig _grace
+  for _sig in INT TERM KILL; do
+    kill "-${_sig}" -- "-${SERVER_PID}" 2>/dev/null \
+      || kill "-${_sig}" "${SERVER_PID}" 2>/dev/null \
+      || return 0
+    # SIGINT gets the widest budget: it is the one vLLM unwinds its engine subprocesses on, and
+    # that unwind is what lets a profiled run flush its output.
+    [[ "${_sig}" == "INT" ]] && _grace="${SHUTDOWN_GRACE_S:-60}" || _grace=30
+    _wait_gone "${_grace}" && return 0
+    echo "server did not stop on SIG${_sig} after ${_grace}s" >&2
+  done
+  echo "WARNING: server ${SERVER_PID} survived SIGKILL and may still hold GPUs on $(hostname -s)" >&2
+  return 0
+}
+
+# Monitor mode for the launch alone, so the server leads its own process group. Without it the job
+# joins this script's group and `kill -- -PID` above would signal this script too.
+set -m
 "${VLLM}" serve "${MODEL}" \
   --host 127.0.0.1 --port "${PORT}" \
   --tensor-parallel-size 1 \
@@ -196,7 +245,8 @@ fi
   "${TRUST_REMOTE_CODE_ARGS[@]}" \
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
-trap 'kill ${SERVER_PID} 2>/dev/null || true' EXIT
+set +m
+trap _shutdown_server EXIT
 
 echo "server pid ${SERVER_PID}, log ${SERVER_LOG}"
 

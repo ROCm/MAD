@@ -488,10 +488,20 @@ _cleanup_on_exit() {
         [[ -n "$_pid" ]] && _shutdown_server "$_pid" "server ${_pid} (exit cleanup)"
     done
     _stop_rdma_counters
-    # An orderly exit is not orderly if something is still running: without this the job reports
-    # success and the counter files look like a finished measurement.
-    if (( _shutdown_failures > 0 )) && (( _status == 0 )); then
-        exit 1
+    # A surviving server is reported, not turned into a failed job. It used to flip a zero status
+    # to 1, which madengine records as Failed -- and a Failed run has no perf CSV collected, so a
+    # serving benchmark that took two hours to bring up was discarded over a shutdown that
+    # happened after the last measurement. The measurement channel is already protected without
+    # this: `_stop_rdma_counters` writes `.failed` beside the counter file on the same condition,
+    # and the report withholds every counter claim that rests on it.
+    #
+    # The marker below is written whether or not counters were on, because a server still holding
+    # GPUs is an operational problem for the next job on this node regardless of measurement.
+    if (( _shutdown_failures > 0 )); then
+        echo "[shutdown] WARNING: ${_shutdown_failures} server(s) survived shutdown on" \
+             "$(hostname -s); they may still hold GPUs. Exit status left at ${_status}." >&2
+        echo "${_shutdown_failures} server(s) survived shutdown at $(date -Is)" \
+            > "/run_logs/${SLURM_JOB_ID:-0}/shutdown_failed_NODE${NODE_RANK:-0}" 2>/dev/null || true
     fi
 }
 trap _cleanup_on_exit EXIT
@@ -773,9 +783,42 @@ _shutdown_server() {
     # Recorded here, not returned only: `return 1` was ineffective because there is no `errexit`
     # and every call site invokes this as a bare command. A counter written while servers still
     # run is not this run's window, so the failure has to outlive the call.
-    echo "[profile] WARNING: ${_label} (pid=${_pid}) survived SIGKILL" >&2
+    echo "[shutdown] WARNING: ${_label} (pid=${_pid}) survived SIGKILL" >&2
+    _group_survivors "$_pid" >&2
     _shutdown_failures=$(( _shutdown_failures + 1 ))
     return 1
+}
+
+# _group_survivors PGID -- what is still in the group, and what it is doing.
+#
+# This exists because "survived SIGKILL" was reported on every node of every run on 2026-09-14 and
+# nobody could say why. The two candidates need different fixes and the log could not tell them
+# apart: a process in uninterruptible state (D) has not received the SIGKILL yet and no amount of
+# `KILL_GRACE_S` helps -- the wait has to be on the driver's teardown -- whereas a live process in
+# S or R simply needs a longer grace. `wchan` names the kernel function it is parked in, which is
+# what distinguishes "stuck in the GPU/RDMA driver" from "stuck in our own code".
+#
+# /proc is read directly rather than through `ps`, which the serving images do not all carry.
+_group_survivors() {
+    local _pgid="$1" _stat _raw _after _pid _comm _state _ppid _pgrp _wchan _found=0
+    for _stat in /proc/[0-9]*/stat; do
+        [[ -r "$_stat" ]] || continue
+        read -r _raw < "$_stat" 2>/dev/null || continue
+        # Fields: pid (comm) state ppid pgrp ... -- comm is arbitrary text in parentheses and can
+        # itself contain spaces and ')', so everything is taken relative to its *last* ')'.
+        _pid=${_raw%% *}
+        _comm=${_raw#*(}; _comm=${_comm%)*}
+        _after=${_raw##*) }
+        read -r _state _ppid _pgrp _ <<< "$_after"
+        [[ "$_pgrp" == "$_pgid" ]] || continue
+        _wchan=""
+        [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
+        echo "[shutdown]   still in group ${_pgid}: pid=${_pid} state=${_state}" \
+             "comm=${_comm} wchan=${_wchan:-?}"
+        _found=1
+    done
+    (( _found )) || echo "[shutdown]   group ${_pgid} has no members left in /proc;" \
+                         "the liveness test disagrees with /proc, which is itself the finding"
 }
 
 # _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]
@@ -873,15 +916,49 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"
 
+    # Every log this barrier will wait on, in the order it waits. The loops below still wait in
+    # role order -- a decode is not expected to be ready before its prefill -- but each poll now
+    # checks all of these for death, not just the one it is currently blocked on. A decode that
+    # died during prefill bring-up used to go unnoticed until prefill finished and its own turn
+    # came: about an hour per failed attempt on 2026-09-14.
+    _watched_logs=()
+    if [[ "$DP_MODE" == "0" ]]; then
+        for ((_w = 0; _w < xP; _w++)); do
+            _watched_logs+=("prefill NODE${_w}|${_runlog}/prefill_NODE${_w}.log")
+        done
+        for ((_w = xP; _w <= xP + yD - 1; _w++)); do
+            _watched_logs+=("decode NODE${_w}|${_runlog}/decode_NODE${_w}.log")
+        done
+    else
+        _watched_logs+=("master prefill|${_runlog}/prefill_NODE0.log")
+        _watched_logs+=("master decode|${_runlog}/decode_NODE${xP}.log")
+    fi
+
+    # _any_watched_died -- true when any watched server's log says it will never become ready.
+    # Names the casualty in `_died_label`/`_died_log` so the caller reports the server that
+    # actually died rather than the one it happened to be waiting on.
+    _any_watched_died() {
+        local _entry _label _file
+        for _entry in "${_watched_logs[@]}"; do
+            IFS='|' read -r _label _file <<< "$_entry"
+            if _log_is_this_attempt "$_file" && _server_died "$_file"; then
+                _died_label="$_label"
+                _died_log="$_file"
+                return 0
+            fi
+        done
+        return 1
+    }
+
     if [[ "$DP_MODE" == "0" ]]; then
         echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
         for ((i = 0; i < xP; i++)); do
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: prefill NODE${i} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
@@ -898,9 +975,9 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: decode NODE${i} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
@@ -921,9 +998,9 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: ${_log_label} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
