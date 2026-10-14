@@ -187,12 +187,16 @@ Off by default. Both switches are environment variables:
 |---|---|---|
 | `PROFILE_ENABLE` | `0` | RCCL debug logs (one file per process) and torch traces |
 | `RDMA_COUNTERS` | follows `PROFILE_ENABLE` | adapter counters sampled from sysfs |
-| `PROFILE_DIR` | `./profile_<backend>` | where all of it lands |
+| `PROFILE_DIR` | `/run_logs/vllm_deepep_<backend>` | where all of it lands |
 
-The default is under the working directory rather than `/run_logs`, which this workload does not
-mount — unlike `sglang_disagg`, whose manifest binds one. Artifacts written to an unmounted path
-would land in the container's writable layer and disappear with it, while the run still reported
-them as collected.
+**Bind a host directory onto `/run_logs` before turning either on.** The staged model directory is
+deleted after the run unless `--keep-model-dir` is given, and an unbound path lives only in the
+container's writable layer, so artifacts written to either are gone before anyone reads them. The
+script says so at startup rather than letting the run report a profile it cannot produce.
+
+The model cards bind `/sys/devices` read-only. `--device=/dev/infiniband` is not enough for the
+counter channel: the entries under `/sys/class/infiniband` are symlinks into `/sys/devices`, so
+without it the sampler reads dangling links and finds nothing.
 
 `RDMA_COUNTERS=1` on its own is worth knowing about: reading sysfs perturbs nothing, so such a
 run's throughput is still comparable with an unprofiled one. `PROFILE_ENABLE=1` is not — RCCL's

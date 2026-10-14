@@ -48,7 +48,7 @@ chmod +x "${T}/stub_vllm"
 
 run_script() {
     ( cd "${T}/run_directory" && \
-      PROFILE_ENABLE="$1" RDMA_COUNTERS="$2" \
+      PROFILE_ENABLE="$1" RDMA_COUNTERS="$2" PROFILE_DIR="${T}/profile" \
       RDMA_COUNTERS_INTERVAL=1 RDMA_COUNTERS_START_TIMEOUT_S=15 \
       MODEL_PATH="${T}/model" VLLM="${T}/stub_vllm" PORT="$3" \
       timeout 200 bash ./run_vllm_deepep.sh 2>&1 )
@@ -63,23 +63,28 @@ case "$out" in
     *) bad "never reached the launch: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')" ;;
 esac
 
-echo "== artifacts land under the working directory, not /run_logs =="
+echo "== artifacts go where PROFILE_DIR says =="
 out="$(run_script 1 1 18093)"
 # compgen, not `[[ -d ... ]]`: bash does not expand a glob in the operand of -d, so that test
 # asks about a directory literally named with an asterisk and always fails.
-if compgen -G "${T}/run_directory/profile_*/rdma" > /dev/null 2>&1; then
-    ok "profile directory created beside the run"
+if compgen -G "${T}/profile/rdma" > /dev/null 2>&1; then
+    ok "profile directory created where asked"
 else
-    bad "no profile directory under the run directory"
-fi
-if compgen -G "/run_logs/vllm_deepep_*" > /dev/null 2>&1; then
-    bad "wrote to /run_logs, which this workload does not mount"
-else
-    ok "nothing written to /run_logs"
+    bad "PROFILE_DIR was not honoured"
 fi
 
+echo "== a destination that will not survive the run is called out =="
+# The staged model directory is deleted after the run unless --keep-model-dir is given, and an
+# unbound path lives only in the container's writable layer. Either way the run would otherwise
+# report artifacts it cannot produce. ${T} here is on a real filesystem but not a mount point,
+# which is the same shape as an unbound path in the container.
+case "$out" in
+    *"is not a mount point in this container"*) ok "warned that the destination is not persistent" ;;
+    *) bad "collected into a non-persistent path without saying so" ;;
+esac
+
 echo "== the counter channel reports what actually happened =="
-csv="$(ls "${T}/run_directory"/profile_*/rdma/*.csv 2>/dev/null | head -1)"
+csv="$(ls "${T}/profile"/rdma/*.csv 2>/dev/null | head -1)"
 if [[ -d /sys/class/infiniband ]] && compgen -G "/sys/class/infiniband/*" > /dev/null 2>&1; then
     rows="$(wc -l < "${csv}" 2>/dev/null || echo 0)"
     devices="$(awk -F, 'NR>1{print $3}' "${csv}" 2>/dev/null | sort -u | wc -l)"

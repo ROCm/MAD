@@ -183,14 +183,31 @@ fi
 # bytes are counted. Any single channel would miss the thing being compared.
 PROFILE_ENABLE="${PROFILE_ENABLE:-0}"
 RDMA_COUNTERS="${RDMA_COUNTERS:-${PROFILE_ENABLE}}"
-# Default under the working directory, not /run_logs. This workload mounts no /run_logs -- unlike
-# sglang_disagg, whose manifest binds one -- so artifacts written there would land in the
-# container's writable layer and disappear with it, while the run still reported them as collected.
-# The working directory is inside the bind-mounted workspace, so it outlives the container.
-PROFILE_DIR="${PROFILE_DIR:-${PWD}/profile_${ALL2ALL_BACKEND}}"
+# Artifacts must go somewhere bound to the host. The staged model directory is not: the runner
+# deletes it after the run unless --keep-model-dir or --keep-alive is given (tools/run_models.py),
+# so a profile written beside the script is gone before anyone can read it. /run_logs is the
+# convention sglang_disagg already uses and what a measurement manifest binds.
+PROFILE_DIR="${PROFILE_DIR:-/run_logs/vllm_deepep_${ALL2ALL_BACKEND}}"
 
 _rdma_sampler_pid=""
 _rdma_counters_out=""
+
+# A profile nobody can read afterwards is worse than no profile, because the run reports it as
+# collected. Said once, loudly, rather than discovered when the directory is already gone.
+_warn_if_not_persistent() {
+    [[ "${PROFILE_ENABLE}" == "1" || "${RDMA_COUNTERS}" == "1" ]] || return 0
+    # Leading slash stripped first: `${x%%/*}` on a path that already starts with / yields the
+    # empty string, which made this ask about "/" and never warn about anything.
+    local _rest="${PROFILE_DIR#/}" _root
+    _root="/${_rest%%/*}"
+    if ! grep -qE "[[:space:]]${_root}[[:space:]]" /proc/mounts 2>/dev/null; then
+        echo "WARNING: ${_root} is not a mount point in this container, so anything written to" \
+             "${PROFILE_DIR} stays in the container's writable layer and is lost when it exits." >&2
+        echo "WARNING: bind a host directory onto ${_root}, or point PROFILE_DIR at one that is" \
+             "bound. Collecting anyway, so a local run still works." >&2
+    fi
+}
+_warn_if_not_persistent
 
 if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   mkdir -p "${PROFILE_DIR}/rccl" "${PROFILE_DIR}/traces"
@@ -258,7 +275,14 @@ _start_rdma_counters() {
       fi
       return 0
     fi
-    [[ -s "${_rdma_counters_out}" ]] && { echo "RDMA counters: ${_rdma_counters_out}"; return 0; }
+    # A data row, not merely a non-empty file. The sampler writes its header before it knows
+    # whether there is anything to sample, so "non-empty" is satisfied by a run that is about to
+    # exit having found no adapters -- and whichever of the two the loop noticed first decided
+    # what this reported.
+    if (( $(wc -l < "${_rdma_counters_out}" 2>/dev/null || echo 0) > 1 )); then
+        echo "RDMA counters: ${_rdma_counters_out}"
+        return 0
+    fi
     sleep 0.2
   done
   # Marked, not merely warned about: left unmarked the sampler keeps running and the report sees
