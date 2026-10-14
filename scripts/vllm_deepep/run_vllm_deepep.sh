@@ -183,7 +183,11 @@ fi
 # bytes are counted. Any single channel would miss the thing being compared.
 PROFILE_ENABLE="${PROFILE_ENABLE:-0}"
 RDMA_COUNTERS="${RDMA_COUNTERS:-${PROFILE_ENABLE}}"
-PROFILE_DIR="${PROFILE_DIR:-${RUN_LOGS_DIR:-/run_logs}/vllm_deepep_${ALL2ALL_BACKEND}}"
+# Default under the working directory, not /run_logs. This workload mounts no /run_logs -- unlike
+# sglang_disagg, whose manifest binds one -- so artifacts written there would land in the
+# container's writable layer and disappear with it, while the run still reported them as collected.
+# The working directory is inside the bind-mounted workspace, so it outlives the container.
+PROFILE_DIR="${PROFILE_DIR:-${PWD}/profile_${ALL2ALL_BACKEND}}"
 
 _rdma_sampler_pid=""
 _rdma_counters_out=""
@@ -202,30 +206,63 @@ if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   echo "NOTE: throughput from a PROFILE_ENABLE=1 run is not comparable with an unprofiled one" >&2
 fi
 
-# The sampler is shared with the sglang_disagg workload rather than copied. It reads sysfs and
-# knows nothing about either engine, so one copy is correct for both; a second copy would be a
-# second place for the counter schema to drift.
-_RDMA_SAMPLER="${_RDMA_SAMPLER:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../sglang_disagg" && pwd)/rdma_counters.sh}"
+# The sampler is shared with the sglang_disagg workload rather than copied: it reads sysfs and
+# knows nothing about either engine, so a second copy would only be a second place for the counter
+# schema to drift. In the tree it is a symlink in this directory; madengine copies a model's own
+# script directory with `cp -L`, which turns the symlink into the real file next to this script.
+#
+# Resolution is next-to-the-script first, then the sibling directory for anyone running from a
+# checkout. Neither step may abort: `$(cd ...)` on a missing directory returns non-zero, and under
+# `set -e` that killed the whole workload here -- with profiling off, which is every normal run.
+_resolve_sampler() {
+  local _here _candidate
+  _here="$(dirname "${BASH_SOURCE[0]}")"
+  for _candidate in "${_here}/rdma_counters.sh" "${_here}/../sglang_disagg/rdma_counters.sh"; do
+    [[ -f "${_candidate}" ]] && { printf '%s\n' "${_candidate}"; return 0; }
+  done
+  return 0   # empty: _start_rdma_counters says so and carries on
+}
+_RDMA_SAMPLER="${_RDMA_SAMPLER:-$(_resolve_sampler)}"
 
 _start_rdma_counters() {
   [[ "${RDMA_COUNTERS}" == "1" ]] || return 0
-  if [[ ! -x "${_RDMA_SAMPLER}" ]]; then
-    echo "RDMA_COUNTERS=1 but ${_RDMA_SAMPLER} is missing or not executable" >&2
+  if [[ -z "${_RDMA_SAMPLER}" || ! -f "${_RDMA_SAMPLER}" ]]; then
+    echo "RDMA_COUNTERS=1 but rdma_counters.sh was not found next to this script" >&2
     return 0
   fi
   mkdir -p "${PROFILE_DIR}/rdma"
   _rdma_counters_out="${PROFILE_DIR}/rdma/vllm_$(hostname -s).csv"
-  "${_RDMA_SAMPLER}" --out "${_rdma_counters_out}" \
+  # Through `bash` rather than executed directly: a file that arrives by `cp` or a fresh checkout
+  # does not always keep its exec bit, and the sampler is a plain bash script either way.
+  bash "${_RDMA_SAMPLER}" --out "${_rdma_counters_out}" \
     --interval "${RDMA_COUNTERS_INTERVAL:-30}" &
   _rdma_sampler_pid=$!
   # A baseline before the server starts, or the window begins mid-run and the difference between
   # the arms is an undercount that looks like a whole measurement.
-  local _deadline=$(( $(date +%s) + ${RDMA_COUNTERS_START_TIMEOUT_S:-60} ))
+  #
+  # Liveness is checked before the file, not after. The sampler writes its header and only then
+  # discovers it has nothing to sample, so a file-first test reported "RDMA counters: <path>" for
+  # a sampler that had already exited -- a claim that counters were being collected when none
+  # were. A header-only file is still kept: the report reads it as a node that was sampled and
+  # found nothing, which is not the same as a node never sampled.
+  local _deadline=$(( $(date +%s) + ${RDMA_COUNTERS_START_TIMEOUT_S:-60} )) _st=0
   while (( $(date +%s) < _deadline )); do
+    if ! kill -0 "${_rdma_sampler_pid}" 2>/dev/null; then
+      wait "${_rdma_sampler_pid}" 2>/dev/null || _st=$?
+      _rdma_sampler_pid=""
+      if (( _st == 0 )); then
+        echo "RDMA sampler found nothing to sample; no counters for this node"
+      else
+        echo "WARNING: RDMA sampler exited ${_st} before its first sample" >&2
+        echo "sampler exited ${_st}" > "${_rdma_counters_out}.failed" 2>/dev/null || true
+      fi
+      return 0
+    fi
     [[ -s "${_rdma_counters_out}" ]] && { echo "RDMA counters: ${_rdma_counters_out}"; return 0; }
-    kill -0 "${_rdma_sampler_pid}" 2>/dev/null || break
     sleep 0.2
   done
+  # Marked, not merely warned about: left unmarked the sampler keeps running and the report sees
+  # an ordinary multi-sample file whose window starts after the server.
   echo "WARNING: no RDMA baseline sample before the server started; the window is a floor" >&2
   echo "no baseline sample before the server started" \
     > "${_rdma_counters_out}.failed" 2>/dev/null || true
