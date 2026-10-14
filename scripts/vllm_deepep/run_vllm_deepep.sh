@@ -260,9 +260,48 @@ fi
 # _server_gone -- true only when neither the process group nor the pid still exists. The group
 # matters more than the pid here: `--data-parallel-size 8` means the server has eight engine
 # subprocesses, and those are what hold the GPUs after the parent is gone.
+_proc_scan() {
+  local _pgid="$1" _stat _raw _after _pid _comm _state _pgrp _wchan
+  for _stat in /proc/[0-9]*/stat; do
+    [[ -r "$_stat" ]] || continue
+    read -r _raw < "$_stat" 2>/dev/null || continue
+    # Fields: pid (comm) state ppid pgrp ... -- comm is arbitrary text in parentheses and can
+    # itself contain spaces and ')', so everything is taken relative to its *last* ')'.
+    _pid=${_raw%% *}
+    _comm=${_raw#*(}; _comm=${_comm%)*}
+    _after=${_raw##*) }
+    read -r _state _ _pgrp _ <<< "$_after"
+    [[ "$_pgrp" == "$_pgid" || "$_pid" == "$_pgid" ]] || continue
+    _wchan=""
+    [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
+    echo "${_pid} ${_state} ${_comm} ${_wchan:-?}"
+  done
+}
+
+# True when nothing in the group is still running. A zombie does not count: it holds no memory,
+# no GPU and no file descriptors, only a row in the process table kept until someone calls wait().
+#
+# `kill -0` succeeds on a zombie, which is what this asked before. In the sglang launcher that
+# cost every shutdown the full SIGINT/SIGTERM/SIGKILL escalation against servers that had already
+# exited, and a "survived SIGKILL" warning on every run -- job 472379 showed 36 such survivors,
+# all state=Z, because the container's init never reaps the engine subprocesses. vLLM's
+# data-parallel engines are orphaned the same way, so the same test is wrong here.
+#
+# Kept in step with the copy in ../sglang_disagg/sglang_disagg_mori_io_ep.sh. Duplicated rather
+# than sourced: this script has to stay runnable on its own.
 _server_gone() {
-  kill -0 -- "-${SERVER_PID}" 2>/dev/null && return 1
-  kill -0 "${SERVER_PID}" 2>/dev/null && return 1
+  # Signals stay the fallback where /proc cannot be read: a wrong "gone" would let the container
+  # be torn down with workers still running, which is worse than the false alarm this replaces.
+  if [[ ! -r /proc/self/stat ]]; then
+    kill -0 -- "-${SERVER_PID}" 2>/dev/null && return 1
+    kill -0 "${SERVER_PID}" 2>/dev/null && return 1
+    return 0
+  fi
+  local _pid _state _rest
+  while read -r _pid _state _rest; do
+    [[ "$_state" == "Z" ]] && continue
+    return 1
+  done < <(_proc_scan "${SERVER_PID}")
   return 0
 }
 

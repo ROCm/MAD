@@ -720,11 +720,63 @@ _server_died() {
     grep -qE "${_SERVER_DEATH_SIGNS}" "$1" 2>/dev/null
 }
 
-# _server_gone PID -- true only when neither the process group nor the pid still exists.
-_server_gone() {
-    kill -0 -- "-$1" 2>/dev/null && return 1
-    kill -0 "$1" 2>/dev/null && return 1
+# _proc_scan PGID -- "pid state comm wchan" for every process in the group, or that *is* the
+# group id. One parser, used both to decide whether the group is gone and to report what is left
+# when it is not, so the two can never disagree.
+#
+# /proc is read directly rather than through `ps`, which the serving images do not all carry.
+_proc_scan() {
+    local _pgid="$1" _stat _raw _after _pid _comm _state _pgrp _wchan
+    for _stat in /proc/[0-9]*/stat; do
+        [[ -r "$_stat" ]] || continue
+        read -r _raw < "$_stat" 2>/dev/null || continue
+        # Fields: pid (comm) state ppid pgrp ... -- comm is arbitrary text in parentheses and can
+        # itself contain spaces and ')', so everything is taken relative to its *last* ')'.
+        _pid=${_raw%% *}
+        _comm=${_raw#*(}; _comm=${_comm%)*}
+        _after=${_raw##*) }
+        read -r _state _ _pgrp _ <<< "$_after"
+        [[ "$_pgrp" == "$_pgid" || "$_pid" == "$_pgid" ]] || continue
+        _wchan=""
+        [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
+        echo "${_pid} ${_state} ${_comm} ${_wchan:-?}"
+    done
+}
+
+# _group_is_gone -- reads `_proc_scan` output on stdin; true when nothing in it is still running.
+#
+# A zombie does not count as running. It holds no memory, no GPU and no file descriptors; it is a
+# row in the process table kept until someone calls wait() on it.
+_group_is_gone() {
+    local _pid _state _rest
+    while read -r _pid _state _rest; do
+        [[ "$_state" == "Z" ]] && continue
+        return 1
+    done
     return 0
+}
+
+# _server_gone PID -- true when nothing in the group is still running.
+#
+# This used to ask `kill -0`, which succeeds on a zombie. sglang's scheduler children are orphaned
+# when the server exits and the container's init does not reap them, so they sit in the process
+# table as zombies, still members of the server's process group, indefinitely. The group therefore
+# never looked gone: every shutdown walked the full SIGINT/SIGTERM/SIGKILL escalation against a
+# server that had already exited and then reported "survived SIGKILL".
+#
+# Job 472379 settled it -- 36 survivors across two nodes, every one of them state=Z, with the group
+# leader itself absent. Not uninterruptible driver teardown, and not a grace that was too short:
+# the processes were already dead and the liveness test could not say so. (FOLLOWUP item 2.)
+_server_gone() {
+    # Signals stay the fallback where /proc cannot be read. A wrong "gone" there would stop the
+    # counter sampler while servers were still running, which is worse than the false alarm this
+    # replaces.
+    if [[ ! -r /proc/self/stat ]]; then
+        kill -0 -- "-$1" 2>/dev/null && return 1
+        kill -0 "$1" 2>/dev/null && return 1
+        return 0
+    fi
+    _group_is_gone < <(_proc_scan "$1")
 }
 
 # _wait_gone PID SECONDS -- poll until the whole group is gone, or give up. One helper for all
@@ -791,34 +843,29 @@ _shutdown_server() {
 
 # _group_survivors PGID -- what is still in the group, and what it is doing.
 #
-# This exists because "survived SIGKILL" was reported on every node of every run on 2026-09-14 and
-# nobody could say why. The two candidates need different fixes and the log could not tell them
-# apart: a process in uninterruptible state (D) has not received the SIGKILL yet and no amount of
-# `KILL_GRACE_S` helps -- the wait has to be on the driver's teardown -- whereas a live process in
-# S or R simply needs a longer grace. `wchan` names the kernel function it is parked in, which is
-# what distinguishes "stuck in the GPU/RDMA driver" from "stuck in our own code".
-#
-# /proc is read directly rather than through `ps`, which the serving images do not all carry.
+# Kept after the zombie question was settled, because it is what settled it: 36 survivors across
+# two nodes of job 472379, every one state=Z. It now reports against a liveness test that ignores
+# zombies, so anything it prints as running really is running, and `wchan` names the kernel
+# function it is parked in -- which is what separates "stuck in the GPU/RDMA driver" (state D,
+# where no amount of `KILL_GRACE_S` helps) from "alive and ignoring us" (S or R, where a longer
+# grace would).
 _group_survivors() {
-    local _pgid="$1" _stat _raw _after _pid _comm _state _ppid _pgrp _wchan _found=0
-    for _stat in /proc/[0-9]*/stat; do
-        [[ -r "$_stat" ]] || continue
-        read -r _raw < "$_stat" 2>/dev/null || continue
-        # Fields: pid (comm) state ppid pgrp ... -- comm is arbitrary text in parentheses and can
-        # itself contain spaces and ')', so everything is taken relative to its *last* ')'.
-        _pid=${_raw%% *}
-        _comm=${_raw#*(}; _comm=${_comm%)*}
-        _after=${_raw##*) }
-        read -r _state _ppid _pgrp _ <<< "$_after"
-        [[ "$_pgrp" == "$_pgid" ]] || continue
-        _wchan=""
-        [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
-        echo "[shutdown]   still in group ${_pgid}: pid=${_pid} state=${_state}" \
-             "comm=${_comm} wchan=${_wchan:-?}"
-        _found=1
-    done
-    (( _found )) || echo "[shutdown]   group ${_pgid} has no members left in /proc;" \
-                         "the liveness test disagrees with /proc, which is itself the finding"
+    local _pgid="$1" _pid _state _comm _wchan _live=0 _zombies=0
+    while read -r _pid _state _comm _wchan; do
+        if [[ "$_state" == "Z" ]]; then
+            _zombies=$(( _zombies + 1 ))
+            continue
+        fi
+        echo "[shutdown]   still running in group ${_pgid}: pid=${_pid} state=${_state}" \
+             "comm=${_comm} wchan=${_wchan}"
+        _live=$(( _live + 1 ))
+    done < <(_proc_scan "$_pgid")
+    # Named, not hidden: a zombie holds nothing and is not why the shutdown failed, but a reader
+    # comparing this against `ps` would otherwise wonder where the rest of the group went.
+    (( _zombies )) && echo "[shutdown]   (${_zombies} unreaped zombie(s) in group ${_pgid}," \
+                           "holding nothing and not counted as running)"
+    (( _live )) || echo "[shutdown]   nothing in group ${_pgid} is running;" \
+                        "the liveness test disagrees with /proc, which is itself the finding"
 }
 
 # _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]

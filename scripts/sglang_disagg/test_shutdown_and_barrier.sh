@@ -5,17 +5,22 @@
 # extracts the function under test out of the real file by name and sources only that. The code
 # under test is therefore the shipped code, not a copy of it.
 #
-# Four of the six fail against the pre-fix files, which is how they were checked:
+# Six of the nine fail against the files as they were before this work, which is how they were
+# checked:
 #
-#   SGLANG_SH=<old> VLLM_SH=<old> bash test_shutdown_and_barrier.sh   ->  passed 2, failed 4
+#   SGLANG_SH=<old> VLLM_SH=<old> bash test_shutdown_and_barrier.sh   ->  passed 3, failed 6
 #
-# with the pre-fix run showing `exit status stays 0: expected '0', got '1'` and the vLLM group
-# `before=3 after=3`, i.e. the two defects this change is about.
+# showing `exit status stays 0: expected '0', got '1'`, the vLLM group `before=3 after=3`, and
+# `zombie-only group is gone: expected 'GONE', got 'ALIVE'` -- the three defects behind this.
 #
-# The other two -- "a real failure is not masked" and "stale log ignored" -- are guards against
-# over-correcting, not regression tests, and pass either way. They are here because both fixes
-# widen something, and a widened check that swallows a real failure or resurrects a stale log
-# would be a worse bug than the one being fixed.
+# The zombie test is also the single regression against the intermediate commit, where the
+# liveness check still asked `kill -0`: that revision passes 8 of 9 and fails only that one.
+#
+# Three tests pass either way -- "a real failure is not masked", "stale log ignored", and
+# "ignoring zombies did not make us blind to live processes". They are guards against
+# over-correcting, not regression tests. Each fix widens something, and a widened check that
+# swallows a real failure, resurrects a stale log, or declares a running server dead would be a
+# worse bug than the one being fixed.
 #
 # No GPUs, no SLURM, no container: `bash test_shutdown_and_barrier.sh`.
 set -uo pipefail
@@ -46,14 +51,56 @@ extract() {
     ' "$1"
 }
 
-echo "== _group_survivors names what is still in the group =="
+# lone_zombie -- print the pid of a zombie that is the only member of its own process group.
+#
+# Monitor mode gives the short-lived child its own group; the parent then execs into something
+# that never calls wait(), so nothing reaps it. That is the shape the cluster produces: sglang's
+# scheduler children are orphaned when the server exits and the container's init does not reap
+# them, leaving the server's group populated entirely by zombies. `kill -0` succeeds on every one.
+lone_zombie() {
+    local _f; _f="$(mktemp)"
+    bash -c "set -m; sleep 0.2 & echo \$! > '${_f}'; exec sleep 25" >/dev/null 2>&1 &
+    sleep 1
+    cat "$_f"; rm -f "$_f"
+}
+
+echo "== a group containing only zombies counts as gone =="
 (
+    eval "$(extract "$SGLANG_SH" _proc_scan)"
+    eval "$(extract "$SGLANG_SH" _group_is_gone)"
+    eval "$(extract "$SGLANG_SH" _server_gone)"
+    z="$(lone_zombie)"
+    state="$(awk '{print $3}' "/proc/${z}/stat" 2>/dev/null)"
+    # Guard the fixture itself: if the host reaped it, the assertion below would pass for the
+    # wrong reason and this test would silently stop testing anything.
+    if [[ "$state" != "Z" ]]; then
+        echo "  SKIP - could not hold a zombie (state='${state}')" >&2; exit 0
+    fi
+    kill -0 "$z" 2>/dev/null || { echo "  SKIP - kill -0 already reports it gone" >&2; exit 0; }
+    if _server_gone "$z"; then echo "GONE"; else echo "ALIVE"; fi
+) > /tmp/_t_zombie
+check "zombie-only group is gone" "$(cat /tmp/_t_zombie)" "GONE"
+
+echo "== a running process in the group still counts as alive =="
+(
+    eval "$(extract "$SGLANG_SH" _proc_scan)"
+    eval "$(extract "$SGLANG_SH" _group_is_gone)"
+    eval "$(extract "$SGLANG_SH" _server_gone)"
+    set -m; sleep 20 & pid=$!; set +m
+    if _server_gone "$pid"; then echo "GONE"; else echo "ALIVE"; fi
+    kill -KILL -- "-$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+) > /tmp/_t_live
+check "ignoring zombies did not make us blind to live processes" "$(cat /tmp/_t_live)" "ALIVE"
+
+echo "== _group_survivors reports the running, counts the zombies =="
+(
+    eval "$(extract "$SGLANG_SH" _proc_scan)"
     eval "$(extract "$SGLANG_SH" _group_survivors)"
     set -m; sleep 30 & pid=$!; set +m
     out="$(_group_survivors "$pid" 2>&1)"
     kill -KILL -- "-$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-    # The whole point of the diagnostic: the pid, its state letter and its wchan, so a reader can
-    # tell "parked in the GPU driver" (D) from "alive and ignoring us" (S/R).
+    # The point of the diagnostic: the pid, its state letter and its wchan, so a reader can tell
+    # "parked in the GPU driver" (D) from "alive and ignoring us" (S/R).
     case "$out" in
         *"pid=${pid}"*state=*wchan=*) echo "  ok   - reports pid, state and wchan" ;;
         *) echo "  FAIL - diagnostic missing fields: ${out}" >&2; exit 1 ;;
@@ -130,6 +177,10 @@ check "widening the check did not resurrect stale logs" "$(cat /tmp/_t_barrier_s
 
 echo "== the vllm_deepep shutdown reaches the whole process group =="
 (
+    # _proc_scan too: without it _server_gone's `while read` sees nothing, concludes the group is
+    # gone and the escalation stops after SIGINT. The first version of this test omitted it and
+    # reported a shutdown failure that was its own.
+    eval "$(extract "$VLLM_SH" _proc_scan)"
     eval "$(extract "$VLLM_SH" _server_gone)"
     eval "$(extract "$VLLM_SH" _wait_gone)"
     eval "$(extract "$VLLM_SH" _shutdown_server)"
@@ -141,10 +192,22 @@ echo "== the vllm_deepep shutdown reaches the whole process group =="
     SERVER_PID=$!
     set +m
     sleep 1
-    _kids_before=$(pgrep -g "$SERVER_PID" 2>/dev/null | wc -l)
+    # Running members only. A zombie left in the group is not a failure to stop -- it holds
+    # nothing -- and counting it is exactly the mistake the liveness fix is about.
+    _live_in_group() {
+        local _n=0 _s _r _p _a _st _pp _pg
+        for _s in /proc/[0-9]*/stat; do
+            read -r _r < "$_s" 2>/dev/null || continue
+            _p=${_r%% *}; _a=${_r##*) }
+            read -r _st _pp _pg _ <<< "$_a"
+            [[ "$_pg" == "$1" && "$_st" != "Z" ]] && _n=$(( _n + 1 ))
+        done
+        echo "$_n"
+    }
+    _kids_before=$(_live_in_group "$SERVER_PID")
     _shutdown_server >/dev/null 2>&1
     sleep 1
-    _kids_after=$(pgrep -g "$SERVER_PID" 2>/dev/null | wc -l)
+    _kids_after=$(_live_in_group "$SERVER_PID")
     kill -KILL -- "-$SERVER_PID" 2>/dev/null
     echo "${_kids_before} ${_kids_after}"
 ) > /tmp/_t_group
