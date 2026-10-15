@@ -737,8 +737,16 @@ _proc_scan() {
         _after=${_raw##*) }
         read -r _state _ _pgrp _ <<< "$_after"
         [[ "$_pgrp" == "$_pgid" || "$_pid" == "$_pgid" ]] || continue
+        # `|| true`, and deliberately. /proc/<pid>/wchan carries no trailing newline, so `read`
+        # sets the variable and still returns 1. As the last element of an && list that is the
+        # statement's status, and under `set -e` it aborted the scan before the row was echoed --
+        # reporting a live process as gone, which is how a shutdown would stop escalating after
+        # SIGINT and close the counter window with workers still running. wchan is a diagnostic
+        # field; failing to read it must never decide whether a process exists.
         _wchan=""
-        [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
+        if [[ -r "/proc/${_pid}/wchan" ]]; then
+            read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null || true
+        fi
         echo "${_pid} ${_state} ${_comm} ${_wchan:-?}"
     done
 }

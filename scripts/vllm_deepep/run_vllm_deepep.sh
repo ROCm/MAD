@@ -197,6 +197,7 @@ PROFILE_DIR="${PROFILE_ROOT}/${ALL2ALL_BACKEND}_$(date -u +%Y%m%dT%H%M%SZ)_$(hos
 
 _rdma_sampler_pid=""
 _rdma_counters_out=""
+PROFILER_CONFIG_ARGS=()
 
 # A profile nobody can read afterwards is worse than no profile, because the run reports it as
 # collected. Said once, loudly, rather than discovered when the directory is already gone.
@@ -224,7 +225,20 @@ if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   export NCCL_DEBUG_FILE="${PROFILE_DIR}/rccl/vllm.%h.%p.log"
   # vLLM writes a trace per rank here when the profiler is started; the benchmark below is what
   # drives it. Left unset the profiler is simply off, which is why this is inside the guard.
+  # Both halves of the server's side, because wheels disagree on which one they read.
+  #
+  # Older wheels take the destination from VLLM_TORCH_PROFILER_DIR and register /start_profile
+  # when it is set. Newer ones ignore it and expect --profiler-config; with those, the variable
+  # alone leaves ProfilerConfig.profiler unset, the route unregistered, and `bench serve
+  # --profile` unable to start anything. Passing the flag to a wheel that does not know it would
+  # fail the launch outright, so it is probed for rather than assumed.
   export VLLM_TORCH_PROFILER_DIR="${PROFILE_DIR}/traces"
+  PROFILER_CONFIG_ARGS=()
+  if "${VLLM}" serve --help 2>/dev/null | grep -q -- "--profiler-config"; then
+    PROFILER_CONFIG_ARGS=(--profiler-config
+      "{\"profiler\": \"torch\", \"torch_profiler_dir\": \"${PROFILE_DIR}/traces\"}")
+    echo "profiling on: this vLLM takes --profiler-config; passing it as well"
+  fi
   echo "profiling on: RCCL logs and torch traces under ${PROFILE_DIR}"
   echo "NOTE: throughput from a PROFILE_ENABLE=1 run is not comparable with an unprofiled one" >&2
 fi
@@ -351,8 +365,16 @@ _proc_scan() {
     _after=${_raw##*) }
     read -r _state _ _pgrp _ <<< "$_after"
     [[ "$_pgrp" == "$_pgid" || "$_pid" == "$_pgid" ]] || continue
+    # `|| true`, and deliberately. /proc/<pid>/wchan carries no trailing newline, so `read`
+    # sets the variable and still returns 1. As the last element of an && list that is the
+    # statement's status, and under `set -e` it aborted the scan before the row was echoed --
+    # reporting a live process as gone, which is how a shutdown would stop escalating after
+    # SIGINT and close the counter window with workers still running. wchan is a diagnostic
+    # field; failing to read it must never decide whether a process exists.
     _wchan=""
-    [[ -r "/proc/${_pid}/wchan" ]] && read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null
+    if [[ -r "/proc/${_pid}/wchan" ]]; then
+        read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null || true
+    fi
     echo "${_pid} ${_state} ${_comm} ${_wchan:-?}"
   done
 }
@@ -447,6 +469,7 @@ set -m
   --tensor-parallel-size 1 \
   --data-parallel-size 8 --data-parallel-size-local 8 \
   --enable-expert-parallel \
+  "${PROFILER_CONFIG_ARGS[@]}" \
   --all2all-backend "${ALL2ALL_BACKEND}" \
   --enforce-eager \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
@@ -639,6 +662,16 @@ if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   if ! out="$(bench_once --profile)"; then
     echo "WARNING: the profiled run failed; traces may be absent:" >&2
     echo "${out}" | tail -20 >&2
+  else
+    # `vllm bench serve` exits 0 while reporting failed requests, which the warm-up and measured
+    # loops already guard against. Without the same check here a trace directory is non-empty and
+    # passes the test below while holding a capture of a workload that partly did not happen.
+    # Warned, not fatal: the recorded results are already in, and this pass is not one of them.
+    failed="$(_failed_requests "${out}")"
+    if [[ "${failed}" != "0" ]]; then
+      echo "WARNING: the profiled run reported ${failed:-an unparseable} failed request(s);" \
+           "its traces capture an incomplete workload." >&2
+    fi
   fi
   # Verified, not assumed. The server only registers /start_profile when it was
   # told where to put traces, and newer vLLM takes that through
@@ -646,9 +679,8 @@ if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   # flag above is accepted and nothing is written. Better to say so than to let
   # the run report a channel it does not have.
   if ! compgen -G "${PROFILE_DIR}/traces/*" > /dev/null 2>&1; then
-    echo "WARNING: PROFILE_ENABLE=1 but ${PROFILE_DIR}/traces is empty. If this vLLM takes" \
-         "--profiler-config instead of VLLM_TORCH_PROFILER_DIR, the server never registered" \
-         "/start_profile and no trace was captured." >&2
+    echo "WARNING: PROFILE_ENABLE=1 but ${PROFILE_DIR}/traces is empty: the server registered" \
+         "no profiler, or the capture produced nothing. Check the server log for /start_profile." >&2
   fi
 fi
 

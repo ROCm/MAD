@@ -89,6 +89,29 @@ echo "== a group containing only zombies counts as gone =="
 ) > /tmp/_t_zombie
 check "zombie-only group is gone" "$(cat /tmp/_t_zombie)" "GONE"
 
+echo "== the liveness check survives the launcher's own shell options =="
+(
+    # Under `set -e`, which is what run_vllm_deepep.sh runs with. This suite otherwise uses
+    # `set -uo pipefail`, and that is why it could not catch the defect this covers:
+    # /proc/<pid>/wchan carries no trailing newline, so `read` sets the variable and returns 1.
+    # As the last element of an && list that was the statement's status, and `set -e` aborted the
+    # scan before the row was echoed -- a live process read as gone, which would stop a shutdown
+    # escalating after SIGINT and close the counter window with workers still running.
+    {
+        echo 'set -euo pipefail'
+        # Expanded here, so the generated script carries the function bodies rather than a call
+        # to `extract`, which does not exist inside it.
+        extract "$VLLM_SH" _proc_scan
+        extract "$VLLM_SH" _server_gone
+        echo 'set -m; sleep 20 & SERVER_PID=$!; set +m'
+        echo 'sleep 1'
+        echo 'if _server_gone; then echo GONE; else echo ALIVE; fi'
+        echo 'kill -KILL -- "-$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null'
+    } > /tmp/_t_sete.sh
+    bash /tmp/_t_sete.sh 2>/dev/null | tail -1
+) > /tmp/_t_sete_out
+check "a live process is not reported gone under set -e" "$(cat /tmp/_t_sete_out)" "ALIVE"
+
 echo "== a running process in the group still counts as alive =="
 (
     eval "$(extract "$SGLANG_SH" _proc_scan)"
