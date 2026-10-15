@@ -36,7 +36,7 @@ The Slurm flow runs `merge_results.py` on the initiator so `results_merged.json`
 
 ## Quick Start (madengine)
 
-Run both commands from **this directory** (`scripts/kvcache_transfer_bench`):
+Run both commands from the **MAD repository root**:
 
 ```bash
 madengine build --tags pyt_kvcache_transfer_bench_all \
@@ -61,8 +61,10 @@ any backend that produced no results.
   block passed to `run` replaces that block entirely.
 - `--registry` takes a Docker Hub namespace such as `myorg/myrepo`; madengine
 prefixes `docker.io/` and tags the image
-`<registry>:pyt_kvcache_transfer_bench_all`. The registry is what carries the
-image from the build job to the run job.
+`<registry>:kvcache_transfer_bench_pyt_kvcache_transfer_bench_all` (the card's
+discovered name, `kvcache_transfer_bench/pyt_kvcache_transfer_bench_all`, with
+the `/` replaced). The registry is what carries the image from the build job
+to the run job.
 - Export `MAD_DOCKERHUB_USER` and `MAD_DOCKERHUB_PASSWORD` (a Docker Hub PAT)
 before `build`, or put them in `credential.json`. An ambient `docker login`
 only reaches the build node if `$HOME` is on shared storage.
@@ -85,7 +87,7 @@ pushed, skip `--build-on-compute` and point `build` at it. This only regenerates
 
 ```bash
 madengine build --tags pyt_kvcache_transfer_bench_all \
-                --use-image docker.io/<namespace>/<repo>:pyt_kvcache_transfer_bench_all \
+                --use-image docker.io/<namespace>/<repo>:kvcache_transfer_bench_pyt_kvcache_transfer_bench_all \
                 --additional-context '{"slurm": {"partition": "<your-partition>"}}'
 madengine run   --tags pyt_kvcache_transfer_bench_all \
                 --manifest-file build_manifest.json
@@ -128,10 +130,10 @@ docker push <your-repo>/kv-cache-transfer-bench:latest
 
 ### 2. Run the Benchmark via Slurm
 
-Submit the launcher from the `kvcache_transfer_bench` directory (so `SLURM_SUBMIT_DIR` points at this repo). Pass [Slurm options](https://slurm.schedmd.com/sbatch.html) to `sbatch` first, then the script path, then benchmark options:
+Submit the launcher from the `scripts/kvcache_transfer_bench` directory (so `SLURM_SUBMIT_DIR` points at this benchmark). Pass [Slurm options](https://slurm.schedmd.com/sbatch.html) to `sbatch` first, then the script path, then benchmark options:
 
 ```bash
-cd kvcache_transfer_bench
+cd scripts/kvcache_transfer_bench
 sbatch [sbatch options] scripts/run.slurm [benchmark options]
 ```
 
@@ -176,7 +178,7 @@ sbatch -t 08:00:00 -N 2 scripts/run.slurm --docker-image <your-repo>/kv-cache-un
 salloc -N 2 -n 2 --ntasks-per-node=1 --time=08:00:00
 
 # 2. From the allocation shell, run the benchmark
-cd kvcache_transfer_bench
+cd scripts/kvcache_transfer_bench
 bash scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
 ```
 

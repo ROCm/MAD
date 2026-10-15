@@ -44,6 +44,8 @@ SYNC_PORT=${SYNC_PORT:-9999}
 KV_CACHE_TEST_PATH=/workspace/kvcache_transfer_bench
 
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Plain sbatch runs a spooled copy of this script, so SCRIPT_DIR is not the checkout
+[ -f "$PROJECT_DIR/scripts/run_node.sh" ] || PROJECT_DIR="${SLURM_SUBMIT_DIR:?submit from scripts/kvcache_transfer_bench}"
 KV_CACHE_TEST_REPO="$(cd "$PROJECT_DIR" && pwd)/"
 DOCKER_CONTAINER_NAME=container_kv_transfer_perf_bench
 # Get node names from Slurm (recover from SLURM_JOB_ID if SLURM_NODELIST is empty)
