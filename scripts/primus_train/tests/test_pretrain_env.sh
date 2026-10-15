@@ -82,6 +82,13 @@ check_run_sh_extracts_bridge_pretrain() {
   assert_file_contains "$RUN_SH" '--num-gpus'
 }
 
+check_run_sh_multinode_perf() {
+  # Only the last node logs throughput (print_rank_last); the others must not fail
+  # the run on an empty extraction. Megatron configs get a world-size-valid GBS.
+  assert_file_contains "$RUN_SH" 'NODE_RANK:-0\} == \$\{NNODES:-1\} - 1'
+  assert_file_contains "$RUN_SH" 'scaleout_batch.py'
+}
+
 check_dockerfile_requires_primus_cli() {
   local dockerfile="$SCRIPT_DIR/../../../docker/primus.ubuntu.amd.Dockerfile"
   if ! grep -qE -- '/workspace/Primus/(runner/)?primus-cli' "$dockerfile"; then
@@ -154,6 +161,7 @@ check_fla_pretrain_hook() {
 check_run_sh_does_not_copy_env
 check_run_sh_always_primus_cli
 check_run_sh_extracts_bridge_pretrain
+check_run_sh_multinode_perf
 check_dockerfile_requires_primus_cli
 check_primus_gpu_env_files
 check_mxfp4_yaml_env

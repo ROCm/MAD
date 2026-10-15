@@ -222,9 +222,15 @@ print("" if sl is None or sl == "" else sl)
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"
   extractcode=$?
   set -e
+  # Megatron prints throughput on the last global rank only, so on a multi-node run
+  # only the last node's log carries it; the other nodes have nothing to extract.
   if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    echo "[primus_train] training log present but TPS extraction failed" >&2
-    exitcode="$extractcode"
+    if (( ${NODE_RANK:-0} == ${NNODES:-1} - 1 )); then
+      echo "[primus_train] training log present but TPS extraction failed" >&2
+      exitcode="$extractcode"
+    else
+      echo "[primus_train] no TPS on node ${NODE_RANK:-0} of ${NNODES:-1}; the last node reports it"
+    fi
   fi
 fi
 exit "$exitcode"
