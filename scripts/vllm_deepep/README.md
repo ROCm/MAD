@@ -77,8 +77,13 @@ variable and running the script directly inside the container.
 | `GPU_MEMORY_UTILIZATION` | 0.70 | 0.80 for R1 |
 | `EP_NIC_NAME` / `NCCL_SOCKET_IFNAME` | `bnxt_re0` / `fenic0` | cluster-specific |
 
-`NCCL_CUMEM_ENABLE=1` is set for both backends and is not optional: RCCL
-rejects symmetric memory without VMM.
+`NCCL_CUMEM_ENABLE` defaults to 1 for both backends and can be overridden.
+DeepEP V2 needs it — RCCL rejects symmetric memory, and `ncclDevCommCreate`,
+without VMM. MoRI carries its own transport and was never shown to need it, and
+on a stack where cuMem itself is broken (ROCm 7.14/7.15 userspace over a 7.0
+host KFD, reported) setting it unconditionally takes the control arm down with
+the subject, leaving a comparison with no baseline. Set `NCCL_CUMEM_ENABLE=0`
+for the MoRI arm there.
 
 ## Reproducibility: revision pinning and remote code
 
@@ -187,7 +192,8 @@ Off by default. Both switches are environment variables:
 |---|---|---|
 | `PROFILE_ENABLE` | `0` | RCCL debug logs (one file per process) and torch traces |
 | `RDMA_COUNTERS` | follows `PROFILE_ENABLE` | adapter counters sampled from sysfs |
-| `PROFILE_DIR` | `/run_logs/vllm_deepep_<backend>` | where all of it lands |
+| `PROFILE_DIR` | `/run_logs/vllm_deepep` | the **root**; each invocation gets its own
+  subdirectory `<backend>_<timestamp>_<host>_<pid>` beneath it |
 
 **Bind a host directory onto `/run_logs` before turning either on.** The staged model directory is
 deleted after the run unless `--keep-model-dir` is given, and an unbound path lives only in the

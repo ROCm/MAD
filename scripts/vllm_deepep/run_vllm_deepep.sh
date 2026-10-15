@@ -241,7 +241,14 @@ if [[ "${PROFILE_ENABLE}" == "1" ]]; then
   # fail the launch outright, so it is probed for rather than assumed.
   export VLLM_TORCH_PROFILER_DIR="${PROFILE_DIR}/traces"
   PROFILER_CONFIG_ARGS=()
-  if "${VLLM}" serve --help 2>/dev/null | grep -q -- "--profiler-config"; then
+  # `--help=all`, and into a variable rather than through a pipe. Recent vLLM prints
+  # configuration-group summaries for a plain `serve --help`, so an individual flag need not
+  # appear there at all; and `| grep -q` exits as soon as it matches, which can leave the
+  # producer writing to a closed pipe -- under `pipefail` that turns a match into a non-zero
+  # status, i.e. a false negative on exactly the wheels this is meant to detect.
+  _vllm_help="$("${VLLM}" serve --help=all 2>/dev/null || true)"
+  [[ -z "${_vllm_help}" ]] && _vllm_help="$("${VLLM}" serve --help 2>/dev/null || true)"
+  if [[ "${_vllm_help}" == *--profiler-config* ]]; then
     PROFILER_CONFIG_ARGS=(--profiler-config
       "{\"profiler\": \"torch\", \"torch_profiler_dir\": \"${PROFILE_DIR}/traces\"}")
     echo "profiling on: this vLLM takes --profiler-config; passing it as well"

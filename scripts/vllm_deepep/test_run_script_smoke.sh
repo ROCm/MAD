@@ -62,10 +62,16 @@ cat > "${T}/stub_vllm_live" <<'STUB'
 ARGV_DIR="${STUB_ARGV_DIR:?}"
 case "$1" in
   serve)
-    if [[ "${2:-}" == "--help" ]]; then
+    if [[ "${2:-}" == "--help" || "${2:-}" == "--help=all" ]]; then
       echo "usage: vllm serve [options]"
-      # Whether this wheel advertises the flag is the thing under test.
-      [[ "${STUB_PROFILER_CONFIG:-0}" == "1" ]] && echo "  --profiler-config PROFILER_CONFIG"
+      # Recent vLLM prints configuration-group summaries for a plain --help and only lists
+      # individual flags under --help=all. The stub behaves the same way, so a probe that asks
+      # the wrong one cannot pass this test.
+      if [[ "${2}" == "--help=all" ]]; then
+        [[ "${STUB_PROFILER_CONFIG:-0}" == "1" ]] && echo "  --profiler-config PROFILER_CONFIG"
+      else
+        echo "  ProfilerConfig options:"
+      fi
       exit 0
     fi
     printf '%s\n' "$@" > "${ARGV_DIR}/serve.argv"
