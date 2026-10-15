@@ -249,6 +249,14 @@ _start_rdma_counters() {
   fi
   mkdir -p "${PROFILE_DIR}/rdma"
   _rdma_counters_out="${PROFILE_DIR}/rdma/vllm_$(hostname -s).csv"
+  # Cleared here, before backgrounding, not by the sampler. The sampler clears them when it
+  # truncates, but this loop starts polling immediately, so a previous run's `.started` could
+  # satisfy the baseline wait for a window that no longer exists.
+  if ! rm -f "${_rdma_counters_out}.started" "${_rdma_counters_out}.failed"; then
+    echo "WARNING: cannot clear stale markers beside ${_rdma_counters_out}; counter channel" \
+         "skipped rather than started on a window we cannot bound" >&2
+    return 0
+  fi
   # Through `bash` rather than executed directly: a file that arrives by `cp` or a fresh checkout
   # does not always keep its exec bit, and the sampler is a plain bash script either way.
   bash "${_RDMA_SAMPLER}" --out "${_rdma_counters_out}" \
@@ -275,12 +283,12 @@ _start_rdma_counters() {
       fi
       return 0
     fi
-    # A data row, not merely a non-empty file. The sampler writes its header before it knows
-    # whether there is anything to sample, so "non-empty" is satisfied by a run that is about to
-    # exit having found no adapters -- and whichever of the two the loop noticed first decided
-    # what this reported.
-    if (( $(wc -l < "${_rdma_counters_out}" 2>/dev/null || echo 0) > 1 )); then
-        echo "RDMA counters: ${_rdma_counters_out}"
+    # The sampler's own marker, written once its first *complete* sample has landed. Counting CSV
+    # lines instead only proved that one counter had been written: the baseline of every counter
+    # after it would then be taken once the server was already running, and the window would
+    # silently undercount.
+    if [[ -f "${_rdma_counters_out}.started" ]]; then
+        echo "RDMA baseline sample taken: ${_rdma_counters_out}"
         return 0
     fi
     sleep 0.2
@@ -476,6 +484,13 @@ fi
 BENCH_TIMEOUT_SECS="${BENCH_TIMEOUT_SECS:-1800}"
 
 bench_once() {
+  # `--profile` when asked. VLLM_TORCH_PROFILER_DIR only tells the server where
+  # traces would go; nothing starts a capture, so setting it alone produced an
+  # empty directory and a run that claimed a trace channel it did not have.
+  # This is the client half: it POSTs /start_profile before the requests and
+  # /stop_profile after.
+  local _profile=()
+  [[ "${1:-}" == "--profile" ]] && _profile=(--profile)
   # --trust-remote-code forwarded: bench serve loads its own tokenizer
   # (get_tokenizer(...)) independently of the server, and a model that
   # genuinely needs the opt-in would otherwise serve successfully and then
@@ -486,7 +501,7 @@ bench_once() {
     --dataset-name random \
     --random-input-len "${ISL}" --random-output-len "${OSL}" \
     --max-concurrency "${CONCURRENCY}" --num-prompts "${NUM_PROMPTS}" \
-    --ignore-eos "${TRUST_REMOTE_CODE_ARGS[@]}" 2>&1
+    --ignore-eos "${_profile[@]}" "${TRUST_REMOTE_CODE_ARGS[@]}" 2>&1
 }
 
 # Shared between warm-up and measured runs: a nonzero "Failed requests" count
@@ -604,6 +619,28 @@ for i in $(seq 1 "${MEASURED_RUNS}"); do
     "${tput_val}" "${tpot_val}" "${ttft_val}" "${WARMUP_RUNS}" \
     "${MORI_DISABLE_TOPO:-}" >> "${DETAIL_CSV}"
 done
+
+# A separate run, after the measured ones and not recorded. Profiling depresses
+# throughput, so a profiled run cannot also be a measured one; folding it into
+# the loop above would have put a slower number in the CSV under the same label
+# as the rest.
+if [[ "${PROFILE_ENABLE}" == "1" ]]; then
+  echo "--- extra profiled run (not recorded) ---"
+  if ! out="$(bench_once --profile)"; then
+    echo "WARNING: the profiled run failed; traces may be absent:" >&2
+    echo "${out}" | tail -20 >&2
+  fi
+  # Verified, not assumed. The server only registers /start_profile when it was
+  # told where to put traces, and newer vLLM takes that through
+  # --profiler-config rather than VLLM_TORCH_PROFILER_DIR, in which case the
+  # flag above is accepted and nothing is written. Better to say so than to let
+  # the run report a channel it does not have.
+  if ! compgen -G "${PROFILE_DIR}/traces/*" > /dev/null 2>&1; then
+    echo "WARNING: PROFILE_ENABLE=1 but ${PROFILE_DIR}/traces is empty. If this vLLM takes" \
+         "--profiler-config instead of VLLM_TORCH_PROFILER_DIR, the server never registered" \
+         "/start_profile and no trace was captured." >&2
+  fi
+fi
 
 echo "=== results (${RESULT_CSV}) ==="
 cat "${RESULT_CSV}"

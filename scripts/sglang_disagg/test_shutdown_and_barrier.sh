@@ -32,10 +32,18 @@ VLLM_SH="${VLLM_SH:-${HERE}/../vllm_deepep/run_vllm_deepep.sh}"
 
 _pass=0
 _fail=0
+_skip=0
 
 ok()   { echo "  ok   - $1"; _pass=$(( _pass + 1 )); }
 bad()  { echo "  FAIL - $1" >&2; _fail=$(( _fail + 1 )); }
-check() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1: expected '$3', got '$2'"; fi; }
+skip() { echo "  skip - $1"; _skip=$(( _skip + 1 )); }
+check() {
+    # SKIP is a value, not an absence: a guard that cannot build its fixture prints it on stdout
+    # so this can tell "the host reaped the zombie" from "the assertion failed".
+    if [[ "$2" == SKIP* ]]; then skip "$1 (${2#SKIP })"
+    elif [[ "$2" == "$3" ]]; then ok "$1"
+    else bad "$1: expected '$3', got '$2'"; fi
+}
 
 # extract FILE NAME -- the text of one shell function, dedented to column 0 so a function defined
 # inside a block can still be sourced on its own.
@@ -74,9 +82,9 @@ echo "== a group containing only zombies counts as gone =="
     # Guard the fixture itself: if the host reaped it, the assertion below would pass for the
     # wrong reason and this test would silently stop testing anything.
     if [[ "$state" != "Z" ]]; then
-        echo "  SKIP - could not hold a zombie (state='${state}')" >&2; exit 0
+        echo "SKIP the host reaped the fixture (state='${state}')"; exit 0
     fi
-    kill -0 "$z" 2>/dev/null || { echo "  SKIP - kill -0 already reports it gone" >&2; exit 0; }
+    kill -0 "$z" 2>/dev/null || { echo "SKIP kill -0 already reports the fixture gone"; exit 0; }
     if _server_gone "$z"; then echo "GONE"; else echo "ALIVE"; fi
 ) > /tmp/_t_zombie
 check "zombie-only group is gone" "$(cat /tmp/_t_zombie)" "GONE"
@@ -244,5 +252,5 @@ echo "== a survived shutdown marks the vllm_deepep counter window untrustworthy 
 check "counter file marked .failed" "$(cat /tmp/_t_marker)" "MARKED"
 
 echo
-echo "passed ${_pass}, failed ${_fail}"
+echo "passed ${_pass}, failed ${_fail}, skipped ${_skip}"
 (( _fail == 0 ))
