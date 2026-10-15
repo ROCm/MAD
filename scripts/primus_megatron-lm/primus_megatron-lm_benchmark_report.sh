@@ -257,6 +257,14 @@ run_primus() {
   if [[ "${PRIMUS_DISABLE_PROFILE:-0}" == "1" ]]; then
     knobs+=(--profile false --use_pytorch_profiler false)
   fi
+  # Whitespace-separated Primus overrides, e.g. a parallel layout that has to
+  # change several keys together ("--pipeline_model_parallel_size 4
+  # --use_torch_fsdp2 false" -- Megatron rejects FSDP2 with PP > 1).
+  if [[ -n "${PRIMUS_EXTRA_ARGS:-}" ]]; then
+    local extra_args
+    read -r -d '' -a extra_args <<< "$PRIMUS_EXTRA_ARGS" || true
+    knobs+=("${extra_args[@]}")
+  fi
   if [[ ${#knobs[@]} -gt 0 ]]; then
     echo "[INFO] Primus CLI knobs from environment: ${knobs[*]}"
   fi
@@ -266,21 +274,23 @@ run_primus() {
     --config "$config" "$@" "${knobs[@]}" 2>&1 | tee "$TRAIN_LOG"
 }
 
-# PRIMUS_TRAIN_ITERS and PRIMUS_DISABLE_PROFILE only reach Primus through
-# run_primus(). Most models in this script still invoke `primus-cli direct`
-# themselves and never pass through it, and there the two variables are simply
-# ignored -- which means a full-length run where a short one was asked for, and
-# a profiled run where the profiler was meant to be off. Both look like a
+# PRIMUS_TRAIN_ITERS, PRIMUS_DISABLE_PROFILE and PRIMUS_EXTRA_ARGS only reach
+# Primus through run_primus(). Most models in this script still invoke
+# `primus-cli direct` themselves and never pass through it, and there the
+# variables are simply ignored -- which means a full-length run where a short
+# one was asked for, a profiled run where the profiler was meant to be off, or
+# the config's own settings instead of the requested overrides. All look like a
 # plain, successful run, so say it out loud instead.
 PRIMUS_KNOBS_HONOURED=0
 warn_if_knobs_ignored() {
-  if [[ -z "${PRIMUS_TRAIN_ITERS:-}" && "${PRIMUS_DISABLE_PROFILE:-0}" != "1" ]]; then
+  if [[ -z "${PRIMUS_TRAIN_ITERS:-}" && "${PRIMUS_DISABLE_PROFILE:-0}" != "1" \
+        && -z "${PRIMUS_EXTRA_ARGS:-}" ]]; then
     return 0
   fi
   if [[ "$PRIMUS_KNOBS_HONOURED" == "1" ]]; then
     return 0
   fi
-  echo "[WARN] PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE are set, but $MODEL_REPO" \
+  echo "[WARN] PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE/PRIMUS_EXTRA_ARGS are set, but $MODEL_REPO" \
        "launches primus-cli directly rather than through run_primus(), so they" \
        "had no effect on this run."
 }
