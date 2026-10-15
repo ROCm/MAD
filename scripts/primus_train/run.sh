@@ -108,6 +108,7 @@ if [[ -z "${PRIMUS_GPU_MODEL:-}" ]]; then
   gpu_name="${MAD_SYSTEM_GPU_PRODUCT_NAME:-}"
   arch="${MAD_SYSTEM_GPU_ARCHITECTURE:-}"
   case "$gpu_name" in
+    *MI455*) PRIMUS_GPU_MODEL=MI455X ;;
     *MI325*) PRIMUS_GPU_MODEL=MI325X ;;
     *MI355*) PRIMUS_GPU_MODEL=MI355X ;;
     *MI350*) PRIMUS_GPU_MODEL=MI350X ;;
@@ -116,6 +117,7 @@ if [[ -z "${PRIMUS_GPU_MODEL:-}" ]]; then
       case "$arch" in
         gfx942*) PRIMUS_GPU_MODEL=MI300X ;;
         gfx950*) PRIMUS_GPU_MODEL=MI355X ;;
+        gfx1250*) PRIMUS_GPU_MODEL=MI455X ;;
       esac
       ;;
   esac
