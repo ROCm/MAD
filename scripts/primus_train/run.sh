@@ -165,6 +165,19 @@ cli_cmd=(
 if [[ "$framework" == "torchtitan" ]]; then
   cli_cmd+=(--job.dump_folder "$RUN_DIR/outputs")
 fi
+# Megatron rejects a global batch size that is not a multiple of micro batch size x
+# data-parallel size, and the configs are tuned for one 8-GPU node. An explicit
+# --global_batch_size from the caller wins.
+if [[ "$framework" == "megatron" ]] && ! printf '%s\n' "${forward_args[@]}" | grep -qx -- '--global_batch_size'; then
+  world_size=$(( ${NNODES:-1} * ${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}} ))
+  scaleout_script="${script_dir}/scaleout_batch.py"
+  [[ -f "$RUN_DIR/scaleout_batch.py" ]] && scaleout_script="$RUN_DIR/scaleout_batch.py"
+  scaleout_gbs="$(python3 "$scaleout_script" "$EXP" --world-size "$world_size" -- "${forward_args[@]}" || true)"
+  if [[ -n "$scaleout_gbs" ]]; then
+    echo "[primus_train] global_batch_size -> $scaleout_gbs for world size $world_size"
+    cli_cmd+=(--global_batch_size "$scaleout_gbs")
+  fi
+fi
 cli_cmd+=("${forward_args[@]}")
 "${cli_cmd[@]}"
 exitcode=$?
