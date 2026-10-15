@@ -256,6 +256,7 @@ variables (`AGENTIC_CONC`, `AGENTIC_CACHE_WARMUP_DURATION`, `MAX_MODEL_LEN`,
 | `AGENTIC_PORT` | `2322` | sglang router port aiperf targets |
 | `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
 | `ENABLE_RADIX_CACHE` | auto | `1` forces radix cache on i.e. strips `--disable-radix-cache` (auto-on for agentic) |
+| `MOE_A2A_BACKEND` | unset | Overrides `--moe-a2a-backend` from `models.yaml` on prefill and decode (e.g. `none` for plain RCCL collectives instead of MoRI) |
 | `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
 
 Note: `AGENTIC_SERVER_METRICS` is set automatically by the launcher to the space-separated server metrics endpoints (`<prefill_ip>:3000 <decode_ip>:3000`) and consumed by aiperf's `--server-metrics`; it is not a boolean toggle.
