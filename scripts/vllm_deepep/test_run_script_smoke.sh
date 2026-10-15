@@ -12,9 +12,16 @@
 #   2. Artifacts defaulted under /run_logs, which this workload -- unlike sglang_disagg -- does
 #      not mount. They would have gone to the container's writable layer and vanished with it.
 #
-# The stub exits immediately, so the script takes its "server died during startup" path. That is
-# deliberate: it reaches the launch, the readiness probe and the exit trap in a couple of seconds,
-# which is every line this change touches.
+# Two stubs. The first exits immediately, so the script takes its "server died during startup"
+# path -- the launch, the readiness probe and the exit trap in a couple of seconds. The second
+# answers the readiness probe and prints a parseable result block, so the benchmark loop, the CSV
+# and the profiled pass are reached as well; without it, "PROFILE_ENABLE=1 captures nothing"
+# could survive review, which is exactly what happened.
+#
+# What the live stub can and cannot establish, stated so the result is not over-read: it shows
+# the script doing its half of the trace channel -- configuring the server and asking the
+# benchmark to capture. It cannot show vLLM writing a trace. That needs the real wheel on real
+# GPUs and is still outstanding.
 #
 # No GPUs and no model needed. RDMA counters are collected for real where /sys/class/infiniband
 # exists and must degrade cleanly where it does not; both are asserted.
@@ -45,6 +52,64 @@ fi
 
 printf '#!/bin/bash\nsleep 2\nexit 7\n' > "${T}/stub_vllm"
 chmod +x "${T}/stub_vllm"
+
+# A stub that behaves enough like vLLM to drive the whole script: it answers the readiness probe,
+# records the argv it was given, and prints a result block the parser accepts. The dying stub
+# above only ever reaches the launch, so the benchmark loop, the CSV and the profiled pass were
+# never covered -- which is how "PROFILE_ENABLE=1 captures nothing" survived review.
+cat > "${T}/stub_vllm_live" <<'STUB'
+#!/bin/bash
+ARGV_DIR="${STUB_ARGV_DIR:?}"
+case "$1" in
+  serve)
+    if [[ "${2:-}" == "--help" ]]; then
+      echo "usage: vllm serve [options]"
+      # Whether this wheel advertises the flag is the thing under test.
+      [[ "${STUB_PROFILER_CONFIG:-0}" == "1" ]] && echo "  --profiler-config PROFILER_CONFIG"
+      exit 0
+    fi
+    printf '%s\n' "$@" > "${ARGV_DIR}/serve.argv"
+    port=18000
+    for ((i = 1; i <= $#; i++)); do
+      [[ "${!i}" == "--port" ]] && { j=$((i + 1)); port="${!j}"; }
+    done
+    # Always 200, so the script's `curl -sf .../health` succeeds.
+    exec python3 -c "
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+    def do_POST(self): self.do_GET()
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+" "$port"
+    ;;
+  bench)
+    printf '%s\n' "$@" >> "${ARGV_DIR}/bench.argv"
+    # Failures only on the profiled pass. Reporting them on a warm-up would abort the run before
+    # the profiled pass exists -- correctly, which is why that path cannot be used to test this.
+    _failed=0
+    for _a in "$@"; do [[ "$_a" == "--profile" ]] && _failed="${STUB_FAILED:-0}"; done
+    echo "============ Serving Benchmark Result ============"
+    echo "Failed requests:                         ${_failed}"
+    echo "Total token throughput (tok/s):          1234.56"
+    echo "Median TPOT (ms):                        34.50"
+    echo "P99 TTFT (ms):                           456.70"
+    exit 0
+    ;;
+esac
+exit 2
+STUB
+chmod +x "${T}/stub_vllm_live"
+
+run_live() {
+    rm -rf "${T}/argv"; mkdir -p "${T}/argv"
+    ( cd "${T}/run_directory" && \
+      PROFILE_ENABLE=1 RDMA_COUNTERS=0 PROFILE_DIR="${T}/profile_live" \
+      STUB_ARGV_DIR="${T}/argv" STUB_PROFILER_CONFIG="$1" STUB_FAILED="$2" \
+      WARMUP_RUNS=1 MEASURED_RUNS=1 \
+      MODEL_PATH="${T}/model" VLLM="${T}/stub_vllm_live" PYTHON=python3 PORT="$3" \
+      timeout 200 bash ./run_vllm_deepep.sh 2>&1 )
+}
 
 run_script() {
     ( cd "${T}/run_directory" && \
@@ -114,6 +179,48 @@ else
         *) bad "no adapters, and no statement either way" ;;
     esac
 fi
+
+echo "== the trace channel: the script does its half =="
+# What a stub can establish and what it cannot. It can show the script configures the server and
+# asks the benchmark to capture -- the two things that were missing when PROFILE_ENABLE=1 produced
+# an empty directory. It cannot show vLLM writing a trace; that needs the real wheel on real GPUs.
+out="$(run_live 1 0 18091)"
+if grep -q -- "--profiler-config" "${T}/argv/serve.argv" 2>/dev/null; then
+    ok "the server was configured through --profiler-config when the wheel advertises it"
+else
+    bad "wheel advertises --profiler-config and the server was not given it"
+fi
+if grep -q -- "--profile" "${T}/argv/bench.argv" 2>/dev/null; then
+    ok "the benchmark was asked to capture"
+else
+    bad "no --profile reached the benchmark, so nothing would start a capture"
+fi
+# Exactly once: the measured runs must stay comparable, so only the extra pass profiles.
+_n="$(grep -c -- "^--profile$" "${T}/argv/bench.argv" 2>/dev/null || echo 0)"
+if [[ "${_n}" == "1" ]]; then
+    ok "exactly one pass profiled, so the recorded runs stay unprofiled"
+else
+    bad "${_n} passes profiled; the recorded runs must not be"
+fi
+
+echo "== a wheel without --profiler-config is not handed the flag =="
+# Passing it to a wheel that does not know it fails the launch outright, which would turn a
+# profiling request into a workload that cannot start at all.
+out="$(run_live 0 0 18090)"
+if grep -q -- "--profiler-config" "${T}/argv/serve.argv" 2>/dev/null; then
+    bad "handed --profiler-config to a wheel that does not advertise it"
+else
+    ok "flag withheld from a wheel that does not advertise it"
+fi
+
+echo "== failed requests during the profiled pass are reported =="
+# `vllm bench serve` exits 0 while reporting failures, so a trace directory fills and passes the
+# capture check while holding a capture of a workload that partly did not happen.
+out="$(run_live 1 7 18089)"
+case "$out" in
+    *"profiled run reported 7 failed request"*) ok "the profiled pass named its failed requests" ;;
+    *) bad "failed requests during the profiled pass went unreported" ;;
+esac
 
 echo
 echo "passed ${_pass}, failed ${_fail}"
