@@ -5,6 +5,7 @@ This benchmark measures KV cache transfer throughput across multiple backends (N
 ## Overview
 
 - **Backends**: NIXL, Mori, Mooncake (ROCm KV transfer engines). NIXL replaces the deprecated ROCm/RIXL (same Python API); results from runs before the switch are labelled `rixl`.
+- **MoRI has two backends**: `mori` drives MoRI's Python benchmark (`tests/python/io/benchmark.py`, one `torchrun` per size), and `mori_cpp` drives MoRI-IO's C++ benchmark (`tests/cpp/io/bench_engine`, one process for the whole sweep). Both run RDMA writes from GPU memory with batch size 1, the session fast path, 1 QP per transfer and 1 worker thread; `mori_cpp` also uses contiguous batch slots (`--batch-contiguous`) and times 500 iterations per size after 50 warmup iterations.
 - **Environment**: 2 nodes, Docker containers, InfiniBand (`mlx5_0` by default)
 - **What it produces**: A sweep from `--start-size` through `--stop-size`, with JSON per backend, a merged CSV, and an interactive HTML report that compares backends across transfer sizes
 
@@ -25,7 +26,7 @@ Benchmark outputs are usually under `shared/results_<job_id>/` (path may differ 
 
 | Artifact                                                          | Description                                                                      |
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `results_nixl.json`, `results_mori.json`, `results_mooncake.json` | Raw throughput JSON from each backend                                            |
+| `results_nixl.json`, `results_mori.json`, `results_mori_cpp.json`, `results_mooncake.json` | Raw throughput JSON from each backend                   |
 | `results_merged.json`                                             | Single merged file combining all backends (normalized)                           |
 | `results_merged.csv`                                              | Pivot table: transfer size vs throughput per backend                             |
 | `report.html`                                                     | Interactive HTML report (tables + Plotly charts)                                 |
@@ -53,6 +54,33 @@ image on both nodes, runs the sweep, and writes
 `perf.csv`, one row per backend and transfer size, plus a `FAILURE` row for
 any backend that produced no results.
 
+### Choosing backends
+
+Each model card runs a fixed set of backends in one 2-node job. Select a card by
+its tag (or its name) in `--tags`, on both `build` and `run`:
+
+| Tag        | Model card                            | Backends                                |
+| ---------- | ------------------------------------- | --------------------------------------- |
+| `kvcache`  | `pyt_kvcache_transfer_bench_all`      | `nixl`, `mori`, `mori_cpp`, `mooncake`  |
+| `mori`     | `pyt_kvcache_transfer_bench_mori`     | `mori` and `mori_cpp`, on the same node pair |
+| `mori_py`  | `pyt_kvcache_transfer_bench_mori_py`  | `mori` (Python benchmark)               |
+| `mori_cpp` | `pyt_kvcache_transfer_bench_mori_cpp` | `mori_cpp` (C++ `bench_engine`)         |
+
+For example, the C++ MoRI backend alone:
+
+```bash
+madengine build --tags mori_cpp \
+                --registry <namespace>/<repo> --build-on-compute \
+                --additional-context '{"slurm": {"partition": "<your-partition>"}}'
+madengine run   --tags mori_cpp --manifest-file build_manifest.json
+```
+
+Several tags (e.g. `--tags mori_cpp,mori_py`) select several cards, and each card
+runs as its own job, possibly on a different node pair; use `mori` to compare the
+two MoRI backends on the same nodes. `kvcache_transfer_bench/all` selects every
+card. Each card gets its own image tag, but they share one Dockerfile, so building
+several in one `build` reuses the Docker layer cache.
+
 **Notes**
 
 - Set your cluster's Slurm partition with `--additional-context` on `build`, as
@@ -75,8 +103,8 @@ from-source build needs longer.
 - The sweep doubles from `START_SIZE` (4KB) to `STOP_SIZE` (1GB), both in bytes,
 set in the `env_vars` of `models.json`. Override them for one run with e.g.
 `madengine run ... --additional-context '{"env_vars": {"STOP_SIZE": "4294967296"}}'`.
-MoRI caps its sweep at 2GB (it rejects single transfers above `UINT32_MAX`),
-so sizes above that come from NIXL and Mooncake only.
+Both MoRI backends cap their sweep at 2GB (MoRI rejects single transfers above
+`UINT32_MAX`), so sizes above that come from NIXL and Mooncake only.
 
 
 
@@ -109,12 +137,13 @@ From the repository root:
 docker build --network=host -f docker/kvcache_transfer_bench.ubuntu.amd.Dockerfile -t kv-cache-unified:latest ./docker
 ```
 
-The image is built on the SGLang ROCm 10 base `lmsysorg/sglang:v0.5.20-rocm10-mi30x` (`lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` also works, via `--build-arg BASE_DOCKER=...`), with each engine pinned by a Dockerfile `ARG` and gated by `INSTALL_MORI` / `INSTALL_MOONCAKE` / `INSTALL_NIXL` (default `1`; any other value skips that build and keeps whatever the base image ships):
+The image is built on the SGLang ROCm 10 base `lmsysorg/sglang:v0.5.20-rocm10-mi30x` (`lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` also works, via `--build-arg BASE_DOCKER=...`), with each engine pinned by a Dockerfile `ARG` and gated by `INSTALL_MORI` / `INSTALL_MOONCAKE` / `INSTALL_NIXL` (default `1`; any other value skips that build and keeps whatever the base image ships). `INSTALL_MORI_CPP_BENCH` (default `1`) builds MoRI-IO's `bench_engine` for the `mori_cpp` backend from the same MoRI checkout, at `$MORI_IO_BENCH_ENGINE_BIN`:
 
 
 | Component | Pin                                                                                         |
 | --------- | ------------------------------------------------------------------------------------------- |
 | MoRI      | `v1.2.3.post1` (`67632e80`)                                                                 |
+| MoRI-IO `bench_engine` | same MoRI checkout, target-only CMake build in `$MORI_ROOT/build_bench`        |
 | Mooncake  | `v0.3.13.post1` (`71973589`), built with `-DENABLE_MULTI_PROTOCOL=ON`                       |
 | NIXL      | `v1.4.1` (`778edd1d`) + ROCm fix `fe3244c8` (ai-dynamo/nixl#2191), over ROCm/ucx `da3fac2a` |
 
@@ -145,7 +174,8 @@ sbatch [sbatch options] scripts/run.slurm [benchmark options]
 | `--docker-image` | *(required)*     | Image to `docker pull` and run on both nodes (e.g. `kv-cache-unified:latest` or registry path) |
 | `--start-size`   | 4096             | Minimum transfer size (bytes)                                                                  |
 | `--stop-size`    | 1073741824 (1GB) | Maximum transfer size (bytes)                                                                  |
-| `--backends`     | all              | Comma-separated: `nixl,mori,mooncake` or `all`                                                 |
+| `--backends`     | all              | Comma-separated: `nixl,mori,mori_cpp,mooncake` or `all`                                        |
+| `--model-name`   | pyt_kvcache_transfer_bench_all | `model` column of `perf.csv` (madengine sets it from `BENCH_MODEL_NAME`)         |
 | `--ibdevice`     | mlx5_0           | InfiniBand device                                                                              |
 | `--sync-port`    | 9999             | TCP port for target/initiator sync                                                             |
 
@@ -208,11 +238,12 @@ On clusters without Slurm (Kubernetes, bare-metal, etc.), you can run `run_node.
 | `--node2`              | yes      | —                                 | Hostname of the **initiator** node             |
 | `--kv-cache-test-path` | no       | /workspace/kvcache_transfer_bench | Path to benchmark inside container             |
 | `--shared-folder`      | no       | (kv-cache-test-path)              | Base path; appends `/shared/results_<JOB_ID>`  |
-| `--backends`           | no       | all                               | Comma-separated: `nixl,mori,mooncake` or `all` |
+| `--backends`           | no       | all                               | Comma-separated: `nixl,mori,mori_cpp,mooncake` or `all` |
 | `--start-size`         | no       | 4096                              | Minimum transfer size (bytes)                  |
 | `--stop-size`          | no       | 1073741824                        | Maximum transfer size (bytes)                  |
 | `--ibdevice`           | no       | mlx5_0                            | InfiniBand device                              |
 | `--sync-port`          | no       | 9999                              | TCP port for target/initiator sync             |
+| `--model-name`         | no       | pyt_kvcache_transfer_bench_all    | `model` column of `perf.csv`                   |
 
 
 **Example** (run on each node; `JOB_ID` from env for bare-metal):
@@ -229,7 +260,7 @@ docker run --rm --device /dev/dri --device /dev/kfd --device /dev/infiniband \
     --node1 node-target.example.com --node2 node-initiator.example.com \
     --kv-cache-test-path /workspace/kvcache_transfer_bench \
     --shared-folder /workspace/kvcache_transfer_bench \
-    --backends nixl,mori,mooncake --start-size 4096 --stop-size 1073741824 --ibdevice mlx5_0
+    --backends nixl,mori,mori_cpp,mooncake --start-size 4096 --stop-size 1073741824 --ibdevice mlx5_0
 ```
 
 
@@ -293,7 +324,7 @@ python scripts/merge_results.py --input-dir <results_dir> --kv-cache-estimator-f
 ```
 kvcache_transfer_bench/
 ├── README.md
-├── models.json                 # madengine model card (slurm_multi launcher)
+├── models.json                 # madengine model cards (slurm_multi launcher), one per backend set
 ├── kv_cache_estimator.py       # KV cache size calculator & vLLM verifier
 ├── scripts/
 │   ├── merge_results.py        # Merge JSON results, generate CSV + HTML report
@@ -303,7 +334,8 @@ kvcache_transfer_bench/
 ├── backends/
 │   ├── common/                 # Shared utilities (sync, helpers)
 │   ├── nixl/                   # NIXL initiator/target benchmarks
-│   ├── mori/                   # Mori initiator/target benchmarks
+│   ├── mori/                   # Mori initiator/target benchmarks (Python benchmark.py)
+│   ├── mori_cpp/               # MoRI-IO C++ bench_engine initiator/target wrappers
 │   └── mooncake/               # Mooncake initiator/target benchmarks
 └── shared/                     # Results (shared/results_<JOB_ID>/)
 ```

@@ -8,6 +8,7 @@ START_SIZE="4096" # 4kb
 STOP_SIZE="1073741824" # 1GB
 IBDEVICES="mlx5_0"
 SYNC_PORT="9999"
+MODEL_NAME="pyt_kvcache_transfer_bench_all"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             SYNC_PORT="$2"
             shift 2
             ;;
+        --model-name)
+            MODEL_NAME="$2"
+            shift 2
+            ;;
         *)
             shift
             ;;
@@ -55,7 +60,7 @@ done
 
 BENCH_BACKENDS=$(echo "$BENCH_BACKENDS" | tr ',' ' ')
 if [ "$BENCH_BACKENDS" = "all" ]; then
-    BENCH_BACKENDS="mooncake mori nixl"
+    BENCH_BACKENDS="mooncake mori mori_cpp nixl"
 fi
 
 JOB_ID=${SLURM_JOB_ID:-${JOB_ID:-unknown}}
@@ -84,7 +89,7 @@ missing=
 
 if [ -n "$missing" ]; then
     echo "ERROR: Required arguments not set: $missing" >&2
-    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV]" >&2
+    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV] [--model-name NAME]" >&2
     exit 1
 fi
 
@@ -131,6 +136,7 @@ if [ "$NODE1" != "$CURRENT_HOST" ]; then
     python3 $KV_CACHE_TEST_PATH/scripts/to_perf_csv.py \
         --input-dir "$SHARED_FOLDER" \
         --output "$KV_CACHE_TEST_PATH/slurm_output/perf_csv/results_${JOB_ID}.csv" \
+        --model-name "$MODEL_NAME" \
         --backends "$(echo "$BENCH_BACKENDS" | tr ' ' ',')"
     echo "=== perf.csv generation complete (exit code $?) ==="
 

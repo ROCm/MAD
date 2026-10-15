@@ -27,6 +27,10 @@ while [[ $# -gt 0 ]]; do
             SYNC_PORT="$2"
             shift 2
             ;;
+        --model-name)
+            BENCH_MODEL_NAME="$2"
+            shift 2
+            ;;
         *)
             shift
             ;;
@@ -41,6 +45,7 @@ BENCH_BACKENDS=${BENCH_BACKENDS:-all}
 DOCKER_IMAGE=${DOCKER_IMAGE_ARG:-${DOCKER_IMAGE_NAME:?Set DOCKER_IMAGE_NAME (env) or pass --docker-image}}
 IBDEVICES=${IBDEVICES:-${IBDEVICE:-mlx5_0}}
 SYNC_PORT=${SYNC_PORT:-9999}
+BENCH_MODEL_NAME=${BENCH_MODEL_NAME:-pyt_kvcache_transfer_bench_all}
 KV_CACHE_TEST_PATH=/workspace/kvcache_transfer_bench
 
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -66,6 +71,7 @@ if [ -z "$NODE1" ]; then
     exit 1
 fi
 echo "INFO: NODE1=$NODE1 NODE2=$NODE2 (${#NODES[@]} node(s))"
+echo "INFO: BENCH_MODEL_NAME=$BENCH_MODEL_NAME BENCH_BACKENDS=$BENCH_BACKENDS"
 echo "INFO: KV_CACHE_TEST_REPO=$KV_CACHE_TEST_REPO -> $KV_CACHE_TEST_PATH"
 
 # ---------------------------------------------------------------------------
@@ -121,7 +127,7 @@ docker run --rm \
     -e GPUS_PER_NODE=$GPUS_PER_NODE \
     -e MAD_SYSTEM_GPU_ARCHITECTURE='"${MAD_SYSTEM_GPU_ARCHITECTURE:-}"' \
     --name '"$DOCKER_CONTAINER_NAME"' \
-    '"$DOCKER_IMAGE"' /bin/bash -c "'"$DRIVER_SCRIPT"' --node1 '"${NODE1}"' --node2 '"${NODE2}"' --kv-cache-test-path '"$KV_CACHE_TEST_PATH"' --shared-folder '"$KV_CACHE_TEST_PATH"' --backends '"${BENCH_BACKENDS:-all}"' --start-size '"$START_SIZE"' --stop-size '"$STOP_SIZE"' --sync-port '"$SYNC_PORT"' --ibdevice '"$IBDEVICES"'"
+    '"$DOCKER_IMAGE"' /bin/bash -c "'"$DRIVER_SCRIPT"' --node1 '"${NODE1}"' --node2 '"${NODE2}"' --kv-cache-test-path '"$KV_CACHE_TEST_PATH"' --shared-folder '"$KV_CACHE_TEST_PATH"' --backends '"${BENCH_BACKENDS:-all}"' --start-size '"$START_SIZE"' --stop-size '"$STOP_SIZE"' --sync-port '"$SYNC_PORT"' --ibdevice '"$IBDEVICES"' --model-name '"$BENCH_MODEL_NAME"'"
 '
 BENCH_RC=$?
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Post-process benchmark results: merge results_nixl.json, results_mori.json,
-and results_mooncake.json from a shared directory into:
+results_mori_cpp.json and results_mooncake.json from a shared directory into:
   - results_merged.json  (combined, normalized list)
   - results_merged.csv   (pivot: one row per transfer size, one column per backend)
   - report.html          (self-contained HTML report with table + throughput chart)
@@ -19,14 +19,16 @@ from pathlib import Path
 RESULT_FILES = [
     "results_nixl.json",
     "results_mori.json",
+    "results_mori_cpp.json",
     "results_mooncake.json",
 ]
 
-BACKENDS = ["nixl", "mori", "mooncake"]
+BACKENDS = ["nixl", "mori", "mori_cpp", "mooncake"]
 
 BACKEND_COLORS = {
     "nixl": "#4472C4",
     "mori": "#ED7D31",
+    "mori_cpp": "#70AD47",
     "mooncake": "#A5A5A5",
 }
 

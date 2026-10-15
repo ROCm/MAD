@@ -15,6 +15,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ibverbs-uti
 RUN if [ "${INSTALL_MORI}" = "1" ]; then echo "INSTALL_MORI=1: installing MoRI at ${MORI_COMMIT}" && git checkout main && git fetch origin && git pull origin main && git checkout ${MORI_COMMIT} && pip install -r requirements-build.txt Cython && MORI_GPU_ARCHS="${GPU_ARCH_LIST}" pip install --no-build-isolation -e . ; else echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; fi
 ENV MORI_ROOT=/sgl-workspace/mori
 
+# ========== MORI-IO C++ BENCHMARK ==========
+# bench_engine (tests/cpp/io/bench_engine.cpp) for the mori_cpp backend, built from the MoRI checkout above.
+# Set INSTALL_MORI_CPP_BENCH=1 to build it; any other value skips it.
+# On the pip ROCm SDK (ROCm 10 bases) hsakmt's CMake config needs NUMA, whose config is under lib/rocm_sysdeps.
+ARG INSTALL_MORI_CPP_BENCH=1
+ENV MORI_IO_BENCH_ENGINE_BIN=${MORI_ROOT}/build_bench/tests/cpp/bench_engine
+RUN if [ "${INSTALL_MORI_CPP_BENCH}" = "1" ]; then echo "INSTALL_MORI_CPP_BENCH=1: building bench_engine at $(git -C ${MORI_ROOT} rev-parse --short HEAD)" && \
+        cd ${MORI_ROOT} && \
+        cmake -B build_bench -DCMAKE_PREFIX_PATH="${ROCM_PATH:-/opt/rocm}/lib/rocm_sysdeps" \
+            -DUSE_ROCM=ON -DCMAKE_BUILD_TYPE=Release -DGPU_TARGETS="${GPU_ARCH_LIST:-gfx942}" \
+            -DBUILD_IO=ON -DBUILD_TESTS=ON -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UMBP=OFF \
+            -DWITH_MPI=OFF -DBUILD_XLA_FFI_OPS=OFF && \
+        cmake --build build_bench --target bench_engine -j $(nproc) && \
+        ${MORI_IO_BENCH_ENGINE_BIN} --help > /dev/null ; \
+    else echo "INSTALL_MORI_CPP_BENCH=${INSTALL_MORI_CPP_BENCH}: skipping bench_engine build"; fi
+
 # ========== MOONCAKE ==========
 WORKDIR /sgl-workspace
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"

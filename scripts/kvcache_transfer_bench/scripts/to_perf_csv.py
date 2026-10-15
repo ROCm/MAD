@@ -128,7 +128,7 @@ def main():
     parser.add_argument("--input-dir", required=True, help="Directory containing results_merged.json")
     parser.add_argument("--output", required=True, help="Output perf.csv path")
     parser.add_argument("--model-name", default="pyt_kvcache_transfer_bench_all")
-    parser.add_argument("--backends", default="nixl,mori,mooncake",
+    parser.add_argument("--backends", default="nixl,mori,mori_cpp,mooncake",
                         help="Comma-separated backends that were requested for this run")
     args = parser.parse_args()
 
