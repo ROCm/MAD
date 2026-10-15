@@ -187,7 +187,13 @@ RDMA_COUNTERS="${RDMA_COUNTERS:-${PROFILE_ENABLE}}"
 # deletes it after the run unless --keep-model-dir or --keep-alive is given (tools/run_models.py),
 # so a profile written beside the script is gone before anyone can read it. /run_logs is the
 # convention sglang_disagg already uses and what a measurement manifest binds.
-PROFILE_DIR="${PROFILE_DIR:-/run_logs/vllm_deepep_${ALL2ALL_BACKEND}}"
+PROFILE_ROOT="${PROFILE_DIR:-/run_logs/vllm_deepep}"
+# One directory per invocation, under the destination the operator supplied. A persistent mount is
+# reused by every run of every model card, so a fixed path accumulates: old RCCL logs and traces
+# stay while the counter CSV is overwritten, and the artifacts then describe more than one run
+# under a single label. It also made the "were traces captured" check below answerable by a trace
+# from a previous run.
+PROFILE_DIR="${PROFILE_ROOT}/${ALL2ALL_BACKEND}_$(date -u +%Y%m%dT%H%M%SZ)_$(hostname -s)_$$"
 
 _rdma_sampler_pid=""
 _rdma_counters_out=""
@@ -198,7 +204,7 @@ _warn_if_not_persistent() {
     [[ "${PROFILE_ENABLE}" == "1" || "${RDMA_COUNTERS}" == "1" ]] || return 0
     # Leading slash stripped first: `${x%%/*}` on a path that already starts with / yields the
     # empty string, which made this ask about "/" and never warn about anything.
-    local _rest="${PROFILE_DIR#/}" _root
+    local _rest="${PROFILE_ROOT#/}" _root
     _root="/${_rest%%/*}"
     if ! grep -qE "[[:space:]]${_root}[[:space:]]" /proc/mounts 2>/dev/null; then
         echo "WARNING: ${_root} is not a mount point in this container, so anything written to" \
@@ -293,8 +299,12 @@ _start_rdma_counters() {
     fi
     sleep 0.2
   done
-  # Marked, not merely warned about: left unmarked the sampler keeps running and the report sees
-  # an ordinary multi-sample file whose window starts after the server.
+  # Stopped first, then marked. The sampler clears `.failed` and `.started` when it truncates its
+  # output, so a sampler still initialising when this timeout fires would erase the marker written
+  # here and leave a window that began after the server with nothing to say so.
+  kill -TERM "${_rdma_sampler_pid}" 2>/dev/null || true
+  wait "${_rdma_sampler_pid}" 2>/dev/null || true
+  _rdma_sampler_pid=""
   echo "WARNING: no RDMA baseline sample before the server started; the window is a floor" >&2
   echo "no baseline sample before the server started" \
     > "${_rdma_counters_out}.failed" 2>/dev/null || true

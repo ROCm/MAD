@@ -63,14 +63,26 @@ case "$out" in
     *) bad "never reached the launch: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')" ;;
 esac
 
-echo "== artifacts go where PROFILE_DIR says =="
+echo "== each invocation gets its own directory under PROFILE_DIR =="
 out="$(run_script 1 1 18093)"
 # compgen, not `[[ -d ... ]]`: bash does not expand a glob in the operand of -d, so that test
 # asks about a directory literally named with an asterisk and always fails.
-if compgen -G "${T}/profile/rdma" > /dev/null 2>&1; then
-    ok "profile directory created where asked"
+if compgen -G "${T}/profile/*/rdma" > /dev/null 2>&1; then
+    ok "profile directory created under PROFILE_DIR"
 else
     bad "PROFILE_DIR was not honoured"
+fi
+
+# A persistent mount is reused by every run of every model card. Sharing one directory left old
+# RCCL logs and traces in place while the counter CSV was overwritten, so the artifacts described
+# more than one run under a single label -- and an old trace could answer "were traces captured"
+# for a run that captured none.
+out2="$(run_script 1 1 18092)"
+_runs="$(find "${T}/profile" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)"
+if (( _runs >= 2 )); then
+    ok "a second invocation did not reuse the first one's directory (${_runs} present)"
+else
+    bad "two invocations shared one directory (${_runs} present)"
 fi
 
 echo "== a destination that will not survive the run is called out =="
@@ -84,7 +96,7 @@ case "$out" in
 esac
 
 echo "== the counter channel reports what actually happened =="
-csv="$(ls "${T}/profile"/rdma/*.csv 2>/dev/null | head -1)"
+csv="$(ls "${T}/profile"/*/rdma/*.csv 2>/dev/null | head -1)"
 if [[ -d /sys/class/infiniband ]] && compgen -G "/sys/class/infiniband/*" > /dev/null 2>&1; then
     rows="$(wc -l < "${csv}" 2>/dev/null || echo 0)"
     devices="$(awk -F, 'NR>1{print $3}' "${csv}" 2>/dev/null | sort -u | wc -l)"
