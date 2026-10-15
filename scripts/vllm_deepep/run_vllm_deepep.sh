@@ -84,9 +84,16 @@ DETAIL_CSV="${LOG_DIR}/perf_vllm_deepep_detail.csv"
 echo "=== vllm_deepep: ${MODEL_REPO} over ${ALL2ALL_BACKEND} ==="
 
 # --- backend-specific environment -------------------------------------------
-# NCCL_CUMEM_ENABLE is required by BOTH backends: RCCL refuses symmetric memory
-# (and ncclDevCommCreate) without VMM.
-export NCCL_CUMEM_ENABLE=1
+# deepep_v2 needs this: RCCL refuses symmetric memory, and ncclDevCommCreate,
+# without VMM. For mori it was asserted rather than established -- mori carries
+# its own transport -- and on a stack where cuMem itself is broken, setting it
+# unconditionally takes down the control arm along with the subject, which
+# leaves a comparison with no baseline. Observed on ROCm 7.14/7.15 userspace
+# over a 7.0 host KFD: mori failed at init with cumem=1 and reached MoE
+# execution with cumem=0.
+#
+# The default is unchanged. It is overridable now, which is what was missing.
+export NCCL_CUMEM_ENABLE="${NCCL_CUMEM_ENABLE:-1}"
 export VLLM_ROCM_USE_AITER=1
 # vLLM refuses MoRI without AITER fused MoE, and running the two arms on
 # different MoE implementations would make the comparison meaningless, so both
