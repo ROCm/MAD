@@ -282,7 +282,16 @@ fi
 # MOE_A2A_BACKEND overrides the MoE all-to-all backend from models.yaml (e.g. "none"
 # to run DP-attention EP over plain RCCL collectives instead of MoRI). Appended last,
 # so argparse's last-occurrence-wins rule makes it beat any --moe-a2a-backend above.
+# Interpolated into the eval'd launch command, so it is restricted like KV_TRANSFER_BACKEND
+# below: the ROCm-relevant subset of sglang's MOE_A2A_BACKEND_CHOICES.
 if [[ -n "${MOE_A2A_BACKEND:-}" ]]; then
+    case "$MOE_A2A_BACKEND" in
+        none|mori|deepep|mooncake|nixl) ;;
+        *)
+            echo "ERROR: unsupported MOE_A2A_BACKEND='$MOE_A2A_BACKEND' (expected: none|mori|deepep|mooncake|nixl)" >&2
+            exit 1
+            ;;
+    esac
     PREFILL_MODEL_CONFIG="${PREFILL_MODEL_CONFIG} --moe-a2a-backend ${MOE_A2A_BACKEND}"
     DECODE_MODEL_CONFIG="${DECODE_MODEL_CONFIG} --moe-a2a-backend ${MOE_A2A_BACKEND}"
     echo "[moe] MOE_A2A_BACKEND=${MOE_A2A_BACKEND} overrides the models.yaml MoE all-to-all backend"
