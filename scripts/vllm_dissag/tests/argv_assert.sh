@@ -23,6 +23,16 @@ _argv() { # connector wide_ep ep_backend model model_path
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
+# emit argv for a cell with a KV_OFFLOAD tier set
+_argv_off() { # connector wide_ep ep_backend model model_path kv_offload [backend] [disk_path]
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
+    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} ${8:+OFFLOAD_DISK_PATH="$8"} \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+
 _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _count() { local n; n="$(grep -cF -- "$2" <<<"$1")"; [[ "$n" == "$3" ]] && { printf "  PASS  %s (=%s)\n" "$4" "$n"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s want %s)\n" "$4" "$n" "$3"; fail=$((fail+1)); }; }
@@ -46,6 +56,47 @@ _has    "$B" "--block-size" "has --block-size"
 _has    "$B" "16" "block-size value 16 present"
 _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu, default backend = OffloadingConnector (moriio wideEP DSV3) ==="
+O="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 cpu)"
+_has    "$O" "MultiConnector" "wraps in MultiConnector"
+_has    "$O" "OffloadingConnector" "default backend adds OffloadingConnector (native)"
+_hasnot "$O" "SimpleCPUOffloadConnector" "SimpleCPU not used unless selected"
+_has    "$O" "cpu_bytes_to_use" "OffloadingConnector has cpu_bytes_to_use"
+_has    "$O" "MoRIIOConnector" "base MoRIIOConnector preserved inside MultiConnector"
+_has    "$O" "--enable-prefix-caching" "prefix caching enabled under offload"
+_hasnot "$O" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu, OFFLOAD_BACKEND=SimpleCPUOffloadConnector (moriio wideEP DSV3) ==="
+OS="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 cpu SimpleCPUOffloadConnector)"
+_has    "$OS" "SimpleCPUOffloadConnector" "explicit SimpleCPUOffloadConnector selected"
+_has    "$OS" "cpu_bytes_to_use" "SimpleCPUOffloadConnector has cpu_bytes_to_use"
+_hasnot "$OS" "TieringOffloadingSpec" "SimpleCPU has no fs tier"
+
+echo ""
+echo "=== KV_OFFLOAD=fs, default backend = OffloadingConnector + TieringOffloadingSpec ==="
+OF="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 fs OffloadingConnector /mnt/nvme)"
+_has    "$OF" "OffloadingConnector" "fs tier uses OffloadingConnector"
+_has    "$OF" "TieringOffloadingSpec" "fs tier adds TieringOffloadingSpec"
+_has    "$OF" "secondary_tiers" "fs tier adds secondary_tiers"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu (tiered prefix cache; rixl deepep DSV3) ==="
+OD="$(_argv_off rixl 1 deepep DeepSeek-V3 /m/DSV3 cpu)"
+_has    "$OD" "MultiConnector" "wraps in MultiConnector"
+_has    "$OD" "OffloadingConnector" "default backend adds OffloadingConnector (native)"
+_has    "$OD" "NixlConnector" "base NixlConnector preserved inside MultiConnector"
+_has    "$OD" "--enable-prefix-caching" "prefix caching enabled under offload"
+_hasnot "$OD" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=none is unchanged (no MultiConnector; disagg recipe intact) ==="
+N="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 none)"
+_hasnot "$N" "MultiConnector" "no MultiConnector when offload disabled"
+_hasnot "$N" "OffloadingConnector" "no offload connector when offload disabled"
+_has    "$N" "--no-enable-prefix-caching" "prefix caching stays off (base recipe)"
 
 echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
