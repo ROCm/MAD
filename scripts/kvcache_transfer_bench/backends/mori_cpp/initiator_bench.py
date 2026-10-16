@@ -3,7 +3,7 @@
 MoRI-IO C++ Benchmark - Initiator Node (bench_engine rank 1 = TARGET in mori terms)
 
 Waits for the target node to start bench_engine rank 0, then runs rank 1 with
-the same workload flags (engine.py). This node only registers memory and waits;
+the same workload flags (common/mori_settings.py). This node only registers memory and waits;
 the target node records the results.
 """
 
@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.mori_settings import clamp_end_size
 from common.utils import add_common_bench_args, resolve_hostname
 
 import engine
@@ -27,7 +28,7 @@ def main():
     engine.require_engine()
     target_node = args.target_node or os.environ.get("TARGET_IP", "localhost")
     self_ip = engine.local_ip()
-    end_size = engine.clamp_end_size(args.end_size)
+    end_size = clamp_end_size(args.end_size)
 
     print(f"{'='*60}")
     print("MoRI-IO C++ Benchmark - INITIATOR (bench_engine rank 1)")

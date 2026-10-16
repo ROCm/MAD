@@ -3,9 +3,9 @@
 MORI Benchmark - Initiator Node (node_rank=1 = TARGET in mori terms)
 
 Runs one torchrun per size (like NIXL/Mooncake): for each size, sync with
-target, run MORI benchmark with --sweep-start-size=X --sweep-max-size=X,
---iters=128, --warmup-iters=100. MORI does warmup + active iterations
-internally (one transfer at a time). Target parses output and writes results.
+target, run MoRI's Python benchmark through run_benchmark.py with
+--sweep-start-size=X --sweep-max-size=X and the workload shared with mori_cpp
+(common/mori_settings.py). Target parses output and writes results.
 """
 
 import argparse
@@ -16,11 +16,11 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.mori_settings import NUM_ITERS, WARMUP_ITERS, WORKLOAD_FLAGS, clamp_end_size
 from common.utils import add_common_bench_args, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
-NUM_ITERS = 128
-MAX_BUFFER_SIZE = 2147483648  # 2 GB: MoRI rejects single transfers above UINT32_MAX (4 GiB - 1)
+RUN_BENCHMARK = str(Path(__file__).resolve().parent / "run_benchmark.py")
 
 
 def main():
@@ -42,10 +42,7 @@ def main():
     hostname = sock.gethostname()
     initiator_ip = resolve_hostname(os.environ.get("NODE2", hostname))
 
-    if args.end_size > MAX_BUFFER_SIZE:
-        print(f"WARNING: Clamping sweep to {MAX_BUFFER_SIZE} bytes "
-              f"(MoRI rejects single transfers above UINT32_MAX)")
-        args.end_size = MAX_BUFFER_SIZE
+    args.end_size = clamp_end_size(args.end_size)
 
     test_sizes = generate_test_sizes(args.start_size, args.end_size)
 
@@ -58,7 +55,7 @@ def main():
     print(f"Sweep:        {args.start_size} .. {args.end_size} bytes")
     print(f"Test sizes:   {test_sizes}")
     print(f"Buffer alloc: {args.end_size} bytes (max size, reused for all)")
-    print(f"Iterations:   {NUM_ITERS} per size")
+    print(f"Iterations:   {NUM_ITERS} per size (+{WARMUP_ITERS} warmup)")
     print(f"Op type:      write")
     print(f"Shared folder: {SHARED_DIR}")
     print(f"MORI_ROOT:    {mori_root}")
@@ -95,22 +92,13 @@ def main():
                 "--nproc_per_node=1",
                 f"--master_addr={master_addr}",
                 f"--master_port={master_port}",
-                mori_bench,
+                RUN_BENCHMARK,
                 f"--host={initiator_ip}",
-                "--op-type=write",
+                *WORKLOAD_FLAGS,
                 f"--buffer-size={args.end_size}",
-                "--transfer-batch-size=1",
-                "--enable-sess",
-                "--enable-batch-transfer",
                 "--all",
                 f"--sweep-start-size={current_size}",
                 f"--sweep-max-size={current_size}",
-                "--num-initiator-dev=1",
-                "--num-target-dev=1",
-                "--num-worker-threads=1",
-                f"--iters={NUM_ITERS}",
-                "--poll_cq_mode=polling",
-                "--log-level=info",
             ]
             print(f"Command: {' '.join(cmd)}\n")
 

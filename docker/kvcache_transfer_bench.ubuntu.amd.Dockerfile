@@ -9,15 +9,12 @@ WORKDIR /sgl-workspace
 WORKDIR /sgl-workspace/mori
 # v1.2.3.post1
 ARG MORI_COMMIT="67632e80e2e492184b589904b63225f82d45537c"
-# Set INSTALL_MORI=1 to build/install MoRI at MORI_COMMIT; any other value skips it.
 ARG INSTALL_MORI=1
 RUN apt-get update && apt-get install -y --no-install-recommends git ibverbs-utils libibverbs-dev openmpi-bin libopenmpi-dev libpci-dev libdw1 locales libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc cmake libdrm-dev
 RUN if [ "${INSTALL_MORI}" = "1" ]; then echo "INSTALL_MORI=1: installing MoRI at ${MORI_COMMIT}" && git checkout main && git fetch origin && git pull origin main && git checkout ${MORI_COMMIT} && pip install -r requirements-build.txt Cython && MORI_GPU_ARCHS="${GPU_ARCH_LIST}" pip install --no-build-isolation -e . ; else echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; fi
 ENV MORI_ROOT=/sgl-workspace/mori
 
 # ========== MORI-IO C++ BENCHMARK ==========
-# bench_engine (tests/cpp/io/bench_engine.cpp) for the mori_cpp backend, built from the MoRI checkout above.
-# Set INSTALL_MORI_CPP_BENCH=1 to build it; any other value skips it.
 # On the pip ROCm SDK (ROCm 10 bases) hsakmt's CMake config needs NUMA, whose config is under lib/rocm_sysdeps.
 ARG INSTALL_MORI_CPP_BENCH=1
 ENV MORI_IO_BENCH_ENGINE_BIN=${MORI_ROOT}/build_bench/tests/cpp/bench_engine
@@ -36,7 +33,6 @@ WORKDIR /sgl-workspace
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
 # v0.3.13.post1
 ARG MOONCAKE_COMMIT="719735896c86b56fabec6cf3e825fb2ea640597a"
-# Set INSTALL_MOONCAKE=1 to build/install Mooncake at MOONCAKE_COMMIT; any other value skips it.
 ARG INSTALL_MOONCAKE=1
 ENV MOONCAKE_HOME=/sgl-workspace/Mooncake
 # ENABLE_MULTI_PROTOCOL=ON is required with USE_HIP=ON; without it cross-node writes are routed to HIP IPC and fail.
@@ -67,13 +63,12 @@ ARG NIXL_REPO="https://github.com/ai-dynamo/nixl.git"
 ARG NIXL_COMMIT="778edd1d1a50936b12c264879e12ef465e629002"
 # ai-dynamo/nixl#2191 (ROCm fix, not in v1.4.1)
 ARG NIXL_CHERRY_PICK="fe3244c875ee4a22da6b0140c94c334546e9b715"
-# Set INSTALL_NIXL=1 to build UCX + NIXL at the commits above; any other value skips them.
 ARG INSTALL_NIXL=1
 ENV UCX_HOME=/sgl-workspace/ucx
 ENV NIXL_HOME=/sgl-workspace/nixl
 ENV PATH=${UCX_HOME}/bin:${PATH}:/usr/local/bin/etcd
 ENV LD_LIBRARY_PATH=${NIXL_HOME}/lib/x86_64-linux-gnu:${UCX_HOME}/lib:${LD_LIBRARY_PATH}
-# Replaces any NIXL the base ships; NIXL's build rejects distro Abseil without absl_log (e.g. Ubuntu 24.04's).
+# Replaces any NIXL the base ships. NIXL's build rejects distro Abseil without absl_log (e.g. Ubuntu 24.04's).
 RUN if [ "${INSTALL_NIXL}" = "1" ]; then echo "INSTALL_NIXL=1: installing NIXL at ${NIXL_COMMIT}" && \
         pip install meson meson-python patchelf tomlkit uv && \
         if dpkg -s libabsl-dev >/dev/null 2>&1; then apt-get remove -y libabsl-dev; fi && \

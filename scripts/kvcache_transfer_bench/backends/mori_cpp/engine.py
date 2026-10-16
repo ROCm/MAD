@@ -2,8 +2,8 @@
 MoRI-IO C++ benchmark (bench_engine) command line, shared by both nodes.
 
 bench_engine requires identical workload arguments on both ranks, so they are
-built here once. Workload: RDMA write from GPU memory, batch size 1 with
-contiguous slots, the session fast path, 1 QP per transfer and 1 worker thread.
+built here once, from the workload shared with the Python mori backend
+(common/mori_settings.py).
 """
 
 import fcntl
@@ -16,14 +16,9 @@ from pathlib import Path
 from typing import List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.mori_settings import WORKLOAD_FLAGS
 from common.utils import resolve_hostname
 
-NUM_ITERS = 500
-WARMUP_ITERS = 50
-NUM_QP_PER_TRANSFER = 1
-NUM_WORKER_THREADS = 1
-TRANSFER_BATCH_SIZE = 1
-MAX_TRANSFER_SIZE = 2147483648  # 2 GB: MoRI rejects single transfers above UINT32_MAX (4 GiB - 1)
 BOOTSTRAP_PORT = 18515  # bench_engine's engines also listen on the next two ports
 TIMEOUT_S = 1800
 
@@ -78,31 +73,11 @@ def command(rank: int, master_ip: str, self_ip: str, port: int,
         "--master-ip", master_ip,
         "--self-ip", self_ip,
         "--port", str(port),
-        "--backend", "rdma",
-        "--op", "write",
-        "--mem-type", "gpu",
+        *WORKLOAD_FLAGS,
         "--all",
-        "--sweep-start", str(start_size),
-        "--sweep-max", str(end_size),
-        "--transfer-batch-size", str(TRANSFER_BATCH_SIZE),
-        "--enable-batch-transfer",
-        "--batch-contiguous",
-        "--enable-sess",
-        "--num-qp-per-transfer", str(NUM_QP_PER_TRANSFER),
-        "--num-worker-threads", str(NUM_WORKER_THREADS),
-        "--poll_cq_mode", "polling",
-        "--iters", str(NUM_ITERS),
-        "--warmup-iters", str(WARMUP_ITERS),
-        "--log-level", "info",
+        "--sweep-start-size", str(start_size),
+        "--sweep-max-size", str(end_size),
     ]
-
-
-def clamp_end_size(end_size: int) -> int:
-    if end_size > MAX_TRANSFER_SIZE:
-        print(f"WARNING: Clamping sweep to {MAX_TRANSFER_SIZE} bytes "
-              f"(MoRI rejects single transfers above UINT32_MAX)")
-        return MAX_TRANSFER_SIZE
-    return end_size
 
 
 def _text(stream) -> str:

@@ -5,7 +5,7 @@ MoRI-IO C++ Benchmark - Target Node (bench_engine rank 0 = INITIATOR in mori ter
 Same roles as the Python MoRI backend: this node drives the RDMA writes, parses
 bench_engine's table and writes results_mori_cpp.json. One bench_engine run
 covers the whole sweep (per size: warmup, then a single timer around the timed
-iterations); see engine.py for the workload flags.
+iterations), with the workload in common/mori_settings.py.
 """
 
 import argparse
@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common import mori_settings
 from common.utils import add_common_bench_args, append_result_to_file, collect_version_info
 
 import engine
@@ -50,7 +51,7 @@ def main():
     engine.require_engine()
     hostname = sock.gethostname()
     master_ip = engine.local_ip()
-    end_size = engine.clamp_end_size(args.end_size)
+    end_size = mori_settings.clamp_end_size(args.end_size)
 
     print(f"{'='*60}")
     print("MoRI-IO C++ Benchmark - TARGET (bench_engine rank 0, one run for the sweep)")
@@ -60,9 +61,7 @@ def main():
     if args.initiator_node:
         print(f"Initiator:    {args.initiator_node}")
     print(f"Sweep:        {args.start_size} .. {end_size} bytes")
-    print(f"Iterations:   {engine.NUM_ITERS} per size (+{engine.WARMUP_ITERS} warmup)")
-    print(f"QPs/workers:  {engine.NUM_QP_PER_TRANSFER} QP per transfer, {engine.NUM_WORKER_THREADS} worker thread")
-    print(f"Batch:        {engine.TRANSFER_BATCH_SIZE}, contiguous")
+    print(f"Iterations:   {mori_settings.NUM_ITERS} per size (+{mori_settings.WARMUP_ITERS} warmup)")
     print(f"bench_engine: {engine.engine_path()}")
     print(f"Shared folder: {shared_dir}")
     print(f"{'='*60}\n")
@@ -97,17 +96,7 @@ def main():
             append_result_to_file(results_path, metadata, {
                 "backend": "mori_cpp",
                 "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "test_parameters": {
-                    "size_bytes": m["msg_size_bytes"],
-                    "size_mb": m["msg_size_bytes"] / (1024 * 1024),
-                    "num_iters": m["iters"],
-                    "warmup_iters": engine.WARMUP_ITERS,
-                    "operation": "write",
-                    "transfer_batch_size": m["batch_size"],
-                    "batch_contiguous": True,
-                    "num_qp_per_transfer": engine.NUM_QP_PER_TRANSFER,
-                    "num_worker_threads": engine.NUM_WORKER_THREADS,
-                },
+                "test_parameters": mori_settings.test_parameters(m["msg_size_bytes"]),
                 "results": {
                     "bandwidth_gbs_avg": round(m["avg_bandwidth_gbps"], 4),
                     "latency_us_avg": m["avg_latency_us"],

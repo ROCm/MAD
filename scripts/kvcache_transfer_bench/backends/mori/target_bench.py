@@ -3,8 +3,9 @@
 MORI Benchmark - Target Node (node_rank=0 = INITIATOR in mori terms)
 
 Runs one torchrun per size (like NIXL/Mooncake): for each size, signal ready,
-run MORI benchmark with --iters=128 --warmup-iters=100, parse results, write
-in NIXL-style format (bandwidth_gbs_avg) for merge_results.
+run MoRI's Python benchmark through run_benchmark.py with the workload shared
+with mori_cpp (common/mori_settings.py), parse results, write in NIXL-style
+format (bandwidth_gbs_avg) for merge_results.
 """
 
 import argparse
@@ -17,11 +18,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.mori_settings import NUM_ITERS, WARMUP_ITERS, WORKLOAD_FLAGS, clamp_end_size, test_parameters
 from common.utils import add_common_bench_args, append_result_to_file, collect_version_info, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
-NUM_ITERS = 128
-MAX_BUFFER_SIZE = 2147483648  # 2 GB: MoRI rejects single transfers above UINT32_MAX (4 GiB - 1)
+RUN_BENCHMARK = str(Path(__file__).resolve().parent / "run_benchmark.py")
 
 
 def parse_mori_output_all(output: str) -> list:
@@ -66,11 +67,7 @@ def main():
     target_node = args.target_node or hostname
     master_addr = resolve_hostname(target_node)
 
-    original_end_size = args.end_size
-    if args.end_size > MAX_BUFFER_SIZE:
-        print(f"WARNING: Clamping sweep to {MAX_BUFFER_SIZE} bytes "
-              f"(MoRI rejects single transfers above UINT32_MAX)")
-        args.end_size = MAX_BUFFER_SIZE
+    args.end_size = clamp_end_size(args.end_size)
 
     test_sizes = generate_test_sizes(args.start_size, args.end_size)
 
@@ -83,7 +80,7 @@ def main():
         print(f"Initiator:    {args.initiator_node}")
     print(f"Sweep:        {args.start_size} .. {args.end_size} bytes")
     print(f"Test sizes:   {test_sizes}")
-    print(f"Iterations:   {NUM_ITERS} per size")
+    print(f"Iterations:   {NUM_ITERS} per size (+{WARMUP_ITERS} warmup)")
     print(f"Shared folder: {SHARED_DIR}")
     print(f"MORI_ROOT:    {mori_root}")
     print(f"{'='*60}\n")
@@ -129,23 +126,13 @@ def main():
                 "--nproc_per_node=1",
                 f"--master_addr={master_addr}",
                 f"--master_port={master_port}",
-                mori_bench,
+                RUN_BENCHMARK,
                 f"--host={master_addr}",
-                "--op-type=write",
+                *WORKLOAD_FLAGS,
                 f"--buffer-size={args.end_size}",
-                "--transfer-batch-size=1",
-                "--enable-sess",
-                "--enable-batch-transfer",
                 "--all",
                 f"--sweep-start-size={current_size}",
                 f"--sweep-max-size={current_size}",
-                "--num-initiator-dev=1",
-                "--num-target-dev=1",
-                "--num-qp-per-transfer=1",
-                "--num-worker-threads=1",
-                f"--iters={NUM_ITERS}",
-                "--poll_cq_mode=polling",
-                "--log-level=info",
             ]
 
             print(f"Command: {' '.join(cmd)}\n")
@@ -177,12 +164,7 @@ def main():
                 result_entry = {
                     "backend": "mori",
                     "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "test_parameters": {
-                        "size_bytes": m["msg_size_bytes"],
-                        "size_mb": m["msg_size_bytes"] / (1024 * 1024),
-                        "num_iters": NUM_ITERS,
-                        "operation": "write",
-                    },
+                    "test_parameters": test_parameters(m["msg_size_bytes"]),
                     "results": {
                         "bandwidth_gbs_avg": avg_gbs,
                         "bandwidth_gbs_min": avg_gbs,  # MORI doesn't report per-iter; use avg
