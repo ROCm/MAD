@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-MORI Benchmark - Target Node (node_rank=0 = INITIATOR in mori terms)
-
-Runs one torchrun per size (like NIXL/Mooncake): for each size, signal ready,
-run MoRI's Python benchmark through run_benchmark.py with the workload shared
-with mori_cpp (common/mori_settings.py), parse results, write in NIXL-style
-format (bandwidth_gbs_avg) for merge_results.
+MORI Benchmark - Target Node (node_rank=0 = INITIATOR)
 """
 
 import argparse

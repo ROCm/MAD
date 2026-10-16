@@ -1,9 +1,5 @@
 """
 MoRI-IO C++ benchmark (bench_engine) command line, shared by both nodes.
-
-bench_engine requires identical workload arguments on both ranks, so they are
-built here once, from the workload shared with the Python mori backend
-(common/mori_settings.py).
 """
 
 import fcntl

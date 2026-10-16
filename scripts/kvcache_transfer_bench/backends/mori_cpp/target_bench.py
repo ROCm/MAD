@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-MoRI-IO C++ Benchmark - Target Node (bench_engine rank 0 = INITIATOR in mori terms)
-
-Same roles as the Python MoRI backend: this node drives the RDMA writes, parses
-bench_engine's table and writes results_mori_cpp.json. One bench_engine run
-covers the whole sweep (per size: warmup, then a single timer around the timed
-iterations), with the workload in common/mori_settings.py.
+MoRI-IO C++ Benchmark - Target Node (bench_engine rank 0 = INITIATOR)
 """
 
 import argparse

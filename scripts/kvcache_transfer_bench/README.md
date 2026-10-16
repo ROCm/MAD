@@ -59,12 +59,17 @@ any backend that produced no results.
 Each model card runs a fixed set of backends in one 2-node job. Select a card by
 its tag (or its name) in `--tags`, on both `build` and `run`:
 
-| Tag        | Model card                            | Backends                                |
-| ---------- | ------------------------------------- | --------------------------------------- |
-| `kvcache`  | `pyt_kvcache_transfer_bench_all`      | `nixl`, `mori`, `mori_cpp`, `mooncake`  |
-| `mori`     | `pyt_kvcache_transfer_bench_mori`     | `mori` and `mori_cpp`, on the same node pair |
-| `mori_py`  | `pyt_kvcache_transfer_bench_mori_py`  | `mori` (Python benchmark)               |
-| `mori_cpp` | `pyt_kvcache_transfer_bench_mori_cpp` | `mori_cpp` (C++ `bench_engine`)         |
+| Tag                | Model card                            | Backends                                |
+| ------------------ | ------------------------------------- | --------------------------------------- |
+| `kvcache`          | `pyt_kvcache_transfer_bench_all`      | `nixl`, `mori`, `mori_cpp`, `mooncake`  |
+| `kvcache_nixl`     | `pyt_kvcache_transfer_bench_nixl`     | `nixl`                                  |
+| `kvcache_mooncake` | `pyt_kvcache_transfer_bench_mooncake` | `mooncake`                              |
+| `mori`             | `pyt_kvcache_transfer_bench_mori`     | `mori` and `mori_cpp`, on the same node pair |
+| `mori_py`          | `pyt_kvcache_transfer_bench_mori_py`  | `mori` (Python benchmark)               |
+| `mori_cpp`         | `pyt_kvcache_transfer_bench_mori_cpp` | `mori_cpp` (C++ `bench_engine`)         |
+
+The NIXL and Mooncake tags carry a `kvcache_` prefix because `nixl` and `mooncake`
+also tag the vLLM and SGLang disaggregated-inference cards elsewhere in MAD.
 
 For example, the C++ MoRI backend alone:
 

@@ -2,7 +2,7 @@
 Workload shared by the Python (mori) and C++ (mori_cpp) MoRI backends.
 
 MoRI's Python benchmark and bench_engine accept the same spellings for these
-flags, so both backends pass exactly WORKLOAD_FLAGS; only the rendezvous and
+flags, so both backends pass exactly WORKLOAD_FLAGS. Only the rendezvous and
 sweep-range flags differ between them. The Python benchmark has no warmup
 option, so backends/mori/run_benchmark.py adds --warmup-iters to it.
 """

@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 """
-MoRI-IO C++ Benchmark - Initiator Node (bench_engine rank 1 = TARGET in mori terms)
-
-Waits for the target node to start bench_engine rank 0, then runs rank 1 with
-the same workload flags (common/mori_settings.py). This node only registers memory and waits;
-the target node records the results.
+MoRI-IO C++ Benchmark - Initiator Node (bench_engine rank 1 = TARGET)
 """
 
 import argparse

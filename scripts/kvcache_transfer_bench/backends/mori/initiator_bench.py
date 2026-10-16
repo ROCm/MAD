@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-MORI Benchmark - Initiator Node (node_rank=1 = TARGET in mori terms)
-
-Runs one torchrun per size (like NIXL/Mooncake): for each size, sync with
-target, run MoRI's Python benchmark through run_benchmark.py with
---sweep-start-size=X --sweep-max-size=X and the workload shared with mori_cpp
-(common/mori_settings.py). Target parses output and writes results.
+MORI Benchmark - Initiator Node (node_rank=1 = TARGET)
 """
 
 import argparse

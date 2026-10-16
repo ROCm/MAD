@@ -117,5 +117,63 @@
             "mori_cpp"
         ],
         "args": ""
+    },
+    {
+        "name": "pyt_kvcache_transfer_bench_nixl",
+        "dockerfile": "../../docker/kvcache_transfer_bench",
+        "scripts": "scripts/run.slurm",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "04:00:00"
+        },
+        "env_vars": {
+            "BENCH_MODEL_NAME": "pyt_kvcache_transfer_bench_nixl",
+            "BENCH_BACKENDS": "nixl",
+            "START_SIZE": "4096",
+            "STOP_SIZE": "1073741824",
+            "IBDEVICE": "mlx5_0",
+            "SYNC_PORT": "9999"
+        },
+        "tags": [
+            "kvcache_nixl"
+        ],
+        "args": ""
+    },
+    {
+        "name": "pyt_kvcache_transfer_bench_mooncake",
+        "dockerfile": "../../docker/kvcache_transfer_bench",
+        "scripts": "scripts/run.slurm",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "04:00:00"
+        },
+        "env_vars": {
+            "BENCH_MODEL_NAME": "pyt_kvcache_transfer_bench_mooncake",
+            "BENCH_BACKENDS": "mooncake",
+            "START_SIZE": "4096",
+            "STOP_SIZE": "1073741824",
+            "IBDEVICE": "mlx5_0",
+            "SYNC_PORT": "9999"
+        },
+        "tags": [
+            "kvcache_mooncake"
+        ],
+        "args": ""
     }
 ]
