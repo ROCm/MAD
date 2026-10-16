@@ -506,10 +506,20 @@ _cleanup_on_exit() {
         [[ -n "$_pid" ]] && _shutdown_server "$_pid" "server ${_pid} (exit cleanup)"
     done
     _stop_rdma_counters
-    # An orderly exit is not orderly if something is still running: without this the job reports
-    # success and the counter files look like a finished measurement.
-    if (( _shutdown_failures > 0 )) && (( _status == 0 )); then
-        exit 1
+    # A surviving server is reported, not turned into a failed job. It used to flip a zero status
+    # to 1, which madengine records as Failed -- and a Failed run has no perf CSV collected, so a
+    # serving benchmark that took two hours to bring up was discarded over a shutdown that
+    # happened after the last measurement. The measurement channel is already protected without
+    # this: `_stop_rdma_counters` writes `.failed` beside the counter file on the same condition,
+    # and the report withholds every counter claim that rests on it.
+    #
+    # The marker below is written whether or not counters were on, because a server still holding
+    # GPUs is an operational problem for the next job on this node regardless of measurement.
+    if (( _shutdown_failures > 0 )); then
+        echo "[shutdown] WARNING: ${_shutdown_failures} server(s) survived shutdown on" \
+             "$(hostname -s); they may still hold GPUs. Exit status left at ${_status}." >&2
+        echo "${_shutdown_failures} server(s) survived shutdown at $(date -Is)" \
+            > "/run_logs/${SLURM_JOB_ID:-0}/shutdown_failed_NODE${NODE_RANK:-0}" 2>/dev/null || true
     fi
 }
 trap _cleanup_on_exit EXIT
@@ -728,11 +738,71 @@ _server_died() {
     grep -qE "${_SERVER_DEATH_SIGNS}" "$1" 2>/dev/null
 }
 
-# _server_gone PID -- true only when neither the process group nor the pid still exists.
-_server_gone() {
-    kill -0 -- "-$1" 2>/dev/null && return 1
-    kill -0 "$1" 2>/dev/null && return 1
+# _proc_scan PGID -- "pid state comm wchan" for every process in the group, or that *is* the
+# group id. One parser, used both to decide whether the group is gone and to report what is left
+# when it is not, so the two can never disagree.
+#
+# /proc is read directly rather than through `ps`, which the serving images do not all carry.
+_proc_scan() {
+    local _pgid="$1" _stat _raw _after _pid _comm _state _pgrp _wchan
+    for _stat in /proc/[0-9]*/stat; do
+        [[ -r "$_stat" ]] || continue
+        read -r _raw < "$_stat" 2>/dev/null || continue
+        # Fields: pid (comm) state ppid pgrp ... -- comm is arbitrary text in parentheses and can
+        # itself contain spaces and ')', so everything is taken relative to its *last* ')'.
+        _pid=${_raw%% *}
+        _comm=${_raw#*(}; _comm=${_comm%)*}
+        _after=${_raw##*) }
+        read -r _state _ _pgrp _ <<< "$_after"
+        [[ "$_pgrp" == "$_pgid" || "$_pid" == "$_pgid" ]] || continue
+        # `|| true`, and deliberately. /proc/<pid>/wchan carries no trailing newline, so `read`
+        # sets the variable and still returns 1. As the last element of an && list that is the
+        # statement's status, and under `set -e` it aborted the scan before the row was echoed --
+        # reporting a live process as gone, which is how a shutdown would stop escalating after
+        # SIGINT and close the counter window with workers still running. wchan is a diagnostic
+        # field; failing to read it must never decide whether a process exists.
+        _wchan=""
+        if [[ -r "/proc/${_pid}/wchan" ]]; then
+            read -r _wchan < "/proc/${_pid}/wchan" 2>/dev/null || true
+        fi
+        echo "${_pid} ${_state} ${_comm} ${_wchan:-?}"
+    done
+}
+
+# _group_is_gone -- reads `_proc_scan` output on stdin; true when nothing in it is still running.
+#
+# A zombie does not count as running. It holds no memory, no GPU and no file descriptors; it is a
+# row in the process table kept until someone calls wait() on it.
+_group_is_gone() {
+    local _pid _state _rest
+    while read -r _pid _state _rest; do
+        [[ "$_state" == "Z" ]] && continue
+        return 1
+    done
     return 0
+}
+
+# _server_gone PID -- true when nothing in the group is still running.
+#
+# This used to ask `kill -0`, which succeeds on a zombie. sglang's scheduler children are orphaned
+# when the server exits and the container's init does not reap them, so they sit in the process
+# table as zombies, still members of the server's process group, indefinitely. The group therefore
+# never looked gone: every shutdown walked the full SIGINT/SIGTERM/SIGKILL escalation against a
+# server that had already exited and then reported "survived SIGKILL".
+#
+# Job 472379 settled it -- 36 survivors across two nodes, every one of them state=Z, with the group
+# leader itself absent. Not uninterruptible driver teardown, and not a grace that was too short:
+# the processes were already dead and the liveness test could not say so. (FOLLOWUP item 2.)
+_server_gone() {
+    # Signals stay the fallback where /proc cannot be read. A wrong "gone" there would stop the
+    # counter sampler while servers were still running, which is worse than the false alarm this
+    # replaces.
+    if [[ ! -r /proc/self/stat ]]; then
+        kill -0 -- "-$1" 2>/dev/null && return 1
+        kill -0 "$1" 2>/dev/null && return 1
+        return 0
+    fi
+    _group_is_gone < <(_proc_scan "$1")
 }
 
 # _wait_gone PID SECONDS -- poll until the whole group is gone, or give up. One helper for all
@@ -791,9 +861,37 @@ _shutdown_server() {
     # Recorded here, not returned only: `return 1` was ineffective because there is no `errexit`
     # and every call site invokes this as a bare command. A counter written while servers still
     # run is not this run's window, so the failure has to outlive the call.
-    echo "[profile] WARNING: ${_label} (pid=${_pid}) survived SIGKILL" >&2
+    echo "[shutdown] WARNING: ${_label} (pid=${_pid}) survived SIGKILL" >&2
+    _group_survivors "$_pid" >&2
     _shutdown_failures=$(( _shutdown_failures + 1 ))
     return 1
+}
+
+# _group_survivors PGID -- what is still in the group, and what it is doing.
+#
+# Kept after the zombie question was settled, because it is what settled it: 36 survivors across
+# two nodes of job 472379, every one state=Z. It now reports against a liveness test that ignores
+# zombies, so anything it prints as running really is running, and `wchan` names the kernel
+# function it is parked in -- which is what separates "stuck in the GPU/RDMA driver" (state D,
+# where no amount of `KILL_GRACE_S` helps) from "alive and ignoring us" (S or R, where a longer
+# grace would).
+_group_survivors() {
+    local _pgid="$1" _pid _state _comm _wchan _live=0 _zombies=0
+    while read -r _pid _state _comm _wchan; do
+        if [[ "$_state" == "Z" ]]; then
+            _zombies=$(( _zombies + 1 ))
+            continue
+        fi
+        echo "[shutdown]   still running in group ${_pgid}: pid=${_pid} state=${_state}" \
+             "comm=${_comm} wchan=${_wchan}"
+        _live=$(( _live + 1 ))
+    done < <(_proc_scan "$_pgid")
+    # Named, not hidden: a zombie holds nothing and is not why the shutdown failed, but a reader
+    # comparing this against `ps` would otherwise wonder where the rest of the group went.
+    (( _zombies )) && echo "[shutdown]   (${_zombies} unreaped zombie(s) in group ${_pgid}," \
+                           "holding nothing and not counted as running)"
+    (( _live )) || echo "[shutdown]   nothing in group ${_pgid} is running;" \
+                        "the liveness test disagrees with /proc, which is itself the finding"
 }
 
 # _wait_for_tcp HOST PORT [TIMEOUT_S] [LABEL]
@@ -891,15 +989,49 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
     _wait_start_ts=$(date +%s)
     _runlog="/run_logs/${SLURM_JOB_ID:-0}"
 
+    # Every log this barrier will wait on, in the order it waits. The loops below still wait in
+    # role order -- a decode is not expected to be ready before its prefill -- but each poll now
+    # checks all of these for death, not just the one it is currently blocked on. A decode that
+    # died during prefill bring-up used to go unnoticed until prefill finished and its own turn
+    # came: about an hour per failed attempt on 2026-09-14.
+    _watched_logs=()
+    if [[ "$DP_MODE" == "0" ]]; then
+        for ((_w = 0; _w < xP; _w++)); do
+            _watched_logs+=("prefill NODE${_w}|${_runlog}/prefill_NODE${_w}.log")
+        done
+        for ((_w = xP; _w <= xP + yD - 1; _w++)); do
+            _watched_logs+=("decode NODE${_w}|${_runlog}/decode_NODE${_w}.log")
+        done
+    else
+        _watched_logs+=("master prefill|${_runlog}/prefill_NODE0.log")
+        _watched_logs+=("master decode|${_runlog}/decode_NODE${xP}.log")
+    fi
+
+    # _any_watched_died -- true when any watched server's log says it will never become ready.
+    # Names the casualty in `_died_label`/`_died_log` so the caller reports the server that
+    # actually died rather than the one it happened to be waiting on.
+    _any_watched_died() {
+        local _entry _label _file
+        for _entry in "${_watched_logs[@]}"; do
+            IFS='|' read -r _label _file <<< "$_entry"
+            if _log_is_this_attempt "$_file" && _server_died "$_file"; then
+                _died_label="$_label"
+                _died_log="$_file"
+                return 0
+            fi
+        done
+        return 1
+    }
+
     if [[ "$DP_MODE" == "0" ]]; then
         echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
         for ((i = 0; i < xP; i++)); do
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: prefill NODE${i} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
@@ -916,9 +1048,9 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: decode NODE${i} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
@@ -939,9 +1071,9 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
             until _log_is_this_attempt "$LOG_FILE" \
                     && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                if _log_is_this_attempt "$LOG_FILE" && _server_died "$LOG_FILE"; then
-                    echo "ERROR: ${_log_label} died before becoming ready (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
+                if _any_watched_died; then
+                    echo "ERROR: ${_died_label} died before becoming ready (${_died_log})" >&2
+                    tail -n 40 "$_died_log" 2>/dev/null || true
                     exit 1
                 fi
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
