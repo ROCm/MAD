@@ -262,7 +262,7 @@ run_primus() {
   # --use_torch_fsdp2 false" -- Megatron rejects FSDP2 with PP > 1).
   if [[ -n "${PRIMUS_EXTRA_ARGS:-}" ]]; then
     local extra_args
-    read -r -d '' -a extra_args <<< "$PRIMUS_EXTRA_ARGS" || true
+    IFS=$' \t\n' read -r -d '' -a extra_args <<< "$PRIMUS_EXTRA_ARGS" || true
     knobs+=("${extra_args[@]}")
   fi
   if [[ ${#knobs[@]} -gt 0 ]]; then

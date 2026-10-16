@@ -102,6 +102,16 @@ check_extra_args() (
     "PRIMUS_EXTRA_ARGS word splitting"
 )
 
+# A caller with a hardened IFS must not change how the value splits.
+check_extra_args_ignore_caller_ifs() (
+  export PRIMUS_EXTRA_ARGS="--pipeline_model_parallel_size 4 --use_torch_fsdp2 false"
+  unset PRIMUS_TRAIN_ITERS PRIMUS_DISABLE_PROFILE
+  IFS=$'\n\t'
+  assert_eq "--pipeline_model_parallel_size|4|--use_torch_fsdp2|false" \
+    "$(primus_words cfg.yaml | tail -n 4 | paste -sd '|')" \
+    "PRIMUS_EXTRA_ARGS under a hardened IFS"
+)
+
 # Extra args come after the other knobs, so they win on a key both set.
 check_extra_args_come_last() (
   export PRIMUS_TRAIN_ITERS=15 PRIMUS_EXTRA_ARGS="--train_iters 20"
@@ -162,6 +172,7 @@ check_disable_profile
 check_both_knobs
 check_knobs_come_last
 check_extra_args
+check_extra_args_ignore_caller_ifs
 check_extra_args_come_last
 check_mi355x_32gpu_is_untouched
 check_mi355x_16gpu_gets_overrides
