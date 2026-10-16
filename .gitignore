@@ -70,9 +70,6 @@ venv.bak/
 *.csv
 *.json
 !models.json
-!perf_super.json
-!perf_entry_super.json
-!perf_entry.json
 *.log
 *.out
 *.html
@@ -83,12 +80,15 @@ venv.bak/
 # See benchmark/jax_maxtext/README.md for details.
 scripts/Primus/
 
+# Local agent planning artifacts
+docs/superpowers/
+
 # Artifacts left in the repo root by a madengine run. hf_cache matters most: the
 # jax-maxdiffusion wrapper points HF_HOME here so gated FLUX/WAN weights survive between
 # runs, which puts 100+GB one careless `git add -A` away from being staged.
 hf_cache/
 run_directory/
-.jax-*_env/
+.*_env/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
