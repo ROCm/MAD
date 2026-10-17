@@ -1,0 +1,15 @@
+rdma3 (benic4) hw_counters — atomics+error counters FROZEN (async_ll issues zero atomics):
+  res_rx_pci_err=1
+  unrecoverable_err=4
+  remote_op_err=3
+  req_cqe_error=3
+  rx_atomic_requests=2
+  tx_atomic_req=4
+  tx_write_req=4719266
+  rx_write_requests=472500
+
+NIC vs GPU PCIe AtomicOps capability (the root cause):
+  GPU 0000:1b:00.0:
+    			 AtomicOpsCap: 32bit+ 64bit+ 128bitCAS-
+  NIC 0000:60:00.0:
+    			 AtomicOpsCap: 32bit- 64bit- 128bitCAS-
