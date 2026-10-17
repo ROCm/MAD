@@ -87,6 +87,7 @@ VALID_MODELS=( \
     "DeepSeek-R1" \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
+    "Kimi-K3-MXFP4" \
     "GLM-5.1-FP8" \
 )
 
@@ -95,6 +96,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3" \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
+    "Kimi-K3-MXFP4" \
     "GLM-5.1-FP8" \
 )
 
@@ -182,7 +184,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "Kimi-K3-MXFP4" "GLM-5.1-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -252,6 +254,28 @@ LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
 
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
+
+# Resolve EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) from the recipe so
+# submit-time topology/JIT decisions match the in-container launcher. env/-e still wins.
+if [[ -z "${EP_TP_SIZE:-}" && -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]]; then
+  EP_TP_SIZE="$(MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
+
+# TP-within-EP (EP_TP_SIZE>1) is only valid on the wideEP MoRIIO path. Per-pool sizing is
+# validated in vllm_disagg.sh (EP_TP_SIZE must divide GPUS_PER_NODE). Recommended shape: 2P/2D.
+if (( ${EP_TP_SIZE:-1} > 1 )); then
+  if [[ "$WIDE_EP" != "1" || "$CONNECTOR" != "moriio" ]]; then
+    echo "Error: EP_TP_SIZE=${EP_TP_SIZE} (TP-within-EP) requires CONNECTOR=moriio WIDE_EP=1." >&2
+    exit 1
+  fi
+fi
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
 
@@ -331,6 +355,7 @@ echo ""
 # Calculate NUM_NODES based on xP and yD
 NUM_NODES=$((xP + yD))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+# NUM_NODES is derived generically from xP+yD; no per-model node-count lock.
 
 # DeepEP configuration (only exported when RUN_DEEPEP=1)
 if [[ "$_run_deepep" == "1" ]]; then
@@ -514,7 +539,18 @@ if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
     _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
     _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
     _IMG_KEY="${_IMG_KEY:-noimg}";
-    _JIT_CACHE_HOST="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    _JIT_BASE="${JIT_CACHE_HOST:-/mnt/m2m_nobackup/${USER}/vllm_jit_cache/${_IMG_KEY}}";
+    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches.
+    if (( ${EP_TP_SIZE:-1} > 1 )) && [ "${JIT_CACHE_SPLIT_ROLE:-1}" = "1" ]; then
+        if [ "${SLURM_PROCID}" -lt "${xP}" ]; then
+            _JIT_ROLE="prefill";
+        else
+            _JIT_ROLE="decode";
+        fi
+        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}";
+    else
+        _JIT_CACHE_HOST="${_JIT_BASE}";
+    fi
     mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
     _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
     echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";

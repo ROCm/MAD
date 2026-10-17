@@ -82,12 +82,29 @@ yD="${yD:-1}"
 echo "[vllm_disagg] topology: xP=${xP} yD=${yD} (total nodes=$((xP + yD)))"
 IPADDRS="${IPADDRS:-localhost}"
 IFS=',' read -ra IP_ARRAY <<< "${IPADDRS}"
+PREFILL_POD_HOSTS="$(IFS=,; echo "${IP_ARRAY[*]:0:xP}")"
+DECODE_POD_HOSTS="$(IFS=,; echo "${IP_ARRAY[*]:xP:yD}")"
+export PREFILL_POD_HOSTS DECODE_POD_HOSTS
 
 echo "Listing NIXL_COOKBOOK_PATH: ${NIXL_COOKBOOK_PATH:-<unset>}"
 [[ -n "${NIXL_COOKBOOK_PATH:-}" ]] && ls "${NIXL_COOKBOOK_PATH}"
 
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
+
+# EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) may be supplied by the
+# recipe env: block, which is exported further below. Resolve it early -- env/-e wins --
+# so the topology math can size per-node DP ranks (TP-within-EP -> fewer ranks/node).
+if [[ -z "${EP_TP_SIZE:-}" && -n "$MODEL_NAME" && -f "${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" ]]; then
+    EP_TP_SIZE="$(MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+import os, yaml
+m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+cfg = m.get(os.environ["MODEL_NAME"]) or {}
+print((cfg.get("env") or {}).get("EP_TP_SIZE", ""))
+PY
+)"
+fi
+export EP_TP_SIZE="${EP_TP_SIZE:-1}"
 
 # =============================================================================
 # Topology math
@@ -100,6 +117,16 @@ PREFILL_DP_START_RANK=$(( NODE_RANK * _GPUS_PER_NODE ))
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
 DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _GPUS_PER_NODE ))
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
+# TP-within-EP (EP_TP_SIZE>1): TP inside each EP pool -> fewer DP ranks/node.
+if [[ "${WIDE_EP:-0}" == "1" ]] && (( ${EP_TP_SIZE:-1} > 1 )); then
+    if (( _GPUS_PER_NODE % EP_TP_SIZE != 0 || PREFILL_DP_SIZE % EP_TP_SIZE != 0 || DECODE_DP_SIZE % EP_TP_SIZE != 0 )); then
+        echo "Error: EP_TP_SIZE=${EP_TP_SIZE} must divide GPUS_PER_NODE=${_GPUS_PER_NODE} and per-pool DP sizes (prefill=${PREFILL_DP_SIZE}, decode=${DECODE_DP_SIZE})." >&2
+        exit 1
+    fi
+    DP_PARALLEL_SIZE_LOCAL=$(( _GPUS_PER_NODE / ${EP_TP_SIZE} ))
+    PREFILL_DP_START_RANK=$(( NODE_RANK * DP_PARALLEL_SIZE_LOCAL ))
+    DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * DP_PARALLEL_SIZE_LOCAL ))
+fi
 
 # =============================================================================
 # Driver helper functions (shared by all connectors)
@@ -204,6 +231,15 @@ PY
     echo "[vllm_disagg] model flags (${PARALLEL_MODE}): prefill='${MODEL_CONFIG_PREFILL}' decode='${MODEL_CONFIG_DECODE}'"
 fi
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
+
+# Tokenize models.yaml flag strings without bash eval (JSON in --quantization-config breaks eval).
+_model_config_to_array() {
+    local _mc="$1"
+    local -n _out="$2"
+    _out=()
+    [[ -z "$_mc" ]] && return 0
+    mapfile -t _out < <(python3 -c 'import shlex,sys; print("\n".join(shlex.split(sys.argv[1])))' "$_mc")
+}
 
 # =============================================================================
 # Load parallelism + connector, then initialize
