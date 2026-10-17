@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(madengine discover *)",
+      "Bash(madengine run *)",
+      "Bash(madengine build *)",
+      "Bash(madengine report tracelens *)",
+      "Bash(madengine report tracelens-compare *)",
+      "Bash(bash scripts/Primus/primus-cli *)",
+      "Bash(bash scripts/Primus/runner/primus-cli *)",
+      "Bash(python3 -m primus.agents.tuning_agent *)",
+      "Bash(docker images *)",
+      "Bash(docker run --rm *)",
+      "Bash(which torchrun)",
+      "Bash(python3 -m json.tool *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(rocm-smi *)",
+      "Bash(amd-smi *)",
+      "Bash(bash .claude/skills/mad-common/preflight.sh)",
+      "Bash(python3 .claude/skills/mad-validate/scripts/validate.py *)",
+      "Read",
+      "Grep",
+      "Glob"
+    ]
+  }
+}
