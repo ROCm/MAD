@@ -97,7 +97,7 @@ madengine build --tags primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain 
 The base Docker image is defined in `docker/primus.ubuntu.amd.Dockerfile`. To use a different base image (e.g., a newer Primus release), edit the `BASE_DOCKER` argument at the top of that file:
 
 ```dockerfile
-ARG BASE_DOCKER=rocm/primus:v26.7
+ARG BASE_DOCKER=rocm/primus:v26.8
 ```
 
 > **Note:** `MAD_SYSTEM_GPU_ARCHITECTURE` is automatically detected at runtime via `rocminfo`. You do not need to provide it during the build step.
@@ -121,12 +121,15 @@ madengine run --tags primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain --
 The tag follows the naming convention `primus_train/<backend>_<GPU_ARCH>_<MODEL_CONFIG>`, where:
 - `<backend>` is the Primus launcher: `megatron`, `torchtitan`, `megatron_bridge`, `nemo_automodel`,
   `diffusion`, or `moe_package`
-- `<GPU_ARCH>` is the target accelerator (`MI300X`, `MI325X`, or `MI355X`)
+- `<GPU_ARCH>` is the target accelerator (`MI300X`, `MI325X`, `MI355X`, or `MI455X`)
 - `<MODEL_CONFIG>` matches the YAML filename under `examples/<backend>/configs/<GPU_ARCH>/`
 
 Tags are discovered from the Primus submodule at run time by
-`scripts/primus_train/get_models_json.py`, so any config present in the pinned Primus
-checkout is runnable even if it is not listed below. The JAX-based launchers (`maxtext`,
+`scripts/primus_train/get_models_json.py`, which globs
+`examples/<launcher>/configs/<GPU_ARCH>/**/*.yaml`. A config in that layout is
+runnable even if it is not listed below. SpecForge configs live at
+`examples/specforge/configs/*.yaml` with no architecture directory, so they are
+not discovered. The JAX-based launchers (`maxtext`,
 `maxdiffusion`) are excluded from this discovery and are instead run via the dedicated
 `jax-maxtext` and `jax-maxdiffusion` benchmarks.
 
@@ -194,11 +197,20 @@ madengine discover --tags torchtitan
 
 ## 5. Supported Models
 
-Tables below are generated from the pinned Primus submodule (`release/v26.7`) and list every
+Tables below are generated from the pinned Primus submodule (`release/v26.8`) and list every
 config `madengine discover` will report. The `Model` column is derived from the config filename
 (with precision appended when the config has one); the `Tag` column is what you pass to
 `madengine build` / `madengine run`.
 
+> **Changed in v26.8**
+> - Hylo configs were renamed back to Zebra. Megatron `hylo_llama_*` tags are now
+>   `zebra_llama_*`. Megatron-Bridge `hylo_mamba_*_hybrid_sft_posttrain` tags are now
+>   `zebra_mamba_*_hybrid_sft_posttrain`.
+> - Megatron adds ZAYA1-8B (`zaya1_8B-BF16-pretrain`) on MI300X and MI355X, and MiniMax-M3
+>   (`minimax_m3-BF16-pretrain`, `minimax_m3-FP8-pretrain`, `minimax_m3_8layer-BF16-pretrain`)
+>   on MI355X.
+> - Megatron adds four gfx1250 LoRA SFT configs under MI455X.
+>
 > **Changed in v26.7**
 > - Megatron MI355X adds Deepseek v4 flash 4-layer SFT, Llama3.1 8B LoRA SFT, and MXFP4
 >   Qwen2.5 72B / Qwen3 30B-A3B pretrain configs.
@@ -218,11 +230,12 @@ config `madengine discover` will report. The `Model` column is derived from the 
 
 You can also check the Primus repository directly for the latest supported configs:
 
-- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI300X)
-- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI325X)
-- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron/configs/MI355X)
+- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI300X)
+- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI325X)
+- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI355X)
+- [MI455X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron/configs/MI455X)
 
-#### MI300X Configs (88)
+#### MI300X Configs (89)
 
 | Model | Tag |
 | --- | --- |
@@ -250,13 +263,6 @@ You can also check the Primus repository directly for the latest supported confi
 | Grok1 FP8 | `primus_train/megatron_MI300X_grok1-FP8-pretrain` |
 | Grok2 BF16 | `primus_train/megatron_MI300X_grok2-BF16-pretrain` |
 | Grok2 FP8 | `primus_train/megatron_MI300X_grok2-FP8-pretrain` |
-| Hylo llama gdn 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_1B_BF16-pretrain` |
-| Hylo llama gdn 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_gdn_300M_BF16-pretrain` |
-| Hylo llama kda 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_kda_1B_BF16-pretrain` |
-| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_1B_BF16-pretrain` |
-| Hylo llama mamba 300M BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_300M_BF16-pretrain` |
-| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_3B_BF16-pretrain` |
-| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI300X_hylo_llama_mamba_8B_BF16-pretrain` |
 | Kda 1B BF16 | `primus_train/megatron_MI300X_kda_1B_BF16-pretrain` |
 | Kda 300M BF16 | `primus_train/megatron_MI300X_kda_300M_BF16-pretrain` |
 | Llama2 13B BF16 | `primus_train/megatron_MI300X_llama2_13B-BF16-pretrain` |
@@ -314,6 +320,14 @@ You can also check the Primus repository directly for the latest supported confi
 | Qwen3 5 35B A3B FP8 | `primus_train/megatron_MI300X_qwen3_5_35B_A3B-FP8-pretrain` |
 | Qwen3 8B BF16 | `primus_train/megatron_MI300X_qwen3_8B-BF16-pretrain` |
 | Qwen3 8B FP8 | `primus_train/megatron_MI300X_qwen3_8B-FP8-pretrain` |
+| Zaya1 8B BF16 | `primus_train/megatron_MI300X_zaya1_8B-BF16-pretrain` |
+| Zebra llama gdn 1B BF16 | `primus_train/megatron_MI300X_zebra_llama_gdn_1B_BF16-pretrain` |
+| Zebra llama gdn 300M BF16 | `primus_train/megatron_MI300X_zebra_llama_gdn_300M_BF16-pretrain` |
+| Zebra llama kda 1B BF16 | `primus_train/megatron_MI300X_zebra_llama_kda_1B_BF16-pretrain` |
+| Zebra llama mamba 1B BF16 | `primus_train/megatron_MI300X_zebra_llama_mamba_1B_BF16-pretrain` |
+| Zebra llama mamba 300M BF16 | `primus_train/megatron_MI300X_zebra_llama_mamba_300M_BF16-pretrain` |
+| Zebra llama mamba 3B BF16 | `primus_train/megatron_MI300X_zebra_llama_mamba_3B_BF16-pretrain` |
+| Zebra llama mamba 8B BF16 | `primus_train/megatron_MI300X_zebra_llama_mamba_8B_BF16-pretrain` |
 
 #### MI325X Configs (68)
 
@@ -331,9 +345,6 @@ You can also check the Primus repository directly for the latest supported confi
 | Grok1 FP8 | `primus_train/megatron_MI325X_grok1-FP8-pretrain` |
 | Grok2 BF16 | `primus_train/megatron_MI325X_grok2-BF16-pretrain` |
 | Grok2 FP8 | `primus_train/megatron_MI325X_grok2-FP8-pretrain` |
-| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_1B_BF16-pretrain` |
-| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_3B_BF16-pretrain` |
-| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI325X_hylo_llama_mamba_8B_BF16-pretrain` |
 | Llama2 13B BF16 | `primus_train/megatron_MI325X_llama2_13B-BF16-pretrain` |
 | Llama2 13B FP8 | `primus_train/megatron_MI325X_llama2_13B-FP8-pretrain` |
 | Llama2 70B BF16 | `primus_train/megatron_MI325X_llama2_70B-BF16-pretrain` |
@@ -387,8 +398,11 @@ You can also check the Primus repository directly for the latest supported confi
 | Qwen3 4B FP8 | `primus_train/megatron_MI325X_qwen3_4B-FP8-pretrain` |
 | Qwen3 8B BF16 | `primus_train/megatron_MI325X_qwen3_8B-BF16-pretrain` |
 | Qwen3 8B FP8 | `primus_train/megatron_MI325X_qwen3_8B-FP8-pretrain` |
+| Zebra llama mamba 1B BF16 | `primus_train/megatron_MI325X_zebra_llama_mamba_1B_BF16-pretrain` |
+| Zebra llama mamba 3B BF16 | `primus_train/megatron_MI325X_zebra_llama_mamba_3B_BF16-pretrain` |
+| Zebra llama mamba 8B BF16 | `primus_train/megatron_MI325X_zebra_llama_mamba_8B_BF16-pretrain` |
 
-#### MI355X Configs (128)
+#### MI355X Configs (132)
 
 | Model | Tag |
 | --- | --- |
@@ -430,11 +444,6 @@ You can also check the Primus repository directly for the latest supported confi
 | Grok1 FP8 | `primus_train/megatron_MI355X_grok1-FP8-pretrain` |
 | Grok2 BF16 | `primus_train/megatron_MI355X_grok2-BF16-pretrain` |
 | Grok2 FP8 | `primus_train/megatron_MI355X_grok2-FP8-pretrain` |
-| Hylo llama gdn 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_gdn_1B_BF16-pretrain` |
-| Hylo llama kda 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_kda_1B_BF16-pretrain` |
-| Hylo llama mamba 1B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_1B_BF16-pretrain` |
-| Hylo llama mamba 3B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_3B_BF16-pretrain` |
-| Hylo llama mamba 8B BF16 | `primus_train/megatron_MI355X_hylo_llama_mamba_8B_BF16-pretrain` |
 | Kda 1B BF16 | `primus_train/megatron_MI355X_kda_1B_BF16-pretrain` |
 | Kda 300M BF16 | `primus_train/megatron_MI355X_kda_300M_BF16-pretrain` |
 | Kimi k2 BF16 | `primus_train/megatron_MI355X_kimi_k2-BF16-pretrain` |
@@ -484,6 +493,9 @@ You can also check the Primus repository directly for the latest supported confi
 | Mamba 370M | `primus_train/megatron_MI355X_mamba_370M-pretrain` |
 | Minimax m2.5 BF16 | `primus_train/megatron_MI355X_minimax_m2.5-BF16-pretrain` |
 | Minimax m2.5 FP8 | `primus_train/megatron_MI355X_minimax_m2.5-FP8-pretrain` |
+| Minimax m3 BF16 | `primus_train/megatron_MI355X_minimax_m3-BF16-pretrain` |
+| Minimax m3 FP8 | `primus_train/megatron_MI355X_minimax_m3-FP8-pretrain` |
+| Minimax m3 8layer BF16 | `primus_train/megatron_MI355X_minimax_m3_8layer-BF16-pretrain` |
 | Mixtral 8x22B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-BF16-pretrain` |
 | Mixtral 8x22B v0.1 FP8 | `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-FP8-pretrain` |
 | Mixtral 8x7B v0.1 BF16 | `primus_train/megatron_MI355X_mixtral_8x7B_v0.1-BF16-pretrain` |
@@ -520,6 +532,21 @@ You can also check the Primus repository directly for the latest supported confi
 | Qwen3 5 35B A3B FP8 | `primus_train/megatron_MI355X_qwen3_5_35B_A3B-FP8-pretrain` |
 | Qwen3 8B BF16 | `primus_train/megatron_MI355X_qwen3_8B-BF16-pretrain` |
 | Qwen3 8B FP8 | `primus_train/megatron_MI355X_qwen3_8B-FP8-pretrain` |
+| Zaya1 8B BF16 | `primus_train/megatron_MI355X_zaya1_8B-BF16-pretrain` |
+| Zebra llama gdn 1B BF16 | `primus_train/megatron_MI355X_zebra_llama_gdn_1B_BF16-pretrain` |
+| Zebra llama kda 1B BF16 | `primus_train/megatron_MI355X_zebra_llama_kda_1B_BF16-pretrain` |
+| Zebra llama mamba 1B BF16 | `primus_train/megatron_MI355X_zebra_llama_mamba_1B_BF16-pretrain` |
+| Zebra llama mamba 3B BF16 | `primus_train/megatron_MI355X_zebra_llama_mamba_3B_BF16-pretrain` |
+| Zebra llama mamba 8B BF16 | `primus_train/megatron_MI355X_zebra_llama_mamba_8B_BF16-pretrain` |
+
+#### MI455X Configs (4)
+
+| Model | Tag |
+| --- | --- |
+| Llama2 70B-lora-sft-1gpu-proxy BF16 | `primus_train/megatron_MI455X_llama2_70B-BF16-lora-sft-1gpu-proxy` |
+| Llama3.2 1B-lora-sft BF16 | `primus_train/megatron_MI455X_llama3.2_1B-BF16-lora-sft` |
+| Qwen2.5 72B-lora-sft-1gpu-proxy BF16 | `primus_train/megatron_MI455X_qwen2.5_72B-BF16-lora-sft-1gpu-proxy` |
+| Qwen3 235B A22B-lora-sft-1gpu-proxy BF16 | `primus_train/megatron_MI455X_qwen3_235B_A22B-BF16-lora-sft-1gpu-proxy` |
 
 ---
 
@@ -527,9 +554,9 @@ You can also check the Primus repository directly for the latest supported confi
 
 You can also check the Primus repository directly for the latest supported configs:
 
-- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI300X)
-- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI325X)
-- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/torchtitan/configs/MI355X)
+- [MI300X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI300X)
+- [MI325X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI325X)
+- [MI355X configs](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/torchtitan/configs/MI355X)
 
 #### MI300X Configs (25)
 
@@ -631,12 +658,12 @@ in the Primus repository.
 
 | Backend | MI300X | MI325X | MI355X | Configs |
 | --- | --- | --- | --- | --- |
-| Megatron-Bridge | 9 | — | 9 | [`examples/megatron_bridge/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/megatron_bridge/configs) |
-| MaxText | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/maxtext/configs) |
-| MaxDiffusion | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/maxdiffusion/configs) |
-| NeMo-AutoModel | — | — | 4 | [`examples/nemo_automodel/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/nemo_automodel/configs) |
-| Diffusion | — | — | 6 | [`examples/diffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/diffusion/configs) |
-| MoE-Package | — | — | 2 | [`examples/moe_package/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.7/examples/moe_package/configs) |
+| Megatron-Bridge | 9 | — | 9 | [`examples/megatron_bridge/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron_bridge/configs) |
+| MaxText | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxtext/configs) |
+| MaxDiffusion | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxdiffusion/configs) |
+| NeMo-AutoModel | — | — | 4 | [`examples/nemo_automodel/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/nemo_automodel/configs) |
+| Diffusion | — | — | 6 | [`examples/diffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/diffusion/configs) |
+| MoE-Package | — | — | 2 | [`examples/moe_package/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/moe_package/configs) |
 
 > **Note:** MaxDiffusion and MaxText are JAX backends and NeMo-AutoModel requires the
 > `third_party/Automodel` submodule; see the Primus documentation for their prerequisites.
