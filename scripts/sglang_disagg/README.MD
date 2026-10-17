@@ -63,6 +63,9 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 
 ## Quick Start
 
+To run a card through madengine or with `sbatch` directly, with a cluster's allocation
+defaults, see [scripts/common/README.md](../common/README.md).
+
 ```bash
 git clone https://github.com/ROCm/MAD.git
 cd scripts/sglang_disagg

@@ -76,13 +76,89 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # Dependencies and Environment Setup
 # =============================================================================
 
-pip install py-spy
-pip install --ignore-installed --force-reinstall flask
-pip install pyyaml
+# These are expected to be baked into the image
+# (docker/sglang_disagg_inference.ubuntu.amd.Dockerfile). Install only what is
+# genuinely missing, so a MAD-built image does no work here while an image supplied
+# through DOCKER_IMAGE_NAME still self-heals. The unconditional
+# "--ignore-installed --force-reinstall flask" this replaces mutated the image on
+# every node of every run, downgraded click 8.5.0 -> 8.4.1, and surfaced unrelated
+# dependency conflicts in the log.
+# py-spy ships a binary rather than an importable module, so check for the command.
+command -v py-spy >/dev/null 2>&1 || pip install py-spy
+python3 -c "import flask" >/dev/null 2>&1 || pip install flask
+python3 -c "import yaml"  >/dev/null 2>&1 || pip install pyyaml
 
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
 host_name=$(hostname)
+
+# Failing the job so every node, and the CI log, finds out. /run_logs is the job's
+# shared log directory, so a marker one node writes there is seen by the others;
+# every socket_barrier below watches it. Before, a node that gave up exited alone and
+# the nodes waiting on it looped until the job's wall clock: in one run the
+# decode server hit "Scheduler hit an exception" at 17:56, the router wait timed out
+# 4000s later, and the job still ran to its 6-hour TIMEOUT.
+JOB_ABORT_FILE="/run_logs/${SLURM_JOB_ID:-0}/ABORTED"
+# Lines SGLang prints only when a server has died.
+_FATAL_SERVER_LOG_RE='Scheduler hit an exception|Received sigquit from a child process'
+# First error lines, then the tail: the tail of a dead server is its traceback, and the
+# cause is usually earlier.
+# Who holds this node's GPU memory, from the kernel (readable inside the container): one
+# failure was "free memory on startup is less than desired" on 3 of 8
+# GPUs, and nothing in the log could say what held it.
+_print_gpu_snapshot() {
+    echo "----- GPU memory on $(hostname) -----"
+    local d
+    for d in /sys/class/drm/card*/device; do
+        [ -r "$d/mem_info_vram_used" ] || continue
+        echo "$(basename "$(dirname "$d")"): $(( $(cat "$d/mem_info_vram_used") >> 30 )) GiB used of $(( $(cat "$d/mem_info_vram_total") >> 30 )) GiB"
+    done
+    echo "----- processes holding GPU memory (KFD; host pids) -----"
+    ls /sys/class/kfd/kfd/proc 2>/dev/null | tr '\n' ' '; echo
+    command -v rocm-smi >/dev/null 2>&1 && rocm-smi --showpids 2>/dev/null | grep -vE '^=+|^\s*$' | head -n 30 || true
+}
+_print_server_log() {  # <file>
+    echo "----- first error lines of $1 -----"
+    grep -nE 'Error|error:|Exception|NCCL WARN|out of memory|hipError|Segmentation fault|core dumped|Memory access fault|died unexpectedly' "$1" 2>/dev/null \
+        | grep -vE 'Traceback|raise |Failed to import Triton kernels' \
+        | awk '{ k = $0; sub(/^[0-9]+:/, "", k); gsub(/pid=[0-9]+/, "", k);
+                 gsub(/[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]/, "", k);
+                 if (!seen[k]++) print }' | head -n 40 || true
+    echo "----- last 80 lines of $1 -----"
+    tail -n 80 "$1" 2>/dev/null || true
+    _print_gpu_snapshot
+}
+# Everything this launcher started, children first. A node that gives up must not leave
+# its servers running: they hold the container's output pipe, so the container -- and
+# the SLURM job -- stayed up until the wall clock. In one run NODE1's decode
+# server had started fine; NODE0 failed, NODE1's barrier gave up and exited, and the
+# decode server kept the job alive until it was cancelled.
+_descendants() {  # <pid>: every process below it, children first
+    local c
+    for c in $(pgrep -P "$1" 2>/dev/null); do _descendants "$c"; echo "$c"; done
+}
+# SIGTERM first, then SIGKILL whatever is left after a grace period. vLLM workers wedged
+# in a failed HIP/RCCL call ignore SIGTERM: in one run both nodes gave up and the
+# job still ran on, holding its nodes, until it was cancelled by hand.
+_kill_own_processes() {
+    local pids p i
+    pids="$(_descendants $$)"
+    [ -n "$pids" ] || return 0
+    kill $pids 2>/dev/null || true
+    for i in $(seq 1 15); do
+        p=""; for p in $pids; do kill -0 "$p" 2>/dev/null && break; p=""; done
+        [ -z "$p" ] && return 0
+        sleep 1
+    done
+    kill -9 $pids 2>/dev/null || true
+}
+
+_job_fail() {  # <reason>
+    echo "ERROR: $1" >&2
+    echo "NODE${NODE_RANK} (${host_name}): $1" >> "${JOB_ABORT_FILE}" 2>/dev/null || true
+    _kill_own_processes
+    exit 1
+}
 
 if [[ "$PARALLEL_MODE" != "dp" && "$PARALLEL_MODE" != "tp" ]]; then
     echo "ERROR: PARALLEL_MODE must be 'dp' or 'tp' (got: ${PARALLEL_MODE})"
@@ -287,7 +363,9 @@ python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-port ${BARRIER_PORT} \
     --enable-port \
     --node-ips ${IPADDRS} \
-    --node-ports ${BARRIER_PORT}
+    --node-ports ${BARRIER_PORT} \
+    --abort-file "${JOB_ABORT_FILE}" \
+    || _job_fail "container creation barrier on port ${BARRIER_PORT} failed on ${host_name}"
 
 
 # =============================================================================
@@ -417,10 +495,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/prefill_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "prefill NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for prefill NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -430,10 +512,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             LOG_FILE="${_runlog}/decode_NODE${i}.log"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "decode NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for decode NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -447,10 +533,14 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
             IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
             until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
                 _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "${_log_label} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                fi
+                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for ${_log_label}: $(head -n1 "${JOB_ABORT_FILE}")"
                 if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    echo "ERROR: Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})" >&2
-                    tail -n 40 "$LOG_FILE" 2>/dev/null || true
-                    exit 1
+                    _print_server_log "$LOG_FILE"
+                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})"
                 fi
                 sleep "${ROUTER_POLL_SLEEP_SECONDS}"
             done
@@ -661,7 +751,9 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
@@ -743,7 +835,9 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
         --node-ips "${MASTER_ADDR}" \
-        --node-ports 2322
+        --node-ports 2322 \
+        --abort-file "${JOB_ABORT_FILE}" \
+        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \

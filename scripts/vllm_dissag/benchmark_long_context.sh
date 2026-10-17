@@ -78,3 +78,12 @@ for combo in "${COMBINATIONS[@]}"; do
     done
 done
 echo "==== Long-context benchmark complete ====" | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
+
+# Publish the results as the sweep does. This harness wrote only its log, so a long_context
+# run always ended "no perf CSV" in run_xPyD_models.slurm and failed, however it went. The
+# parser reads this harness's "[RUNNING] isl=... con=..." cells; a cell that stalled or
+# printed no result is a FAILURE row.
+python3 "$NIXL_COOKBOOK_PATH/parse_to_csv.py" "${LOG}_CONCURRENCY.log" -o "${LOG}_CONCURRENCY.csv" \
+    --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" \
+    --model-name "${MODEL_NAME}" \
+    2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null

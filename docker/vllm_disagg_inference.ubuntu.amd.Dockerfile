@@ -225,6 +225,13 @@ ENV _ROCM_DIR=/opt/rocm \
     _RIXL_BRANCH=f33a5599 \
     _RIXL_INSTALL_DIR=/usr/local/RIXL/install \
     _NIXLBENCH_INSTALL_DIR=/usr/local/RIXL
+# rocSHMEM is pinned like every other source here. It tracked rocm-systems `develop`
+# until rocm-systems 16dc5673 (2026-09-25, "replace hip atomic builtins with scoped
+# counterparts") made projects/rocshmem/src/atomic.hpp use scoped atomics on float and
+# double, which this image's ROCm 7.2 compiler rejects ("address argument to atomic
+# operation must be a pointer to integer or pointer"); every build of this image failed
+# from then on. This is that commit's parent, the rocSHMEM the image last built with.
+ARG ROCSHMEM_REF=9c43b23229cf2f835b838f72c0d1af3d4876167c
 RUN if [ "${WITH_NIXL}" != "1" ]; then \
       echo "WITH_NIXL=${WITH_NIXL}: skipping UCX/RIXL/rocSHMEM/DeepEP (MoRI-EP + base DeepEP only)"; \
     else set -e && \
@@ -257,7 +264,7 @@ RUN if [ "${WITH_NIXL}" != "1" ]; then \
                     --config-settings=setup-args="-Ddisable_gds_backend=true" . && \
       # rocSHMEM (DeepEP dep)
       cd /tmp && git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git && \
-        cd rocm-systems && git sparse-checkout set --cone projects/rocshmem && git checkout develop && \
+        cd rocm-systems && git sparse-checkout set --cone projects/rocshmem && git checkout "${ROCSHMEM_REF}" && \
         mkdir -p /tmp/rocshmem-build && cd /tmp/rocshmem-build && \
         /tmp/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends \
           -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS="${GFX_COMPILATION_ARCH}" && \

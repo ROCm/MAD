@@ -7,7 +7,9 @@
 # NCCL ibv_modify_qp timeouts on cross-rail node pairs.
 #
 # --switches=2: allow up to 2 IB switches (rails). select_same_rail_nodes() below
-# enforces per-role rail consistency. Set --switches=1 to force single rail.
+# verifies the allocation actually landed on one leaf whenever USE_CX7_NICS=1, and
+# aborts before any GPU time is spent if it did not. Set --switches=1 to ask the
+# scheduler for a single rail up front instead of checking after the fact.
 #SBATCH --switches=2
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
@@ -128,8 +130,18 @@ esac
 export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
 echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 
-MODEL_NAME="${MODEL_NAME:-None}"
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Site config: filesystem roots, partition, fabric device, ports, timeouts.
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
+# environment variables, and this file just fills what neither of them set.
+# Model-specific performance flags stay in models.yaml, not here.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
+    echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
+    exit 1
+fi
+. "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 
 validate_model_name() {
   local is_valid_model=false
@@ -170,60 +182,88 @@ TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
 echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
-# Function to check model path on all nodes
-check_model_path() {
-    local path=$1
-    local check_name=$2
-    
-    echo "Checking $check_name: $path"
-    
-    # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then 
-            echo \"\$(hostname): ✓ Found $path\"
-            exit 0
-        else 
-            echo \"\$(hostname): ✗ Missing $path\"
-            exit 1
-        fi
-    "
-    
-    # Check if all nodes succeeded (exit code 0)
-    local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "✓ $check_name available on ALL nodes"
+# ------------------------
+# Same-rail placement check
+# ------------------------
+# mori_ep_env.sh selects the 8x CX7 400G rail NICs when USE_CX7_NICS=1, and those
+# require same-rail nodes; a cross-rail pair makes NCCL time out inside
+# ibv_modify_qp. base_flags carries --watchdog-timeout 1000000, so that timeout is a
+# hang, not a failure: the job would sit burning its allocation to the time limit.
+# Detect it in seconds instead, before any container starts.
+#
+# Bypass with REQUIRE_SAME_RAIL=0. Worth knowing: this reads SLURM's topology tree,
+# which is only as good as topology.conf. If that describes the management network
+# rather than the CX7 fabric, this check is conservative rather than correct.
+select_same_rail_nodes() {
+    if [ "${USE_CX7_NICS:-0}" != "1" ]; then
+        echo "[rail] USE_CX7_NICS != 1: mlx5_1 is cross-rail safe, no rail check needed"
         return 0
-    else
-        echo "✗ $check_name NOT available on all nodes"
-        return 1
     fi
+    if [ "${REQUIRE_SAME_RAIL:-1}" != "1" ]; then
+        echo "[rail] REQUIRE_SAME_RAIL=0: skipping the same-rail check"
+        return 0
+    fi
+
+    local topo
+    topo=$(scontrol show topology 2>/dev/null)
+    if [ -z "$topo" ]; then
+        echo "[rail] WARNING: no SLURM topology reported; cannot verify same-rail placement"
+        return 0
+    fi
+
+    local node line leaf leafname nodelist members first_leaf="" mismatch=0
+    for node in $ALL_NODES; do
+        leaf=""
+        while IFS= read -r line; do
+            case "$line" in *Level=0*) ;; *) continue ;; esac
+            leafname=${line#*SwitchName=}; leafname=${leafname%% *}
+            nodelist=${line#*Nodes=};      nodelist=${nodelist%% *}
+            members=$(scontrol show hostnames "$nodelist" 2>/dev/null)
+            if echo "$members" | grep -qx -- "$node"; then
+                leaf="$leafname"
+                break
+            fi
+        done <<< "$topo"
+
+        if [ -z "$leaf" ]; then
+            echo "[rail] WARNING: $node is in no Level=0 switch; cannot verify placement"
+            return 0
+        fi
+        echo "[rail] $node -> $leaf"
+        if [ -z "$first_leaf" ]; then
+            first_leaf="$leaf"
+        elif [ "$leaf" != "$first_leaf" ]; then
+            mismatch=1
+        fi
+    done
+
+    if [ "$mismatch" -eq 1 ]; then
+        echo ""
+        echo "✗ FATAL ERROR: the allocated nodes span more than one leaf switch, and"
+        echo "  USE_CX7_NICS=1 selects the 8x CX7 400G rail NICs, which require same-rail"
+        echo "  nodes (scripts/sglang_disagg/mori_ep_env.sh:8-16). A cross-rail pair hangs"
+        echo "  in NCCL ibv_modify_qp rather than failing, so this run is stopped now"
+        echo "  instead of burning the allocation."
+        echo ""
+        echo "  Resubmit (placement is not pinned), or set --switches=1 in the #SBATCH"
+        echo "  directives, or set USE_CX7_NICS=0 for the cross-rail-safe mlx5_1"
+        echo "  management NIC, or set REQUIRE_SAME_RAIL=0 to bypass this check."
+        exit 1
+    fi
+
+    echo "[rail] all $TOTAL_NODES nodes on leaf $first_leaf; CX7 rail NICs are safe"
 }
 
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared_inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-else
-    echo ""
-    echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "Model must be accessible from all nodes for distributed execution."
-    echo "Please ensure the model is available on all allocated nodes."
-    exit 1
-fi
+select_same_rail_nodes
+
+
+# Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
+# explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
+# load from one path, so a partial hit fails the run deep into bring-up.
+# Detects the allocation's GPU arch (and enforces GPU_ARCHS when the card sets it),
+# before the weights probe. See cluster_require_gpu_arch in cluster.sh.
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
+cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""
@@ -270,17 +310,15 @@ export SLURM_NODELIST="$NEW_SLURM_NODELIST"
 
 # Keep other SLURM variables as they were or set defaults
 export SLURM_TASKS_PER_NODE="1(x$NUM_NODES)"
-export SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-/home/ravgupta}"
-export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME:-m2m}"
+# SLURM_SUBMIT_DIR, SLURM_CLUSTER_NAME, SLURM_JOB_PARTITION, SLURM_JOB_ACCOUNT,
+# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh. The rest
+# are per-job and stay here. (SLURM_SUBMIT_DIR used to default to one person's
+# home directory, which only ever worked for that account.)
 export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
-export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION:-amd-rccl}"
 export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_QOS="${SLURM_JOB_QOS:-normal}"
-export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT:-amd-rccl}"
 export SLURM_NTASKS_PER_NODE=1
 export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
 export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
 export SLURM_JOB_NAME="${SLURM_JOB_NAME:-${xP}p${yD}d_bench-serving}"
 
 echo ""
@@ -322,7 +360,7 @@ MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE
 # match every address), so when it is empty we skip the prefix match and go
 # straight to the first-address fallback. Fall back to the first address if no
 # matching address is present; fail fast if empty.
-FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
+# Default set in cluster.sh (site fact).
 # Escape regex-special chars so the prefix is matched literally, anchored at start.
 FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
 MASTER_ADDR_RAW="$MASTER_ADDR"
@@ -377,6 +415,7 @@ echo "SKIP_BENCHMARK=${SKIP_BENCHMARK} SKIP_CURL_TEST=${SKIP_CURL_TEST} (sglang_
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
+cluster_mark_dir "$LOG_PATH" "per-job logs from sglang disaggregated runs (one directory per SLURM job id)"
     echo "Created directory: $LOG_PATH"
 else
     echo "Directory already exists: $LOG_PATH"
@@ -395,7 +434,11 @@ export DP_MODE=$DP_MODE
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
 export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
-export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
+# Default 1, not 2. The 2 was never honoured: benchmark_xPyD.sh looped over the literal
+# "{1..$BENCHMARK_ITR}", so every run so far has swept once. Now that the loop works,
+# leaving the default at 2 would double every sweep's wall clock as a side effect of a
+# bug fix. 1 preserves observed behaviour and matches vllm_dissag/benchmark_xPyD.sh:5.
+export BENCHMARK_ITR=${BENCHMARK_ITR:-1}
 export SKIP_BENCHMARK
 export SKIP_CURL_TEST
 
@@ -411,6 +454,16 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
+# Stop this node container when the task is signalled. scancel sends SIGTERM here, but
+# the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
+# SIGTERM, so a cancelled job left its container running and holding every GPU: one
+# cancelled job left its container holding 1535 GB on a node. docker run
+# runs in the background so the trap fires as soon as the signal lands.
+_stop_container() {
+    docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
+    docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
+}
+trap "_stop_container; exit 143" TERM INT
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -450,6 +503,7 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
+    ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
     -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \
@@ -475,6 +529,9 @@ docker run --rm \
     ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
     ${AGENTIC_ALLOW_UV_INSTALL:+-e AGENTIC_ALLOW_UV_INSTALL=$AGENTIC_ALLOW_UV_INSTALL} \
     ${AGENTIC_UV_VERSION:+-e AGENTIC_UV_VERSION=$AGENTIC_UV_VERSION} \
+    ${NCCL_DEBUG:+-e NCCL_DEBUG=$NCCL_DEBUG} \
+    ${NCCL_DEBUG_SUBSYS:+-e NCCL_DEBUG_SUBSYS=$NCCL_DEBUG_SUBSYS} \
+    ${NCCL_DEBUG_FILE:+-e NCCL_DEBUG_FILE=$NCCL_DEBUG_FILE} \
     --ulimit nofile=1048576:1048576 \
     --name $DOCKER_CONT_NAME \
     --entrypoint /bin/bash \
@@ -482,7 +539,28 @@ docker run --rm \
         set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
-    "
+    " &
+_docker_pid=$!
+wait "$_docker_pid"
+_docker_rc=$?
+trap - TERM INT
+exit "$_docker_rc"
 '
+_srun_rc=$?
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+
+# The job's verdict. This script used to end with the cleanup srun above, so its exit status,
+# and the SLURM job's, was the cleanup's: a run whose servers died at start-up and produced no
+# results still ended COMPLETED, and madengine collected "0 successful, 0 failed" as a pass.
+# A node's container exits non-zero when its server or benchmark fails (passing runs exit 0 on
+# every node), and a benchmark that ran writes /run_logs/$SLURM_JOB_ID/perf.csv (= $LOG_PATH on
+# the host). SKIP_BENCHMARK=1 serves without benchmarking, so it has no results to require.
+if [ "$_srun_rc" -ne 0 ]; then
+    echo "ERROR: a node's container exited with status ${_srun_rc}; see the per-node logs under ${LOG_PATH}/${SLURM_JOB_ID}." >&2
+    exit "$_srun_rc"
+fi
+if [ "${SKIP_BENCHMARK}" != "1" ] && [ ! -f "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" ]; then
+    echo "ERROR: no perf CSV at ${LOG_PATH}/${SLURM_JOB_ID}/perf.csv; the benchmark produced no parseable results." >&2
+    exit 1
+fi
 
