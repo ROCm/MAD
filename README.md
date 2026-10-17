@@ -160,6 +160,11 @@ madengine run --tags model_name --clean-docker-cache
 
 ### Adding New Models
 
+The fastest way to add a model is the `mad-add-model` agent skill (works in
+Claude Code, Cursor and Codex CLI) — see
+[`.claude/README.md`](.claude/README.md) for the available skills, or follow
+the manual steps below.
+
 Follow these steps to add a new model to the MAD repository:
 
 #### Step 1: Create Workload Name
