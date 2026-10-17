@@ -1,0 +1,13 @@
+# Single-node runs use tp below. A multi-node madengine job ignores it:
+# N GPUs per node become tensor parallel N, M nodes become data parallel M,
+# and pipeline parallel stays 1 unless VLLM_PIPELINE_PARALLEL_SIZE is set.
+- benchmark: serving
+  model:
+    Qwen/Qwen3-8B
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  env:
+    VLLM_ROCM_USE_AITER: 1
