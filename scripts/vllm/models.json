@@ -321,7 +321,7 @@
     },
     {
         "name": "pyt_vllm_kimi-k3",
-        "dockerfile": "../../docker/pyt_vllm_kimi_k3",
+        "dockerfile": "../../docker/pyt_vllm",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -332,6 +332,7 @@
         "tags": [
             "pyt",
             "vllm",
+            "vllm_default",
             "inference"
         ],
         "timeout": -1,
