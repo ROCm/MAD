@@ -1,6 +1,6 @@
 # MAD Agent Skills
 
-This directory contains agent skills for streamlining MAD (Model Automation and Dashboarding) development workflows. They work in Claude Code, Cursor and Codex CLI — see [Claude Code, Cursor and Codex](#claude-code-cursor-and-codex).
+This directory contains agent skills for streamlining MAD (Model Automation and Dashboarding) development workflows. They work in Claude Code, Cursor and Codex CLI — see [Claude Code, Cursor and Codex](#claude-code-cursor-and-codex). Shared repo guidance for all three tools is in [`AGENTS.md`](../AGENTS.md).
 
 ## Available Skills
 
@@ -12,7 +12,7 @@ Interactive wizard to add new AI models to the MAD platform. Guides you through:
 - models.json configuration
 - Validation and testing
 
-**Usage:** `/mad-add-model` (Codex: `$mad-add-model`) or naturally describe adding a model
+**Usage:** `/mad-add-model` (Codex: `$mad-add-model`). Explicit only: it writes files, so agents don't start it on their own.
 
 **Time savings:** Reduces model addition from 30-60 minutes to <10 minutes
 
@@ -29,18 +29,23 @@ Comprehensive multi-level validation for model configurations including:
 ### mad-generate-dockerfile
 Standalone Dockerfile generator using framework-specific templates.
 
-**Usage:** `/mad-generate-dockerfile` (Codex: `$mad-generate-dockerfile`)
+**Usage:** `/mad-generate-dockerfile` (Codex: `$mad-generate-dockerfile`). Explicit only.
 
-### Claude Code-only skills and workflows
-`.claude/skills/` also holds `mad-benchmark`, `mad-profile`, `mad-tune`,
-`mad-report`, and `primus-projection`, plus the `mad-benchmark-sweep` and
-`mad-tune-search` workflows in `.claude/workflows/`. They rely on Claude Code
-features (`!` pre-flight injection, `context: fork` subagents from
-`.claude/agents/`, workflows), so they are not linked into `.agents/skills/`.
-Cursor still loads them from `.claude/skills/` but does not run the pre-flight
-or the forks; use them from Claude Code. `CLAUDE.md` describes them. Their GPU runs go through
-`.claude/skills/mad-common/mad-run.sh`, which detaches each run and holds a
-host-wide GPU lock.
+### Benchmark, profile, tune and report skills
+`mad-benchmark`, `mad-profile`, `mad-tune`, `primus-projection` (explicit only)
+and `mad-report` (automatic, read-only) are linked into `.agents/skills/` too.
+Claude Code adds two things the other tools skip: it runs their
+`` ```! `` pre-flight block before the skill loads (Cursor and Codex are told to
+run it first), and it forks them into the subagents in `.claude/agents/`
+(Cursor and Codex run them inline and read the agent file for its
+conventions). Their GPU runs go through `.claude/skills/mad-common/mad-run.sh`,
+which detaches each run and holds a host-wide GPU lock.
+
+### Claude Code-only workflows
+The `mad-benchmark-sweep` and `mad-tune-search` workflows in
+`.claude/workflows/` need Claude Code's workflow runtime. Both plan by default
+and run only with `--execute`; `CLAUDE.md` describes them, and
+`node --test tools/tests/` tests them against a mock agent.
 
 ## Quick Start
 
@@ -61,15 +66,20 @@ host-wide GPU lock.
 ```
 .claude/
 ├── README.md                           # This file
+├── settings.json                       # Shared permissions + models.json hook
+├── agents/                             # Subagents the skills fork into (Claude Code)
+├── hooks/validate-models-json.sh       # Validates models.json edits
+├── workflows/                          # mad-benchmark-sweep, mad-tune-search (Claude Code)
 ├── skills/
 │   ├── mad-add-model/                  # Model addition wizard
-│   │   └── SKILL.md
+│   │   ├── SKILL.md
+│   │   └── agents/openai.yaml          # Codex: explicit invocation only
 │   ├── mad-validate-model/             # Configuration validator
-│   │   └── SKILL.md
-│   └── mad-generate-dockerfile/        # Dockerfile generator
-│       ├── SKILL.md
-│       ├── scripts/render_dockerfile.py  # Template renderer
-│       └── framework_templates/        # Jinja2 templates
+│   ├── mad-generate-dockerfile/        # Dockerfile generator
+│   │   ├── scripts/render_dockerfile.py  # Template renderer
+│   │   └── framework_templates/        # Jinja2 templates
+│   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-report/, primus-projection/
+│   └── mad-common/                     # preflight.sh, mad-run.sh (shared helpers)
 └── prompts/
     └── model_addition_guide.md         # Detailed guide
 
@@ -89,7 +99,10 @@ skills in different places:
 | Codex CLI | `.agents/skills/` only | `$mad-add-model`, or pick from `/skills` |
 
 All three also pick a skill automatically when the request matches its
-`description`.
+`description`, except the explicit-only skills: those set
+`disable-model-invocation: true` (read by Claude Code and Cursor) and ship
+`agents/openai.yaml` with `policy.allow_implicit_invocation: false` (read by
+Codex). Every skill that builds, runs or writes files is explicit only.
 
 `.claude/skills/` holds the real files; `.agents/skills/*` are symlinks back
 to them, so there's a single source of truth: edit the files under
@@ -105,6 +118,10 @@ When writing or editing a skill, keep it tool-neutral:
   `AskUserQuestion`; Codex and Cursor don't have it.
 - Put anything that must produce exact output in a script (like
   `render_dockerfile.py`) rather than prose instructions.
+- Claude Code-only frontmatter (`context`, `agent`, `background`,
+  `allowed-tools`) is ignored elsewhere, so the body must still work inline.
+  Only Claude Code substitutes `$ARGUMENTS` and runs `` ```! `` blocks; say
+  what other agents should do instead.
 
 On native Windows, git checks out symlinks as plain text files unless
 symlinks are enabled, and then Codex won't see the skills (Claude Code and
@@ -127,15 +144,25 @@ Skills are implemented using:
 - **Agent-driven** interactive workflows (Claude Code, Cursor, Codex)
 - Integration with existing MAD tools (tools/utils.py, tools/logger.py)
 
+Checks (all GPU-free, all run in CI):
+- `python3 tools/validation/skill_validator.py` — skill and subagent
+  frontmatter, `.agents/skills` links, and explicit-only consistency
+- `python3 tools/validation/model_config_validator.py` — every model registry
+- `node --test tools/tests/` — the workflows, against a mock agent
+
 ## Contributing
 
 When adding new skills:
 1. Create skill directory under `.claude/skills/`
 2. Add a `SKILL.md` with YAML frontmatter (`name`, `description`) and the workflow instructions;
    `name` must match the directory name
-3. Add templates and validators as needed
-4. Link it for Codex: `ln -s ../../.claude/skills/<name> .agents/skills/<name>`
-5. Update this README
+3. If it builds, runs or writes files, make it explicit only: add
+   `disable-model-invocation: true` and an `agents/openai.yaml` with
+   `policy.allow_implicit_invocation: false`
+4. Add templates and validators as needed
+5. Link it for Codex: `ln -s ../../.claude/skills/<name> .agents/skills/<name>`
+6. Run `python3 tools/validation/skill_validator.py`
+7. Update this README
 
 ## References
 

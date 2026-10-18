@@ -1,0 +1,35 @@
+name: Test Claude Code workflows
+
+# Runs the .claude/workflows scripts against a scripted mock agent: argument
+# parsing, plan/execute behavior, context threading and tune-search statistics.
+# No GPU, no Claude. Also syntax-checks the shared shell helpers.
+on:
+  pull_request:
+    paths:
+      - ".claude/workflows/**"
+      - ".claude/skills/mad-common/**"
+      - ".claude/hooks/**"
+      - "tools/tests/**"
+      - ".github/workflows/claude-workflows.yml"
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Workflow unit tests
+        run: node --test tools/tests/
+
+      - name: Shell helpers parse
+        run: for f in .claude/skills/mad-common/*.sh .claude/hooks/*.sh; do bash -n "$f"; done

@@ -12,16 +12,17 @@ export const meta = {
 //   (a) a structured object: { tags: string[], nGpus?: string[], execute?: boolean,
 //       additionalContext?: string, timeout?: number }
 //   (b) a CLI-style string mirroring `/mad-benchmark`, e.g.
-//       --tags pyt_vllm_qwen3-8b,bert --additional-context '{"gpu_vendor":"AMD",...}' --live-output
+//       --tags pyt_vllm_qwen3-8b,dummy_multi --additional-context '{"gpu_vendor":"AMD",...}' --execute
 //
 // At least one tag is required. Pass several after --tags and/or comma-separate
 // them; each tag becomes one sweep cell. --additional-context (JSON or a Python
 // dict literal) is normalized to JSON and threaded into EVERY cell command, so
 // HF tokens / docker_env_vars reach each run.
 //
-// EXECUTE semantics: runs for real by default. Pass --no-execute (or --plan, or
-// execute:false) to only validate commands + resolve tags without touching GPUs.
-// Even when executing, each cell first checks for AMD GPUs and self-skips if none.
+// EXECUTE semantics: plans by default — resolves tags and prints each cell's
+// command without touching GPUs. Pass --execute (or execute:true) to run them.
+// --plan / --no-execute / --dry-run force plan mode. Even when executing, each
+// cell first checks for AMD GPUs and self-skips if none.
 // Executed cells run ONE AT A TIME: madengine gives every run the GPUs from
 // index 0 up and shares working files (perf_entry*, build_manifest.json), so
 // parallel runs on one host would collide. Each run also goes through
@@ -113,7 +114,7 @@ function normalizeContext(raw) {
 // --- parse a CLI string into the structured cfg the sweep uses ---
 function parseCli(s) {
   const toks = tokenize(s)
-  const cfg = { tags: [], nGpus: [], execute: true }
+  const cfg = { tags: [], nGpus: [], execute: false }
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
     const next = () => toks[++i]
@@ -145,17 +146,17 @@ let cfg
 if (typeof args === 'string') {
   cfg = parseCli(args)
 } else if (args && typeof args === 'object') {
-  cfg = { execute: true, ...args }
+  cfg = { execute: false, ...args }
   if (typeof cfg.tags === 'string') cfg.tags = cfg.tags.split(',').filter(Boolean)
 } else {
-  cfg = { tags: [], nGpus: [], execute: true }
+  cfg = { tags: [], nGpus: [], execute: false }
 }
 
 if (!cfg.tags || !cfg.tags.length)
-  throw new Error('mad-benchmark-sweep needs at least one tag, e.g. --tags pyt_vllm_qwen3-8b,dummy_multi [--plan]')
+  throw new Error('mad-benchmark-sweep needs at least one tag, e.g. --tags pyt_vllm_qwen3-8b,dummy_multi [--execute]')
 const tags = cfg.tags
 const nGpus = (cfg.nGpus && cfg.nGpus.length) ? cfg.nGpus : [null]
-const execute = cfg.execute !== false
+const execute = cfg.execute === true
 const ctxObj = normalizeContext(cfg.additionalContext)
 const timeout = cfg.timeout || null
 const PREFLIGHT = 'bash .claude/skills/mad-common/preflight.sh'
@@ -168,6 +169,7 @@ for (const tag of tags)
     matrix.push({ tag, nGpus: g })
 
 log(`Sweep matrix: ${matrix.length} cell(s) across ${tags.length} tag(s) [${tags.join(', ')}]. execute=${execute}${ctxObj ? ', additional-context threaded' : ''}`)
+if (!execute) log('Plan mode: commands are resolved and printed, nothing runs. Pass --execute to run them on this host.')
 
 // ── Resolve: one pre-flight, then madengine discover per tag ───────────────
 phase('Resolve')
@@ -193,7 +195,7 @@ const resolved = await agent(
 1. Run \`${PREFLIGHT}\`. If it exits non-zero, return preflightOk false with its output and stop.
 2. For each tag below, run \`madengine discover --tags <tag> --json\` (read-only, no GPU) and return the "name" of every model it lists. A tag that matches nothing gets an empty list and the error text.
 Tags: ${JSON.stringify(tags)}`,
-  { label: 'resolve', phase: 'Resolve', schema: RESOLVE_SCHEMA }
+  { label: 'resolve', phase: 'Resolve', schema: RESOLVE_SCHEMA, agentType: 'mad-benchmark-runner' }
 )
 if (!resolved) throw new Error('Resolve step returned no result; nothing was run.')
 if (!resolved.preflightOk) throw new Error(`Pre-flight failed; nothing was run.\n${resolved.preflightOutput || ''}`)
@@ -259,7 +261,7 @@ function runCell(cell, i) {
 Command: ${cmd}
 ${action}
 Return the cell label, the exact command, status, and performance/metric if available.`,
-    { label: `bench:${label}`, phase: 'Run', schema: CELL_SCHEMA }
+    { label: `bench:${label}`, phase: 'Run', schema: CELL_SCHEMA, agentType: 'mad-benchmark-runner' }
   ).then(res => res
     ? { ...res, _label: label, _output: outFile }
     : { cell: label, command: cmd, status: 'error', performance: null, metric: null,
@@ -288,7 +290,7 @@ do not let a failed/unresolved cell read as success;
 (5) note that each cell wrote a separate perf_<cell>.csv and that they can be
 concatenated for a combined report.
 Do not invent numbers — only use provided data.`,
-  { phase: 'Synthesize' }
+  { phase: 'Synthesize', agentType: 'mad-perf-analyst' }
 )
 
 return { execute, cells: clean, report: summary }

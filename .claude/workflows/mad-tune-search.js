@@ -17,7 +17,7 @@ export const meta = {
 //   (a) a structured object: { tag, target?, candidates?, execute?, repeats?,
 //       additionalContext?, timeout?, depth?, profileTool?, expect? }
 //   (b) a CLI-style string, e.g.
-//       --tag pyt_vllm_qwen3-8b --target latency --depth auto --candidates 4
+//       --tag pyt_vllm_qwen3-8b --target latency --depth auto --candidates 4 --execute
 //       --tag primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain --expect
 //
 // The tag is required and must resolve (madengine discover) to exactly ONE model.
@@ -47,10 +47,19 @@ export const meta = {
 // --depth operator|dispatch|kernel runs that rung only. --profile-tool NAME forces
 // the matching rung and uses NAME as its tool. Default --depth auto descends.
 //
-// EXECUTE: runs for real by default. --no-execute / --plan prints commands only.
+// EXECUTE: plans by default — resolves the model, prints every command, and
+// ranks candidates without touching GPUs. --execute (or execute:true) runs them;
+// --plan / --no-execute / --dry-run force plan mode.
 // Every run goes through .claude/skills/mad-common/mad-run.sh, which detaches it
 // (a tool call ends after 10 minutes) and holds a host-wide GPU lock. Candidates
 // are measured one at a time so GPU runs and file edits do not race.
+//
+// CLEAN TREE: candidates prefer levers that need no file edit (docker_env_vars,
+// --tags <model>:<arg>=<value>). When one edits a tracked file it must revert
+// it. After each executed candidate a separate agent reads `git status` and the
+// workflow compares it with the snapshot taken before the first candidate; on
+// any difference that candidate is an error and the search stops, so a leaked
+// edit can never contaminate the next measurement.
 
 function shellQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'"
@@ -134,7 +143,7 @@ function parseExpect(v) {
 
 function parseCli(s) {
   const toks = tokenize(s)
-  const cfg = { execute: true, expect: false, depth: 'auto' }
+  const cfg = { execute: false, expect: false, depth: 'auto' }
   const tags = []
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
@@ -208,20 +217,20 @@ let cfg
 if (typeof args === 'string') {
   cfg = parseCli(args)
 } else if (args && typeof args === 'object') {
-  cfg = { execute: true, expect: false, depth: 'auto', ...args }
+  cfg = { execute: false, expect: false, depth: 'auto', ...args }
   if (Object.prototype.hasOwnProperty.call(args, 'expect')) cfg.expect = parseExpect(args.expect)
 } else {
-  cfg = { execute: true, expect: false, depth: 'auto' }
+  cfg = { execute: false, expect: false, depth: 'auto' }
 }
 
 if (!cfg.tag)
-  throw new Error('mad-tune-search needs one model tag, e.g. --tag pyt_vllm_qwen3-8b [--target latency] [--plan]')
+  throw new Error('mad-tune-search needs one model tag, e.g. --tag pyt_vllm_qwen3-8b [--target latency] [--execute]')
 const DEPTHS = ['auto', 'operator', 'dispatch', 'kernel']
 const tag = cfg.tag
 const target = cfg.target || 'throughput'
 const nCandidates = Math.max(1, Math.min(cfg.candidates || 4, 8))
 const repeats = Math.max(1, Math.min(cfg.repeats || 3, 5))
-const execute = cfg.execute !== false
+const execute = cfg.execute === true
 const timeout = cfg.timeout || null
 const expectOn = cfg.expect === true
 let depth = DEPTHS.includes(cfg.depth) ? cfg.depth : 'auto'
@@ -293,6 +302,7 @@ if (cfg._extraTags && cfg._extraTags.length)
 if (execute && repeats < 2)
   log('Note: --repeats 1 takes one sample per configuration, so no candidate can be marked trustworthy. Use --repeats 2 or more for a recommendation.')
 log(`Tuning "${tag}" for ${target}. depth=${depth}. repeats=${repeats}. expect=${expectOn}. execute=${execute}. ${cleanCtx ? 'clean context ready' : 'no additional-context'}.`)
+if (!execute) log('Plan mode: commands are printed and candidates ranked, nothing runs. Pass --execute to measure on this host.')
 
 const PREFLIGHT = 'Pre-flight: run `bash .claude/skills/mad-common/preflight.sh` and stop if it exits non-zero.'
 const MAD_RUN = 'bash .claude/skills/mad-common/mad-run.sh'
@@ -334,7 +344,7 @@ Classify:
 - framework: modules.pre_trainer.framework or modules.post_trainer.framework from that YAML when you can read it, else null.
 List levers that actually exist for this family. Training: batch, precision, TP/PP/EP, RCCL/NCCL, recompute, PYTORCH_TUNABLEOP_ENABLED. Inference: gpu-memory-utilization, max-num-seqs, max-num-batched-tokens, tensor-parallel, precision, HIP graphs, attention backend.
 Report whether the entry sets "multiple_results" (its CSV filename, or null).`,
-  { label: 'resolve', phase: 'Baseline', schema: BASELINE_SCHEMA }
+  { label: 'resolve', phase: 'Baseline', schema: BASELINE_SCHEMA, agentType: 'mad-benchmark-runner' }
 )
 if (!baseline) throw new Error(`Baseline step returned no result for "${tag}"; nothing was measured.`)
 const resolvedModels = baseline.resolvedModels || []
@@ -370,7 +380,7 @@ ${baseOuts.map(o => '  ' + runCmd(o, cleanCtx)).join('\n')}
 ${RUN_HOW}
 If no AMD GPUs are present (rocm-smi/amd-smi), set status "skipped" with no samples. ${parseHint}
 Return status, one number per successful run in samples (same order), the metric unit, and the commands you ran.`,
-    { label: 'baseline', phase: 'Baseline', schema: SAMPLES_SCHEMA }
+    { label: 'baseline', phase: 'Baseline', schema: SAMPLES_SCHEMA, agentType: 'mad-benchmark-runner' }
   )
 }
 if (!baseRuns) baseRuns = { status: execute ? 'error' : 'planned', samples: [], metric: null, commands: baseOuts.map(o => runCmd(o, cleanCtx)), notes: execute ? 'baseline agent returned no result' : 'plan mode' }
@@ -432,7 +442,7 @@ Tools are torch_profiler_dynolog plus tracelens. Do not add rocm_trace_lite or r
 ${baseline.family === 'inference' ? 'Inference has no optimizer.step(); TORCH_PROFILE_ITERATIONS is already 0 (duration capture).' : 'Training uses iteration capture (TORCH_PROFILE_ITERATIONS=5).'}
 ${opAction}
 Return status, bound (compute|memory|communication|launch|mixed|unknown), evidence, topOperators [{name, pct, module}], tracePath.`,
-    { phase: 'Operator', schema: RUNG_SCHEMA }
+    { phase: 'Operator', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('operator agent returned no result')
 }
 log(`Operator: ${operator.status}. ${operator.evidence || operator.reason || ''}`)
@@ -463,7 +473,7 @@ Classify bottleneck as compute, memory, communication, launch, mixed, or unknown
 - communication: RCCL/NCCL collectives are a large share
 - launch: many tiny kernels and timeline gaps
 Return status, bottleneck, evidence citing hotspot percents, hotspots [{name, pct}], tracePath.`,
-    { phase: 'Dispatch', schema: RUNG_SCHEMA }
+    { phase: 'Dispatch', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('dispatch agent returned no result')
 }
 log(`Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''}. ${(dispatch.hotspots || []).slice(0, 3).map(h => `${h.name} ${h.pct != null ? h.pct + '%' : ''}`).join(', ')}`)
@@ -504,7 +514,7 @@ Command (this preset only — do not add rocm_trace_lite):
 ${kCmd}
 ${kAction}
 Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath.`,
-    { phase: 'Kernel', schema: RUNG_SCHEMA }
+    { phase: 'Kernel', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('kernel agent returned no result')
   kernel.preset = kernel.preset || kernelPreset
 }
@@ -553,7 +563,7 @@ Family: ${baseline.family}
 ${expectAction}
 Supported frameworks: megatron, torchtitan, maxtext (jax), torchrec_dlrm. Inference and every other trainer return source "skipped".
 Return source, fits, memoryPerGpuGb, expectedTokensPerSecPerGpu, expectedTflops, recommended {tp, pp, ep, cp, mbs, gbs, schedule, recompute} or null, and reason.`,
-    { phase: 'Expect', schema: EXPECT_SCHEMA }
+    { phase: 'Expect', schema: EXPECT_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || expectSkipped('expect agent returned no result')
 }
 log(`Expect: ${expectResult.source}. ${expectResult.reason || ''}`)
@@ -597,7 +607,7 @@ Use the deepest rung that actually returned evidence. Cite that evidence on ever
 - When Expect source is "projection" and recommended is set, prefer candidates from that config, best projected tokens/s first, and drop a config Projection says will not fit. Read the optimization tables in scripts/Primus/skills/primus-projection/SKILL.md and propose only a lever that file lists and this config supports. Still change ONE lever per candidate.
 - Prefer levers that need no file edit: leverKind "env" (docker_env_vars) or "arg" (madengine passes --tags <model>:<arg>=<value> to the script as --<arg> <value>).
 Each candidate returns id, change, hypothesis, evidence, depth (operator|dispatch|kernel|expect), leverKind (env|arg|config|other).`,
-  { phase: 'Propose', schema: CANDS_SCHEMA }
+  { phase: 'Propose', schema: CANDS_SCHEMA, agentType: 'mad-tuner' }
 )
 if (!proposed) throw new Error('Propose step returned no result; no candidates to evaluate.')
 const candidates = (proposed.candidates || []).slice(0, nCandidates)
@@ -621,13 +631,30 @@ const direction = higherIsBetter
   ? 'Higher is better (throughput).'
   : 'Lower is better (latency).'
 
+// Tracked-file state, read by its own agent so a candidate cannot vouch for itself.
+const TREE_SCHEMA = {
+  type: 'object',
+  required: ['porcelain'],
+  properties: { porcelain: { type: 'string' } },
+}
+async function trackedChanges(label) {
+  const r = await agent(
+    'From the MAD repo root run `git status --porcelain --untracked-files=no` and return its exact output in porcelain ("" when it prints nothing). Change nothing.',
+    { label, phase: 'Evaluate', schema: TREE_SCHEMA, effort: 'low' }
+  )
+  return r ? r.porcelain.trim() : null
+}
+const treeBefore = execute && candidates.length ? await trackedChanges('tree:before') : null
+if (execute && candidates.length && treeBefore === null)
+  throw new Error('Could not read git status before evaluating candidates; nothing was measured.')
+
 const evaluated = []
 for (const cand of candidates) {
   const safeId = String(cand.id).replace(/[^A-Za-z0-9._-]/g, '_')
   const outs = sampleOutFiles(`perf_tune_${safeId}`)
   const cmds = outs.map(o => runCmd(o, cleanCtx))
   const action = execute
-    ? `If AMD GPUs are present (check rocm-smi/amd-smi), apply the change ONCE, run the ${repeats} commands CLEAN (no tools key) one after another, then REVERT any file/config edit and confirm \`git status\` shows no leftover change, so the next candidate starts clean. ${RUN_HOW}
+    ? `If AMD GPUs are present (check rocm-smi/amd-smi), apply the change ONCE, run the ${repeats} commands CLEAN (no tools key) one after another, then REVERT any file/config edit. The workflow compares \`git status\` with its pre-candidate snapshot afterwards and stops the search on any leftover change. ${RUN_HOW}
 ${parseHint} If no GPUs, set status "skipped" with no samples.`
     : 'Do NOT execute. Produce the exact commands (plus precisely how to apply the change) and set status "planned" with no samples.'
 
@@ -642,8 +669,22 @@ ${cmds.map(c => '  ' + c).join('\n')}
 ${ctxHint}
 ${action}
 Return status, one number per successful run in samples (same order), the metric unit, the exact commands you ran, and notes.`,
-    { label: `eval:${cand.id}`, phase: 'Evaluate', schema: SAMPLES_SCHEMA }
+    { label: `eval:${cand.id}`, phase: 'Evaluate', schema: SAMPLES_SCHEMA, agentType: 'mad-tuner' }
   ) || { status: 'error', samples: [], metric: null, commands: cmds, notes: 'evaluate agent returned no result' }
+
+  let leaked = null
+  if (execute) {
+    const treeAfter = await trackedChanges(`tree:${cand.id}`)
+    if (treeAfter !== treeBefore)
+      leaked = treeAfter === null
+        ? 'could not read git status after this candidate'
+        : `tracked files differ from the pre-candidate snapshot:\n${treeAfter || '(clean)'}\nexpected:\n${treeBefore || '(clean)'}`
+  }
+  if (leaked) {
+    runs.status = 'error'
+    runs.samples = []
+    runs.notes = `${runs.notes ? runs.notes + ' ' : ''}Discarded: ${leaked}`
+  }
 
   const candStats = stats(runs.samples)
   const g = gate(baseStats, candStats, baseline.baselineMetric, runs.metric, higherIsBetter)
@@ -669,11 +710,16 @@ Baseline (computed): median ${baseStats.median} ${baseline.baselineMetric || ''}
 Candidate (computed): ${JSON.stringify(measured)}
 Hypothesis was: ${cand.hypothesis}
 The numeric gate passed: ${g.reason}. Look for what the numbers cannot show: the change was not actually applied as described, a run used a profiler, a run failed or was retried, the edit leaked into other runs, or the result does not follow from the hypothesis. Return id, trustworthy, reason.`,
-      { label: `verify:${cand.id}`, phase: 'Evaluate', schema: VERDICT_SCHEMA }
+      { label: `verify:${cand.id}`, phase: 'Evaluate', schema: VERDICT_SCHEMA, agentType: 'mad-perf-analyst' }
     ) || { id: cand.id, trustworthy: false, reason: 'verify agent returned no result' }
   }
   evaluated.push({ ...measured, _change: cand.change, _evidence: cand.evidence, _depth: cand.depth,
     verdict: { ...verdict, trustworthy: g.pass && verdict.trustworthy === true } })
+  if (leaked) {
+    const rest = candidates.slice(candidates.indexOf(cand) + 1).map(c => c.id)
+    log(`Stopped: candidate ${cand.id} left the working tree changed. Restore it (git diff / git checkout) before re-running.${rest.length ? ` Not evaluated: ${rest.join(', ')}.` : ''}`)
+    break
+  }
 }
 
 // ── Phase 8: Synthesize ────────────────────────────────────────────────────
@@ -697,7 +743,7 @@ Produce:
 (5) the recommended configuration — ONLY from candidates whose verdict.trustworthy is true; if none ran, present the ranked plan to test on a GPU host;
 (6) the exact next clean madengine command.
 Each candidate wrote its own perf_tune_<id>_r<k>.csv files. Do not invent measurements or recompute the given statistics. Do not treat a profiled run as the score.`,
-  { phase: 'Synthesize' }
+  { phase: 'Synthesize', agentType: 'mad-perf-analyst' }
 )
 
 return {

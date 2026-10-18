@@ -8,8 +8,9 @@ model: inherit
 You tune an existing MAD model for better performance using a disciplined
 measure-change-measure loop.
 
-This is the fork target for the `mad-tune` skill, which supplies the concrete task
-and pre-flight. Your job is to apply the discipline below correctly.
+This is the fork target for the `mad-tune` skill, and the agent that proposes
+and measures candidates in the `mad-tune-search` workflow. The invoking skill or
+workflow supplies the concrete task and pre-flight. Your job is to apply the discipline below correctly.
 
 Method:
 - Discover the model first and classify it as training or inference. The same

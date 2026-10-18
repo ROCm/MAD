@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Shared MAD pre-flight: ensure madengine is installed and we're at the repo root.
+# Shared MAD pre-flight: check madengine is installed and we're at the repo root.
+# It never installs anything; it prints the install command and fails.
 # Referenced by every GPU-touching mad-* skill via dynamic context injection
 # (`bash .claude/skills/mad-common/preflight.sh`, relative to the repo root) so
 # the check is inlined into the skill prompt before the work begins.
@@ -10,22 +11,13 @@
 set -euo pipefail
 
 if ! command -v madengine &>/dev/null; then
-  if [ -f requirements.txt ] && grep -q madengine requirements.txt; then
-    echo "[pre-flight] madengine not found. Installing from requirements.txt..."
-    if ! pip install -r requirements.txt; then
-      echo "[pre-flight] pip install failed."
-      exit 1
-    fi
-    if ! command -v madengine &>/dev/null; then
-      echo "[pre-flight] pip install finished but madengine is still not on PATH."
-      exit 1
-    fi
-  else
-    echo "[pre-flight] madengine not found and requirements.txt is missing."
-    echo "  Install:  pip install git+https://github.com/ROCm/madengine.git@main"
-    echo "  Or clone MAD and run from its root (which has requirements.txt)."
-    exit 1
-  fi
+  # Never install into whatever Python environment happens to be active; say
+  # how instead and let the user choose the environment.
+  echo "[pre-flight] madengine is not installed (or not on PATH)."
+  echo "  Install the version MAD pins, in the environment you run from:"
+  echo "    pip install -r requirements.txt   # from the MAD repo root"
+  echo "  then retry."
+  exit 1
 fi
 
 if [ ! -f models.json ]; then

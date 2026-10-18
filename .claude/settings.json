@@ -10,19 +10,34 @@
       "Bash(bash scripts/Primus/runner/primus-cli *)",
       "Bash(python3 -m primus.agents.tuning_agent *)",
       "Bash(docker images *)",
-      "Bash(docker run --rm *)",
       "Bash(which torchrun)",
       "Bash(python3 -m json.tool *)",
       "Bash(git status)",
+      "Bash(git status --porcelain --untracked-files=no)",
       "Bash(git diff *)",
       "Bash(git log *)",
       "Bash(rocm-smi *)",
       "Bash(amd-smi *)",
       "Bash(bash .claude/skills/mad-common/preflight.sh)",
-      "Bash(python3 .claude/skills/mad-validate/scripts/validate.py *)",
+      "Bash(bash .claude/skills/mad-common/mad-run.sh *)",
+      "Bash(python3 tools/validation/model_config_validator.py *)",
       "Read",
       "Grep",
       "Glob"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-models-json.sh",
+            "timeout": 120
+          }
+        ]
+      }
     ]
   }
 }

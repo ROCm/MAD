@@ -761,7 +761,7 @@
         <tr>
           <td>Add a new model</td>
           <td><code>/mad-add-model</code></td>
-          <td>(interactive skill; also in Cursor and Codex)</td>
+          <td>(interactive skill, no subagent)</td>
         </tr>
         <tr>
           <td>Profile / trace a model</td>
@@ -781,7 +781,7 @@
         <tr>
           <td>Validate model entries</td>
           <td><code>/mad-validate-model</code></td>
-          <td>(validator script; also in Cursor and Codex)</td>
+          <td>(validator script, no subagent)</td>
         </tr>
       </tbody>
     </table>
@@ -790,9 +790,16 @@
   <p>
     Two multi-agent <strong>workflows</strong> handle matrix benchmarking and systematic
     tuning search: <code>mad-benchmark-sweep</code> and <code>mad-tune-search</code>.
-    These fan out subagent calls and synthesize results into comparison tables. GPU runs go
+    These fan out subagent calls and synthesize results into comparison tables. Both plan by
+    default and run on GPUs only with <code>--execute</code>. GPU runs go
     through <code>.claude/skills/mad-common/mad-run.sh</code>, which detaches each run (a tool
     call ends after 10 minutes) and holds a host-wide GPU lock, so runs never share GPUs.
+  </p>
+  <p>
+    Every skill also loads in Cursor and Codex CLI (through <code>.agents/skills/</code>), where it
+    runs inline instead of in a subagent; the workflows are Claude Code only. Skills that build,
+    run, or write files are explicit only in all three tools. Shared conventions live in
+    <code>AGENTS.md</code>; see <code>.claude/README.md</code>.
   </p>
 </section>
 
@@ -1001,7 +1008,7 @@
     <div class="flow-row">
       <div class="flow-q">Benchmark multiple tags at once</div>
       <div class="flow-arrow">→</div>
-      <div class="flow-cmd">/mad-benchmark-sweep --tags bert,deepseek</div>
+      <div class="flow-cmd">/mad-benchmark-sweep --tags bert,pyt_vllm_deepseek-r1 --execute</div>
     </div>
     <div class="flow-row">
       <div class="flow-q">Add a brand-new model</div>
@@ -1122,7 +1129,7 @@ echo <span class="t-string">"performance: $performance samples_per_second"</span
       <p><strong>Examples</strong></p>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-benchmark</span> <span class="t-string">bert</span>
 <span class="t-cmd">/mad-benchmark</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-flag">--timeout 3600</span>
-<span class="t-cmd">/mad-benchmark</span> <span class="t-string">deepseek</span> <span class="t-flag">--output results/deepseek.csv</span></pre>
+<span class="t-cmd">/mad-benchmark</span> <span class="t-string">pyt_vllm_deepseek-r1</span> <span class="t-flag">--output results/deepseek-r1.csv</span></pre>
 
       <p><strong>What the agent does</strong></p>
       <ol>
@@ -1208,7 +1215,7 @@ FROM $BASE_DOCKER</pre>
       <p><strong>Examples</strong></p>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-profile</span> <span class="t-string">bert</span> <span class="t-string">dispatch</span>
 <span class="t-cmd">/mad-profile</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">operator</span>
-<span class="t-cmd">/mad-profile</span> <span class="t-string">deepseek</span> <span class="t-string">kernel</span> <span class="t-string">rocprofv3_memory</span></pre>
+<span class="t-cmd">/mad-profile</span> <span class="t-string">pyt_vllm_deepseek-r1</span> <span class="t-string">kernel</span> <span class="t-string">rocprofv3_memory</span></pre>
 
       <p><strong>What the agent does</strong></p>
       <ol>
@@ -1323,7 +1330,7 @@ FROM $BASE_DOCKER</pre>
       <p><strong>Examples</strong></p>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-cmd">/mad-tune</span> <span class="t-string">bert</span>
 <span class="t-cmd">/mad-tune</span> <span class="t-string">pyt_vllm_llama-3.1-8b</span> <span class="t-string">throughput</span>
-<span class="t-cmd">/mad-tune</span> <span class="t-string">deepseek</span> <span class="t-string">latency</span> <span class="t-string">try tensor-parallel=4</span></pre>
+<span class="t-cmd">/mad-tune</span> <span class="t-string">pyt_vllm_deepseek-r1</span> <span class="t-string">latency</span> <span class="t-string">try tensor-parallel=4</span></pre>
 
       <p><strong>What the agent does</strong></p>
       <ol>
@@ -1452,27 +1459,27 @@ FROM $BASE_DOCKER</pre>
             <tr><td><code>--additional-context '{...}'</code></td><td>Threaded <em>verbatim</em> into every cell (HF token, <code>docker_env_vars</code>, deployment keys). A per-cell <code>n_gpus</code> is merged in when <code>--ngpus</code> is set.</td></tr>
             <tr><td><code>--ngpus 4,8</code></td><td>Optional GPU-count axis — multiplies the matrix (each tag × each count).</td></tr>
             <tr><td><code>--timeout S</code></td><td>Optional per-cell timeout in seconds.</td></tr>
-            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Validate + resolve tags only, no GPU. <strong>Executes by default.</strong></td></tr>
+            <tr><td><code>--execute</code></td><td>Run the cells on this host. <strong>Without it the sweep only plans</strong>: it resolves tags and prints each command, no GPU. <code>--plan</code> / <code>--no-execute</code> force plan mode.</td></tr>
           </tbody>
         </table>
       </div>
 
       <p><strong>Example invocations</strong></p>
-      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Execute mode (default) — AMD GPU required, context threaded into every cell</span>
-<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert,pyt_vllm_qwen3-8b</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"gpu_vendor": "AMD", "guest_os": "UBUNTU"}'</span> <span class="t-flag">--live-output</span>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Plan mode (default) — safe, no GPU required</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert pyt_vllm_deepseek-r1</span>
 
-<span class="t-comment"># Plan mode — safe, no GPU required</span>
-<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert pyt_vllm_deepseek-r1</span> <span class="t-flag">--plan</span>
+<span class="t-comment"># Execute — AMD GPU required, context threaded into every cell</span>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert,pyt_vllm_qwen3-8b</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"gpu_vendor": "AMD", "guest_os": "UBUNTU"}'</span> <span class="t-flag">--execute</span>
 
 <span class="t-comment"># GPU-count axis: each tag × each count</span>
-<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">--ngpus</span> <span class="t-string">4,8</span></pre>
+<span class="t-cmd">/mad-benchmark-sweep</span> <span class="t-flag">--tags</span> <span class="t-string">bert</span> <span class="t-flag">--ngpus</span> <span class="t-string">4,8</span> <span class="t-flag">--execute</span></pre>
 
       <div class="callout callout-amber">
-        <div class="callout-title">Executes by default</div>
+        <div class="callout-title">Plans by default</div>
         <p>
-          On a GPU host this workflow <strong>runs immediately</strong>. Pass <code>--plan</code>
-          (or <code>--no-execute</code>) to only validate commands and resolve tags. Each cell
-          still self-skips if no AMD GPU is present.
+          Without <code>--execute</code> the workflow only resolves tags and prints each cell's
+          command; nothing touches the GPUs. With <code>--execute</code>, each cell still
+          self-skips if no AMD GPU is present.
         </p>
       </div>
 
@@ -1597,23 +1604,23 @@ FROM $BASE_DOCKER</pre>
             <tr><td><code>--expect</code> / <code>--expect auto</code></td><td>Off unless passed. Asks the <code>primus-projection</code> skill for expected tokens/s on a Primus training config. Inference and other trainers skip it.</td></tr>
             <tr><td><code>--additional-context '{...}'</code></td><td>JSON or Python-dict context (normalized to JSON; an unparseable value stops the workflow). <code>docker_env_vars</code>, <code>slurm</code>, and <code>k8s</code> are kept. A <code>tools</code> entry is ignored; each depth builds its own. Clean measurements strip <code>tools</code>. For <code>env</code>-lever candidates the agent merges the var into <code>docker_env_vars</code>.</td></tr>
             <tr><td><code>--timeout S</code></td><td>Optional per-run timeout in seconds.</td></tr>
-            <tr><td><code>--no-execute</code> / <code>--plan</code></td><td>Print the madengine commands and rank candidates. No GPU. <strong>Executes by default.</strong></td></tr>
+            <tr><td><code>--execute</code></td><td>Measure on this host. <strong>Without it the search only plans</strong>: it prints the madengine commands and ranks candidates, no GPU. <code>--plan</code> / <code>--no-execute</code> force plan mode.</td></tr>
           </tbody>
         </table>
       </div>
 
       <p><strong>Example invocations</strong></p>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Inference: descend operator (duration capture), dispatch, and kernel, then measure clean.</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--target</span> <span class="t-string">latency</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--target</span> <span class="t-string">latency</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span> <span class="t-flag">--execute</span>
 
 <span class="t-comment"># One rung only</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--depth</span> <span class="t-string">kernel</span> <span class="t-flag">--profile-tool</span> <span class="t-string">rocprofv3_memory</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--depth</span> <span class="t-string">kernel</span> <span class="t-flag">--profile-tool</span> <span class="t-string">rocprofv3_memory</span> <span class="t-flag">--execute</span>
 
 <span class="t-comment"># Primus training, with projection numbers attached</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain</span> <span class="t-flag">--expect</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain</span> <span class="t-flag">--expect</span> <span class="t-flag">--execute</span>
 
-<span class="t-comment"># Plan mode — print commands, no GPU</span>
-<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">bert</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span> <span class="t-flag">--plan</span></pre>
+<span class="t-comment"># Plan mode (default) — print commands, no GPU</span>
+<span class="t-cmd">/mad-tune-search</span> <span class="t-flag">--tag</span> <span class="t-string">bert</span> <span class="t-flag">--candidates</span> <span class="t-string">4</span></pre>
 
       <div class="callout callout-amber">
         <div class="callout-title">Sequential evaluation — and why</div>
@@ -1678,11 +1685,12 @@ FROM $BASE_DOCKER</pre>
           slow first run (online GEMM benchmarking collapses throughput to &lt;1 tok/s).
           The Docker container launched by madengine outlives the Claude session — if the
           session ends mid-run the container keeps going but the workflow never completes
-          and the config edit is not reverted. Always pass <code>--timeout</code> to bound
-          each candidate, and confirm <code>extended.yaml</code> (or any edited config) is
-          clean after an interrupted run.
+          and a config edit may not be reverted. Always pass <code>--timeout</code> to bound
+          each candidate, and run <code>git status</code> after an interrupted run. During a
+          normal run the workflow checks <code>git status</code> after every candidate and
+          stops the search if an edit leaked.
         </p>
-        <pre style="background:transparent;border:none;padding:4px 0 0;margin:0;"><code>/mad-tune-search --tag pyt_vllm_qwen3-8b --timeout 1200</code></pre>
+        <pre style="background:transparent;border:none;padding:4px 0 0;margin:0;"><code>/mad-tune-search --tag pyt_vllm_qwen3-8b --timeout 1200 --execute</code></pre>
       </div>
     </div>
   </div>
@@ -1713,7 +1721,7 @@ FROM $BASE_DOCKER</pre>
     </div>
     <div class="card-body">
       <p><strong>Tools:</strong> Bash, Read, Grep, Glob</p>
-      <p><strong>Called by:</strong> <code>/mad-benchmark</code>, <code>/mad-profile</code>, <code>mad-benchmark-sweep</code> (workflow)</p>
+      <p><strong>Called by:</strong> <code>/mad-benchmark</code>, <code>/mad-profile</code>, <code>mad-benchmark-sweep</code> and <code>mad-tune-search</code> (workflows)</p>
       <ul>
         <li>Resolves tags with <code>madengine discover</code> (read-only, no GPU).</li>
         <li>Builds the full madengine run command including profiling context if requested.</li>
@@ -1804,7 +1812,7 @@ FROM $BASE_DOCKER</pre>
     </div>
     <div class="env-card">
       <div class="env-name">PYTORCH_TUNABLEOP_ENABLED</div>
-      <div class="env-desc">Enable PyTorch TunableOp for auto-tuned GEMM kernels. A common throughput tuning lever for PyTorch models. <strong>First run is very slow</strong> (online GEMM tuning collapses throughput to ~0.2–1 tok/s); results are only meaningful on a warm second run with cached kernels. Set <code>--timeout</code> generously or do a throwaway warmup pass before measuring.</div>
+      <div class="env-desc">Enable PyTorch TunableOp for auto-tuned GEMM kernels. A common throughput tuning lever for PyTorch models. <strong>First run is very slow</strong> (online GEMM tuning collapses throughput to ~0.2–1 tok/s); results are only meaningful on a warm second run with cached kernels. Each madengine run is a fresh container, so the tuned results survive only when <code>PYTORCH_TUNABLEOP_FILENAME</code> points at a host directory mounted with <code>docker_mounts</code> (see the TunableOp tip below).</div>
     </div>
     <div class="env-card">
       <div class="env-name">NCCL_* / RCCL_*</div>
@@ -1874,7 +1882,7 @@ FROM $BASE_DOCKER</pre>
       </p>
       <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># Merge sweep results (keep one header row)</span>
 head -1 perf_bert.csv > perf_combined.csv
-<span class="t-cmd">tail</span> -n +2 perf_bert.csv perf_deepseek.csv >> perf_combined.csv
+<span class="t-cmd">tail</span> -n +2 perf_bert.csv perf_pyt_vllm_deepseek-r1.csv >> perf_combined.csv
 <span class="t-cmd">madengine report to-html</span> <span class="t-flag">--csv-file-path</span> perf_combined.csv</pre>
     </div>
   </details>
@@ -1898,7 +1906,7 @@ head -1 perf_bert.csv > perf_combined.csv
   </details>
 
   <details>
-    <summary>TunableOp needs a warmup — don't measure cold</summary>
+    <summary>TunableOp: tune once on a host mount, then measure</summary>
     <div class="details-body">
       <p>
         <code>PYTORCH_TUNABLEOP_ENABLED=1</code> triggers online GEMM auto-tuning on
@@ -1909,13 +1917,24 @@ head -1 perf_bert.csv > perf_combined.csv
       <p>
         Measuring TunableOp cold produces a misleading (and huge) regression that the verify
         step will correctly mark untrustworthy — but only after burning 30+ minutes of GPU time.
-        Best practice:
+        A warmup run alone does not help: every madengine run starts a fresh container, and
+        <code>--skip-model-run</code> only builds the image, so the results file from one run
+        is gone by the next. Keep it on the host instead:
       </p>
       <ul>
-        <li>Run a throwaway warmup pass first (<code>--skip-model-run</code> then one full run) to populate the cache.</li>
+        <li>Mount a host directory and point <code>PYTORCH_TUNABLEOP_FILENAME</code> into it
+          (<code>%d</code> becomes the GPU index).</li>
+        <li>Run once with <code>PYTORCH_TUNABLEOP_TUNING=1</code> to tune. Discard that run's number.</li>
+        <li>Measure with <code>PYTORCH_TUNABLEOP_TUNING=0</code>, so the runs read the tuned
+          results without tuning again.</li>
         <li>Always set <code>--timeout</code> so a single candidate cannot stall the whole tune-search.</li>
         <li>The profiling bottleneck data guides whether TunableOp is even worth trying — only relevant for compute-bound (GEMM-dominant) workloads.</li>
       </ul>
+      <pre><span class="copy-hint" onclick="copyCode(this)">copy</span><span class="t-comment"># 1. Tune (results land in ~/tunableop on the host)</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--timeout</span> <span class="t-string">7200</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"docker_mounts": {"/tunableop": "'"$HOME"'/tunableop"}, "docker_env_vars": {"PYTORCH_TUNABLEOP_ENABLED": "1", "PYTORCH_TUNABLEOP_TUNING": "1", "PYTORCH_TUNABLEOP_FILENAME": "/tunableop/results%d.csv"}}'</span>
+
+<span class="t-comment"># 2. Measure with the tuned results, no further tuning</span>
+<span class="t-cmd">madengine run</span> <span class="t-flag">--tags</span> <span class="t-string">pyt_vllm_qwen3-8b</span> <span class="t-flag">--additional-context</span> <span class="t-string">'{"docker_mounts": {"/tunableop": "'"$HOME"'/tunableop"}, "docker_env_vars": {"PYTORCH_TUNABLEOP_ENABLED": "1", "PYTORCH_TUNABLEOP_TUNING": "0", "PYTORCH_TUNABLEOP_FILENAME": "/tunableop/results%d.csv"}}'</span></pre>
     </div>
   </details>
 

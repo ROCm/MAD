@@ -4,6 +4,7 @@ description: Analyze and summarize MAD benchmark results (perf.csv / perf_entry_
 argument-hint: "[csv-or-json path] [compare-to path]"
 context: fork
 agent: mad-perf-analyst
+background: false
 allowed-tools: Read Grep Glob Bash(madengine report *)
 ---
 
@@ -31,3 +32,10 @@ Summarize that file when the user asks about a TraceLens report. Diff two
 operator workbooks with
 `madengine report tracelens-compare <before> <after> --names before --names after`.
 A profiled `perf.csv` row is not a clean score.
+
+## Agent Notes
+- Claude Code, Cursor and Codex all load this skill (Codex through
+  `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
+  means the text the user gave after the skill name.
+- Claude Code runs this skill in the `mad-perf-analyst` subagent. Other agents run it
+  inline: read `.claude/agents/mad-perf-analyst.md` first for the conventions it assumes.

@@ -16,6 +16,8 @@ Anything after that is an explicit madengine tool name. Use the tag token in
 every `madengine` command.
 
 ## Pre-flight
+Claude Code runs this before the skill starts. Other agents: run it first from
+the repo root and stop if it fails.
 ```!
 bash .claude/skills/mad-common/preflight.sh
 ```
@@ -56,3 +58,10 @@ default to `dispatch` (`rocm_trace_lite`), which covers training and inference.
 
 For a multi-depth search that also measures clean candidates, use the
 `mad-tune-search` workflow (`--depth auto`).
+
+## Agent Notes
+- Claude Code, Cursor and Codex all load this skill (Codex through
+  `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
+  means the text the user gave after the skill name.
+- Claude Code runs this skill in the `mad-benchmark-runner` subagent. Other agents run it
+  inline: read `.claude/agents/mad-benchmark-runner.md` first for the conventions it assumes.

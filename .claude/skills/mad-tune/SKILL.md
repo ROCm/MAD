@@ -15,6 +15,8 @@ token may be `throughput` or `latency`, and `operator`, `dispatch`, or `kernel`.
 Use the tag token in every `madengine` command.
 
 ## Pre-flight
+Claude Code runs this before the skill starts. Other agents: run it first from
+the repo root and stop if it fails.
 ```!
 bash .claude/skills/mad-common/preflight.sh
 ```
@@ -66,3 +68,10 @@ the final recommended config with before/after numbers.
 Primus projection is not part of this loop. For a multi-depth search, use the
 `mad-tune-search` workflow. Pass `--expect` on that workflow only when you want
 projected tokens/s for a Primus training model.
+
+## Agent Notes
+- Claude Code, Cursor and Codex all load this skill (Codex through
+  `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
+  means the text the user gave after the skill name.
+- Claude Code runs this skill in the `mad-tuner` subagent. Other agents run it
+  inline: read `.claude/agents/mad-tuner.md` first for the conventions it assumes.

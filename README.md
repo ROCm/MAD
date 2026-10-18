@@ -75,7 +75,7 @@ Below are blueprints of supported models along with their documentation.
 
 ### Running Models
 
-The madengine CLI [ROCm/madengine](https://github.com/ROCm/madengine/) provides a simple interface for running models locally. All models defined in `models.json` can be executed on a Docker host to collect performance results.
+The madengine CLI [ROCm/madengine](https://github.com/ROCm/madengine/) provides a simple interface for running models locally. All models registered in the `scripts/**/models.json` registries can be executed on a Docker host to collect performance results.
 
 **Please note that support of running models using tools/run_models.py is no longer recommended, and tools/run_models.py will be removed from MAD repo soon.**
 
@@ -159,21 +159,22 @@ madengine run --tags model_name --clean-docker-cache
 
 ## Claude Code Integration
 
-MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code) that cover benchmarking, profiling, tuning, adding models, reporting, and validation. See `CLAUDE.md` for full context and conventions.
+MAD ships agent skills for [Claude Code](https://claude.ai/code), Cursor and Codex CLI that cover benchmarking, profiling, tuning, adding models, reporting, and validation. `AGENTS.md` holds the shared conventions; `CLAUDE.md` adds the Claude Code specifics; [`.claude/README.md`](.claude/README.md) explains how the skills are shared across the three tools.
 
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|
-| `/mad-benchmark <tag>` | Manual | Build and run a madengine benchmark on AMD GPUs |
-| `/mad-profile <tag> [operator\|dispatch\|kernel]` | Manual | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
-| `/mad-tune <tag>` | Manual | Measure-change-measure tuning loop for training or inference |
-| `/mad-add-model` | Interactive | Guided model addition: per-directory `models.json` entry, Dockerfile, run.sh, validation |
-| `/mad-generate-dockerfile` | Interactive | Render a MAD Dockerfile from a framework template |
+| `/mad-benchmark <tag>` | Explicit | Build and run a madengine benchmark on AMD GPUs |
+| `/mad-profile <tag> [operator\|dispatch\|kernel]` | Explicit | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
+| `/mad-tune <tag>` | Explicit | Measure-change-measure tuning loop for training or inference |
+| `/primus-projection <tag>` | Explicit | Projected memory fit and tokens/s for a Primus training tag |
+| `/mad-add-model` | Explicit | Guided model addition: per-directory `models.json` entry, Dockerfile, run.sh, validation |
+| `/mad-generate-dockerfile` | Explicit | Render a MAD Dockerfile from a framework template |
 | `/mad-report [csv]` | Auto | Summarize or compare benchmark results |
 | `/mad-validate-model [model]` | Auto | GPU-free lint of every model registry, its files, and the output contract |
 
-`/mad-add-model`, `/mad-generate-dockerfile`, and `/mad-validate-model` also work in Cursor and Codex CLI (see [`.claude/README.md`](.claude/README.md)).
+Explicit skills run only when you invoke them (`/name` in Claude Code and Cursor, `$name` in Codex). Long runs go through `.claude/skills/mad-common/mad-run.sh`, which detaches each run and serializes runs on one host with a GPU lock.
 
-Larger fan-out jobs use workflows: `mad-benchmark-sweep` (a matrix across tags; planned cells run in parallel, executed cells one at a time) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements repeated `--repeats` times, 3 by default). GPU runs go through `.claude/skills/mad-common/mad-run.sh`, which detaches each run and serializes runs on one host with a GPU lock. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
+Claude Code also has two workflows for larger fan-out jobs: `mad-benchmark-sweep` (a matrix across tags) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements repeated `--repeats` times, 3 by default). Both plan by default and only run on GPUs with `--execute`. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
 
 ## Contributing
 
@@ -197,51 +198,61 @@ Follow the naming convention: `{framework}_{project}_{workload}`
 
 #### Step 2: Model Configuration
 
-Add an entry to `models.json`:
+Models are registered **per directory**: add the entry to the `models.json` in
+the model's script directory, `scripts/<dir>/models.json` (create
+`scripts/<name>/models.json` for a model with its own run script, or add to an
+existing one such as `scripts/vllm/models.json` when reusing its runner). The
+root `models.json` stays `[]`; madengine only requires it to exist. Paths in an
+entry are relative to the directory holding that `models.json`:
 
 ```json
 {
-  "name": "tf2_bert_large",
-  "url": "https://github.com/ROCmSoftwarePlatform/bert",
-  "dockerfile": "docker/tf2_bert_large",
-  "scripts": "scripts/tf2_bert_large",
-  "n_gpus": "4",
-  "owner": "john.doe@amd.com",
-  "training_precision": "fp32",
+  "name": "pyt_huggingface_bert",
+  "url": "https://github.com/huggingface/transformers",
+  "dockerfile": "../../docker/pyt_huggingface",
+  "scripts": "run.sh",
+  "n_gpus": "-1",
+  "owner": "mad.support@amd.com",
+  "training_precision": "",
   "tags": [
-    "per_commit",
-    "tf2",
-    "bert",
-    "fp32"
+    "pyt",
+    "bert"
   ],
   "args": ""
 }
 ```
 
+madengine names it `<dir>/<name>` (e.g. `huggingface_bert/pyt_huggingface_bert`),
+which is also the `model` value in `perf.csv`. This is the real entry in
+`scripts/huggingface_bert/models.json`. Names must be unique across all
+directories.
+
 #### Configuration Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | ✅ | Unique model identifier |
-| `url` | ✅ | Repository URL to clone |
-| `dockerfile` | ✅ | Path to Dockerfile |
-| `scripts` | ✅ | Path to script directory |
-| `n_gpus` | ✅ | Number of GPUs (`-1` for all available) |
+| `name` | ✅ | Unique model identifier, `{framework}_{project}_{workload}` |
+| `dockerfile` | ✅ | Dockerfile path prefix relative to the registry directory; `.ubuntu.amd.Dockerfile` is appended |
+| `scripts` | ✅ | Run script relative to the registry directory (e.g. `run.sh`) |
+| `n_gpus` | ✅ | Number of GPUs as a string (`"-1"` for all available) |
 | `owner` | ✅ | Contact email |
-| `training_precision` | ✅ | Precision level (fp16, fp32, etc.) |
 | `tags` | ✅ | List of tags for categorization |
+| `args` | ✅ | Additional script arguments (may be `""`) |
+| `url` | ❌ | Repository URL cloned into the container (`""` if none) |
+| `training_precision` | ❌ | Precision level (fp16, bf16, fp32, etc.) |
 | `data` | ❌ | Optional data path |
-| `timeout` | ❌ | Model-specific timeout override |
+| `timeout` | ❌ | Model-specific timeout override in seconds |
 | `multiple_results` | ❌ | CSV file for multiple results |
-| `args` | ❌ | Additional script arguments |
 
 #### Step 3: Docker Setup
 
-Create a Dockerfile in the `docker/` directory:
+Create `docker/<name>.ubuntu.amd.Dockerfile` (reuse an existing Dockerfile of
+the same stack when you can). The `# CONTEXT` header must be the first line:
 
 ```dockerfile
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-FROM rocm/tensorflow:latest
+ARG BASE_DOCKER=rocm/pytorch:latest
+FROM $BASE_DOCKER
 
 # Install system dependencies
 RUN apt update && apt install -y \
@@ -267,7 +278,9 @@ WORKDIR /workspace
 
 #### Step 4: Script Implementation
 
-Create a script directory in `scripts/` with a `run.sh` file:
+Create `run.sh` in the model's script directory (`scripts/<dir>/`). Only that
+directory is copied into the container, so everything the script calls must
+live in it:
 
 ```bash
 #!/bin/bash
@@ -318,6 +331,16 @@ Create a CSV file with columns: `models,performance,metric`
 models,performance,metric
 model_1,156.7,examples/sec
 model_2,89.3,tokens/sec
+```
+
+#### Step 5: Validate
+
+GPU-free checks, then a real run on a GPU host:
+
+```bash
+python3 tools/validation/model_config_validator.py --model <name>
+madengine discover --tags <name>          # must list <dir>/<name>
+madengine run --tags <name> --live-output
 ```
 
 ## Environment Variables

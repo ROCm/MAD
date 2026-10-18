@@ -60,3 +60,8 @@ profiler search. The slash command itself is not a way to probe other models.
 - `expectedTflops` (null when the tool does not report it)
 - `recommended`: `{tp, pp, ep, cp, mbs, gbs, schedule, recompute}` or null
 - `reason`: one line: the profiling mode used (simulate or benchmark) and where it ran (host or image), plus the skip reason when `source` is `skipped`
+
+## Agent Notes
+- Claude Code, Cursor and Codex all load this skill (Codex through
+  `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
+  means the text the user gave after the skill name.
