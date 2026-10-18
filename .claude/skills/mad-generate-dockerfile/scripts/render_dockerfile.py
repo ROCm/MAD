@@ -27,12 +27,25 @@ import os
 import re
 import shlex
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-TEMPLATES_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "framework_templates"
-)
+SKILL_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+TEMPLATES_DIR = os.path.join(SKILL_DIR, "framework_templates")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(SKILL_DIR)))
 TEMPLATE_SUFFIX = "_base.Dockerfile.jinja"
+
+# The maintained Dockerfile each template is modeled on. Its base image is the
+# default `base_image`, read at render time so templates never pin a stale one.
+REFERENCE_DOCKERFILES = {
+    "atom": "docker/pyt_atom.ubuntu.amd.Dockerfile",
+    "jax": "docker/primus_maxtext.ubuntu.amd.Dockerfile",
+    "pytorch": "docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile",
+    "sglang": "docker/pyt_sglang.ubuntu.amd.Dockerfile",
+    "sglang_disagg": "docker/sglang_disagg_inference.ubuntu.amd.Dockerfile",
+    "vllm": "docker/pyt_vllm.ubuntu.amd.Dockerfile",
+    "vllm_disagg": "docker/vllm_disagg_inference.ubuntu.amd.Dockerfile",
+    "xdit": "docker/pyt_xdit.ubuntu.amd.Dockerfile",
+}
 
 
 def available_frameworks() -> List[str]:
@@ -65,6 +78,20 @@ def template_variables(env, framework: str) -> List[str]:
 
     source = env.loader.get_source(env, framework + TEMPLATE_SUFFIX)[0]
     return sorted(jinja2.meta.find_undeclared_variables(env.parse(source)))
+
+
+def reference_base_image(framework: str) -> Optional[str]:
+    """Return the base image of the framework's reference Dockerfile, or None."""
+    path = os.path.join(REPO_ROOT, REFERENCE_DOCKERFILES.get(framework, ""))
+    try:
+        with open(path) as f:
+            for line in f:
+                match = re.match(r"\s*ARG\s+BASE_(?:DOCKER|IMAGE)\s*=\s*[\"']?([^\s\"']+)", line)
+                if match:
+                    return match.group(1)
+    except OSError:
+        pass
+    return None
 
 
 def load_context(raw: str) -> Dict:
@@ -136,6 +163,15 @@ def check_context(context: Dict, known: List[str]) -> List[str]:
 def render(framework: str, context: Dict) -> str:
     env = make_env()
     errors = check_context(context, template_variables(env, framework))
+    if "base_image" not in context:
+        base_image = reference_base_image(framework)
+        if base_image:
+            context["base_image"] = base_image
+        else:
+            errors.append(
+                f"no base image: pass 'base_image' (could not read ARG BASE_DOCKER from "
+                f"{REFERENCE_DOCKERFILES.get(framework, 'a reference Dockerfile')})"
+            )
     if errors:
         sys.exit("ERROR: " + "; ".join(errors))
     context.setdefault("year", datetime.date.today().year)
@@ -157,6 +193,8 @@ def main() -> int:
         env = make_env()
         for framework in available_frameworks():
             print(f"{framework}: {', '.join(template_variables(env, framework))}")
+            print(f"  default base_image: {reference_base_image(framework) or '(none; pass base_image)'}"
+                  f" from {REFERENCE_DOCKERFILES.get(framework, '-')}")
         return 0
     if not args.framework:
         parser.error("--framework is required (or use --list)")

@@ -1,6 +1,7 @@
 ---
 name: mad-add-model
 description: Guided workflow to add a new AI model to the MAD platform (Dockerfile, run script, per-directory models.json entry, docs, and validation). Use when the user asks to add, create, or register a new model for MAD, or names "add model"/"new model".
+disable-model-invocation: true
 ---
 
 # mad-add-model Skill Instructions
@@ -74,11 +75,15 @@ files until you have the answers:
 
 Before generating files, validate:
 
-1. **Check for duplicates** across **all** registered model files, not just
-   the destination directory: search the root `models.json` and every
-   `scripts/*/models.json` (models are registered per-directory; see Step 5)
-   for an existing entry with the same name, e.g.
-   `grep -l '"name": "{model_name}"' models.json scripts/*/models.json`
+1. **Check for duplicates** across **all** registries, not just the
+   destination directory. `madengine discover --tags {model_name}` is the
+   authoritative check (it sees every `models.json` under `scripts/` and the
+   `get_models_json.py` models); it must list nothing. Without madengine,
+   search the files instead, e.g.
+   `grep -rlE '"name": *"{model_name}"' --include=models.json scripts/`.
+   MAD requires names to be unique across directories: madengine would accept
+   the same name in two directories as `dir/name`, but an unscoped
+   `--tags {model_name}` would then select both.
 2. **Verify naming convention:** Must match `^[a-z]+_[a-z0-9_.\-]+$`
 3. **Suggest corrections** if needed
 4. **Ask the user** to confirm the final name
@@ -113,23 +118,18 @@ For the shared-framework layout, skip Steps 3, 4 and 6: the Dockerfile,
    See `.claude/skills/mad-generate-dockerfile/SKILL.md` for each template's
    context variables.
 
-2. **Read existing similar Dockerfiles** for base image references:
-   - For PyTorch: Read `docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile`
-   - For JAX: Read `docker/primus_maxtext.ubuntu.amd.Dockerfile`
-   - For vLLM: Read `docker/pyt_vllm.ubuntu.amd.Dockerfile`
-   - For SGLang: Read `docker/pyt_sglang.ubuntu.amd.Dockerfile`
-   - For ATOM: Read `docker/pyt_atom.ubuntu.amd.Dockerfile`
-   - For xDiT: Read `docker/pyt_xdit.ubuntu.amd.Dockerfile`
-   - For SGLang disagg: Read `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`
-   - For vLLM disagg: Read `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`
-   - Extract base image ARG value
+2. **Base image:** the renderer takes the default from the template's
+   reference Dockerfile (e.g. `docker/pyt_vllm.ubuntu.amd.Dockerfile` for
+   `vllm`), so it matches what MAD currently ships.
+   `render_dockerfile.py --list` shows it. Pass `base_image` only when the
+   user asks for a different image.
 
 3. **Render a preview** with the renderer script (never fill in the template
    by hand), passing the context as a JSON object:
    ```bash
    python3 .claude/skills/mad-generate-dockerfile/scripts/render_dockerfile.py \
      --framework {framework} \
-     --context '{"base_image": "<extracted_base_image>", "apt_packages": [...], "pip_packages": [...], "git_repos": [{"url": "...", "path": "...", "checkout": "..."}]}'
+     --context '{"apt_packages": [...], "pip_packages": [...], "git_repos": [{"url": "...", "path": "...", "checkout": "..."}]}'
    ```
    Omit keys the user did not provide; `year` defaults to the current year.
    It needs `jinja2` (`pip install jinja2` if missing).
@@ -153,10 +153,10 @@ For the shared-framework layout, skip Steps 3, 4 and 6: the Dockerfile,
    - Output performance metrics (`echo "performance: <value> <unit>"`)
    - Handle errors
 
-3. **Keep `{script_dir}` self-contained.** At run time only the directory
-   holding the configured script is copied into the container
-   (`tools/run_models.py`), so every helper `run.sh` calls (Python drivers,
-   config files) must live in `{script_dir}`. A vLLM model that just needs
+3. **Keep `{script_dir}` self-contained.** At run time madengine copies only
+   the directory holding the configured script into the container, so every
+   helper `run.sh` calls (Python drivers, config files) must live in
+   `{script_dir}`. A vLLM model that just needs
    `scripts/vllm/run_vllm.py` and its `configs/` belongs in the
    shared-framework layout instead (Step 2b).
 
@@ -199,9 +199,10 @@ For the shared-framework layout, skip Steps 3, 4 and 6: the Dockerfile,
 ### Step 5: Register in models.json
 
 MAD models are registered via **per-directory `models.json` files** in
-`{script_dir}` (see Step 2b) — not a single root `models.json`. The root
-`models.json` is reserved for models whose directory has a
-`get_models_json.py` instead.
+`{script_dir}` (see Step 2b), not the root `models.json`. The root file stays
+`[]` (madengine requires it to exist). A directory that generates its models
+with a `get_models_json.py` must not also get a `models.json`; madengine
+refuses a directory that has both.
 
 1. **Read the existing `{script_dir}/models.json`** if it exists (always true
    for the shared-framework layout), otherwise it will be created.
@@ -273,6 +274,10 @@ MAD models are registered via **per-directory `models.json` files** in
    - `python3 tools/validation/model_config_validator.py --models-json {script_dir}/models.json --model {model_name}` on the new entry
    - `python3 tools/validation/dockerfile_validator.py docker/{dockerfile_name}.ubuntu.amd.Dockerfile` on the Dockerfile
    - `python3 tools/validation/script_validator.py {script_dir}/run.sh` on the run script
+     (add `--multiple-results` when the entry sets `multiple_results`)
+   - `madengine discover --tags {model_name}` must list exactly the new model,
+     named `{dir}/{model_name}`. This is what `madengine run` will see. If
+     madengine is not installed, say so and skip this check.
 
 2. **Check for errors:**
    - Missing required fields
@@ -288,10 +293,10 @@ MAD models are registered via **per-directory `models.json` files** in
 
 **Ask the user:** "Would you like me to test building the Docker image?"
 
-If yes, from the repository root:
+If yes, from the repository root build it the way `madengine run` will (same
+build context and build args), without running the workload:
 ```bash
-docker build -f docker/{dockerfile_name}.ubuntu.amd.Dockerfile \
-  -t ci-{model_name}:test .
+madengine build --tags {model_name}
 ```
 
 Show build output and report success/failure. In a sandboxed agent (e.g.
@@ -327,6 +332,9 @@ Next steps:
 
 ## Agent Notes
 
+- This skill writes files, so it runs only when invoked explicitly
+  (`disable-model-invocation` for Claude Code and Cursor,
+  `agents/openai.yaml` for Codex).
 - This skill works in Claude Code, Cursor and Codex. It only needs file
   read/write/edit, a shell, and a way to ask the user questions; use whichever
   tools your agent provides for those.

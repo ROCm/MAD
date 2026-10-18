@@ -5,19 +5,32 @@ Validates run.sh scripts for:
 - Shebang presence
 - License header
 - Error handling (set -e)
-- Required environment variables
 - Output format for performance metrics
+
+SLURM batch scripts (.sbatch / .slurm) are submitted with sbatch rather than
+executed, so they are not required to be executable.
 """
 
 import os
+import re
 from typing import List
+
+try:
+    from .model_config_validator import _dir_emits_performance_line
+except ImportError:  # run as a script: python3 tools/validation/script_validator.py
+    from model_config_validator import _dir_emits_performance_line
+
+BATCH_SUFFIXES = ('.sbatch', '.slurm')
 
 
 class ScriptValidator:
     """Validator for MAD run scripts"""
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, verbose: bool = True, multiple_results: bool = False):
         self.verbose = verbose
+        # The model writes its results to a CSV (models.json multiple_results)
+        # instead of printing a 'performance:' line.
+        self.multiple_results = multiple_results
         self.errors: List[str] = []
         self.warnings: List[str] = []
 
@@ -48,9 +61,9 @@ class ScriptValidator:
         self._check_shebang(content)
         self._check_license_header(content)
         self._check_error_handling(content)
-        self._check_executable(script_path)
-        self._check_required_env_vars(content)
-        self._check_performance_output(content)
+        if not script_path.endswith(BATCH_SUFFIXES):
+            self._check_executable(script_path)
+        self._check_performance_output(script_path)
 
         if self.verbose:
             self._print_report(script_path)
@@ -60,7 +73,7 @@ class ScriptValidator:
     def _check_shebang(self, content: str):
         """Check for proper shebang"""
         first_line = content.split('\n', 1)[0].strip()
-        if first_line not in ('#!/bin/bash', '#!/usr/bin/env bash'):
+        if not re.match(r'^#!\s*(/usr)?/bin/(env\s+)?(bash|sh)(\s|$)', first_line):
             self.errors.append(
                 "Missing or incorrect shebang. Should be: #!/bin/bash "
                 "or #!/usr/bin/env bash"
@@ -88,20 +101,18 @@ class ScriptValidator:
                 f"Script is not executable. Run: chmod +x {script_path}"
             )
 
-    def _check_required_env_vars(self, content: str):
-        """Check for the MAD runtime environment variables the script relies on"""
-        required_vars = ['MAD_MODEL_NAME', 'MAD_RUNTIME_NGPUS']
-        for var in required_vars:
-            if var not in content:
-                self.warnings.append(
-                    f"Script does not reference required MAD environment variable: {var}"
-                )
+    def _check_performance_output(self, script_path: str):
+        """Check the script emits the 'performance:' metric line MAD parses.
 
-    def _check_performance_output(self, content: str):
-        """Check the script emits the 'performance:' metric line MAD parses"""
-        if "performance:" not in content:
+        The line may come from a helper the script calls, so the script's whole
+        directory is searched. Skipped for multiple_results models.
+        """
+        if self.multiple_results:
+            return
+        if not _dir_emits_performance_line(os.path.dirname(os.path.abspath(script_path))):
             self.warnings.append(
-                "Script does not appear to output a 'performance: <value> <unit>' line"
+                "No 'performance: <value> <unit>' line in the script's directory "
+                "(fine only if the model sets multiple_results; pass --multiple-results)"
             )
 
     def _print_report(self, script_path: str):
@@ -135,10 +146,12 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Validate MAD run scripts')
     parser.add_argument('script', help='Path to script to validate')
+    parser.add_argument('--multiple-results', action='store_true',
+                        help='The model sets multiple_results, so no performance: line is expected')
 
     args = parser.parse_args()
 
-    validator = ScriptValidator(verbose=True)
+    validator = ScriptValidator(verbose=True, multiple_results=args.multiple_results)
     valid = validator.validate(args.script)
 
     sys.exit(0 if valid else 1)

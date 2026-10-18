@@ -42,7 +42,7 @@ performs. Errors fail validation; warnings are reported but pass.
   `madengine discover --tags <dir>/all --json` and checked for file
   references, the Dockerfile header and the output contract only (their names
   and metadata come from code). Without madengine on PATH they are reported
-  as "Not checked".
+  as "Not checked" (an error with `--require-dynamic`, which CI uses).
 
 ### Required Fields and Types
 - Required, non-empty: `name`, `dockerfile`, `scripts`, `n_gpus`, `owner`, `tags` (error)
@@ -134,4 +134,7 @@ and suggest a concrete fix for each.
 - Run with no arguments (or `--all`) to validate every registered model in one
   pass, including cross-registry duplicate names
 - Integrated into mad-add-model skill for automatic validation
-- Can be run in CI/CD pipelines
+- CI (`.github/workflows/mad-validate.yml`) runs it with `--require-dynamic`,
+  plus `madengine discover --tags all`, `tools/validation/skill_validator.py`
+  (skill and subagent frontmatter, Codex links) and a render of every
+  Dockerfile template

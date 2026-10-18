@@ -30,7 +30,7 @@
 # Runtime recipe / RDMA platform env is NOT baked in; the launcher applies it
 # at run time (see scripts/vllm_dissag/connectors/*.env and models.yaml).
 ###############################################################################
-ARG BASE_DOCKER={{ base_image | default('rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491') }}
+ARG BASE_DOCKER={{ base_image }}
 FROM ${BASE_DOCKER}
 
 # Specify entrypoint to override upstream
