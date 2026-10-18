@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 ###############################################################################
-ARG BASE_DOCKER={{ base_image | default('lmsysorg/sglang:v0.4.5-rocm630') }}
+ARG BASE_DOCKER={{ base_image }}
 
 FROM $BASE_DOCKER
 

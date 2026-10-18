@@ -24,7 +24,7 @@
 # SOFTWARE.
 #
 ###############################################################################
-ARG BASE_DOCKER={{ base_image | default('lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x') }}
+ARG BASE_DOCKER={{ base_image }}
 FROM $BASE_DOCKER
 
 USER root

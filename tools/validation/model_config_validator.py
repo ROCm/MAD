@@ -419,9 +419,9 @@ def registry_scope(registry_dir: str, repo_root: str = REPO_ROOT) -> str:
 def discover_registry_files(repo_root: str = REPO_ROOT) -> List[str]:
     """Find every models.json registry file in the repo.
 
-    Models are registered either in the root models.json (directories with a
-    get_models_json.py) or in per-directory models.json files found by walking
-    scripts/ recursively, the same way madengine discovers them.
+    Models are registered in per-directory models.json files found by walking
+    scripts/ recursively, the same way madengine discovers them. The root
+    models.json (normally []) is included because madengine reads it too.
     """
     paths = []
     root_json = os.path.join(repo_root, 'models.json')
@@ -639,12 +639,15 @@ def _selected(model: dict, scope: str, model_name: Optional[str], tag: Optional[
 
 def validate_registries(repo_root: str = REPO_ROOT, model_name: Optional[str] = None,
                         tag: Optional[str] = None,
-                        allow_missing_files: bool = False) -> bool:
+                        allow_missing_files: bool = False,
+                        require_dynamic: bool = False) -> bool:
     """Validate every registered model, or only those matching --model/--tag.
 
     Covers the root models.json, every models.json under scripts/ (recursive),
     and get_models_json.py models when madengine is installed. Fails when no
-    model was validated, so an empty or mistyped selection never passes.
+    model was validated, so an empty or mistyped selection never passes. With
+    require_dynamic, a get_models_json.py directory that could not be expanded
+    is an error instead of a warning (for CI, where madengine is installed).
     """
     all_valid = True
     for message in find_registry_conflicts(repo_root):
@@ -689,7 +692,11 @@ def validate_registries(repo_root: str = REPO_ROOT, model_name: Optional[str] = 
                     all_valid = False
 
     for message in dynamic_skipped:
-        print(f"\n⚠️  Not checked: {message}")
+        if require_dynamic:
+            print(f"\n❌ Not checked: {message}")
+            all_valid = False
+        else:
+            print(f"\n⚠️  Not checked: {message}")
     print(f"\nValidated {checked} model(s) from {len(registry_files)} models.json file(s)"
           + (f"; {len(dynamic_skipped)} get_models_json.py director(ies) not checked"
              if dynamic_skipped else ""))
@@ -726,6 +733,9 @@ if __name__ == '__main__':
                        help='Treat missing Dockerfile/script references as '
                             'warnings instead of errors (for models still '
                             'being generated)')
+    parser.add_argument('--require-dynamic', action='store_true',
+                       help='Fail when a get_models_json.py directory cannot be expanded '
+                            '(e.g. madengine is not installed); use in CI')
     parser.add_argument('--repo-root', default=REPO_ROOT,
                        help='MAD repository root (default: derived from this file)')
 
@@ -774,5 +784,5 @@ if __name__ == '__main__':
     else:
         # Validate every registry, optionally narrowed by --model / --tag
         valid = validate_registries(repo_root, args.model, args.tag,
-                                    args.allow_missing_files)
+                                    args.allow_missing_files, args.require_dynamic)
         sys.exit(0 if valid else 1)

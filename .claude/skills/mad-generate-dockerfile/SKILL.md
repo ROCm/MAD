@@ -1,6 +1,7 @@
 ---
 name: mad-generate-dockerfile
 description: Standalone Dockerfile generator for MAD models using the framework-specific Jinja2 templates in framework_templates/. Use when the user asks to generate, create, or scaffold a Dockerfile for a MAD model without running the full mad-add-model workflow.
+disable-model-invocation: true
 ---
 
 # mad-generate-dockerfile Skill Instructions
@@ -24,7 +25,7 @@ the output is identical whichever agent runs this skill.
 
 ## Available Templates
 
-| `--framework` | Use for | Reference Dockerfile (for current `base_image`) |
+| `--framework` | Use for | Reference Dockerfile (supplies the default `base_image`) |
 |---|---|---|
 | `pytorch` | Generic PyTorch workloads (incl. diffusion models needing ROCm flash-attention) | `docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile` |
 | `jax` | JAX / MaxText | `docker/primus_maxtext.ubuntu.amd.Dockerfile` |
@@ -36,13 +37,16 @@ the output is identical whichever agent runs this skill.
 | `vllm_disagg` | vLLM disaggregated prefill-decode (MoRI, AITER, NIXL/RIXL, DeepEP) | `docker/vllm_disagg_inference.ubuntu.amd.Dockerfile` |
 
 `render_dockerfile.py --list` prints the context variables each template
-accepts. Each template requires the `# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}`
+accepts and the default base image it would use. The renderer reads that
+default from the reference Dockerfile's `ARG BASE_DOCKER=` line on every run,
+so templates never pin a stale image. Each template requires the `# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}`
 header (already present).
 
 ### Common context variables (all templates)
 
 - `year` — copyright year (the renderer defaults it to the current year)
-- `base_image` — overrides the template's default `ARG BASE_DOCKER=`
+- `base_image` — overrides the default `ARG BASE_DOCKER=` taken from the
+  reference Dockerfile
 - `apt_packages`, `pip_packages` — lists of extra packages
 - `git_repos` — list of `{url, path, checkout}` dicts
 - `custom_entrypoint` — `true` to emit `ENTRYPOINT [""]` (pytorch, jax,
@@ -82,9 +86,10 @@ assume defaults and continue on your own.
 1. **Ask the user** which framework (pytorch, jax, vllm, sglang, atom, xdit,
    sglang_disagg, vllm_disagg) and model name they need a Dockerfile for.
 2. Read the matching template above.
-3. Read the reference Dockerfile listed for that template to extract the
-   current `ARG BASE_DOCKER=` value as the default `base_image`. For the
-   disagg templates, also take the current MoRI/AITER/vLLM pins from it.
+3. Run `render_dockerfile.py --list` to see the default `base_image` (read
+   from the reference Dockerfile). Pass `base_image` only when the user wants
+   a different one. For the disagg templates, also read the reference
+   Dockerfile for the current MoRI/AITER/vLLM pins.
 4. **Ask the user** for any extra `apt`/`pip` packages or git repos to bake
    in, plus any template-specific options above (e.g. flash-attention for
    PyTorch diffusion models).
@@ -92,7 +97,7 @@ assume defaults and continue on your own.
    ```bash
    python3 .claude/skills/mad-generate-dockerfile/scripts/render_dockerfile.py \
      --framework vllm \
-     --context '{"base_image": "vllm/vllm-openai-rocm:v0.28.0", "pip_packages": ["foo==1.0"]}'
+     --context '{"pip_packages": ["foo==1.0"]}'
    ```
    Fix any `ERROR`/`WARNING` lines (a warning means a context key the
    template does not use, usually a typo).
@@ -104,6 +109,9 @@ assume defaults and continue on your own.
 
 ## Agent Notes
 
+- This skill writes files, so it runs only when invoked explicitly
+  (`disable-model-invocation` for Claude Code and Cursor,
+  `agents/openai.yaml` for Codex).
 - This skill works in Claude Code, Cursor and Codex. It only needs file
   read/write and a shell; use whichever tools your agent provides for those.
 - In a sandboxed agent (e.g. Codex), `pip install jinja2` needs network

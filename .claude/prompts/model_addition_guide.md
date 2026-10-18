@@ -93,9 +93,10 @@ echo "performance: <value> <metric>"
 
 ### 4. Update models.json
 
-MAD models are registered via **per-directory `models.json` files**, not a
-single root `models.json` — the root file is reserved for directories that
-provide a `get_models_json.py`. Paths inside an entry are relative to the
+MAD models are registered via **per-directory `models.json` files**, not the
+root `models.json` (it stays `[]`, but madengine requires it to exist). Some
+directories generate their models with a `get_models_json.py` instead; a
+directory may not have both. Paths inside an entry are relative to the
 directory containing that `models.json`.
 
 For a model reusing the shared vLLM Dockerfile and script, add the entry to
@@ -121,13 +122,16 @@ for a model with its own Dockerfile/script):
 
 ```bash
 python3 tools/validation/model_config_validator.py --models-json scripts/vllm/models.json --model pyt_vllm_llama-3.2-8b
+
+# What madengine will run: must list exactly vllm/pyt_vllm_llama-3.2-8b
+madengine discover --tags pyt_vllm_llama-3.2-8b
 ```
 
 ### 6. Test
 
 ```bash
-# Build Docker image (the shared Dockerfile registered in the entry above)
-docker build -f docker/pyt_vllm.ubuntu.amd.Dockerfile -t ci-test .
+# Build the image the way madengine run will (same context and build args)
+madengine build --tags pyt_vllm_llama-3.2-8b
 
 # Run model
 madengine run --tags pyt_vllm_llama-3.2-8b
@@ -185,7 +189,7 @@ madengine run --tags pyt_vllm_llama-3.2-8b
 ## Common Issues
 
 ### Issue: Duplicate model name
-**Solution:** Check the root `models.json` and every `scripts/*/models.json` for an existing entry with the same name, then choose a unique one
+**Solution:** `madengine discover --tags <name>` lists any existing model with that name (in any directory); choose a name it does not list. Names must be unique across directories.
 
 ### Issue: Dockerfile build fails
 **Solution:** Verify base image exists, check package names

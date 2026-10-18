@@ -1,0 +1,54 @@
+name: Validate model registries and agent skills
+
+# GPU-free checks: every registered model (static and get_models_json.py),
+# madengine discovery, the agent skills/subagents, and the Dockerfile templates.
+on:
+  pull_request:
+    paths:
+      - "models.json"
+      - "scripts/**"
+      - "docker/**"
+      - ".claude/**"
+      - ".agents/**"
+      - "tools/validation/**"
+      - "requirements.txt"
+      - ".github/workflows/mad-validate.yml"
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # scripts/Primus feeds scripts/primus_train/get_models_json.py
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install madengine and validator dependencies
+        run: pip install -r requirements.txt pyyaml jinja2
+
+      - name: Validate every registered model
+        run: python3 tools/validation/model_config_validator.py --require-dynamic
+
+      - name: madengine discovers every model
+        run: madengine discover --tags all > /dev/null
+
+      - name: Lint skills, subagents and Codex links
+        run: python3 tools/validation/skill_validator.py
+
+      - name: Render every Dockerfile template
+        run: |
+          renderer=.claude/skills/mad-generate-dockerfile/scripts/render_dockerfile.py
+          for framework in $(python3 "$renderer" --list | grep -v '^ ' | cut -d: -f1); do
+            python3 "$renderer" --framework "$framework" > "/tmp/$framework.Dockerfile"
+            python3 tools/validation/dockerfile_validator.py "/tmp/$framework.Dockerfile" > /dev/null
+          done
