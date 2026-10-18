@@ -45,7 +45,7 @@ which detaches each run and holds a host-wide GPU lock.
 The `mad-benchmark-sweep` and `mad-tune-search` workflows in
 `.claude/workflows/` need Claude Code's workflow runtime. Both plan by default
 and run only with `--execute`; `CLAUDE.md` describes them, and
-`node --test tools/tests/` tests them against a mock agent.
+`node --test tools/tests/*.test.mjs` tests them against a mock agent.
 
 ## Quick Start
 
@@ -148,7 +148,7 @@ Checks (all GPU-free, all run in CI):
 - `python3 tools/validation/skill_validator.py` — skill and subagent
   frontmatter, `.agents/skills` links, and explicit-only consistency
 - `python3 tools/validation/model_config_validator.py` — every model registry
-- `node --test tools/tests/` — the workflows, against a mock agent
+- `node --test tools/tests/*.test.mjs` — the workflows, against a mock agent
 
 ## Contributing
 

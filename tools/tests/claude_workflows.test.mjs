@@ -5,7 +5,7 @@
 // agent(), so argument parsing, plan/execute behavior, context threading and
 // the tune-search statistics are checked without Claude or a GPU.
 //
-//   node --test tools/tests/
+//   node --test tools/tests/*.test.mjs
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

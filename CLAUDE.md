@@ -28,7 +28,7 @@ Claude Code does.
     snapshot and stops if an edit leaked. `--expect` adds `/primus-projection`
     numbers for a Primus training model; it stays off otherwise.
   - The tests in `tools/tests/` run both against a mock agent:
-    `node --test tools/tests/`.
+    `node --test tools/tests/*.test.mjs`.
 - **Hook.** `.claude/settings.json` registers a PostToolUse hook
   (`.claude/hooks/validate-models-json.sh`) that validates any
   `scripts/**/models.json` Claude edits and reports errors back immediately.

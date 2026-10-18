@@ -29,7 +29,7 @@ jobs:
           node-version: "22"
 
       - name: Workflow unit tests
-        run: node --test tools/tests/
+        run: node --test tools/tests/*.test.mjs
 
       - name: Shell helpers parse
         run: for f in .claude/skills/mad-common/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
