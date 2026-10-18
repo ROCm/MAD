@@ -176,7 +176,10 @@ Larger fan-out jobs use workflows: `mad-benchmark-sweep` (parallel matrix across
 
 ### Adding New Models
 
-> **Using Claude Code?** Run `/mad-add-model <framework_project_workload>` — it scaffolds all three artifacts (models.json entry, Dockerfile, run.sh) from the closest existing template and validates the result automatically. The manual steps below are for reference.
+The fastest way to add a model is the `mad-add-model` agent skill (works in
+Claude Code, Cursor and Codex CLI) — see
+[`.claude/README.md`](.claude/README.md) for the available skills, or follow
+the manual steps below.
 
 Follow these steps to add a new model to the MAD repository:
 
