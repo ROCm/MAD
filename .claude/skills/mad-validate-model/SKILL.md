@@ -13,24 +13,36 @@ Perform comprehensive multi-level validation on MAD model configurations to catc
 ### Validate All Models
 ```
 User: Validate all models
-Agent: [Runs `python3 tools/validation/model_config_validator.py --all`,
-        which validates the root models.json plus every scripts/*/models.json]
+Agent: [Runs `python3 tools/validation/model_config_validator.py` (same as --all),
+        which validates every registered model: the root models.json, every
+        models.json under scripts/ (recursive), and get_models_json.py models]
 ```
 
-### Validate Specific Model
+### Validate Specific Models
 ```
 User: Validate pyt_vllm_llama-3.1-8b
-Agent: [Runs the validator with --models-json pointing at the registry that
-        contains the model, plus --model pyt_vllm_llama-3.1-8b]
+Agent: [Runs the validator with --model pyt_vllm_llama-3.1-8b
+        (a bare name or dir/name such as vllm/pyt_vllm_llama-3.1-8b), or
+        --tag <tag> for every model carrying that tag]
 ```
+
+The run fails when nothing matched, so a typo or an empty registry never
+reads as a pass. The last line reports how many models were validated.
 
 ## Validation Checks
 
 These are the checks `tools/validation/model_config_validator.py` actually
 performs. Errors fail validation; warnings are reported but pass.
 
-### Registry File
+### Registry Files
 - Valid JSON whose top level is an array of model objects (error)
+- A directory holding both `models.json` and `get_models_json.py` (error;
+  madengine refuses to discover it)
+- `get_models_json.py` models are expanded with
+  `madengine discover --tags <dir>/all --json` and checked for file
+  references, the Dockerfile header and the output contract only (their names
+  and metadata come from code). Without madengine on PATH they are reported
+  as "Not checked".
 
 ### Required Fields and Types
 - Required, non-empty: `name`, `dockerfile`, `scripts`, `n_gpus`, `owner`, `tags` (error)
@@ -58,10 +70,20 @@ performs. Errors fail validation; warnings are reported but pass.
 - `{dockerfile}.ubuntu.amd.Dockerfile` and `scripts` exist, resolved relative
   to the directory containing the `models.json` (error; a warning instead
   with `--allow-missing-files`, for models still being generated)
+- The Dockerfile has `# CONTEXT {...}` in its first 5 lines (where madengine
+  reads it), parseable as a dict whose `gpu_vendor` is AMD (error)
+
+### Output Contract
+- Without `multiple_results`, some file in the script's directory must print a
+  `performance: <value> <unit>` line (comment lines don't count) (error)
+- `distributed.launcher: slurm_multi` models are exempt: their job writes
+  `perf.csv` itself
 
 ### Duplicate Names
 - No name repeated within the file, or registered in any other registry file
-  (root `models.json` plus every `scripts/*/models.json`) (error)
+  (root `models.json` plus every `models.json` under `scripts/`) (error).
+  madengine would accept the same name in two directories as `dir/name`, but
+  an unscoped `--tags name` would then select both, so MAD treats it as an error.
 
 Not checked: `args` values beyond the recommended flags, config files
 referenced from `args`, `multiple_results` naming, and `training_precision`.
@@ -106,10 +128,10 @@ and suggest a concrete fix for each.
 
 ## Integration
 
-- Can be called standalone: `python3 tools/validation/model_config_validator.py --models-json scripts/{model_dir}/models.json --model MODEL_NAME`
-  (models are registered per-directory; `--models-json` must point at the
-  file that actually contains the model, not the root `models.json`)
-- Use `--all` instead of `--models-json`/`--model` to validate every registry
-  file in the repo in one pass, including cross-registry duplicate names
+- Can be called standalone: `python3 tools/validation/model_config_validator.py --model MODEL_NAME`
+  searches every registry. `--models-json scripts/{model_dir}/models.json --model MODEL_NAME`
+  limits the lookup to one file (the form `mad-add-model` uses).
+- Run with no arguments (or `--all`) to validate every registered model in one
+  pass, including cross-registry duplicate names
 - Integrated into mad-add-model skill for automatic validation
 - Can be run in CI/CD pipelines

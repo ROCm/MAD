@@ -12,6 +12,11 @@ Validates Dockerfiles for:
 import re
 from typing import List, Tuple
 
+try:
+    from .model_config_validator import check_dockerfile_context_header
+except ImportError:  # run as a script: python3 tools/validation/dockerfile_validator.py
+    from model_config_validator import check_dockerfile_context_header
+
 
 class DockerfileValidator:
     """Validator for MAD Dockerfiles"""
@@ -39,13 +44,15 @@ class DockerfileValidator:
                 content = f.read()
         except FileNotFoundError:
             self.errors.append(f"Dockerfile not found: {dockerfile_path}")
-            return False
         except Exception as e:
             self.errors.append(f"Error reading Dockerfile: {e}")
+        if self.errors:
+            if self.verbose:
+                self._print_report(dockerfile_path)
             return False
 
         # Check required elements
-        self._check_context_header(content)
+        self._check_context_header(dockerfile_path)
         self._check_license_header(content)
         self._check_base_image(content)
         self._check_workspace_setup(content)
@@ -56,13 +63,11 @@ class DockerfileValidator:
 
         return len(self.errors) == 0
 
-    def _check_context_header(self, content: str):
-        """Check for required CONTEXT header"""
-        if "# CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}" not in content:
-            self.errors.append(
-                "Missing required CONTEXT header. "
-                "Should be: # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}"
-            )
+    def _check_context_header(self, dockerfile_path: str):
+        """Check for the CONTEXT header in the first 5 lines, where madengine reads it"""
+        error = check_dockerfile_context_header(dockerfile_path)
+        if error:
+            self.errors.append(error)
 
     def _check_license_header(self, content: str):
         """Check for MIT license header"""
