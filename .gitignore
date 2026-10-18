@@ -92,3 +92,6 @@ run_directory/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
+
+# madengine runs started by .claude/skills/mad-common/mad-run.sh
+.mad-runs/

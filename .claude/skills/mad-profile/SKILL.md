@@ -5,7 +5,7 @@ argument-hint: "<tag> [operator|dispatch|kernel] [tool]"
 disable-model-invocation: true
 context: fork
 agent: mad-benchmark-runner
-allowed-tools: Bash(madengine *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash *) Read Grep Glob
+allowed-tools: Bash(madengine discover *) Bash(madengine report *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash .claude/skills/mad-common/preflight.sh) Bash(bash .claude/skills/mad-common/mad-run.sh *) Read Grep Glob
 ---
 
 Profile `$ARGUMENTS`.
@@ -17,7 +17,7 @@ every `madengine` command.
 
 ## Pre-flight
 ```!
-bash ${CLAUDE_SKILL_DIR}/../mad-common/preflight.sh
+bash .claude/skills/mad-common/preflight.sh
 ```
 
 ## Depths
@@ -48,7 +48,10 @@ default to `dispatch` (`rocm_trace_lite`), which covers training and inference.
    for the selected depth. Keep the user's other context keys (`docker_env_vars`,
    `slurm`, `k8s`) and replace `tools`.
 3. Check for AMD GPUs (`rocm-smi` / `amd-smi`). If none, print the command and
-   stop. Otherwise run it and report the trace directory. Say that the perf
+   stop. Otherwise start it with
+   `bash .claude/skills/mad-common/mad-run.sh start <run-id> -- <command>`, repeat
+   `mad-run.sh wait <run-id>` until it reports `succeeded` or `failed`, and
+   report the trace directory. Say that the perf
    number under a profiler is not a clean benchmark number.
 
 For a multi-depth search that also measures clean candidates, use the

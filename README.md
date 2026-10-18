@@ -166,11 +166,14 @@ MAD ships with a set of `/mad-*` skills for [Claude Code](https://claude.ai/code
 | `/mad-benchmark <tag>` | Manual | Build and run a madengine benchmark on AMD GPUs |
 | `/mad-profile <tag> [operator\|dispatch\|kernel]` | Manual | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
 | `/mad-tune <tag>` | Manual | Measure-change-measure tuning loop for training or inference |
-| `/mad-add-model <name>` | Manual | Scaffold models.json + Dockerfile + run.sh from the nearest template |
+| `/mad-add-model` | Interactive | Guided model addition: per-directory `models.json` entry, Dockerfile, run.sh, validation |
+| `/mad-generate-dockerfile` | Interactive | Render a MAD Dockerfile from a framework template |
 | `/mad-report [csv]` | Auto | Summarize or compare benchmark results |
-| `/mad-validate [tag]` | Auto | GPU-free lint of models.json and file references |
+| `/mad-validate-model [model]` | Auto | GPU-free lint of every model registry, its files, and the output contract |
 
-Larger fan-out jobs use workflows: `mad-benchmark-sweep` (parallel matrix across tags) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements). Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
+`/mad-add-model`, `/mad-generate-dockerfile`, and `/mad-validate-model` also work in Cursor and Codex CLI (see [`.claude/README.md`](.claude/README.md)).
+
+Larger fan-out jobs use workflows: `mad-benchmark-sweep` (a matrix across tags; planned cells run in parallel, executed cells one at a time) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements repeated `--repeats` times, 3 by default). GPU runs go through `.claude/skills/mad-common/mad-run.sh`, which detaches each run and serializes runs on one host with a GPU lock. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
 
 ## Contributing
 

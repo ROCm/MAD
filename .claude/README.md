@@ -31,6 +31,17 @@ Standalone Dockerfile generator using framework-specific templates.
 
 **Usage:** `/mad-generate-dockerfile` (Codex: `$mad-generate-dockerfile`)
 
+### Claude Code-only skills and workflows
+`.claude/skills/` also holds `mad-benchmark`, `mad-profile`, `mad-tune`,
+`mad-report`, and `primus-projection`, plus the `mad-benchmark-sweep` and
+`mad-tune-search` workflows in `.claude/workflows/`. They rely on Claude Code
+features (`!` pre-flight injection, `context: fork` subagents from
+`.claude/agents/`, workflows), so they are not linked into `.agents/skills/`.
+Cursor still loads them from `.claude/skills/` but does not run the pre-flight
+or the forks; use them from Claude Code. `CLAUDE.md` describes them. Their GPU runs go through
+`.claude/skills/mad-common/mad-run.sh`, which detaches each run and holds a
+host-wide GPU lock.
+
 ## Quick Start
 
 1. **Add a new model:**

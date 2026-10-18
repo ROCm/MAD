@@ -4,7 +4,7 @@ description: Analyze and summarize MAD benchmark results (perf.csv / perf_entry_
 argument-hint: "[csv-or-json path] [compare-to path]"
 context: fork
 agent: mad-perf-analyst
-allowed-tools: Read Grep Glob Bash(python3 *) Bash(madengine report *)
+allowed-tools: Read Grep Glob Bash(madengine report *)
 ---
 
 Analyze MAD results: $ARGUMENTS
@@ -14,7 +14,9 @@ Analyze MAD results: $ARGUMENTS
    `perf_entry.csv`, `perf_entry_super.json`, or any `multiple_results` CSV named.
 2. If two paths are provided, compare them: per-model delta and % change, flagging
    regressions vs improvements (respect each row's `metric`/unit — never compare
-   across different units).
+   across different units). Match models by the last `/` component of `model`:
+   madengine names per-directory models `dir/name` (e.g. `vllm/pyt_vllm_qwen3-8b`),
+   while CSVs from before the per-directory registries hold the bare name.
 3. Otherwise summarize: models run, performance + unit, and pass/fail status.
 
 A higher number is usually better for throughput (tokens/s, samples/s) and worse for

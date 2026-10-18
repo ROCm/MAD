@@ -2,23 +2,25 @@ export const meta = {
   name: 'mad-tune-search',
   description: 'Descend operator, dispatch, and kernel profiling for a training or inference MAD model, then measure clean candidates and synthesize the winning config',
   phases: [
-    { title: 'Baseline', detail: 'classify the model and establish a clean baseline number' },
+    { title: 'Baseline', detail: 'resolve exactly one model, classify it, and measure a clean baseline (N runs)' },
     { title: 'Operator', detail: 'TraceLens on a PyTorch Kineto trace, when the model is PyTorch' },
     { title: 'Dispatch', detail: 'rocm-trace-lite kernel-dispatch timeline' },
     { title: 'Kernel', detail: 'one rocprofv3 counter preset chosen from the dispatch class' },
     { title: 'Expect', detail: 'Primus projection numbers only when --expect is passed' },
     { title: 'Propose', detail: 'one-lever candidates citing the deepest evidence' },
-    { title: 'Evaluate', detail: 'measure each candidate cleanly (sequential) and verify its delta' },
+    { title: 'Evaluate', detail: 'measure each candidate cleanly (sequential, N runs) and verify its delta' },
     { title: 'Synthesize', detail: 'pick the winning configuration' },
   ],
 }
 
 // ARGS — accepts EITHER:
-//   (a) a structured object: { tag, target?, candidates?, execute?,
+//   (a) a structured object: { tag, target?, candidates?, execute?, repeats?,
 //       additionalContext?, timeout?, depth?, profileTool?, expect? }
 //   (b) a CLI-style string, e.g.
 //       --tag pyt_vllm_qwen3-8b --target latency --depth auto --candidates 4
 //       --tag primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain --expect
+//
+// The tag is required and must resolve (madengine discover) to exactly ONE model.
 //
 // THREE DEPTHS, ONE MODEL AT A TIME. madengine is the harness. Each depth is its
 // own run. Never put rocm_trace_lite and rocprofv3_* in the same tools array.
@@ -32,6 +34,12 @@ export const meta = {
 // CLEAN vs PROFILED: baseline and every candidate measurement strip `tools`.
 // A profiled perf number is evidence, not the score.
 //
+// REPEATS: the baseline and each candidate are measured --repeats times
+// (default 3, 1..5). Medians, spread, and deltas are computed here, not by an
+// agent. A candidate is trustworthy only when both sides have >= 2 samples, the
+// metric matches, the improvement beats the run-to-run spread (at least 1%), and
+// the adversarial verifier agrees.
+//
 // EXPECT is OFF unless the user passes --expect / --expect auto. Projection only
 // scores Primus training configs. Inference and every other trainer skip it even
 // then. --expect off and --no-expect force it off.
@@ -40,7 +48,9 @@ export const meta = {
 // the matching rung and uses NAME as its tool. Default --depth auto descends.
 //
 // EXECUTE: runs for real by default. --no-execute / --plan prints commands only.
-// Candidates are measured one at a time so GPU runs and file edits do not race.
+// Every run goes through .claude/skills/mad-common/mad-run.sh, which detaches it
+// (a tool call ends after 10 minutes) and holds a host-wide GPU lock. Candidates
+// are measured one at a time so GPU runs and file edits do not race.
 
 function shellQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'"
@@ -66,6 +76,56 @@ function tokenize(s) {
   return out
 }
 
+// Rewrite a Python dict literal (single quotes, True/False/None, trailing
+// commas) as JSON. madengine accepts both forms; the workflow needs JSON so it
+// can add a tools array or env vars without losing the user's keys.
+function pyLiteralToJson(s) {
+  let out = '', i = 0
+  while (i < s.length) {
+    const c = s[i]
+    if (c === "'" || c === '"') {
+      let str = ''
+      i++
+      while (i < s.length && s[i] !== c) {
+        if (s[i] === '\\' && i + 1 < s.length) {
+          const n = s[i + 1]
+          str += (n === "'" ? "'" : n === '"' ? '"' : '\\' + n)
+          i += 2
+        } else {
+          str += s[i++]
+        }
+      }
+      if (i >= s.length) throw new Error('unterminated string')
+      i++
+      out += JSON.stringify(str.replace(/\\(.)/g, (m, n) => JSON.parse('"\\' + n + '"')))
+    } else if (/[A-Za-z_]/.test(c)) {
+      let w = ''
+      while (i < s.length && /[A-Za-z0-9_]/.test(s[i])) w += s[i++]
+      out += ({ True: 'true', False: 'false', None: 'null' })[w] || w
+    } else {
+      out += c
+      i++
+    }
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1')
+}
+
+// Parse --additional-context into a plain object, or throw. Never silently drop
+// it: it carries docker_env_vars such as the HF token.
+function normalizeContext(raw) {
+  if (raw == null || raw === '') return null
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw
+  let obj
+  try { obj = JSON.parse(raw) } catch (e) {
+    try { obj = JSON.parse(pyLiteralToJson(String(raw))) } catch (e2) {
+      throw new Error(`--additional-context must be a JSON object or a Python dict literal (${e2.message}): ${raw}`)
+    }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj))
+    throw new Error(`--additional-context must be an object, got: ${raw}`)
+  return obj
+}
+
 function parseExpect(v) {
   if (v == null || v === true || v === 'auto' || v === 'on' || v === '') return true
   if (v === false || v === 'off' || v === 'false' || v === '0') return false
@@ -89,6 +149,8 @@ function parseCli(s) {
       cfg.target = next()
     } else if (t === '--candidates' || t === '-n') {
       cfg.candidates = parseInt(next(), 10)
+    } else if (t === '--repeats') {
+      cfg.repeats = parseInt(next(), 10)
     } else if (t === '--profile-tool') {
       cfg.profileTool = next()
     } else if (t === '--depth') {
@@ -111,6 +173,37 @@ function parseCli(s) {
   return cfg
 }
 
+// --- deterministic statistics (never delegated to an agent) ---
+function median(xs) {
+  const s = [...xs].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+function stats(samples) {
+  const xs = (samples || []).filter(x => typeof x === 'number' && isFinite(x))
+  if (!xs.length) return { n: 0, median: null, spreadPct: null }
+  const med = median(xs)
+  const spreadPct = xs.length > 1 && med ? (Math.max(...xs) - Math.min(...xs)) / Math.abs(med) * 100 : null
+  return { n: xs.length, median: med, spreadPct }
+}
+const MIN_NOISE_PCT = 1
+function gate(base, cand, baseMetric, candMetric, higherIsBetter) {
+  if (base.n < 2 || cand.n < 2)
+    return { pass: false, deltaPct: null, noisePct: null, reason: `needs >= 2 samples on both sides (baseline ${base.n}, candidate ${cand.n})` }
+  if (baseMetric && candMetric && baseMetric.trim().toLowerCase() !== candMetric.trim().toLowerCase())
+    return { pass: false, deltaPct: null, noisePct: null, reason: `metric differs (baseline "${baseMetric}", candidate "${candMetric}")` }
+  const deltaPct = (cand.median - base.median) / Math.abs(base.median) * 100
+  const improvementPct = higherIsBetter ? deltaPct : -deltaPct
+  const noisePct = Math.max(base.spreadPct || 0, cand.spreadPct || 0, MIN_NOISE_PCT)
+  const pass = improvementPct > noisePct
+  return {
+    pass, deltaPct, noisePct,
+    reason: pass
+      ? `improves ${improvementPct.toFixed(2)}% > noise ${noisePct.toFixed(2)}%`
+      : `improvement ${improvementPct.toFixed(2)}% does not beat noise ${noisePct.toFixed(2)}%`,
+  }
+}
+
 let cfg
 if (typeof args === 'string') {
   cfg = parseCli(args)
@@ -121,10 +214,13 @@ if (typeof args === 'string') {
   cfg = { execute: true, expect: false, depth: 'auto' }
 }
 
+if (!cfg.tag)
+  throw new Error('mad-tune-search needs one model tag, e.g. --tag pyt_vllm_qwen3-8b [--target latency] [--plan]')
 const DEPTHS = ['auto', 'operator', 'dispatch', 'kernel']
-const tag = cfg.tag || 'bert'
+const tag = cfg.tag
 const target = cfg.target || 'throughput'
 const nCandidates = Math.max(1, Math.min(cfg.candidates || 4, 8))
+const repeats = Math.max(1, Math.min(cfg.repeats || 3, 5))
 const execute = cfg.execute !== false
 const timeout = cfg.timeout || null
 const expectOn = cfg.expect === true
@@ -145,16 +241,10 @@ if (profileTool) {
     log(`Note: --profile-tool ${profileTool} is a ${forced} tool; --depth ${depth} still selects the rung. A tool is applied only on its own rung.`)
 }
 
-let ctxObj = null
-if (cfg.additionalContext) {
-  try { ctxObj = JSON.parse(cfg.additionalContext) }
-  catch (e) { log('Warning: --additional-context is not valid JSON; clean runs pass it through verbatim, and profiled runs use a tools-only context.') }
-}
-const baseObj = (ctxObj && typeof ctxObj === 'object') ? { ...ctxObj } : null
-if (baseObj) delete baseObj.tools
-const cleanCtx = baseObj
-  ? JSON.stringify(baseObj)
-  : (cfg.additionalContext || null)
+const ctxObj = normalizeContext(cfg.additionalContext)
+const baseObj = ctxObj ? { ...ctxObj } : {}
+delete baseObj.tools
+const cleanCtx = Object.keys(baseObj).length ? JSON.stringify(baseObj) : null
 if (ctxObj && Array.isArray(ctxObj.tools) && ctxObj.tools.length)
   log('Note: tools in --additional-context are not used. Each depth builds its own tools array. Pass --depth or --profile-tool to force one rung.')
 
@@ -164,14 +254,13 @@ function toolsPayload(tools) {
   const hasRocprof = names.some(n => String(n).startsWith('rocprof'))
   if (hasRtl && hasRocprof)
     throw new Error('refusing to stack rocm_trace_lite with rocprofv3 in one madengine run')
-  const o = { ...(baseObj || {}), tools }
-  return JSON.stringify(o)
+  return JSON.stringify({ ...baseObj, tools })
 }
 function ctxFlag(payload) {
   return payload ? ` --additional-context ${shellQuote(payload)}` : ''
 }
 function runCmd(outFile, payload) {
-  const flags = ['--tags ' + tag, '--live-output', '-o ' + outFile]
+  const flags = ['--tags ' + shellQuote(tag), '--live-output', '-o ' + outFile]
   if (timeout) flags.push('--timeout ' + timeout)
   return `madengine run ${flags.join(' ')}${ctxFlag(payload)}`
 }
@@ -201,22 +290,27 @@ const KERNEL_PRESET = {
 
 if (cfg._extraTags && cfg._extraTags.length)
   log(`Note: mad-tune-search tunes ONE model. Using "${tag}"; ignoring extra tags [${cfg._extraTags.join(', ')}]. Use mad-benchmark-sweep to compare multiple models.`)
-log(`Tuning "${tag}" for ${target}. depth=${depth}. expect=${expectOn}. execute=${execute}. ${cleanCtx ? 'clean context ready' : 'no additional-context'}.`)
+if (execute && repeats < 2)
+  log('Note: --repeats 1 takes one sample per configuration, so no candidate can be marked trustworthy. Use --repeats 2 or more for a recommendation.')
+log(`Tuning "${tag}" for ${target}. depth=${depth}. repeats=${repeats}. expect=${expectOn}. execute=${execute}. ${cleanCtx ? 'clean context ready' : 'no additional-context'}.`)
 
 const PREFLIGHT = 'Pre-flight: run `bash .claude/skills/mad-common/preflight.sh` and stop if it exits non-zero.'
+const MAD_RUN = 'bash .claude/skills/mad-common/mad-run.sh'
+const RUN_HOW = `Run every madengine command through the run helper, never in the foreground (a tool call ends after 10 minutes):
+  ${MAD_RUN} start <run-id> -- <madengine command>
+then repeat \`${MAD_RUN} wait <run-id>\` until its first line says MAD_RUN_STATUS=succeeded or failed. Use a fresh run-id per run (append -2, -3, ... if start says it exists).`
 
-// ── Phase 1: Baseline (CLEAN) ──────────────────────────────────────────────
+// ── Phase 1: Baseline (resolve + classify, then CLEAN measurement) ─────────
 phase('Baseline')
 const BASELINE_SCHEMA = {
   type: 'object',
-  required: ['model', 'scriptPath', 'baselineSummary', 'family', 'pytorch'],
+  required: ['resolvedModels', 'model', 'scriptPath', 'baselineSummary', 'family', 'pytorch'],
   properties: {
+    resolvedModels: { type: 'array', items: { type: 'string' } },
     model: { type: 'string' },
     scriptPath: { type: 'string' },
     baselineSummary: { type: 'string' },
     multipleResults: { type: ['string', 'null'] },
-    baselinePerf: { type: ['number', 'null'] },
-    baselineMetric: { type: ['string', 'null'] },
     family: { type: 'string', enum: ['training', 'inference', 'other'] },
     pytorch: { type: 'boolean' },
     primusConfig: { type: ['string', 'null'] },
@@ -224,14 +318,13 @@ const BASELINE_SCHEMA = {
     levers: { type: 'array', items: { type: 'string' } },
   },
 }
-const baseAction = execute
-  ? `If AMD GPUs are present, establish a CLEAN baseline (profiler OFF, no tools key): either reuse the most recent clean perf row for this model in perf.csv or its results CSV, or run "${runCmd('perf_tune_baseline.csv', cleanCtx)}" once and parse it. Report baselinePerf + baselineMetric.`
-  : 'Do NOT run anything. Read the static config only; leave baselinePerf null.'
 const baseline = await agent(
-  `In the MAD repo, establish the tuning baseline for tag "${tag}" (target: ${target}).
+  `In the MAD repo, resolve and classify tag "${tag}" for tuning (target: ${target}). Do not run any benchmark.
 ${PREFLIGHT}
-Run \`madengine discover --tags ${tag}\` first. Find the models.json entry (or the dynamic
-entry), its scripts/.../run.sh, dockerfile, tags, and args.
+Run \`madengine discover --tags ${shellQuote(tag)} --json\` and put the "name" of every model it lists in resolvedModels.
+If it lists exactly one model, read that model's registry entry — scripts/<dir>/models.json (paths in it are
+relative to that directory) or, for a generated model, the directory's get_models_json.py — plus its run script,
+dockerfile, tags, and args. Set model to the discovered name.
 Classify:
 - family "training" when tags/scripts/dockerfile indicate pretrain, finetune, primus, megatron, torchtitan, maxtext, or torchtune.
 - family "inference" when they indicate vllm, sglang, inference, or serving.
@@ -240,15 +333,51 @@ Classify:
 - primusConfig: the --config_path value when discover shows one under scripts/Primus, else null.
 - framework: modules.pre_trainer.framework or modules.post_trainer.framework from that YAML when you can read it, else null.
 List levers that actually exist for this family. Training: batch, precision, TP/PP/EP, RCCL/NCCL, recompute, PYTORCH_TUNABLEOP_ENABLED. Inference: gpu-memory-utilization, max-num-seqs, max-num-batched-tokens, tensor-parallel, precision, HIP graphs, attention backend.
-Report whether the entry sets "multiple_results" (its CSV filename, or null).
-${baseAction}`,
-  { phase: 'Baseline', schema: BASELINE_SCHEMA }
+Report whether the entry sets "multiple_results" (its CSV filename, or null).`,
+  { label: 'resolve', phase: 'Baseline', schema: BASELINE_SCHEMA }
 )
+if (!baseline) throw new Error(`Baseline step returned no result for "${tag}"; nothing was measured.`)
+const resolvedModels = baseline.resolvedModels || []
+if (resolvedModels.length !== 1)
+  throw new Error(`mad-tune-search tunes exactly one model, but "${tag}" resolves to ${resolvedModels.length}: [${resolvedModels.join(', ')}]. Pass one model name (e.g. ${resolvedModels[0] || 'dir/model'}).`)
+
 const multiCsv = baseline.multipleResults || null
 const parseHint = multiCsv
-  ? `This is a multiple_results model — performance is NOT a stdout line; after the run read the per-metric CSV "${multiCsv}" (and the -o file) and report the primary ${target} metric.`
-  : 'Parse the "performance: <value> <unit>" line from stdout. Ignore perf numbers taken under a profiler.'
+  ? `This is a multiple_results model — performance is NOT a stdout line; after each run read the per-metric CSV "${multiCsv}" (and the -o file) and take the primary ${target} metric.`
+  : 'Parse the "performance: <value> <unit>" line from each run\'s output. Ignore perf numbers taken under a profiler.'
 const higherIsBetter = target !== 'latency'
+
+const SAMPLES_SCHEMA = {
+  type: 'object',
+  required: ['status', 'samples'],
+  properties: {
+    status: { type: 'string', enum: ['planned', 'ran', 'skipped', 'error'] },
+    samples: { type: 'array', items: { type: 'number' } },
+    metric: { type: ['string', 'null'] },
+    commands: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'string' },
+  },
+}
+function sampleOutFiles(prefix) {
+  return Array.from({ length: repeats }, (_, k) => `${prefix}_r${k + 1}.csv`)
+}
+const baseOuts = sampleOutFiles('perf_tune_baseline')
+let baseRuns
+if (execute) {
+  baseRuns = await agent(
+    `Measure a CLEAN baseline for "${baseline.model}" (profiler OFF, no tools key): ${repeats} sequential run(s), one per command below. Do not reuse an old perf.csv row.
+${baseOuts.map(o => '  ' + runCmd(o, cleanCtx)).join('\n')}
+${RUN_HOW}
+If no AMD GPUs are present (rocm-smi/amd-smi), set status "skipped" with no samples. ${parseHint}
+Return status, one number per successful run in samples (same order), the metric unit, and the commands you ran.`,
+    { label: 'baseline', phase: 'Baseline', schema: SAMPLES_SCHEMA }
+  )
+}
+if (!baseRuns) baseRuns = { status: execute ? 'error' : 'planned', samples: [], metric: null, commands: baseOuts.map(o => runCmd(o, cleanCtx)), notes: execute ? 'baseline agent returned no result' : 'plan mode' }
+const baseStats = stats(baseRuns.samples)
+baseline.baselinePerf = baseStats.median
+baseline.baselineMetric = baseRuns.metric || null
+log(`Baseline: ${baseRuns.status}. ${baseStats.n ? `median ${baseStats.median} ${baseRuns.metric || ''} over ${baseStats.n} run(s)${baseStats.spreadPct != null ? `, spread ${baseStats.spreadPct.toFixed(2)}%` : ''}` : 'no samples'}`)
 
 function operatorTools() {
   const env = baseline.family === 'inference'
@@ -291,7 +420,8 @@ if (!want('operator')) {
   const opPayload = toolsPayload(operatorTools())
   const opCmd = runCmd('perf_tune_operator.csv', opPayload)
   const opAction = execute
-    ? `If AMD GPUs are present, run this command once. Then read tracelens_output/tracelens_summary.json (or the per-trace CSV). The perf number on this run is profiled — do not treat it as the baseline. If no GPUs, or no Kineto trace appears, set status "skipped".`
+    ? `If AMD GPUs are present, run this command once. ${RUN_HOW}
+Then read tracelens_output/tracelens_summary.json (or the per-trace CSV) written by this run. The perf number on this run is profiled — do not treat it as the baseline. If no GPUs, or no Kineto trace appears, set status "skipped".`
     : 'Do NOT run anything. If an existing tracelens_output/tracelens_summary.json is on disk, read it and set status "planned" only when you did not run; otherwise status "skipped". Print the command either way.'
   operator = await agent(
     `Operator-level profile of "${baseline.model}" (family: ${baseline.family}, target: ${target}).
@@ -303,7 +433,7 @@ ${baseline.family === 'inference' ? 'Inference has no optimizer.step(); TORCH_PR
 ${opAction}
 Return status, bound (compute|memory|communication|launch|mixed|unknown), evidence, topOperators [{name, pct, module}], tracePath.`,
     { phase: 'Operator', schema: RUNG_SCHEMA }
-  )
+  ) || skipped('operator agent returned no result')
 }
 log(`Operator: ${operator.status}. ${operator.evidence || operator.reason || ''}`)
 
@@ -316,7 +446,8 @@ if (!want('dispatch')) {
   const dPayload = toolsPayload(dispatchTools())
   const dCmd = runCmd('perf_tune_dispatch.csv', dPayload)
   const dAction = execute
-    ? 'If AMD GPUs are present, run this command once and read rocm_trace_lite_output/ (trace.db or trace_summary.txt) for kernel dispatch names and their share of GPU time. If no GPUs, set status "skipped". The perf number is profiled — ignore it as a score.'
+    ? `If AMD GPUs are present, run this command once. ${RUN_HOW}
+Then read rocm_trace_lite_output/ (trace.db or trace_summary.txt) from this run for kernel dispatch names and their share of GPU time. If no GPUs, set status "skipped". The perf number is profiled — ignore it as a score.`
     : 'Do NOT run anything. Read an existing rocm_trace_lite_output/ if present. Print the command. Set status "planned" when you only printed it, "skipped" when there is nothing to read.'
   dispatch = await agent(
     `Dispatch-level profile of "${baseline.model}" (family: ${baseline.family}).
@@ -333,7 +464,7 @@ Classify bottleneck as compute, memory, communication, launch, mixed, or unknown
 - launch: many tiny kernels and timeline gaps
 Return status, bottleneck, evidence citing hotspot percents, hotspots [{name, pct}], tracePath.`,
     { phase: 'Dispatch', schema: RUNG_SCHEMA }
-  )
+  ) || skipped('dispatch agent returned no result')
 }
 log(`Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''}. ${(dispatch.hotspots || []).slice(0, 3).map(h => `${h.name} ${h.pct != null ? h.pct + '%' : ''}`).join(', ')}`)
 
@@ -362,7 +493,8 @@ if (skipKernel) {
   const kPayload = toolsPayload([{ name: kernelPreset }])
   const kCmd = runCmd('perf_tune_kernel.csv', kPayload)
   const kAction = execute
-    ? 'If AMD GPUs are present, run this command once and read rocprof_output/ for the counter or kernel summary. If no GPUs, set status "skipped". Ignore the profiled perf number as a score.'
+    ? `If AMD GPUs are present, run this command once. ${RUN_HOW}
+Then read rocprof_output/ from this run for the counter or kernel summary. If no GPUs, set status "skipped". Ignore the profiled perf number as a score.`
     : 'Do NOT run anything. Read an existing rocprof_output/ if present. Print the command and set status "planned" or "skipped".'
   kernel = await agent(
     `Kernel-level profile of "${baseline.model}" using preset ${kernelPreset}.
@@ -373,7 +505,7 @@ ${kCmd}
 ${kAction}
 Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath.`,
     { phase: 'Kernel', schema: RUNG_SCHEMA }
-  )
+  ) || skipped('kernel agent returned no result')
   kernel.preset = kernel.preset || kernelPreset
 }
 log(`Kernel: ${kernel.status} preset=${kernel.preset || kernelPreset || 'none'}. ${kernel.evidence || kernel.reason || ''}`)
@@ -393,17 +525,20 @@ const EXPECT_SCHEMA = {
     reason: { type: 'string' },
   },
 }
-let expectResult
-if (!expectOn) {
-  expectResult = {
+function expectSkipped(reason) {
+  return {
     source: 'skipped',
     fits: null,
     memoryPerGpuGb: null,
     expectedTokensPerSecPerGpu: null,
     expectedTflops: null,
     recommended: null,
-    reason: 'Expect is off. Pass --expect to attach Primus projection numbers for a Primus training model.',
+    reason,
   }
+}
+let expectResult
+if (!expectOn) {
+  expectResult = expectSkipped('Expect is off. Pass --expect to attach Primus projection numbers for a Primus training model.')
 } else {
   const expectAction = execute
     ? 'Run the projection commands if the model qualifies and scripts/Primus is present. If primus-cli or the YAML is missing, set source "skipped" and say why. Do not write these numbers into perf.csv.'
@@ -419,7 +554,7 @@ ${expectAction}
 Supported frameworks: megatron, torchtitan, maxtext (jax), torchrec_dlrm. Inference and every other trainer return source "skipped".
 Return source, fits, memoryPerGpuGb, expectedTokensPerSecPerGpu, expectedTflops, recommended {tp, pp, ep, cp, mbs, gbs, schedule, recompute} or null, and reason.`,
     { phase: 'Expect', schema: EXPECT_SCHEMA }
-  )
+  ) || expectSkipped('expect agent returned no result')
 }
 log(`Expect: ${expectResult.source}. ${expectResult.reason || ''}`)
 
@@ -445,7 +580,7 @@ const CANDS_SCHEMA = {
 }
 const proposed = await agent(
   `Propose ${nCandidates} DISTINCT tuning candidates to improve ${target} for "${baseline.model}" (family: ${baseline.family}).
-Baseline: ${baseline.baselineSummary}
+Baseline: ${baseline.baselineSummary}${baseStats.n ? ` (clean median ${baseStats.median} ${baseline.baselineMetric || ''} over ${baseStats.n} run(s))` : ''}
 Operator: ${operator.status} — ${operator.evidence || operator.reason || ''}
 Top operators: ${JSON.stringify((operator.topOperators || []).slice(0, 5))}
 Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''} — ${dispatch.evidence || dispatch.reason || ''}
@@ -460,26 +595,16 @@ Use the deepest rung that actually returned evidence. Cite that evidence on ever
 - Kernel evidence: PYTORCH_TUNABLEOP_ENABLED, hipBLASLt, or the kernel flag the counters implicate.
 - Training parallelism (TP/PP/EP, RCCL_*) only when dispatch or the kernel preset shows collectives.
 - When Expect source is "projection" and recommended is set, prefer candidates from that config, best projected tokens/s first, and drop a config Projection says will not fit. Read the optimization tables in scripts/Primus/skills/primus-projection/SKILL.md and propose only a lever that file lists and this config supports. Still change ONE lever per candidate.
+- Prefer levers that need no file edit: leverKind "env" (docker_env_vars) or "arg" (madengine passes --tags <model>:<arg>=<value> to the script as --<arg> <value>).
 Each candidate returns id, change, hypothesis, evidence, depth (operator|dispatch|kernel|expect), leverKind (env|arg|config|other).`,
   { phase: 'Propose', schema: CANDS_SCHEMA }
 )
+if (!proposed) throw new Error('Propose step returned no result; no candidates to evaluate.')
 const candidates = (proposed.candidates || []).slice(0, nCandidates)
-log(`Evaluating ${candidates.length} candidate(s) sequentially, CLEAN (profiler off). execute=${execute}`)
+log(`Evaluating ${candidates.length} candidate(s) sequentially, CLEAN (profiler off), ${repeats} run(s) each. execute=${execute}`)
 
-// ── Phase 7: Evaluate (CLEAN, sequential) + adversarial verify ─────────────
+// ── Phase 7: Evaluate (CLEAN, sequential, N runs) + adversarial verify ─────
 phase('Evaluate')
-const EVAL_SCHEMA = {
-  type: 'object',
-  required: ['id', 'status'],
-  properties: {
-    id: { type: 'string' },
-    status: { type: 'string', enum: ['planned', 'ran', 'skipped', 'error'] },
-    command: { type: 'string' },
-    performance: { type: ['number', 'null'] },
-    metric: { type: ['string', 'null'] },
-    notes: { type: 'string' },
-  },
-}
 const VERDICT_SCHEMA = {
   type: 'object',
   required: ['id', 'trustworthy'],
@@ -490,8 +615,8 @@ const VERDICT_SCHEMA = {
   },
 }
 const ctxHint = cleanCtx
-  ? 'A CLEAN base --additional-context (profiler OFF) is in the command. If this candidate\'s leverKind is "env", apply the change by MERGING the env var into that context\'s "docker_env_vars" object (show the merged command you actually run); do not export it separately.'
-  : 'If leverKind is "env", apply by adding --additional-context \'{"docker_env_vars": {"VAR": "value"}}\' (or exporting the var).'
+  ? 'A CLEAN base --additional-context (profiler OFF) is in the commands. If this candidate\'s leverKind is "env", apply the change by MERGING the env var into that context\'s "docker_env_vars" object (show the merged commands you actually run); do not export it separately.'
+  : 'If leverKind is "env", apply it by adding --additional-context \'{"docker_env_vars": {"VAR": "value"}}\' to every command.'
 const direction = higherIsBetter
   ? 'Higher is better (throughput).'
   : 'Lower is better (latency).'
@@ -499,38 +624,56 @@ const direction = higherIsBetter
 const evaluated = []
 for (const cand of candidates) {
   const safeId = String(cand.id).replace(/[^A-Za-z0-9._-]/g, '_')
-  const outFile = `perf_tune_${safeId}.csv`
-  const cmd = runCmd(outFile, cleanCtx)
+  const outs = sampleOutFiles(`perf_tune_${safeId}`)
+  const cmds = outs.map(o => runCmd(o, cleanCtx))
   const action = execute
-    ? `If AMD GPUs are present (check rocm-smi/amd-smi), apply the change, RUN the command CLEAN (no tools key), parse the result, then REVERT any file/config edit so the next candidate starts clean. ${parseHint} Results land in ${outFile}. If no GPUs, set status "skipped".`
-    : 'Do NOT execute. Produce the exact command (plus precisely how to apply the change) and set status "planned".'
+    ? `If AMD GPUs are present (check rocm-smi/amd-smi), apply the change ONCE, run the ${repeats} commands CLEAN (no tools key) one after another, then REVERT any file/config edit and confirm \`git status\` shows no leftover change, so the next candidate starts clean. ${RUN_HOW}
+${parseHint} If no GPUs, set status "skipped" with no samples.`
+    : 'Do NOT execute. Produce the exact commands (plus precisely how to apply the change) and set status "planned" with no samples.'
 
-  const evalResult = await agent(
+  const runs = await agent(
     `Evaluate tuning candidate ${cand.id} for "${baseline.model}" (family: ${baseline.family}, leverKind: ${cand.leverKind || 'other'}, depth: ${cand.depth || 'dispatch'}).
 ${PREFLIGHT}
 Change: ${cand.change}
 Hypothesis: ${cand.hypothesis}
 Motivating evidence: ${cand.evidence}
-Base command (CLEAN): ${cmd}
+Base commands (CLEAN, one per sample):
+${cmds.map(c => '  ' + c).join('\n')}
 ${ctxHint}
 ${action}
-Return id, status, the exact command you ran, and performance/metric if measured.`,
-    { label: `eval:${cand.id}`, phase: 'Evaluate', schema: EVAL_SCHEMA }
-  )
+Return status, one number per successful run in samples (same order), the metric unit, the exact commands you ran, and notes.`,
+    { label: `eval:${cand.id}`, phase: 'Evaluate', schema: SAMPLES_SCHEMA }
+  ) || { status: 'error', samples: [], metric: null, commands: cmds, notes: 'evaluate agent returned no result' }
 
-  const verdict = await agent(
-    `Adversarially review tuning candidate ${cand.id}.
+  const candStats = stats(runs.samples)
+  const g = gate(baseStats, candStats, baseline.baselineMetric, runs.metric, higherIsBetter)
+  const measured = {
+    id: cand.id,
+    status: runs.status,
+    commands: runs.commands || cmds,
+    metric: runs.metric || null,
+    samples: runs.samples || [],
+    median: candStats.median,
+    spreadPct: candStats.spreadPct,
+    deltaPct: g.deltaPct,
+    gate: g,
+    notes: runs.notes || '',
+  }
+
+  let verdict = { id: cand.id, trustworthy: false, reason: `gate: ${g.reason}` }
+  if (g.pass) {
+    verdict = await agent(
+      `Adversarially review tuning candidate ${cand.id}.
 Target: ${target}. ${direction}
-Baseline: ${baseline.baselinePerf != null ? baseline.baselinePerf + ' ' + (baseline.baselineMetric || '') : baseline.baselineSummary}
-Claimed result: ${JSON.stringify(evalResult)}
+Baseline (computed): median ${baseStats.median} ${baseline.baselineMetric || ''}, samples ${JSON.stringify(baseRuns.samples)}, spread ${baseStats.spreadPct != null ? baseStats.spreadPct.toFixed(2) + '%' : 'n/a'}
+Candidate (computed): ${JSON.stringify(measured)}
 Hypothesis was: ${cand.hypothesis}
-Is the conclusion trustworthy? Default to trustworthy=false if the change was not actually
-measured (planned/skipped), if only one sample was taken, if it ran under a profiler, if the
-delta is in the wrong direction for ${target}, or if the delta vs baseline is within
-run-to-run noise (~1-2%). Return id, trustworthy, reason.`,
-    { label: `verify:${cand.id}`, phase: 'Evaluate', schema: VERDICT_SCHEMA }
-  )
-  evaluated.push({ ...evalResult, _change: cand.change, _evidence: cand.evidence, _depth: cand.depth, verdict })
+The numeric gate passed: ${g.reason}. Look for what the numbers cannot show: the change was not actually applied as described, a run used a profiler, a run failed or was retried, the edit leaked into other runs, or the result does not follow from the hypothesis. Return id, trustworthy, reason.`,
+      { label: `verify:${cand.id}`, phase: 'Evaluate', schema: VERDICT_SCHEMA }
+    ) || { id: cand.id, trustworthy: false, reason: 'verify agent returned no result' }
+  }
+  evaluated.push({ ...measured, _change: cand.change, _evidence: cand.evidence, _depth: cand.depth,
+    verdict: { ...verdict, trustworthy: g.pass && verdict.trustworthy === true } })
 }
 
 // ── Phase 8: Synthesize ────────────────────────────────────────────────────
@@ -539,21 +682,21 @@ const clean = evaluated.filter(Boolean)
 const report = await agent(
   `Synthesize a MAD tuning search for "${baseline.model}" (family: ${baseline.family}, target: ${target}).
 ${direction}
-Baseline: ${baseline.baselineSummary}${baseline.baselinePerf != null ? ` (clean baseline: ${baseline.baselinePerf} ${baseline.baselineMetric || ''})` : ''}
+Baseline: ${baseline.baselineSummary}${baseStats.n ? ` (clean median ${baseStats.median} ${baseline.baselineMetric || ''} over ${baseStats.n} run(s), spread ${baseStats.spreadPct != null ? baseStats.spreadPct.toFixed(2) + '%' : 'n/a'})` : ' (not measured)'}
 Operator: ${operator.status} — ${operator.evidence || operator.reason || ''}
 Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''} — ${dispatch.evidence || dispatch.reason || ''}
 Kernel: ${kernel.status} preset=${kernel.preset || 'none'} — ${kernel.evidence || kernel.reason || ''}
 Expect: ${JSON.stringify(expectResult)}
-Evaluated candidates (JSON, each with a verdict): ${JSON.stringify(clean)}
+Evaluated candidates (JSON; median, spreadPct, deltaPct and gate are computed, verdict.trustworthy is final): ${JSON.stringify(clean)}
 
 Produce:
 (1) a one-line headline: the depth that explained the bottleneck, and the best trustworthy improvement (or that none beat baseline);
 (2) one paragraph each for operator, dispatch, and kernel, including a skipped reason when that rung did not run;
-(3) a table: Candidate | Depth | Change | Evidence | Status | Performance | vs Baseline | Trustworthy;
+(3) a table: Candidate | Depth | Change | Evidence | Status | Median (n) | vs Baseline | Trustworthy;
 (4) when Expect source is "projection", the projected tokens/s/GPU beside the measured number;
-(5) the recommended configuration — ONLY from candidates whose verdict is trustworthy; if none ran, present the ranked plan to test on a GPU host;
+(5) the recommended configuration — ONLY from candidates whose verdict.trustworthy is true; if none ran, present the ranked plan to test on a GPU host;
 (6) the exact next clean madengine command.
-Each candidate wrote its own perf_tune_<id>.csv. Do not invent measurements. Do not treat a profiled run as the score.`,
+Each candidate wrote its own perf_tune_<id>_r<k>.csv files. Do not invent measurements or recompute the given statistics. Do not treat a profiled run as the score.`,
   { phase: 'Synthesize' }
 )
 
@@ -563,7 +706,9 @@ return {
   family: baseline.family,
   execute,
   depth,
+  repeats,
   expect: expectOn,
+  baseline: { ...baseRuns, ...baseStats },
   operator,
   dispatch,
   kernel,
