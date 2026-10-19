@@ -34,12 +34,13 @@ Standalone Dockerfile generator using framework-specific templates.
 ### Benchmark, profile, tune and report skills
 `mad-benchmark`, `mad-profile`, `mad-tune`, `primus-projection` (explicit only)
 and `mad-report` (automatic, read-only) are linked into `.agents/skills/` too.
-Claude Code adds two things the other tools skip: it runs their
-`` ```! `` pre-flight block before the skill loads (Cursor and Codex are told to
-run it first), and it forks them into the subagents in `.claude/agents/`
-(Cursor and Codex run them inline and read the agent file for its
-conventions). Their GPU runs go through `.claude/skills/mad-common/mad-run.sh`,
-which detaches each run and holds a host-wide GPU lock.
+Claude Code runs their `` ```! `` pre-flight block before the skill loads
+(Cursor and Codex are told to run it first) and forks them into the subagents
+in `.claude/agents/`. Cursor reads the same subagents and the skills tell it to
+delegate to them. Codex gets generated copies in `.codex/agents/` (see
+[Subagents](#subagents)). Their GPU runs go through
+`.claude/skills/mad-common/mad-run.sh`, which detaches each run and holds a
+host-wide GPU lock.
 
 ### Claude Code-only workflows
 The `mad-benchmark-sweep` and `mad-tune-search` workflows in
@@ -67,7 +68,7 @@ and run only with `--execute`; `CLAUDE.md` describes them, and
 .claude/
 ├── README.md                           # This file
 ├── settings.json                       # Shared permissions + models.json hook
-├── agents/                             # Subagents the skills fork into (Claude Code)
+├── agents/                             # Subagents the skills fork into (Claude Code, Cursor)
 ├── hooks/validate-models-json.sh       # Validates models.json edits
 ├── workflows/                          # mad-benchmark-sweep, mad-tune-search (Claude Code)
 ├── skills/
@@ -84,7 +85,17 @@ and run only with `--execute`; `CLAUDE.md` describes them, and
     └── model_addition_guide.md         # Detailed guide
 
 .agents/skills/                         # Symlinks to .claude/skills/* (Codex)
+.codex/agents/                          # Codex copies of .claude/agents/*, generated
 ```
+
+## Subagents
+
+`.claude/agents/*.md` is the source for the three subagents. Claude Code and
+Cursor read those files directly (Cursor also honors `readonly: true` on
+`mad-perf-analyst`). Codex only reads TOML from `.codex/agents/`, so
+`tools/agent_config/codex_agents.py` generates `mad_benchmark_runner.toml`,
+`mad_tuner.toml` and `mad_perf_analyst.toml` from them. After editing an agent,
+run `python3 tools/agent_config/codex_agents.py`; CI runs it with `--check`.
 
 ## Claude Code, Cursor and Codex
 
@@ -149,6 +160,8 @@ Checks (all GPU-free, all run in CI):
   frontmatter, `.agents/skills` links, and explicit-only consistency
 - `python3 tools/validation/model_config_validator.py` — every model registry
 - `node --test tools/tests/*.test.mjs` — the workflows, against a mock agent
+- `python3 tools/agent_config/codex_agents.py --check` — the Codex agents match
+  `.claude/agents/`
 
 ## Contributing
 

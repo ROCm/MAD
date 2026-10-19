@@ -2,13 +2,17 @@ name: Test Claude Code workflows
 
 # Runs the .claude/workflows scripts against a scripted mock agent: argument
 # parsing, plan/execute behavior, context threading and tune-search statistics.
-# No GPU, no Claude. Also syntax-checks the shared shell helpers.
+# No GPU, no Claude. Also syntax-checks the shared shell helpers and checks
+# that the Codex agents in .codex/agents match .claude/agents.
 on:
   pull_request:
     paths:
       - ".claude/workflows/**"
       - ".claude/skills/mad-common/**"
       - ".claude/hooks/**"
+      - ".claude/agents/**"
+      - ".codex/**"
+      - "tools/agent_config/**"
       - "tools/tests/**"
       - ".github/workflows/claude-workflows.yml"
   push:
@@ -33,3 +37,12 @@ jobs:
 
       - name: Shell helpers parse
         run: for f in .claude/skills/mad-common/*.sh .claude/hooks/*.sh; do bash -n "$f"; done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Codex agents match .claude/agents
+        run: |
+          pip install pyyaml
+          python3 tools/agent_config/codex_agents.py --check

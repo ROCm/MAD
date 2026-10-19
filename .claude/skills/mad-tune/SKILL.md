@@ -73,5 +73,7 @@ projected tokens/s for a Primus training model.
 - Claude Code, Cursor and Codex all load this skill (Codex through
   `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
   means the text the user gave after the skill name.
-- Claude Code runs this skill in the `mad-tuner` subagent. Other agents run it
-  inline: read `.claude/agents/mad-tuner.md` first for the conventions it assumes.
+- Claude Code runs this skill in the `mad-tuner` subagent. In Cursor, delegate
+  to the `mad-tuner` subagent (Cursor reads `.claude/agents/`); in Codex, spawn the
+  `mad_tuner` agent (`.codex/agents/`). Otherwise run it inline and
+  read `.claude/agents/mad-tuner.md` first for the conventions it assumes.

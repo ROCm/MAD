@@ -163,7 +163,7 @@ MAD ships agent skills for [Claude Code](https://claude.ai/code), Cursor and Cod
 
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|
-| `/mad-benchmark <tag>` | Explicit | Build and run a madengine benchmark on AMD GPUs |
+| `/mad-benchmark <tag>[,<tag>...]` | Explicit | Build and run a madengine benchmark on AMD GPUs |
 | `/mad-profile <tag> [operator\|dispatch\|kernel]` | Explicit | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
 | `/mad-tune <tag>` | Explicit | Measure-change-measure tuning loop for training or inference |
 | `/primus-projection <tag>` | Explicit | Projected memory fit and tokens/s for a Primus training tag |
@@ -174,7 +174,7 @@ MAD ships agent skills for [Claude Code](https://claude.ai/code), Cursor and Cod
 
 Explicit skills run only when you invoke them (`/name` in Claude Code and Cursor, `$name` in Codex). Long runs go through `.claude/skills/mad-common/mad-run.sh`, which detaches each run and serializes runs on one host with a GPU lock.
 
-Claude Code also has two workflows for larger fan-out jobs: `mad-benchmark-sweep` (a matrix across tags) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements repeated `--repeats` times, 3 by default). Both plan by default and only run on GPUs with `--execute`. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
+Claude Code also has two workflows for larger fan-out jobs (Cursor and Codex users can pass several tags to `/mad-benchmark` instead): `mad-benchmark-sweep` (a matrix across tags) and `mad-tune-search` (operator → dispatch → kernel, then clean measurements repeated `--repeats` times, 3 by default). Both plan by default and only run on GPUs with `--execute`. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
 
 ## Contributing
 

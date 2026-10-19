@@ -63,5 +63,7 @@ For a multi-depth search that also measures clean candidates, use the
 - Claude Code, Cursor and Codex all load this skill (Codex through
   `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
   means the text the user gave after the skill name.
-- Claude Code runs this skill in the `mad-benchmark-runner` subagent. Other agents run it
-  inline: read `.claude/agents/mad-benchmark-runner.md` first for the conventions it assumes.
+- Claude Code runs this skill in the `mad-benchmark-runner` subagent. In Cursor, delegate
+  to the `mad-benchmark-runner` subagent (Cursor reads `.claude/agents/`); in Codex, spawn the
+  `mad_benchmark_runner` agent (`.codex/agents/`). Otherwise run it inline and
+  read `.claude/agents/mad-benchmark-runner.md` first for the conventions it assumes.

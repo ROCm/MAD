@@ -48,6 +48,28 @@ bash .claude/skills/mad-common/mad-run.sh wait <run-id>   # repeat until succeed
 `.claude/skills/mad-common/preflight.sh` checks that madengine is installed and
 that you are at the repo root. It never installs anything.
 
+### Claude Code, Cursor and Codex
+
+- **Workflows are Claude Code only.** `mad-benchmark-sweep` and
+  `mad-tune-search` (`.claude/workflows/`) need Claude Code's workflow runtime.
+  In Cursor and Codex, use `mad-benchmark` with several tags
+  (`/mad-benchmark bert,pyt_vllm_qwen3-8b` runs them in one `madengine run`)
+  and `mad-tune`.
+- **Subagents.** The skills hand work to `mad-benchmark-runner`, `mad-tuner` and
+  `mad-perf-analyst`. Claude Code and Cursor read them from `.claude/agents/`.
+  Codex reads `.codex/agents/*.toml` (`mad_benchmark_runner`, `mad_tuner`,
+  `mad_perf_analyst`), generated from the Markdown files: edit
+  `.claude/agents/*.md`, then run `python3 tools/agent_config/codex_agents.py`.
+  CI fails if they drift.
+- **Codex sandbox.** If Codex asks whether to trust this project, say yes so it
+  loads `.codex/`. `madengine run`/`build`, and so `mad-run.sh start`, need the
+  Docker socket and network, which Codex's default sandbox blocks: approve
+  running them outside the sandbox, or start Codex with
+  `--sandbox danger-full-access` on a dedicated GPU host.
+- **Permissions and hooks.** The pre-approved commands and the `models.json`
+  validation hook in `.claude/settings.json` apply to Claude Code only. Cursor
+  and Codex ask for approval as usual, and CI validates every registry.
+
 ## The performance contract (most important convention)
 
 A model's run script MUST print exactly one line to stdout:

@@ -1,7 +1,7 @@
 ---
 name: mad-benchmark
 description: Build and run a madengine benchmark for a MAD model/tag. Use when the user wants to benchmark, run, or measure a model on AMD GPUs.
-argument-hint: <tag-or-model> [extra options]
+argument-hint: <tag-or-model>[,<tag-or-model>...] [extra options]
 disable-model-invocation: true
 context: fork
 agent: mad-benchmark-runner
@@ -10,9 +10,11 @@ allowed-tools: Bash(madengine discover *) Bash(madengine report *) Bash(rocm-smi
 
 Benchmark `$ARGUMENTS` with madengine.
 
-The model tag is the first whitespace-delimited token of `$ARGUMENTS`. Later
-tokens are options (output path, timeout, deploy). Use that tag token in every
-`madengine` command.
+The first whitespace-delimited token of `$ARGUMENTS` is the tag, or several
+tags joined by commas (`bert,pyt_vllm_qwen3-8b`). Later tokens are options
+(output path, timeout, deploy). Pass that token unchanged to every `madengine`
+command: madengine splits it on commas, so one `madengine run --tags a,b`
+runs every model the tags resolve to and writes one `perf.csv` row per model.
 
 ## Pre-flight
 Claude Code runs this before the skill starts. Other agents: run it first from
@@ -22,9 +24,9 @@ bash .claude/skills/mad-common/preflight.sh
 ```
 
 ## Task
-1. Confirm the tag matches real models via `madengine discover --tags <tag> --json`
-   (read-only, no GPU). If the intent is fuzzy, grep `scripts/**/models.json`
-   for candidates.
+1. Confirm the tag(s) match real models via `madengine discover --tags <tag> --json`
+   (read-only, no GPU). If a tag matches nothing, say which one and stop. If the
+   intent is fuzzy, grep `scripts/**/models.json` for candidates.
 2. Assemble `madengine run --tags <tag> --live-output`. Add as the request implies:
    - `-o <path>` to keep results separately,
    - `--timeout <s>` for long training runs (default 7200),
@@ -43,9 +45,14 @@ bash .claude/skills/mad-common/preflight.sh
 Report: resolved model list, the exact command, required env vars, and where
 results landed (`perf.csv` by default).
 
+For a matrix across GPU counts, or a separate result file per tag, Claude Code
+has the `mad-benchmark-sweep` workflow.
+
 ## Agent Notes
 - Claude Code, Cursor and Codex all load this skill (Codex through
   `.agents/skills/`). Only Claude Code substitutes `$ARGUMENTS`; elsewhere it
   means the text the user gave after the skill name.
-- Claude Code runs this skill in the `mad-benchmark-runner` subagent. Other agents run it
-  inline: read `.claude/agents/mad-benchmark-runner.md` first for the conventions it assumes.
+- Claude Code runs this skill in the `mad-benchmark-runner` subagent. In Cursor, delegate
+  to the `mad-benchmark-runner` subagent (Cursor reads `.claude/agents/`); in Codex, spawn the
+  `mad_benchmark_runner` agent (`.codex/agents/`). Otherwise run it inline and
+  read `.claude/agents/mad-benchmark-runner.md` first for the conventions it assumes.

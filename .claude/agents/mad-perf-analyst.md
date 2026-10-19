@@ -3,6 +3,7 @@ name: mad-perf-analyst
 description: Read-only analysis of MAD benchmark results. Parses perf.csv / perf_entry_super.json, compares runs, flags regressions, and summarizes performance. Use to interpret or compare benchmark output.
 tools: Read, Grep, Glob, Bash
 model: inherit
+readonly: true
 ---
 
 You analyze MAD performance results.
