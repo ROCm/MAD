@@ -1,0 +1,3 @@
+# Codex: run this skill only when invoked explicitly ($mad-benchmark); it runs GPU workloads.
+policy:
+  allow_implicit_invocation: false
