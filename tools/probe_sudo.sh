@@ -19,7 +19,15 @@ ok=() bad=() unknown=()
 for n in "$@"; do
     out=$(timeout 120 srun -p meta64 -w "$n" -N1 -t 00:02:00 --overlap \
             sudo -n /usr/bin/docker version --format '{{.Server.Version}}' 2>&1)
+    rc=$?
     ver=$(printf '%s' "$out" | tail -1)
+    # 124 is timeout(1): the node was busy and srun never got past the queue, so
+    # docker was never reached. Calling that unhealthy would quietly grow the
+    # exclude list every time the cluster is full.
+    if [ "$rc" -eq 124 ]; then
+        unknown+=("$n"); echo "BUSY $n  (probe timed out in the queue; not a health verdict)"
+        continue
+    fi
     case "$out" in
         *"has been revoked"*|*"Required node not available"*|*"Unable to allocate"*)
             unknown+=("$n"); echo "BUSY $n  (allocation revoked; not a health verdict)" ;;

@@ -155,6 +155,22 @@ CLUSTERS = {
 DOCKERFILE = "docker/pyt_infx.ubuntu.amd.Dockerfile"
 
 
+def image_tag(prefix, fw, arch, base_image, build_args):
+    """Tag that changes whenever the image would.
+
+    madengine reuses a local image, and a saved image tar, by TAG. Two scenarios
+    that share a model prefix and framework but pin different engine images --
+    or the same scenario built once plainly and once on an RCCL overlay, or for
+    a different in-image uid -- would otherwise collide, and a later run would
+    silently execute the earlier image.
+    """
+    import hashlib
+
+    material = base_image + "|" + "|".join(f"{k}={v}" for k, v in sorted(build_args.items()))
+    digest = hashlib.sha256(material.encode()).hexdigest()[:10]
+    return f"mad-infx-{prefix}-{fw}:{arch}-{digest}"
+
+
 class Untranslatable(Exception):
     """This scenario cannot be expressed against a MAD runner, with the reason.
 
@@ -225,6 +241,10 @@ def _attr_conflict(point, args, env, base_args):
         ("ep", recipe_val("expert-parallel-size")),
         ("dp-attn", recipe_val("enable-dp-attention")),
         ("kv-offloading", env.get("KV_OFFLOADING")),
+        # Kimi-K3's vLLM recipe has two TP8/conc-1 overrides that differ only in
+        # decode-context parallelism; without this both match either point and
+        # the sweep doubles.
+        ("dcp-size", recipe_val("decode-context-parallel-size")),
     ]
     for scen_key, rec_val in checks:
         if scen_key not in point or rec_val is None:
@@ -239,7 +259,7 @@ def _attr_conflict(point, args, env, base_args):
 
 
 def enumerate_points(recipe, tp, point=None):
-    """Yield (concurrency, per-point agg args, per-point benchmark env) for `tp`.
+    """Yield (concurrency, per-point agg args, benchmark env, server env) for `tp`.
 
     InferenceX writes the sweep two different ways and both reduce to the same
     thing:
@@ -276,6 +296,10 @@ def enumerate_points(recipe, tp, point=None):
         if block_tp is not None and int(block_tp) != int(tp):
             continue
         env = dict(block.get("benchmark", {}).get("env", {}))
+        # An override may also set server env of its own (vLLM's
+        # VLLM_USE_BREAKABLE_CUDAGRAPH, the offload points' PYTHONHASHSEED);
+        # the base env alone is not the point's environment.
+        server_env = dict(_agg(block).get("env", {}))
         conc_raw = env.get("CONC")
         if conc_raw is None:
             continue
@@ -292,11 +316,12 @@ def enumerate_points(recipe, tp, point=None):
                 per = {k: (v[i] if isinstance(v, list) else v) for k, v in point_args.items()}
                 per_env = {k: (v[i] if isinstance(v, list) else v) for k, v in env.items()
                            if k != "CONC"}
-                yield int(c), per, per_env
+                yield int(c), per, per_env, server_env
         else:
             if allowed is not None and int(conc_raw) not in [int(a) for a in allowed]:
                 continue
-            yield int(conc_raw), point_args, {k: v for k, v in env.items() if k != "CONC"}
+            yield (int(conc_raw), point_args,
+                   {k: v for k, v in env.items() if k != "CONC"}, server_env)
     if not found:
         raise Untranslatable(
             f"no override block for tp={tp} in recipe {recipe['base']['name']!r}")
@@ -337,7 +362,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
-        for conc, point_args, _ in enumerate_points(recipe, tp, point):
+        for conc, point_args, _, point_env_srv in enumerate_points(recipe, tp, point):
             extra = base_extra_args(recipe)
             extra.update({f"--{k}": v for k, v in point_args.items()
                           if k not in RUNNER_OWNED_ARGS and v is not False})
@@ -348,7 +373,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 "inp": int(workload["isl"]),
                 "out": int(workload["osl"]),
                 "max_concurrency": conc,
-                "env": dict(_agg(base).get("env", {})),
+                "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
             }
             _stamp(block, scenario_key, tp, conc, runner)
@@ -358,7 +383,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
     return blocks, notes
 
 
-def emit_agentic(scenario_key, recipe, workloads, runner, duration=None):
+def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_prefix=""):
     """agentic-coding -> the runners' `benchmark: agentic` config blocks.
 
     The replay itself is MAD's own agentx core (scripts/common/benchmark_agentic.sh
@@ -376,7 +401,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None):
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
-        for conc, point_args, point_env in enumerate_points(recipe, tp, point):
+        for conc, point_args, point_env, point_env_srv in enumerate_points(recipe, tp, point):
             extra = base_extra_args(recipe)
             extra.update({f"--{k}": v for k, v in point_args.items()
                           if k not in RUNNER_OWNED_ARGS and v is not False})
@@ -388,10 +413,18 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None):
                 "KV_OFFLOADING": str(point_env.get("KV_OFFLOADING",
                                                    point.get("kv-offloading", "none"))),
             }
-            for k in ("WEKA_LOADER_OVERRIDE", "AIPERF_APPLY_CHAT_TEMPLATE",
-                      "AIPERF_REQUIRED_SERVER_METRIC_PREFIX"):
-                if k in bench_env:
-                    agentic_env[k] = str(bench_env[k])
+            # Forward every AIPerf knob rather than a whitelist: the recipes
+            # also set client timeouts (AIPERF_HTTP_TCP_USER_TIMEOUT) that the
+            # shared hook does not restore, and a missed one silently changes
+            # the measurement.
+            for k, v in bench_env.items():
+                if k.startswith("AIPERF_") or k == "WEKA_LOADER_OVERRIDE":
+                    agentic_env[k] = str(v)
+            # The hook picks the trace corpus from MODEL_PREFIX when the recipe
+            # states no explicit loader. Without it every model falls back to
+            # the 256k-capped corpus, which is a different workload for the
+            # models whose scenarios use the uncapped one.
+            agentic_env.setdefault("MODEL_PREFIX", model_prefix)
             backend = point.get("kv-offload-backend") or {}
             if backend.get("name"):
                 agentic_env["KV_OFFLOAD_BACKEND"] = str(backend["name"])
@@ -406,7 +439,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None):
                 "inp": 0,
                 "out": 0,
                 "max_concurrency": conc,
-                "env": dict(_agg(base).get("env", {})),
+                "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
                 "agentic_env": agentic_env,
             }
@@ -491,6 +524,11 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
         )
 
     key = f"infx-{scenario_key}"
+    build_args = dict(
+        {"BASE_DOCKER": image},
+        **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
+           if cluster.get("run_as_submitting_user") else {}),
+    )
     model_dir = os.path.basename(model)
     mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
     nodes = int(_agg(base).get("nodes", 1))
@@ -504,7 +542,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
         "built_images": {
             key: {
                 "model": key,
-                "docker_image": f"mad-infx-{prefix}-{fw}:{arch}",
+                "docker_image": image_tag(prefix, fw, arch, image, build_args),
                 "dockerfile": DOCKERFILE,
                 "base_docker": image,
                 "build_duration": 0,
@@ -556,11 +594,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
                 "NCCL_DEBUG_SUBSYS": "INIT",
             },
             "docker_mounts": mounts,
-            "docker_build_arg": dict(
-                {"BASE_DOCKER": image},
-                **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
-                   if cluster.get("run_as_submitting_user") else {}),
-            ),
+            "docker_build_arg": build_args,
             "gpu_vendor": "AMD",
             "guest_os": "UBUNTU",
             "docker_gpus": gpus,
@@ -621,7 +655,28 @@ def models_json_entry(manifest, key):
     m["scripts"] = "run_infx.sh"
     m["data"] = "huggingface"
     m["_runner_dir"] = runner_dir
+    # models.json carries no build arguments and no per-run identity. The
+    # Dockerfile has no default BASE_DOCKER on purpose, and the -u the manifest
+    # needs on a root_squash cluster is the GENERATOR's uid, which is wrong for
+    # anyone else. So this entry is for running an image that already exists,
+    # and the manifest stays the self-contained path.
+    m["additional_docker_run_options"] = _strip_uid(
+        m.get("additional_docker_run_options", ""))
     return m
+
+
+def _strip_uid(opts):
+    """Drop `-u <uid>:<gid>` from docker options; see models_json_entry."""
+    out, skip = [], False
+    for tok in opts.split():
+        if skip:
+            skip = False
+            continue
+        if tok == "-u":
+            skip = True
+            continue
+        out.append(tok)
+    return " ".join(out)
 
 
 # --------------------------------------------------------------------------
@@ -640,6 +695,15 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
 
     runner = DISAGG_RUNNERS[scenario["framework"]]
     cluster = CLUSTERS[args.cluster]
+    # Options the disagg route cannot honour must be refused, not ignored: a
+    # smoke run that quietly uses the real checkpoint and every point is worse
+    # than no run.
+    unsupported = [n for n, v in (("--agentic-duration", args.agentic_duration),
+                                  ("--smoke-model", args.smoke_model),
+                                  ("--smoke-first-point", args.smoke_first_point)) if v]
+    if unsupported:
+        raise Untranslatable(
+            f"the disagg route does not implement {', '.join(unsupported)}")
     gpu_type = scenario["runner"].split(":")[-1].split("-")[0]
     arch = GPU_ARCH.get(gpu_type)
     if arch is None or arch != cluster["arch"]:
@@ -659,7 +723,15 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
             man, pnotes = disagg_emitter.emit_disagg(
                 scenario_key, scenario, workload_name, workload, point, idx,
                 cluster, runner, args.timeout, args.slurm_time,
-                args.weights_dir, args.model_host_dir, arch, resolve_mounts)
+                args.weights_dir, args.model_host_dir, arch, resolve_mounts,
+                mad_dir=args.mad_dir, infx_commit=infx_revision(args.infx),
+                run_logs_host=args.run_logs_dir)
+            if args.base_image:
+                k = next(iter(man["built_images"]))
+                man["built_images"][k]["base_docker"] = args.base_image
+                man["context"]["docker_build_arg"]["BASE_DOCKER"] = args.base_image
+                man["_infx_provenance"]["fidelity_gaps"].append(
+                    f"image replaced: {scenario['image']} -> {args.base_image}")
         except ValueError as exc:
             skipped.append(f"point {idx}: {exc}")
             continue
@@ -708,10 +780,11 @@ def _translate_one(args, scenario_key, out_dir):
     workload = entries[0]
 
     recipe = load_recipe(args.infx, workload["search-space"][0]["srt-recipe"])
-    emitter = WORKLOAD_EMITTERS[workload_name]
-    kwargs = {"duration": args.agentic_duration} if workload_name == "agentic-coding" else {}
-    blocks, notes = emitter(scenario_key, recipe, entries, runner, **kwargs)
     prefix = scenario["model-prefix"]
+    emitter = WORKLOAD_EMITTERS[workload_name]
+    kwargs = ({"duration": args.agentic_duration, "model_prefix": prefix}
+              if workload_name == "agentic-coding" else {})
+    blocks, notes = emitter(scenario_key, recipe, entries, runner, **kwargs)
     cluster = CLUSTERS[args.cluster]
 
     smoke = []
@@ -730,7 +803,13 @@ def _translate_one(args, scenario_key, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
     cfg_name = f"{prefix}_{fw}_infx.yaml" if args.per_framework_config else f"{prefix}_infx.yaml"
-    cfg_path = os.path.join(out_dir, cfg_name)
+    # The runner resolves --config relative to its own directory, so the file
+    # has to exist there. Write it straight into the MAD checkout when we know
+    # it; otherwise say plainly that it still has to be staged, because a
+    # same-named file left over from an earlier scenario would be picked up
+    # instead and the run would silently measure something else.
+    staged = os.path.join(args.mad_dir, "scripts", runner["dir"], "configs")
+    cfg_path = os.path.join(staged if os.path.isdir(staged) else out_dir, cfg_name)
     with open(cfg_path, "w") as f:
         f.write(f"# Generated by infx2mad.py from InferenceX scenario {scenario_key}\n")
         f.write(f"# Source recipe: {workload['search-space'][0]['srt-recipe']}\n")
@@ -768,6 +847,10 @@ def _translate_one(args, scenario_key, out_dir):
         json.dump([models_json_entry(man, key)], f, indent=2)
         f.write("\n")
 
+    if not os.path.isdir(staged):
+        notes.append(
+            f"config written to {cfg_path}; copy it to scripts/{runner['dir']}/configs/ "
+            "before running, or pass --mad-dir so it is written there directly")
     return {"scenario": scenario_key, "framework": fw, "workload": workload_name,
             "runner": f"scripts/{runner['dir']}", "points": len(blocks),
             "config": cfg_path, "manifest": man_path, "gaps": notes}
@@ -800,6 +883,12 @@ def main():
     ap.add_argument("--per-framework-config", action="store_true",
                     help="name configs <prefix>_<framework>_infx.yaml, so two "
                          "frameworks serving the same model do not collide")
+    ap.add_argument("--mad-dir", default=".",
+                    help="MAD checkout, read for scripts/sglang_disagg/models.yaml "
+                         "when translating a disaggregated scenario")
+    ap.add_argument("--run-logs-dir",
+                    help="shared writable dir bound to /run_logs on every node; "
+                         "the disagg launcher coordinates readiness through it")
     ap.add_argument("--base-image",
                     help="run on this image instead of the scenario's. The RCCL CI "
                          "uses it to layer the RCCL under test over the scenario's "

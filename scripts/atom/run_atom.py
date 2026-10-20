@@ -32,6 +32,7 @@ import json
 import yaml
 import psutil
 import shutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -236,18 +237,23 @@ def parse_args():
     return args
 
 def dict_to_args(args_dict: Dict) -> str:
-    """Convert argument dictionary to command-line string"""
+    """Convert argument dictionary to command-line string.
+
+    Values are shell-quoted: they come from a config file and reach the engine
+    through a shell string, so a JSON-valued argument would otherwise lose its
+    quoting during shell parsing. Flags stay bare.
+    """
     args_list = []
     for key, value in args_dict.items():
         if value is True:
             args_list.append(key)
         elif value is not False and value is not None:
-            args_list.append(f"{key} {value}")
+            args_list.append(f"{key} {shlex.quote(str(value))}")
     return " ".join(args_list)
 
 def dict_to_env(env_dict: Dict) -> str:
     """Convert environment dictionary to env var string"""
-    return " ".join(f"{k}={v}" for k, v in env_dict.items())
+    return " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_dict.items())
 
 def expand_configs(args, configs: List[Dict]):
     # Apply architecture specific overrides to config

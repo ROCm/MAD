@@ -51,7 +51,15 @@ def main():
     headers = {e: csv_header(e) for e in POPPED}
     problems, blocks, files = [], 0, 0
 
-    for man_path in sorted(glob.glob(os.path.join(ROOT, "*", "*.manifest.json"))):
+    # --all writes one directory per scenario, --scenario writes flat into
+    # out_dir. Globbing only the nested layout made a single-scenario run report
+    # zero files and OK, which is a false green.
+    manifests = sorted(set(glob.glob(os.path.join(ROOT, "*", "*.manifest.json")) +
+                           glob.glob(os.path.join(ROOT, "*.manifest.json"))))
+    if not manifests:
+        print(f"no manifests under {ROOT}")
+        return 1
+    for man_path in manifests:
         man = json.load(open(man_path))
         key = next(iter(man["built_models"]))
         model = man["built_models"][key]
@@ -77,9 +85,16 @@ def main():
             continue
 
         cfg_name = model["args"].split("--config ")[1].split()[0].split("/")[-1]
-        cfg_path = os.path.join(os.path.dirname(man_path), cfg_name)
-        if not os.path.exists(cfg_path):
-            problems.append(f"{man_path}: manifest points at {cfg_name}, which was not emitted")
+        # The translator writes the config into the runner's configs/ when it
+        # knows the MAD checkout, and beside the manifest otherwise; the runner
+        # resolves --config relative to its own directory, so check both.
+        candidates = [os.path.join(MAD, "scripts", engine, "configs", cfg_name),
+                      os.path.join(os.path.dirname(man_path), cfg_name)]
+        cfg_path = next((c for c in candidates if os.path.exists(c)), None)
+        if cfg_path is None:
+            problems.append(
+                f"{man_path}: manifest points at {cfg_name}, which is in neither "
+                f"scripts/{engine}/configs/ nor the output dir")
             continue
         files += 1
 

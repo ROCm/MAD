@@ -19,6 +19,32 @@ Two shapes the launcher cannot express, declared rather than approximated:
 """
 
 import os
+import yaml
+
+
+def catalog_name(mad_dir, model_dir):
+    """The launcher's own key for this checkpoint.
+
+    MODEL_NAME must be a key in scripts/sglang_disagg/models.yaml; the launcher
+    rejects anything else before it starts a server, and a checkpoint basename
+    is usually not that key (DeepSeek-R1-0528 vs the catalog's DeepSeek-R1).
+    """
+    cat = os.path.join(mad_dir, "scripts", "sglang_disagg", "models.yaml")
+    try:
+        with open(cat) as f:
+            keys = list(yaml.safe_load(f) or {})
+    except OSError:
+        raise ValueError(f"cannot read the disagg model catalog at {cat}")
+    if model_dir in keys:
+        return model_dir
+    # Longest key that prefixes the checkpoint name, e.g. DeepSeek-R1 for
+    # DeepSeek-R1-0528. Anything else has no supported mapping.
+    cands = sorted((k for k in keys if model_dir.startswith(k)), key=len, reverse=True)
+    if cands:
+        return cands[0]
+    raise ValueError(
+        f"{model_dir!r} has no entry in scripts/sglang_disagg/models.yaml; "
+        "the launcher validates MODEL_NAME against that catalog")
 
 
 def _worker_nodes(role, gpus_per_node):
@@ -36,7 +62,8 @@ def _worker_nodes(role, gpus_per_node):
 
 def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                 cluster, runner, timeout, slurm_time, weights_dir, model_host_dir,
-                gpu_arch, resolve_mounts):
+                gpu_arch, resolve_mounts, mad_dir=".", infx_commit="unknown",
+                run_logs_host=None):
     """-> (manifest dict, notes) for one search-space point."""
     notes = []
     gpus_per_node = cluster["gpus_per_node"]
@@ -48,6 +75,15 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             "scripts/sglang_disagg resolves a single SGLANG_TP_SIZE for both roles"
         )
     tp = int(prefill["tp"])
+    # DP_MODE=1 makes the launcher derive each role's TP/EP from nodes x GPUs,
+    # not from SGLANG_TP_SIZE, so two TP8 prefill workers would silently become
+    # one TP16 group. Only accept a layout where that derivation agrees with
+    # the point.
+    dp_attn = bool(prefill.get("dp-attn")) or bool(decode.get("dp-attn"))
+    if bool(prefill.get("dp-attn")) != bool(decode.get("dp-attn")):
+        raise ValueError(
+            f"asymmetric dp-attn (prefill={prefill.get('dp-attn')}, "
+            f"decode={decode.get('dp-attn')}); the launcher takes one DP_MODE")
     xP, yD = _worker_nodes(prefill, gpus_per_node), _worker_nodes(decode, gpus_per_node)
     if xP is None or yD is None:
         raise ValueError(
@@ -62,7 +98,13 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     arch = gpu_arch
 
     kv = scenario.get("kv-p2p-transfer") or "nixl"
-    dp_mode = 1 if (prefill.get("dp-attn") or decode.get("dp-attn")) else 0
+    dp_mode = 1 if dp_attn else 0
+    if dp_mode and (xP, yD) != (int(prefill.get("num-worker", 1)), int(decode.get("num-worker", 1))):
+        raise ValueError(
+            f"DP_MODE=1 derives each role's degrees from its node count, which "
+            f"would merge {prefill.get('num-worker')} prefill / "
+            f"{decode.get('num-worker')} decode workers into one group per role")
+    catalog = catalog_name(mad_dir, model_dir)
     conc = " ".join(str(c) for c in point["conc-list"])
     # Only fixed-seq-len states a sequence shape; an agentic replay has none.
     isl = workload.get("isl")
@@ -83,7 +125,7 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         )
 
     env_vars = {
-        "MODEL_NAME": model_dir,
+        "MODEL_NAME": catalog,
         "MODEL_PATH": model_path,
         "RUN_MORI": "1" if kv == "mori" else "0",
         "DP_MODE": str(dp_mode),
@@ -102,6 +144,10 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         # The disagg launcher already has the agentic hook; selecting it is a
         # single env var, which is why agentic needed new code only on the
         # aggregated side.
+        # Both selectors: the launcher keys its agentic setup (metrics,
+        # AGENTIC_SERVER_METRICS, dropping --disable-radix-cache) off
+        # BENCHMARK_SCRIPT, while BENCHMARK_SCRIPT_FILE only picks the hook.
+        env_vars["BENCHMARK_SCRIPT"] = "agentic"
         env_vars["BENCHMARK_SCRIPT_FILE"] = "benchmark_agentic.sh"
         env_vars["AGENTIC_CONC"] = conc
         env_vars.pop("BENCHMARK_COMBINATIONS", None)
@@ -109,7 +155,7 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     nodes = xP + yD
     gpus = ",".join(str(i) for i in range(gpus_per_node))
     args = (
-        f"--model-name {model_dir} --model-path {model_path} "
+        f"--model-name {catalog} --model-path {model_path} "
         f"--run-mori {env_vars['RUN_MORI']} --dp-mode {dp_mode} "
         f"--xp {xP} --yd {yD} --gpus-per-node {gpus_per_node} "
         f"--kv-transfer-backend {kv}"
@@ -159,8 +205,13 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             "skip_perf_collection": False,
             "docker_env_vars": dict(env_vars, MAD_SYSTEM_GPU_ARCHITECTURE=arch,
                                     **cluster.get("fabric_env", {})),
-            "docker_mounts": dict(mounts, **{"/dev/infiniband": "/dev/infiniband",
-                                             "/sys/class/infiniband": "/sys/class/infiniband"}),
+            # /run_logs must be shared and writable: the launcher coordinates
+            # readiness between prefill, decode and proxy through files there.
+            "docker_mounts": dict(mounts, **{
+                "/dev/infiniband": "/dev/infiniband",
+                "/sys/class/infiniband": "/sys/class/infiniband",
+                "/run_logs": run_logs_host or os.path.join(os.getcwd(), "run_logs"),
+            }),
             "docker_build_arg": dict(
                 {"BASE_DOCKER": scenario["image"]},
                 **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
@@ -208,6 +259,8 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             "workload": workload_name,
             "precision": scenario["precision"],
             "point_index": idx,
+            "inferencex_commit": infx_commit,
+            "model_catalog_name": catalog,
             "topology": {"prefill_nodes": xP, "decode_nodes": yD, "tp": tp,
                          "ep": point["prefill"].get("ep"), "dp_attn": bool(dp_mode),
                          "kv_p2p_transfer": kv},

@@ -36,6 +36,7 @@ import csv
 import json
 import yaml
 import psutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -397,13 +398,18 @@ def main():
             # concatenate env vars and extra args into the corresponding strings
             env_vars = config.get("env", {})
             extra_args = config.get("extra_args", {})
-            env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
+            # Values come from a config file and reach the engine through a
+            # shell string, so anything with spaces or quotes -- a JSON
+            # attention-config, compilation-config or speculative-config -- must
+            # be quoted or the shell eats its structure and the server refuses
+            # to start. Flags stay bare.
+            env_vars_str = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" {k} {v}"
+                    extra_args_str += f" {k} {shlex.quote(str(v))}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
 

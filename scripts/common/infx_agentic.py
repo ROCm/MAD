@@ -117,7 +117,11 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
         hook_env.update({str(k): str(v) for k, v in agentic_env.items()})
         hook_env.update({
             "MODEL_PATH": model,
-            "MODEL": config["model"],
+            # MODEL is deliberately NOT set: the runners reduce config["model"]
+            # to a basename, but vLLM serves under the full repository id or
+            # checkpoint path and registers no alias, so a basename would miss
+            # /v1/models and the replay would address a model the server does
+            # not know. The hook resolves the advertised id itself.
             # agentic_lib.sh defaults AGENTIC_PORT to the backend's ROUTER port;
             # an aggregated server listens where the runner just launched it.
             "AGENTIC_PORT": str(port),
