@@ -45,7 +45,7 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
 
     for i, section in enumerate(sections[1:], 1):  # Skip first empty section
         # Look for configuration in previous sections (from [RUNNING] line)
-        if i > 1:
+        if i > 0:  # sections[0] holds the first [RUNNING] line
             prev_section = sections[i-1]
 
             # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>

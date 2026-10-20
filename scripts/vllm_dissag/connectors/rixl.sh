@@ -240,6 +240,17 @@ _rixl_launch_tp() {
     local engine_id
     if [[ "$log_prefix" == "prefill" ]]; then engine_id="pd-run"; else engine_id="pd-decode"; fi
     local kv_config; kv_config=$(_rixl_kv_config_tp "${kv_role}" "${engine_id}")
+    # KV_OFFLOAD wrap; one TP engine spans the node's GPUs.
+    local _OFFLOAD_TP_WORLD="${DP_PARALLEL_SIZE_LOCAL:-8}"
+    kv_config=$(kv_offload_wrap "${kv_config}")
+
+    local _prefix_cache_arg; _prefix_cache_arg="$(kv_prefix_cache_arg)"
+
+    # Optional context cap and HBM KV cap (the cap forces eviction into the offload tier).
+    local mml_args=()
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     # Per-model config string (from models.yaml; tokenized as the legacy eval did)
     local cfg_args=()
@@ -251,6 +262,9 @@ _rixl_launch_tp() {
             vllm serve "${MODEL_PATH}" \
                 --port "${SERVER_PORT}" \
                 --trust-remote-code \
+                "${_prefix_cache_arg}" \
+                "${mml_args[@]}" \
+                "${mem_args[@]}" \
                 --kv-transfer-config "${kv_config}" \
                 "${cfg_args[@]}"
         WORKER_PID=0; return 0
@@ -259,6 +273,9 @@ _rixl_launch_tp() {
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
+        "${_prefix_cache_arg}" \
+        "${mml_args[@]}" \
+        "${mem_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         "${cfg_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
@@ -278,16 +295,6 @@ _rixl_launch_deepep() {
 
     connector_setup_env "${backend}"
 
-    # Agentic gating: the default sweep keeps prefix caching OFF via the hardcoded
-    # --no-enable-prefix-caching below. The agentic trace-replay path
-    # (BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh) — or ENABLE_PREFIX_CACHE=1 —
-    # STRIPS that flag so prefix caching is ON. Gated so the default (non-agentic)
-    # sweep argv is byte-for-byte unchanged.
-    local _prefix_cache_flag="--no-enable-prefix-caching"
-    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
-        _prefix_cache_flag=""
-    fi
-
     local extra_args=()
     if [[ "$role" == "master" ]]; then
         extra_args+=(--api-server-count=8 --data-parallel-start-rank 0)
@@ -304,6 +311,11 @@ _rixl_launch_deepep() {
     fi
 
     local kv_config; kv_config=$(_rixl_kv_config_deepep "${kv_role}" "${engine_id}" "${dp_size}")
+    # KV_OFFLOAD wrap; wideEP is tp1 per DP rank, so the pool is split per rank.
+    local _OFFLOAD_TP_WORLD=1
+    kv_config=$(kv_offload_wrap "${kv_config}")
+
+    local _prefix_cache_arg; _prefix_cache_arg="$(kv_prefix_cache_arg)"
 
     # Per-model dp: flags from models.yaml (driver-exported). Empty for the DeepSeek
     # deepep entries today, so this is currently a no-op; kept so future per-model
@@ -311,6 +323,13 @@ _rixl_launch_deepep() {
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+
+    # Optional context cap (required for DeepSeek-V3 MLA, else TritonMLA workspace OOM) and
+    # HBM KV cap (forces eviction into the offload tier).
+    local mml_args=()
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "deepep" "${log_prefix}" "${role}" \
@@ -324,14 +343,16 @@ _rixl_launch_deepep() {
                 --data-parallel-rpc-port "${RPC_PORT}" \
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
-                ${_prefix_cache_flag} --block-size 1 \
-                --gpu-memory-utilization 0.8 \
+                "${_prefix_cache_arg}" --block-size 1 \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
                 --kv-cache-dtype fp8 \
                 --enable-expert-parallel \
                 --all2all-backend "${backend}" \
                 ${DBO_ARGS} \
                 "${extra_args[@]}" \
                 "${model_args[@]}" \
+                "${mml_args[@]}" \
+                "${mem_args[@]}" \
                 --kv-transfer-config "${kv_config}"
         WORKER_PID=0; return 0
     fi
@@ -346,14 +367,16 @@ _rixl_launch_deepep() {
         --data-parallel-rpc-port "${RPC_PORT}" \
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
-        ${_prefix_cache_flag} --block-size 1 \
-        --gpu-memory-utilization 0.8 \
+        "${_prefix_cache_arg}" --block-size 1 \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
         --kv-cache-dtype fp8 \
         --enable-expert-parallel \
         --all2all-backend "${backend}" \
         ${DBO_ARGS} \
         "${extra_args[@]}" \
         "${model_args[@]}" \
+        "${mml_args[@]}" \
+        "${mem_args[@]}" \
         --kv-transfer-config "${kv_config}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
     WORKER_PID=$!
@@ -376,9 +399,14 @@ connector_start_proxy() {
     # Agentic replay: point aiperf at the backend vLLM servers' /metrics (SERVER_PORT)
     # for prefill+decode masters. Gated on the agentic path so the default sweep is
     # unaffected. Consumed by scripts/common/agentic_lib.sh (aiperf --server-metrics).
-    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${BENCHMARK_SCRIPT:-}" == "multiturn" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
         export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVER_PORT} ${DECODE_MASTER_ADDR}:${SERVER_PORT}}"
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+        # Prefill /metrics for benchmark_multiturn.sh's hit-rate instrumentation.
+        export PREFILL_METRICS_URL="${PREFILL_METRICS_URL:-http://${PREFILL_MASTER_ADDR}:${SERVER_PORT}/metrics}"
+        echo "[metrics] PREFILL_METRICS_URL=${PREFILL_METRICS_URL}"
+        export DECODE_METRICS_URL="${DECODE_METRICS_URL:-http://${DECODE_MASTER_ADDR}:${SERVER_PORT}/metrics}"
+        echo "[metrics] DECODE_METRICS_URL=${DECODE_METRICS_URL}"
     fi
     for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do PREFILL_ARGS+="${IP_ARRAY[$i]} "; PREFILL_PORTS+="$SERVER_PORT "; done
     for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do DECODE_ARGS+="${IP_ARRAY[$i]} "; DECODE_PORTS+="$SERVER_PORT "; done
