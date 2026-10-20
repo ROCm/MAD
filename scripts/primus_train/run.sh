@@ -34,15 +34,22 @@ else
 fi
 
 # EXP: prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args.
-# --config_path is a wrapper-only flag that Primus' own CLI (primus/cli/main.py) does not
-# recognize, so strip it (and its value) out of forward_args.
+# --config_path and --variant (model_overrides.py) are wrapper-only flags that Primus' own
+# CLI (primus/cli/main.py) does not recognize, so strip them (and their values) out of
+# forward_args.
 args=("$@")
 forward_args=()
 config_path_arg=""
+variant=""
 i=0
 while [[ $i -lt ${#args[@]} ]]; do
   if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
     config_path_arg="${args[i+1]}"
+    i=$((i + 2))
+    continue
+  fi
+  if [[ "${args[i]}" == "--variant" && -n "${args[i+1]:-}" ]]; then
+    variant="${args[i+1]}"
     i=$((i + 2))
     continue
   fi
@@ -209,15 +216,41 @@ cli_cmd=(
 if [[ "$framework" == "torchtitan" ]]; then
   cli_cmd+=(--job.dump_folder "$RUN_DIR/outputs")
 fi
+world_size=$(( ${NNODES:-1} * ${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}} ))
+# Per-model overrides the config YAML does not carry (model_overrides.py). They come first
+# so the caller's arguments and PRIMUS_EXTRA_ARGS can still replace any of them.
+model_args=()
+if [[ "$framework" == "megatron" ]]; then
+  overrides_script="${script_dir}/model_overrides.py"
+  [[ -f "$RUN_DIR/model_overrides.py" ]] && overrides_script="$RUN_DIR/model_overrides.py"
+  if ! overrides_out="$(python3 "$overrides_script" "$EXP" --device "${PRIMUS_GPU_MODEL:-}" \
+                          --world-size "$world_size" --variant "$variant")"; then
+    echo "ERROR: $overrides_script failed for $EXP" >&2
+    exit 1
+  fi
+  [[ -n "$overrides_out" ]] && mapfile -t model_args <<< "$overrides_out"
+  if [[ -n "$variant" && ${#model_args[@]} -eq 0 ]]; then
+    echo "ERROR: no '$variant' variant of $(basename "$EXP" .yaml) for ${PRIMUS_GPU_MODEL:-<unset>}" >&2
+    exit 1
+  fi
+  if [[ ${#model_args[@]} -gt 0 ]]; then
+    echo "[primus_train] model overrides${variant:+ ($variant)}: ${model_args[*]}"
+  fi
+elif [[ -n "$variant" ]]; then
+  echo "ERROR: --variant applies to megatron configs only; framework=$framework" >&2
+  exit 1
+fi
+cli_cmd+=("${model_args[@]}")
 # Megatron rejects a global batch size that is not a multiple of micro batch size x
 # data-parallel size, and the configs are tuned for one 8-GPU node. An explicit
-# --global_batch_size from the caller or PRIMUS_EXTRA_ARGS wins.
+# --global_batch_size from the caller or PRIMUS_EXTRA_ARGS wins; one from the model
+# overrides is renormalized like the YAML value.
 caller_args=("${forward_args[@]}" "${knob_args[@]}")
 if [[ "$framework" == "megatron" ]] && ! printf '%s\n' "${caller_args[@]}" | grep -qx -- '--global_batch_size'; then
-  world_size=$(( ${NNODES:-1} * ${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}} ))
   scaleout_script="${script_dir}/scaleout_batch.py"
   [[ -f "$RUN_DIR/scaleout_batch.py" ]] && scaleout_script="$RUN_DIR/scaleout_batch.py"
-  scaleout_gbs="$(python3 "$scaleout_script" "$EXP" --world-size "$world_size" -- "${caller_args[@]}" || true)"
+  scaleout_gbs="$(python3 "$scaleout_script" "$EXP" --world-size "$world_size" \
+                    -- "${model_args[@]}" "${caller_args[@]}" || true)"
   if [[ -n "$scaleout_gbs" ]]; then
     echo "[primus_train] global_batch_size -> $scaleout_gbs for world size $world_size"
     cli_cmd+=(--global_batch_size "$scaleout_gbs")

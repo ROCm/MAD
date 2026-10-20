@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 SRC = Path(__file__).resolve().parents[1]
-HELPERS = ("run.sh", "scaleout_batch.py", "extract_primus_perf.py")
+HELPERS = ("run.sh", "scaleout_batch.py", "extract_primus_perf.py", "model_overrides.py")
 
 STUB_CLI = """\
 #!/usr/bin/env bash
@@ -60,7 +60,8 @@ def make_tree(tmp_path, overrides, framework="megatron", name="toy-BF16-pretrain
     return train / "run.sh", rel, run_dir
 
 
-def run(tmp_path, overrides, *args, env=None, framework="megatron", name="toy-BF16-pretrain"):
+def run(tmp_path, overrides, *args, env=None, framework="megatron", name="toy-BF16-pretrain",
+        expect_ok=True):
     run_sh, rel, run_dir = make_tree(tmp_path, overrides, framework, name)
     base_env = {
         k: v for k, v in os.environ.items()
@@ -80,6 +81,9 @@ def run(tmp_path, overrides, *args, env=None, framework="megatron", name="toy-BF
         ["bash", str(run_sh), "--config_path", rel, *args],
         cwd=run_dir, env=base_env, capture_output=True, text=True,
     )
+    if not expect_ok:
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        return None, None, proc, run_dir
     assert proc.returncode == 0, proc.stdout + proc.stderr
     cli_args = (tmp_path / "args.txt").read_text().split("\n")[:-1]
     cli_env = dict(
@@ -131,6 +135,48 @@ def test_megatron_only_knobs_skipped_for_other_frameworks(tmp_path):
     assert "--train_iters" not in args
     assert overrides_after_config(args)[-2:] == ["--training.steps", "5"]
     assert "apply to megatron configs only" in proc.stderr
+
+
+KIMI = "kimi_k2_thinking-BF16-pretrain"
+
+
+def test_model_overrides_come_first(tmp_path):
+    args, _, _, _ = run(
+        tmp_path, {"micro_batch_size": 4, "global_batch_size": 64}, "--micro_batch_size", "2",
+        name=KIMI,
+    )
+    assert overrides_after_config(args) == [
+        "--micro_batch_size", "1", "--global_batch_size", "128",
+        "--recompute_granularity", "full", "--recompute_method", "uniform",
+        "--recompute_num_layers", "1",
+        "--micro_batch_size", "2",
+    ]
+
+
+def test_variant_selects_its_rules_and_is_not_forwarded(tmp_path):
+    args, _, _, _ = run(tmp_path, {}, "--variant", "proxy", name=KIMI)
+    assert overrides_after_config(args) == [
+        "--num_layers", "3", "--moe_layer_freq", "1",
+        "--micro_batch_size", "1", "--global_batch_size", "32",
+    ]
+    assert "--variant" not in args
+
+
+def test_override_batch_size_is_renormalized(tmp_path):
+    # The 16-GPU rule drops MBS 8 -> 2; DP 16 x MBS 2 makes GBS 24 invalid, so 32.
+    args, _, _, _ = run(
+        tmp_path, {"micro_batch_size": 8, "global_batch_size": 24},
+        name="gpt_oss_120B-BF16-pretrain",
+    )
+    assert overrides_after_config(args) == [
+        "--micro_batch_size", "2", "--recompute_num_layers", "9",
+        "--global_batch_size", "32",
+    ]
+
+
+def test_unknown_variant_fails(tmp_path):
+    _, _, proc, _ = run(tmp_path, {}, "--variant", "proxy", expect_ok=False)
+    assert "no 'proxy' variant of toy-BF16-pretrain for MI355X" in proc.stderr
 
 
 def test_perf_csv_reports_the_run_shape(tmp_path):
