@@ -1,0 +1,47 @@
+_comment:
+- Extra clusters for infx2mad.py --cluster-file. Merged over the built-in
+- table, so an entry may override single fields of a known cluster.
+- ''
+- Every field below exists because something concrete breaks without it.
+- 'Fill them from the cluster, do not guess: a wrong partition wastes a'
+- submission, a wrong arch runs a recipe on a part it was never measured on,
+- and that is the one failure this whole path exists to avoid.
+- ''
+- The dccs-4081 entry below is a TEMPLATE with placeholder values. It is not
+- usable until someone with access fills it in — see the per-field notes.
+dccs-4081:
+  _status: TEMPLATE - placeholder values, do not run as-is
+  arch: gfx942
+  _arch: MI300X/MI325X are both gfx942. Checked against the scenario's gpu_type; a mismatch is refused.
+  partition: FILL_ME
+  _partition: sinfo -s | awk 'NR>1{print $1}' on the login node.
+  gpus_per_node: 8
+  _gpus_per_node: Determines docker_gpus and, for disagg, how worker counts map onto xP/yD node counts.
+  network_interface: FILL_ME
+  _network_interface: Management iface for NCCL_SOCKET_IFNAME / GLOO_SOCKET_IFNAME. `ip -br addr` on a
+    compute node.
+  skip_gpus_directive: false
+  _skip_gpus_directive: 'true only when GPUs are NOT configured as a Slurm GRES (as on Ruby), in which
+    case #SBATCH --gpus-per-node must not be emitted. Check `scontrol show config | grep -i gres`.'
+  run_as_submitting_user: false
+  _run_as_submitting_user: 'true when the MAD workspace sits on an NFS export with root_squash: in-container
+    root lands as nobody and madengine''s own `mkdir run_directory` and `cp --preserve=all` fail. Check
+    with `mount | grep <workspace fs>` or just try one run.'
+  exclude_nodes: ''
+  _exclude_nodes: Comma-separated nodes whose sssd/PAM is broken, where passwordless sudo refuses and
+    every docker call dies before the model loads. Probe with probe_sudo.sh first; this is a snapshot,
+    not an invariant.
+  fabric_env:
+    _note: Only multi-node (disagg) runs read this. Mirror whatever the RCCL CI's CLUSTER_CONFIGS uses
+      for the same cluster so both arms describe one cluster.
+    NCCL_IB_DISABLE: '0'
+    NCCL_IB_HCA: FILL_ME
+    IB_DEVICES: FILL_ME
+    MORI_RDMA_DEVICES: FILL_ME
+    NCCL_IB_GID_INDEX: FILL_ME
+    MORI_IB_GID_INDEX: FILL_ME
+    NCCL_SOCKET_IFNAME: FILL_ME
+    GLOO_SOCKET_IFNAME: FILL_ME
+    MORI_SOCKET_IFNAME: FILL_ME
+    RDMAV_DRIVERS: FILL_ME
+    IBV_DRIVERS: FILL_ME

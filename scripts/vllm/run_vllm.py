@@ -239,6 +239,46 @@ def run_throughput(model, config):
 
     return results
 
+
+def _load_infx_agentic():
+    """Import the shared agentic body from scripts/common/.
+
+    Imported lazily, not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    import sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines."""
+    infx_agentic = _load_infx_agentic()
+    server_cmd = (
+        "vllm serve "
+        f"{model} "
+        f"--dtype {config['dtype']} "
+        f"-tp {config['tp']} "
+        f"--trust-remote-code "
+        f"--disable-uvicorn-access-log "
+    )
+    env = config.pop("env", "")
+    extra_args = config.pop("extra_args", "")
+    config.pop("random_range_ratio", None)
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    return infx_agentic.run_agentic(
+        model, config, "vllm", server_cmd, "localhost", 8000, 1800
+    )
+
+
 def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
@@ -462,6 +502,8 @@ def main():
                 results = run_latency(model, config)
             elif benchmark == "throughput":
                 results = run_throughput(model, config)
+            elif benchmark == "agentic":
+                results = run_agentic_point(model, config)
             elif benchmark == "serving":
                 results = run_serving(model, config)
             else:

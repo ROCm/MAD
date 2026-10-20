@@ -54,5 +54,49 @@
         "timeout": -1,
         "skip_gpu_arch": "gfx942",
         "args": "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
+    },
+    {
+        "name": "infx-dsr1-fp8-mi355x-sglang",
+        "url": "",
+        "dockerfile": "../../docker/pyt_infx",
+        "scripts": "run_infx.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1-0528.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "inferencex",
+            "dsr1",
+            "gfx950"
+        ],
+        "timeout": 14400,
+        "args": "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/dsr1_infx.yaml --variant all",
+        "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --security-opt seccomp=unconfined --cap-add IPC_LOCK --ulimit memlock=-1 -u 100772:100772"
+    },
+    {
+        "name": "infx-glm5.2-fp8-mi355x-sglang-agentic-mtp",
+        "url": "",
+        "dockerfile": "../../docker/pyt_infx",
+        "scripts": "run_infx.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_GLM-5.2-FP8.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference",
+            "inferencex",
+            "glm5.2",
+            "gfx950"
+        ],
+        "timeout": 14400,
+        "args": "--model_repo zai-org/GLM-5.2-FP8 --config configs/glm5.2_infx.yaml --variant all",
+        "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --security-opt seccomp=unconfined --cap-add IPC_LOCK --ulimit memlock=-1 -u 100772:100772"
     }
 ]

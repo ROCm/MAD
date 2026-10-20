@@ -1,0 +1,41 @@
+_comment:
+- gfx942 cluster dccs-4081-slurm.cs-aus.dcgpu. Every value below was read off
+- 'the cluster on 2026-10-13, not guessed. Use with:'
+- '  infx2mad.py --cluster dccs-4081 --cluster-file clusters.dccs.json ...'
+- ''
+- 'Reachability: Ruby cannot open TCP to this cluster (ICMP passes, every port'
+- filtered); the channel only opens outbound from dccs. Work through a reverse
+- 'tunnel started THERE:'
+- '  ssh -f -N -R 2222:localhost:22 ilkosare@ruby-slurmlogin01...'
+- ''
+- 'BLOCKER before anything runs here: there is no shared model store. The only'
+- shared filesystem is per-user NFS home at a 100 GB quota (51 GB free), and
+- /mnt is node-LOCAL (1.3 TB free, not visible to other nodes). The gfx942
+- scenarios want 600-800 GB checkpoints, so a weights story has to exist
+- before a run is attempted. Translation works today; execution does not.
+- ''
+- 'Also node-local-only: no RDMA. /sys/class/infiniband is empty and `rdma link`'
+- lists nothing, so the multi-node disagg scenarios cannot run here at all.
+- Only single-node (aggregated) scenarios are candidates.
+- ''
+- 'One-time prerequisite: the NFS home is mode 0700, and dockerd (as root,'
+- squashed to nobody) cannot even traverse it, so a bind mount fails with
+- '''error while creating mount source path ... permission denied''. Run'
+- '`chmod o+x $HOME` once.'
+dccs-4081:
+  arch: gfx942
+  partition: compute
+  gpus_per_node: 8
+  network_interface: eno8303
+  skip_gpus_directive: false
+  _skip_gpus_directive: GresTypes=gpu and nodes advertise gpu:amd_instinct_mi300x_oam:8, so unlike Ruby
+    the --gpus-per-node directive is valid and must be emitted.
+  run_as_submitting_user: true
+  _run_as_submitting_user: 'Verified: in-container root can write a 0777 dir on the NFS home, but `cp
+    --preserve=all` returns 1 — the same root_squash failure that breaks madengine on Ruby.'
+  exclude_nodes: ''
+  _exclude_nodes: Not probed yet; 8 nodes total. Run tools/probe_sudo.sh over them before a first real
+    run.
+  fabric_env: {}
+  _fabric_env: 'Deliberately empty: no RDMA devices on this cluster, so there is nothing to point NCCL_IB_HCA
+    at. Multi-node scenarios are out of scope here.'

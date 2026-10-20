@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Disaggregated prefill/decode scenarios -> madengine manifests.
+
+Separate from the aggregated emitters because scripts/sglang_disagg has a
+different contract: it is driven by args and env (xP prefill nodes, yD decode
+nodes, SGLANG_TP_SIZE, KV_TRANSFER_BACKEND, BENCHMARK_CONCURRENCY_LEVELS) rather
+than by a config YAML, and it spans several nodes.
+
+One manifest per search-space point, not one per scenario: a point fixes the
+topology (how many prefill and decode nodes, which TP, whether DP-attention is
+on), and those are launcher arguments, so two points cannot share a manifest.
+
+Two shapes the launcher cannot express, declared rather than approximated:
+  * asymmetric TP. scripts/sglang_disagg/run.sh resolves one SGLANG_TP_SIZE into
+    IO_EP_TP_SIZE for both roles, so a point with prefill tp=4 and decode tp=8
+    has no faithful mapping.
+  * a worker smaller than a node. xP and yD are NODE counts; the point states
+    workers. They coincide only while tp equals the node's GPU count.
+"""
+
+import os
+
+
+def _worker_nodes(role, gpus_per_node):
+    """Nodes a role occupies, or None when a worker does not fill a node."""
+    tp = int(role["tp"])
+    workers = int(role.get("num-worker", 1))
+    if tp > gpus_per_node:
+        if tp % gpus_per_node:
+            return None
+        return workers * (tp // gpus_per_node)
+    if tp != gpus_per_node:
+        return None
+    return workers
+
+
+def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
+                cluster, runner, timeout, slurm_time, weights_dir, model_host_dir,
+                gpu_arch, resolve_mounts):
+    """-> (manifest dict, notes) for one search-space point."""
+    notes = []
+    gpus_per_node = cluster["gpus_per_node"]
+    prefill, decode = point["prefill"], point["decode"]
+
+    if int(prefill["tp"]) != int(decode["tp"]):
+        raise ValueError(
+            f"asymmetric TP (prefill tp={prefill['tp']}, decode tp={decode['tp']}); "
+            "scripts/sglang_disagg resolves a single SGLANG_TP_SIZE for both roles"
+        )
+    tp = int(prefill["tp"])
+    xP, yD = _worker_nodes(prefill, gpus_per_node), _worker_nodes(decode, gpus_per_node)
+    if xP is None or yD is None:
+        raise ValueError(
+            f"tp={tp} does not fill a {gpus_per_node}-GPU node, so the point's worker "
+            "counts cannot be expressed as the launcher's xP/yD node counts"
+        )
+
+    model = scenario["model"]
+    model_dir = os.path.basename(model)
+    mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
+    key = f"infx-{scenario_key}-p{idx}"
+    arch = gpu_arch
+
+    kv = scenario.get("kv-p2p-transfer") or "nixl"
+    dp_mode = 1 if (prefill.get("dp-attn") or decode.get("dp-attn")) else 0
+    conc = " ".join(str(c) for c in point["conc-list"])
+    # Only fixed-seq-len states a sequence shape; an agentic replay has none.
+    isl = workload.get("isl")
+    osl = workload.get("osl")
+
+    if int(prefill.get("ep", 1)) != int(decode.get("ep", 1)):
+        notes.append(
+            f"prefill ep={prefill.get('ep')} but decode ep={decode.get('ep')}; the "
+            "launcher derives EP from DP_MODE and TP, so the two roles cannot differ"
+        )
+    for setting in prefill.get("additional-settings", []) or []:
+        notes.append(f"prefill carries an InferenceX-side override not mapped: {setting}")
+    if scenario.get("router"):
+        notes.append(
+            f"scenario pins router {scenario['router'].get('name')} "
+            f"{scenario['router'].get('version')}; the launcher uses the router its "
+            "image ships"
+        )
+
+    env_vars = {
+        "MODEL_NAME": model_dir,
+        "MODEL_PATH": model_path,
+        "RUN_MORI": "1" if kv == "mori" else "0",
+        "DP_MODE": str(dp_mode),
+        "xP": str(xP),
+        "yD": str(yD),
+        "SGLANG_TP_SIZE": str(tp),
+        "GPUS_PER_NODE": str(gpus_per_node),
+        "KV_TRANSFER_BACKEND": kv,
+        "BENCHMARK_CONCURRENCY_LEVELS": conc,
+        "BENCHMARK_FAIL_FAST": "1",
+        "NCCL_DEBUG": "WARN",
+    }
+    if isl is not None and osl is not None:
+        env_vars["BENCHMARK_COMBINATIONS"] = f"{int(isl)}/{int(osl)}"
+    if workload_name == "agentic-coding":
+        # The disagg launcher already has the agentic hook; selecting it is a
+        # single env var, which is why agentic needed new code only on the
+        # aggregated side.
+        env_vars["BENCHMARK_SCRIPT_FILE"] = "benchmark_agentic.sh"
+        env_vars["AGENTIC_CONC"] = conc
+        env_vars.pop("BENCHMARK_COMBINATIONS", None)
+
+    nodes = xP + yD
+    gpus = ",".join(str(i) for i in range(gpus_per_node))
+    args = (
+        f"--model-name {model_dir} --model-path {model_path} "
+        f"--run-mori {env_vars['RUN_MORI']} --dp-mode {dp_mode} "
+        f"--xp {xP} --yd {yD} --gpus-per-node {gpus_per_node} "
+        f"--kv-transfer-backend {kv}"
+    )
+
+    manifest = {
+        "built_images": {
+            key: {
+                "model": key,
+                "docker_image": f"mad-infx-{scenario['model-prefix']}-disagg:{arch}",
+                "dockerfile": "docker/pyt_infx.ubuntu.amd.Dockerfile",
+                "base_docker": scenario["image"],
+                "build_duration": 0,
+                "local_image": True,
+                "registry_image": None,
+                "registry": None,
+                "gpu_vendor": "AMD",
+            }
+        },
+        "built_models": {
+            key: {
+                "name": key,
+                "url": "",
+                "dockerfile": "docker/pyt_infx.ubuntu.amd.Dockerfile",
+                "scripts": f"scripts/{runner['dir']}/run.sh",
+                "data": "",
+                "n_gpus": "-1",
+                "owner": "mad.support@amd.com",
+                "training_precision": "",
+                "multiple_results": f"perf_sglang-disagg-{model_dir}.csv",
+                "tags": ["pyt", "sglang", "disagg", "inference", "inferencex",
+                         scenario["model-prefix"], arch],
+                "timeout": timeout,
+                "args": args,
+                "additional_docker_run_options": (
+                    "--privileged --group-add render --shm-size 64G "
+                    "--device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 "
+                    "--ulimit nofile=1048576:1048576 -v /sys:/sys:ro "
+                    "-v /sys/class/infiniband:/sys/class/infiniband:ro "
+                    "-v /run/udev:/run/udev:ro"
+                    + (f" -u {os.getuid()}:{os.getgid()}"
+                       if cluster.get("run_as_submitting_user") else "")
+                ),
+            }
+        },
+        "context": {
+            "skip_perf_collection": False,
+            "docker_env_vars": dict(env_vars, MAD_SYSTEM_GPU_ARCHITECTURE=arch,
+                                    **cluster.get("fabric_env", {})),
+            "docker_mounts": dict(mounts, **{"/dev/infiniband": "/dev/infiniband",
+                                             "/sys/class/infiniband": "/sys/class/infiniband"}),
+            "docker_build_arg": dict(
+                {"BASE_DOCKER": scenario["image"]},
+                **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
+                   if cluster.get("run_as_submitting_user") else {}),
+            ),
+            "gpu_vendor": "AMD",
+            "guest_os": "UBUNTU",
+            "docker_gpus": gpus,
+        },
+        "credentials_required": [],
+        "summary": {"successful_builds": [], "failed_builds": [], "total_build_time": 0,
+                    "successful_pushes": [], "failed_pushes": []},
+        "deployment_config": {
+            "target": "slurm",
+            "slurm": {
+                "partition": cluster["partition"],
+                "nodes": nodes,
+                "gpus_per_node": gpus_per_node,
+                "time": slurm_time,
+                "output_dir": "./slurm_output",
+                "exclusive": True,
+                "network_interface": cluster["network_interface"],
+                "skip_gpus_directive": cluster["skip_gpus_directive"],
+                **({"exclude": cluster["exclude_nodes"]} if cluster.get("exclude_nodes") else {}),
+            },
+            "distributed": {
+                "launcher": "sglang-disagg",
+                "backend": "nccl",
+                "port": 29500,
+                "nnodes": nodes,
+                "nproc_per_node": gpus_per_node,
+                "sglang_disagg": {"prefill_nodes": xP, "decode_nodes": yD},
+            },
+            "env_vars": dict(env_vars, **cluster.get("fabric_env", {})),
+            "monitor": True,
+            "debug": False,
+            "docker_gpus": gpus,
+            "gpus_per_node": gpus_per_node,
+        },
+        "_infx_provenance": {
+            "scenario": scenario_key,
+            "master_config": "configs/amd-master.yaml",
+            "framework": scenario["framework"],
+            "mad_runner": f"scripts/{runner['dir']}",
+            "workload": workload_name,
+            "precision": scenario["precision"],
+            "point_index": idx,
+            "topology": {"prefill_nodes": xP, "decode_nodes": yD, "tp": tp,
+                         "ep": point["prefill"].get("ep"), "dp_attn": bool(dp_mode),
+                         "kv_p2p_transfer": kv},
+            "concurrency": point["conc-list"],
+            "fidelity_gaps": notes,
+        },
+    }
+    return manifest, notes
