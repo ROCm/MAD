@@ -13,6 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 SRC = Path(__file__).resolve().parents[1]
@@ -199,8 +200,18 @@ def test_perf_csv_reports_the_run_shape(tmp_path):
 def test_rccl_log_dir_gives_each_rank_a_file(tmp_path):
     log_dir = tmp_path / "rccl_logs"
     _, env, _, _ = run(tmp_path, {}, env={"RCCL_LOG_DIR": str(log_dir)})
-    assert env["NCCL_DEBUG_FILE"] == f"{log_dir}/toy-BF16-pretrain.node_1.%h.%p.log"
+    assert env["NCCL_DEBUG_FILE"] == f"{log_dir}/BF16.node_1.%h.%p.log"
     assert log_dir.is_dir()
+
+
+@pytest.mark.parametrize("name, phase", [
+    ("llama3.1_8B-MXFP8-pretrain", "MXFP8"),
+    ("mamba_130M_pretrain", "run"),
+])
+def test_rccl_log_name_leads_with_the_precision(tmp_path, name, phase):
+    log_dir = tmp_path / "rccl_logs"
+    _, env, _, _ = run(tmp_path, {}, env={"RCCL_LOG_DIR": str(log_dir)}, name=name)
+    assert env["NCCL_DEBUG_FILE"] == f"{log_dir}/{phase}.node_1.%h.%p.log"
 
 
 def test_unwritable_rccl_log_dir_keeps_stdout(tmp_path):

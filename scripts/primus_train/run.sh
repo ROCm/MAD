@@ -178,9 +178,14 @@ fi
 # A directory RCCL cannot write to is worse than none: RCCL drops the output instead of
 # falling back to stdout. The container writes as root squashed to nobody on NFS, so the
 # directory has to be world-writable; when it is not, say so and keep the logs in stdout.
+# Files are <PRECISION>.node_<N>.<host>.<pid>.log: the mad-profiling primus engine reads the
+# phase and node off the first two dot-separated fields, and config names carry dots
+# (llama3.1_8B-...), so the config name cannot lead.
 if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
   if mkdir -p "$RCCL_LOG_DIR" 2>/dev/null && [[ -w "$RCCL_LOG_DIR" ]]; then
-    export NCCL_DEBUG_FILE="$RCCL_LOG_DIR/$(basename "$EXP" .yaml).node_${NODE_RANK:-0}.%h.%p.log"
+    rccl_phase="$(basename "$EXP" .yaml | tr '[:lower:]' '[:upper:]' \
+                    | grep -oE 'MXFP8|MXFP4|BF16|FP16|FP8|FP4' | head -n1 || true)"
+    export NCCL_DEBUG_FILE="$RCCL_LOG_DIR/${rccl_phase:-run}.node_${NODE_RANK:-0}.%h.%p.log"
     echo "[primus_train] RCCL logs go to $NCCL_DEBUG_FILE (one file per rank)"
   else
     unset NCCL_DEBUG_FILE
