@@ -177,9 +177,16 @@ RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update && \
 # add_needed() adds librocm_smi64 to NEEDED idempotently (skips if already
 # present, so re-running never appends duplicates) and FAILS the build if
 # patchelf cannot apply it -- `import torch` depends on this resolving rsmi_init.
+# It is a no-op for a librccl with no undefined rsmi_* symbols: RCCL built
+# against amd-smi (rocm/primus:v26.8 ships libamd_smi.so.27 and no
+# librocm_smi64 at all) would otherwise gain a NEEDED entry nothing provides,
+# and `import torch` fails to dlopen it.
 RUN set -e && \
     add_needed() { \
       local lib="$1"; \
+      if [ "$(nm -D --undefined-only "$lib" | grep -cE '[[:space:]]rsmi_' || true)" -eq 0 ]; then \
+        echo "  add_needed: $lib does not use rocm_smi, skipped"; return 0; \
+      fi; \
       if objdump -p "$lib" | grep -qE "NEEDED[[:space:]]+librocm_smi64"; then \
         echo "  add_needed: already present in $lib"; return 0; \
       fi; \
