@@ -277,6 +277,11 @@ def main():
         default=None,
         help="Fallback world_size when the log has no printed TPS (Megatron-Bridge)",
     )
+    parser.add_argument(
+        "--micro-batch-size",
+        default="",
+        help="Fallback micro batch size when the log has no argument dump (non-zero ranks)",
+    )
     parser.add_argument("--mode", default="", help="Training suite for the CSV (pretrain/posttrain)")
     parser.add_argument("--device", default="", help="GPU model for the CSV (e.g. MI355X)")
     args = parser.parse_args()
@@ -303,7 +308,7 @@ def main():
     shape = {
         "mode": args.mode,
         "precision": precision_from_name(os.path.basename(args.log_path)),
-        "batch_size": metrics.get("batch_size") or "",
+        "batch_size": metrics.get("batch_size") or args.micro_batch_size,
         "global_batch_size": metrics.get("global_batch_size") or "",
         "seq_len": metrics.get("seq_len") or "",
         "device": args.device,

@@ -251,9 +251,9 @@ cli_cmd+=("${model_args[@]}")
 # --global_batch_size from the caller or PRIMUS_EXTRA_ARGS wins; one from the model
 # overrides is renormalized like the YAML value.
 caller_args=("${forward_args[@]}" "${knob_args[@]}")
+scaleout_script="${script_dir}/scaleout_batch.py"
+[[ -f "$RUN_DIR/scaleout_batch.py" ]] && scaleout_script="$RUN_DIR/scaleout_batch.py"
 if [[ "$framework" == "megatron" ]] && ! printf '%s\n' "${caller_args[@]}" | grep -qx -- '--global_batch_size'; then
-  scaleout_script="${script_dir}/scaleout_batch.py"
-  [[ -f "$RUN_DIR/scaleout_batch.py" ]] && scaleout_script="$RUN_DIR/scaleout_batch.py"
   scaleout_gbs="$(python3 "$scaleout_script" "$EXP" --world-size "$world_size" \
                     -- "${model_args[@]}" "${caller_args[@]}" || true)"
   if [[ -n "$scaleout_gbs" ]]; then
@@ -301,6 +301,12 @@ print("" if sl is None or sl == "" else sl)
     num_gpus=8
   fi
   [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
+  # Megatron dumps its arguments on rank 0 only, and the last node, which reports the
+  # throughput, does not run rank 0: resolve the micro batch size the run used here.
+  if [[ "$framework" == "megatron" ]]; then
+    micro_batch="$(python3 "$scaleout_script" "$EXP" --micro-batch -- "${cli_cmd[@]}" 2>/dev/null || true)"
+    [[ -n "$micro_batch" ]] && extract_args+=(--micro-batch-size "$micro_batch")
+  fi
   extract_args+=(--num-gpus "$num_gpus" --mode "$suite" --device "${PRIMUS_GPU_MODEL:-}")
   set +e
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"

@@ -53,6 +53,17 @@ def test_unresolvable_values_are_left_alone():
     assert adjusted({"global_batch_size": 32}, 16) is None
 
 
+def test_micro_batch_prints_the_effective_value(capsys):
+    cfg = "modules:\n  pre_trainer:\n    overrides:\n      micro_batch_size: 16\n"
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        f.write(cfg)
+    args = ["--micro_batch_size", "4", "--micro_batch_size", "2"]
+    assert _mod.main([f.name, "--micro-batch", "--", *args]) == 0
+    assert capsys.readouterr().out.strip() == "2"
+    assert _mod.main([f.name, "--micro-batch"]) == 0
+    assert capsys.readouterr().out.strip() == "16"
+
+
 def test_cli_overrides_take_precedence(capsys):
     cfg = "modules:\n  pre_trainer:\n    overrides:\n      micro_batch_size: 16\n      global_batch_size: 128\n"
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

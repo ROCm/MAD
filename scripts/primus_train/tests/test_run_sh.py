@@ -30,10 +30,13 @@ for a in "$@"; do
   prev="$a"
 done
 mkdir -p "$(dirname "$log")"
-cat > "$log" <<'EOF'
+: > "$log"
+[[ -n "${STUB_NO_ARG_DUMP:-}" ]] || cat >> "$log" <<'EOF'
   micro_batch_size ................................ 2
   seq_length ...................................... 8192
   world_size ...................................... 16
+EOF
+cat >> "$log" <<'EOF'
  iteration       10/      10 | elapsed time per iteration (ms): 1000.0 | compute per GPU (TFLOP/s/GPU): 500.0 (avg 499.0) | tokens/s/GPU inst/harmonic mean: 1800.0/1799.0 | global batch size:    32 |
 EOF
 """
@@ -195,6 +198,19 @@ def test_perf_csv_reports_the_run_shape(tmp_path):
             "mode": "pretrain", "precision": "BF16", "batch_size": "2",
             "global_batch_size": "32", "seq_len": "8192", "device": "MI355X", "num_gpus": "16",
         }
+
+
+def test_perf_csv_micro_batch_without_an_argument_dump(tmp_path):
+    # Only rank 0 dumps Megatron's arguments; the reporting last node has none, so the
+    # micro batch size comes from the config plus the CLI overrides run.sh passed.
+    _, _, _, run_dir = run(
+        tmp_path, {"micro_batch_size": 4, "global_batch_size": 64, "seq_length": 8192},
+        "--micro_batch_size", "2", env={"STUB_NO_ARG_DUMP": "1"},
+    )
+    with open(run_dir / "primus_perf_output.csv") as f:
+        row = next(csv.DictReader(f))
+    assert row["batch_size"] == "2"
+    assert row["seq_len"] == "8192"
 
 
 def test_rccl_log_dir_gives_each_rank_a_file(tmp_path):

@@ -7,7 +7,11 @@ world size the run aborts before the first step. This prints the smallest valid
 global batch size at or above the configured one, and nothing when the configured
 value is already valid (single-node runs stay unchanged) or cannot be resolved.
 
+With --micro-batch it prints the micro batch size the run uses instead (YAML value
+after CLI overrides), for the perf report.
+
 Usage: scaleout_batch.py <config.yaml> --world-size N [-- <primus cli overrides>]
+       scaleout_batch.py <config.yaml> --micro-batch [-- <primus cli overrides>]
 """
 
 import argparse
@@ -83,12 +87,19 @@ def main(argv=None):
         argv, extra = argv[:split], argv[split + 1:]
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("config")
-    parser.add_argument("--world-size", type=int, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--world-size", type=int)
+    mode.add_argument("--micro-batch", action="store_true")
     args = parser.parse_args(argv)
 
     with open(args.config) as f:
         overrides = dict(trainer_overrides(yaml.safe_load(f)))
     overrides.update(cli_overrides(extra))
+    if args.micro_batch:
+        mbs = resolve_int(overrides.get("micro_batch_size"))
+        if mbs is not None:
+            print(mbs)
+        return 0
     adjusted = adjusted_global_batch_size(overrides, args.world_size)
     if adjusted is not None:
         print(adjusted)
