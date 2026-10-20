@@ -34,7 +34,7 @@ python3 tools/infx2mad.py --infx "$INFX" \
     --out-dir out
 
 # everything that maps to a runner on this cluster, with the gaps named
-python3 tools/infx2mad.py --infx "$INFX" --all --per-framework-config --out-dir out
+python3 tools/infx2mad.py --infx "$INFX" --all --out-dir out
 
 # check every generated block against the target runner's CSV schema
 python3 tools/validate_configs.py . out

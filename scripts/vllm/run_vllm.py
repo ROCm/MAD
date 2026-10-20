@@ -293,9 +293,11 @@ def run_serving(model, config):
         f"--trust-remote-code "
         f"--disable-uvicorn-access-log "
     )
-    # pop env and extra args from config
+    # pop env, extra args and the bench-only knob from config: everything left
+    # in config lands in the CSV row, whose columns are fixed by CSV_HEADER.
     env = config.pop('env', "")
     extra_args = config.pop('extra_args', "")
+    random_range_ratio = config.pop('random_range_ratio', 1.0)
     server_cmd = f"{env} {server_cmd} {extra_args}".strip()
     config["cmd"] = server_cmd
 
@@ -338,6 +340,10 @@ def run_serving(model, config):
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
+            # 1.0 means every prompt is exactly inp tokens. A recipe that
+            # jitters input length has to be able to say so, or its numbers are
+            # not reproducible here.
+            f"--random-range-ratio {random_range_ratio} "
             f"--save-result "
             f"--result-filename {output_json}"
         )

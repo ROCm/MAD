@@ -327,16 +327,19 @@ def enumerate_points(recipe, tp, point=None):
             f"no override block for tp={tp} in recipe {recipe['base']['name']!r}")
 
 
-def base_extra_args(recipe):
-    """Recipe base args -> runner extra_args, minus what the runner emits itself.
+def effective_args(recipe, point_args):
+    """Base args overlaid with the point's, then filtered.
 
-    Booleans need care: the runners render any bool as a bare flag, so a `false`
-    would be emitted as `--enable-metrics` and turn the option ON. A recipe arg
-    set to false means "leave it off", which the engines spell by omitting the
-    flag, so drop it here.
+    Order matters. Filtering false values out of the base BEFORE the overlay
+    would let a base `true` survive a point that sets the same flag to false --
+    DeepSeek-V4 enables enforce-shared-experts-fusion in its base and disables
+    it for the MegaMoE points. Merge raw, then drop runner-owned args and the
+    flags whose effective value is false, which the engines spell by omitting
+    them.
     """
-    args = _agg(recipe["base"]).get("args", {})
-    return {f"--{k}": v for k, v in args.items()
+    merged = dict(_agg(recipe["base"]).get("args", {}))
+    merged.update(point_args)
+    return {f"--{k}": v for k, v in merged.items()
             if k not in RUNNER_OWNED_ARGS and v is not False}
 
 
@@ -363,9 +366,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, _, point_env_srv in enumerate_points(recipe, tp, point):
-            extra = base_extra_args(recipe)
-            extra.update({f"--{k}": v for k, v in point_args.items()
-                          if k not in RUNNER_OWNED_ARGS and v is not False})
+            extra = effective_args(recipe, point_args)
             block = {
                 "benchmark": "serving",
                 "model": base["model"]["path"].removeprefix("hf:"),
@@ -402,9 +403,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, point_env, point_env_srv in enumerate_points(recipe, tp, point):
-            extra = base_extra_args(recipe)
-            extra.update({f"--{k}": v for k, v in point_args.items()
-                          if k not in RUNNER_OWNED_ARGS and v is not False})
+            extra = effective_args(recipe, point_args)
             # agentic_lib.sh is driven by env, not CLI. KV_OFFLOADING is
             # required by its aggregation step; the recipe states it per point.
             agentic_env = {
@@ -417,8 +416,12 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             # also set client timeouts (AIPERF_HTTP_TCP_USER_TIMEOUT) that the
             # shared hook does not restore, and a missed one silently changes
             # the measurement.
-            for k, v in bench_env.items():
-                if k.startswith("AIPERF_") or k == "WEKA_LOADER_OVERRIDE":
+            # The point's own benchmark env overrides the base: DeepSeek-V4's
+            # overrides set AGENTIC_WARMUP_GRACE_PERIOD and an AIPerf routing
+            # key, and the hook would otherwise use its own defaults.
+            for k, v in {**bench_env, **point_env}.items():
+                if (k.startswith("AIPERF_") or k.startswith("AGENTIC_")
+                        or k == "WEKA_LOADER_OVERRIDE"):
                     agentic_env[k] = str(v)
             # The hook picks the trace corpus from MODEL_PREFIX when the recipe
             # states no explicit loader. Without it every model falls back to
@@ -725,11 +728,9 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
                 cluster, runner, args.timeout, args.slurm_time,
                 args.weights_dir, args.model_host_dir, arch, resolve_mounts,
                 mad_dir=args.mad_dir, infx_commit=infx_revision(args.infx),
-                run_logs_host=args.run_logs_dir)
+                run_logs_host=args.run_logs_dir,
+                base_image_override=args.base_image)
             if args.base_image:
-                k = next(iter(man["built_images"]))
-                man["built_images"][k]["base_docker"] = args.base_image
-                man["context"]["docker_build_arg"]["BASE_DOCKER"] = args.base_image
                 man["_infx_provenance"]["fidelity_gaps"].append(
                     f"image replaced: {scenario['image']} -> {args.base_image}")
         except ValueError as exc:
@@ -802,7 +803,11 @@ def _translate_one(args, scenario_key, out_dir):
         notes.append("SMOKE ARTIFACT, not an InferenceX-comparable row: " + "; ".join(smoke))
 
     os.makedirs(out_dir, exist_ok=True)
-    cfg_name = f"{prefix}_{fw}_infx.yaml" if args.per_framework_config else f"{prefix}_infx.yaml"
+    # The scenario key, not just the prefix: the FP4, FP8 and MTP SGLang
+    # DeepSeek scenarios share a prefix and framework, so a prefix-only name
+    # has them overwrite one another's staged config and earlier manifests then
+    # run whichever was written last.
+    cfg_name = f"{scenario_key}_infx.yaml"
     # The runner resolves --config relative to its own directory, so the file
     # has to exist there. Write it straight into the MAD checkout when we know
     # it; otherwise say plainly that it still has to be staged, because a
@@ -881,8 +886,9 @@ def main():
                     help="SBATCH --time; a full ladder reloads the checkpoint once per "
                          "point, so size it against the model, not the point count")
     ap.add_argument("--per-framework-config", action="store_true",
-                    help="name configs <prefix>_<framework>_infx.yaml, so two "
-                         "frameworks serving the same model do not collide")
+                    help="accepted and ignored; config names are keyed by "
+                         "scenario, which already separates frameworks and the "
+                         "precision/spec-decoding variants that share a prefix")
     ap.add_argument("--mad-dir", default=".",
                     help="MAD checkout, read for scripts/sglang_disagg/models.yaml "
                          "when translating a disaggregated scenario")

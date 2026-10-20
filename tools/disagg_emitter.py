@@ -21,6 +21,8 @@ Two shapes the launcher cannot express, declared rather than approximated:
 import os
 import yaml
 
+from infx2mad import image_tag
+
 
 def catalog_name(mad_dir, model_dir):
     """The launcher's own key for this checkpoint.
@@ -63,7 +65,7 @@ def _worker_nodes(role, gpus_per_node):
 def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                 cluster, runner, timeout, slurm_time, weights_dir, model_host_dir,
                 gpu_arch, resolve_mounts, mad_dir=".", infx_commit="unknown",
-                run_logs_host=None):
+                run_logs_host=None, base_image_override=None):
     """-> (manifest dict, notes) for one search-space point."""
     notes = []
     gpus_per_node = cluster["gpus_per_node"]
@@ -97,13 +99,30 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     key = f"infx-{scenario_key}-p{idx}"
     arch = gpu_arch
 
+    # The override has to be known here, not patched in afterwards: it feeds the
+    # image tag, and a tag computed from the pre-override image would let a
+    # plain build and an overlay build share it.
+    image = base_image_override or scenario["image"]
+    build_args = dict(
+        {"BASE_DOCKER": image},
+        **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
+           if cluster.get("run_as_submitting_user") else {}),
+    )
     kv = scenario.get("kv-p2p-transfer") or "nixl"
     dp_mode = 1 if dp_attn else 0
-    if dp_mode and (xP, yD) != (int(prefill.get("num-worker", 1)), int(decode.get("num-worker", 1))):
-        raise ValueError(
-            f"DP_MODE=1 derives each role's degrees from its node count, which "
-            f"would merge {prefill.get('num-worker')} prefill / "
-            f"{decode.get('num-worker')} decode workers into one group per role")
+    if dp_mode:
+        # With DP_MODE=1 the launcher builds ONE group per role whose degree is
+        # nodes x GPUS_PER_NODE, regardless of SGLANG_TP_SIZE. Two TP8 workers
+        # on 8-GPU nodes therefore become a single TP16 group while the point
+        # asked for two TP8 ones, so compare the derived degree with the
+        # requested TP rather than node counts with worker counts.
+        for role_name, role, nodes_of_role in (("prefill", prefill, xP), ("decode", decode, yD)):
+            derived = nodes_of_role * gpus_per_node
+            if derived != int(role["tp"]):
+                raise ValueError(
+                    f"DP_MODE=1 gives {role_name} one TP{derived}/EP{derived} group "
+                    f"({nodes_of_role} node(s) x {gpus_per_node} GPUs), but the point "
+                    f"asks for {role.get('num-worker', 1)} x TP{role['tp']}")
     catalog = catalog_name(mad_dir, model_dir)
     conc = " ".join(str(c) for c in point["conc-list"])
     # Only fixed-seq-len states a sequence shape; an agentic replay has none.
@@ -117,6 +136,18 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         )
     for setting in prefill.get("additional-settings", []) or []:
         notes.append(f"prefill carries an InferenceX-side override not mapped: {setting}")
+    # The launcher is driven by its own catalog entry, and this emitter does not
+    # read the point's srt-recipe, so per-role serving settings -- speculative
+    # decoding and draft configuration among them -- come from MAD's catalog
+    # rather than from the scenario.
+    if point.get("spec-decoding", "none") != "none":
+        notes.append(
+            f"point selects spec-decoding={point['spec-decoding']}, which the "
+            "catalog-driven launcher does not receive: per-role recipe settings "
+            "are not forwarded by this emitter")
+    notes.append(
+        "per-role serving arguments come from scripts/sglang_disagg/models.yaml, "
+        "not from the point's srt-recipe")
     if scenario.get("router"):
         notes.append(
             f"scenario pins router {scenario['router'].get('name')} "
@@ -165,9 +196,10 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         "built_images": {
             key: {
                 "model": key,
-                "docker_image": f"mad-infx-{scenario['model-prefix']}-disagg:{arch}",
+                "docker_image": image_tag(scenario["model-prefix"], "disagg", arch,
+                                          image, build_args),
                 "dockerfile": "docker/pyt_infx.ubuntu.amd.Dockerfile",
-                "base_docker": scenario["image"],
+                "base_docker": image,
                 "build_duration": 0,
                 "local_image": True,
                 "registry_image": None,
@@ -212,11 +244,7 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                 "/sys/class/infiniband": "/sys/class/infiniband",
                 "/run_logs": run_logs_host or os.path.join(os.getcwd(), "run_logs"),
             }),
-            "docker_build_arg": dict(
-                {"BASE_DOCKER": scenario["image"]},
-                **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
-                   if cluster.get("run_as_submitting_user") else {}),
-            ),
+            "docker_build_arg": build_args,
             "gpu_vendor": "AMD",
             "guest_os": "UBUNTU",
             "docker_gpus": gpus,

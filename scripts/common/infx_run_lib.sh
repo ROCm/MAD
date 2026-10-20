@@ -58,7 +58,12 @@ infx_main() {
     if [[ -z "${HF_HUB_CACHE:-}" ]]; then
         export HF_HUB_CACHE="/myworkspace"
     fi
+    # The per-engine wrappers run under `set -ex`, so assigning the token
+    # plainly would print it to stderr and into every captured run log.
+    local _xtrace_was_on=0
+    case "$-" in *x*) _xtrace_was_on=1; set +x ;; esac
     export HF_TOKEN="${MAD_SECRETS_HFTOKEN:-${HF_TOKEN:-}}"
+    [ "$_xtrace_was_on" -eq 1 ] && set -x
 
     # Download accelerator only. When MAD_DATAHOME points at weights already on
     # the cluster there is nothing to download, and an image without outbound
@@ -72,7 +77,13 @@ infx_main() {
         variant_arg=(--variant "$VARIANT")
     fi
 
-    python3 -u "$runner" --config "$CONFIG" --model "$MODEL" "${variant_arg[@]}"
+    # ATOM auto-merges its sibling configs/perf.yaml, which would fold MAD's
+    # own tuning into a translated recipe without any fidelity note.
+    local extra=()
+    if [[ "$runner" == run_atom.py ]] && grep -q -- "--no-perf-merge" "$runner" 2>/dev/null; then
+        extra=(--no-perf-merge)
+    fi
+    python3 -u "$runner" --config "$CONFIG" --model "$MODEL" "${variant_arg[@]}" "${extra[@]}"
 
     # madengine collects the CSV from the parent of run_directory.
     local model_name
