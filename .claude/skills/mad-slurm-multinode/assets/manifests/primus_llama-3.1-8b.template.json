@@ -53,7 +53,13 @@
     "docker_mounts": {
       "/dev/infiniband": "/dev/infiniband"
     },
-    "docker_build_arg": {},
+    "docker_build_arg": {
+      "BASE_DOCKER": "rocm/primus:v26.8",
+      "BUILD_GPU_TARGETS": "<FILL_GPU_TARGETS  gfx942=MI300X/MI325X, gfx950=MI350X/MI355X>",
+      "RCCL_REPO": "https://github.com/ROCm/rocm-systems.git",
+      "RCCL_BRANCH": "",
+      "RCCL_COMMIT": "<FILL_RCCL_COMMIT  pinned RCCL commit sha; leave RCCL_BRANCH/RCCL_COMMIT empty to keep the base image RCCL>"
+    },
     "gpu_vendor": "AMD",
     "guest_os": "UBUNTU",
     "docker_gpus": "0,1,2,3,4,5,6,7"
