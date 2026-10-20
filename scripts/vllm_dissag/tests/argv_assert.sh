@@ -116,7 +116,7 @@ optin = [m for m, c in y.items()
 print("[" + ",".join(sorted(optin)) + "]")
 PY
 )"
-_has "$_OPTIN_RM" "[GLM-5.3-Flash-FP8-gfx942]" "models.yaml: GLM-5.3-Flash-FP8-gfx942 is the ONLY read_mode opt-in"
+_has "$_OPTIN_RM" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-MXFP4-gfx942]" "models.yaml: the GLM-5.3-Flash gfx942 cards are the ONLY read_mode opt-ins"
 _has "$(cat "$SLURM")" '${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=' "slurm forwards MORIIO_READ_MODE override"
 
 # GLM-5.3-Flash runs MTP on BOTH legs (the transferred KV cache groups must match) with a
@@ -145,7 +145,7 @@ print("[" + ",".join(sorted(m for m, c in y.items()
       if isinstance(c, dict) and (c.get("env") or {}).get("ROUTER_PREFILL_POLICY"))) + "]")
 PY
 )"
-_has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942]" "models.yaml: GLM-5.3-Flash-FP8-gfx942 is the ONLY router-policy opt-in"
+_has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-MXFP4-gfx942]" "models.yaml: the GLM-5.3-Flash gfx942 cards are the ONLY router-policy opt-ins"
 
 # The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
 # with srun stubbed to "find" only the directory FOUND on every node.
@@ -174,14 +174,44 @@ print(sorted({(c["env_vars"]["MODEL_NAME"], c["env_vars"]["MODEL_WEIGHTS_NAME"])
               for c in json.load(open(sys.argv[1])) if "MODEL_WEIGHTS_NAME" in c.get("env_vars", {})}))
 PY
 )"
-_eq "$_CARDS_WN" "[('GLM-5.3-Flash-FP8-gfx942', 'GLM-5.3-Flash-FP8')]" "models.json: only the GLM-5.3 gfx942 cards set MODEL_WEIGHTS_NAME (=GLM-5.3-Flash-FP8)"
+_eq "$_CARDS_WN" "[('GLM-5.3-Flash-FP8-gfx942', 'GLM-5.3-Flash-FP8'), ('GLM-5.3-Flash-MXFP4-gfx942', 'GLM-5.3-Flash-MXFP4')]" "models.json: only the GLM-5.3 gfx942 cards set MODEL_WEIGHTS_NAME (FP8 / MXFP4 dirs)"
 _CARDS_MISS="$(python3 - "$DIR/models.json" <<'PY'
 import json, sys
 print(len([c for c in json.load(open(sys.argv[1]))
-           if c["env_vars"]["MODEL_NAME"] == "GLM-5.3-Flash-FP8-gfx942" and "MODEL_WEIGHTS_NAME" not in c["env_vars"]]))
+           if c["env_vars"]["MODEL_NAME"] in ("GLM-5.3-Flash-FP8-gfx942", "GLM-5.3-Flash-MXFP4-gfx942")
+           and "MODEL_WEIGHTS_NAME" not in c["env_vars"]]))
 PY
 )"
 _eq "$_CARDS_MISS" "0" "models.json: every GLM-5.3 gfx942 card sets MODEL_WEIGHTS_NAME"
+
+# GLM-5.3-Flash-MXFP4: same argv as the FP8 card; the MXFP4 switches come from models.yaml env:, and
+# VLLM_ROCM_MXFP4_MOE_FP8BLOCK reaches the prefill leg only (PREFILL_EXTRA_ENV, exported per leg).
+echo ""
+echo "=== GLM-5.3-Flash-MXFP4 (gfx942): per-leg env, argv identical to the FP8 card ==="
+_out_role() { # model role(0=prefill,1=decode) -> full dry-run output
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" DRY_RUN=1 NODE_RANK="$2" xP=1 yD=1 \
+    CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori MODEL_NAME="$1" MODEL_PATH=/m/GLM53 \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT \
+    PROXY_TYPE=vllm_router ROUTER_PORT=30000 bash "$DIR/vllm_disagg.sh" 2>/dev/null
+}
+_argv_of() { awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f' | tr ' ' '\n'; }
+MP="$(_out_role GLM-5.3-Flash-MXFP4-gfx942 0)"; MD="$(_out_role GLM-5.3-Flash-MXFP4-gfx942 1)"
+FP="$(_out_role GLM-5.3-Flash-FP8-gfx942 0)"; FD="$(_out_role GLM-5.3-Flash-FP8-gfx942 1)"
+_has "$MP" "===LEGENV log_prefix=prefill VLLM_ROCM_MXFP4_MOE_FP8BLOCK=1===" "GLM-5.3 MXFP4 prefill: MoE experts as exact FP8 blocks (per-leg env)"
+_hasnot "$MD" "===LEGENV" "GLM-5.3 MXFP4 decode: no per-leg env (4-bit experts)"
+_hasnot "$FP$FD" "===LEGENV" "GLM-5.3 FP8: no per-leg env"
+_eq "$(_argv_of <<<"$MP")" "$(_argv_of <<<"$FP")" "GLM-5.3 MXFP4 prefill argv == FP8 prefill argv"
+_eq "$(_argv_of <<<"$MD")" "$(_argv_of <<<"$FD")" "GLM-5.3 MXFP4 decode argv == FP8 decode argv"
+_has "$C" 'PREFILL_EXTRA_ENV:-' "moriio.sh: per-leg env is opt-in (empty default)"
+_OPTIN_LEG="$(python3 - "$DIR/models.yaml" <<'PY'
+import sys, yaml
+y = yaml.safe_load(open(sys.argv[1])) or {}
+print("[" + ",".join(sorted(m for m, c in y.items() if isinstance(c, dict)
+      and ({"PREFILL_EXTRA_ENV", "DECODE_EXTRA_ENV"} & set(c.get("env") or {})))) + "]")
+PY
+)"
+_has "$_OPTIN_LEG" "[GLM-5.3-Flash-MXFP4-gfx942]" "models.yaml: GLM-5.3-Flash-MXFP4-gfx942 is the ONLY per-leg env opt-in"
+_eq "$(_probe "$_NV/GLM-5.3-Flash-MXFP4" GLM-5.3-Flash-MXFP4-gfx942 GLM-5.3-Flash-MXFP4)" "$_NV/GLM-5.3-Flash-MXFP4" "probe: GLM-5.3 MXFP4 gfx942 resolves the GLM-5.3-Flash-MXFP4 dir"
 
 echo ""
 echo "======================================================"
