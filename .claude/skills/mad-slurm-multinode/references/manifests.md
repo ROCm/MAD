@@ -114,62 +114,81 @@ differ, the host path belongs on the value side.
 
 ## Per-workload notes
 
-- **Primus** (`primus_pyt_megatron_lm_train_llama-3.1-{8b,70b}_overlay`): uses the
-  `rccl_overlay` Dockerfile; `launcher: torchrun`, `nproc_per_node: 8`.
-  `multiple_results` = `perf_primus-megatron-Llama-3.1-{8B,70B}.csv`. 70B is
-  heavier — give it more walltime / more nodes.
-- **Primus GPT-OSS-120B** (`primus_pyt_megatron_lm_train_gpt-oss-120b_overlay`):
-  same `rccl_overlay` Dockerfile/`torchrun` shape as the Llama-3.1 templates.
-  Verified working at 2 nodes (TP1 x PP2 x VP2 x EP8 = 16 GPU parallelism) with
-  `timeout: 14400` (4h) — the CLI default (7200s/2h) times out on this model;
-  keep the explicit 14400. `multiple_results` =
-  `perf_primus-megatron-GPT-OSS-120B.csv`.
-- **Primus Kimi-K2-Thinking**
-  (`primus_pyt_megatron_lm_train_kimi-k2-thinking_overlay`): 1T-total /
+- **Primus Megatron, shared shape.** Every Primus Megatron template is one
+  `primus_train` model, `primus_train/megatron_<GPU>_<config>`: one Primus config
+  and one precision per model, discovered by `scripts/primus_train/get_models_json.py`
+  from the `scripts/Primus` submodule. The templates ship `<GPU>` = `MI355X`; on
+  another GPU replace it in three places — `name`/`model`, `args`
+  (`--config_path examples/megatron/configs/<GPU>/...`) and
+  `deployment_config.distributed.primus.config_path` — and keep the two paths
+  identical (madengine exports the latter as `PRIMUS_CONFIG_PATH`, which `run.sh`
+  prefers over `--config_path`; without it the run looks for `exp_pretrain.yaml`).
+  For another precision pick the matching config (`llama3.1_8B-FP8-pretrain`,
+  `-MXFP8-`, `-MXFP4-`, ...). `scripts` = `scripts/primus_train/run.sh`,
+  `launcher: primus` (no torchrun wrap: `primus-cli direct` runs torchrun inside
+  the container), image = the `rccl_overlay` Dockerfile on `rocm/primus:v26.8`
+  with the submodule's Primus baked in, `dockercontext` = `.`.
+  `multiple_results` = `primus_perf_output.csv`, one row per metric
+  (`tokens_per_second`, `tflops`, `model_flops_utilization`) with `mode`,
+  `precision`, `batch_size`, `global_batch_size`, `seq_len`, `device`,
+  `num_gpus`. Deployment knobs: `PRIMUS_TRAIN_ITERS`, `PRIMUS_DISABLE_PROFILE=1`,
+  `PRIMUS_EXTRA_ARGS` (any Primus CLI arguments, applied last), `RCCL_LOG_DIR`
+  (one RCCL log per rank). Per-model arguments a config needs to run as
+  benchmarked (Kimi recompute, GPT-OSS memory fallback, Scout tokenizer, proxy
+  shapes) come from `scripts/primus_train/model_overrides.py`; the run log prints
+  them as `[primus_train] model overrides: ...`. SLURM runs need a madengine with
+  the slash-in-model-name fix (develop `2b0a7ff`), because the model name now
+  contains `primus_train/`.
+- **Primus Llama-3.1-8B / 70B** (`..._llama3.1_{8B,70B}-BF16-pretrain`). 70B is
+  heavier — give it more walltime / more nodes. The old 70B FP8 proxy (40 layers,
+  gfx942 only) is `megatron_MI300X_llama3.1_70B-FP8-pretrain-proxy`.
+- **Primus GPT-OSS-120B** (`..._gpt_oss_120B-BF16-pretrain`). Verified working at
+  2 nodes (TP1 x PP2 x VP2 x EP8 = 16 GPU parallelism) with `timeout: 14400`
+  (4h) — the CLI default (7200s/2h) times out on this model; keep the explicit
+  14400. At 16 GPUs or on gfx942, `model_overrides.py` drops MBS to 2 (BF16) / 1
+  (FP8) and recomputes 9 layers: at 16 GPUs DP is 8 and the distributed optimizer
+  no longer fits. MI300X/MI325X models reuse the MI355X config.
+- **Primus Kimi-K2-Thinking** (`..._kimi_k2_thinking-BF16-pretrain`): 1T-total /
   27B-active MLA + MoE (61 layers, 384 experts), BF16 only, EP=192 across
   24 nodes, TP=1, MBS=1, full recompute, seq 4096. It does not fit in less.
   Validated end-to-end: all 50 iterations, `torchrun` exit 0, ~236 tok/s/GPU. **Mock data, 50 iterations, no checkpoint** — a throughput
   benchmark, not a training run (see [gotchas.md](gotchas.md#primus_megatron-training)).
-  Two things differ from the other Primus templates and must be preserved:
-  `"dockercontext": "./docker"` (the overlay Dockerfile `COPY`s the two Kimi
-  YAMLs out of `docker/kimi_k2_configs/`), and the `log_error_patterns` override
-  (torchrun prints a `Traceback` at worker cleanup that would otherwise be
-  scored as a failure). The template does **not** set `PRIMUS_SANITY_TRAIN_ITERS`
-  by default, so it measures full depth — `context.docker_env_vars` reaches
-  every deployment (SLURM included), so setting it there is not a build-only
-  toggle; add it yourself only for a deliberate fast 3-layer CI/sanity pass
-  (see [gotchas.md](gotchas.md#primus_megatron-training)).
+  Its YAMLs are injected by the `rccl_overlay` Dockerfile from
+  `docker/kimi_k2_configs/`, so it exists only on that image. Keep the
+  `log_error_patterns` override (torchrun prints a `Traceback` at worker cleanup
+  that would otherwise be scored as a failure). For a fast 3-layer CI/sanity pass
+  use the `...-pretrain-proxy` model instead (see
+  [gotchas.md](gotchas.md#primus_megatron-training)).
   Reference: 2 nodes / 16 GPU MI355X, BF16, MBS=1 -> ~6487 tok/s/GPU,
   ~96.5 TFLOP/s/GPU (run-to-run spread < 0.02%).
-  Known open issue: no `tokens/s/GPU` line reaches the log for this model, so
-  the perf CSV comes out header-only even on a healthy run. Read throughput off
-  the iteration timestamps instead. The cause is **not** the logging cadence:
+  Known open issue: no `tokens/s/GPU` line reaches the log for this model.
+  `extract_primus_perf.py` then derives tok/s/GPU from the iteration time and
+  global batch size, so the CSV is no longer empty, but cross-check it against
+  the iteration timestamps. The cause is **not** the logging cadence:
   Primus already defaults to `log_interval: 1` / `log_throughput: true`
   (`primus/configs/modules/megatron/pre_trainer.yaml`), the shipped Kimi
   experiment YAML only restates that default, and the 24-node run above was
-  measured with it in place and still produced an empty CSV. Root cause is
+  measured with it in place and still printed no throughput. Root cause is
   still open — do not "fix" it by touching `log_interval`.
-  `multiple_results` = `perf_primus-megatron-Kimi-K2-Thinking.csv`.
-- **Primus Llama-4-Scout-17B-16E**
-  (`primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay`): same
-  `rccl_overlay` Dockerfile / `torchrun` shape. MoE, BF16 only, seq 4096, MBS=1;
-  the shipped config runs EP=8 intra-node with TP=1/PP=1, so scaleout is pure
-  data parallelism and the global batch is renormalised to one micro-batch per
-  rank. Two knobs, both optional:
-  - `SCOUT_MOE_DISPATCHER` (default `alltoall`) — set `allgather` to route the
-    MoE dispatch around a RCCL build that hangs in `ALLTOALL_BASE`; the script
-    then also turns off `moe_shared_expert_overlap`, which is alltoall-only.
-  - `SCOUT_HF_TOKENIZER` (default `unsloth/Llama-4-Scout-17B-16E`) — a non-gated
-    mirror, so the run does not need a per-account Llama-4 license grant. Point
-    it at `meta-llama/Llama-4-Scout-17B-16E` once access is granted.
+- **Primus Llama-4-Scout-17B-16E** (`..._llama4_17B16E-BF16-pretrain`). MoE,
+  BF16 only, seq 4096, MBS=1; the shipped config runs EP=8 intra-node with
+  TP=1/PP=1, so scaleout is pure data parallelism and the global batch is
+  renormalised to one micro-batch per rank. `model_overrides.py` sets the
+  non-gated `unsloth/Llama-4-Scout-17B-16E` tokenizer mirror and the `alltoall`
+  dispatcher. Both used to be env knobs; set them through `PRIMUS_EXTRA_ARGS`
+  now:
+  - `--moe_token_dispatcher_type allgather --moe_shared_expert_overlap false`
+    routes the MoE dispatch around a RCCL build that hangs in `ALLTOALL_BASE`
+    (shared-expert overlap is alltoall-only).
+  - `--tokenizer_model meta-llama/Llama-4-Scout-17B-16E` once the account has the
+    Llama-4 license grant.
   Reference point: 2 nodes / 16 GPU gfx950, BF16, `alltoall` → ~2734 tok/s/GPU,
   ~275 TFLOP/s/GPU on `rocm/primus:v26.3` with RCCL develop `f1be5f14` (the
-  earlier `c67fbe4956` hung in the MoE all-to-all). Reproduced on this template:
-  2749.5 tok/s/GPU, 276.8 TFLOP/s/GPU, 48/48 parsed iterations, 0 RCCL errors.
-  The `v26.3` pin is deliberate — on `v26.5` the run trains to completion but
-  emits no throughput at all, see
-  [gotchas.md](gotchas.md#primus_megatron-training).
-  `multiple_results` = `perf_primus-megatron-Llama-4-Scout-17B-16E.csv`.
+  earlier `c67fbe4956` hung in the MoE all-to-all). Reproduced on the old
+  template: 2749.5 tok/s/GPU, 276.8 TFLOP/s/GPU, 48/48 parsed iterations, 0 RCCL
+  errors. On `v26.5` the run printed no throughput at all (see
+  [gotchas.md](gotchas.md#primus_megatron-training)); `v26.8` is not re-measured
+  yet.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.
   `launcher: sglang-disagg`, `scripts/sglang_disagg/run.sh` entrypoint,

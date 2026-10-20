@@ -375,16 +375,21 @@ sweep retry.
 
 Keywords: primus megatron scaleout MoE training, primus_turbo DeepEP token dispatcher,
 use_turbo_deepep moe_enable_deepep flex alltoall, moe_shared_expert_overlap assert,
-print_rank_last throughput last global rank, multi-node perf collection rank-0.
+print_rank_last throughput last global rank, multi-node perf collection rank-0,
+scripts/primus_train run.sh, model_overrides.py, PRIMUS_EXTRA_ARGS, scaleout_batch.py.
+
+All Primus Megatron templates run `scripts/primus_train/run.sh` (madengine
+`launcher: primus`); `scripts/primus_megatron-lm` is gone. Per-model CLI overrides
+that used to live in its `benchmark_report.sh` are in
+`scripts/primus_train/model_overrides.py`; deployment-side arguments go in
+`PRIMUS_EXTRA_ARGS` and win over both the config YAML and those overrides.
 
 - **DeepEP is opt-in and OFF by default (dispatcher = `alltoall` over RCCL).**
   The baseline MoE token dispatcher is Megatron `alltoall` (a `torch.distributed`
   all-to-all over the EP group, carried by RCCL on the RoCE/IB fabric) — *not*
   MoRI. To switch to the Primus-Turbo **DeepEP** dispatcher, set
-  `PRIMUS_USE_DEEPEP=1` in the manifest env (a primus scaleout manifest can carry
-  it defaulting to `"0"`), which makes
-  `scripts/primus_megatron-lm/primus_megatron-lm_benchmark_report.sh`
-  (invoked by the model `run.sh`) pass `--use_turbo_deepep true` to Primus. Primus
+  `PRIMUS_EXTRA_ARGS="--use_turbo_deepep true --moe_shared_expert_overlap false"`
+  in the manifest env (this replaces the old `PRIMUS_USE_DEEPEP=1` knob). Primus
   then (`_is_turbo_deepep_enabled`) auto-sets `moe_enable_deepep=True` and
   `moe_token_dispatcher_type='flex'` and swaps in
   `PrimusTurboDeepEPTokenDispatcher`. DeepEP lives inside `primus_turbo` (module
@@ -396,7 +401,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   `AssertionError: DeepEP not support moe_shared_expert_overlap, please set
   moe_shared_expert_overlap=False` (DeepSeek-V3 enables shared-expert overlap by
   default). So enabling DeepEP must also pass `--moe_shared_expert_overlap false`
-  (done automatically alongside `--use_turbo_deepep true`). Measured 4-node x
+  (part of the `PRIMUS_EXTRA_ARGS` value above). Measured 4-node x
   8-GPU DeepSeek-V3 proxy config (MI300X, BF16, seq 4096): DeepEP ~295-299 TFLOP/s/GPU,
   ~13.1-13.3k tokens/s/GPU vs alltoall ~270 / ~12.05k (~+9%).
 
@@ -414,19 +419,14 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
 - **Per-model global batch size must be normalized to the world size, or Megatron
   aborts at startup on non-standard node counts.** The config `global_batch_size`
   is tuned for a single 8-GPU node; at any node count where
-  `GBS % (MBS * world_size) != 0` (e.g. a 3-node/24-GPU run: `512 % (4*24) != 0`)
-  Megatron aborts with `global batch size ... is not divisible by micro batch
-  size ... times data parallel size`. In our consolidated
-  `scripts/primus_megatron-lm/primus_megatron-lm_benchmark_report.sh` this is
-  handled generically for *every* model branch: `scaleout_gbs_override` reads
-  MBS/GBS from the run's config YAML and, when `NUM_GPUS > 8`, rounds GBS up to
-  the next multiple of `MBS * NUM_GPUS` (via `normalize_global_batch_size`) and
-  passes it as an explicit `--global_batch_size` override; single-node runs emit
-  no override so behavior there is byte-for-byte unchanged. Any new per-model
-  branch that hardcodes GBS should route it through `scaleout_gbs_override` to
-  stay node-count-portable. (Upstream fix for the 8B branch:
-  [mkuznet1/MAD#1](https://github.com/mkuznet1/MAD/pull/1) — our tree already
-  generalizes it, so no per-branch change is needed here.)
+  `GBS % (MBS * DP) != 0` Megatron aborts with `global batch size ... is not
+  divisible by micro batch size ... times data parallel size`.
+  `scripts/primus_train/run.sh` handles it for every Megatron config:
+  `scaleout_batch.py` reads MBS/GBS/TP/PP/CP from the YAML plus any CLI override
+  (including `model_overrides.py`), rounds GBS up to the next multiple of
+  `MBS * DP`, and passes it as `--global_batch_size` (logged as
+  `[primus_train] global_batch_size -> N`). A `--global_batch_size` in the
+  caller's arguments or `PRIMUS_EXTRA_ARGS` turns the renormalization off.
 
 - **`rocm/primus:v26.4` auto-loads `librccl-anp.so`, which deadlocks a bundled
   RCCL overlay — set `NCCL_NET_PLUGIN=none`.** The v26.4 base image ships an
@@ -440,7 +440,7 @@ print_rank_last throughput last global rank, multi-node perf collection rank-0.
   IB/RoCE net path directly. The primus template ships this key set to `none`.
 
 Keywords: Kimi-K2-Thinking 384 experts MoE, rdzv timeout DistStoreError MIOpen,
-PRIMUS_SANITY_TRAIN_ITERS proxy 3-layer, log_error_patterns torchrun SIGSEGV Traceback,
+kimi_k2_thinking-BF16-pretrain-proxy 3-layer --variant proxy, log_error_patterns torchrun SIGSEGV Traceback,
 moe_router_num_groups null no group routing.
 
 - **Kimi-K2-Thinking needs 24 nodes (192 GPUs) with `PRIMUS_EP=192`,
@@ -459,37 +459,31 @@ moe_router_num_groups null no group routing.
   image.** Unlike every other Primus model here,
   `kimi_k2_thinking.yaml` and `kimi_k2_thinking-BF16-pretrain.yaml` live in this
   repo under `docker/kimi_k2_configs/` and are copied into the Primus tree by
-  `docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile`. That `COPY`
-  is relative to the build context, so the manifest must keep
-  `"dockercontext": "./docker"` — without it madengine gives any dockerfile whose
-  path contains `primus` a repo-root context and the build fails at the `COPY`.
+  `docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile`, so the Kimi
+  models exist only on that image (`get_models_json.py` registers them with it).
+  The overlay builds from the repo root (`"dockercontext": "."`, which madengine
+  also picks by itself for any dockerfile path containing `primus`); an old
+  manifest that still says `"./docker"` fails at `COPY scripts/Primus/`.
 
-- **`context.docker_env_vars` reaches every deployment, not just a local
-  build-time sanity pass — `PRIMUS_SANITY_TRAIN_ITERS` must not live there by
-  default.** madengine renders `context.docker_env_vars` as `--env` on the
-  actual `docker run`/`torchrun` invocation on every node, SLURM-deployed runs
-  included (verified directly: grepping a real 2-node SLURM job's container
-  launch line shows `PRIMUS_SANITY_TRAIN_ITERS=50` passed to the container even
-  though the manifest's `deployment_config.env_vars` never set it). An earlier
-  version of this template shipped `PRIMUS_SANITY_TRAIN_ITERS`/
-  `PRIMUS_SANITY_DATATYPE` unconditionally in `context.docker_env_vars`, on the
-  mistaken assumption that block was build-time-only — the effect was that
-  *every* deployment of the template, including the "real" SLURM run, silently
-  took the 3-layer proxy path and never measured full depth. Fixed: the
-  shipped template no longer sets either key. Add `PRIMUS_SANITY_TRAIN_ITERS`
-  to `context.docker_env_vars` yourself only when you deliberately want the
-  fast 3-layer CI/build-sanity path (`--num_layers 3 --moe_layer_freq 1` in
-  `benchmark_report.sh`, ~30 min on 2×MI355X); leave it absent for a real
-  measurement — at full depth, `torch.compile` workers can saturate every CPU
-  during NCCL bootstrap and the rendezvous can time out (`DistStoreError:
-  Timed out`) before the first training step without the rdzv fix below.
+- **The 3-layer Kimi sanity pass is its own model, not an env toggle.** Use
+  `primus_train/megatron_<GPU>_kimi_k2_thinking-BF16-pretrain-proxy` (`--variant
+  proxy`: `--num_layers 3 --moe_layer_freq 1`, MBS 1, GBS 32; ~30 min on
+  2×MI355X) for CI/build sanity and the base model for a real measurement. The old
+  `PRIMUS_SANITY_TRAIN_ITERS` knob is gone; it was easy to get wrong because
+  `context.docker_env_vars` is rendered as `--env` on every node's `docker run`,
+  SLURM-deployed runs included, so a template that carried it silently measured
+  the proxy on every deployment. At full depth, `torch.compile` workers can
+  saturate every CPU during NCCL bootstrap and the rendezvous can time out
+  (`DistStoreError: Timed out`) before the first training step without the rdzv
+  fix below.
 
 - **The torchrun rdzv timeout must be 7200s.** The 600s default is too short for
   MIOpen kernel compilation on a first run with 384 experts, and the job dies at
   `DistStoreError` during NCCL init — this looks like a network fault but is not.
-  The `rccl_overlay` Dockerfile patches `run_pretrain.sh` and
-  `primus-cli-direct.sh` to `--rdzv-conf timeout=7200`. Rebuild without that
-  patch and the failure comes back.
+  The `rccl_overlay` Dockerfile patches `runner/primus-cli-direct.sh` to
+  `--rdzv-conf timeout=7200` and fails the build if the patch stops applying;
+  `docker/primus` does not carry it. Run without that patch and the failure
+  comes back.
 
 - **`log_error_patterns` must be overridden.** torchrun prints `Traceback (most
   recent call last)` to stdout when a worker is SIGTERMed at cleanup, even after
@@ -502,20 +496,18 @@ moe_router_num_groups null no group routing.
   uses `n_group=1`, so `moe_router_num_groups` is `null` (no group routing), and
   there are no MTP layers. Both are handled inside `kimi_k2_thinking.yaml`; no
   env overrides are needed.
-- **`rocm/primus:v26.5` can train fine and still report nothing — pin the base
-  that the model was validated on.** Observed on Llama-4-Scout, 2 nodes / 16 GPU
-  gfx950: on `v26.5` the run completes all 50 iterations and logs
-  `pretrain() completed successfully`, but every step also logs
-  `[Patch:megatron.training_log] No token throughput`, the Primus summary prints
-  `Harmonic mean of TPS (excluding first 2 steps): N/A`, and
-  `primus_megatron-lm_benchmark_report.py` finds no `tokens/s/GPU` — so the perf
-  CSV comes out empty and madengine scores the run FAILED. The identical commit
-  on `rocm/primus:v26.3` gave 48/48 parsed iterations, 2749.5 tok/s/GPU and
-  276.8 TFLOP/s/GPU. This is easy to misread as a parser bug in MAD; it is not —
-  grep the training log for `No token throughput` before touching the parser.
-  The v26.5 run additionally SIGSEGVs at teardown
-  (`destroy_process_group() was not called before program exit`), which is a
-  second, independent reason it is scored as a failure.
+- **A Primus base can train fine and still print no throughput — grep for `No
+  token throughput` before touching the parser.** Observed on Llama-4-Scout,
+  2 nodes / 16 GPU gfx950, `rocm/primus:v26.5`: all 50 iterations complete, but
+  every step logs `[Patch:megatron.training_log] No token throughput` and the
+  Primus summary prints `Harmonic mean of TPS (excluding first 2 steps): N/A`; the
+  same commit on `v26.3` gave 2749.5 tok/s/GPU and 276.8 TFLOP/s/GPU.
+  `extract_primus_perf.py` now derives tok/s/GPU from `elapsed time per iteration`
+  and the global batch size when the line carries none, so such a run still yields
+  a perf row; check it against the reference above before trusting it. The v26.5
+  run additionally SIGSEGVed at teardown (`destroy_process_group() was not called
+  before program exit`). The templates are on `v26.8`, where neither symptom has
+  been re-checked for Scout yet.
 
 ## pyt_mlperf_training (MLPerf Llama-3.1)
 

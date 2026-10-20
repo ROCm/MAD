@@ -1,10 +1,10 @@
 {
   "built_images": {
     "rocm-primus-llama31-8b-overlay": {
-      "model": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
-      "docker_image": "rocm/primus:v26.5-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
+      "model": "primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain",
+      "docker_image": "rocm/primus:v26.8-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
-      "base_docker": "rocm/primus:v26.5",
+      "base_docker": "rocm/primus:v26.8",
       "build_duration": 0,
       "local_image": true,
       "registry_image": null,
@@ -14,17 +14,23 @@
   },
   "built_models": {
     "rocm-primus-llama31-8b-overlay": {
-      "name": "primus_pyt_megatron_lm_train_llama-3.1-8b_overlay",
+      "name": "primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain",
       "url": "",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
-      "scripts": "scripts/primus_megatron-lm/run.sh",
+      "dockercontext": ".",
+      "scripts": "scripts/primus_train/run.sh",
       "n_gpus": "-1",
       "owner": "mad.support@amd.com",
-      "training_precision": "",
-      "multiple_results": "perf_primus-megatron-Llama-3.1-8B.csv",
-      "tags": ["pyt", "pretrain", "llama-3.1-8b", "training"],
+      "training_precision": "bf16",
+      "multiple_results": "primus_perf_output.csv",
+      "tags": [
+        "primus",
+        "megatron",
+        "MI355X",
+        "llama3.1_8B-BF16-pretrain"
+      ],
       "timeout": -1,
-      "args": "--model_repo primus_pyt_megatron_lm_train_llama-3.1-8b",
+      "args": "--config_path examples/megatron/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml",
       "additional_docker_run_options": "--privileged --group-add render --shm-size 64G --device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro"
     }
   },
@@ -74,11 +80,14 @@
       "network_interface": "<FILL_IFNAME  management iface, see references/cluster-types.md>"
     },
     "distributed": {
-      "launcher": "torchrun",
+      "launcher": "primus",
       "backend": "nccl",
       "port": 29500,
       "nnodes": 2,
-      "nproc_per_node": 8
+      "nproc_per_node": 8,
+      "primus": {
+        "config_path": "examples/megatron/configs/MI355X/llama3.1_8B-BF16-pretrain.yaml"
+      }
     },
     "env_vars": {
       "HF_HOME": "${HF_HOME}",
