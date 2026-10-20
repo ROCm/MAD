@@ -133,6 +133,23 @@ def test_megatron_only_knobs_skipped_for_other_frameworks(tmp_path):
     assert "apply to megatron configs only" in proc.stderr
 
 
+def test_perf_csv_reports_the_run_shape(tmp_path):
+    _, _, _, run_dir = run(tmp_path, {"micro_batch_size": 2, "global_batch_size": 24})
+    with open(run_dir / "primus_perf_output.csv") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["metric"] for r in rows] == [
+        "tokens_per_second", "tflops", "model_flops_utilization"
+    ]
+    assert rows[0]["performance"] == "1799.0"
+    for row in rows:
+        assert {k: row[k] for k in (
+            "mode", "precision", "batch_size", "global_batch_size", "seq_len", "device", "num_gpus"
+        )} == {
+            "mode": "pretrain", "precision": "BF16", "batch_size": "2",
+            "global_batch_size": "32", "seq_len": "8192", "device": "MI355X", "num_gpus": "16",
+        }
+
+
 def test_rccl_log_dir_gives_each_rank_a_file(tmp_path):
     log_dir = tmp_path / "rccl_logs"
     _, env, _, _ = run(tmp_path, {}, env={"RCCL_LOG_DIR": str(log_dir)})

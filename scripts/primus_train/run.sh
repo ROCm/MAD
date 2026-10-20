@@ -227,7 +227,8 @@ cli_cmd+=("${caller_args[@]}")
 "${cli_cmd[@]}"
 exitcode=$?
 set -e
-# Extract tps/tflops/mfu from training log into primus_perf_output.csv (one row: model, performance, metric, tflops, model_flops_utilization)
+# Extract tps/tflops/mfu and the run shape from the training log into primus_perf_output.csv
+# (one row per metric; see extract_primus_perf.py for the columns)
 LOG_PATH="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 if [[ -f "$LOG_PATH" ]]; then
   extract_script="${script_dir}/extract_primus_perf.py"
@@ -262,7 +263,7 @@ print("" if sl is None or sl == "" else sl)
     num_gpus=8
   fi
   [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
-  extract_args+=(--num-gpus "$num_gpus")
+  extract_args+=(--num-gpus "$num_gpus" --mode "$suite" --device "${PRIMUS_GPU_MODEL:-}")
   set +e
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"
   extractcode=$?
