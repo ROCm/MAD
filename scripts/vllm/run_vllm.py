@@ -503,7 +503,11 @@ def main():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" {k} {shlex.quote(str(v))}"
+                    # Lists and mappings must be JSON, not Python repr: a
+                    # recipe can hand us a structured value and str() would
+                    # single-quote its keys.
+                    rendered = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                    extra_args_str += f" {k} {shlex.quote(rendered)}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             

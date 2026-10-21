@@ -236,6 +236,19 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def _arg_value(value):
+    """Render a config value the way the engine's parser expects it.
+
+    A recipe may give a list or mapping -- ATOM's extra-kv-connectors is a list
+    of mappings -- and str() on those yields Python syntax with single quotes,
+    which these arguments do not accept. Serialize them as JSON; scalars pass
+    through unchanged.
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
+
+
 def dict_to_args(args_dict: Dict) -> str:
     """Convert argument dictionary to command-line string.
 
@@ -248,7 +261,7 @@ def dict_to_args(args_dict: Dict) -> str:
         if value is True:
             args_list.append(key)
         elif value is not False and value is not None:
-            args_list.append(f"{key} {shlex.quote(str(value))}")
+            args_list.append(f"{key} {shlex.quote(_arg_value(value))}")
     return " ".join(args_list)
 
 def dict_to_env(env_dict: Dict) -> str:

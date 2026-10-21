@@ -107,11 +107,20 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
             raise Exception("Server failed to start")
         print(f"Server at {server.pid} contacted successfully", flush=True)
 
+        # The hook writes fixed filenames (agentic_result.json,
+        # benchmark_command.txt), so two replays sharing a directory lose the
+        # first one's evidence. Give each its own, and do not reuse one that
+        # already exists -- a repeated run of the same point is still a
+        # separate measurement.
         tag = config.get("variant") or f"{config['model']}_tp{config['tp']}"
-        result_dir = os.path.abspath(
+        base_dir = os.path.abspath(
             f"agentic_{tag}_c{config['max_concurrency']}".replace("/", "_")
         )
-        os.makedirs(result_dir, exist_ok=True)
+        result_dir, attempt = base_dir, 1
+        while os.path.exists(result_dir):
+            attempt += 1
+            result_dir = f"{base_dir}_run{attempt}"
+        os.makedirs(result_dir)
 
         hook_env = dict(os.environ)
         hook_env.update({str(k): str(v) for k, v in agentic_env.items()})

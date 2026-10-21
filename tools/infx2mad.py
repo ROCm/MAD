@@ -53,9 +53,14 @@ RUNNER_OWNED_ARGS = {
     "served-model-name",
     "host",
     "port",
-    "trust-remote-code",
     "dtype",
 }
+
+# trust-remote-code is runner-owned only where the runner actually emits it.
+# run_sglang.py and run_vllm.py always add it; run_atom.py does not -- it only
+# forwards it to the benchmark when the config still carries it -- so stripping
+# it there silently changes how the model loads.
+OWNED_BY_RUNNER = {"sglang": {"trust-remote-code"}, "vllm": {"trust-remote-code"}}
 
 TP_KEYS = ("tensor-parallel-size", "tp-size")
 
@@ -224,6 +229,41 @@ def _base_tp(recipe):
     return None
 
 
+def _effective_tp(args, base_args):
+    """TP as the scenario counts it: GPUs the engine spans.
+
+    vLLM expresses DP-attention as tensor-parallel-size 1 with
+    data-parallel-size N, while the scenario calls the same point tp=N. SGLang
+    keeps tensor-parallel-size at N. Multiplying covers both, since a recipe
+    that does not use data parallelism leaves it at 1.
+    """
+    def val(key, default=None):
+        return args.get(key, base_args.get(key, default))
+
+    tp = next((val(k) for k in TP_KEYS if val(k) is not None), None)
+    if tp is None:
+        return None
+    # The two engines spell DP-attention differently and mean different things
+    # by the data-parallel degree. SGLang sets enable-dp-attention and shards
+    # attention ACROSS the same tensor-parallel group, so the GPU count is tp.
+    # vLLM has no such flag and expresses the same topology as
+    # tensor-parallel-size 1 with data-parallel-size N, where the GPU count is
+    # the product.
+    if val("enable-dp-attention"):
+        return int(tp)
+    return int(tp) * int(val("data-parallel-size", 1) or 1)
+
+
+def _dp_attention_on(args, base_args):
+    """Whether the point runs DP-attention, in either engine's spelling."""
+    def val(key, default=None):
+        return args.get(key, base_args.get(key, default))
+
+    if val("enable-dp-attention"):
+        return True
+    return int(val("data-parallel-size", 1) or 1) > 1
+
+
 def _attr_conflict(point, args, env, base_args):
     """True when the scenario point and a recipe override disagree on an axis.
 
@@ -239,7 +279,7 @@ def _attr_conflict(point, args, env, base_args):
 
     checks = [
         ("ep", recipe_val("expert-parallel-size")),
-        ("dp-attn", recipe_val("enable-dp-attention")),
+        ("dp-attn", _dp_attention_on(args, base_args)),
         ("kv-offloading", env.get("KV_OFFLOADING")),
         # Kimi-K3's vLLM recipe has two TP8/conc-1 overrides that differ only in
         # decode-context parallelism; without this both match either point and
@@ -283,7 +323,7 @@ def enumerate_points(recipe, tp, point=None):
         if "override" not in name:
             continue
         args = dict(_agg(block).get("args", {}))
-        block_tp = next((args[k] for k in TP_KEYS if k in args), None)
+        block_tp = _effective_tp(args, _agg(recipe["base"]).get("args", {}))
         if block_tp is None:
             # Some recipes (the atom ones) carry no roles block at all and state
             # no tensor-parallel-size anywhere: the only place the degree
@@ -300,6 +340,10 @@ def enumerate_points(recipe, tp, point=None):
         # VLLM_USE_BREAKABLE_CUDAGRAPH, the offload points' PYTHONHASHSEED);
         # the base env alone is not the point's environment.
         server_env = dict(_agg(block).get("env", {}))
+        # Recorded, not applied: some overrides put an sglang-router in front
+        # of the server with its own routing policy, and the aggregated path
+        # replays against the server directly.
+        server_env["_infx_frontend"] = block.get("frontend") or {}
         conc_raw = env.get("CONC")
         if conc_raw is None:
             continue
@@ -327,7 +371,7 @@ def enumerate_points(recipe, tp, point=None):
             f"no override block for tp={tp} in recipe {recipe['base']['name']!r}")
 
 
-def effective_args(recipe, point_args):
+def effective_args(recipe, point_args, owned=frozenset()):
     """Base args overlaid with the point's, then filtered.
 
     Order matters. Filtering false values out of the base BEFORE the overlay
@@ -339,8 +383,9 @@ def effective_args(recipe, point_args):
     """
     merged = dict(_agg(recipe["base"]).get("args", {}))
     merged.update(point_args)
+    skip = RUNNER_OWNED_ARGS | set(owned)
     return {f"--{k}": v for k, v in merged.items()
-            if k not in RUNNER_OWNED_ARGS and v is not False}
+            if k not in skip and v is not False}
 
 
 # --------------------------------------------------------------------------
@@ -356,6 +401,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
     # The recipe jitters prompt length; MAD's runner used to hardcode 1.0 (every
     # prompt exactly `inp` tokens), which is a different workload. It now reads
     # random_range_ratio from the config, so pass the recipe's value through.
+    seen_frontends = set()
     rrr = bench_env.get("RANDOM_RANGE_RATIO")
     if bench_env.get("USE_CHAT_TEMPLATE", "false") != "false":
         notes.append("recipe asks for a chat template; the MAD runner uses dataset-name=random.")
@@ -366,7 +412,9 @@ def emit_serving(scenario_key, recipe, workloads, runner):
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, _, point_env_srv in enumerate_points(recipe, tp, point):
-            extra = effective_args(recipe, point_args)
+            point_env_srv = _split_marker(point_env_srv, seen_frontends)
+            extra = effective_args(recipe, point_args,
+                                   OWNED_BY_RUNNER.get(runner["dir"], set()))
             block = {
                 "benchmark": "serving",
                 "model": base["model"]["path"].removeprefix("hf:"),
@@ -377,14 +425,16 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
             }
-            _stamp(block, scenario_key, tp, conc, runner)
+            _stamp(block, scenario_key, tp, conc, runner, _point_suffix(extra))
             if rrr is not None:
                 block["random_range_ratio"] = float(rrr)
             blocks.append(block)
+    notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
     return blocks, notes
 
 
-def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_prefix=""):
+def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_prefix="",
+                 framework="", precision="", image=""):
     """agentic-coding -> the runners' `benchmark: agentic` config blocks.
 
     The replay itself is MAD's own agentx core (scripts/common/benchmark_agentic.sh
@@ -396,6 +446,8 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
     notes = []
     base = recipe["base"]
     bench_env = base.get("benchmark", {}).get("env", {})
+    model_id = base["model"]["path"].removeprefix("hf:")
+    seen_frontends = set()
 
     blocks = []
     for workload in workloads:
@@ -403,15 +455,49 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, point_env, point_env_srv in enumerate_points(recipe, tp, point):
+            point_env_srv = _split_marker(point_env_srv, seen_frontends)
             extra = effective_args(recipe, point_args)
             # agentic_lib.sh is driven by env, not CLI. KV_OFFLOADING is
             # required by its aggregation step; the recipe states it per point.
+            kv_off = str(point_env.get("KV_OFFLOADING",
+                                       point.get("kv-offloading", "none")))
+            ep_deg = int(extra.get("--expert-parallel-size", 0)) or (
+                tp if extra.get("--enable-expert-parallel") else 1)
             agentic_env = {
                 "AGENTIC_CONC": str(conc),
                 **({"DURATION": str(duration)} if duration else {}),
-                "KV_OFFLOADING": str(point_env.get("KV_OFFLOADING",
-                                                   point.get("kv-offloading", "none"))),
+                "KV_OFFLOADING": kv_off,
+                # The aggregator reads the topology and the descriptive fields
+                # from the environment. Left unset it defaults TP to 1, which
+                # divides nothing and reports per-GPU throughput TP times too
+                # high, and writes a row whose concurrency, framework and
+                # precision are blank. These are the values the point already
+                # states, so there is no reason for the artifact not to carry
+                # them.
+                "CONC": str(conc),
+                "TP": str(tp),
+                "EP_SIZE": str(ep_deg),
+                "DP_ATTENTION": "true" if extra.get("--enable-dp-attention") else "false",
+                "FRAMEWORK": framework,
+                "PRECISION": precision,
+                "MODEL": model_id,
+                "IMAGE": image,
+                "SPEC_DECODING": str(point.get("spec-decoding", "none")),
             }
+            backend_name = (point.get("kv-offload-backend") or {}).get("name")
+            if kv_off != "none":
+                # The aggregator refuses to run unless the backend metadata is
+                # present as JSON and its name matches, so an offload point
+                # would otherwise die after the replay rather than produce a
+                # result.
+                if not backend_name:
+                    notes.append(
+                        f"tp={tp} conc={conc} offloads KV but names no backend; "
+                        "the aggregator requires one")
+                else:
+                    agentic_env["KV_OFFLOAD_BACKEND"] = str(backend_name)
+                    agentic_env["KV_OFFLOAD_BACKEND_METADATA"] = json.dumps(
+                        {"name": str(backend_name)})
             # Forward every AIPerf knob rather than a whitelist: the recipes
             # also set client timeouts (AIPERF_HTTP_TCP_USER_TIMEOUT) that the
             # shared hook does not restore, and a missed one silently changes
@@ -428,10 +514,6 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             # the 256k-capped corpus, which is a different workload for the
             # models whose scenarios use the uncapped one.
             agentic_env.setdefault("MODEL_PREFIX", model_prefix)
-            backend = point.get("kv-offload-backend") or {}
-            if backend.get("name"):
-                agentic_env["KV_OFFLOAD_BACKEND"] = str(backend["name"])
-
             block = {
                 "benchmark": "agentic",
                 "model": base["model"]["path"].removeprefix("hf:"),
@@ -446,9 +528,10 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                 "extra_args": extra,
                 "agentic_env": agentic_env,
             }
-            _stamp(block, scenario_key, tp, conc, runner)
+            _stamp(block, scenario_key, tp, conc, runner, _point_suffix(extra))
             blocks.append(block)
 
+    notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
     if duration is None:
         notes.append(
             "no measurement window set; agentic_lib.sh defaults to 120 s while the "
@@ -466,6 +549,46 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
 WORKLOAD_EMITTERS = {"fixed-seq-len": emit_serving, "agentic-coding": emit_agentic}
 
 
+def _split_marker(server_env, seen):
+    """Remove the internal frontend marker and remember what it said."""
+    fe = server_env.pop("_infx_frontend", None) or {}
+    if fe.get("type") and fe["type"] != "sglang":
+        seen.add(fe["type"])
+    return {k: v for k, v in server_env.items() if not k.startswith("_infx_")}
+
+
+def _frontend_and_acceptance_notes(seen, workloads):
+    """Deviations that belong to the scenario as a whole, not to one point."""
+    notes = []
+    if seen:
+        notes.append(
+            f"recipe puts a {'/'.join(sorted(seen))} frontend in front of the "
+            "server with its own routing policy; the aggregated path replays "
+            "against the server directly, so that routing is not reproduced")
+    if any(str(pt.get("spec-decoding", "none")) != "none"
+           for w in workloads for pt in w["search-space"]):
+        notes.append(
+            "InferenceX applies golden acceptance-length overrides at submission "
+            "(synthetic_acceptance.build_overrides); the raw recipe does not "
+            "carry them, so these points measure the engine's native acceptance "
+            "rather than the pinned one")
+    return notes
+
+
+def _point_suffix(extra):
+    """Short discriminator for points that share tp and concurrency."""
+    bits = []
+    ep = extra.get("--expert-parallel-size")
+    if ep and int(ep) > 1:
+        bits.append(f"ep{ep}")
+    if extra.get("--enable-dp-attention"):
+        bits.append("dp")
+    dcp = extra.get("--decode-context-parallel-size")
+    if dcp and int(dcp) > 1:
+        bits.append(f"dcp{dcp}")
+    return ("-" + "-".join(bits)) if bits else ""
+
+
 def _ep_note(point, tp):
     """Expert parallelism needs no note: the recipe override carries
     expert-parallel-size and the emitters pass it straight into extra_args.
@@ -473,10 +596,16 @@ def _ep_note(point, tp):
     return []
 
 
-def _stamp(block, scenario_key, tp, conc, runner):
-    """Add the keys whose presence depends on the runner's config contract."""
+def _stamp(block, scenario_key, tp, conc, runner, suffix=""):
+    """Add the keys whose presence depends on the runner's config contract.
+
+    The variant has to identify the POINT: DeepSeek-V4 has an ep=1 and an ep=8
+    point at the same tp and concurrency, and a name that cannot tell them
+    apart would make `--variant` select both and make their result directories
+    collide.
+    """
     if runner["supports_variant"]:
-        block["variant"] = f"{scenario_key}-tp{tp}-c{conc}"
+        block["variant"] = f"{scenario_key}-tp{tp}-c{conc}{suffix}"
     if runner["dtype_key"]:
         # The checkpoint carries its own quantisation and the InferenceX recipe
         # passes no --dtype at all; the runners always emit one, so 'auto' is
@@ -783,7 +912,9 @@ def _translate_one(args, scenario_key, out_dir):
     recipe = load_recipe(args.infx, workload["search-space"][0]["srt-recipe"])
     prefix = scenario["model-prefix"]
     emitter = WORKLOAD_EMITTERS[workload_name]
-    kwargs = ({"duration": args.agentic_duration, "model_prefix": prefix}
+    kwargs = ({"duration": args.agentic_duration, "model_prefix": prefix,
+               "framework": fw, "precision": scenario.get("precision", ""),
+               "image": args.base_image or scenario["image"]}
               if workload_name == "agentic-coding" else {})
     blocks, notes = emitter(scenario_key, recipe, entries, runner, **kwargs)
     cluster = CLUSTERS[args.cluster]
