@@ -160,24 +160,41 @@ CLUSTERS = {
 DOCKERFILE = "docker/pyt_infx.ubuntu.amd.Dockerfile"
 
 
-def device_group_args():
+DEVICE_GROUPS = (("render", "RENDER_GID"), ("video", "VIDEO_GID"))
+
+
+def device_group_args(cluster):
     """gids for the groups madengine's `docker run` adds by name.
 
     madengine passes `--group-add render --group-add video`, and docker looks
     those names up in the IMAGE's group file: the vLLM nightly images have
-    neither, so the container never starts. The gid has to be the host's as
-    well, because /dev/dri/renderD* arrives with the host's numeric ownership.
-    Absent on this host means absent from the build too, which leaves whatever
-    the base image ships untouched.
+    neither, so the container never starts before the runner is reached. The
+    gid must be the COMPUTE NODE's, because /dev/dri/renderD* is bind-mounted
+    with that node's numeric ownership and a non-root container cannot read it
+    under any other gid.
+
+    So the cluster entry owns these, and the generating host is only a
+    fallback for the common case where it shares the cluster's name service.
+    A login node that resolves neither, with no cluster entry, is refused
+    rather than silently emitting a build that omits the group.
     """
     import grp
 
-    args = {}
-    for name, arg in (("render", "RENDER_GID"), ("video", "VIDEO_GID")):
+    configured = cluster.get("device_gids") or {}
+    args, missing = {}, []
+    for name, arg in DEVICE_GROUPS:
+        if name in configured:
+            args[arg] = str(configured[name])
+            continue
         try:
             args[arg] = str(grp.getgrnam(name).gr_gid)
         except KeyError:
-            pass
+            missing.append(name)
+    if missing:
+        raise Untranslatable(
+            f"group(s) {', '.join(missing)} resolve on neither this host nor "
+            "the cluster entry, and madengine adds them by name at docker run; "
+            "set device_gids in the cluster file to the compute node's values")
     return args
 
 
@@ -849,7 +866,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
         **({"INFX_PIP_PACKAGES": pip_packages} if pip_packages else {}),
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
            if cluster.get("run_as_submitting_user") else {}),
-        **device_group_args(),
+        **device_group_args(cluster),
     )
     model_dir = os.path.basename(model)
     mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
@@ -1112,7 +1129,13 @@ def _translate_one(args, scenario_key, out_dir):
 
     smoke = []
     if args.smoke_point:
-        kept = [b for b in blocks if args.smoke_point in b["_point_id"]]
+        # Match on a component boundary, not a substring: `tp8-c1` would
+        # otherwise also select tp8-c12 and tp8-c16, quietly running three
+        # points where one was asked for. A bare `tp8-c1` still selects
+        # `tp8-c1-dp` and friends, which is the discriminator, not a new point.
+        kept = [b for b in blocks
+                if b["_point_id"] == args.smoke_point
+                or b["_point_id"].startswith(args.smoke_point + "-")]
         if not kept:
             raise Untranslatable(
                 f"--smoke-point {args.smoke_point!r} matched none of "
@@ -1151,12 +1174,21 @@ def _translate_one(args, scenario_key, out_dir):
     # DeepSeek scenarios share a prefix and framework, so a prefix-only name
     # has them overwrite one another's staged config and earlier manifests then
     # run whichever was written last.
-    cfg_name = f"{scenario_key}_infx.yaml"
+    # Fingerprint the blocks the manifest will point at. A full translation and
+    # a smoke one -- or two runs differing in --agentic-duration or
+    # --base-image -- name the same scenario, so a bare scenario name has the
+    # later write replace the file an earlier manifest still references. That
+    # manifest then runs a workload it does not describe while keeping its own
+    # point count and fidelity claims, which is the one failure these artifacts
+    # exist to prevent.
+    import hashlib
+
+    digest = hashlib.sha256(
+        yaml.safe_dump(blocks, sort_keys=True).encode()).hexdigest()[:8]
+    cfg_name = f"{scenario_key}_infx-{digest}.yaml"
     # The runner resolves --config relative to its own directory, so the file
     # has to exist there. Write it straight into the MAD checkout when we know
-    # it; otherwise say plainly that it still has to be staged, because a
-    # same-named file left over from an earlier scenario would be picked up
-    # instead and the run would silently measure something else.
+    # it; otherwise say plainly that it still has to be staged.
     staged = os.path.join(args.mad_dir, "scripts", runner["dir"], "configs")
     cfg_path = os.path.join(staged if os.path.isdir(staged) else out_dir, cfg_name)
     with open(cfg_path, "w") as f:

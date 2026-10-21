@@ -103,10 +103,16 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     # image tag, and a tag computed from the pre-override image would let a
     # plain build and an overlay build share it.
     image = base_image_override or scenario["image"]
+    # Imported here, not at module scope: infx2mad imports this module.
+    from infx2mad import device_group_args
+
     build_args = dict(
         {"BASE_DOCKER": image},
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
            if cluster.get("run_as_submitting_user") else {}),
+        # These manifests pass --group-add render too, so the image needs the
+        # group for the same reason the aggregated ones do.
+        **device_group_args(cluster),
     )
     kv = scenario.get("kv-p2p-transfer") or "nixl"
     dp_mode = 1 if dp_attn else 0
@@ -217,7 +223,14 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                 "n_gpus": "-1",
                 "owner": "mad.support@amd.com",
                 "training_precision": "",
-                "multiple_results": f"perf_sglang-disagg-{model_dir}.csv",
+                # The agentic hook writes an aggregate JSON and plots and
+                # explicitly does not touch perf.csv (agentic_lib.sh), so
+                # naming a results CSV would make every successful replay look
+                # like a failed collection. MAD's own disagg agentic entries
+                # declare none either; the results are the aggregate under
+                # /run_logs. The sweep benchmark does produce the CSV.
+                **({"multiple_results": f"perf_sglang-disagg-{model_dir}.csv"}
+                   if workload_name != "agentic-coding" else {}),
                 "tags": ["pyt", "sglang", "disagg", "inference", "inferencex",
                          scenario["model-prefix"], arch],
                 "timeout": timeout,
@@ -234,7 +247,9 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             }
         },
         "context": {
-            "skip_perf_collection": False,
+            # Nothing to collect on the agentic route: its results are the
+            # aggregate JSON the hook leaves under /run_logs.
+            "skip_perf_collection": workload_name == "agentic-coding",
             "docker_env_vars": dict(env_vars, MAD_SYSTEM_GPU_ARCHITECTURE=arch,
                                     **cluster.get("fabric_env", {})),
             # /run_logs must be shared and writable: the launcher coordinates
@@ -293,6 +308,10 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                          "ep": point["prefill"].get("ep"), "dp_attn": bool(dp_mode),
                          "kv_p2p_transfer": kv},
             "concurrency": point["conc-list"],
+            "results": ("aggregate JSON under /run_logs; the agentic hook "
+                        "writes no perf CSV"
+                        if workload_name == "agentic-coding"
+                        else f"perf_sglang-disagg-{model_dir}.csv"),
             "fidelity_gaps": notes,
         },
     }

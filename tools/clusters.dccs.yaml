@@ -30,6 +30,10 @@ dccs-4081:
   skip_gpus_directive: false
   _skip_gpus_directive: GresTypes=gpu and nodes advertise gpu:amd_instinct_mi300x_oam:8, so unlike Ruby
     the --gpus-per-node directive is valid and must be emitted.
+  device_gids: {}
+  _device_gids: 'Not read from a compute node on this cluster yet, so the generating host''s own
+    render/video gids are used. Fill in from `getent group render video` on a compute node if an
+    image lacking those groups fails to start, or if the login node does not share the name service.'
   run_as_submitting_user: true
   _run_as_submitting_user: 'Verified: in-container root can write a 0777 dir on the NFS home, but `cp
     --preserve=all` returns 1 — the same root_squash failure that breaks madengine on Ruby.'

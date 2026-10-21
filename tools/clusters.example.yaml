@@ -27,6 +27,13 @@ dccs-4081:
   _run_as_submitting_user: 'true when the MAD workspace sits on an NFS export with root_squash: in-container
     root lands as nobody and madengine''s own `mkdir run_directory` and `cp --preserve=all` fail. Check
     with `mount | grep <workspace fs>` or just try one run.'
+  device_gids: {}
+  _device_gids: 'Numeric gids of the render and video groups ON THE COMPUTE NODE, e.g. {render: 105,
+    video: 39}. madengine runs the container with --group-add render --group-add video and docker
+    resolves those names in the IMAGE, so an image lacking them (the vLLM nightly images) never starts;
+    the gid must match the node''s because /dev/dri/renderD* is bind-mounted with its ownership. Left
+    empty, the generating host''s own groups are used, which is right only when it shares the cluster''s
+    name service. Read them with `getent group render video` on a compute node.'
   exclude_nodes: ''
   _exclude_nodes: Comma-separated nodes whose sssd/PAM is broken, where passwordless sudo refuses and
     every docker call dies before the model loads. Probe with probe_sudo.sh first; this is a snapshot,
