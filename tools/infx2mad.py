@@ -10,7 +10,7 @@ Emits, per scenario:
   3. <model-prefix>_models.json the same model in models.json shape, for a
                                 plain `madengine run --tags` invocation
 
-Why a translator and not a new harness: 49 of AMD's 51 InferenceX scenarios map
+Why a translator and not a new harness: 47 of AMD's 52 InferenceX scenarios map
 onto a MAD runner that already exists (scripts/sglang, scripts/vllm,
 scripts/atom, scripts/sglang_disagg), and madengine already runs in the RCCL CI
 arm. So this is a ROUTER: read the scenario, pick the runner that serves its
@@ -218,6 +218,48 @@ def load_recipe(infx_root, rel_path):
         return yaml.safe_load(f)
 
 
+# The only setup_script whose effect we can restate exactly. The others
+# (kimik3-atom-dspark-draft.sh, minimaxm3-atom-eagle3-deps.sh,
+# lmcache-mp-rocm.sh) patch files inside the container or stand up a connector,
+# and guessing at them would be worse than refusing.
+REPRODUCIBLE_SETUP_SCRIPTS = {"pip-runtime-deps.sh"}
+
+
+def resolve_setup_script(recipe, blocks):
+    """Packages the recipe's setup_script installs, for the image build.
+
+    A setup_script runs in the container before the engine starts, and a
+    recipe declares one because its base image is missing something: DeepSeek-V4's
+    vLLM base needs Pillow, fastapi and uvicorn, and the server dies on import
+    without them. Passing SETUP_PIP_PACKAGES to the server, as the recipe's env
+    does, installs nothing -- so ignoring the script emits a run whose container
+    is not the one the recipe describes.
+
+    pip-runtime-deps.sh is exactly `pip install $SETUP_PIP_PACKAGES`, so it
+    folds into the image build. Anything else is refused.
+    """
+    script = recipe["base"].get("setup_script")
+    if not script:
+        return "", None
+    if script not in REPRODUCIBLE_SETUP_SCRIPTS:
+        raise Untranslatable(
+            f"recipe declares setup_script {script!r}, which prepares the "
+            "container in ways this wrapper does not reproduce; running "
+            "without it would measure a container the recipe does not describe")
+    wanted = {str(b.get("env", {}).get("SETUP_PIP_PACKAGES", "")).strip()
+              for b in blocks}
+    wanted.discard("")
+    if len(wanted) > 1:
+        raise Untranslatable(
+            f"points disagree on SETUP_PIP_PACKAGES ({sorted(wanted)}); "
+            "one image cannot satisfy both")
+    packages = next(iter(wanted), "")
+    if not packages:
+        return "", None
+    return packages, (f"setup_script {script} is applied at image build "
+                      f"(pip install {packages}) rather than per run")
+
+
 def _agg(block):
     return block.get("roles", {}).get("agg", {})
 
@@ -348,6 +390,7 @@ def enumerate_points(recipe, tp, point=None):
         # Some overrides stand up a side service the point then talks to --
         # DeepSeek-V4's ATOM offload points need an lmcache-server. Neither the
         # wrapper nor the runner starts one, so those points cannot succeed.
+        server_env["_infx_setup"] = block.get("setup_script") or ""
         svcs = block.get("services") or []
         server_env["_infx_services"] = sorted(
             str(x.get("type") or x.get("name")) if isinstance(x, dict) else str(x)
@@ -428,8 +471,17 @@ def emit_serving(scenario_key, recipe, workloads, runner):
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, _, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
-            point_services = set()
-            point_env_srv = _split_marker(point_env_srv, seen_frontends, point_services)
+            point_services, point_setups = set(), set()
+            point_env_srv = _split_marker(point_env_srv, seen_frontends,
+                                          point_services, point_setups)
+            unusable = point_setups - REPRODUCIBLE_SETUP_SCRIPTS
+            if unusable:
+                notes.append(
+                    f"tp={tp} conc={conc} dropped: the override declares "
+                    f"setup_script {', '.join(sorted(unusable))}, which "
+                    "prepares the container in ways this wrapper does not "
+                    "reproduce")
+                continue
             if point_services:
                 notes.append(
                     f"tp={tp} conc={conc} dropped: the override needs the "
@@ -478,8 +530,17 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
         tp = point["tp"]
         notes += _ep_note(point, tp)
         for conc, point_args, point_env, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
-            point_services = set()
-            point_env_srv = _split_marker(point_env_srv, seen_frontends, point_services)
+            point_services, point_setups = set(), set()
+            point_env_srv = _split_marker(point_env_srv, seen_frontends,
+                                          point_services, point_setups)
+            unusable = point_setups - REPRODUCIBLE_SETUP_SCRIPTS
+            if unusable:
+                notes.append(
+                    f"tp={tp} conc={conc} dropped: the override declares "
+                    f"setup_script {', '.join(sorted(unusable))}, which "
+                    "prepares the container in ways this wrapper does not "
+                    "reproduce")
+                continue
             if point_services:
                 notes.append(
                     f"tp={tp} conc={conc} dropped: the override needs the "
@@ -580,7 +641,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
 WORKLOAD_EMITTERS = {"fixed-seq-len": emit_serving, "agentic-coding": emit_agentic}
 
 
-def _split_marker(server_env, seen, services=None):
+def _split_marker(server_env, seen, services=None, setups=None):
     """Remove the internal markers and remember what they said."""
     fe = server_env.pop("_infx_frontend", None) or {}
     if fe.get("type") and fe["type"] != "sglang":
@@ -588,6 +649,12 @@ def _split_marker(server_env, seen, services=None):
     needed = server_env.pop("_infx_services", None) or []
     if needed and services is not None:
         services.update(needed)
+    # An override can carry its own setup_script -- MiniMax-M3's vLLM
+    # lmcache point installs LMCache into the worker container -- so the
+    # base-level check alone would let an unprepared point through.
+    setup = server_env.pop("_infx_setup", None)
+    if setup and setups is not None:
+        setups.add(setup)
     return {k: v for k, v in server_env.items() if not k.startswith("_infx_")}
 
 
@@ -676,7 +743,7 @@ def resolve_mounts(model_dir, weights_dir, model_host_dir):
 
 def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, fw,
                        model_host_dir, timeout, weights_dir=None, slurm_time="04:00:00",
-                       base_image_override=None):
+                       base_image_override=None, pip_packages=""):
     base = recipe["base"]
     model = base["model"]["path"].removeprefix("hf:")
     image = base_image_override or scenario["image"]
@@ -693,6 +760,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
     key = f"infx-{scenario_key}"
     build_args = dict(
         {"BASE_DOCKER": image},
+        **({"INFX_PIP_PACKAGES": pip_packages} if pip_packages else {}),
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
            if cluster.get("run_as_submitting_user") else {}),
     )
@@ -867,6 +935,7 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
     # than no run.
     unsupported = [n for n, v in (("--agentic-duration", args.agentic_duration),
                                   ("--smoke-model", args.smoke_model),
+                                  ("--smoke-point", args.smoke_point),
                                   ("--smoke-first-point", args.smoke_first_point)) if v]
     if unsupported:
         raise Untranslatable(
@@ -979,6 +1048,14 @@ def _translate_one(args, scenario_key, out_dir):
     if smoke:
         notes.append("SMOKE ARTIFACT, not an InferenceX-comparable row: " + "; ".join(smoke))
 
+    # Both of these have to be decided before the config header is written, or
+    # the file a human reads would omit a gap the manifest records.
+    pip_packages, setup_note = resolve_setup_script(recipe, blocks)
+    if setup_note:
+        notes.append(setup_note)
+    if args.base_image:
+        notes.append(f"image replaced: {scenario['image']} -> {args.base_image}")
+
     os.makedirs(out_dir, exist_ok=True)
     # The scenario key, not just the prefix: the FP4, FP8 and MTP SGLang
     # DeepSeek scenarios share a prefix and framework, so a prefix-only name
@@ -1006,13 +1083,12 @@ def _translate_one(args, scenario_key, out_dir):
         scenario_key, scenario, recipe, prefix, cluster, runner, fw,
         args.model_host_dir, args.timeout, weights_dir=args.weights_dir,
         slurm_time=args.slurm_time, base_image_override=args.base_image,
+        pip_packages=pip_packages,
     )
     man["built_models"][next(iter(man["built_models"]))]["args"] = (
         man["built_models"][next(iter(man["built_models"]))]["args"]
         .replace(f"configs/{prefix}_infx.yaml", f"configs/{cfg_name}")
     )
-    if args.base_image:
-        notes.append(f"image replaced: {scenario['image']} -> {args.base_image}")
     man["_infx_provenance"]["inferencex_commit"] = infx_revision(args.infx)
     man["_infx_provenance"]["scenario_image"] = scenario["image"]
     man["_infx_provenance"]["workload"] = workload_name

@@ -50,6 +50,22 @@ ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
 
+# A recipe may declare `setup_script: pip-runtime-deps.sh`, which installs the
+# packages its base image lacks before the engine starts -- DeepSeek-V4's vLLM
+# base needs Pillow, fastapi and uvicorn, and the server dies on import without
+# them. That script does nothing but `pip install $SETUP_PIP_PACKAGES`, so
+# infx2mad.py folds it into the build and passes the list here. Doing it at
+# build time rather than per run also keeps the install out of the measured
+# window. The list is part of the image tag's fingerprint, so two scenarios
+# needing different packages cannot share an image.
+ARG INFX_PIP_PACKAGES=""
+RUN if [ -n "$INFX_PIP_PACKAGES" ]; then \
+        pip_opts=""; \
+        python3 -m pip install --help 2>/dev/null | grep -q -- --break-system-packages \
+            && pip_opts="--break-system-packages"; \
+        python3 -m pip install --quiet $pip_opts $INFX_PIP_PACKAGES; \
+    fi
+
 # On a cluster whose MAD workspace is an NFS export with root_squash, madengine
 # has to run the container as the submitting user rather than root. AITER then
 # JIT-builds kernels and writes its tuning cache into paths the image ships

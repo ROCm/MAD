@@ -7,7 +7,7 @@ numbers with our harness instead of growing a second one.
 
 ## Why a translator and not a new harness
 
-49 of the 52 AMD scenarios map onto a MAD runner that already exists:
+47 of the 52 AMD scenarios map onto a MAD runner that already exists:
 
 | InferenceX framework | MAD runner |
 | --- | --- |
@@ -65,9 +65,9 @@ python3 tools/infx2mad.py --infx "$INFX" --all \
 Every deviation from the recipe is recorded in the manifest's
 `_infx_provenance.fidelity_gaps` and in the config header, together with the
 InferenceX commit the artifacts were generated from. A translated row that
-silently differs from the scenario is worse than no row. The `--smoke-model` and
-`--smoke-first-point` options exist so a stand-in run can be made cheaply, and
-they are loud for the same reason.
+silently differs from the scenario is worse than no row. The `--smoke-model`,
+`--smoke-first-point` and `--smoke-point` options exist so a stand-in run can be
+made cheaply, and they are loud for the same reason.
 
 Four invariants the emitters hold, each forced by something concrete:
 
@@ -93,6 +93,18 @@ Four invariants the emitters hold, each forced by something concrete:
 - **`xP`/`yD` are node counts** while a scenario states workers; they coincide
   only while tp equals the node's GPU count.
 - **`atom-disagg` and `tilert`** have no MAD runner.
+- **Recipe `setup_script`.** A recipe may prepare its container before the
+  engine starts. `pip-runtime-deps.sh` is reproducible — it installs
+  `SETUP_PIP_PACKAGES` and nothing else — so it is folded into the image build
+  and the packages become part of the image tag's fingerprint. Any other
+  setup_script patches the container in ways the wrapper cannot restate, so the
+  scenario (or the one override that declares it) is dropped with the reason
+  attached rather than run unprepared.
+- **Pinned engine images expire.** A scenario pins the image its numbers were
+  measured against, and the vLLM nightly tags are garbage-collected upstream, so
+  an older scenario can become unbuildable. `--base-image` substitutes one and
+  records the substitution as a fidelity gap; the tag fingerprint changes with
+  it, so the run cannot reuse an image built from the pinned one.
 - **Agentic measurement window.** The recipes state none and `agentic_lib.sh`
   defaults to 120 s against a 900 s scenario minimum, so pass
   `--agentic-duration 900` for a submission-valid row.
