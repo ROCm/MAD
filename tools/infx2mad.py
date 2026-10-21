@@ -448,7 +448,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
             }
-            _stamp(block, scenario_key, tp, conc, runner, _point_suffix(extra))
+            _stamp(block, scenario_key, engine_tp, conc, runner, _point_suffix(extra))
             if rrr is not None:
                 block["random_range_ratio"] = float(rrr)
             blocks.append(block)
@@ -559,7 +559,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                 "extra_args": extra,
                 "agentic_env": agentic_env,
             }
-            _stamp(block, scenario_key, tp, conc, runner, _point_suffix(extra))
+            _stamp(block, scenario_key, engine_tp, conc, runner, _point_suffix(extra))
             blocks.append(block)
 
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
@@ -615,7 +615,7 @@ def _point_suffix(extra):
     ep = extra.get("--expert-parallel-size")
     if ep and int(ep) > 1:
         bits.append(f"ep{ep}")
-    if extra.get("--enable-dp-attention"):
+    if _dp_attention_on({k.lstrip("-"): v for k, v in extra.items()}, {}):
         bits.append("dp")
     dcp = extra.get("--decode-context-parallel-size")
     if dcp and int(dcp) > 1:
@@ -638,8 +638,9 @@ def _stamp(block, scenario_key, tp, conc, runner, suffix=""):
     apart would make `--variant` select both and make their result directories
     collide.
     """
+    block["_point_id"] = f"tp{tp}-c{conc}{suffix}"
     if runner["supports_variant"]:
-        block["variant"] = f"{scenario_key}-tp{tp}-c{conc}{suffix}"
+        block["variant"] = f"{scenario_key}-{block['_point_id']}"
     if runner["dtype_key"]:
         # The checkpoint carries its own quantisation and the InferenceX recipe
         # passes no --dtype at all; the runners always emit one, so 'auto' is
@@ -954,6 +955,17 @@ def _translate_one(args, scenario_key, out_dir):
     cluster = CLUSTERS[args.cluster]
 
     smoke = []
+    if args.smoke_point:
+        kept = [b for b in blocks if args.smoke_point in b["_point_id"]]
+        if not kept:
+            raise Untranslatable(
+                f"--smoke-point {args.smoke_point!r} matched none of "
+                f"{[b['_point_id'] for b in blocks]}")
+        blocks = kept
+        smoke.append(f"only points matching {args.smoke_point!r} kept "
+                     f"({len(blocks)} of them)")
+    for b in blocks:
+        b.pop("_point_id", None)
     if args.smoke_first_point:
         blocks = blocks[:1]
         smoke.append(f"only the first point kept: tp={blocks[0]['tp']} "
@@ -1079,6 +1091,11 @@ def main():
     ap.add_argument("--smoke-model", help="serve this checkpoint instead of the scenario's")
     ap.add_argument("--smoke-first-point", action="store_true",
                     help="keep only the first (tp, concurrency) point")
+    ap.add_argument("--smoke-point",
+                    help="keep only points whose id contains this string, e.g. "
+                         "'tp1-c64-dp'. The id is tp<N>-c<M> plus the topology "
+                         "suffix, and exists for every engine, unlike variant, "
+                         "which only SGLang configs carry")
     args = ap.parse_args()
 
     if args.cluster_file:
