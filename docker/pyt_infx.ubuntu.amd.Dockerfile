@@ -75,6 +75,24 @@ RUN if [ -n "$INFX_PIP_PACKAGES" ]; then \
 # container with `whoami`, which then fails and aborts the run before the model
 # starts, so give the uid a name at build time. Default 0 keeps the plain
 # run-as-root case untouched.
+# madengine starts the container with `--group-add render --group-add video`,
+# and docker resolves those names against the IMAGE's group file. The vLLM
+# nightly images carry neither, so the run dies with "Unable to find group
+# render" before the model is reached. The gids are the host's, because the
+# container also has to read /dev/dri/renderD*, which is bind-mounted with the
+# host's numeric ownership and is unreadable to a non-root user in any other
+# group. Default 0 means "leave this image's groups alone".
+ARG RENDER_GID=0
+ARG VIDEO_GID=0
+RUN for spec in "render:$RENDER_GID" "video:$VIDEO_GID"; do \
+        name="${spec%%:*}"; gid="${spec##*:}"; \
+        [ "$gid" = "0" ] && continue; \
+        getent group "$name" >/dev/null && continue; \
+        # A gid already taken by another group still lets the name resolve,
+        # which is what unblocks docker run; say so rather than failing here.
+        groupadd -g "$gid" "$name" || groupadd "$name"; \
+    done
+
 ARG RUN_AS_UID=0
 ARG RUN_AS_GID=0
 RUN if [ "$RUN_AS_UID" != "0" ]; then \

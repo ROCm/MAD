@@ -5,10 +5,494 @@
 # Do not hand-edit; regenerate instead.
 # FIDELITY GAP: recipe puts a vllm-router frontend in front of the server with its own routing policy; the aggregated path replays against the server directly, so that routing is not reproduced
 # FIDELITY GAP: InferenceX applies golden acceptance-length overrides at submission (synthetic_acceptance.build_overrides); the raw recipe does not carry them, so these points measure the engine's native acceptance rather than the pinned one
-# FIDELITY GAP: measurement window 180 s is below the scenario minimum of 900 s; the run is marked submission_valid=false by design.
-# FIDELITY GAP: SMOKE ARTIFACT, not an InferenceX-comparable row: only points matching 'tp1-c64-dp' kept (1 of them)
+# FIDELITY GAP: no measurement window set; agentic_lib.sh defaults to 120 s while the InferenceX scenario minimum is 900 s, so the run is marked submission_valid=false. Pass --agentic-duration 900 for a valid row.
 # FIDELITY GAP: setup_script pip-runtime-deps.sh is applied at image build (pip install Pillow fastapi uvicorn) rather than per run
-# FIDELITY GAP: image replaced: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19 -> vllm/vllm-openai-rocm:nightly-df3bd094aeea829f27baa0a5282830464f601d9f
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 1
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 2
+  agentic_env:
+    AGENTIC_CONC: '1'
+    KV_OFFLOADING: none
+    CONC: '1'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 4
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 8
+  agentic_env:
+    AGENTIC_CONC: '4'
+    KV_OFFLOADING: none
+    CONC: '4'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 8
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 16
+  agentic_env:
+    AGENTIC_CONC: '8'
+    KV_OFFLOADING: none
+    CONC: '8'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 16
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 32
+  agentic_env:
+    AGENTIC_CONC: '16'
+    KV_OFFLOADING: none
+    CONC: '16'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 32
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 64
+  agentic_env:
+    AGENTIC_CONC: '32'
+    KV_OFFLOADING: none
+    CONC: '32'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 40
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 80
+  agentic_env:
+    AGENTIC_CONC: '40'
+    KV_OFFLOADING: none
+    CONC: '40'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 48
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 96
+  agentic_env:
+    AGENTIC_CONC: '48'
+    KV_OFFLOADING: none
+    CONC: '48'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 56
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 112
+  agentic_env:
+    AGENTIC_CONC: '56'
+    KV_OFFLOADING: none
+    CONC: '56'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 8
+  inp: 0
+  out: 0
+  max_concurrency: 64
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 1
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --max-num-seqs: 128
+  agentic_env:
+    AGENTIC_CONC: '64'
+    KV_OFFLOADING: none
+    CONC: '64'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'false'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    MODEL_PREFIX: dsv4
+  dtype: auto
 - benchmark: agentic
   model: deepseek-ai/DeepSeek-V4-Pro-0813
   tp: 1
@@ -50,16 +534,130 @@
     --max-num-seqs: 64
   agentic_env:
     AGENTIC_CONC: '64'
-    DURATION: '180'
     KV_OFFLOADING: none
     CONC: '64'
     TP: '8'
     EP_SIZE: '1'
+    DCP_SIZE: '1'
     DP_ATTENTION: 'true'
     FRAMEWORK: vllm
     PRECISION: fp4
     MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
-    IMAGE: vllm/vllm-openai-rocm:nightly-df3bd094aeea829f27baa0a5282830464f601d9f
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: '1'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 1
+  inp: 0
+  out: 0
+  max_concurrency: 128
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 8
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --prefill-schedule-interval: 8
+    --long-prefill-token-threshold: 16384
+    --max-num-seqs: 128
+  agentic_env:
+    AGENTIC_CONC: '128'
+    KV_OFFLOADING: none
+    CONC: '128'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'true'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
+    SPEC_DECODING: draft_model
+    AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
+    AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'
+    AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: '1'
+    MODEL_PREFIX: dsv4
+  dtype: auto
+- benchmark: agentic
+  model: deepseek-ai/DeepSeek-V4-Pro-0813
+  tp: 1
+  inp: 0
+  out: 0
+  max_concurrency: 192
+  env:
+    SETUP_PIP_PACKAGES: Pillow fastapi uvicorn
+    VLLM_ENGINE_READY_TIMEOUT_S: '10800'
+    VLLM_PREFIX_CACHE_RETENTION_INTERVAL: '32768'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
+    VLLM_ROCM_USE_AITER: '1'
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_MOE: '1'
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: '0'
+    OMP_NUM_THREADS: '1'
+  extra_args:
+    --revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --tokenizer-revision: 72e1d3230f6c080a530b0a1d46f8eb4602340597
+    --trust-remote-code: true
+    --async-scheduling: true
+    --distributed-executor-backend: mp
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+    --data-parallel-size: 8
+    --gpu-memory-utilization: 0.86
+    --moe-backend: aiter
+    --compilation-config: '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE"}'
+    --speculative-config: '{"method": "dspark", "num_speculative_tokens": 6, "draft_sample_method":
+      "probabilistic"}'
+    --tokenizer-mode: deepseek_v4
+    --tool-call-parser: deepseek_v4
+    --reasoning-parser: deepseek_v4
+    --enable-auto-tool-choice: true
+    --enable-prefix-caching: true
+    --no-disable-hybrid-kv-cache-manager: true
+    --prefill-schedule-interval: 8
+    --long-prefill-token-threshold: 16384
+    --max-num-seqs: 192
+  agentic_env:
+    AGENTIC_CONC: '192'
+    KV_OFFLOADING: none
+    CONC: '192'
+    TP: '8'
+    EP_SIZE: '1'
+    DCP_SIZE: '1'
+    DP_ATTENTION: 'true'
+    FRAMEWORK: vllm
+    PRECISION: fp4
+    MODEL: deepseek-ai/DeepSeek-V4-Pro-0813
+    IMAGE: vllm/vllm-openai-rocm:nightly-e9757321527ca1ecd514c07c1418dd2c53da3d19
     SPEC_DECODING: draft_model
     AIPERF_HTTP_TCP_USER_TIMEOUT: '900000'
     AIPERF_REQUIRED_SERVER_METRIC_PREFIX: 'vllm:'

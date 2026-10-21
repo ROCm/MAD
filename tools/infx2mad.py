@@ -160,6 +160,27 @@ CLUSTERS = {
 DOCKERFILE = "docker/pyt_infx.ubuntu.amd.Dockerfile"
 
 
+def device_group_args():
+    """gids for the groups madengine's `docker run` adds by name.
+
+    madengine passes `--group-add render --group-add video`, and docker looks
+    those names up in the IMAGE's group file: the vLLM nightly images have
+    neither, so the container never starts. The gid has to be the host's as
+    well, because /dev/dri/renderD* arrives with the host's numeric ownership.
+    Absent on this host means absent from the build too, which leaves whatever
+    the base image ships untouched.
+    """
+    import grp
+
+    args = {}
+    for name, arg in (("render", "RENDER_GID"), ("video", "VIDEO_GID")):
+        try:
+            args[arg] = str(grp.getgrnam(name).gr_gid)
+        except KeyError:
+            pass
+    return args
+
+
 def image_tag(prefix, fw, arch, base_image, build_args):
     """Tag that changes whenever the image would.
 
@@ -418,12 +439,16 @@ def enumerate_points(recipe, tp, point=None):
                 per = {k: (v[i] if isinstance(v, list) else v) for k, v in point_args.items()}
                 per_env = {k: (v[i] if isinstance(v, list) else v) for k, v in env.items()
                            if k != "CONC"}
-                yield int(c), per, per_env, server_env, engine_tp
+                # A fresh copy per point: _split_marker POPS the markers,
+                # so sharing one dict across a zipped override's
+                # concurrencies would check only the first and emit the
+                # rest without their setup or service dependencies.
+                yield int(c), per, per_env, dict(server_env), engine_tp
         else:
             if allowed is not None and int(conc_raw) not in [int(a) for a in allowed]:
                 continue
             yield (int(conc_raw), point_args,
-                   {k: v for k, v in env.items() if k != "CONC"}, server_env,
+                   {k: v for k, v in env.items() if k != "CONC"}, dict(server_env),
                    engine_tp)
     if not found:
         raise Untranslatable(
@@ -523,6 +548,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
     bench_env = base.get("benchmark", {}).get("env", {})
     model_id = base["model"]["path"].removeprefix("hf:")
     seen_frontends = set()
+    dram_unstated = set()
 
     blocks = []
     for workload in workloads:
@@ -554,6 +580,23 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                                        point.get("kv-offloading", "none")))
             ep_deg = int(extra.get("--expert-parallel-size", 0)) or (
                 tp if extra.get("--enable-expert-parallel") else 1)
+            # Decode-context parallelism is part of the topology the aggregator
+            # prints and names the result file with. Kimi-K3's offload points
+            # are DCP8; unset, they would be recorded as DCP1.
+            dcp_deg = int(extra.get("--decode-context-parallel-size",
+                                    point.get("dcp-size", 1)) or 1)
+            # The host-DRAM budget is descriptive here, not functional: the
+            # recipes that need a concrete figure state it themselves (ATOM),
+            # and SGLang sizes its host cache from hicache-ratio instead. Carry
+            # whatever the merged server env has so the row is not silently 0.
+            # The recipes that state it put it in the point's BENCHMARK env,
+            # beside CONC and KV_OFFLOADING, not in the server role's env.
+            host_dram = str(point_env.get("TOTAL_CPU_DRAM_GB",
+                                          point_env_srv.get("TOTAL_CPU_DRAM_GB",
+                                                            bench_env.get("TOTAL_CPU_DRAM_GB",
+                                                                          "")))).strip()
+            if not host_dram and kv_off == "dram":
+                dram_unstated.add(f"tp={tp} conc={conc}")
             agentic_env = {
                 "AGENTIC_CONC": str(conc),
                 **({"DURATION": str(duration)} if duration else {}),
@@ -568,6 +611,8 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                 "CONC": str(conc),
                 "TP": str(tp),
                 "EP_SIZE": str(ep_deg),
+                "DCP_SIZE": str(dcp_deg),
+                **({"TOTAL_CPU_DRAM_GB": host_dram} if host_dram else {}),
                 "DP_ATTENTION": "true" if _dp_attention_on(
                     {k.lstrip("-"): v for k, v in extra.items()}, {}) else "false",
                 "FRAMEWORK": framework,
@@ -624,6 +669,13 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             blocks.append(block)
 
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
+    if dram_unstated:
+        notes.append(
+            "host-DRAM offload budget not reported for "
+            f"{len(dram_unstated)} dram-offloading point(s): InferenceX computes "
+            "TOTAL_CPU_DRAM_GB at submission from its own runner's memory, and "
+            "the recipe states none, so the aggregated row carries no figure. "
+            "The engine's own sizing (SGLang's hicache-ratio) is unaffected")
     if duration is None:
         notes.append(
             "no measurement window set; agentic_lib.sh defaults to 120 s while the "
@@ -763,6 +815,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
         **({"INFX_PIP_PACKAGES": pip_packages} if pip_packages else {}),
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
            if cluster.get("run_as_submitting_user") else {}),
+        **device_group_args(),
     )
     model_dir = os.path.basename(model)
     mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
