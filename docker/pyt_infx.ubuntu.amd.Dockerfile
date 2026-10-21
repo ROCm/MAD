@@ -39,6 +39,12 @@ ARG BASE_DOCKER
 
 FROM $BASE_DOCKER
 
+# The vLLM and ATOM base images declare a serving ENTRYPOINT. madengine keeps
+# its container alive by running `<image> cat`, which such an entrypoint takes
+# as a serving argument instead of executing, so the benchmark's later
+# `docker exec` calls never reach a running container.
+ENTRYPOINT []
+
 USER root
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR

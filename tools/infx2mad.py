@@ -316,6 +316,7 @@ def enumerate_points(recipe, tp, point=None):
     list from it would be a guess.
     """
     base_tp = _base_tp(recipe)
+    base_args_all = _agg(recipe["base"]).get("args", {})
     found = False
     for name, block in recipe.items():
         if name == "base" or not isinstance(block, dict):
@@ -344,6 +345,13 @@ def enumerate_points(recipe, tp, point=None):
         # of the server with its own routing policy, and the aggregated path
         # replays against the server directly.
         server_env["_infx_frontend"] = block.get("frontend") or {}
+        # Some overrides stand up a side service the point then talks to --
+        # DeepSeek-V4's ATOM offload points need an lmcache-server. Neither the
+        # wrapper nor the runner starts one, so those points cannot succeed.
+        svcs = block.get("services") or []
+        server_env["_infx_services"] = sorted(
+            str(x.get("type") or x.get("name")) if isinstance(x, dict) else str(x)
+            for x in (svcs.values() if isinstance(svcs, dict) else svcs))
         conc_raw = env.get("CONC")
         if conc_raw is None:
             continue
@@ -352,6 +360,13 @@ def enumerate_points(recipe, tp, point=None):
             continue
         allowed = point.get("conc-list") if point else None
         found = True
+        # The scenario's tp counts GPUs; the engine's tensor-parallel degree can
+        # differ -- vLLM's DP-attention points are TP1 x DP8 on eight GPUs. The
+        # server must be launched with the engine's degree, so carry it
+        # separately instead of dropping it with the other TP keys.
+        engine_tp = int(next((args[k] for k in TP_KEYS if k in args),
+                             next((base_args_all[k] for k in TP_KEYS if k in base_args_all),
+                                  tp)))
         point_args = {k: v for k, v in args.items() if k not in TP_KEYS}
         if isinstance(conc_raw, list):
             for i, c in enumerate(conc_raw):
@@ -360,12 +375,13 @@ def enumerate_points(recipe, tp, point=None):
                 per = {k: (v[i] if isinstance(v, list) else v) for k, v in point_args.items()}
                 per_env = {k: (v[i] if isinstance(v, list) else v) for k, v in env.items()
                            if k != "CONC"}
-                yield int(c), per, per_env, server_env
+                yield int(c), per, per_env, server_env, engine_tp
         else:
             if allowed is not None and int(conc_raw) not in [int(a) for a in allowed]:
                 continue
             yield (int(conc_raw), point_args,
-                   {k: v for k, v in env.items() if k != "CONC"}, server_env)
+                   {k: v for k, v in env.items() if k != "CONC"}, server_env,
+                   engine_tp)
     if not found:
         raise Untranslatable(
             f"no override block for tp={tp} in recipe {recipe['base']['name']!r}")
@@ -411,14 +427,21 @@ def emit_serving(scenario_key, recipe, workloads, runner):
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
-        for conc, point_args, _, point_env_srv in enumerate_points(recipe, tp, point):
-            point_env_srv = _split_marker(point_env_srv, seen_frontends)
+        for conc, point_args, _, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
+            point_services = set()
+            point_env_srv = _split_marker(point_env_srv, seen_frontends, point_services)
+            if point_services:
+                notes.append(
+                    f"tp={tp} conc={conc} dropped: the override needs the "
+                    f"{', '.join(sorted(point_services))} service, which neither "
+                    "the wrapper nor the runner starts")
+                continue
             extra = effective_args(recipe, point_args,
                                    OWNED_BY_RUNNER.get(runner["dir"], set()))
             block = {
                 "benchmark": "serving",
                 "model": base["model"]["path"].removeprefix("hf:"),
-                "tp": tp,
+                "tp": engine_tp,
                 "inp": int(workload["isl"]),
                 "out": int(workload["osl"]),
                 "max_concurrency": conc,
@@ -454,8 +477,15 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
-        for conc, point_args, point_env, point_env_srv in enumerate_points(recipe, tp, point):
-            point_env_srv = _split_marker(point_env_srv, seen_frontends)
+        for conc, point_args, point_env, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
+            point_services = set()
+            point_env_srv = _split_marker(point_env_srv, seen_frontends, point_services)
+            if point_services:
+                notes.append(
+                    f"tp={tp} conc={conc} dropped: the override needs the "
+                    f"{', '.join(sorted(point_services))} service, which neither "
+                    "the wrapper nor the runner starts")
+                continue
             extra = effective_args(recipe, point_args)
             # agentic_lib.sh is driven by env, not CLI. KV_OFFLOADING is
             # required by its aggregation step; the recipe states it per point.
@@ -477,7 +507,8 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                 "CONC": str(conc),
                 "TP": str(tp),
                 "EP_SIZE": str(ep_deg),
-                "DP_ATTENTION": "true" if extra.get("--enable-dp-attention") else "false",
+                "DP_ATTENTION": "true" if _dp_attention_on(
+                    {k.lstrip("-"): v for k, v in extra.items()}, {}) else "false",
                 "FRAMEWORK": framework,
                 "PRECISION": precision,
                 "MODEL": model_id,
@@ -517,7 +548,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             block = {
                 "benchmark": "agentic",
                 "model": base["model"]["path"].removeprefix("hf:"),
-                "tp": tp,
+                "tp": engine_tp,
                 # The runners' CSV columns include inp/out; an agentic replay has
                 # no fixed sequence length, so 0 marks "not a fixed-seq-len run"
                 # rather than inventing a number.
@@ -549,11 +580,14 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
 WORKLOAD_EMITTERS = {"fixed-seq-len": emit_serving, "agentic-coding": emit_agentic}
 
 
-def _split_marker(server_env, seen):
-    """Remove the internal frontend marker and remember what it said."""
+def _split_marker(server_env, seen, services=None):
+    """Remove the internal markers and remember what they said."""
     fe = server_env.pop("_infx_frontend", None) or {}
     if fe.get("type") and fe["type"] != "sglang":
         seen.add(fe["type"])
+    needed = server_env.pop("_infx_services", None) or []
+    if needed and services is not None:
+        services.update(needed)
     return {k: v for k, v in server_env.items() if not k.startswith("_infx_")}
 
 

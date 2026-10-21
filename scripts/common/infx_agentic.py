@@ -124,6 +124,12 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
 
         hook_env = dict(os.environ)
         hook_env.update({str(k): str(v) for k, v in agentic_env.items()})
+        # MODEL must reach the aggregator, but it must NOT be set when the hook
+        # runs: a non-empty value makes benchmark_agentic.sh skip /v1/models
+        # discovery, and vLLM serves the mounted checkpoint path under no alias,
+        # so the replay would address an id the server never registered. The
+        # hook discovers the advertised id and exports it onward itself.
+        hook_env.pop("MODEL", None)
         hook_env.update({
             "MODEL_PATH": model,
             # MODEL is deliberately NOT set: the runners reduce config["model"]
