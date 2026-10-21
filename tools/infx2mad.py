@@ -772,6 +772,40 @@ def _stamp(block, scenario_key, tp, conc, runner, suffix=""):
 # The madengine side
 # --------------------------------------------------------------------------
 
+def revision_note(blocks, weights_dir):
+    """Say so when a pinned checkpoint revision cannot be enforced.
+
+    A recipe pins `revision` and `tokenizer-revision` because the scenario was
+    measured against that exact checkpoint. The engines honour it only when
+    they resolve the model through the HuggingFace hub; served from a mounted
+    directory, as every run here is, the flag is accepted and ignored. A
+    checkpoint that differs then fails in a way that names neither: DeepSeek-V4
+    at the wrong revision dies inside the DSpark speculator asking for a
+    config field the pinned revision has and an older one does not.
+
+    An HF snapshot path carries its sha, so compare; a plain directory cannot
+    be checked at all, which is itself worth saying.
+    """
+    pinned = {str(b["extra_args"][k]) for b in blocks
+              for k in ("--revision", "--tokenizer-revision")
+              if k in b.get("extra_args", {})}
+    if not pinned:
+        return None
+    pinned_str = ", ".join(sorted(pinned))
+    head, sep, tail = (os.path.realpath(weights_dir or "")
+                       .partition(os.sep + "snapshots" + os.sep))
+    if sep:
+        have = tail.split(os.sep)[0]
+        if have in pinned:
+            return None
+        return (f"recipe pins revision {pinned_str} but the mounted snapshot is "
+                f"{have}; the engine ignores the flag for a local path, so this "
+                "run measures the mounted checkpoint")
+    return (f"recipe pins revision {pinned_str}, which the engine ignores for a "
+            "mounted checkpoint; the weights directory carries no revision "
+            "marker, so the artifacts cannot confirm it is that checkpoint")
+
+
 def resolve_mounts(model_dir, weights_dir, model_host_dir):
     """-> (docker_mounts, in-container model path).
 
@@ -1106,6 +1140,9 @@ def _translate_one(args, scenario_key, out_dir):
     pip_packages, setup_note = resolve_setup_script(recipe, blocks)
     if setup_note:
         notes.append(setup_note)
+    rev_note = revision_note(blocks, args.weights_dir)
+    if rev_note:
+        notes.append(rev_note)
     if args.base_image:
         notes.append(f"image replaced: {scenario['image']} -> {args.base_image}")
 
