@@ -65,7 +65,7 @@ def _worker_nodes(role, gpus_per_node):
 def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
                 cluster, runner, timeout, slurm_time, weights_dir, model_host_dir,
                 gpu_arch, resolve_mounts, mad_dir=".", infx_commit="unknown",
-                run_logs_host=None, base_image_override=None):
+                run_logs_host=None, base_image_override=None, device_gids=None):
     """-> (manifest dict, notes) for one search-space point."""
     notes = []
     gpus_per_node = cluster["gpus_per_node"]
@@ -103,16 +103,18 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     # image tag, and a tag computed from the pre-override image would let a
     # plain build and an overlay build share it.
     image = base_image_override or scenario["image"]
-    # Imported here, not at module scope: infx2mad imports this module.
-    from infx2mad import device_group_args
-
     build_args = dict(
         {"BASE_DOCKER": image},
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
            if cluster.get("run_as_submitting_user") else {}),
         # These manifests pass --group-add render too, so the image needs the
-        # group for the same reason the aggregated ones do.
-        **device_group_args(cluster),
+        # group for the same reason the aggregated ones do. Passed in rather
+        # than resolved here: run as `python3 tools/infx2mad.py`, the
+        # translator is __main__, so importing it by name would load a SECOND
+        # copy whose Untranslatable is a different class than the one the
+        # sweep catches -- and a missing group would abort the whole run with
+        # a traceback instead of reporting one untranslatable scenario.
+        **(device_gids or {}),
     )
     kv = scenario.get("kv-p2p-transfer") or "nixl"
     dp_mode = 1 if dp_attn else 0

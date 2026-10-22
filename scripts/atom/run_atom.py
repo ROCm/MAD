@@ -369,6 +369,8 @@ def run_agentic_point(model, config):
         server_cmd += f"--kv_cache_dtype {config['kv_cache_dtype']} "
     env_dict = config.pop("env", {})
     extra_args_dict = config.pop("extra_args", {})
+    # The agentic replay drives its own prompt corpus, so the serving-only
+    # length-distribution knob is dropped rather than forwarded.
     config.pop("random_range_ratio", None)
     config.pop("bench_serving", None)
     env_str = dict_to_env(env_dict) if env_dict else ""
@@ -385,6 +387,11 @@ def run_agentic_point(model, config):
 def run_serving(model, config):
     # num_prompts = multiplier * max_concurrency; multiplier from perf.yaml bench_serving (default 10), popped so it stays out of the CSV row
     multiplier = int((config.pop("bench_serving", {}) or {}).get("num_prompts_multiplier") or 10)
+    # The benchmark call below hardcoded 0.8 while this value was discarded, so
+    # a recipe asking for another prompt-length distribution measured 0.8 with
+    # nothing saying so. 0.8 remains the default, leaving existing configs
+    # unchanged. run_sglang.py and run_vllm.py already honour this key.
+    random_range_ratio = config.pop("random_range_ratio", 0.8)
     if not config.get("num_prompts"):
         config["num_prompts"] = str(multiplier * int(config["max_concurrency"]))
     output_json = (
@@ -434,7 +441,7 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
+            f"--random-range-ratio {random_range_ratio} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -506,6 +513,7 @@ def run_serving_profile(model, config):
     kernel-summary aggregator.
     """
     config.pop("bench_serving", None)  # perf.yaml-only knob; keep out of CSV row
+    random_range_ratio = config.pop("random_range_ratio", 0.8)  # see run_serving
     if not config.get("num_prompts"):
         config["num_prompts"] = str(min(5, 10 * int(config["max_concurrency"])))
     output_json = (
@@ -579,7 +587,7 @@ def run_serving_profile(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
+            f"--random-range-ratio {random_range_ratio} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "

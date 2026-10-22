@@ -128,6 +128,18 @@ CLUSTERS = {
         # denied and madengine's own `cp --preserve=all` cannot set ownership.
         # Running as the submitting user is what makes both succeed.
         "run_as_submitting_user": True,
+        # Where checkpoints already live on this cluster. Searched in order for
+        # a directory named after the scenario's model that holds a
+        # config.json, so a scenario need not be told its own path. These are
+        # five separate stores; four of them are one user's, which is exactly
+        # why this belongs in the cluster entry rather than in anyone's memory.
+        "model_stores": [
+            "/apps/models_blog",
+            "/apps/models",
+            "/apps/models/htrivedi",
+            "/apps/data/models",
+            "/apps/huzhao/models",
+        ],
         # Nodes whose sssd/PAM is broken: sudo there answers "PAM account
         # management error" and refuses, so every docker call fails before the
         # model is reached. Probe with probe_sudo.sh before trusting this list;
@@ -823,6 +835,62 @@ def revision_note(blocks, weights_dir):
             "marker, so the artifacts cannot confirm it is that checkpoint")
 
 
+def precision_note(scenario, weights_dir):
+    """Say so when the mounted checkpoint is not the precision claimed.
+
+    A scenario states the precision its numbers were measured at, and the
+    engine takes the quantization from the checkpoint, not from that label. So
+    a mi355x-fp4 scenario served from an fp8 copy of the same model produces a
+    row that reads as fp4 and is not: different kernels, different memory
+    traffic, different numbers. Both DeepSeek-V4 checkpoints on this cluster
+    are fp8 while their scenarios say fp4, so this is not hypothetical.
+
+    Only checkpoints that declare a quantization are checked; an unquantized
+    checkpoint says nothing and is left alone.
+    """
+    want = (scenario.get("precision") or "").lower()
+    if not want or not weights_dir:
+        return None
+    cfg = os.path.join(os.path.realpath(weights_dir), "config.json")
+    try:
+        with open(cfg) as f:
+            have = ((json.load(f).get("quantization_config") or {})
+                    .get("quant_method") or "").lower()
+    except (OSError, ValueError):
+        return (f"scenario states precision {want} and the mounted checkpoint has "
+                "no readable config.json, so the artifacts cannot confirm it")
+    if not have or have == want:
+        return None
+    return (f"scenario states precision {want} but the mounted checkpoint is "
+            f"quantized {have}; the engine follows the checkpoint, so this run "
+            "does not measure what the scenario names")
+
+
+def resolve_weights(scenario, cluster, explicit):
+    """Where this scenario's checkpoint lives on this cluster.
+
+    An explicit --weights-dir always wins. Otherwise the model is looked up by
+    name in the cluster's model stores, because which checkpoints a cluster
+    holds is a cluster fact, like its partition or its broken nodes -- and
+    finding them by hand is how 88 of 280 points were first reported
+    unreachable when they were simply in a store nobody had listed.
+
+    Not found is not an error here: the caller may be generating artifacts to
+    run elsewhere. It is recorded, so a run that falls back to MAD's own
+    download path does not look like a run against a staged checkpoint.
+    """
+    if explicit:
+        return explicit, None
+    name = scenario["model"].split("/")[-1]
+    for store in cluster.get("model_stores") or ():
+        cand = os.path.join(store, name)
+        if os.path.isfile(os.path.join(cand, "config.json")):
+            return cand, None
+    stores = ", ".join(cluster.get("model_stores") or ()) or "(none configured)"
+    return None, (f"no checkpoint named {name!r} in the cluster's model stores "
+                  f"[{stores}]; the run will fall back to fetching it")
+
+
 def resolve_mounts(model_dir, weights_dir, model_host_dir):
     """-> (docker_mounts, in-container model path).
 
@@ -1056,6 +1124,10 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
     workload_name = present[0]
     workload = scenario["scenarios"][workload_name][0]
 
+    # Resolved here, not inside the emitter: an unresolvable group has to
+    # raise Untranslatable from the module the sweep actually imported.
+    device_gids = device_group_args(cluster)
+
     os.makedirs(out_dir, exist_ok=True)
     made, notes, skipped = [], [], []
     for idx, point in enumerate(workload["search-space"]):
@@ -1066,7 +1138,7 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
                 args.weights_dir, args.model_host_dir, arch, resolve_mounts,
                 mad_dir=args.mad_dir, infx_commit=infx_revision(args.infx),
                 run_logs_host=args.run_logs_dir,
-                base_image_override=args.base_image)
+                base_image_override=args.base_image, device_gids=device_gids)
             if args.base_image:
                 man["_infx_provenance"]["fidelity_gaps"].append(
                     f"image replaced: {scenario['image']} -> {args.base_image}")
@@ -1163,9 +1235,15 @@ def _translate_one(args, scenario_key, out_dir):
     pip_packages, setup_note = resolve_setup_script(recipe, blocks)
     if setup_note:
         notes.append(setup_note)
-    rev_note = revision_note(blocks, args.weights_dir)
+    weights_dir, weights_note = resolve_weights(scenario, cluster, args.weights_dir)
+    if weights_note:
+        notes.append(weights_note)
+    rev_note = revision_note(blocks, weights_dir)
     if rev_note:
         notes.append(rev_note)
+    prec_note = precision_note(scenario, weights_dir)
+    if prec_note:
+        notes.append(prec_note)
     if args.base_image:
         notes.append(f"image replaced: {scenario['image']} -> {args.base_image}")
 
@@ -1195,7 +1273,7 @@ def _translate_one(args, scenario_key, out_dir):
     # runner's configs/ holding translations that no manifest points at.
     man = translate_manifest(
         scenario_key, scenario, recipe, prefix, cluster, runner, fw,
-        args.model_host_dir, args.timeout, weights_dir=args.weights_dir,
+        args.model_host_dir, args.timeout, weights_dir=weights_dir,
         slurm_time=args.slurm_time, base_image_override=args.base_image,
         pip_packages=pip_packages,
     )
