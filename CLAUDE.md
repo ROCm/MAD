@@ -32,7 +32,9 @@ Claude Code does.
 - **Hook.** `.claude/settings.json` registers a PostToolUse hook
   (`.claude/hooks/validate-models-json.sh`) that validates any
   `scripts/**/models.json` Claude edits and reports errors back immediately.
-- **Permissions.** `.claude/settings.json` pre-approves read-only madengine and
-  git commands, the pre-flight, `mad-run.sh`, and the model validator. It does
-  not pre-approve `docker run` or `madengine database`; `/primus-projection`
-  grants `docker run --rm` only while it runs.
+- **Permissions.** `.claude/settings.json` pre-approves `madengine discover`,
+  `run` and `build` (so GPU runs start without a prompt), `madengine report
+  tracelens*`, read-only git commands, `rocm-smi`/`amd-smi`, the pre-flight,
+  `mad-run.sh`, the model validator, and the Primus CLI commands. It does not
+  pre-approve `docker run` or `madengine database`; `/primus-projection` grants
+  `docker run --rm` only while it runs.
