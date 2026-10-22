@@ -172,6 +172,12 @@ CLUSTERS = {
 DOCKERFILE = "docker/pyt_infx.ubuntu.amd.Dockerfile"
 
 
+# Frontend types that ARE the engine's own server rather than something in
+# front of it. Observed across the AMD recipes: atomesh, sglang-router and
+# vllm-router are routers; sglang and vllm are the engines themselves.
+DIRECT_FRONTENDS = {"sglang", "vllm", "atom"}
+
+
 DEVICE_GROUPS = (("render", "RENDER_GID"), ("video", "VIDEO_GID"))
 
 
@@ -433,10 +439,14 @@ def enumerate_points(recipe, tp, point=None):
         # VLLM_USE_BREAKABLE_CUDAGRAPH, the offload points' PYTHONHASHSEED);
         # the base env alone is not the point's environment.
         server_env = dict(_agg(block).get("env", {}))
-        # Recorded, not applied: some overrides put an sglang-router in front
-        # of the server with its own routing policy, and the aggregated path
-        # replays against the server directly.
-        server_env["_infx_frontend"] = block.get("frontend") or {}
+        # Recorded, not applied: some recipes put a router in front of the
+        # server with its own routing policy, and the aggregated path replays
+        # against the server directly. The override inherits base's frontend
+        # when it declares none -- dsr1-fp4-mi355x-atom states `atomesh` in
+        # base only, so reading the override alone dropped the gap entirely
+        # and the run bypassed Atomesh with nothing saying so.
+        server_env["_infx_frontend"] = (
+            block.get("frontend") or recipe["base"].get("frontend") or {})
         # Some overrides stand up a side service the point then talks to --
         # DeepSeek-V4's ATOM offload points need an lmcache-server. Neither the
         # wrapper nor the runner starts one, so those points cannot succeed.
@@ -725,7 +735,11 @@ WORKLOAD_EMITTERS = {"fixed-seq-len": emit_serving, "agentic-coding": emit_agent
 def _split_marker(server_env, seen, services=None, setups=None):
     """Remove the internal markers and remember what they said."""
     fe = server_env.pop("_infx_frontend", None) or {}
-    if fe.get("type") and fe["type"] != "sglang":
+    # `sglang` and `vllm` name the engine's own HTTP server, which is exactly
+    # what the runners start; only a real router in front of it is a gap. Now
+    # that base's frontend is inherited, every vLLM recipe would otherwise
+    # report one.
+    if fe.get("type") and fe["type"] not in DIRECT_FRONTENDS:
         seen.add(fe["type"])
     needed = server_env.pop("_infx_services", None) or []
     if needed and services is not None:
@@ -866,14 +880,20 @@ def precision_note(scenario, weights_dir):
             "does not measure what the scenario names")
 
 
-def resolve_weights(scenario, cluster, explicit):
+def resolve_weights(model_path, cluster, explicit):
     """Where this scenario's checkpoint lives on this cluster.
 
-    An explicit --weights-dir always wins. Otherwise the model is looked up by
-    name in the cluster's model stores, because which checkpoints a cluster
-    holds is a cluster fact, like its partition or its broken nodes -- and
+    An explicit --weights-dir always wins. Otherwise the EFFECTIVE model -- the
+    stand-in under --smoke-model, the scenario's own otherwise -- is looked up
+    by name in the cluster's model stores, because which checkpoints a cluster
+    holds is a cluster fact, like its partition or its broken nodes, and
     finding them by hand is how 88 of 280 points were first reported
     unreachable when they were simply in a store nobody had listed.
+
+    Resolving the scenario's model instead of the effective one would mount the
+    real checkpoint under the stand-in's name, and every runner prefers those
+    weights through MAD_DATAHOME -- so a smoke run advertised as cheap would
+    load the full original checkpoint.
 
     Not found is not an error here: the caller may be generating artifacts to
     run elsewhere. It is recorded, so a run that falls back to MAD's own
@@ -881,7 +901,7 @@ def resolve_weights(scenario, cluster, explicit):
     """
     if explicit:
         return explicit, None
-    name = scenario["model"].split("/")[-1]
+    name = model_path.split("/")[-1]
     for store in cluster.get("model_stores") or ():
         cand = os.path.join(store, name)
         if os.path.isfile(os.path.join(cand, "config.json")):
@@ -903,7 +923,16 @@ def resolve_mounts(model_dir, weights_dir, model_host_dir):
     """
     container_models = "/models"
     if not weights_dir:
-        return {container_models: model_host_dir}, f"{container_models}/{model_dir}"
+        # Nothing resolved for this scenario: mount the shared store anyway --
+        # it may hold the checkpoint under another name -- but report no
+        # datahome, because all three runners treat a non-empty MAD_DATAHOME as
+        # THE checkpoint path and skip their download branch. Exporting a path
+        # that holds no checkpoint turns a missing download into a server that
+        # fails to start.
+        staged = os.path.isfile(
+            os.path.join(model_host_dir, model_dir, "config.json"))
+        return ({container_models: model_host_dir},
+                f"{container_models}/{model_dir}" if staged else None)
     weights_dir = os.path.realpath(weights_dir)
     head, sep, tail = weights_dir.partition(os.sep + "snapshots" + os.sep)
     if sep:
@@ -988,8 +1017,10 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
             "docker_env_vars": {
                 "MAD_SYSTEM_GPU_ARCHITECTURE": arch,
                 # The runners prefer MAD_DATAHOME over an HF pull, which is what
-                # keeps a 600+ GB checkpoint off the network every run.
-                "MAD_DATAHOME": model_path,
+                # keeps a 600+ GB checkpoint off the network every run. Absent
+                # when nothing is staged, so the runner downloads instead of
+                # pointing the engine at an empty directory.
+                **({"MAD_DATAHOME": model_path} if model_path else {}),
                 # NOT the weights mount: sglang's bench_serving downloads the
                 # ShareGPT corpus to sample a token-length distribution whenever
                 # random-range-ratio != 1.0, and writes it into HF_HUB_CACHE. The
@@ -1033,7 +1064,7 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
                 "nnodes": nodes,
                 "nproc_per_node": cluster["gpus_per_node"],
             },
-            "env_vars": {"MAD_DATAHOME": model_path},
+            "env_vars": ({"MAD_DATAHOME": model_path} if model_path else {}),
             "debug": False,
             "docker_gpus": gpus,
         },
@@ -1197,6 +1228,13 @@ def _translate_one(args, scenario_key, out_dir):
                "image": args.base_image or scenario["image"]}
               if workload_name == "agentic-coding" else {})
     blocks, notes = emitter(scenario_key, recipe, entries, runner, **kwargs)
+    if not blocks:
+        # Every matching override can be dropped -- unsupported setup script,
+        # a service the wrapper does not start. Writing a zero-point config and
+        # manifest leaves artifacts the validator happily reports as OK, and
+        # the smoke paths below index blocks[0]. Refuse, keeping the reasons so
+        # --all reports them and continues.
+        raise Untranslatable("; ".join(notes) or "no expressible point")
     cluster = CLUSTERS[args.cluster]
 
     smoke = []
@@ -1235,7 +1273,8 @@ def _translate_one(args, scenario_key, out_dir):
     pip_packages, setup_note = resolve_setup_script(recipe, blocks)
     if setup_note:
         notes.append(setup_note)
-    weights_dir, weights_note = resolve_weights(scenario, cluster, args.weights_dir)
+    weights_dir, weights_note = resolve_weights(
+        recipe["base"]["model"]["path"].removeprefix("hf:"), cluster, args.weights_dir)
     if weights_note:
         notes.append(weights_note)
     rev_note = revision_note(blocks, weights_dir)

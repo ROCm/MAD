@@ -166,6 +166,12 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     env_vars = {
         "MODEL_NAME": catalog,
         "MODEL_PATH": model_path,
+        # Without this, run.sh picks a repository from the CATALOG KEY when the
+        # weights are not already there: catalog key DeepSeek-R1 falls back to
+        # deepseek-ai/DeepSeek-R1-0528 even for a scenario naming an AMD FP4
+        # build, so a fresh run would fetch a different checkpoint than the
+        # provenance claims.
+        "MODEL_REPO": scenario["model"],
         "RUN_MORI": "1" if kv == "mori" else "0",
         "DP_MODE": str(dp_mode),
         "xP": str(xP),
@@ -186,6 +192,15 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         # Both selectors: the launcher keys its agentic setup (metrics,
         # AGENTIC_SERVER_METRICS, dropping --disable-radix-cache) off
         # BENCHMARK_SCRIPT, while BENCHMARK_SCRIPT_FILE only picks the hook.
+        # agentic_lib.sh passes AGENTIC_CONC straight after --concurrency in a
+        # SINGLE aiperf invocation; it does not loop. A two-value list would
+        # become `--concurrency 16 32`, which is one malformed run rather than
+        # two replays, so refuse instead of emitting it.
+        if len(point["conc-list"]) != 1:
+            raise ValueError(
+                f"agentic point lists {len(point['conc-list'])} concurrencies "
+                f"{point['conc-list']}; the disagg agentic hook runs one per "
+                "invocation and does not loop over them")
         env_vars["BENCHMARK_SCRIPT"] = "agentic"
         env_vars["BENCHMARK_SCRIPT_FILE"] = "benchmark_agentic.sh"
         env_vars["AGENTIC_CONC"] = conc

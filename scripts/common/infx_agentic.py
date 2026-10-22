@@ -113,8 +113,16 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
         # already exists -- a repeated run of the same point is still a
         # separate measurement.
         tag = config.get("variant") or f"{config['model']}_tp{config['tp']}"
+        # One level ABOVE the working directory. The runners execute inside
+        # madengine's run_directory, which madengine deletes after a successful
+        # run unless --keep-model-dir or --keep-alive is given, and the shared
+        # wrapper lifts only the performance CSV out of it. Written inside, the
+        # aggregate JSON, the replay logs and the AIPerf artifacts -- including
+        # submission_valid, which never reaches the CSV -- would be destroyed by
+        # exactly the runs that produced them.
         base_dir = os.path.abspath(
-            f"agentic_{tag}_c{config['max_concurrency']}".replace("/", "_")
+            os.path.join("..", f"agentic_{tag}_c{config['max_concurrency']}"
+                               .replace("/", "_"))
         )
         result_dir, attempt = base_dir, 1
         while os.path.exists(result_dir):
