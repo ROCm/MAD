@@ -92,10 +92,30 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             f"tp={tp} does not fill a {gpus_per_node}-GPU node, so the point's worker "
             "counts cannot be expressed as the launcher's xP/yD node counts"
         )
+    # A worker wider than one node needs the server told its rank in the group.
+    # sglang_disagg_mori_io_ep.sh adds --nnodes/--node-rank only under
+    # DP_MODE=1; at DP_MODE=0 it starts an independent single-node server per
+    # node, so a TP16 worker would never be formed and the manifest would
+    # measure something else entirely.
+    if not dp_attn and max(int(prefill["tp"]), int(decode["tp"])) > gpus_per_node:
+        raise ValueError(
+            f"a worker spans more than one {gpus_per_node}-GPU node "
+            f"(prefill tp={prefill['tp']}, decode tp={decode['tp']}) while "
+            "dp-attn is off; the launcher passes --nnodes/--node-rank only "
+            "under DP_MODE=1, so it would start one server per node instead")
 
     model = scenario["model"]
     model_dir = os.path.basename(model)
     mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
+    # The aggregated route can leave this unset and let the runner download.
+    # This one cannot: the launcher fetches on rank 0 and the peers wait for
+    # the files to appear at a SHARED path, so with nothing staged the manifest
+    # would carry `MODEL_PATH: null` and `--model-path None`.
+    if not model_path:
+        raise ValueError(
+            f"no checkpoint for {model_dir!r} under {model_host_dir!r}; the "
+            "disagg launcher needs a shared path its peers can wait on, so it "
+            "cannot fall back to a per-rank download")
     key = f"infx-{scenario_key}-p{idx}"
     arch = gpu_arch
 

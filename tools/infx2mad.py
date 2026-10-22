@@ -1158,6 +1158,11 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
     # Resolved here, not inside the emitter: an unresolvable group has to
     # raise Untranslatable from the module the sweep actually imported.
     device_gids = device_group_args(cluster)
+    # The disagg emitter only ever saw --model-host-dir, so a checkpoint in any
+    # of the cluster's other stores looked absent to it. Same resolution as the
+    # aggregated route.
+    disagg_weights, disagg_note = resolve_weights(
+        scenario["model"], cluster, args.weights_dir)
 
     os.makedirs(out_dir, exist_ok=True)
     made, notes, skipped = [], [], []
@@ -1166,7 +1171,7 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
             man, pnotes = disagg_emitter.emit_disagg(
                 scenario_key, scenario, workload_name, workload, point, idx,
                 cluster, runner, args.timeout, args.slurm_time,
-                args.weights_dir, args.model_host_dir, arch, resolve_mounts,
+                disagg_weights, args.model_host_dir, arch, resolve_mounts,
                 mad_dir=args.mad_dir, infx_commit=infx_revision(args.infx),
                 run_logs_host=args.run_logs_dir,
                 base_image_override=args.base_image, device_gids=device_gids)
@@ -1185,6 +1190,8 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
     if not made:
         raise Untranslatable("; ".join(skipped) or "no expressible point")
     notes += [f"point dropped -> {s}" for s in skipped]
+    if disagg_note:
+        notes.append(disagg_note)
     return {"scenario": scenario_key, "framework": scenario["framework"],
             "workload": workload_name, "runner": f"scripts/{runner['dir']}",
             "points": len(made), "config": "(env-driven launcher)",
