@@ -75,22 +75,30 @@ RUN if [ -n "$INFX_PIP_PACKAGES" ]; then \
 # container with `whoami`, which then fails and aborts the run before the model
 # starts, so give the uid a name at build time. Default 0 keeps the plain
 # run-as-root case untouched.
+
 # madengine starts the container with `--group-add render --group-add video`,
 # and docker resolves those names against the IMAGE's group file. The vLLM
 # nightly images carry neither, so the run dies with "Unable to find group
-# render" before the model is reached. The gids are the host's, because the
-# container also has to read /dev/dri/renderD*, which is bind-mounted with the
-# host's numeric ownership and is unreadable to a non-root user in any other
-# group. Default 0 means "leave this image's groups alone".
+# render" before the model is reached.
+#
+# Creating the names is not enough: the supplementary group only grants access
+# if its gid matches the compute node's, because /dev/dri/renderD* is bind-
+# mounted with that node's numeric ownership and a container running as the
+# submitting user has no other way in. So the gid is forced -- an image group
+# at a different gid is moved, and -o allows the gid to be shared with a group
+# that already holds it, which is harmless and beats silently using the wrong
+# one. Default 0 means "leave this image's groups alone".
 ARG RENDER_GID=0
 ARG VIDEO_GID=0
 RUN for spec in "render:$RENDER_GID" "video:$VIDEO_GID"; do \
         name="${spec%%:*}"; gid="${spec##*:}"; \
         [ "$gid" = "0" ] && continue; \
-        getent group "$name" >/dev/null && continue; \
-        # A gid already taken by another group still lets the name resolve,
-        # which is what unblocks docker run; say so rather than failing here.
-        groupadd -g "$gid" "$name" || groupadd "$name"; \
+        if getent group "$name" >/dev/null; then \
+            cur="$(getent group "$name" | cut -d: -f3)"; \
+            [ "$cur" = "$gid" ] || groupmod -o -g "$gid" "$name"; \
+        else \
+            groupadd -o -g "$gid" "$name"; \
+        fi; \
     done
 
 ARG RUN_AS_UID=0
