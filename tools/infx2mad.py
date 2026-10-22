@@ -1189,6 +1189,17 @@ def _translate_one(args, scenario_key, out_dir):
     # The runner resolves --config relative to its own directory, so the file
     # has to exist there. Write it straight into the MAD checkout when we know
     # it; otherwise say plainly that it still has to be staged.
+    # The manifest first: it is what refuses a scenario the cluster cannot run
+    # -- wrong GPU architecture, unresolvable device groups. Writing the config
+    # before that check staged a file for every rejected scenario, leaving the
+    # runner's configs/ holding translations that no manifest points at.
+    man = translate_manifest(
+        scenario_key, scenario, recipe, prefix, cluster, runner, fw,
+        args.model_host_dir, args.timeout, weights_dir=args.weights_dir,
+        slurm_time=args.slurm_time, base_image_override=args.base_image,
+        pip_packages=pip_packages,
+    )
+
     staged = os.path.join(args.mad_dir, "scripts", runner["dir"], "configs")
     cfg_path = os.path.join(staged if os.path.isdir(staged) else out_dir, cfg_name)
     with open(cfg_path, "w") as f:
@@ -1200,13 +1211,6 @@ def _translate_one(args, scenario_key, out_dir):
         for n in notes:
             f.write(f"# FIDELITY GAP: {n}\n")
         yaml.safe_dump(blocks, f, sort_keys=False, default_flow_style=False)
-
-    man = translate_manifest(
-        scenario_key, scenario, recipe, prefix, cluster, runner, fw,
-        args.model_host_dir, args.timeout, weights_dir=args.weights_dir,
-        slurm_time=args.slurm_time, base_image_override=args.base_image,
-        pip_packages=pip_packages,
-    )
     man["built_models"][next(iter(man["built_models"]))]["args"] = (
         man["built_models"][next(iter(man["built_models"]))]["args"]
         .replace(f"configs/{prefix}_infx.yaml", f"configs/{cfg_name}")
