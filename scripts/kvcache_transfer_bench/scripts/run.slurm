@@ -1,4 +1,13 @@
 #!/bin/bash
+#SBATCH --job-name=kvcache-transfer-bench
+#SBATCH -N 2
+#SBATCH --ntasks-per-node=1
+#SBATCH --spread-job
+#SBATCH --gres=gpu:8
+#SBATCH --time=04:00:00
+#SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
+#SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
+
 set +x
 
 while [[ $# -gt 0 ]]; do

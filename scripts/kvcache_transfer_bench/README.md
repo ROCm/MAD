@@ -185,25 +185,27 @@ sbatch [sbatch options] scripts/run.slurm [benchmark options]
 | `--sync-port`    | 9999             | TCP port for target/initiator sync                                                             |
 
 
-**Slurm options** (passed to `sbatch` before the script):
+**Slurm options** (passed to `sbatch` before the script): the `#SBATCH` header in `run.slurm` sets the defaults below, and any of them can be overridden on the command line. madengine's `slurm_multi` path runs the script with `bash`, so it ignores the header and uses the `slurm` block in `models.json` instead.
 
 
-| Option       | Description                                                         |
-| ------------ | ------------------------------------------------------------------- |
-| `--nodelist` | Comma-separated node names (e.g. `node-hostname-1,node-hostname-2`) |
-| `-t`         | Time limit (e.g. `-t 08:00:00`); required on some clusters          |
-| `-N 2`       | Number of nodes; required                                           |
+| Option            | Default (`run.slurm` header)                        | Description                                                         |
+| ----------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
+| `-N`              | 2                                                   | Number of nodes; the benchmark needs exactly 2 (target, initiator)  |
+| `-t`              | 04:00:00                                            | Time limit                                                          |
+| `-o` / `-e`       | `/shared_inference/<user>/model_blog_logs/slurm-<job_id>.out` / `.err` | Log files; the directory must exist           |
+| `-p`              | cluster default                                     | Partition                                                           |
+| `--nodelist`      | any                                                 | Comma-separated node names (e.g. `node-hostname-1,node-hostname-2`) |
 
 
 **Example:**
 
 ```bash
-# Run on specific nodes (pass -t if your cluster requires a runtime limit)
-sbatch -t 08:00:00 --nodelist=node-hostname-1,node-hostname-2 \
-  scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
+# Let Slurm pick 2 nodes, with the header's defaults
+sbatch scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
 
-# Or let Slurm pick any 2 nodes
-sbatch -t 08:00:00 -N 2 scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
+# Run on specific nodes with a longer time limit
+sbatch --nodelist=node-hostname-1,node-hostname-2 -t 08:00:00 \
+  scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
 ```
 
 **Run on already allocated nodes:** If you have an interactive allocation (e.g. via `salloc`), run the launcher directly. It will use `SLURM_NODELIST` from your current session:
