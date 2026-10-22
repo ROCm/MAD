@@ -92,3 +92,9 @@ run_directory/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
+
+slurm_results/
+slurm_output/
+scripts/kvcache_transfer_bench/shared/
+madengine_build_*
+.madengine_session_start
