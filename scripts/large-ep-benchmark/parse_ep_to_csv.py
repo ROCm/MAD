@@ -155,7 +155,7 @@ def save_perf_csv(results: List[Dict], output_file: str):
 
     nnodes = os.environ.get('NNODES', os.environ.get('SLURM_NNODES', '1'))
     gpus = os.environ.get('GPUS_PER_NODE', '8')
-    skip_deepep = os.environ.get('SKIP_DEEPEP', '0')
+    skip_deepep = os.environ.get('SKIP_DEEPEP', '1')
 
     if skip_deepep == '1':
         backend = 'mori_only'
