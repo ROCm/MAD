@@ -89,6 +89,12 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
     are fixed by each runner's CSV_HEADER.
     """
     agentic_env = config.pop("agentic_env", {}) or {}
+    # The recipe states how long a cold load may take (Kimi-K3's MI355X vLLM
+    # recipe allows 7200 s through its health check and
+    # VLLM_ENGINE_READY_TIMEOUT_S). That env var reaches the server but not
+    # this wait, so without carrying the budget a valid load is interrupted
+    # before the replay starts. Popped, so it never reaches the CSV row.
+    start_timeout = int(config.pop("startup_timeout", 0) or start_timeout)
     if not config.get("num_prompts"):
         # Not a fixed-prompt-count workload, but the CSV column still wants one.
         config["num_prompts"] = "0"

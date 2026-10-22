@@ -294,9 +294,22 @@ def resolve_setup_script(recipe, blocks):
     pip-runtime-deps.sh is exactly `pip install $SETUP_PIP_PACKAGES`, so it
     folds into the image build. Anything else is refused.
     """
-    script = recipe["base"].get("setup_script")
-    if not script:
+    # Base is not the only place: an override may be the ONLY declaration, and
+    # reading base alone accepted such a point as reproducible while omitting
+    # its packages from the image, so the server started without them.
+    declared = {recipe["base"].get("setup_script") or ""}
+    for b in blocks:
+        declared.update(b.get("_setup") or ())
+    declared.discard("")
+    for b in blocks:
+        b.pop("_setup", None)
+    if not declared:
         return "", None
+    if len(declared) > 1:
+        raise Untranslatable(
+            f"points declare different setup scripts ({sorted(declared)}); "
+            "one image cannot satisfy both")
+    script = next(iter(declared))
     if script not in REPRODUCIBLE_SETUP_SCRIPTS:
         raise Untranslatable(
             f"recipe declares setup_script {script!r}, which prepares the "
@@ -539,6 +552,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
             point_env_srv = _split_marker(point_env_srv, seen_frontends,
                                           point_services, point_setups)
             unusable = point_setups - REPRODUCIBLE_SETUP_SCRIPTS
+            point_setup = sorted(point_setups - {""})
             if unusable:
                 notes.append(
                     f"tp={tp} conc={conc} dropped: the override declares "
@@ -565,6 +579,10 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 "extra_args": extra,
             }
             _stamp(block, scenario_key, engine_tp, conc, runner, _point_suffix(extra))
+            # Carried so resolve_setup_script sees declarations that live on
+            # the override rather than on base; popped before the YAML write.
+            if point_setup:
+                block["_setup"] = point_setup
             if rrr is not None:
                 block["random_range_ratio"] = float(rrr)
             blocks.append(block)
@@ -588,6 +606,9 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
     model_id = base["model"]["path"].removeprefix("hf:")
     seen_frontends = set()
     dram_unstated = set()
+    hc = base.get("health_check") or {}
+    startup_budget = int(hc.get("interval_seconds", 0) or 0) * \
+        int(hc.get("max_attempts", 0) or 0)
 
     blocks = []
     for workload in workloads:
@@ -599,6 +620,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             point_env_srv = _split_marker(point_env_srv, seen_frontends,
                                           point_services, point_setups)
             unusable = point_setups - REPRODUCIBLE_SETUP_SCRIPTS
+            point_setup = sorted(point_setups - {""})
             if unusable:
                 notes.append(
                     f"tp={tp} conc={conc} dropped: the override declares "
@@ -702,9 +724,17 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
                 "max_concurrency": conc,
                 "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
+                # How long the recipe says a cold load may take. Kimi-K3's
+                # MI355X vLLM recipe allows 7200 s; the shared hook otherwise
+                # stops waiting at 1800 and the replay never starts.
+                **({"startup_timeout": startup_budget} if startup_budget else {}),
                 "agentic_env": agentic_env,
             }
             _stamp(block, scenario_key, engine_tp, conc, runner, _point_suffix(extra))
+            # Carried so resolve_setup_script sees declarations that live on
+            # the override rather than on base; popped before the YAML write.
+            if point_setup:
+                block["_setup"] = point_setup
             blocks.append(block)
 
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)

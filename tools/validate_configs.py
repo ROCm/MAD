@@ -29,9 +29,9 @@ ROOT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/all"
 
 # Keys each runner pops before building the CSV row (verified in the sources).
 POPPED = {
-    "sglang": {"env", "extra_args", "random_range_ratio", "agentic_env"},
-    "vllm": {"env", "extra_args", "random_range_ratio", "agentic_env"},
-    "atom": {"env", "extra_args", "random_range_ratio", "agentic_env", "bench_serving"},
+    "sglang": {"env", "extra_args", "random_range_ratio", "agentic_env", "startup_timeout"},
+    "vllm": {"env", "extra_args", "random_range_ratio", "agentic_env", "startup_timeout"},
+    "atom": {"env", "extra_args", "random_range_ratio", "agentic_env", "bench_serving", "startup_timeout"},
 }
 # Keys the runner adds itself, so a block need not carry them.
 ADDED = {"cmd", "num_prompts", "performance", "metric", "unit"}
