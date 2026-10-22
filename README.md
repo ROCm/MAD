@@ -25,6 +25,13 @@ Below are blueprints of supported models along with their documentation.
 | [**vLLM disaggregated P/D inference**](scripts/vllm_dissag/README.MD) | Distributed Inference P/D disaggregation with vLLM (Default, MoRI EP, DeepEP) | DeepSeek-R1, DeepSeek-V3, DeepSeek-V3-5layer, amd-Llama-3.3-70B-Instruct-FP8-KV, Llama-3.1-405B-Instruct-FP8-KV, gpt-oss-120b |
 | [**SGLang disaggregated P/D inference**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang (MoRI IO, Mooncake) | Llama-3.1-8B, Qwen3-32B, Llama-3.3-70B-FP8, Llama-3.1-405B-FP8, Mixtral-8x7B, DeepSeek-V3, DeepSeek-R1 |
 | [**SGLang disaggregated P/D inference with WideEP/LargeEP**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang with WideEP/LargeEP | DeepSeek-V3, DeepSeek-R1 |
+| [**DeepSeek-V4-Pro disaggregated P/D inference**](scripts/DeepSeekV4/README.md) | Distributed Inference P/D disaggregation for DeepSeek-V4-Pro (ATOM+mooncake / SGLang+MoRI) | DeepSeek-V4-Pro |
+| [**Qwen3.5-35B-A3B aggregated inference**](scripts/Qwen3.5/README.md) | Single-node aggregated serving/benchmark (SGLang/vLLM); recommended default SGLang+MXFP4+TP1 (8 instances/node) | Qwen3.5-35B-A3B (MXFP4, FP8) |
+| [**MiniMax-M3 disaggregated P/D inference**](scripts/MiniMax-M3/README.md) | Distributed Inference P/D disaggregation for MiniMax-M3 on MI355X (ATOM+mooncake, MXFP4); top-throughput InferenceX config | MiniMax-M3 (MXFP4) |
+| [**MiniMax-M3 single-node P/D over XGMI**](scripts/MiniMax-M3-single-pd/README.md) | Single-node prefill/decode disaggregation for MiniMax-M3 on MI355X via vLLM + MoRIIO with GPU-to-GPU XGMI KV transfer (TP4/TP4) | MiniMax-M3 (MXFP4) |
+| [**GLM-5.2 disaggregated P/D inference**](scripts/GLM-5.2-disagg/README.md) | Two-node prefill/decode disaggregation for GLM-5.2 on MI355X (ATOM + atomesh + mooncake TCP KV transfer, TP8/TP8) | GLM-5.2 (MXFP4) |
+| [**AgentX Case-A conformance trace**](scripts/AgentX_CaseA/README.md) | Engine- and topology-agnostic agentic replay trace (deterministic, matches ExplainX Case-A on 6 axes) + aiperf driver for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
+| [**AgentX Case-B conformance trace**](scripts/AgentX_CaseB/README.md) | Large-context (up to 500K input) agentic replay trace (deterministic, matches customer Case-B on 6 axes) + aiperf driver, for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 
 ## Table of Contents
