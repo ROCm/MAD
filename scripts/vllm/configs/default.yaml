@@ -19,6 +19,10 @@
   max_concurrency: 1 8 32 128
   env:
     VLLM_ROCM_USE_AITER: 1
+  arch_overrides:
+    # MI300 cannot fit TP4, override to TP8 only
+    gfx942:
+      tp: 8
 
 - benchmark: serving
   model: moonshotai/Kimi-K3
