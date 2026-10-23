@@ -265,6 +265,31 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         env_vars["BENCHMARK_SCRIPT_FILE"] = "benchmark_agentic.sh"
         env_vars["AGENTIC_CONC"] = conc
         env_vars.pop("BENCHMARK_COMBINATIONS", None)
+        # The pinned InferenceX aggregator (infx/results/agentic/__init__.py,
+        # _gpu_shape) reads its OWN names for the replay's topology, separate
+        # from what the launcher itself exports and from AGENTIC_CONC above:
+        #   * CONC, read directly, not derived from AGENTIC_CONC;
+        #   * IS_MULTINODE, which selects the single-node-vs-multinode branch
+        #     of _gpu_shape at all -- missing it takes the single-node path
+        #     regardless of what else is set, defaulting to TP=1;
+        #   * PREFILL_TP/DECODE_TP, not PREFILL_TP_SIZE/DECODE_TP_SIZE (the
+        #     launcher's own names for the same values);
+        #   * PREFILL_NUM_WORKERS/DECODE_NUM_WORKERS, i.e. the node counts
+        #     xP/yD, so num_gpus = xP*tp + yD*tp rather than defaulting to 0.
+        # Without these a 1P2D TP8 replay (24 GPUs) is recorded as single-node
+        # TP1 conc=0, and per-GPU throughput divides by 1 instead of 24.
+        env_vars["CONC"] = conc
+        env_vars["IS_MULTINODE"] = "true"
+        env_vars["PREFILL_NUM_WORKERS"] = str(xP)
+        env_vars["PREFILL_TP"] = str(tp)
+        env_vars["DECODE_NUM_WORKERS"] = str(yD)
+        env_vars["DECODE_TP"] = str(tp)
+        if prefill.get("ep") is not None:
+            env_vars["PREFILL_EP"] = str(prefill["ep"])
+        if decode.get("ep") is not None:
+            env_vars["DECODE_EP"] = str(decode["ep"])
+        env_vars["PREFILL_DP_ATTN"] = "true" if prefill.get("dp-attn") else "false"
+        env_vars["DECODE_DP_ATTN"] = "true" if decode.get("dp-attn") else "false"
 
     nodes = xP + yD
     gpus = ",".join(str(i) for i in range(gpus_per_node))

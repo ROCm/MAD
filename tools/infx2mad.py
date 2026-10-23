@@ -587,6 +587,18 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 "max_concurrency": conc,
                 "env": {**_agg(base).get("env", {}), **point_env_srv},
                 "extra_args": extra,
+                # run_vllm.py defaults bench_args['--run_accuracy'] to True and
+                # runs 250 GSM8K examples through lm_eval after every serving
+                # benchmark. This wrapper's image does not install lm_eval
+                # (unlike the older scripts/vllm/run.sh), so the accuracy pass
+                # fails with check=True before run_serving returns -- and
+                # since the serving results are only returned at the very end
+                # of the function, the already-successful throughput numbers
+                # are lost along with it. Off by default here; a recipe is
+                # free to ask for it back via extra_args/env, it just does not
+                # happen by default on this image.
+                **({"bench_args": {"--run_accuracy": False}}
+                   if runner["dir"] == "vllm" else {}),
             }
             _stamp(block, scenario_key, engine_tp, conc, runner, _point_suffix(extra))
             # Carried so resolve_setup_script sees declarations that live on
