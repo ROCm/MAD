@@ -26,11 +26,15 @@ Supports two log formats:
    'GPU utilization: <n>MODEL_TFLOP/s/GPU' line only if no
    compute/throughput-per-GPU value was found.
 
-Output CSV format (model, performance, metric) — one row per metric:
-  model,performance,metric
-  primus_run,9629.8,tokens_per_second
-  primus_run,496.1,tflops
-  primus_run,23.10,model_flops_utilization
+Output CSV format — one row per metric, each carrying the run's shape:
+  model,performance,metric,mode,precision,batch_size,global_batch_size,seq_len,device,num_gpus
+  primus_run,9629.8,tokens_per_second,pretrain,BF16,2,256,8192,MI355X,16
+  primus_run,496.1,tflops,pretrain,BF16,2,256,8192,MI355X,16
+  primus_run,23.10,model_flops_utilization,pretrain,BF16,2,256,8192,MI355X,16
+
+The shape columns are what the run actually used, read back from the log (Megatron's
+argument dump and its iteration lines), so CLI overrides and the scaleout global batch
+size are reflected. A value the log does not carry falls back to the CLI, else is blank.
 
 MFU fallback: Megatron 26.5+ logs (unlike Torchtitan) do not print an
 "mfu:" field at all, so MFU is instead estimated here as
@@ -75,6 +79,18 @@ _PEAK_MULTIPLIER = (
     ("FP8", 2.0),
     ("FP4", 4.0),
 )
+
+
+CSV_FIELDS = [
+    "model", "performance", "metric",
+    "mode", "precision", "batch_size", "global_batch_size", "seq_len", "device", "num_gpus",
+]
+
+
+def precision_from_name(name: str) -> str:
+    """Precision token of a config or log basename ("BF16", "MXFP4", ...), or ""."""
+    upper = name.upper()
+    return next((token for token, _ in _PEAK_MULTIPLIER if token in upper), "")
 
 
 def _estimate_mfu(tflops: str, log_path: str) -> str | None:
@@ -123,11 +139,12 @@ def extract_metrics(
     seq_length: int | None = None,
     num_gpus: int | None = None,
 ) -> dict:
-    """Parse log file and return tps, tflops, mfu from the last matching lines."""
+    """Parse log file and return tps, tflops, mfu and the run shape from the last matching lines."""
     tps = tflops = mfu = None
     elapsed_ms = global_batch = None
     parsed_seq = seq_length
     log_gpus = None
+    micro_batch = None
 
     # Torchtitan format regexes
     tt_tps_re = re.compile(r"tps:\s*([0-9][0-9.,eE+-]*)")
@@ -144,6 +161,7 @@ def extract_metrics(
     meg_tflops_old_re = re.compile(r'throughput per GPU \(TFLOP/s/GPU\):\s*([\d.]+)')
 
     seq_arg_re = re.compile(r"\bseq_length\s+\.{2,}\s+(\d+)")
+    mbs_arg_re = re.compile(r"\bmicro_batch_size\s+\.{2,}\s+(\d+)")
     world_arg_re = re.compile(r"\bworld_size\s+\.{2,}\s+(\d+)")
     # Primus env / YAML dump: "world_size=8", "world_size: 8". Does not match
     # "world_size: None" or "log_world_size_to_tensorboard:".
@@ -165,6 +183,10 @@ def extract_metrics(
                     m = world_arg_re.search(line) or world_env_re.search(line)
                     if m:
                         log_gpus = int(m.group(1))
+                if micro_batch is None:
+                    m = mbs_arg_re.search(line)
+                    if m:
+                        micro_batch = m.group(1)
                 m = seq_inline_re.search(line)
                 if m:
                     parsed_seq = int(m.group(1))
@@ -227,7 +249,15 @@ def extract_metrics(
     if tflops is None:
         tflops = bridge_tflops
 
-    return {"tps": tps, "tflops": tflops, "mfu": mfu}
+    return {
+        "tps": tps,
+        "tflops": tflops,
+        "mfu": mfu,
+        "batch_size": micro_batch,
+        "global_batch_size": global_batch,
+        "seq_len": parsed_seq,
+        "num_gpus": parsed_gpus,
+    }
 
 
 def main():
@@ -247,6 +277,13 @@ def main():
         default=None,
         help="Fallback world_size when the log has no printed TPS (Megatron-Bridge)",
     )
+    parser.add_argument(
+        "--micro-batch-size",
+        default="",
+        help="Fallback micro batch size when the log has no argument dump (non-zero ranks)",
+    )
+    parser.add_argument("--mode", default="", help="Training suite for the CSV (pretrain/posttrain)")
+    parser.add_argument("--device", default="", help="GPU model for the CSV (e.g. MI355X)")
     args = parser.parse_args()
 
     metrics = extract_metrics(
@@ -268,14 +305,26 @@ def main():
         )
         sys.exit(1)
 
+    shape = {
+        "mode": args.mode,
+        "precision": precision_from_name(os.path.basename(args.log_path)),
+        "batch_size": metrics.get("batch_size") or args.micro_batch_size,
+        "global_batch_size": metrics.get("global_batch_size") or "",
+        "seq_len": metrics.get("seq_len") or "",
+        "device": args.device,
+        "num_gpus": metrics.get("num_gpus") or "",
+    }
     rows = [
-        {"model": args.model_id, "performance": metrics.get("tps") or "", "metric": "tokens_per_second"},
-        {"model": args.model_id, "performance": metrics.get("tflops") or "", "metric": "tflops"},
-        {"model": args.model_id, "performance": metrics.get("mfu") or "", "metric": "model_flops_utilization"},
+        {"model": args.model_id, "performance": metrics.get(key) or "", "metric": metric, **shape}
+        for key, metric in (
+            ("tps", "tokens_per_second"),
+            ("tflops", "tflops"),
+            ("mfu", "model_flops_utilization"),
+        )
     ]
 
     with open(args.output_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["model", "performance", "metric"])
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
 

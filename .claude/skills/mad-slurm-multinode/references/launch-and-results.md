@@ -63,8 +63,8 @@ Implications for the agent:
 
 - `perf.csv` (or `--output` path) in `rundir` — the aggregated performance row.
 - `perf_super*.csv` / `perf_entry*.csv` — intermediate per-entry files.
-- The model's `multiple_results` CSV (e.g.
-  `perf_primus-megatron-Llama-3.1-8B.csv`) — per-model detail.
+- The model's `multiple_results` CSV (e.g. `primus_perf_output.csv` for every
+  Primus model) — per-model detail.
 - `slurm_output/node_*.out` — raw logs (throughput banner, NCCL/RCCL transport
   lines, tracebacks).
 

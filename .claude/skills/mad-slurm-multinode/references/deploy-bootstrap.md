@@ -64,7 +64,8 @@ manifest's `dockerfile` and the model `scripts`/`run.sh` exist:
 # example for primus_llama-3.1-8b — adjust to the chosen manifest's fields
 ( cd MAD \
   && [ -f docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile ] \
-  && [ -f scripts/primus_megatron-lm/run.sh ] \
+  && [ -f scripts/primus_train/run.sh ] \
+  && [ -f scripts/Primus/primus-cli ] \
   || echo "STOP: manifest dockerfile/run.sh not found under MAD" )
 ```
 

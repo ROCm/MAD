@@ -34,15 +34,22 @@ else
 fi
 
 # EXP: prefer PRIMUS_CONFIG_PATH (SLURM/K8s), else --config_path in args.
-# --config_path is a wrapper-only flag that Primus' own CLI (primus/cli/main.py) does not
-# recognize, so strip it (and its value) out of forward_args.
+# --config_path and --variant (model_overrides.py) are wrapper-only flags that Primus' own
+# CLI (primus/cli/main.py) does not recognize, so strip them (and their values) out of
+# forward_args.
 args=("$@")
 forward_args=()
 config_path_arg=""
+variant=""
 i=0
 while [[ $i -lt ${#args[@]} ]]; do
   if [[ "${args[i]}" == "--config_path" && -n "${args[i+1]:-}" ]]; then
     config_path_arg="${args[i+1]}"
+    i=$((i + 2))
+    continue
+  fi
+  if [[ "${args[i]}" == "--variant" && -n "${args[i+1]:-}" ]]; then
+    variant="${args[i+1]}"
     i=$((i + 2))
     continue
   fi
@@ -108,6 +115,7 @@ if [[ -z "${PRIMUS_GPU_MODEL:-}" ]]; then
   gpu_name="${MAD_SYSTEM_GPU_PRODUCT_NAME:-}"
   arch="${MAD_SYSTEM_GPU_ARCHITECTURE:-}"
   case "$gpu_name" in
+    *MI455*) PRIMUS_GPU_MODEL=MI455X ;;
     *MI325*) PRIMUS_GPU_MODEL=MI325X ;;
     *MI355*) PRIMUS_GPU_MODEL=MI355X ;;
     *MI350*) PRIMUS_GPU_MODEL=MI350X ;;
@@ -116,6 +124,7 @@ if [[ -z "${PRIMUS_GPU_MODEL:-}" ]]; then
       case "$arch" in
         gfx942*) PRIMUS_GPU_MODEL=MI300X ;;
         gfx950*) PRIMUS_GPU_MODEL=MI355X ;;
+        gfx1250*) PRIMUS_GPU_MODEL=MI455X ;;
       esac
       ;;
   esac
@@ -134,6 +143,55 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
   export HF_TOKEN
 elif [[ -n "${MAD_SECRETS_HFTOKEN:-}" ]]; then
   export HF_TOKEN="$MAD_SECRETS_HFTOKEN"
+fi
+
+# Deployment knobs, set through context.docker_env_vars. Unset means whatever the config
+# ships. They go after every other override because Primus builds the override map as a
+# dict, so the last occurrence of a key wins.
+knob_args=()
+if [[ "$framework" == "megatron" ]]; then
+  if [[ -n "${PRIMUS_TRAIN_ITERS:-}" ]]; then
+    knob_args+=(--train_iters "$PRIMUS_TRAIN_ITERS")
+  fi
+  # A perf gate wants steady iterations, not a trace: the profiler window costs about 3x
+  # a normal iteration and leaves the next ones elevated while the trace is written.
+  if [[ "${PRIMUS_DISABLE_PROFILE:-0}" == "1" ]]; then
+    knob_args+=(--profile false --use_pytorch_profiler false)
+  fi
+elif [[ -n "${PRIMUS_TRAIN_ITERS:-}" || "${PRIMUS_DISABLE_PROFILE:-0}" == "1" ]]; then
+  echo "[primus_train] WARNING: PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE apply to megatron" \
+       "configs only; framework=$framework ignores them" >&2
+fi
+# Whitespace-separated Primus overrides for any framework, e.g. a parallel layout that has
+# to change several keys together ("--pipeline_model_parallel_size 4 --use_torch_fsdp2 false").
+if [[ -n "${PRIMUS_EXTRA_ARGS:-}" ]]; then
+  read -r -a primus_extra_args <<< "$PRIMUS_EXTRA_ARGS"
+  knob_args+=("${primus_extra_args[@]}")
+fi
+if [[ ${#knob_args[@]} -gt 0 ]]; then
+  echo "[primus_train] Primus CLI knobs from environment: ${knob_args[*]}"
+fi
+
+# Give each rank its own RCCL log when the deployment points RCCL_LOG_DIR at a shared mount:
+# the ranks stop overwriting each other in the shared stdout, and every rank is logged
+# rather than the few that torchrun's --local-ranks-filter lets through.
+# A directory RCCL cannot write to is worse than none: RCCL drops the output instead of
+# falling back to stdout. The container writes as root squashed to nobody on NFS, so the
+# directory has to be world-writable; when it is not, say so and keep the logs in stdout.
+# Files are <PRECISION>.node_<N>.<host>.<pid>.log: the mad-profiling primus engine reads the
+# phase and node off the first two dot-separated fields, and config names carry dots
+# (llama3.1_8B-...), so the config name cannot lead.
+if [[ -n "${RCCL_LOG_DIR:-}" ]]; then
+  if mkdir -p "$RCCL_LOG_DIR" 2>/dev/null && [[ -w "$RCCL_LOG_DIR" ]]; then
+    rccl_phase="$(basename "$EXP" .yaml | tr '[:lower:]' '[:upper:]' \
+                    | grep -oE 'MXFP8|MXFP4|BF16|FP16|FP8|FP4' | head -n1 || true)"
+    export NCCL_DEBUG_FILE="$RCCL_LOG_DIR/${rccl_phase:-run}.node_${NODE_RANK:-0}.%h.%p.log"
+    echo "[primus_train] RCCL logs go to $NCCL_DEBUG_FILE (one file per rank)"
+  else
+    unset NCCL_DEBUG_FILE
+    echo "[primus_train] WARNING: RCCL_LOG_DIR=$RCCL_LOG_DIR is not writable from the container" \
+         "(chmod 0777 it on the host); RCCL keeps logging to stdout" >&2
+  fi
 fi
 
 # Redirect Primus output/outputs to run_directory (workspace root when run via madengine).
@@ -163,11 +221,52 @@ cli_cmd=(
 if [[ "$framework" == "torchtitan" ]]; then
   cli_cmd+=(--job.dump_folder "$RUN_DIR/outputs")
 fi
-cli_cmd+=("${forward_args[@]}")
+world_size=$(( ${NNODES:-1} * ${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}} ))
+# Per-model overrides the config YAML does not carry (model_overrides.py). They come first
+# so the caller's arguments and PRIMUS_EXTRA_ARGS can still replace any of them.
+model_args=()
+if [[ "$framework" == "megatron" ]]; then
+  overrides_script="${script_dir}/model_overrides.py"
+  [[ -f "$RUN_DIR/model_overrides.py" ]] && overrides_script="$RUN_DIR/model_overrides.py"
+  if ! overrides_out="$(python3 "$overrides_script" "$EXP" --device "${PRIMUS_GPU_MODEL:-}" \
+                          --world-size "$world_size" --variant "$variant")"; then
+    echo "ERROR: $overrides_script failed for $EXP" >&2
+    exit 1
+  fi
+  [[ -n "$overrides_out" ]] && mapfile -t model_args <<< "$overrides_out"
+  if [[ -n "$variant" && ${#model_args[@]} -eq 0 ]]; then
+    echo "ERROR: no '$variant' variant of $(basename "$EXP" .yaml) for ${PRIMUS_GPU_MODEL:-<unset>}" >&2
+    exit 1
+  fi
+  if [[ ${#model_args[@]} -gt 0 ]]; then
+    echo "[primus_train] model overrides${variant:+ ($variant)}: ${model_args[*]}"
+  fi
+elif [[ -n "$variant" ]]; then
+  echo "ERROR: --variant applies to megatron configs only; framework=$framework" >&2
+  exit 1
+fi
+cli_cmd+=("${model_args[@]}")
+# Megatron rejects a global batch size that is not a multiple of micro batch size x
+# data-parallel size, and the configs are tuned for one 8-GPU node. An explicit
+# --global_batch_size from the caller or PRIMUS_EXTRA_ARGS wins; one from the model
+# overrides is renormalized like the YAML value.
+caller_args=("${forward_args[@]}" "${knob_args[@]}")
+scaleout_script="${script_dir}/scaleout_batch.py"
+[[ -f "$RUN_DIR/scaleout_batch.py" ]] && scaleout_script="$RUN_DIR/scaleout_batch.py"
+if [[ "$framework" == "megatron" ]] && ! printf '%s\n' "${caller_args[@]}" | grep -qx -- '--global_batch_size'; then
+  scaleout_gbs="$(python3 "$scaleout_script" "$EXP" --world-size "$world_size" \
+                    -- "${model_args[@]}" "${caller_args[@]}" || true)"
+  if [[ -n "$scaleout_gbs" ]]; then
+    echo "[primus_train] global_batch_size -> $scaleout_gbs for world size $world_size"
+    cli_cmd+=(--global_batch_size "$scaleout_gbs")
+  fi
+fi
+cli_cmd+=("${caller_args[@]}")
 "${cli_cmd[@]}"
 exitcode=$?
 set -e
-# Extract tps/tflops/mfu from training log into primus_perf_output.csv (one row: model, performance, metric, tflops, model_flops_utilization)
+# Extract tps/tflops/mfu and the run shape from the training log into primus_perf_output.csv
+# (one row per metric; see extract_primus_perf.py for the columns)
 LOG_PATH="$RUN_DIR/output/log_mp_pretrain_$(basename "$EXP" .yaml).txt"
 if [[ -f "$LOG_PATH" ]]; then
   extract_script="${script_dir}/extract_primus_perf.py"
@@ -202,14 +301,26 @@ print("" if sl is None or sl == "" else sl)
     num_gpus=8
   fi
   [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
-  extract_args+=(--num-gpus "$num_gpus")
+  # Megatron dumps its arguments on rank 0 only, and the last node, which reports the
+  # throughput, does not run rank 0: resolve the micro batch size the run used here.
+  if [[ "$framework" == "megatron" ]]; then
+    micro_batch="$(python3 "$scaleout_script" "$EXP" --micro-batch -- "${cli_cmd[@]}" 2>/dev/null || true)"
+    [[ -n "$micro_batch" ]] && extract_args+=(--micro-batch-size "$micro_batch")
+  fi
+  extract_args+=(--num-gpus "$num_gpus" --mode "$suite" --device "${PRIMUS_GPU_MODEL:-}")
   set +e
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"
   extractcode=$?
   set -e
+  # Megatron prints throughput on the last global rank only, so on a multi-node run
+  # only the last node's log carries it; the other nodes have nothing to extract.
   if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    echo "[primus_train] training log present but TPS extraction failed" >&2
-    exitcode="$extractcode"
+    if (( ${NODE_RANK:-0} == ${NNODES:-1} - 1 )); then
+      echo "[primus_train] training log present but TPS extraction failed" >&2
+      exitcode="$extractcode"
+    else
+      echo "[primus_train] no TPS on node ${NODE_RANK:-0} of ${NNODES:-1}; the last node reports it"
+    fi
   fi
 fi
 exit "$exitcode"
