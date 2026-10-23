@@ -107,6 +107,28 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     model = scenario["model"]
     model_dir = os.path.basename(model)
     mounts, model_path = resolve_mounts(model_dir, weights_dir, model_host_dir)
+    # /run_logs is where the launcher's cross-node rendezvous happens, and
+    # run.sh aborts when it is missing or unwritable. Two things have to hold
+    # before docker starts, and neither did:
+    #   * the path must be ABSOLUTE -- docker reads a relative source as a
+    #     named volume, which gives each node its own empty one, so the
+    #     readiness files a peer greps for would never appear;
+    #   * it must exist and be writable by the submitting user, because docker
+    #     otherwise creates it as root and the container cannot write there.
+    run_logs = os.path.realpath(run_logs_host or os.path.join(os.getcwd(), "run_logs"))
+    try:
+        os.makedirs(run_logs, exist_ok=True)
+        os.chmod(run_logs, 0o1777)
+    except OSError as exc:
+        raise ValueError(
+            f"cannot prepare the shared run-logs directory {run_logs}: {exc}; "
+            "the disagg launchers coordinate readiness through it across "
+            "nodes, so it has to exist on shared storage and be writable")
+    if not os.access(run_logs, os.W_OK):
+        raise ValueError(
+            f"shared run-logs directory {run_logs} is not writable; "
+            "scripts/sglang_disagg/run.sh aborts without it")
+
     # The aggregated route can leave this unset and let the runner download.
     # This one cannot: the launcher fetches on rank 0 and the peers wait for
     # the files to appear at a SHARED path, so with nothing staged the manifest
@@ -294,7 +316,7 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
             "docker_mounts": dict(mounts, **{
                 "/dev/infiniband": "/dev/infiniband",
                 "/sys/class/infiniband": "/sys/class/infiniband",
-                "/run_logs": run_logs_host or os.path.join(os.getcwd(), "run_logs"),
+                "/run_logs": run_logs,
             }),
             "docker_build_arg": build_args,
             "gpu_vendor": "AMD",

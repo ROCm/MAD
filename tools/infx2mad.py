@@ -952,6 +952,12 @@ def resolve_mounts(model_dir, weights_dir, model_host_dir):
     checkpoint rather than a bad mount.
     """
     container_models = "/models"
+    # Absolute, always: madengine renders the mount verbatim, and docker reads
+    # a relative source as a NAMED VOLUME rather than a host directory -- so
+    # `--model-host-dir store` would mount an empty volume while MAD_DATAHOME
+    # still pointed inside it, and the runner would skip downloading and then
+    # fail to load. The explicit weights branch below already does this.
+    model_host_dir = os.path.realpath(model_host_dir) if model_host_dir else model_host_dir
     if not weights_dir:
         # Nothing resolved for this scenario: mount the shared store anyway --
         # it may hold the checkpoint under another name -- but report no
@@ -1179,10 +1185,19 @@ def _translate_disagg(args, scenario_key, scenario, out_dir):
         raise Untranslatable(
             f"scenario targets {gpu_type} ({arch}) but the cluster is {cluster['arch']}")
 
-    present = [w for w in ("fixed-seq-len", "agentic-coding") if w in scenario["scenarios"]]
-    if len(present) != 1:
-        raise Untranslatable(f"expected one known workload, found {present}")
-    workload_name = present[0]
+    # Same selection rule as the aggregated route: auto-detect only when asked
+    # to. Ignoring the flag meant `--all --workload agentic-coding` still
+    # emitted fixed-seq-len disagg manifests, and asking for a workload a
+    # scenario does not have silently produced the other one.
+    workload_name = args.workload
+    if workload_name == "auto":
+        present = [w for w in ("fixed-seq-len", "agentic-coding")
+                   if w in scenario["scenarios"]]
+        if len(present) != 1:
+            raise Untranslatable(f"expected one known workload, found {present}")
+        workload_name = present[0]
+    if workload_name not in scenario["scenarios"]:
+        raise Untranslatable(f"no {workload_name} workload")
     workload = scenario["scenarios"][workload_name][0]
 
     # Resolved here, not inside the emitter: an unresolvable group has to
