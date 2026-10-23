@@ -900,8 +900,39 @@ def revision_note(blocks, weights_dir):
             "marker, so the artifacts cannot confirm it is that checkpoint")
 
 
+# Tokens a quant_method value can directly state, matched as a substring so
+# "mxfp4", "w4a4", "fp4" all read as fp4 -- the scenario's own label is this
+# coarse too (just "fp4"/"fp8"), never a specific recipe name.
+PRECISION_TOKENS = ("fp4", "fp8", "int4", "int8")
+
+
+def _declared_precision(quant_cfg, method):
+    """-> a normalized token like 'fp4', or None if unverifiable from this file.
+
+    quant_method alone is not always a precision: "quark" and
+    "compressed-tensors" are library/format names that quantize to whatever
+    bit width their own config says, so asserting a mismatch from the method
+    name alone would flag correctly-quantized checkpoints (Qwen3.5's and
+    GLM-5.2's mxfp4 quark checkpoints on this cluster both do) as wrong.
+    """
+    for token in PRECISION_TOKENS:
+        if token in method:
+            return token
+    if method == "quark":
+        # Quark nests the actual format under global_quant_config; the dtype
+        # recipes use for serving weights and inputs are always set together,
+        # so pick either present.
+        g = quant_cfg.get("global_quant_config") or {}
+        for key in ("weight", "input_tensors"):
+            dtype = ((g.get(key) or {}).get("dtype") or "").lower()
+            if dtype:
+                return dtype
+    return None
+
+
 def precision_note(scenario, weights_dir):
-    """Say so when the mounted checkpoint is not the precision claimed.
+    """Say so when the mounted checkpoint's precision cannot be confirmed, or
+    is confirmed wrong.
 
     A scenario states the precision its numbers were measured at, and the
     engine takes the quantization from the checkpoint, not from that label. So
@@ -911,7 +942,9 @@ def precision_note(scenario, weights_dir):
     are fp8 while their scenarios say fp4, so this is not hypothetical.
 
     Only checkpoints that declare a quantization are checked; an unquantized
-    checkpoint says nothing and is left alone.
+    checkpoint says nothing and is left alone. A declared method this tool
+    cannot resolve to a bit width is reported as unverifiable rather than
+    asserted as a mismatch.
     """
     want = (scenario.get("precision") or "").lower()
     if not want or not weights_dir:
@@ -919,16 +952,24 @@ def precision_note(scenario, weights_dir):
     cfg = os.path.join(os.path.realpath(weights_dir), "config.json")
     try:
         with open(cfg) as f:
-            have = ((json.load(f).get("quantization_config") or {})
-                    .get("quant_method") or "").lower()
+            quant_cfg = json.load(f).get("quantization_config") or {}
     except (OSError, ValueError):
         return (f"scenario states precision {want} and the mounted checkpoint has "
                 "no readable config.json, so the artifacts cannot confirm it")
-    if not have or have == want:
+    method = (quant_cfg.get("quant_method") or "").lower()
+    if not method:
+        return None
+    have = _declared_precision(quant_cfg, method)
+    if have is None:
+        return (f"scenario states precision {want}; the mounted checkpoint is "
+                f"quantized via {method!r}, whose config does not state a bit "
+                "width this tool recognizes, so the precision cannot be "
+                "verified (not reported as a mismatch)")
+    if have == want:
         return None
     return (f"scenario states precision {want} but the mounted checkpoint is "
-            f"quantized {have}; the engine follows the checkpoint, so this run "
-            "does not measure what the scenario names")
+            f"quantized {have} (quant_method={method}); the engine follows the "
+            "checkpoint, so this run does not measure what the scenario names")
 
 
 def resolve_weights(model_path, cluster, explicit):
@@ -1010,7 +1051,8 @@ def resolve_mounts(model_dir, weights_dir, model_host_dir):
 
 def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, fw,
                        model_host_dir, timeout, weights_dir=None, slurm_time="04:00:00",
-                       base_image_override=None, pip_packages=""):
+                       base_image_override=None, pip_packages="", workload_name=None,
+                       results_host_dir=None):
     base = recipe["base"]
     model = base["model"]["path"].removeprefix("hf:")
     image = base_image_override or scenario["image"]
@@ -1097,8 +1139,19 @@ def translate_manifest(scenario_key, scenario, recipe, prefix, cluster, runner, 
                 "HF_HOME": "/tmp/hf_home",
                 "NCCL_DEBUG": "WARN",
                 "NCCL_DEBUG_SUBSYS": "INIT",
+                # madengine's `run_directory` is deleted after a successful run
+                # (unless --keep-model-dir/--keep-alive) and, for a multi-node
+                # SLURM deployment, lives on node-local scratch by default --
+                # writing "one directory above cwd" (infx_agentic.py) only
+                # lands on durable storage when that assumption holds. An
+                # explicit bind mount does not depend on it either way, so the
+                # agentic hook is told to prefer this path when present.
+                **({"AGENTIC_RESULTS_DIR": "/run_logs"}
+                   if workload_name == "agentic-coding" and results_host_dir else {}),
             },
-            "docker_mounts": mounts,
+            "docker_mounts": ({**mounts, "/run_logs": os.path.realpath(results_host_dir)}
+                              if workload_name == "agentic-coding" and results_host_dir
+                              else mounts),
             "docker_build_arg": build_args,
             "gpu_vendor": "AMD",
             "guest_os": "UBUNTU",
@@ -1393,11 +1446,32 @@ def _translate_one(args, scenario_key, out_dir):
     # -- wrong GPU architecture, unresolvable device groups. Writing the config
     # before that check staged a file for every rejected scenario, leaving the
     # runner's configs/ holding translations that no manifest points at.
+    results_host_dir = None
+    if workload_name == "agentic-coding":
+        # Prepared up front, same requirements as disagg's /run_logs: has to
+        # exist and be writable by the submitting user before docker starts,
+        # or a run_as_submitting_user container cannot write a root-owned dir
+        # docker would otherwise create.
+        results_host_dir = os.path.realpath(args.run_logs_dir or
+                                            os.path.join(os.getcwd(), "run_logs"))
+        try:
+            os.makedirs(results_host_dir, exist_ok=True)
+            os.chmod(results_host_dir, 0o1777)
+        except OSError as exc:
+            raise Untranslatable(
+                f"cannot prepare the shared results directory {results_host_dir}: "
+                f"{exc}; the agentic replay writes its artifacts there so they "
+                "survive run_directory cleanup")
+        if not os.access(results_host_dir, os.W_OK):
+            raise Untranslatable(
+                f"shared results directory {results_host_dir} is not writable")
+
     man = translate_manifest(
         scenario_key, scenario, recipe, prefix, cluster, runner, fw,
         args.model_host_dir, args.timeout, weights_dir=weights_dir,
         slurm_time=args.slurm_time, base_image_override=args.base_image,
-        pip_packages=pip_packages,
+        pip_packages=pip_packages, workload_name=workload_name,
+        results_host_dir=results_host_dir,
     )
 
     staged = os.path.join(args.mad_dir, "scripts", runner["dir"], "configs")
@@ -1472,8 +1546,11 @@ def main():
                     help="MAD checkout, read for scripts/sglang_disagg/models.yaml "
                          "when translating a disaggregated scenario")
     ap.add_argument("--run-logs-dir",
-                    help="shared writable dir bound to /run_logs on every node; "
-                         "the disagg launcher coordinates readiness through it")
+                    help="shared writable dir bound to /run_logs: the disagg "
+                         "launcher coordinates cross-node readiness through it, "
+                         "and an agentic-coding replay writes its result "
+                         "artifacts there instead of trusting run_directory's "
+                         "location. Defaults to ./run_logs")
     ap.add_argument("--base-image",
                     help="run on this image instead of the scenario's. The RCCL CI "
                          "uses it to layer the RCCL under test over the scenario's "
@@ -1544,6 +1621,14 @@ def main():
         for s in skipped:
             print(f"  {s}")
     print(f"\ntranslated {len(ok)} scenario(s), {sum(r['points'] for r in ok)} points")
+    # An explicit --scenario that could not be translated must fail the
+    # process, not just print and return 0: automation checking the exit
+    # status would otherwise proceed as if a manifest had been written, or --
+    # with a reused --out-dir -- silently pick up a stale one from an earlier
+    # run. --all keeps its skip-and-report behaviour: a sweep is expected to
+    # reject some scenarios, that is not failure.
+    if args.scenario and skipped:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

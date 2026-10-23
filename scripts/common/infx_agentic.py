@@ -119,16 +119,24 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
         # already exists -- a repeated run of the same point is still a
         # separate measurement.
         tag = config.get("variant") or f"{config['model']}_tp{config['tp']}"
-        # One level ABOVE the working directory. The runners execute inside
-        # madengine's run_directory, which madengine deletes after a successful
-        # run unless --keep-model-dir or --keep-alive is given, and the shared
-        # wrapper lifts only the performance CSV out of it. Written inside, the
-        # aggregate JSON, the replay logs and the AIPerf artifacts -- including
-        # submission_valid, which never reaches the CSV -- would be destroyed by
-        # exactly the runs that produced them.
+        # madengine's run_directory is deleted after a successful run unless
+        # --keep-model-dir/--keep-alive, and the shared wrapper lifts only the
+        # performance CSV out of it. The aggregate JSON, replay logs and AIPerf
+        # artifacts -- including submission_valid, which never reaches the CSV
+        # -- would be destroyed by exactly the runs that produced them.
+        #
+        # AGENTIC_RESULTS_DIR, when the translator set it, is an explicit bind
+        # mount and therefore durable regardless of where madengine staged
+        # run_directory. "one directory above cwd" is kept as a fallback for
+        # manifests generated before this existed, or hand-written ones, but it
+        # is only durable when that parent happens to be shared storage --
+        # true for a single-node run whose workspace is the NFS submission
+        # dir, false for one on node-local scratch and false for every
+        # multi-node SLURM deployment this project's job.sh.j2 defaults to.
+        results_root = os.environ.get("AGENTIC_RESULTS_DIR") or ".."
         base_dir = os.path.abspath(
-            os.path.join("..", f"agentic_{tag}_c{config['max_concurrency']}"
-                               .replace("/", "_"))
+            os.path.join(results_root, f"agentic_{tag}_c{config['max_concurrency']}"
+                                       .replace("/", "_"))
         )
         result_dir, attempt = base_dir, 1
         while os.path.exists(result_dir):
