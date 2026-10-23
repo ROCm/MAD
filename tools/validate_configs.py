@@ -36,6 +36,15 @@ POPPED = {
 # Keys the runner adds itself, so a block need not carry them.
 ADDED = {"cmd", "num_prompts", "performance", "metric", "unit"}
 REQUIRED = {"benchmark", "model", "tp", "max_concurrency"}
+# Fields the SERVING command indexes unconditionally, beyond REQUIRED -- not
+# every engine needs every one (ATOM's CSV has no `variant`, see RUNNERS in
+# infx2mad.py), so these are checked per engine rather than folded into
+# REQUIRED, which would false-positive on ATOM.
+SERVING_REQUIRED = {
+    "sglang": {"out", "variant", "dtype"},
+    "vllm": {"out", "dtype"},
+    "atom": {"out"},
+}
 
 
 def csv_header(engine):
@@ -113,8 +122,14 @@ def main():
                     problems.append(f"{where}: {k} must be a mapping, got {type(b[k]).__name__}")
             if b.get("benchmark") == "agentic" and "agentic_env" not in b:
                 problems.append(f"{where}: agentic block carries no agentic_env")
-            if b.get("benchmark") == "serving" and not b.get("inp"):
-                problems.append(f"{where}: serving block has no input length")
+            if b.get("benchmark") == "serving":
+                if not b.get("inp"):
+                    problems.append(f"{where}: serving block has no input length")
+                missing_serving = SERVING_REQUIRED.get(engine, set()) - set(b)
+                if missing_serving:
+                    problems.append(
+                        f"{where}: serving block missing {sorted(missing_serving)}, "
+                        f"which {engine}'s serving command indexes unconditionally")
 
     print(f"checked {files} config file(s), {blocks} block(s)")
     for p in problems:

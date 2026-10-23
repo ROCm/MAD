@@ -587,6 +587,17 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                 block["random_range_ratio"] = float(rrr)
             blocks.append(block)
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
+    # infx/bench/fixed_seq.py::client_argv requests 2x-concurrency warmups
+    # before measurement. None of the three MAD serving commands sets a
+    # warmup count -- they run their engine's native bench_serving client
+    # as-is -- and this wrapper does not know whether that client exposes an
+    # equivalent flag, so forcing one risks an unsupported argument rather
+    # than fixing the gap. Recorded rather than guessed at.
+    notes.append(
+        "InferenceX requests 2x-concurrency warmup requests before "
+        "measurement (infx/bench/fixed_seq.py); the translated command runs "
+        "the engine's native bench_serving client with its own warmup "
+        "default instead")
     return blocks, notes
 
 

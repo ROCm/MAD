@@ -198,6 +198,18 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     notes.append(
         "per-role serving arguments come from scripts/sglang_disagg/models.yaml, "
         "not from the point's srt-recipe")
+    if workload_name == "fixed-seq-len":
+        # InferenceX's own client (infx/bench/fixed_seq.py::srt_sweep) sends
+        # 10x concurrency prompts; this launcher's benchmark_xPyD.sh computes
+        # max(16, 2x concurrency) instead -- a conc=64 point sends 128 prompts
+        # here against 640 there. Nothing in this emitter can change that: it
+        # is the shared disagg benchmark script's own policy, not a per-point
+        # setting, so it is recorded once rather than measured and fixed.
+        notes.append(
+            "measurement prompt count is max(16, 2x concurrency) "
+            "(scripts/sglang_disagg/benchmark_xPyD.sh), not InferenceX's "
+            "10x concurrency (infx/bench/fixed_seq.py); a shorter client run "
+            "measures a shorter steady-state window")
     if scenario.get("router"):
         notes.append(
             f"scenario pins router {scenario['router'].get('name')} "
