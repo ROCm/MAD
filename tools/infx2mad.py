@@ -128,6 +128,16 @@ CLUSTERS = {
         # denied and madengine's own `cp --preserve=all` cannot set ownership.
         # Running as the submitting user is what makes both succeed.
         "run_as_submitting_user": True,
+        # Ruby's bnxt_re kernel module is a Broadcom Thor2 fork
+        # (`uname -r` carries `_brcmrdma...`) reporting a verbs ABI the
+        # distro rdma-core in the serving images does not support: RDMA
+        # transport then reports no active device even though
+        # /dev/infiniband and ibv_devinfo on the bare host are fine. Verified
+        # against job 94559 (disagg, MoRI kv-transfer): host rdma-core 61.0
+        # works, in-image rdma-core 39.0 does not. 63.0 is the version
+        # docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile already
+        # pins for the same Thor2 family of fixes; unverified here yet.
+        "rdma_core_version": "63.0",
         # Where checkpoints already live on this cluster. Searched in order for
         # a directory named after the scenario's model that holds a
         # config.json, so a scenario need not be told its own path. These are

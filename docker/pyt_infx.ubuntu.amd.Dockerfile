@@ -109,6 +109,64 @@ RUN if [ "$RUN_AS_UID" != "0" ]; then \
             useradd -u "$RUN_AS_UID" -g "$RUN_AS_GID" -M -d /tmp -s /bin/bash madrun; \
     fi
 
+# Replaces the image's rdma-core with one built from source. /dev/infiniband
+# and /sys/class/infiniband being bind-mounted is not enough for RDMA to work
+# in a container: the verbs provider has to speak the ABI the HOST kernel's
+# driver reports, and Ruby's bnxt_re kernel module (a Broadcom Thor2 fork,
+# `uname -r` carrying `_brcmrdma...`) reports an ABI this image's distro
+# rdma-core does not support -- `ibv_devinfo` fails with "does not support the
+# kernel ABI" and every RDMA transport (disagg's MoRI kv-transfer among them)
+# reports no active device. The bare host's own rdma-core (built against this
+# kernel) has no such problem, which is what pins the version below rather
+# than leaving this to "whatever the image ships". Lifted from
+# docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile, which carries the
+# same stage for the same Thor2 family of bnxt_re fixes. Empty = keep the
+# base image's rdma-core, which is the right choice for anything not doing
+# RDMA transport (P2P/IPC-only serving points measured in rccl_surface_atom_serving
+# never needed this).
+ARG RDMA_CORE_VERSION=
+RUN if [ -n "$RDMA_CORE_VERSION" ]; then \
+      set -e; \
+      apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update; \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git ca-certificates cmake ninja-build build-essential pkg-config make \
+        libnl-3-dev libnl-route-3-dev libudev-dev libssl-dev libsystemd-dev \
+        python3-docutils pandoc; \
+      rm -rf /var/lib/apt/lists/*; \
+      git clone --depth 1 --branch "v${RDMA_CORE_VERSION}" https://github.com/linux-rdma/rdma-core.git /tmp/rdma-core; \
+      cd /tmp/rdma-core && git log -1 --format='%H %s'; \
+      mkdir build && cd build; \
+      cmake -GNinja \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu \
+        -DCMAKE_INSTALL_SYSCONFDIR=/etc \
+        -DCMAKE_INSTALL_RUNDIR=/run \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DNO_PYVERBS=1 \
+        ..; \
+      ninja -j"$(nproc)"; \
+      DEBIAN_FRONTEND=noninteractive apt-get purge -y python3-docutils pandoc; \
+      DEBIAN_FRONTEND=noninteractive apt-get autoremove -y; \
+      rm -rf /var/lib/apt/lists/*; \
+      to_remove=""; \
+      for p in ibverbs-providers libibverbs1 libibverbs-dev ibverbs-utils \
+               librdmacm1 librdmacm-dev rdma-core libibumad3 libibmad5 \
+               infiniband-diags; do \
+        if dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed"; then \
+          to_remove="$to_remove $p"; \
+        fi; \
+      done; \
+      if [ -n "$to_remove" ]; then \
+        echo "removing distro rdma packages:$to_remove"; \
+        dpkg -r --force-all $to_remove; \
+      fi; \
+      ninja install && ldconfig; \
+      rm -f /usr/local/lib/x86_64-linux-gnu/libbnxt_re-rdmav*.so /usr/local/lib/libbnxt_re-rdmav*.so; \
+      cd / && rm -rf /tmp/rdma-core; \
+    else \
+      echo "RDMA_CORE_VERSION empty -- keeping the base image's rdma-core"; \
+    fi
+
 ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor \
     TRITON_CACHE_DIR=/tmp/triton
 RUN mkdir -p /tmp/aiter_configs /tmp/torchinductor /tmp/triton \

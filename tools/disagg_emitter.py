@@ -145,6 +145,7 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     # image tag, and a tag computed from the pre-override image would let a
     # plain build and an overlay build share it.
     image = base_image_override or scenario["image"]
+    kv = scenario.get("kv-p2p-transfer") or "nixl"
     build_args = dict(
         {"BASE_DOCKER": image},
         **({"RUN_AS_UID": str(os.getuid()), "RUN_AS_GID": str(os.getgid())}
@@ -157,8 +158,13 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         # sweep catches -- and a missing group would abort the whole run with
         # a traceback instead of reporting one untranslatable scenario.
         **(device_gids or {}),
+        # MoRI's kv-transfer path needs RDMA, and this image's distro
+        # rdma-core does not speak Ruby's bnxt_re kernel ABI -- see the
+        # RDMA_CORE_VERSION stage in pyt_infx.ubuntu.amd.Dockerfile. nixl
+        # points do not take this path and the build cost is skipped for them.
+        **({"RDMA_CORE_VERSION": cluster.get("rdma_core_version", "")}
+           if kv == "mori" and cluster.get("rdma_core_version") else {}),
     )
-    kv = scenario.get("kv-p2p-transfer") or "nixl"
     dp_mode = 1 if dp_attn else 0
     if dp_mode:
         # With DP_MODE=1 the launcher builds ONE group per role whose degree is
