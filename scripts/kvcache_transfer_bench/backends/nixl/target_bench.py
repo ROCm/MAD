@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RIXL Benchmark - Target Node (Simplified)
+NIXL Benchmark - Target Node (Simplified)
 Simplified target benchmark with hardcoded values and embedded etcd server
 """
 
@@ -110,7 +110,7 @@ def run_etcd_server(hostname, etcd_port=2379, etcd_peer_port=2380, register_atex
 def main():
     global SHARED_DIR
 
-    parser = argparse.ArgumentParser(description='RIXL Benchmark Target (Simplified)')
+    parser = argparse.ArgumentParser(description='NIXL Benchmark Target (Simplified)')
     add_common_bench_args(parser, default_shared="/shared")
     args = parser.parse_args()
 
@@ -133,7 +133,7 @@ def main():
     etcd_endpoint = f"http://{target_node}:{ETCD_PORT}"
 
     print(f"{'='*60}")
-    print(f"RIXL Benchmark - TARGET (Simplified)")
+    print(f"NIXL Benchmark - TARGET (Simplified)")
     print(f"{'='*60}")
     print(f"Hostname: {hostname}")
     print(f"Target Node: {target_node}")
@@ -184,15 +184,15 @@ def main():
         print(f"{'='*60}\n")
 
         config = nixl_agent_config(True, True, port)
-        logger.info("Initializing RIXL agent in target mode...")
+        logger.info("Initializing NIXL agent in target mode...")
         agent = nixl_agent("target", config)
 
         # Allocate VRAM buffer for current size
         logger.info(f"Allocating {current_size} bytes in VRAM on GPU {GPU_ID}...")
         tensor = torch.zeros(current_size, dtype=torch.uint8, device=device)
 
-        # Register GPU memory with RIXL
-        logger.info("Registering GPU memory with RIXL agent...")
+        # Register GPU memory with NIXL
+        logger.info("Registering GPU memory with NIXL agent...")
         reg_descs = agent.register_memory([tensor])
 
         if not reg_descs:

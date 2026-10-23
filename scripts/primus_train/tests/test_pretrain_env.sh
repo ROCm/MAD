@@ -126,8 +126,14 @@ check_gpu_model_mapping() {
   assert_eq "MI325X" "$(eval_gpu_model gfx942 "AMD Instinct MI325X")" "PRIMUS_GPU_MODEL"
   assert_eq "MI355X" "$(eval_gpu_model gfx950 "AMD Instinct MI355X")" "PRIMUS_GPU_MODEL"
   assert_eq "MI350X" "$(eval_gpu_model gfx950 "AMD Instinct MI350X")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI455X" "$(eval_gpu_model gfx1250 "AMD Instinct MI455X")" "PRIMUS_GPU_MODEL"
   assert_eq "MI300X" "$(eval_gpu_model gfx942 "")" "PRIMUS_GPU_MODEL"
   assert_eq "MI355X" "$(eval_gpu_model gfx950 "")" "PRIMUS_GPU_MODEL"
+  assert_eq "MI455X" "$(eval_gpu_model gfx1250 "")" "PRIMUS_GPU_MODEL"
+  if [[ ! -f "$PRIMUS_ROOT/runner/helpers/envs/MI455X.sh" ]]; then
+    echo "Expected $PRIMUS_ROOT/runner/helpers/envs/MI455X.sh for gfx1250 recipes" >&2
+    return 1
+  fi
 }
 
 check_explicit_gpu_model_override() (
