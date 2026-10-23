@@ -116,7 +116,8 @@ directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards se
 `MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
 `NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0`. The per-NIC steps (detect the devices, what to
 export, how to verify) are in [`skills/moriio-nics-thor2`](skills/moriio-nics-thor2/SKILL.md) (Broadcom Thor2) and
-[`skills/moriio-nics-cx7`](skills/moriio-nics-cx7/SKILL.md) (ConnectX-7).
+[`skills/moriio-nics-cx7`](skills/moriio-nics-cx7/SKILL.md) (ConnectX-7). Build, launch and per-leg verification of both GLM-5.3-Flash cards:
+[`skills/glm53-flash-gfx942`](skills/glm53-flash-gfx942/SKILL.md).
 `GLM-5.3-Flash-MXFP4-gfx942` serves the AMD Quark MXFP4 checkpoint (`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-MXFP4`) with
 the FP8 card's flags. gfx942 has no FP4 matrix math, and every MXFP4 expert of this checkpoint converts exactly to FP8
 128x128 blocks with a power-of-two block scale, so the card sets `VLLM_ROCM_MXFP4_WEIGHT_ONLY=1`,
@@ -124,7 +125,8 @@ the FP8 card's flags. gfx942 has no FP4 matrix math, and every MXFP4 expert of t
 (shared experts as FP8 blocks) on both legs, plus `VLLM_ROCM_MXFP4_MOE_FP8BLOCK=1` on the prefill leg only through
 `PREFILL_EXTRA_ENV` (`connectors/moriio.sh` exports `PREFILL_EXTRA_ENV` / `DECODE_EXTRA_ENV` on that leg; unset for
 every other model). Expected load-log lines: prefill "MXFP4 MoE experts converted exactly to FP8 128x128 blocks",
-decode "MXFP4 MoE experts on AITER FlyDSL W4A16 with exact e2m1 decode".
+decode "MXFP4 MoE experts on AITER FlyDSL W4A16 with exact e2m1 decode". Validation results (harness, MI325X and MI300X):
+[`results/GLM-5.3-Flash-MXFP4-gfx942_20261023.html`](results/GLM-5.3-Flash-MXFP4-gfx942_20261023.html).
 Validation results on MI325X and MI300X (accuracy, perf, AgentX):
 [`results/GLM-5.3-Flash-FP8-gfx942_20260927.html`](results/GLM-5.3-Flash-FP8-gfx942_20260927.html).
 Short prompts (under ~2K tokens) need vLLM `6a0cb9395797` or later on the fork branch: earlier pins zeroed the decode
