@@ -58,5 +58,25 @@
     ],
     "timeout": -1,
     "args": "--model_repo meta-llama/Llama-3.1-8B-Instruct"
+  },
+  {
+    "name": "pyt_vllm_disagg_llmd_qwen3-30b-a3b_fp8",
+    "url": "",
+    "dockerfile": "../../docker/pyt_vllm",
+    "scripts": "run_llmd.sh",
+    "data": "huggingface",
+    "n_gpus": "-1",
+    "owner": "mad.support@amd.com",
+    "training_precision": "",
+    "multiple_results": "perf_Qwen3-30B-A3B-Thinking-2507-FP8_llmd.csv",
+    "tags": [
+      "pyt",
+      "vllm",
+      "vllm_disagg",
+      "llmd",
+      "inference"
+    ],
+    "timeout": -1,
+    "args": "--model_repo Qwen/Qwen3-30B-A3B-Thinking-2507-FP8"
   }
 ]
