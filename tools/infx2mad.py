@@ -965,10 +965,20 @@ def resolve_mounts(model_dir, weights_dir, model_host_dir):
         # THE checkpoint path and skip their download branch. Exporting a path
         # that holds no checkpoint turns a missing download into a server that
         # fails to start.
-        staged = os.path.isfile(
-            os.path.join(model_host_dir, model_dir, "config.json"))
-        return ({container_models: model_host_dir},
-                f"{container_models}/{model_dir}" if staged else None)
+        #
+        # os.path.isfile follows symlinks, so a staged check that passes does
+        # not mean model_host_dir itself holds the checkpoint: model_host_dir/
+        # model_dir can itself be a symlink into an HF cache snapshot elsewhere
+        # (a different trap than the one below, one level up). Mounting only
+        # model_host_dir then leaves that symlink dangling in the container.
+        # realpath it and fall through to the same snapshot-aware resolution
+        # used for an explicit --weights-dir, instead of trusting the literal
+        # path.
+        candidate = os.path.join(model_host_dir, model_dir)
+        if os.path.isfile(os.path.join(candidate, "config.json")):
+            weights_dir = candidate
+        else:
+            return {container_models: model_host_dir}, None
     weights_dir = os.path.realpath(weights_dir)
     head, sep, tail = weights_dir.partition(os.sep + "snapshots" + os.sep)
     if sep:
