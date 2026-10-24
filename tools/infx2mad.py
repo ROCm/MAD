@@ -254,10 +254,24 @@ class Untranslatable(Exception):
 # Reading the InferenceX side
 # --------------------------------------------------------------------------
 
+# Every invariant this file assumes -- srt-recipe as a full path, a recipe's
+# base.model carrying the checkpoint, _effective_tp's reading of base args --
+# was verified against this commit. Upstream is not append-only: the day this
+# file was last touched, upstream HEAD (80dff12) had already restructured
+# every scenario to srt-recipe-dir + a bare recipe filename AND dropped
+# base.model from the recipe entirely, so a scenario's model now has to come
+# from the master entry. A README that says `git clone` with no checkout step
+# hands a fresh user whatever upstream is on the day they run it, not this.
+EXPECTED_INFX_COMMIT = "f85e1b9a259b4c1209830f10ba34fd3578396567"
+
+
 def load_scenario(infx_root, key):
     path = os.path.join(infx_root, "configs", "amd-master.yaml")
-    with open(path) as f:
-        master = yaml.safe_load(f)
+    try:
+        with open(path) as f:
+            master = yaml.safe_load(f)
+    except OSError as exc:
+        raise Untranslatable(f"cannot read {path}: {exc}")
     if key not in master:
         raise Untranslatable(f"scenario {key!r} not in {path}")
     return master[key]
@@ -279,9 +293,35 @@ def infx_revision(infx_root):
         return "unknown"
 
 
+def check_infx_revision(infx_root):
+    """Warn, loudly, when the checkout is not the one this file was verified
+    against -- advisory, not a hard gate, since trying a newer commit on
+    purpose is legitimate. Silent on "unknown" (no .git, e.g. a tarball
+    extract): that is not evidence of either commit.
+    """
+    got = infx_revision(infx_root)
+    if got not in ("unknown", EXPECTED_INFX_COMMIT):
+        print(
+            f"WARNING: {infx_root} is at {got[:12]}, not the "
+            f"{EXPECTED_INFX_COMMIT[:12]} this tool's schema assumptions were "
+            "verified against. Upstream has changed scenario fields before "
+            "(srt-recipe-dir, base.model) without notice; a scenario that "
+            "fails to parse below may be a schema change, not a bug here.",
+            file=sys.stderr)
+
+
 def load_recipe(infx_root, rel_path):
-    with open(os.path.join(infx_root, rel_path)) as f:
-        return yaml.safe_load(f)
+    path = os.path.join(infx_root, rel_path)
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f)
+    except OSError as exc:
+        raise Untranslatable(
+            f"cannot read recipe {path}: {exc}. If {infx_root} is not at "
+            f"{EXPECTED_INFX_COMMIT[:12]}, upstream may have restructured "
+            "this scenario's recipe path (srt-recipe-dir + a bare filename, "
+            "seen upstream as of 80dff12) since this tool's srt-recipe "
+            "handling was last verified against a full-path value")
 
 
 # The only setup_script whose effect we can restate exactly. The others
@@ -1606,6 +1646,8 @@ def main():
 
     if not args.all and not args.scenario:
         ap.error("pass --scenario or --all")
+
+    check_infx_revision(args.infx)
 
     if args.print_scenario_image:
         print(load_scenario(args.infx, args.scenario)["image"])

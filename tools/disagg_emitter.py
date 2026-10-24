@@ -274,20 +274,34 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
         #     regardless of what else is set, defaulting to TP=1;
         #   * PREFILL_TP/DECODE_TP, not PREFILL_TP_SIZE/DECODE_TP_SIZE (the
         #     launcher's own names for the same values);
-        #   * PREFILL_NUM_WORKERS/DECODE_NUM_WORKERS, i.e. the node counts
-        #     xP/yD, so num_gpus = xP*tp + yD*tp rather than defaulting to 0.
+        #   * PREFILL_NUM_WORKERS/DECODE_NUM_WORKERS, the role's WORKER count
+        #     (recipe num-worker), not xP/yD. xP/yD are NODE counts, and a
+        #     worker can span more than one node (TP16 on 8-GPU nodes is one
+        #     worker over two nodes, num-worker=1, xP=2) -- using xP/yD here
+        #     would count each of that worker's nodes as a separate worker and
+        #     double its GPUs.
         # Without these a 1P2D TP8 replay (24 GPUs) is recorded as single-node
         # TP1 conc=0, and per-GPU throughput divides by 1 instead of 24.
         env_vars["CONC"] = conc
         env_vars["IS_MULTINODE"] = "true"
-        env_vars["PREFILL_NUM_WORKERS"] = str(xP)
+        env_vars["PREFILL_NUM_WORKERS"] = str(prefill.get("num-worker", 1))
         env_vars["PREFILL_TP"] = str(tp)
-        env_vars["DECODE_NUM_WORKERS"] = str(yD)
+        env_vars["DECODE_NUM_WORKERS"] = str(decode.get("num-worker", 1))
         env_vars["DECODE_TP"] = str(tp)
         if prefill.get("ep") is not None:
             env_vars["PREFILL_EP"] = str(prefill["ep"])
         if decode.get("ep") is not None:
             env_vars["DECODE_EP"] = str(decode["ep"])
+        # Scenario identity the aggregator also records. image is the point's
+        # own (base_image_override may differ from scenario["image"]), and
+        # MODEL_PREFIX additionally drives agentic_lib.sh's trace-corpus
+        # selection -- without it corpus selection falls back to the catalog
+        # name, which can pick a different dataset than the scenario's own.
+        env_vars["FRAMEWORK"] = scenario["framework"]
+        env_vars["PRECISION"] = scenario["precision"]
+        env_vars["IMAGE"] = image
+        env_vars["MODEL_PREFIX"] = scenario["model-prefix"]
+        env_vars["DISAGG"] = "true"
         env_vars["PREFILL_DP_ATTN"] = "true" if prefill.get("dp-attn") else "false"
         env_vars["DECODE_DP_ATTN"] = "true" if decode.get("dp-attn") else "false"
 

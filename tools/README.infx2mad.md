@@ -24,7 +24,13 @@ one emitter serves all three.
 ## Usage
 
 ```bash
-git clone --depth 1 https://github.com/SemiAnalysisAI/InferenceX.git
+# Pinned, not `--depth 1` off the default branch: this tool's schema
+# assumptions (srt-recipe as a full path, a recipe's base.model) were
+# verified against this commit. Upstream has restructured both since --
+# srt-recipe-dir + a bare filename, and no base.model at all -- without
+# notice, so an unpinned clone can silently break every scenario.
+git clone https://github.com/SemiAnalysisAI/InferenceX.git
+git -C InferenceX checkout f85e1b9a259b4c1209830f10ba34fd3578396567
 INFX=InferenceX/inferencex-e2e
 
 # one scenario
