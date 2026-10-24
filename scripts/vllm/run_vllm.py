@@ -31,6 +31,7 @@ import json
 import yaml
 import psutil
 import shutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -239,6 +240,46 @@ def run_throughput(model, config):
 
     return results
 
+
+def _load_infx_agentic():
+    """Import the shared agentic body from scripts/common/.
+
+    Imported lazily, not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    import sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines."""
+    infx_agentic = _load_infx_agentic()
+    server_cmd = (
+        "vllm serve "
+        f"{model} "
+        f"--dtype {config['dtype']} "
+        f"-tp {config['tp']} "
+        f"--trust-remote-code "
+        f"--disable-uvicorn-access-log "
+    )
+    env = config.pop("env", "")
+    extra_args = config.pop("extra_args", "")
+    config.pop("random_range_ratio", None)
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    return infx_agentic.run_agentic(
+        model, config, "vllm", server_cmd, "localhost", 8000, 1800
+    )
+
+
 def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
@@ -252,9 +293,11 @@ def run_serving(model, config):
         f"--trust-remote-code "
         f"--disable-uvicorn-access-log "
     )
-    # pop env and extra args from config
+    # pop env, extra args and the bench-only knob from config: everything left
+    # in config lands in the CSV row, whose columns are fixed by CSV_HEADER.
     env = config.pop('env', "")
     extra_args = config.pop('extra_args', "")
+    random_range_ratio = config.pop('random_range_ratio', 1.0)
     server_cmd = f"{env} {server_cmd} {extra_args}".strip()
     config["cmd"] = server_cmd
 
@@ -297,6 +340,10 @@ def run_serving(model, config):
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
+            # 1.0 means every prompt is exactly inp tokens. A recipe that
+            # jitters input length has to be able to say so, or its numbers are
+            # not reproducible here.
+            f"--random-range-ratio {random_range_ratio} "
             f"--save-result "
             f"--result-filename {output_json}"
         )
@@ -445,13 +492,22 @@ def main():
             # concatenate env vars and extra args into the corresponding strings
             env_vars = config.get("env", {})
             extra_args = config.get("extra_args", {})
-            env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
+            # Values come from a config file and reach the engine through a
+            # shell string, so anything with spaces or quotes -- a JSON
+            # attention-config, compilation-config or speculative-config -- must
+            # be quoted or the shell eats its structure and the server refuses
+            # to start. Flags stay bare.
+            env_vars_str = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" {k} {v}"
+                    # Lists and mappings must be JSON, not Python repr: a
+                    # recipe can hand us a structured value and str() would
+                    # single-quote its keys.
+                    rendered = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                    extra_args_str += f" {k} {shlex.quote(rendered)}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             
@@ -462,6 +518,8 @@ def main():
                 results = run_latency(model, config)
             elif benchmark == "throughput":
                 results = run_throughput(model, config)
+            elif benchmark == "agentic":
+                results = run_agentic_point(model, config)
             elif benchmark == "serving":
                 results = run_serving(model, config)
             else:

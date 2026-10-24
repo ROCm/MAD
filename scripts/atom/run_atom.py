@@ -32,6 +32,7 @@ import json
 import yaml
 import psutil
 import shutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -235,19 +236,37 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def _arg_value(value):
+    """Render a config value the way the engine's parser expects it.
+
+    A recipe may give a list or mapping -- ATOM's extra-kv-connectors is a list
+    of mappings -- and str() on those yields Python syntax with single quotes,
+    which these arguments do not accept. Serialize them as JSON; scalars pass
+    through unchanged.
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
+
+
 def dict_to_args(args_dict: Dict) -> str:
-    """Convert argument dictionary to command-line string"""
+    """Convert argument dictionary to command-line string.
+
+    Values are shell-quoted: they come from a config file and reach the engine
+    through a shell string, so a JSON-valued argument would otherwise lose its
+    quoting during shell parsing. Flags stay bare.
+    """
     args_list = []
     for key, value in args_dict.items():
         if value is True:
             args_list.append(key)
         elif value is not False and value is not None:
-            args_list.append(f"{key} {value}")
+            args_list.append(f"{key} {shlex.quote(_arg_value(value))}")
     return " ".join(args_list)
 
 def dict_to_env(env_dict: Dict) -> str:
     """Convert environment dictionary to env var string"""
-    return " ".join(f"{k}={v}" for k, v in env_dict.items())
+    return " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_dict.items())
 
 def expand_configs(args, configs: List[Dict]):
     # Apply architecture specific overrides to config
@@ -318,9 +337,61 @@ def _wait_for_server(server, port=8000, timeout=5400, poll_interval=30):
     print("Timed out waiting for server to start", flush=True)
     return False
 
+
+def _load_infx_agentic():
+    """Import the shared agentic body from scripts/common/.
+
+    Imported lazily, not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    import sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines."""
+    infx_agentic = _load_infx_agentic()
+    server_cmd = (
+        "python -m atom.entrypoints.openai_server "
+        f"--model {model} "
+        f"-tp {config['tp']} "
+    )
+    if config.get("kv_cache_dtype"):
+        server_cmd += f"--kv_cache_dtype {config['kv_cache_dtype']} "
+    env_dict = config.pop("env", {})
+    extra_args_dict = config.pop("extra_args", {})
+    # The agentic replay drives its own prompt corpus, so the serving-only
+    # length-distribution knob is dropped rather than forwarded.
+    config.pop("random_range_ratio", None)
+    config.pop("bench_serving", None)
+    env_str = dict_to_env(env_dict) if env_dict else ""
+    extra_args_str = dict_to_args(extra_args_dict) if extra_args_dict else ""
+    server_cmd = f"{env_str} {server_cmd} {extra_args_str}".strip()
+    # ATOM serves on the OpenAI-compatible endpoint; agentic_lib.sh only knows
+    # the sglang and vllm backends, and vllm is the one whose port and
+    # ctx-window resolver match this endpoint.
+    return infx_agentic.run_agentic(
+        model, config, "vllm", server_cmd, "localhost", 8000, 5400
+    )
+
+
 def run_serving(model, config):
     # num_prompts = multiplier * max_concurrency; multiplier from perf.yaml bench_serving (default 10), popped so it stays out of the CSV row
     multiplier = int((config.pop("bench_serving", {}) or {}).get("num_prompts_multiplier") or 10)
+    # The benchmark call below hardcoded 0.8 while this value was discarded, so
+    # a recipe asking for another prompt-length distribution measured 0.8 with
+    # nothing saying so. 0.8 remains the default, leaving existing configs
+    # unchanged. run_sglang.py and run_vllm.py already honour this key.
+    random_range_ratio = config.pop("random_range_ratio", 0.8)
     if not config.get("num_prompts"):
         config["num_prompts"] = str(multiplier * int(config["max_concurrency"]))
     output_json = (
@@ -370,7 +441,7 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
+            f"--random-range-ratio {random_range_ratio} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -442,6 +513,7 @@ def run_serving_profile(model, config):
     kernel-summary aggregator.
     """
     config.pop("bench_serving", None)  # perf.yaml-only knob; keep out of CSV row
+    random_range_ratio = config.pop("random_range_ratio", 0.8)  # see run_serving
     if not config.get("num_prompts"):
         config["num_prompts"] = str(min(5, 10 * int(config["max_concurrency"])))
     output_json = (
@@ -515,7 +587,7 @@ def run_serving_profile(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
+            f"--random-range-ratio {random_range_ratio} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -837,6 +909,8 @@ def main():
             profile = bool(config.pop('profile', False)) or getattr(args, 'profile', False)
             if benchmark == "serving":
                 results = run_serving_profile(model, config) if profile else run_serving(model, config)
+            elif benchmark == "agentic":
+                results = run_agentic_point(model, config)
             elif benchmark == "accuracy":
                 results = run_accuracy(model, config)
             else:

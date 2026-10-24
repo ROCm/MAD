@@ -36,13 +36,19 @@ import csv
 import json
 import yaml
 import psutil
+import shlex
 import signal
 import argparse
 import itertools
 import subprocess
+import sys
 from typing import List, Dict
 
+
 SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'num_prompts', 'max_concurrency']
+# Keys a config block may carry that are consumed by the runner and must
+# never reach the CSV row, whose columns are fixed by CSV_HEADER.
+RUNNER_ONLY_KEYS = ('env', 'extra_args', 'random_range_ratio', 'agentic_env')
 CSV_HEADER = [
     "model",
     "benchmark",
@@ -64,6 +70,26 @@ PORT = 30000
 # Kimi K3 is a ~1.5 TB checkpoint loaded over TP8; 30 minutes (what run_vllm.py
 # allows) is not enough. Overridable for smaller models.
 SERVER_START_TIMEOUT = int(os.environ.get("SGLANG_SERVER_START_TIMEOUT", 5400))
+
+
+def resolve_bench_module() -> str:
+    """Name of the serving-benchmark module in whichever SGLang is installed.
+
+    SGLang moved sglang.bench_serving to sglang.benchmark.serving. MAD's own
+    images carry the new layout, but a config generated from an InferenceX
+    scenario pins the image that scenario was measured against (for example
+    lmsysorg/sglang:v0.5.12-rocm700-mi35x), and those still ship the old name.
+    Resolving it here lets one runner drive both instead of forking per image.
+    """
+    import importlib.util
+
+    for name in ("sglang.benchmark.serving", "sglang.bench_serving"):
+        try:
+            if importlib.util.find_spec(name) is not None:
+                return name
+        except (ImportError, ValueError):
+            continue
+    raise RuntimeError("no SGLang serving-benchmark module found")
 
 
 def parse_args():
@@ -194,9 +220,11 @@ def run_serving(model, config):
         f"--host {HOST} "
         f"--port {PORT} "
     )
-    # pop env and extra args from config
+    # pop env, extra args and the bench-only knob from config: everything left
+    # in config lands in the CSV row, whose columns are fixed by CSV_HEADER.
     env = config.pop('env', "")
     extra_args = config.pop('extra_args', "")
+    random_range_ratio = config.pop('random_range_ratio', 1.0)
     server_cmd = f"{env} {server_cmd} {extra_args}".strip()
     config["cmd"] = server_cmd
 
@@ -224,7 +252,7 @@ def run_serving(model, config):
             f"{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.jsonl"
         )
         bench_cmd = (
-            "python3 -m sglang.benchmark.serving "
+            f"python3 -m {resolve_bench_module()} "
             f"--backend sglang "
             f"--host {HOST} "
             f"--port {PORT} "
@@ -232,7 +260,10 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
-            f"--random-range-ratio 1.0 "
+            # 1.0 means every prompt is exactly inp tokens. A recipe that
+            # jitters input length (InferenceX sets RANDOM_RANGE_RATIO) has to
+            # be able to say so, or its numbers are not reproducible here.
+            f"--random-range-ratio {random_range_ratio} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--output-file {output_json}"
@@ -283,6 +314,45 @@ def run_serving(model, config):
     return results
 
 
+def _load_infx_agentic():
+    """Import the shared agentic body, which lives in scripts/common/.
+
+    Imported lazily and not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines."""
+    infx_agentic = _load_infx_agentic()
+    env = config.pop("env", "")
+    extra_args = config.pop("extra_args", "")
+    config.pop("random_range_ratio", None)
+    server_cmd = (
+        "sglang serve "
+        f"--model-path {model} "
+        f"--dtype {config['dtype']} "
+        f"--tp-size {config['tp']} "
+        f"--trust-remote-code "
+        f"--host {HOST} "
+        f"--port {PORT} "
+    )
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    return infx_agentic.run_agentic(
+        model, config, "sglang", server_cmd, HOST, PORT, SERVER_START_TIMEOUT
+    )
+
+
 def main():
     args = parse_args()
 
@@ -328,13 +398,22 @@ def main():
             # concatenate env vars and extra args into the corresponding strings
             env_vars = config.get("env", {})
             extra_args = config.get("extra_args", {})
-            env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
+            # Values come from a config file and reach the engine through a
+            # shell string, so anything with spaces or quotes -- a JSON
+            # attention-config, compilation-config or speculative-config -- must
+            # be quoted or the shell eats its structure and the server refuses
+            # to start. Flags stay bare.
+            env_vars_str = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
                 else:
-                    extra_args_str += f" {k} {v}"
+                    # Lists and mappings must be JSON, not Python repr: a
+                    # recipe can hand us a structured value and str() would
+                    # single-quote its keys.
+                    rendered = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                    extra_args_str += f" {k} {shlex.quote(rendered)}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
 
@@ -343,6 +422,8 @@ def main():
             benchmark = config["benchmark"]
             if benchmark == "serving":
                 results = run_serving(model, config)
+            elif benchmark == "agentic":
+                results = run_agentic_point(model, config)
             else:
                 raise ValueError(f"Unknown benchmark: {benchmark}")
 
