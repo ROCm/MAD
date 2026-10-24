@@ -597,6 +597,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
+        emitted_conc = []
         for conc, point_args, _, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
             point_services, point_setups = set(), set()
             point_env_srv = _split_marker(point_env_srv, seen_frontends,
@@ -616,6 +617,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
                     f"{', '.join(sorted(point_services))} service, which neither "
                     "the wrapper nor the runner starts")
                 continue
+            emitted_conc.append(conc)
             extra = effective_args(recipe, point_args,
                                    OWNED_BY_RUNNER.get(runner["dir"], set()))
             block = {
@@ -648,6 +650,7 @@ def emit_serving(scenario_key, recipe, workloads, runner):
             if rrr is not None:
                 block["random_range_ratio"] = float(rrr)
             blocks.append(block)
+        notes += _conc_bounds_note(point, emitted_conc)
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
     # infx/bench/fixed_seq.py::client_argv requests 2x-concurrency warmups
     # before measurement. None of the three MAD serving commands sets a
@@ -688,6 +691,7 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
       for point in workload["search-space"]:
         tp = point["tp"]
         notes += _ep_note(point, tp)
+        emitted_conc = []
         for conc, point_args, point_env, point_env_srv, engine_tp in enumerate_points(recipe, tp, point):
             point_services, point_setups = set(), set()
             point_env_srv = _split_marker(point_env_srv, seen_frontends,
@@ -808,7 +812,9 @@ def emit_agentic(scenario_key, recipe, workloads, runner, duration=None, model_p
             # the override rather than on base; popped before the YAML write.
             if point_setup:
                 block["_setup"] = point_setup
+            emitted_conc.append(conc)
             blocks.append(block)
+        notes += _conc_bounds_note(point, emitted_conc)
 
     notes += _frontend_and_acceptance_notes(seen_frontends, workloads)
     if dram_unstated:
@@ -893,6 +899,32 @@ def _ep_note(point, tp):
     expert-parallel-size and the emitters pass it straight into extra_args.
     Kept as a hook so a future axis that genuinely is not mapped has a home."""
     return []
+
+
+def _conc_bounds_note(point, emitted):
+    """Say so when a point has no conc-list and the recipe's own override
+    ladder reaches outside the scenario's conc-start/conc-end.
+
+    enumerate_points deliberately does not derive a concurrency list from
+    conc-start/conc-end -- the scenario states a range with no step, so a
+    derived list would be a guess -- and instead emits whatever the recipe's
+    override carries. Every AMD recipe at the pinned InferenceX commit keeps
+    its override ladder inside the scenario's declared bounds (checked
+    exhaustively), so this has not been observed live; it is a gap, not a
+    filter, because dropping a point on a guessed boundary risks removing one
+    the recipe author intended.
+    """
+    if point.get("conc-list") is not None:
+        return []
+    cs, ce = point.get("conc-start"), point.get("conc-end")
+    if cs is None or ce is None:
+        return []
+    out = sorted(c for c in emitted if not (int(cs) <= int(c) <= int(ce)))
+    if not out:
+        return []
+    return [f"tp={point['tp']}: recipe emits concurrenc{'y' if len(out) == 1 else 'ies'} "
+            f"{out} outside the scenario's declared conc-start={cs}/conc-end={ce}; "
+            "emitted anyway since no conc-list narrows them"]
 
 
 def _stamp(block, scenario_key, tp, conc, runner, suffix=""):

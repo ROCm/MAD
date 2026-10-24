@@ -138,11 +138,19 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout):
             os.path.join(results_root, f"agentic_{tag}_c{config['max_concurrency']}"
                                        .replace("/", "_"))
         )
+        # mkdir, not exists-then-mkdir: AGENTIC_RESULTS_DIR is shared across
+        # concurrent runs of the same point (same tag, same concurrency), and
+        # exists()-then-makedirs() is a check-then-act race -- two runs can
+        # both see attempt N as free and then both call makedirs, one of them
+        # raising FileExistsError after it has already loaded the checkpoint.
         result_dir, attempt = base_dir, 1
-        while os.path.exists(result_dir):
-            attempt += 1
-            result_dir = f"{base_dir}_run{attempt}"
-        os.makedirs(result_dir)
+        while True:
+            try:
+                os.makedirs(result_dir)
+                break
+            except FileExistsError:
+                attempt += 1
+                result_dir = f"{base_dir}_run{attempt}"
 
         hook_env = dict(os.environ)
         hook_env.update({str(k): str(v) for k, v in agentic_env.items()})

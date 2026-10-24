@@ -246,6 +246,17 @@ def emit_disagg(scenario_key, scenario, workload_name, workload, point, idx,
     if isl is not None and osl is not None:
         env_vars["BENCHMARK_COMBINATIONS"] = f"{int(isl)}/{int(osl)}"
     if workload_name == "agentic-coding":
+        # --agentic-duration is in the aggregated-only unsupported list above
+        # (DURATION is never set here), so this route always falls to
+        # agentic_lib.sh's 120 s default against the scenario's 900 s minimum.
+        # The aggregated emitter records exactly this when duration is None;
+        # match it rather than leave the disagg route the one path silent
+        # about a submission_valid=false run.
+        notes.append(
+            "no measurement window set; agentic_lib.sh defaults to 120 s "
+            "while the InferenceX scenario minimum is 900 s, so the run is "
+            "marked submission_valid=false. The disagg route does not accept "
+            "--agentic-duration.")
         # The disagg launcher already has the agentic hook; selecting it is a
         # single env var, which is why agentic needed new code only on the
         # aggregated side.
