@@ -8,7 +8,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -20,7 +21,6 @@
             "BENCH_BACKENDS": "all",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [
@@ -40,7 +40,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -52,7 +53,6 @@
             "BENCH_BACKENDS": "mori,mori_cpp",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [
@@ -69,7 +69,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -81,7 +82,6 @@
             "BENCH_BACKENDS": "mori",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [
@@ -98,7 +98,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -110,7 +111,6 @@
             "BENCH_BACKENDS": "mori_cpp",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [
@@ -127,7 +127,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -139,7 +140,6 @@
             "BENCH_BACKENDS": "nixl",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [
@@ -156,7 +156,8 @@
         "owner": "mad.support@amd.com",
         "training_precision": "",
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "slurm": {
             "nodes": 2,
@@ -168,7 +169,6 @@
             "BENCH_BACKENDS": "mooncake",
             "START_SIZE": "4096",
             "STOP_SIZE": "1073741824",
-            "IBDEVICE": "mlx5_0",
             "SYNC_PORT": "9999"
         },
         "tags": [

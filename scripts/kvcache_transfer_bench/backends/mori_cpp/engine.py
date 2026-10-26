@@ -13,6 +13,7 @@ from typing import List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common.mori_settings import WORKLOAD_FLAGS
+from common.net_detect import socket_ifname
 from common.utils import resolve_hostname
 
 BOOTSTRAP_PORT = 18515  # bench_engine's engines also listen on the next two ports
@@ -35,7 +36,7 @@ def require_engine() -> str:
 
 
 def _ifname() -> str:
-    return os.environ.get("MORI_SOCKET_IFNAME") or os.environ.get("GLOO_SOCKET_IFNAME", "")
+    return os.environ.get("MORI_SOCKET_IFNAME") or os.environ.get("GLOO_SOCKET_IFNAME") or socket_ifname()
 
 
 def local_ip() -> str:

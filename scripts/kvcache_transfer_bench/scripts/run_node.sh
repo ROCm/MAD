@@ -6,7 +6,7 @@ SHARED_FOLDER=""
 BENCH_BACKENDS="all"
 START_SIZE="4096" # 4kb
 STOP_SIZE="1073741824" # 1GB
-IBDEVICES="mlx5_0"
+IBDEVICES="${IBDEVICES:-${IBDEVICE:-}}"
 SYNC_PORT="9999"
 MODEL_NAME="pyt_kvcache_transfer_bench_all"
 
@@ -67,8 +67,31 @@ JOB_ID=${SLURM_JOB_ID:-${JOB_ID:-unknown}}
 SHARED_FOLDER_BASE="${SHARED_FOLDER:-${KV_CACHE_TEST_PATH}}"
 SHARED_FOLDER="${SHARED_FOLDER_BASE%/}/shared/results_${JOB_ID}"
 
-# UCX/GLOO env for RDMA/ROCm transfers (used by mori, nixl, mooncake)
-export GLOO_SOCKET_IFNAME=eth0
+# Require essential args
+missing=
+[ -z "$NODE1" ]       && missing="${missing}--node1 "
+[ -z "$NODE2" ]       && missing="${missing}--node2 "
+
+if [ -n "$missing" ]; then
+    echo "ERROR: Required arguments not set: $missing" >&2
+    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV] [--model-name NAME]" >&2
+    exit 1
+fi
+
+# Cluster network settings: keep what the caller set, detect the rest on this node.
+NET_DETECT="python3 $KV_CACHE_TEST_PATH/backends/common/net_detect.py"
+IBDEVICES=$($NET_DETECT rdma-device "$IBDEVICES")
+GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-$($NET_DETECT socket-ifname)}
+if [ -z "$IBDEVICES" ]; then
+    echo "ERROR: no active RDMA device found on $(hostname); set IBDEVICE" >&2
+    exit 1
+fi
+echo "INFO: RDMA device $IBDEVICES, socket interface ${GLOO_SOCKET_IFNAME:-<none>} on $(hostname)"
+export IBDEVICES
+[ -n "$GLOO_SOCKET_IFNAME" ] && export GLOO_SOCKET_IFNAME
+export MORI_RDMA_DEVICES="$IBDEVICES"
+
+# UCX/ROCm env for RDMA/ROCm transfers
 export UCX_TLS=rc,sm,self,rocm_copy,rocm_ipc,tcp
 export UCX_NET_DEVICES="${IBDEVICES}:1"
 export UCX_SOCKADDR_TLS_PRIORITY=rdmacm,tcp
@@ -82,23 +105,13 @@ export HSA_ENABLE_SDMA=1
 export UCX_LOG_LEVEL=error
 export NIXL_LOG_LEVEL=WARN
 
-# Require essential args
-missing=
-[ -z "$NODE1" ]       && missing="${missing}--node1 "
-[ -z "$NODE2" ]       && missing="${missing}--node2 "
-
-if [ -n "$missing" ]; then
-    echo "ERROR: Required arguments not set: $missing" >&2
-    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV] [--model-name NAME]" >&2
-    exit 1
-fi
-
 mkdir -p "$SHARED_FOLDER"
 
 # Resolve current hostname on the fly (hostname command works when $HOSTNAME is unset)
 CURRENT_HOST=$(hostname)
 echo "CURRENT_HOST: $CURRENT_HOST"
 
+FAIL=0
 for backend in $BENCH_BACKENDS; do
     echo "=== Starting backend: $backend on $(hostname) (NODE1=$NODE1 CURRENT_HOST=$CURRENT_HOST) ==="
     if [ "$NODE1" = "$CURRENT_HOST" ]; then
@@ -120,7 +133,9 @@ for backend in $BENCH_BACKENDS; do
             --end_size $STOP_SIZE \
             --sync-port "$SYNC_PORT" 2>&1
     fi
-    echo "=== Backend $backend finished with exit code $? ==="
+    rc=$?
+    echo "=== Backend $backend finished with exit code $rc ==="
+    [ "$rc" -eq 0 ] || FAIL=1
 done
 
 # Merge results and generate report (run only on the initiator node)
@@ -146,11 +161,13 @@ if [ "$NODE1" != "$CURRENT_HOST" ]; then
     # Copy SLURM output/error files into the shared results folder
     if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -n "${JOB_ID:-}" ] && [ "$JOB_ID" != "unknown" ]; then
         for ext in out err; do
-            src="${SLURM_SUBMIT_DIR}/kv_cache_perf_bench_${JOB_ID}.${ext}"
+            src="${SLURM_SUBMIT_DIR}/slurm-kvcache-transfer-bench-${JOB_ID}.${ext}"
             if [ -f "$src" ]; then
                 cp "$src" "$SHARED_FOLDER/" && echo "Copied $(basename "$src") -> $SHARED_FOLDER/"
             fi
         done
     fi
 fi
+
+exit "$FAIL"
 
