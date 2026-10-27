@@ -2,16 +2,16 @@
 #SBATCH --job-name=ep-benchmarking
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:8
 #SBATCH --time=04:00:00         # Set a time limit for the job (HH:MM:SS)
-#SBATCH --output="ep_bench_slurm_job.out"
-#SBATCH --error="ep_bench_slurm_job.err"
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
 
 USER_NAME=$(whoami)
 PWD=$(pwd)
-LOG_PATH=${LOG_PATH:-"/shared_inference/${USER_NAME}/model_blog_logs"}
-DOCKER_IMAGE=${DOCKER_IMAGE:-ep-benchmarking:latest}
-IBDEVICES=${IBDEVICES:-mlx5_0}
-SKIP_DEEPEP=${SKIP_DEEPEP:-0}
+LOG_PATH=${LOG_PATH:-"${PWD}/slurm_output"}
+DOCKER_IMAGE=${DOCKER_IMAGE_NAME:-${DOCKER_IMAGE:-ep-benchmarking:latest}}
+SKIP_DEEPEP=${SKIP_DEEPEP:-1}
 
 # ------------------------
 # SLURM Environment Variables
@@ -65,7 +65,8 @@ echo "Log directory: $LOG_PATH/${SLURM_JOB_ID}"
 
 export LOG_PATH=$LOG_PATH
 export DOCKER_IMAGE=$DOCKER_IMAGE
-export IBDEVICES=$IBDEVICES
+# Cluster network settings, forwarded into the containers only when set
+export IBDEVICES GLOO_SOCKET_IFNAME MORI_RDMA_DEVICES MORI_DEVICE_NIC
 export SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST
 export NNODES=$NNODES
 export MASTER_ADDR=$MASTER_ADDR
@@ -74,13 +75,10 @@ export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
 
 srun bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker stop ep-bench;
-sleep 10;
-docker rm ep-bench;
-sleep 10;
-docker stop $(docker ps -aq) && docker rm $(docker ps -aq);
-sleep 30;
-docker pull $DOCKER_IMAGE;    
+docker stop ep-bench 2>/dev/null || true;
+docker rm -f ep-bench 2>/dev/null || true;
+sleep 2;
+docker pull $DOCKER_IMAGE;
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -93,7 +91,6 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --ulimit memlock=-1:-1 \
     -v $HOME:$HOME \
-    -v /shared_inference/models:/data \
     -v $HOME/.ssh:/root/.ssh \
     -v /dev/infiniband:/dev/infiniband \
     -v /sys/class/infiniband:/sys/class/infiniband:ro \
@@ -109,18 +106,37 @@ docker run --rm \
     -e MASTER_PORT=$MASTER_PORT \
     -e NNODES=$NNODES \
     -e IPADDRS=$IPADDRS \
-    -e IBDEVICES=$IBDEVICES \
+    -e IBDEVICES \
+    -e GLOO_SOCKET_IFNAME \
+    -e MORI_RDMA_DEVICES \
+    -e MORI_DEVICE_NIC \
     -e SKIP_DEEPEP=$SKIP_DEEPEP \
     -e MAD_REPO_PATH=$MAD_REPO_PATH \
     -e MAD_REPO_EP_SCRIPTS=$MAD_REPO_EP_SCRIPTS \
+    -e DOCKER_IMAGE=$DOCKER_IMAGE \
     --entrypoint /bin/bash \
     --name ep-bench \
     $DOCKER_IMAGE -c "
+        set -o pipefail
         echo Inside docker container ....
         echo ${MAD_REPO_PATH}
         $MAD_REPO_PATH/run_ep_bench.sh 2>&1 | tee /run_logs/ep_bench_results.log
 "
 '
+BENCH_RC=$?
 
 srun bash -c 'docker stop ep-bench 2>/dev/null || true; docker rm -f ep-bench 2>/dev/null || true'
+
+# madengine collects <submit dir>/slurm_output/perf_csv/*<job_id>*.csv
+PERF_CSV="${LOG_PATH}/${SLURM_JOB_ID}/perf.csv"
+if [ -f "$PERF_CSV" ]; then
+    PERF_DIR="${SLURM_SUBMIT_DIR:-$PWD}/slurm_output/perf_csv"
+    mkdir -p "$PERF_DIR" && cp "$PERF_CSV" "$PERF_DIR/results_${SLURM_JOB_ID}.csv" \
+        && echo "perf.csv -> $PERF_DIR/results_${SLURM_JOB_ID}.csv"
+fi
+
+if [ "$BENCH_RC" -ne 0 ]; then
+    echo "ERROR: benchmark failed on one or more nodes (srun exit $BENCH_RC)" >&2
+fi
+exit $BENCH_RC
 

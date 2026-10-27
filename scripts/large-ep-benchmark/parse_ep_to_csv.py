@@ -3,7 +3,8 @@
 Parse large EP benchmark logs and generate madengine-compatible perf.csv.
 
 Parses output from:
-- MoRI bench_dispatch_combine / test_dispatch_combine_internode (PrettyTable format)
+- MoRI test_dispatch_combine_internode (PrettyTable format)
+- MoRI bench_dispatch_combine, intranode (per-round format)
 - DeepEP test_internode / test_low_latency (inline GB/s format)
 
 Each benchmark test becomes a row in perf.csv with:
@@ -74,6 +75,44 @@ def parse_mori_prettytable(content: str, source: str) -> List[Dict]:
     return results
 
 
+def parse_mori_rounds(content: str, source: str) -> List[Dict]:
+    """Parse MoRI bench_dispatch_combine per-round output (intranode).
+
+    Format:
+    Dispatch result:
+    Round 0 duration(us) [...] bandwidth(GB/s) [...] avg bytes(MB) 296.27 lat 1037.7 bw 299.43 / 452.27
+    Combine result:
+    Round 0 duration(us) [...] ... lat 1102.0 bw 283.06 / 427.53
+
+    `lat` and `bw` are means over ranks; the number after `/` rescales `bw` to the
+    low-latency token count and is not used. As in MoRI's own summary, the best
+    round has the highest `bw` and the lowest `lat`.
+    """
+    dtype_m = re.search(r'dispatch_dtype:\s*(\w+)', content)
+    dtype = {'bf16': 'bfloat16'}.get(dtype_m.group(1), dtype_m.group(1)) if dtype_m else 'unknown'
+    round_pattern = re.compile(r'^Round \d+ duration.* lat ([\d.]+) bw ([\d.]+)')
+
+    samples = {}
+    phase = None
+    for line in content.split('\n'):
+        header_m = re.match(r'(Dispatch|Combine|End-to-end) result:', line)
+        if header_m:
+            phase = header_m.group(1).lower()
+            continue
+        round_m = round_pattern.match(line)
+        if round_m and phase in ('dispatch', 'combine'):
+            samples.setdefault(phase, []).append((float(round_m.group(1)), float(round_m.group(2))))
+
+    return [{
+        'test': f'mori_{source}_{phase}',
+        'dtype': dtype,
+        'bw': max(bw for _, bw in rounds),
+        'link': 'xGMI' if source.startswith('intranode') else 'RDMA',
+        'latency': min(lat for lat, _ in rounds),
+        'metric_type': 'best',
+    } for phase, rounds in samples.items()]
+
+
 def parse_deepep_internode(content: str) -> List[Dict]:
     """Parse DeepEP test_internode output.
 
@@ -140,6 +179,11 @@ def parse_log_file(log_path: str, source_hint: str = "") -> List[Dict]:
             src += '_ll'
         results.extend(parse_mori_prettytable(content, src))
 
+    # Try MoRI per-round format (bench_dispatch_combine, intranode)
+    if 'Dispatch result:' in content:
+        src = 'intranode_ll' if '_ll_' in log_path.lower() else 'intranode'
+        results.extend(parse_mori_rounds(content, src))
+
     # Try DeepEP inline format
     if 'GB/s (RDMA)' in content:
         results.extend(parse_deepep_internode(content))
@@ -155,7 +199,7 @@ def save_perf_csv(results: List[Dict], output_file: str):
 
     nnodes = os.environ.get('NNODES', os.environ.get('SLURM_NNODES', '1'))
     gpus = os.environ.get('GPUS_PER_NODE', '8')
-    skip_deepep = os.environ.get('SKIP_DEEPEP', '0')
+    skip_deepep = os.environ.get('SKIP_DEEPEP', '1')
 
     if skip_deepep == '1':
         backend = 'mori_only'
@@ -172,7 +216,7 @@ def save_perf_csv(results: List[Dict], output_file: str):
         'docker_image': os.environ.get('DOCKER_IMAGE', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        'gpu_architecture': os.environ.get('GPU_ARCH_LIST', 'gfx942'),
     }
 
     fieldnames = [
@@ -190,11 +234,11 @@ def save_perf_csv(results: List[Dict], output_file: str):
         writer.writeheader()
 
         for r in results:
-            # Primary metric: RDMA bandwidth
+            # Primary metric: bandwidth (RDMA between nodes, xGMI within one)
             row = {
                 'model': r['test'],
-                'performance': f"{r['rdma_bw']:.2f}",
-                'metric': f"GB/s RDMA ({r['dtype']})",
+                'performance': f"{r.get('bw', r.get('rdma_bw')):.2f}",
+                'metric': f"GB/s {r.get('link', 'RDMA')} ({r['dtype']})",
                 'status': 'SUCCESS',
             }
             row.update(meta)

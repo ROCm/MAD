@@ -72,6 +72,7 @@ venv.bak/
 !models.json
 *.log
 *.out
+*.err
 *.html
 
 # Primus checkout for JAX/MaxText discovery + image build. Use either:

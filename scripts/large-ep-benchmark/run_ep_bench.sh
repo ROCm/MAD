@@ -1,13 +1,15 @@
 #!/bin/bash
 # set -x
+set -o pipefail
+BENCH_RC=0
 
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-2373}"
 NODE_RANK="${NODE_RANK:-0}"
 NNODES="${NNODES:-1}"
 IPADDRS="${IPADDRS:-localhost}"
-IBDEVICES="${IBDEVICES:-mlx5_0}"
-SKIP_DEEPEP="${SKIP_DEEPEP:-0}"
+IBDEVICES="${IBDEVICES:-}"
+SKIP_DEEPEP="${SKIP_DEEPEP:-1}"
 
 host_ip=$(hostname -I | awk '{print $1}')
 host_name=$(hostname)
@@ -16,7 +18,8 @@ host_name=$(hostname)
 #python $MAD_REPO_PATH/utils/socket_barrier.py --local-ip ${host_ip} --local-port 2200 --enable-port --node-ips ${IPADDRS} --node-ports 2200
 
 echo "$IPADDRS"
-echo "$IBDEVICES"
+# MoRI matches each GPU to its own NIC; MORI_RDMA_DEVICES restricts the candidates
+echo "IBDEVICES: ${IBDEVICES:-<unset>}  MORI_RDMA_DEVICES: ${MORI_RDMA_DEVICES:-<all>}"
 
 SERVER_IP=$(echo "$IPADDRS" | awk -F',' '{print $1}')
 echo "Server IP is - ${SERVER_IP}"
@@ -25,18 +28,18 @@ echo "Node Rank is ${NODE_RANK}"
 echo "-------EP benchamrking --------"
 
 DEEPEP_PATH="/app/DeepEP"
-cd $DEEPEP_PATH
-MORI_PATH="/app/mori"
+MORI_PATH="${MORI_ROOT:-/app/mori}"
 if [ "$NNODES" -eq 1 ]; then
     echo "Total number of nodes - ${NNODES}"
 
     if [ "$SKIP_DEEPEP" != "1" ]; then
-        python tests/test_intranode.py 2>&1 | tee /run_logs/intranode_results.log
+        cd $DEEPEP_PATH
+        python tests/test_intranode.py 2>&1 | tee /run_logs/intranode_results.log || BENCH_RC=1
         sleep 20;
 
-        export ROCSHMEM_USE_IB_HCA=$IBDEVICES
+        [ -n "$IBDEVICES" ] && export ROCSHMEM_USE_IB_HCA=$IBDEVICES
         export ROCSHMEM_HEAP_SIZE=4147483648
-        python tests/test_low_latency.py 2>&1 | tee /run_logs/low_latency_1N_results.log
+        python tests/test_low_latency.py 2>&1 | tee /run_logs/low_latency_1N_results.log || BENCH_RC=1
     else
         echo "----- Skipping DeepEP benchmarks (SKIP_DEEPEP=1) -----"
     fi
@@ -44,11 +47,11 @@ if [ "$NNODES" -eq 1 ]; then
     echo "----- Performing Intranode MoRI -----"
     cd $MORI_PATH
     export PYTHONPATH=$PYTHONPATH:$MORI_PATH
-    export GLOO_SOCKET_IFNAME=$(ip route | grep '^default' | awk '{print $NF}' | head -n 1)
-    python tests/python/ops/bench_dispatch_combine.py 2>&1 | tee /run_logs/mori_intranode_results.log
+    export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-$(ip route | grep '^default' | awk '{print $NF}' | head -n 1)}
+    python tests/python/ops/bench_dispatch_combine.py 2>&1 | tee /run_logs/mori_intranode_results.log || BENCH_RC=1
 
     echo "----- Performing low latency mori ----"
-    python tests/python/ops/bench_dispatch_combine.py --dtype fp8_e4m3_fnuz 2>&1 | tee /run_logs/mori_1N_ll_results.log
+    python tests/python/ops/bench_dispatch_combine.py --dtype fp8_e4m3_fnuz 2>&1 | tee /run_logs/mori_1N_ll_results.log || BENCH_RC=1
 
 else
     LOG_FILE=internode_${NODE_RANK}.txt
@@ -64,8 +67,9 @@ else
 
     if [ "$SKIP_DEEPEP" != "1" ]; then
         echo "----- Running internode tests -----"
+        cd $DEEPEP_PATH
 
-        python tests/test_internode.py 2>&1 | tee /run_logs/$LOG_FILE
+        python tests/test_internode.py 2>&1 | tee /run_logs/$LOG_FILE || BENCH_RC=1
         sleep 20;
 
         echo "----- Running low latency tests -----"
@@ -74,7 +78,7 @@ else
         #export ROCSHMEM_BACKEND=gda
         #export ROCSHMEM_DISABLE_MIXED_IPC=0
         #export ROCSHMEM_USE_IB_HCA=$IBDEVICES
-        python tests/test_low_latency.py 2>&1 | tee /run_logs/low-latency-${NODE_RANK}.log
+        python tests/test_low_latency.py 2>&1 | tee /run_logs/low-latency-${NODE_RANK}.log || BENCH_RC=1
         sleep 20;
     else
         echo "----- Skipping DeepEP benchmarks (SKIP_DEEPEP=1) -----"
@@ -82,13 +86,13 @@ else
 
     echo "---- Running mori internode tests -------"
     cd $MORI_PATH
-    export GLOO_SOCKET_IFNAME=$(ip route | grep '^default' | awk '{print $NF}' | head -n 1)
+    export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-$(ip route | grep '^default' | awk '{print $NF}' | head -n 1)}
     torchrun --nnodes=$NNODES \
         --node_rank=$NODE_RANK \
         --nproc_per_node=1 \
         --master_addr=$MASTER_ADDR \
         --master_port=$MASTER_PORT \
-        examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd bench 2>&1 | tee /run_logs/mori_${LOG_FILE}
+        examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd bench 2>&1 | tee /run_logs/mori_${LOG_FILE} || BENCH_RC=1
     sleep 20;
 
     echo "----- Running mori low latency test -----"
@@ -97,12 +101,13 @@ else
         --nproc_per_node=1 \
         --master_addr=$MASTER_ADDR \
         --master_port=$MASTER_PORT \
-        examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd bench --kernel-type v1_ll 2>&1 | tee /run_logs/mori_ll_${LOG_FILE}
+        examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd bench --kernel-type v1_ll 2>&1 | tee /run_logs/mori_ll_${LOG_FILE} || BENCH_RC=1
 fi
 
 # Generate perf.csv for madengine from all benchmark logs
 if [[ -f "$MAD_REPO_PATH/parse_ep_to_csv.py" ]]; then
     python3 $MAD_REPO_PATH/parse_ep_to_csv.py /run_logs -o /run_logs/perf.csv 2>&1
 fi
+chown -R "$(stat -c '%u:%g' /run_logs)" /run_logs 2>/dev/null || true
 
-exit 0
+exit $BENCH_RC
