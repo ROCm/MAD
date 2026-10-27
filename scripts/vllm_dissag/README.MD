@@ -90,8 +90,9 @@ docker build -t <your-registry>/vllm-disagg:glmv5.1 \
 ```
 
 That Dockerfile defaults to `WITH_NIXL=0` (MoRI-EP only, which is all GLM-5.1 uses) and
-its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime patchers,
-so every GLM DSA fix has to be in-source in that image. Add a
+its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime patchers
+for model fixes (the only patches are the two temporary, non-fatal KV-offload ones under
+`KV_OFFLOAD` below), so every GLM DSA fix has to be in-source in that image. Add a
 `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
 own pins rather than repinning the shared one.
 
@@ -135,6 +136,101 @@ Each followed by:
 export MODEL_NAME=<model> xP=<prefill_nodes> yD=<decode_nodes>
 sbatch -N $((xP+yD)) -n $((xP+yD)) --nodelist=<nodes> run_xPyD_models.slurm
 ```
+
+### Tiered prefix caching (`KV_OFFLOAD`)
+
+An orthogonal overlay that attaches a CPU-RAM KV tier (GPU KV → host, for prefix reuse)
+*on top of* the disagg P/D connector, by composing both via vLLM's `MultiConnector`. Two
+independent axes: the tier topology (`KV_OFFLOAD`) and the CPU-tier backend
+(`OFFLOAD_BACKEND`).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KV_OFFLOAD` | `none` | `none` (off) \| `cpu` (CPU-RAM tier) \| `fs` (CPU-RAM + filesystem tier) |
+| `OFFLOAD_BACKEND` | `OffloadingConnector` | `OffloadingConnector` (alias `native`) \| `SimpleCPUOffloadConnector` \| `LMCacheConnectorV1` (alias `lmcache`) |
+| `OFFLOAD_CPU_BYTES_PER_NODE` | `107374182400` (100 GiB) | **Single CPU-tier budget for all backends**: total host RAM for KV offload **per node** (bytes). The connector derives the per-rank (native) / per-worker (lmcache) value from this + node topology, so one budget means the same node footprint across native TP, native EP, and lmcache. See the conversion note in `connectors/offloading.inc.sh`. |
+| `OFFLOAD_DISK_PATH` | (unset) | required for `KV_OFFLOAD=fs`: base dir for the fs tier (NVMe or NFS, node-accessible). A per-host subdir is appended. |
+| `KV_CACHE_MEMORY_BYTES` | per-model (`models.yaml`) | Per-GPU HBM KV-cache cap in bytes, passed as `--kv-cache-memory-bytes` (also skips the boot profiling forward). Set it explicitly with offloading: a cap makes blocks evict into the CPU tier, and an uncapped KV pool can make the connector's extra KV-registration pass exceed the init timeout. |
+| `LMCACHE_MAX_LOCAL_DISK_SIZE` | `0.0` | `LMCacheConnectorV1` only: **per-worker** fs tier in GB |
+| `FORCE_FRESH_IMAGE` | `0` | Set to `1` to `docker pull` the image on every node and abort if the pull fails (never run a stale cached image). |
+| `DISABLE_HOST_RDMA_MOUNTS` | `0` | Set to `1` to skip host rdma-core bind-mounts (use when host and container rdma-core ABI versions differ). |
+| `MORIIO_READ_MODE` | `0` | MoRIIO only: set to `1` for READ mode (decode pulls KV from prefill instead of prefill pushing). |
+
+**Backend choice.** `OffloadingConnector` (native, default) is the general-purpose backend
+and supports the fs tier via `TieringOffloadingSpec`. `SimpleCPUOffloadConnector` is a
+lighter hash-driven CPU-only alternative (no fs tier). `LMCacheConnectorV1` (lmcache) is best
+for prefix-heavy workloads and supports the fs tier, but needs a vLLM image with `lmcache`
+installed (see below); it works under both rixl and MoRIIO. The `fs` tier is supported
+by `OffloadingConnector` and `LMCacheConnectorV1` only, not `SimpleCPUOffloadConnector`.
+
+Env for each recipe (submit with the same `MODEL_NAME`/`xP`/`yD`/`sbatch` command as above):
+
+```bash
+# Common to all offload runs
+export BENCHMARK_SCRIPT=multiturn
+export PROXY_TYPE=vllm_router ROUTER_BINARY=<path>/vllm-router
+export GPU_MEMORY_UTILIZATION=0.8
+export KV_CACHE_MEMORY_BYTES=25000000000          # per-GPU HBM KV cap so blocks evict into the CPU tier
+export OFFLOAD_CPU_BYTES_PER_NODE=644245094400    # 600 GiB/node; connector splits per rank/worker
+export CLEAN_STALE_JIT_LOCKS=1
+
+# ── native · CPU tier (moriio wideEP, DSV3) ──────────────────────────────────
+export CONNECTOR=moriio WIDE_EP=1 VLLM_ROCM_USE_AITER_MLA=1
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU tier (rixl TP, gpt-oss-120b) ────────────────────────────────
+export CONNECTOR=rixl WIDE_EP=0
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU tier (moriio TP, gpt-oss-120b) ──────────────────────────────
+export CONNECTOR=moriio WIDE_EP=0
+export MORIIO_READ_MODE=1                         # gpt-oss has sliding-window attn; WRITE unsupported
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU + fs tier ───────────────────────────────────────────────────
+export KV_OFFLOAD=fs OFFLOAD_BACKEND=OffloadingConnector
+export OFFLOAD_DISK_PATH=/mnt/kv_offload          # node-accessible storage (NVMe or NFS)
+
+# ── lmcache · CPU (+ optional fs) tier (rixl or moriio) ──────────────────────
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=LMCacheConnectorV1
+export PYTHONHASHSEED=0                           # fixed + identical across all vLLM procs, else lookups miss
+export DISABLE_HOST_RDMA_MOUNTS=1                 # if host rdma-core ABI differs from container
+```
+
+When `KV_OFFLOAD!=none` the launcher forces `--enable-prefix-caching` (offloading is
+meaningless without it). Pair it with a small `--kv-cache-memory-bytes` cap so HBM KV
+actually evicts into the CPU tier. `native`/`SimpleCPUOffloadConnector` need a vLLM image
+shipping those connectors + `MultiConnector` (recent `rocm/vllm-dev` or
+`vllm/vllm-openai-rocm` nightlies); `lmcache` **additionally** needs `lmcache` installed: ROCm vLLM images newer than 0.31.0 already
+ship it; for anything older, build an image with `docker/pyt_vllm_lmcache.ubuntu.amd.Dockerfile`.
+
+LMCache (`lmcache`) CPU and fs tiers are validated on the cluster with both `CONNECTOR=rixl` and
+`CONNECTOR=moriio`, alongside the native backend. Under moriio, LMCache relies on the temporary
+device-binding patch below.
+
+`CONNECTOR=moriio` + TP (`WIDE_EP=0`) with `KV_OFFLOAD` is newly wired and not yet validated end-to-end.
+`LMCACHE_MAX_LOCAL_CPU_SIZE` (GB/worker), if set explicitly, still overrides the value derived from
+`OFFLOAD_CPU_BYTES_PER_NODE`.
+
+**Temporary runtime patches** (`connectors/moriio.sh`, applied per worker at launch, idempotent).
+Each is non-fatal: if its anchor is missing (image already has the fix) it logs
+`WARN: patch could not be applied ... continuing without it` and the launch proceeds. Remove each
+once the images you use ship the upstream fix:
+
+| Patch | Upstream PR | Already in |
+|---|---|---|
+| MoRIIO sideline fix (MultiConnector + offload; WRITE-mode requests stranded in `WAITING_FOR_REMOTE_KVS`) | [vLLM #57705](https://github.com/vllm-project/vllm/pull/57705), merged 2026-10-12 | vLLM builds from that date on, e.g. `vllm/vllm-openai-rocm:nightly` (vLLM 0.32.1rc1.dev361/505/602). Not in vLLM 0.30.x (custom `vllm-rocm-lmcache` image) |
+| LMCache device-binding fix (`local_worker_id` -> `torch.cuda.current_device()`; every DP rank otherwise binds GPU 0) | [LMCache #5501](https://github.com/LMCache/LMCache/pull/5501), merged 2026-10-07 | LMCache v0.5.6 and later. Not in v0.5.5 or earlier: the nightly image ships LMCache 0.5.3 and the custom image 0.5.5, so both need it |
+| LMCache MLA broadcast device fix (retrieve broadcast copied KV chunks to `cuda:{worker_id}`, which is GPU 0 on every DP rank; non-DP0 ranks GPU-fault at the first LMCache hit under DP) | [LMCache #6109](https://github.com/LMCache/LMCache/pull/6109) (open), which supersedes the stale [#5515](https://github.com/LMCache/LMCache/pull/5515) | No release yet: still present in v0.5.6 and v0.5.7rc2 |
+
+The MLA broadcast fix only matters when `save_only_first_rank` is on (default for MLA models) and DP > 1.
+Setting `LMCACHE_EXTRA_CONFIG='{"save_only_first_rank":false}'` also avoids it, as it skips that path.
+
+**Multi-node roles (e.g. 2P2D EP16).** The router must be built from
+[vllm-project/router #458](https://github.com/vllm-project/router/pull/458) (`--moriio-dp-size-local`,
+`--moriio-prefill-hosts`, `--moriio-decode-hosts`). A stock `vllm-router` lacks these flags: the
+launcher then warns and only the master node's DP ranks 0-7 of each role serve. The PR is open; point
+`ROUTER_BINARY` at a binary built from it.
 
 ### Back-compat
 
@@ -322,10 +418,10 @@ resolved from the prefill worker (the first `host:port` in
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep`, `long_context`, `agentic`) |
+| `BENCHMARK_SCRIPT` | `sweep` | Selects the benchmark: `sweep`, `long_context`, `agentic`, `niah`, `multiturn` |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
 | `AGENTIC_PORT` | `${BENCHMARK_PORT}` | Endpoint aiperf targets (auto-resolved to the proxy/router port, then the shim port) |
-| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
+| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic and multiturn) |
 | `ENABLE_PREFIX_CACHE` | auto | `1` forces prefix cache on i.e. strips `--no-enable-prefix-caching` (auto-on for agentic) |
 | `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
 
@@ -433,6 +529,21 @@ The suite roll-up (`suite_summary.json`) has a `workloads[]` array; each entry c
 ```
 
 Thresholds: `AGENTIC_MAX_ERROR_RATE` (default `0.10`, gates PASS/WARN) and `AGENTIC_MIN_CACHE_HIT` (default `0.30`, warn-only). A low cache hit rate on `xP>1` usually indicates the router is not keeping a conversation's turns on the worker holding its prefix (session-affinity).
+### Multi-turn benchmark (for `KV_OFFLOAD`)
+
+`benchmark_multiturn.sh` is the benchmark for the offloading overlays (`export BENCHMARK_SCRIPT=multiturn`).
+Each conversation has a **unique** large prefix and runs as two passes on `vllm bench serve`:
+pass A primes the cache (`prefix + q1`, tiny output); pass B measures turn 2 (`prefix + q1 + q2`).
+Once the primed set exceeds the HBM KV cap, evicted prefixes reload from the CPU/fs tier with
+`KV_OFFLOAD` on (low turn-2 TTFT) or are recomputed with it off (high TTFT). Around each measure
+pass it scrapes the prefill `/metrics` (`PREFILL_METRICS_URL`, exported
+by the connector) and writes GPU prefix-cache and external (offload) hit-rate deltas to `perf.csv`.
+
+- `MT_SWEEP="con:np:isl ..."` is an explicit point list: `con` = in-flight requests (keep low), `np` =
+  distinct primed conversations (the HBM-pressure knob; raise it to cross the HBM -> CPU boundary),
+  `isl` = prefix length. Without it a legacy `MT_CON_LIST` x `MT_PREFIX_LEN_LIST` grid is used.
+- Other knobs: `MT_Q1_LEN`, `MT_Q2_LEN`, `MT_OSL1`, `MT_OSL2`, `MT_SEED`, `MT_DRYRUN`; see the header of
+  `benchmark_multiturn.sh` for defaults.
 
 ## Testing the launcher (no GPUs)
 
