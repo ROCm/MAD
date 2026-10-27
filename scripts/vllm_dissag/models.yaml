@@ -281,3 +281,60 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+
+# ============================ MoE hybrid attention (TP + MoRI wideEP) ============================
+
+# MiMo-V2.6-Flash-RL (XiaomiMiMo/MiMo-V2.6-Flash-RL): 309B MoE, 256 experts,
+# sliding-window hybrid attention, mxfp4 expert weights (attention/dense are fp8).
+# SCOPE: gfx950 (MI355) ONLY, 1P1D ONLY. gfx942 is NOT supported: the experts are stored
+# as MXFP4, which gfx942 has no native support for. Other xPyD shapes are unvalidated.
+# Validated 1P1D on gfx950 with the pinned public image (also set as DOCKER_IMAGE_NAME
+# in models.json):
+#   vllm/vllm-openai-rocm:nightly-92044241a02f05de51420d654daf669de20b4691
+#   digest sha256:637471c07d6afbbe7bb6f45d54ac0edf5b9184342cb95c7d74cde3c2c2ea5180
+#   vLLM 0.30.1rc1.dev648+g92044241a, ROCm 7.2.3, AITER v0.1.24.post1,
+#   MoRI ROCm/mori v1.2.3.post1 (commit 67632e80e2e492184b589904b63225f82d45537c,
+#   from /app/versions.txt in the image).
+# Use the commit-pinned tag, NOT the moving ':nightly'. The image ships no vllm-router,
+# so models.json sets PROXY_TYPE=moriio_toy (in-image toy proxy).
+#   - TP (WIDE_EP=0) and MoRI-EP (WIDE_EP=1, TP=1, DP=GPUs/node). EP = DP x TP,
+#     so an 8-GPU node is DP8 x TP1.
+#   - gsm8k limit=200 scored 0.98 at DP4 x TP1 (earlier nightly); on the pinned image at
+#     DP8 x TP1 it scored 0.985 +/-0.009 with KV_BLOCK_SIZE=16 via the recipe-launched
+#     moriio_toy proxy (0.97 +/-0.012 earlier with --block-size omitted).
+# MoRIIO WRITE mode raises NotImplementedError on hybrid KV groups, so
+# MORIIO_READ_MODE selects READ (decode pulls KV). KV_BLOCK_SIZE=16 is set explicitly
+# (vLLM's own default). The connector default of 1 is the DeepSeek/MLA-era setting; MiMo
+# uses regular + sliding-window attention, whose ROCm kernels support block sizes 16/32
+# only, so block 1 is rejected ("No valid attention backend ... block_size=1"). With 16
+# the backend still ends up with an actual KV block of 32 (logged as "differs from config
+# block_size=16"). Do not use 32: it yields an actual block of 64, which was not validated.
+# Intra-node EP (one node per role) uses mori_high_throughput on both sides;
+# the low-latency kernel is the multi-node decode all2all, not this shape.
+# Fabric (MORI_RDMA_DEVICES, MORI_IB_GID_INDEX, MORI_GPU_ARCHS) stays a
+# submit-time override: gfx950 + bnxt_re GID 3 on the validated cluster,
+# mlx5 on the OCI MI300 default in connectors/moriio.env. NOTE: connectors/moriio.env
+# defaults MORI_GPU_ARCHS=gfx942, so MiMo runs MUST export MORI_GPU_ARCHS=gfx950.
+# On hosts whose first `hostname -I` address is a non-routable backend NIC, also set
+# NODE_IP_IFACE=<front-end iface> (see run_xPyD_models.slurm).
+MiMo-V2.6-Flash-RL:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_MOE: "1"
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: "INT4"
+    KV_CACHE_DTYPE: "fp8"
+    KV_BLOCK_SIZE: "16"
+    MORIIO_READ_MODE: "true"
+    VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+    PREFILL_MORI_BACKEND: "mori_high_throughput"
+    DECODE_MORI_BACKEND: "mori_high_throughput"
+  dp_flags: "--reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice --generation-config vllm --max-model-len auto"
+  tp_flags: "--reasoning-parser mimo --tool-call-parser mimo --enable-auto-tool-choice --generation-config vllm --kv-cache-dtype fp8 --max-model-len auto"
+  prefill:
+    tp: "--tensor-parallel-size 8"
+    dp: ""
+  decode:
+    tp: "--tensor-parallel-size 8"
+    dp: ""

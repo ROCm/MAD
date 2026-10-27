@@ -55,6 +55,7 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `MiMo-V2.6-Flash-RL` | MoE + hybrid attn | 3 (moriio wideEP) | **gfx950 (MI355) only, 1P1D only.** Validated on pinned image `vllm/vllm-openai-rocm:nightly-92044241a02f05de51420d654daf669de20b4691` (MoRI v1.2.3.post1, AITER v0.1.24.post1): gsm8k 0.985 ±0.009 (limit 200, DP8×TP1, via the recipe-launched `moriio_toy` proxy). Sliding-window KV needs MoRIIO READ mode. Needs `KV_BLOCK_SIZE=16` (set in models.yaml; the connector default of 1 is rejected for MiMo) and, on this image, `PROXY_TYPE=moriio_toy` (no vllm-router). gfx942 is not supported: the expert weights are MXFP4, which gfx942 lacks. xPyD beyond 1P1D, the TP combos (1, 2) on this image, and DeepEP are not validated |
 
 ## Prerequisites
 

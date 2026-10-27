@@ -88,6 +88,7 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "MiMo-V2.6-Flash-RL" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +97,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "MiMo-V2.6-Flash-RL" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -408,14 +410,23 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
+# Node IP used for the rendezvous / KV-transfer handshake. Default: first address from
+# `hostname -I`. On hosts where that is a point-to-point backend NIC (e.g. a /31 on a
+# RDMA interface) it is not routable between nodes -- set NODE_IP_IFACE=<front-end iface>
+# (e.g. fenic0) to use that interface's IPv4 address instead. Unset = unchanged behavior.
+if [[ -n "${NODE_IP_IFACE:-}" ]]; then
+    NODE_IP_CMD="ip -4 -o addr show dev ${NODE_IP_IFACE} | awk '{print \$4}' | cut -d/ -f1 | head -n1"
+else
+    NODE_IP_CMD='hostname -I'
+fi
+MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c "$NODE_IP_CMD")
 MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
+    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c "$NODE_IP_CMD")
     IP=$(echo "$IP" | awk 'NR==1 {print $1}')
     IPS+=("$IP")
 done
@@ -465,6 +476,10 @@ fi
 
 export CONNECTOR_ENV_ARGS="$CONNECTOR_ENV_ARGS"
 export LOG_PATH=$LOG_PATH
+# Consumed by the model-mount builder inside the srun block below, which runs in a
+# fresh remote shell -- unexported vars there expand empty.
+export MODEL_DIR="$MODEL_DIR"
+export EXTRA_MOUNTS="${EXTRA_MOUNTS:-}"
 export NIXL_REPO_DIR=$NIXL_REPO_DIR
 export NIXL_COOKBOOK_PATH=$NIXL_COOKBOOK_PATH
 export NNODES=$NNODES
@@ -545,6 +560,36 @@ done
 [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
 [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+
+# --- Build model/data mounts ---
+# The two canonical weight roots are bind-mounted only when they exist on the host:
+# `docker run -v` silently creates a missing host path as an empty root-owned dir,
+# which shadows nothing but wastes a mount and hides the real "weights not found"
+# error behind an empty directory. Clusters that stage weights elsewhere (MODEL_DIR
+# pointing at e.g. /apps/models_blog) add that root via EXTRA_MOUNTS, a space-
+# separated list of `src:dst[:opts]` or bare paths (mounted at the same path).
+_MODEL_MOUNTS=""
+for _root in /shared_inference /mnt/m2m_nobackup; do
+    [ -d "$_root" ] && _MODEL_MOUNTS="$_MODEL_MOUNTS -v $_root:$_root"
+done
+# The MODEL_DIR root may sit outside both canonical roots; mount it when it is a
+# real directory and not already covered, so MODEL_PATH resolves in the container.
+# NOTE: this whole block runs inside `srun bash -c '...'` -- never use an
+# apostrophe here, it would close that quote and break the script at EOF.
+if [ -n "${MODEL_DIR:-}" ] && [ -d "$MODEL_DIR" ]; then
+    case " $_MODEL_MOUNTS " in
+        *" -v $MODEL_DIR:$MODEL_DIR "*) ;;
+        *) [[ "$MODEL_DIR" == /shared_inference/* || "$MODEL_DIR" == /mnt/m2m_nobackup/* || "$MODEL_DIR" == "$HOME"/* ]] \
+             || _MODEL_MOUNTS="$_MODEL_MOUNTS -v $MODEL_DIR:$MODEL_DIR" ;;
+    esac
+fi
+for _m in ${EXTRA_MOUNTS:-}; do
+    case "$_m" in
+        *:*) _MODEL_MOUNTS="$_MODEL_MOUNTS -v $_m" ;;
+        *)   _MODEL_MOUNTS="$_MODEL_MOUNTS -v $_m:$_m" ;;
+    esac
+done
+echo "[model-mounts] $_MODEL_MOUNTS"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="${AGENTIC_CONFIG/#$HOME/$HOME}"
 
@@ -572,8 +617,7 @@ docker run --rm \
     --security-opt seccomp=unconfined \
     --privileged \
     -v $HOME:$HOME \
-    -v /shared_inference:/shared_inference \
-    -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    $_MODEL_MOUNTS \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size ${DOCKER_SHM_SIZE:-256G} \
     --ulimit nofile=524288:524288 \
@@ -651,6 +695,7 @@ docker run --rm \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
+    ${NODE_IP_IFACE:+-e NODE_IP_IFACE=$NODE_IP_IFACE} \
     ${MORI_RDMA_TC:+-e MORI_RDMA_TC=$MORI_RDMA_TC} \
     ${MORI_RDMA_SL:+-e MORI_RDMA_SL=$MORI_RDMA_SL} \
     ${MORI_SHMEM_HEAP_SIZE:+-e MORI_SHMEM_HEAP_SIZE=$MORI_SHMEM_HEAP_SIZE} \
