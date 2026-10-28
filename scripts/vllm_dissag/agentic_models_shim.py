@@ -36,32 +36,32 @@ _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
 
 
-def _health_ok(host, port):
+def _health_status(host, port):
     try:
         c = http.client.HTTPConnection(host, port, timeout=5)
         c.request("GET", "/health")
         r = c.getresponse()
         r.read()
         c.close()
-        return r.status == 200
+        return r.status
     except Exception:
-        return False
+        return None
 
 
 def _upstream_health_ok():
     # Readiness signal: the production vllm-router serves GET /health (200 when
     # workers are registered). The MoRIIO toy proxy does NOT implement /health
-    # (404), so fall back to the prefill backend's /health (a real vLLM OpenAI
-    # server, 200 when the engine is up) when a PREFILL backend is configured.
-    if _health_ok(UP_HOST, UP_PORT):
-        return True
-    if PREFILL:
-        try:
-            h, pt = PREFILL.split(":")
-            return _health_ok(h, int(pt))
-        except Exception:
-            return False
-    return False
+    # (404), so only then fall back to the prefill backend's /health (a real vLLM
+    # OpenAI server, 200 when the engine is up) when a PREFILL backend is configured.
+    # Any other router answer, or no answer, means not ready.
+    status = _health_status(UP_HOST, UP_PORT)
+    if status != 404 or not PREFILL:
+        return status == 200
+    try:
+        h, pt = PREFILL.split(":")
+        return _health_status(h, int(pt)) == 200
+    except Exception:
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
