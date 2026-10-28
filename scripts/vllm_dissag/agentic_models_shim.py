@@ -144,6 +144,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         if force_sse:
             self.send_header("Content-Type", "text/event-stream")
+        # Chunked, so a relay that breaks off is missing the terminating chunk and the client sees
+        # an incomplete body instead of a clean end of stream.
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
@@ -152,10 +155,12 @@ class Handler(BaseHTTPRequestHandler):
                 chunk = resp.read1(8192)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                 self.wfile.flush()
-        except Exception:
-            pass
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except Exception as e:
+            print(f"[agentic-shim] relay {method} {self.path} aborted: {e!r}", flush=True)
         finally:
             conn.close()
 
