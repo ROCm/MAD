@@ -163,7 +163,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             while True:
-                chunk = resp.read(8192)
+                # read1, not read: read(n) blocks until n bytes arrive, which holds back SSE events.
+                chunk = resp.read1(8192)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
