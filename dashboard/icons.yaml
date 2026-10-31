@@ -1,8 +1,9 @@
 # Logos and icons for the MAD Recipes site.
 #
 # Brand marks are trademarks of their owners and are used only to identify the model provider,
-# framework or hardware. Set `logos: neutral` to replace every brand mark with a neutral
-# generated monogram or glyph without touching any code.
+# framework or hardware. The AMD logo in the header (dashboard/logos/amd/, not listed here) is the
+# publisher's. Set `logos: neutral` to replace every brand mark, the AMD logo included, with a
+# neutral generated monogram, glyph or plain text without touching any code.
 #
 # Assets are vendored under dashboard/logos/ by `python3 tools/dashboard/fetch_logos.py`
 # (provider avatars: recipes.vllm.ai/providers, falling back to the Hugging Face org avatar;

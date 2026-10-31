@@ -325,6 +325,12 @@ def test_site_renders_every_page_with_no_broken_links(tmp_path):
     assert "Issue #5" in roadmap and "PR #6" in roadmap and "Y-Model" in roadmap
     # Logos: the Llama row resolves a vendored provider logo, copied once to the site root.
     assert os.path.exists(os.path.join(out, "logos/providers/meta-llama.png"))
+    # AMD logo in the header, linked to amd.com; favicon shared at the root; AMD legal footer.
+    with open(os.path.join(out, "v26.9/models/vllm/llama/index.html")) as f:
+        frozen_page = f.read()
+    assert '<a class="amd-link" href="https://www.amd.com/"' in frozen_page and 'class="amd-logo"' in frozen_page
+    assert '<link rel="icon" href="../../../../favicon.svg"' in frozen_page
+    assert "© 2026 Advanced Micro Devices, Inc." in frozen_page and "amd.com/en/corporate/trademarks" in frozen_page
     with open(os.path.join(out, "models/index.html")) as f:
         assert 'src="../logos/providers/meta-llama.png"' in f.read()
     with open(os.path.join(out, "v26.9/models/vllm/llama/index.html")) as f:

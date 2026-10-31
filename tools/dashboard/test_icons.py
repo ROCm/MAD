@@ -109,6 +109,31 @@ def test_amd_mark_uses_the_provider_avatar_when_available(make):
     assert "g-chip" in str(make(files=()).bind(".").mark("amd", 16))
 
 
+def test_amd_logo_inline_or_text(make, tmp_path):
+    iconset = make()
+    assert str(iconset.bind(".").amd_logo()) == '<span class="amd-text">AMD</span>'   # no vendored logo
+    amd = os.path.join(iconset.logos_dir, "amd")
+    os.makedirs(amd)
+    for name in ("amd-logo.svg", "favicon.svg"):
+        open(os.path.join(amd, name), "w").write('<svg viewBox="0 0 10 2" fill="currentColor"><path d="M0 0h1v1z"/></svg>')
+    bound = iconset.bind(".")
+    assert str(bound.amd_logo(80)).startswith('<svg class="amd-logo" width="80" role="img" aria-label="AMD" viewBox=')
+    assert bound.favicon
+    neutral = icons.IconSet(os.path.join(iconset.logos_dir, "icons.yaml"), iconset.logos_dir, mode="neutral").bind(".")
+    assert "amd-text" in str(neutral.amd_logo()) and not neutral.favicon
+
+
+def test_amd_marks_split_logo_and_arrow():
+    import fetch_logos
+    artwork = ('<svg viewBox="0 0 139.72 33.32"><defs><style>.cls-1{fill:#fff;}</style></defs>'
+               + '<path class="cls-1" d="M0 0h1z"/>' * 3
+               + '<polygon class="cls-1" points="130 9 139.72 0 139.72 33"/><polygon class="cls-1" points="106.4 20 106.4 33.33 119 33.33"/></svg>')
+    logo, favicon = fetch_logos.amd_marks(artwork)
+    assert 'viewBox="0 0 139.72 33.32" fill="currentColor"' in logo and "cls-1" not in logo and logo.count("<path") == 3
+    assert 'viewBox="106.4 0 33.33 33.33"' in favicon and "<path" not in favicon and favicon.count("<polygon") == 2
+    assert "prefers-color-scheme:dark" in favicon
+
+
 def test_glyphs_cover_every_section_icon():
     for name in ("cube", "layers", "shield", "server", "flag", "tag", "chip", "terminal", "box", "network", "swap"):
         assert name in icons.GLYPHS
@@ -142,3 +167,6 @@ def test_committed_icons_yaml_is_consistent_with_vendored_assets():
         text = open(os.path.join(icons.LOGOS_DIR, "simple-icons", f"{slug}.svg")).read()
         assert re.search(r'<path[^>]*\sd="[^"]+"', text), f"{slug}.svg has no path"
         assert f"simple-icons/{slug}.svg" in sources
+    for name in ("amd-logo.svg", "favicon.svg"):
+        text = open(os.path.join(icons.LOGOS_DIR, "amd", name)).read()
+        assert text.startswith("<svg") and f"amd/{name}" in sources, f"{name} missing; run tools/dashboard/fetch_logos.py"

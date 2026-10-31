@@ -1,4 +1,6 @@
 {
+ "amd/amd-logo.svg": "https://raw.githubusercontent.com/ROCm/rocm-docs-core/develop/src/rocm_docs/rocm_docs_theme/static/images/amd-header-logo.svg",
+ "amd/favicon.svg": "https://raw.githubusercontent.com/ROCm/rocm-docs-core/develop/src/rocm_docs/rocm_docs_theme/static/images/amd-header-logo.svg",
  "providers/CohereLabs.png": "https://cdn-avatars.huggingface.co/v1/production/uploads/1678549441248-5e70f6048ce3c604d78fe133.png",
  "providers/Lightricks.png": "https://recipes.vllm.ai/providers/Lightricks.webp",
  "providers/LiquidAI.png": "https://recipes.vllm.ai/providers/LiquidAI.png",

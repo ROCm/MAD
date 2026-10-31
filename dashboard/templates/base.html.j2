@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}MAD Recipes{% endblock %}</title>
+{% if icons.favicon %}<link rel="icon" href="{{ site }}/favicon.svg" type="image/svg+xml">{% endif %}
 <style>
   /* Neutral, hairline-bordered look after recipes.vllm.ai; light and dark selected separately. */
   :root {
@@ -69,10 +70,17 @@
   /* ---- top bar ---- */
   .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line); }
   .topbar .wrap { display: flex; align-items: center; gap: 22px; height: 56px; }
+  /* AMD logo first, as on AMD's ROCm documentation: unaltered artwork in the text color (black or
+     white), linked to amd.com, with clear space and a divider before the site name. */
+  .brand { display: flex; align-items: center; gap: 16px; flex: none; }
+  .amd-link { display: flex; align-items: center; color: var(--ink); padding: 6px 0; }
+  .amd-link:hover { text-decoration: none; opacity: .8; }
+  .amd-logo { display: block; height: auto; }
+  .amd-text { font-weight: 800; font-size: 18px; letter-spacing: .02em; }
+  .brand .divider { width: 1px; height: 24px; background: var(--line-2); }
   .logo { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 650; font-size: 15px; white-space: nowrap; }
   .logo:hover { text-decoration: none; }
-  .logo .mark { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px; }
-  .logo .mark::before { content: ""; width: 4px; height: 20px; border-radius: 2px; background: var(--brand); }
+  .logo .mark { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; }
   .logo .sep { color: var(--ink-3); font-weight: 400; }
   .sections { display: flex; gap: 4px; }
   .sections a { color: var(--ink-2); font-size: 14px; padding: 6px 10px; border-radius: 7px; white-space: nowrap; }
@@ -164,12 +172,15 @@
 
   footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 18px 0 36px; color: var(--ink-3); font-size: 13px; }
   footer a { color: var(--ink-2); margin-right: 18px; }
-  @media (max-width: 1100px) {
+  footer .tm { margin: 10px 0 0; max-width: 900px; }
+  footer .legal { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  footer .legal a { margin-right: 0; }
+  @media (max-width: 1200px) {
     .menu-btn { display: block; }
     .sections { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 16px; }
     .topbar.open .sections { display: flex; }
   }
-  @media (max-width: 760px) { .search { display: none; } .tools a { display: none; } }
+  @media (max-width: 760px) { .search { display: none; } .tools a { display: none; } .brand .divider, .logo .sep, .logo .mark ~ span { display: none; } }
   @media print { .topbar, .frozen, .filters { display: none; } }
   {% block style %}{% endblock %}
 </style>
@@ -181,7 +192,11 @@
 {% set nav = [("models", "models/index.html", "Models"), ("rocm", "rocm/index.html", "ROCm"), ("qa", "qa/index.html", "QA"), ("ci", "ci/index.html", "CI"), ("roadmap", "roadmap/index.html", "Roadmap")] %}
 <div class="topbar" id="topbar"><div class="wrap">
   <button class="menu-btn" type="button" aria-label="Menu" aria-controls="sections" onclick="document.getElementById('topbar').classList.toggle('open')">☰</button>
-  <a class="logo" href="{{ root }}/index.html"{% if active == "overview" %} aria-current="page"{% endif %}><span class="mark">MAD</span><span class="sep">/</span><span>Recipes</span></a>
+  <div class="brand">
+    <a class="amd-link" href="https://www.amd.com/" title="AMD">{{ icons.amd_logo(72) }}</a>
+    <span class="divider" aria-hidden="true"></span>
+    <a class="logo" href="{{ root }}/index.html"{% if active == "overview" %} aria-current="page"{% endif %}><span class="mark">MAD</span><span class="sep">/</span><span>Recipes</span></a>
+  </div>
   <nav class="sections" id="sections" aria-label="Sections">
     {% for key, path, label in nav %}<a href="{{ root }}/{{ path }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
     <a href="{{ site }}/releases/index.html"{% if active == "releases" %} aria-current="page"{% endif %}>Releases</a>
@@ -210,7 +225,14 @@
   <a href="https://github.com/ROCm/madengine">madengine</a>
   <a href="{{ site }}/releases/index.html">Releases</a>
   <span>Generated from {% if snap.commit %}<a href="{{ gh }}/commit/{{ snap.commit }}" class="mono">{{ snap.commit[:10] }}</a>{% else %}a local tree{% endif %} on {{ snap.date }}. Curated data: <code>dashboard/status.yaml</code>.</span>
-  {% if icons.official %}<div style="margin-top:8px">Logos and names are trademarks of their respective owners and are used only to identify models, frameworks and hardware. See <a href="{{ gh }}/blob/develop/dashboard/logos/NOTICE.md">logo sources</a>.</div>{% endif %}
+  <p class="tm">AMD, the AMD Arrow logo, AMD Instinct, ROCm and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names and logos are used only to identify models, frameworks and hardware, and may be trademarks of their respective owners.{% if icons.official %} See <a href="{{ gh }}/blob/develop/dashboard/logos/NOTICE.md">logo sources</a>.{% endif %}</p>
+  <div class="legal">
+    <span>© {{ snap.date[:4] }} Advanced Micro Devices, Inc.</span>
+    <a href="https://www.amd.com/en/corporate/copyright">Terms and Conditions</a>
+    <a href="https://www.amd.com/en/corporate/privacy">Privacy</a>
+    <a href="https://www.amd.com/en/corporate/trademarks">Trademarks</a>
+    <a href="{{ gh }}/blob/develop/LICENSE.txt">License</a>
+  </div>
 </div></footer>
 {{ icons.sprite() }}
 <script src="{{ root }}/search.js"></script>

@@ -6,6 +6,8 @@ Vendor the logos listed in dashboard/icons.yaml into dashboard/logos/ (run when 
                             (the vLLM recipes site, which shows the same Hugging Face org avatars),
                             then the Hugging Face organization avatar API.
   simple-icons/<slug>.svg   brand marks from Simple Icons (CC0), for the `simple:` entries.
+  amd/amd-logo.svg          the AMD logo for the site header, from AMD's ROCm documentation theme,
+  amd/favicon.svg           and the AMD Arrow alone as the site favicon.
   sources.json             where each file came from, for dashboard/logos/NOTICE.md.
 
 Needs network and Pillow (`pip install pillow`); the site build itself needs neither.
@@ -33,6 +35,34 @@ SIZE = 96
 RECIPES_SITE = "https://recipes.vllm.ai"
 HF_AVATAR_API = "https://huggingface.co/api/organizations/{org}/avatar"
 SIMPLE_ICONS_URL = "https://cdn.jsdelivr.net/npm/simple-icons@{version}/icons/{slug}.svg"
+# The AMD logo as AMD's own ROCm documentation theme (rocm-docs-core) ships it: white artwork
+# for its dark header.
+AMD_LOGO_URL = ("https://raw.githubusercontent.com/ROCm/rocm-docs-core/develop/"
+                "src/rocm_docs/rocm_docs_theme/static/images/amd-header-logo.svg")
+
+
+def amd_marks(svg):
+    """(logo, favicon) SVG text from AMD's logo artwork.
+
+    The logo keeps every shape and takes the text color (currentColor): black on the light
+    theme and white on the dark one, the two one-color versions of the AMD logo. The favicon
+    is the AMD Arrow alone (the artwork's two polygons), as amd.com's own favicon shows it,
+    black or white by the browser's color scheme.
+    """
+    shapes = [re.sub(r'\s+class="[^"]*"', "", s) for s in re.findall(r"<(?:path|polygon)\b[^>]*/>", svg)]
+    arrow = [s for s in shapes if s.startswith("<polygon")]
+    if len(shapes) != 5 or len(arrow) != 2:
+        sys.exit(f"ERROR: {AMD_LOGO_URL} no longer has the expected A, M, D and arrow shapes; check it by hand")
+    view_box = re.search(r'viewBox="([^"]+)"', svg).group(1)
+    logo = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}" fill="currentColor">'
+            f'<title>AMD</title>{"".join(shapes)}</svg>\n')
+    points = [float(v) for s in arrow for v in re.search(r'points="([^"]+)"', s).group(1).split()]
+    xs, ys = points[0::2], points[1::2]
+    side = max(max(xs) - min(xs), max(ys) - min(ys))
+    favicon = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{min(xs):g} {min(ys):g} {side:g} {side:g}">'
+               "<style>polygon{fill:#000}@media (prefers-color-scheme:dark){polygon{fill:#fff}}</style>"
+               f'{"".join(arrow)}</svg>\n')
+    return logo, favicon
 
 
 def get(url, timeout=60, attempts=3):
@@ -134,6 +164,15 @@ def main():
             f.write(data)
         sources[key] = url
         print(f"  {slug}: {url}")
+
+    amd_files = ("amd/amd-logo.svg", "amd/favicon.svg")
+    if args.force or not all(have(os.path.join(LOGOS_DIR, key)) for key in amd_files):
+        os.makedirs(os.path.join(LOGOS_DIR, "amd"), exist_ok=True)
+        for key, text in zip(amd_files, amd_marks(get(AMD_LOGO_URL).decode("utf-8"))):
+            with open(os.path.join(LOGOS_DIR, key), "w") as f:
+                f.write(text)
+            sources[key] = AMD_LOGO_URL
+        print(f"  amd: {AMD_LOGO_URL}")
 
     with open(sources_path, "w") as f:
         json.dump(dict(sorted(sources.items())), f, indent=1)

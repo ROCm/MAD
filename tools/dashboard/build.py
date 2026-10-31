@@ -382,6 +382,8 @@ def build_site(out_dir, snapshot, releases, logos=None):
     # Provider logos live once at the site root, shared by every version tree.
     if icon_set.logo_files():
         shutil.copytree(os.path.join(icons.LOGOS_DIR, "providers"), os.path.join(out_dir, "logos", "providers"))
+    if icon_set.amd_file("favicon.svg"):
+        shutil.copy(icon_set.amd_file("favicon.svg"), os.path.join(out_dir, "favicon.svg"))
     # Pages runs Jekyll otherwise, which is slow and skips underscore paths.
     open(os.path.join(out_dir, ".nojekyll"), "w").close()
 

@@ -94,6 +94,11 @@ class IconSet:
             paths = re.findall(r'<path[^>]*\sd="([^"]+)"', f.read())
         return " ".join(paths) or None
 
+    def amd_file(self, name):
+        """Path of a vendored AMD asset (amd-logo.svg, favicon.svg), or None when logos are neutral."""
+        path = os.path.join(self.logos_dir, "amd", name)
+        return path if self.mode == "official" and os.path.exists(path) else None
+
     def bind(self, site):
         return BoundIcons(self, site)
 
@@ -180,6 +185,20 @@ class BoundIcons:
         if spec.startswith("simple:") and self.icons.simple_path(spec.split(":", 1)[1]) is None:
             spec = fallback[key]
         return self._from_spec(spec, size, key)
+
+    def amd_logo(self, width=72):
+        """The AMD logo inline, in the text color (black or white with the theme); the word AMD
+        when logos are neutral."""
+        path = self.icons.amd_file("amd-logo.svg")
+        if path is None:
+            return Markup('<span class="amd-text">AMD</span>')
+        with open(path) as f:
+            svg = f.read().strip()
+        return Markup(svg.replace("<svg ", f'<svg class="amd-logo" width="{width}" role="img" aria-label="AMD" ', 1))
+
+    @property
+    def favicon(self):
+        return self.icons.amd_file("favicon.svg") is not None
 
     def glyph(self, name, size=18):
         return self._use(self._register_glyph(name), size)
