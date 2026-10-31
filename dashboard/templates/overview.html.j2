@@ -24,6 +24,16 @@
       <div class="t-sub">models · {{ snap.models | length }} configurations · {{ cat.frameworks | length }} frameworks</div>
       <div class="gpu-row">{% for sku in snap.skus %}<div><b>{{ cat.sku_families[sku] }}</b>{{ sku }}</div>{% endfor %}</div>
     </a>
+    <a class="tile" href="{{ root }}/models/index.html?scale=multi">
+      <div class="t-name"><span class="with-ico">{{ icons.glyph("network", 18) }}Multi-node</span><span class="faint">→</span></div>
+      <div class="t-value">{{ cat.scale.multi - cat.scale["opt-in"] }}</div>
+      <div class="t-sub">models run across nodes, all on SLURM</div>
+      <ul>
+        <li>{{ cat.scale.both }} run on one node and on several</li>
+        <li>Kubernetes: {% if cat.scale.k8s %}{{ cat.scale.k8s }} by hand (per-node run){% else %}none{% endif %}</li>
+        {% if cat.scale["opt-in"] %}<li>{{ cat.scale["opt-in"] }} opt-in, experimental</li>{% endif %}
+      </ul>
+    </a>
     <a class="tile" href="{{ root }}/rocm/index.html">
       <div class="t-name"><span class="with-ico">{{ icons.glyph("layers", 18) }}ROCm support matrix</span><span class="faint">→</span></div>
       <div class="t-value">{{ rocm_known | length }}</div>

@@ -9,6 +9,7 @@ dashboard/status.yaml. The resulting snapshot is plain JSON so a release can be 
 into dashboard/releases/<version>.json and re-rendered later without the repo state.
 """
 import argparse
+import ast
 import datetime
 import glob
 import os
@@ -23,7 +24,13 @@ STATUS_PATH = os.path.join(REPO_ROOT, "dashboard", "status.yaml")
 INTERNAL_ROADMAP_PATH = os.path.join(REPO_ROOT, "dashboard", "roadmap.internal.yaml")
 PRIMUS_ROOT = os.path.join(REPO_ROOT, "scripts", "Primus")
 
-SCHEMA = 1
+SCHEMA = 2
+
+# Registries whose get_models_json.py hides multi-node-only configs unless this is set.
+MULTINODE_SWITCHES = {
+    "jax-maxtext": "JAX_MAXTEXT_INCLUDE_MULTINODE",
+    "jax-maxdiffusion": "JAX_MAXDIFFUSION_INCLUDE_MULTINODE",
+}
 
 # skip_gpu_arch is ISA-level; these are the Instinct products behind each ISA.
 ISA_SKUS = {
@@ -106,6 +113,9 @@ def discover_models(repo_root=REPO_ROOT):
     os.environ.pop("MODEL_DIR", None)
     # Discover every Primus config directory, not just the ones matching this host's GPU.
     os.environ["JAX_HOST_DEVICE"] = "all"
+    # Include the multi-node-only configs; rows_from() marks them opt-in.
+    for switch in MULTINODE_SWITCHES.values():
+        os.environ[switch] = "1"
     cwd = os.getcwd()
     os.chdir(repo_root)
     try:
@@ -133,6 +143,36 @@ def _registry_of(model):
 
 def primus_checked_out(primus_root=PRIMUS_ROOT):
     return bool(glob.glob(os.path.join(primus_root, "examples", "*", "configs")))
+
+
+def multinode_only(repo_root=REPO_ROOT):
+    """{registry: base models its get_models_json.py hides unless MULTINODE_SWITCHES[registry] is set}.
+
+    Read as a literal (MULTINODE_MODELS = {...}) rather than imported, so the list stays
+    the generator's own.
+    """
+    hidden = {}
+    for registry in MULTINODE_SWITCHES:
+        path = os.path.join(repo_root, "scripts", registry, "get_models_json.py")
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            tree = ast.parse(f.read())
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "MULTINODE_MODELS" for t in node.targets):
+                # set() has no literal form; anything else must be one.
+                is_empty_set = isinstance(node.value, ast.Call) and getattr(node.value.func, "id", "") == "set"
+                hidden[registry] = set() if is_empty_set else set(ast.literal_eval(node.value))
+    return hidden
+
+
+def is_opt_in(model, hidden):
+    """True for a config its registry discovers only with the multi-node switch set."""
+    config = arg_value(model.get("args", ""), "--config_path")
+    if not config:
+        return False
+    base_model = os.path.splitext(os.path.basename(config))[0].split("-")[0]
+    return base_model in hidden.get(model.get("registry"), set())
 
 
 # --------------------------------------------------------------------------- Dockerfiles
@@ -266,6 +306,30 @@ def nodes_of(model):
     return int(n) if n and n.isdigit() else 1
 
 
+def deployment_of(model, frameworks, opt_in=False):
+    """Where a card runs: its scheduler, its Kubernetes path and whether discovery hides it.
+
+    scheduler: "slurm" for slurm_multi cards (their launcher script needs an allocation, even
+    on one node) and for opt-in multi-node configs; "local" for a plain madengine run.
+    k8s: "manual" where the framework documents a per-node run outside SLURM (status.yaml);
+    madengine's slurm_multi launcher itself is SLURM-only.
+    status: "opt-in" for configs hidden unless `switch` (MULTINODE_SWITCHES[registry]) is set.
+    """
+    launcher = (model.get("distributed") or {}).get("launcher", "")
+    return {
+        "scheduler": "slurm" if launcher == "slurm_multi" or opt_in else "local",
+        "k8s": (frameworks.get(model["registry"]) or {}).get("k8s", ""),
+        "status": "opt-in" if opt_in else "registered",
+        "switch": MULTINODE_SWITCHES[model["registry"]] if opt_in else "",
+    }
+
+
+def deployment_from_row(row):
+    """Deployment of a row from a schema-1 snapshot, which predates the field."""
+    multi = row["run"]["launcher"] == "slurm_multi"
+    return {"scheduler": "slurm" if multi else "local", "k8s": "", "status": "registered", "switch": ""}
+
+
 # Precision/quantization tokens that distinguish variants of one model, not the model itself.
 _VARIANT_TOKENS = r"(?:w-[a-z0-9]+-a-[a-z0-9]+|mxfp8|mxfp4|nanoo_fp8|bf16|fp16|fp32|fp8|fp4|kv|preview)"
 
@@ -298,11 +362,13 @@ def framework_of(model, frameworks):
     return name, entry.get("workload", "other")
 
 
-def describe_model(model, frameworks, suite_tags, images):
+def describe_model(model, frameworks, suite_tags, images, opt_in=False):
     label, hf_repo = model_label(model)
     framework, workload = framework_of(model, frameworks)
     image = images[model["dockerfile"]]
     family = family_of(label)
+    # Opt-in configs size their data-center mesh from the allocation (dcn_* = -1): two or more.
+    nodes = 2 if opt_in else nodes_of(model)
     return {
         "name": model["name"],
         "registry": model["registry"],
@@ -313,13 +379,16 @@ def describe_model(model, frameworks, suite_tags, images):
         "precision": precision_of(model),
         "skus": skus_for(model),
         "n_gpus": "all" if str(model.get("n_gpus", "-1")) == "-1" else str(model["n_gpus"]),
-        "nodes": nodes_of(model),
+        "nodes": nodes,
+        "deployment": deployment_of(model, frameworks, opt_in),
         "suites": [t for t in model.get("tags", []) if t in suite_tags],
         "dockerfile": model["dockerfile"],
         "image": image["image"],
         "rocm": image["rocm"],
         "family": family,
         "page": f"{slugify(framework)}/{slugify(family)}",
+        # Variant label on its page when the family is a whole registry (one_page); else derived.
+        "variant": "",
         "readme": (frameworks.get(model["registry"]) or {}).get("readme", ""),
         # Everything a recipe needs to reproduce what madengine runs.
         "run": {
@@ -336,6 +405,31 @@ def describe_model(model, frameworks, suite_tags, images):
             "n_gpus": str(model.get("n_gpus", "-1")),
         },
     }
+
+
+def merge_one_page(rows, frameworks):
+    """Registries marked one_page in status.yaml become one recipe page, one variant per card.
+
+    The page is named after the cards' common prefix (large_ep_bench_1n, large_ep_bench_2n_mori_only
+    -> large_ep_bench); the rest of each name, without its node-count token, labels its variant,
+    so the recipe page can offer node counts and variants as separate choices.
+    """
+    by_registry = {}
+    for r in rows:
+        if (frameworks.get(r["registry"]) or {}).get("one_page"):
+            by_registry.setdefault(r["registry"], []).append(r)
+    for registry, regrows in by_registry.items():
+        labels = [r["model"] for r in regrows]
+        prefix = os.path.commonprefix(labels)
+        if prefix not in labels:
+            # Cut back to a whole token: x_mori / x_mooncake share 'x_mo', not a name.
+            prefix = re.sub(r"[^_\-.]*$", "", prefix)
+        name = prefix.rstrip("_-.") or registry
+        for r in regrows:
+            rest = re.sub(r"^\d+n(?:[_\-.]|$)", "", r["model"][len(prefix):].strip("_-."))
+            r["family"] = name
+            r["page"] = f"{r['page'].split('/', 1)[0]}/{slugify(name)}"
+            r["variant"] = rest.replace("_", " ") or "Default"
 
 
 # --------------------------------------------------------------------------- snapshot
@@ -357,12 +451,15 @@ def derived_qa(rows, images):
             "note": "Every run reports throughput/latency through madengine (performance line or multiple_results CSV).",
         }
     ]
-    multi = [r for r in rows if r["nodes"] > 1]
+    registered = [r for r in rows if r["deployment"]["status"] == "registered"]
+    multi = [r for r in registered if r["nodes"] > 1]
     if multi:
         covered.append({
-            "area": "Multi-node runs",
-            "scope": f"{len(multi)} models ({', '.join(sorted({r['framework'] for r in multi}))})",
-            "note": "SLURM multi-node launches (-N > 1).",
+            "area": "Multi-node runs (SLURM)",
+            "scope": f"{len(multi)} models on {min(r['nodes'] for r in multi)}–{max(r['nodes'] for r in multi)} nodes "
+                     f"({', '.join(sorted({r['framework'] for r in multi}))})",
+            "note": "slurm_multi model cards: the launcher script runs on the SLURM head node and starts one "
+                    "container per node.",
         })
     niah = [r for r in rows if "niah" in r["suites"]]
     if niah:
@@ -372,6 +469,22 @@ def derived_qa(rows, images):
             "note": "Models tagged niah.",
         })
     not_covered = []
+    manual = sorted({r["framework"] for r in rows if r["deployment"]["k8s"] == "manual"})
+    not_covered.append({
+        "area": "Kubernetes",
+        "scope": "All registered models",
+        "note": "No model card targets Kubernetes, and madengine's slurm_multi launcher is SLURM-only."
+                + (f" {', '.join(manual)} documents a manual per-node run that works on Kubernetes." if manual else ""),
+    })
+    opt_in = [r for r in rows if r["deployment"]["status"] == "opt-in"]
+    if opt_in:
+        switches = sorted({r["deployment"]["switch"] for r in opt_in})
+        not_covered.append({
+            "area": "Multi-node training models",
+            "scope": f"{', '.join(sorted({r['family'] for r in opt_in}))} ({', '.join(sorted({r['framework'] for r in opt_in}))})",
+            "note": f"Discovered only with {' / '.join(switches)}=1. The recipe uses madengine's primus launcher "
+                    "on SLURM and is not validated by MAD.",
+        })
     floating = [i for i in images if i["rocm_source"] == "unpinned :latest"]
     if floating:
         not_covered.append({
@@ -429,7 +542,9 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
         if m["dockerfile"] not in images:
             images[m["dockerfile"]] = describe_image(m["dockerfile"], status["rocm_overrides"], warnings, repo_root)
 
-    rows = [describe_model(m, status["frameworks"], status["suite_tags"], images) for m in models]
+    hidden = multinode_only(repo_root)
+    rows = [describe_model(m, status["frameworks"], status["suite_tags"], images, is_opt_in(m, hidden)) for m in models]
+    merge_one_page(rows, status["frameworks"])
     order = {name: i for i, name in enumerate(status["frameworks"])}
     rows.sort(key=lambda r: (order.get(r["registry"], len(order)), r["framework"], r["model"].lower(), r["name"]))
 

@@ -56,8 +56,18 @@ def view(snapshot):
     return {"ci_skus": ci_skus, "sku_isa": sku_isa}
 
 
+def upgrade(snapshot):
+    """Fill in fields newer schemas added, so frozen releases keep rendering."""
+    for row in snapshot["models"]:
+        row.setdefault("deployment", collect.deployment_from_row(row))
+        row.setdefault("variant", "")
+    return snapshot
+
+
 def _variant_label(row, family_rows):
-    """Precision plus whatever tags set this row apart from the rest of its page."""
+    """The card's own label (one_page registries), else precision plus whatever tags set it apart."""
+    if row["variant"]:
+        return row["variant"]
     shared = set.intersection(*(set(r["suites"]) for r in family_rows))
     parts = [row["precision"].upper()] if row["precision"] else []
     parts += [s for s in row["suites"] if s not in shared]
@@ -68,6 +78,32 @@ def sku_label(skus, all_skus):
     if list(skus) == list(all_skus):
         return f"{all_skus[0]}–{all_skus[-1]}"
     return " · ".join(skus)
+
+
+def scale_label(node_counts, slurm, opt_in):
+    """'1 node', '2 nodes · SLURM', '1–4 nodes · SLURM', '2+ nodes · SLURM'."""
+    lo, hi = node_counts[0], node_counts[-1]
+    text = f"{lo}+ nodes" if opt_in else recipes.nodes_label(lo) if lo == hi else f"{lo}–{hi} nodes"
+    return text + (" · SLURM" if slurm else "")
+
+
+def link_scale(pages):
+    """Link the pages of one model under different frameworks (vLLM and vLLM disaggregated P/D, ...)
+    so each shows where else the model runs and on how many nodes; add the filter tokens."""
+    groups = {}
+    for p in pages:
+        groups.setdefault((p["workload"], re.sub(r"[^a-z0-9]", "", p["name"].lower())), []).append(p)
+    for group in groups.values():
+        multi = any(p["node_counts"][-1] > 1 for p in group)
+        single = any(p["node_counts"][0] == 1 for p in group)
+        ordered = sorted(group, key=lambda p: (p["node_counts"][0], p["node_counts"][-1], p["framework"]))
+        for p in group:
+            p["scale_links"] = [{"page": o["page"], "framework": o["framework"], "label": o["scale_label"],
+                                 "current": o is p} for o in ordered] if len(group) > 1 and multi else []
+            # A single-node page's pointer to the same model on more nodes, for the catalog.
+            p["scale_out"] = [o for o in ordered if o["node_counts"][-1] > 1] if p["node_counts"][-1] == 1 else []
+            if single and multi:
+                p["scale"].append("both")
 
 
 def catalog(snapshot):
@@ -89,11 +125,12 @@ def catalog(snapshot):
         page = rows[0]["page"]
         for row in rows:
             row["page"] = page
+        # Node count is part of the key: a sweep's 1- and 2-node cards are separate choices.
         by_label = {}
         for row in rows:
-            by_label.setdefault(_variant_label(row, rows), []).append(row)
+            by_label.setdefault((_variant_label(row, rows), row["nodes"]), []).append(row)
         variants = []
-        for label, vrows in by_label.items():
+        for (label, _), vrows in by_label.items():
             by_sku = {}
             for row in vrows:
                 for sku in row["skus"]:
@@ -109,12 +146,22 @@ def catalog(snapshot):
             v["index"] = str(i)
             v["hf_repo"] = v["rows"][0]["hf_repo"]
             v["suites"] = sorted({s for r in v["rows"] for s in r["suites"]})
+            v["nodes"] = v["rows"][0]["nodes"]
+            v["clusters"] = recipes.clusters(v["rows"][0])
+            v["unavailable"] = recipes.unavailable(v["rows"][0])
         first = rows[0]
         repos = [r["hf_repo"] for r in rows if r["hf_repo"]]
         # Prefer the upstream repo (meta-llama/...) over AMD's quantized re-uploads for the heading.
         repo = next((r for r in repos if not r.startswith("amd/")), repos[0] if repos else None)
         skus = [s for s in snapshot["skus"] if any(s in r["skus"] for r in rows)]
         n_gpus = sorted({r["n_gpus"] for r in rows})
+        node_counts = sorted({r["nodes"] for r in rows})
+        slurm = any(r["deployment"]["scheduler"] == "slurm" for r in rows)
+        k8s = any(r["deployment"]["k8s"] == "manual" for r in rows)
+        opt_in = all(r["deployment"]["status"] == "opt-in" for r in rows)
+        # Filter tokens for the catalog's Scale filter; link_scale() adds "both".
+        scale = [t for t, on in (("single", node_counts[0] == 1), ("multi", node_counts[-1] > 1),
+                                 ("slurm", slurm), ("k8s", k8s), ("opt-in", opt_in)) if on]
         family = {
             "page": page,
             "fw_slug": page.split("/", 1)[0],
@@ -129,8 +176,13 @@ def catalog(snapshot):
             "suites": sorted({s for r in rows for s in r["suites"]}),
             "skus": skus,
             "sku_label": sku_label(skus, snapshot["skus"]),
-            "gpus": ("8 GPU" if n_gpus == ["all"] else " / ".join(n_gpus) + " GPU") + ("/node" if first["nodes"] > 1 else ""),
-            "nodes": max(r["nodes"] for r in rows),
+            "gpus": ("8 GPU" if n_gpus == ["all"] else " / ".join(n_gpus) + " GPU") + ("/node" if node_counts[-1] > 1 else ""),
+            "nodes": node_counts[-1],
+            "node_counts": node_counts,
+            "opt_in": opt_in,
+            "k8s": k8s,
+            "scale": scale,
+            "scale_label": scale_label(node_counts, slurm, opt_in),
             "rocm": sorted({r["rocm"] for r in rows}),
             "support": support(variants, snapshot["skus"]),
         }
@@ -145,6 +197,7 @@ def catalog(snapshot):
         fw["rocm"] = sorted(set(fw["rocm"]) | set(family["rocm"]))
         for sku in skus:
             fw["sku_families"][sku] += 1
+    link_scale(pages)
     return pages, list(frameworks.values())
 
 
@@ -166,6 +219,7 @@ def summarize(snapshot, pages, frameworks):
         "precisions": sorted({p for f in pages for p in f["precisions"]}),
         "sku_families": {sku: sum(sku in f["skus"] for f in pages) for sku in snapshot["skus"]},
         "fw_slugs": {fw["name"]: fw["slug"] for fw in frameworks},
+        "scale": {t: sum(t in f["scale"] for f in pages) for t in ("multi", "both", "slurm", "k8s", "opt-in")},
         "rocm_versions": sorted({i["rocm"] for i in snapshot["images"]} - {"unknown", "floating"}, key=_version_order),
     }
 
@@ -197,7 +251,7 @@ SECTION_PAGES = [
 ]
 RELEASES_PAGE = "releases/index.html"
 CSV_COLUMNS = ["madengine_tag", "framework", "workload", "model", "hf_repo", "precision", "MI300X", "MI325X", "MI350X",
-               "MI355X", "n_gpus", "nodes", "suites", "base_image", "rocm", "recipe"]
+               "MI355X", "n_gpus", "nodes", "scheduler", "k8s", "discovery", "suites", "base_image", "rocm", "recipe"]
 
 
 def up(path):
@@ -207,7 +261,7 @@ def up(path):
 
 def make_tree(snapshot, prefix, label):
     """One version of the site: its snapshot, catalog and the pages it contains."""
-    pages, frameworks = catalog(snapshot)
+    pages, frameworks = catalog(upgrade(snapshot))
     rels = {path for _, path, _ in SECTION_PAGES} | {f"models/{p['page']}/index.html" for p in pages}
     return {"snap": snapshot, "prefix": prefix, "label": label, "pages": pages, "frameworks": frameworks,
             "cat": summarize(snapshot, pages, frameworks), "rels": rels}
@@ -243,7 +297,8 @@ def write_csv(snapshot, path):
         for r in snapshot["models"]:
             writer.writerow([r["name"], r["framework"], r["workload"], r["model"], r["hf_repo"] or "", r["precision"],
                              *("yes" if sku in r["skus"] else "no" for sku in snapshot["skus"]),
-                             r["n_gpus"], r["nodes"], " ".join(r["suites"]), r["image"], r["rocm"],
+                             r["n_gpus"], r["nodes"], r["deployment"]["scheduler"], r["deployment"]["k8s"] or "no",
+                             r["deployment"]["status"], " ".join(r["suites"]), r["image"], r["rocm"],
                              f"models/{r['page']}/index.html"])
 
 
@@ -270,7 +325,8 @@ def render_site(env, out_dir, tree, trees, prev):
         repo = snapshot.get("source_repo", recipes.DEFAULT_REPO)
         cards = [{sku: recipes.recipe(row, sku, ref, repo) for sku, row in v["by_sku"].items()} for v in family["variants"]]
         page("recipe.html.j2", f"models/{family['page']}/index.html", "models", f=family, frameworks=tree["frameworks"],
-             recipes=cards, isa_of=recipes.ISA_OF, default_sku=default_sku(family), gh_ref=ref or "develop")
+             recipes=cards, clusters=recipes.CLUSTERS, isa_of=recipes.ISA_OF, default_sku=default_sku(family),
+             gh_ref=ref or "develop")
 
 
 def release_rows(trees):

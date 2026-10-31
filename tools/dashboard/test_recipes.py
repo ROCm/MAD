@@ -11,9 +11,11 @@ import recipes  # noqa: E402
 def make_row(name="vllm/pyt_vllm_x", registry="vllm", n_gpus="-1", launcher="", args="--model_repo org/X --config c.yaml",
              env_vars=None, multiple_results="perf_X.csv", url="", scripts="scripts/vllm/run.sh", nodes=1,
              precision="", suites=(), skus=("MI300X", "MI325X", "MI350X", "MI355X"), dockerfile="docker/pyt_vllm",
-             page="vllm/x", hf_repo="org/X"):
+             page="vllm/x", hf_repo="org/X", k8s="", status="registered", switch="", variant=""):
+    scheduler = "slurm" if launcher == "slurm_multi" or status == "opt-in" else "local"
     return {
         "name": name, "registry": registry, "dockerfile": dockerfile, "nodes": nodes, "precision": precision,
+        "deployment": {"scheduler": scheduler, "k8s": k8s, "status": status, "switch": switch}, "variant": variant,
         "suites": list(suites), "skus": list(skus), "page": page, "family": "X", "hf_repo": hf_repo,
         "framework": "vLLM", "workload": "inference", "readme": "", "n_gpus": "all" if n_gpus == "-1" else n_gpus,
         "model": hf_repo.split("/")[-1] if hf_repo else name, "image": "vllm/vllm-openai-rocm:v0.29.0", "rocm": "7.2.3",
@@ -73,20 +75,85 @@ def test_madengine_single_node():
     assert "madengine run --tags vllm/pyt_vllm_x" in text
 
 
+def disagg_row(**kw):
+    return make_row(name="vllm_dissag/pyt_vllm_disagg_y", registry="vllm_dissag", launcher="slurm_multi", nodes=2,
+                    args="-N 2 -n 2", scripts="scripts/vllm_dissag/run_xPyD_models.slurm", multiple_results="",
+                    env_vars={"DOCKER_IMAGE_NAME": "<supply-your-image>", "MODEL_NAME": "DeepSeek-R1",
+                              "xP": "1", "yD": "1"}, **kw)
+
+
 def test_multi_node_recipes():
-    row = make_row(name="vllm_dissag/pyt_vllm_disagg_y", registry="vllm_dissag", launcher="slurm_multi", nodes=2,
-                   args="-N 2 -n 2", scripts="scripts/vllm_dissag/run_xPyD_models.slurm", multiple_results="",
-                   env_vars={"DOCKER_IMAGE_NAME": "<supply-your-image>", "MODEL_NAME": "DeepSeek-R1"})
-    me = code(recipes.madengine_steps(row, "MI355X"))
+    steps = recipes.madengine_steps(disagg_row(), "MI355X")
+    me = code(steps[:3])
     assert "--build-on-compute" in me and "--manifest-file build_manifest.json" in me
     assert '"DOCKER_IMAGE_NAME": "<supply-your-image>"' in me
-    plain = code(recipes.docker_steps(row, "MI355X"))
+    # madengine reads the node count from slurm.nodes, never from the card's -N.
+    assert '{"slurm": {"partition": "<partition>", "nodes": 2}}' in me
+    plain_steps = recipes.docker_steps(disagg_row(), "MI355X")
+    plain = code(plain_steps[:3])
     assert "docker push" in plain
     assert "cd scripts/vllm_dissag" in plain
     assert "export DOCKER_IMAGE_NAME='<registry>/<repo>:vllm-dissag-pyt-vllm-disagg-y'" in plain
     assert plain.count("DOCKER_IMAGE_NAME=") == 1
     assert "export MODEL_NAME=DeepSeek-R1" in plain
     assert plain.rstrip().endswith("sbatch -p <partition> -N 2 -n 2 run_xPyD_models.slurm")
+
+
+def test_xpyd_topology_step():
+    me = recipes.madengine_steps(disagg_row(), "MI355X")[-1]
+    assert me["title"].startswith("Other topologies")
+    assert '"slurm": {"partition": "<partition>", "nodes": 4}' in me["code"]
+    assert '"xP": "2", "yD": "2"' in me["code"] and '"DOCKER_IMAGE_NAME": "<supply-your-image>"' in me["code"]
+    plain = recipes.docker_steps(disagg_row(), "MI355X")[-1]["code"]
+    assert plain == "export xP=2 yD=2\nsbatch -p <partition> -N $((xP + yD)) -n $((xP + yD)) run_xPyD_models.slurm"
+    # No xP/yD on the card: no topology step.
+    ep = make_row(name="large-ep-benchmark/b", registry="large-ep-benchmark", launcher="slurm_multi", nodes=4,
+                  args="-N 4 -n 4", scripts="scripts/large-ep-benchmark/run_benchmark.sbatch")
+    assert not any("topolog" in s["title"] for s in recipes.madengine_steps(ep, "MI355X") + recipes.docker_steps(ep, "MI355X"))
+
+
+def test_recipe_clusters():
+    assert list(recipes.recipe(make_row(), "MI355X")) == ["local"]
+    assert recipes.unavailable(make_row()) == {"slurm": "single-node model card.",
+                                               "k8s": "no Kubernetes recipe in MAD for this model."}
+    multi = recipes.recipe(disagg_row(), "MI355X")
+    assert list(multi) == ["slurm"] and list(multi["slurm"]) == ["madengine", "docker"]
+    assert "SLURM-only" in recipes.unavailable(disagg_row())["k8s"]
+    # A slurm_multi card on one node still needs SLURM.
+    one = make_row(launcher="slurm_multi", nodes=1, args="-N 1 -n 1")
+    assert recipes.clusters(one) == ["slurm"] and "SLURM allocation" in recipes.unavailable(one)["local"]
+
+
+def test_kvcache_manual_recipe():
+    row = make_row(name="kvcache_transfer_bench/pyt_kvcache_transfer_bench_mori", registry="kvcache_transfer_bench",
+                   launcher="slurm_multi", nodes=2, args="", k8s="manual",
+                   scripts="scripts/kvcache_transfer_bench/scripts/run.slurm", multiple_results="",
+                   env_vars={"BENCH_MODEL_NAME": "pyt_kvcache_transfer_bench_mori", "BENCH_BACKENDS": "mori",
+                             "START_SIZE": "4096", "STOP_SIZE": "1073741824", "IBDEVICE": "mlx5_0", "SYNC_PORT": "9999"})
+    rec = recipes.recipe(row, "MI300X")
+    assert list(rec) == ["slurm", "k8s"] and list(rec["k8s"]) == ["docker"]
+    text = code(rec["k8s"]["docker"])
+    assert '-v "$PWD/scripts/kvcache_transfer_bench":/workspace/kvcache_transfer_bench' in text
+    assert "/workspace/kvcache_transfer_bench/scripts/run_node.sh" in text
+    assert "--backends mori --start-size 4096 --stop-size 1073741824" in text
+    assert "--model-name pyt_kvcache_transfer_bench_mori" in text and "export JOB_ID=" in text
+    assert "k8s" not in recipes.unavailable(row)
+
+
+def test_opt_in_recipe_uses_primus_launcher():
+    row = make_row(name="jax-maxtext/maxtext_MI355X_llama3.1_405B-bf16-pretrain", registry="jax-maxtext",
+                   dockerfile="docker/primus_maxtext", scripts="scripts/jax-maxtext/run.sh", nodes=2,
+                   args="--config_path examples/maxtext/configs/MI355X/llama3.1_405B-bf16-pretrain.yaml",
+                   status="opt-in", switch="JAX_MAXTEXT_INCLUDE_MULTINODE")
+    rec = recipes.recipe(row, "MI355X")
+    assert list(rec) == ["slurm"] and list(rec["slurm"]) == ["madengine"]
+    text = code(rec["slurm"]["madengine"])
+    assert "export JAX_MAXTEXT_INCLUDE_MULTINODE=1" in text
+    assert '"launcher": "primus"' in text and '"nnodes": <nodes>' in text and '"nodes": <nodes>' in text
+    assert '"config_path": "examples/maxtext/configs/MI355X/llama3.1_405B-bf16-pretrain.yaml"' in text
+    assert "--additional-context-file multinode.json" in text
+    assert "git submodule update --init scripts/Primus" in text
+    assert recipes.unavailable(row)["local"] == "the config is sized for two or more nodes."
 
 
 def test_multi_node_script_in_subdirectory_submits_from_registry_dir():
@@ -125,6 +192,42 @@ def test_catalog_groups_variants_and_products():
     assert [fw["slug"] for fw in frameworks] == ["vllm", "primus"]
 
 
+def test_catalog_node_sweep_and_scale_links():
+    skus = ["MI300X", "MI325X", "MI350X", "MI355X"]
+    ep = dict(registry="large-ep-benchmark", launcher="slurm_multi", page="large-ep/large-ep-bench", hf_repo=None)
+    rows = [
+        make_row(name="ep/1n", nodes=1, variant="Default", **ep),
+        make_row(name="ep/2n", nodes=2, variant="Default", **ep),
+        make_row(name="ep/2n_mori", nodes=2, variant="mori only", **ep),
+        make_row(name="vllm/l", page="vllm/llama-70b", hf_repo="meta-llama/Llama-70B"),
+        make_row(name="d/l", page="vllm-disagg/llama-70b", hf_repo="amd/Llama-70B", launcher="slurm_multi", nodes=2),
+        make_row(name="vllm/q", page="vllm/qwen", hf_repo="Qwen/Qwen"),
+    ]
+    rows[4]["framework"] = "vLLM disaggregated P/D"
+    for r, family in zip(rows, ["large_ep_bench"] * 3 + ["Llama-70B", "Llama-70B", "Qwen"]):
+        r["family"] = family
+    pages, _ = build.catalog({"models": rows, "skus": skus})
+    by_page = {p["page"]: p for p in pages}
+    sweep = by_page["large-ep/large-ep-bench"]
+    # Same label on 1 and 2 nodes stays two variants; the node count is a separate choice.
+    assert [(v["label"], v["nodes"]) for v in sweep["variants"]] == [("Default", 1), ("Default", 2), ("mori only", 2)]
+    assert sweep["node_counts"] == [1, 2] and sweep["scale_label"] == "1–2 nodes · SLURM"
+    assert set(sweep["scale"]) == {"single", "multi", "slurm", "both"}
+    single, multi = by_page["vllm/llama-70b"], by_page["vllm-disagg/llama-70b"]
+    assert [(l["framework"], l["label"], l["current"]) for l in single["scale_links"]] == \
+        [("vLLM", "1 node", True), ("vLLM disaggregated P/D", "2 nodes · SLURM", False)]
+    assert [o["page"] for o in single["scale_out"]] == ["vllm-disagg/llama-70b"] and multi["scale_out"] == []
+    assert "both" in single["scale"] and "both" in multi["scale"]
+    assert by_page["vllm/qwen"]["scale_links"] == [] and by_page["vllm/qwen"]["scale"] == ["single"]
+
+
+def test_upgrade_fills_schema_1_rows():
+    row = make_row(launcher="slurm_multi", nodes=2)
+    del row["deployment"], row["variant"]
+    build.upgrade({"models": [row]})
+    assert row["deployment"]["scheduler"] == "slurm" and row["variant"] == ""
+
+
 def test_variant_label_uses_distinguishing_suites():
     rows = [make_row(suites=["vllm_disagg", "nixl"]), make_row(suites=["vllm_disagg", "mori_ep"], precision="fp8")]
     assert build._variant_label(rows[0], rows) == "nixl"
@@ -133,9 +236,9 @@ def test_variant_label_uses_distinguishing_suites():
 
 def test_frozen_recipes_pin_the_commit():
     row = make_row()
-    for steps in recipes.recipe(row, "MI355X", ref="abc1234").values():
+    for steps in recipes.recipe(row, "MI355X", ref="abc1234")["local"].values():
         assert "git clone https://github.com/ROCm/MAD.git\ncd MAD\ngit checkout abc1234" in steps[0]["code"]
-    assert "git checkout" not in code(recipes.recipe(row, "MI355X")["docker"])
+    assert "git checkout" not in code(recipes.recipe(row, "MI355X")["local"]["docker"])
 
 
 def test_support_states():
@@ -187,6 +290,9 @@ def test_site_renders_every_page_with_no_broken_links(tmp_path):
     live = fake_snapshot()
     frozen = copy.deepcopy(fake_snapshot(state="frozen", version="v26.9"))
     frozen["models"] = frozen["models"][:1]
+    # Frozen schema-1 snapshots predate the deployment fields.
+    for row in frozen["models"]:
+        del row["deployment"], row["variant"]
     out = str(tmp_path / "site")
     assert build.build_site(out, live, [frozen]) == 2  # raises on any broken link
     for prefix in ("", "v26.9/"):
@@ -203,7 +309,15 @@ def test_site_renders_every_page_with_no_broken_links(tmp_path):
     assert "git checkout" not in page
     # The disaggregated page exists only in develop, so v26.9's switcher falls back to its catalog.
     with open(os.path.join(out, "models/vllm-disaggregated-p-d/deepseek/index.html")) as f:
-        assert 'value="../../../v26.9/models/index.html"' in f.read()
+        disagg = f.read()
+    assert 'value="../../../v26.9/models/index.html"' in disagg
+    assert 'data-n="2" data-v="0" data-sku="MI355X" data-c="slurm" data-m="madengine"' in disagg
+    assert "SLURM-only" in disagg
+    assert 'data-c="slurm"' not in page and 'data-c="local"' in page
+    with open(os.path.join(out, "models/index.html")) as f:
+        catalog_page = f.read()
+    assert '<option value="multi">Multi-node (1)</option>' in catalog_page
+    assert "2 nodes · SLURM" in catalog_page
     with open(os.path.join(out, "index.html")) as f:
         assert "2 added, 0 removed" in f.read()
     with open(os.path.join(out, "roadmap/index.html")) as f:

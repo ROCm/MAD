@@ -99,6 +99,57 @@ def test_nodes_of():
     assert collect.nodes_of({"args": "", "slurm": {"nodes": 2, "gpus_per_node": 8}}) == 2
 
 
+def test_deployment_of():
+    frameworks = {"kv": {"name": "KV", "k8s": "manual"}}
+    assert collect.deployment_of({"registry": "vllm"}, frameworks) == \
+        {"scheduler": "local", "k8s": "", "status": "registered", "switch": ""}
+    assert collect.deployment_of({"registry": "kv", "distributed": {"launcher": "slurm_multi"}}, frameworks) == \
+        {"scheduler": "slurm", "k8s": "manual", "status": "registered", "switch": ""}
+    assert collect.deployment_of({"registry": "jax-maxtext"}, frameworks, opt_in=True) == \
+        {"scheduler": "slurm", "k8s": "", "status": "opt-in", "switch": "JAX_MAXTEXT_INCLUDE_MULTINODE"}
+
+
+def test_multinode_only_and_is_opt_in(tmp_path):
+    for registry, literal in (("jax-maxtext", '{"grok1", "llama3.1_405B"}'), ("jax-maxdiffusion", "set()")):
+        d = tmp_path / "scripts" / registry
+        d.mkdir(parents=True)
+        (d / "get_models_json.py").write_text(f"import os\nMULTINODE_MODELS = {literal}\n")
+    hidden = collect.multinode_only(str(tmp_path))
+    assert hidden == {"jax-maxtext": {"grok1", "llama3.1_405B"}, "jax-maxdiffusion": set()}
+    config = "--config_path examples/maxtext/configs/MI355X/{}-bf16-pretrain.yaml"
+    assert collect.is_opt_in({"registry": "jax-maxtext", "args": config.format("llama3.1_405B")}, hidden)
+    assert not collect.is_opt_in({"registry": "jax-maxtext", "args": config.format("llama3.1_8B")}, hidden)
+    assert not collect.is_opt_in({"registry": "primus_train", "args": config.format("grok1")}, hidden)
+
+
+def test_merge_one_page():
+    def row(registry, model):
+        return {"registry": registry, "model": model, "family": model, "page": f"fw/{model}", "variant": ""}
+    rows = [row("ep", m) for m in ("large_ep_bench_1n", "large_ep_bench_1n_mori_only", "large_ep_bench_4n_mori_only")]
+    rows += [row("kv", m) for m in ("kv_mori", "kv_mooncake")] + [row("vllm", "Qwen3-8B")]
+    collect.merge_one_page(rows, {"ep": {"one_page": True}, "kv": {"one_page": True}, "vllm": {}})
+    assert {(r["family"], r["page"], r["variant"]) for r in rows[:3]} == {
+        ("large_ep_bench", "fw/large-ep-bench", "Default"), ("large_ep_bench", "fw/large-ep-bench", "mori only")}
+    # 'kv_mo' is not a name: the prefix is cut back to a whole token.
+    assert [(r["family"], r["variant"]) for r in rows[3:5]] == [("kv", "mori"), ("kv", "mooncake")]
+    assert rows[5]["variant"] == "" and rows[5]["page"] == "fw/Qwen3-8B"
+
+
+def test_derived_qa_multi_node_and_kubernetes():
+    def row(name, nodes, k8s="", status="registered", framework="F"):
+        return {"name": name, "nodes": nodes, "framework": framework, "family": name, "suites": [], "registry": "r",
+                "deployment": {"scheduler": "slurm", "k8s": k8s, "status": status,
+                               "switch": "JAX_MAXTEXT_INCLUDE_MULTINODE" if status == "opt-in" else ""}}
+    rows = [row("a", 1), row("b", 2, k8s="manual", framework="KV"), row("c", 4), row("d", 2, status="opt-in")]
+    covered, not_covered = collect.derived_qa(rows, [])
+    multi = next(q for q in covered if q["area"].startswith("Multi-node"))
+    assert multi["scope"].startswith("2 models on 2–4 nodes")
+    kube = next(q for q in not_covered if q["area"] == "Kubernetes")
+    assert "KV documents a manual per-node run" in kube["note"]
+    opt_in = next(q for q in not_covered if q["area"] == "Multi-node training models")
+    assert opt_in["scope"].startswith("d ") and "JAX_MAXTEXT_INCLUDE_MULTINODE=1" in opt_in["note"]
+
+
 @pytest.mark.parametrize("label, family", [
     ("Llama-3.1-405B-Instruct-MXFP4-Preview", "Llama-3.1-405B-Instruct"),
     ("Llama-3.3-70B-Instruct-FP8-KV", "Llama-3.3-70B-Instruct"),

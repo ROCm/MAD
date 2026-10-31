@@ -6,7 +6,6 @@
   .filters .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .filters input[type=search], .filters select { font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
   .filters input[type=search] { min-width: 220px; }
-  .filters label.check { font-size: 13.5px; color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
   .filters .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
   .count { color: var(--ink-3); font-size: 13px; }
   table.catalog td { vertical-align: middle; }
@@ -68,7 +67,14 @@
       <option value="">Any precision</option>
       {% for p in cat.precisions %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
     </select>
-    <label class="check"><input type="checkbox" id="multinode"> Multi-node only</label>
+    <select id="scale" aria-label="Scale">
+      <option value="">Any scale</option>
+      <option value="single">Single node</option>
+      <option value="multi">Multi-node ({{ cat.scale.multi }})</option>
+      <option value="both">Single and multi-node ({{ cat.scale.both }})</option>
+      <option value="slurm">SLURM ({{ cat.scale.slurm }})</option>
+      <option value="k8s">Kubernetes ({{ cat.scale.k8s }})</option>
+    </select>
     <div class="right">
       <span class="count" id="count" aria-live="polite"></span>
       <div class="group" role="group" aria-label="View">
@@ -84,18 +90,19 @@
       <thead><tr>
         <th>Model</th><th>Variants</th>
         {% for sku in snap.skus %}<th class="mark">{{ sku }}</th>{% endfor %}
-        <th>GPUs</th><th>ROCm</th>
+        <th>GPUs</th><th>Scale</th><th>ROCm</th>
       </tr></thead>
       {% for fw in cat.frameworks %}
       <tbody data-group="{{ fw.slug }}">
-        <tr class="group"><th colspan="{{ 4 + snap.skus | length }}"><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span><span>{{ fw.workload }}</span></th></tr>
+        <tr class="group"><th colspan="{{ 5 + snap.skus | length }}"><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span><span>{{ fw.workload }}</span></th></tr>
         {% for f in fw.families %}
         {% set href = root ~ "/models/" ~ f.page ~ "/index.html" %}
-        <tr class="item" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-nodes="{{ f.nodes }}" data-k="{{ f.search }}">
+        <tr class="item" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
           <td><div class="with-ico" style="gap:10px">{{ icons.logo(f.name, f.org, 30) }}<div><a href="{{ href }}" class="m-name">{{ f.name }}</a>{% if f.org %}<div class="m-org">{{ f.org }}</div>{% endif %}</div></div></td>
           <td>{% for v in f.variants %}<span class="chip">{{ v.label }}</span>{% endfor %}</td>
           {% for sku in snap.skus %}<td class="mark">{{ ui.support_cell(f.support[sku], sku, href ~ "?sku=" ~ sku) }}</td>{% endfor %}
-          <td class="muted" style="white-space:nowrap">{{ f.gpus }}{% if f.nodes > 1 %} × {{ f.nodes }}{% endif %}</td>
+          <td class="muted" style="white-space:nowrap">{{ f.gpus }}</td>
+          <td>{{ ui.scale_chips(f, root) }}</td>
           <td class="muted">{{ f.rocm | join(", ") }}</td>
         </tr>
         {% endfor %}
@@ -110,7 +117,7 @@
       <h3><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span> <span class="faint">{{ fw.workload }}</span></h3>
       <div class="grid">
       {% for f in fw.families %}
-        <a class="tile item" href="{{ root }}/models/{{ f.page }}/index.html" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-nodes="{{ f.nodes }}" data-k="{{ f.search }}">
+        <a class="tile item" href="{{ root }}/models/{{ f.page }}/index.html" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
           <div class="with-ico" style="gap:10px;align-items:flex-start;margin-bottom:8px">
             {{ icons.logo(f.name, f.org, 38) }}
             <div style="min-width:0"><div class="t-name">{{ f.name }}</div><div class="t-org" style="margin-bottom:0">{{ f.org or f.framework }}</div></div>
@@ -118,7 +125,10 @@
           <div>
             {% for p in f.precisions %}<span class="chip">{{ p }}</span>{% endfor %}
             <span class="chip">{{ f.gpus }}</span>
-            {% if f.nodes > 1 %}<span class="chip">{{ f.nodes }} nodes</span>{% endif %}
+            <span class="chip">{{ f.scale_label }}</span>
+            {% if f.k8s %}<span class="chip">K8s: manual</span>{% endif %}
+            {% if f.opt_in %}<span class="chip">opt-in</span>{% endif %}
+            {% if f.scale_out %}<span class="chip" title="Also runs on more nodes: {{ f.scale_out | map(attribute='framework') | join(', ') }}">↗ multi-node</span>{% endif %}
             {% if f.skus %}<span class="chip">{{ f.sku_label }}</span>{% endif %}
           </div>
           <div class="t-desc">{{ f.variants | length }} variant{{ "s" if f.variants | length != 1 }}{% if f.suites %} · {{ f.suites | join(", ") }}{% endif %}</div>
@@ -130,6 +140,7 @@
   </div>
 
   <div class="legend"><span><span class="yes">✓</span> every variant runs on this GPU</span><span><span class="part">◐</span> some variants (hover for which)</span><span><span class="no">–</span> not registered</span></div>
+  <div class="legend"><span><span class="chip">2 nodes · SLURM</span> nodes per run and the scheduler it needs</span><span><span class="chip">↗ multi-node</span> the same model runs on more nodes under another framework</span><span><span class="chip">K8s: manual</span> documented per-node run for Kubernetes or bare metal</span><span><span class="chip">opt-in</span> hidden from discovery by default; experimental</span></div>
   {% set partial = snap.registries | selectattr("note") | list %}
   {% if partial %}
   <p class="muted">Incomplete registries: {% for r in partial %}<code>scripts/{{ r.dir }}</code> ({{ r.note }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>
@@ -144,16 +155,18 @@
 <script>
   // One filter row for both views; state lives in the query string so filtered views can be shared.
   (function () {
-    var KEYS = ["q", "fw", "gpu", "workload", "precision", "multinode", "view"];
+    var KEYS = ["q", "fw", "gpu", "workload", "precision", "scale", "view"];
     var params = new URLSearchParams(location.search);
     var state = {};
     KEYS.forEach(function (k) { state[k] = params.get(k) || ""; });
+    if (params.get("multinode")) state.scale = "multi";   // links from before the Scale filter
     if (!state.view) state.view = localStorage.getItem("mad-models-view") || "table";
     // A shared, already-filtered link goes straight to the results.
     if (KEYS.some(function (k) { return k !== "view" && state[k]; })) document.getElementById("summary").open = false;
     var inputs = { q: document.getElementById("q"), fw: document.getElementById("fw"),
-                   workload: document.getElementById("workload"), precision: document.getElementById("precision") };
-    var multinode = document.getElementById("multinode"), count = document.getElementById("count");
+                   workload: document.getElementById("workload"), precision: document.getElementById("precision"),
+                   scale: document.getElementById("scale") };
+    var count = document.getElementById("count");
 
     function matches(el, words) {
       var d = el.dataset;
@@ -161,7 +174,7 @@
         && (!state.gpu || d.skus.split(" ").indexOf(state.gpu) >= 0)
         && (!state.workload || d.workload === state.workload)
         && (!state.precision || d.prec.split(" ").indexOf(state.precision) >= 0)
-        && (!state.multinode || Number(d.nodes) > 1)
+        && (!state.scale || d.scale.split(" ").indexOf(state.scale) >= 0)
         && words.every(function (w) { return d.k.indexOf(w) >= 0; });
     }
     function apply() {
@@ -176,7 +189,6 @@
       });
       count.textContent = shown + " model" + (shown === 1 ? "" : "s");
       Object.keys(inputs).forEach(function (k) { if (inputs[k].value !== state[k]) inputs[k].value = state[k]; });
-      multinode.checked = !!state.multinode;
       document.querySelectorAll("[data-key]").forEach(function (b) { b.setAttribute("aria-pressed", state[b.dataset.key] === b.dataset.value || (b.dataset.key === "view" && b.dataset.value === view)); });
       localStorage.setItem("mad-models-view", view);
       var out = new URLSearchParams();
@@ -184,7 +196,6 @@
       history.replaceState(null, "", out.toString() ? "?" + out : location.pathname);
     }
     Object.keys(inputs).forEach(function (k) { inputs[k].addEventListener("input", function () { state[k] = inputs[k].value; apply(); }); });
-    multinode.addEventListener("change", function () { state.multinode = multinode.checked ? "1" : ""; apply(); });
     document.querySelectorAll("[data-key]").forEach(function (b) {
       b.addEventListener("click", function () { state[b.dataset.key] = b.dataset.value; apply(); });
     });

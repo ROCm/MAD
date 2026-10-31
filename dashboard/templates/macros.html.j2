@@ -11,6 +11,14 @@
 {%- else %}<span class="no" aria-hidden="true">–</span><span class="sr">{{ sku }}: no</span>{% endif %}
 {%- endmacro %}
 
+{# Nodes and scheduler for a model family, plus its Kubernetes path and multi-node siblings. #}
+{% macro scale_chips(f, root) -%}
+<span class="chip">{{ f.scale_label }}</span>
+{%- if f.k8s %}<span class="chip">K8s: manual</span>{% endif %}
+{%- if f.opt_in %}<span class="chip" title="Discovered only with the registry's multi-node switch; experimental">opt-in</span>{% endif %}
+{%- if f.scale_out %}<a class="chip" href="{{ root }}/models/{{ f.scale_out[0].page }}/index.html" title="Also runs on more nodes: {% for o in f.scale_out %}{{ o.framework }} ({{ o.scale_label }}){% if not loop.last %}, {% endif %}{% endfor %}">↗ multi-node</a>{% endif %}
+{%- endmacro %}
+
 {% macro status_badge(value) -%}
 {% set kind = {"in review": "good", "in progress": "good", "in-progress": "good", "planned": "warning", "blocked": "critical"}.get(value, "") %}
 <span class="status {{ kind }}">{{ value }}</span>

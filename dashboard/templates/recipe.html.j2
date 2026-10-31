@@ -40,6 +40,9 @@
   .row .sub { display: flex; gap: 10px; align-items: center; }
   .row .sub > .faint { font: 600 11px var(--sans); letter-spacing: .06em; width: 64px; }
   .row .help { color: var(--ink-2); font-size: 12.5px; margin-top: 8px; }
+  .row a.pill { color: var(--ink); }
+  .row a.pill:hover { text-decoration: none; }
+  .row a.pill[aria-current="page"] { border-color: var(--sel-line); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; }
   .crumbs { font-size: 13px; color: var(--ink-3); margin-bottom: 10px; }
   .crumbs a { color: var(--ink-2); }
   .support { margin: 16px 0 0; }
@@ -89,18 +92,23 @@
         <span class="chip">{{ f.workload }}</span>
         {% for p in f.precisions %}<span class="chip">{{ p }}</span>{% endfor %}
         <span class="chip">{{ f.gpus }}</span>
-        {% if f.nodes > 1 %}<span class="chip">{{ f.nodes }} nodes</span>{% endif %}
+        <span class="chip">{{ f.scale_label }}</span>
+        {% if f.k8s %}<span class="chip">Kubernetes: manual</span>{% endif %}
+        {% if f.opt_in %}<span class="chip">opt-in · experimental</span>{% endif %}
         <span class="chip">ROCm {{ mn.rocm }}</span>
       </div>
+      {% if f.opt_in %}
+      <p class="faint" style="font-size:13px;margin-top:8px">madengine discovers this config only with <code>{{ mn.deployment.switch }}=1</code>: it is sized for two or more nodes. The recipe uses madengine's <code>primus</code> launcher on SLURM, which MAD has not validated for this model.</p>
+      {% endif %}
     </div>
 
-    {% for v in f.variants %}{% for sku, rec in recipes[v.index | int].items() %}{% for m, mlabel, mhelp in methods %}
-    <div class="cmd" data-v="{{ v.index }}" data-sku="{{ sku }}" data-m="{{ m }}" hidden>
+    {% for v in f.variants %}{% for sku, rec in recipes[v.index | int].items() %}{% for c, by_method in rec.items() %}{% for m, steps in by_method.items() %}
+    <div class="cmd" data-n="{{ v.nodes }}" data-v="{{ v.index }}" data-sku="{{ sku }}" data-c="{{ c }}" data-m="{{ m }}" hidden>
       <div class="cmd-head">
-        <span class="ok">Registered for {{ sku }} ({{ isa_of[sku] }}) · {{ v.by_sku[sku].name }}</span>
+        <span class="ok">{{ "Opt-in config" if v.by_sku[sku].deployment.status == "opt-in" else "Registered" }} for {{ sku }} ({{ isa_of[sku] }}) · {{ v.by_sku[sku].name }}</span>
         <button class="copy" type="button">Copy</button>
       </div>
-      {% for step in rec[m] %}
+      {% for step in steps %}
       <div class="step">
         <span class="label">{{ loop.index }}. {{ step.title }}</span>
         <pre>{{ step.code }}</pre>
@@ -108,20 +116,46 @@
       </div>
       {% endfor %}
     </div>
-    {% endfor %}{% endfor %}{% endfor %}
+    {% endfor %}{% endfor %}{% endfor %}{% endfor %}
 
     <div class="cfg">
+      {% if f.scale_links %}
+      <div class="row">
+        <span class="label">Scale</span>
+        <div>
+          <div class="opts" role="group" aria-label="Same model, other frameworks">
+          {% for l in f.scale_links %}
+            <a class="pill" href="{{ root }}/models/{{ l.page }}/index.html"{% if l.current %} aria-current="page"{% endif %}>{{ icons.framework(l.framework, 15) }}{{ l.framework }} <small>{{ l.label }}</small></a>
+          {% endfor %}
+          </div>
+          <div class="help">The same model under other frameworks, and the node count each runs on.</div>
+        </div>
+      </div>
+      {% endif %}
       <div class="row">
         <span class="label">Hardware</span>
         <div>
           <div class="sub"><span class="faint with-ico" style="gap:6px">{{ icons.mark("amd", 15) }}AMD</span>
             <div class="opts" role="group" aria-label="GPU">
             {% for sku in snap.skus %}
-              <button class="pill" type="button" data-pick="sku" data-value="{{ sku }}" data-variants="{% for v in f.variants %}{% if sku in v.by_sku %}{{ v.index }} {% endif %}{% endfor %}" aria-pressed="false">{{ sku }} <small>{{ isa_of[sku] }}</small></button>
+              <button class="pill" type="button" data-pick="sku" data-value="{{ sku }}" aria-pressed="false">{{ sku }} <small>{{ isa_of[sku] }}</small></button>
             {% endfor %}
             </div>
           </div>
           <div class="help">Struck-through GPUs are excluded by the model card (<code>skip_gpu_arch</code> or a per-GPU config).</div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">Nodes</span>
+        <div>
+          <div class="opts" role="group" aria-label="Nodes">
+          {% if f.node_counts | length > 1 %}
+            {% for n in f.node_counts %}<button class="pill" type="button" data-pick="n" data-value="{{ n }}" aria-pressed="false">{{ n }} × 8 GPU</button>{% endfor %}
+          {% else %}
+            <button class="pill" type="button" aria-pressed="true" disabled style="text-decoration:none;color:var(--sel-ink)">{% if f.opt_in %}2+ nodes{% elif f.nodes > 1 %}{{ f.nodes }} nodes{% else %}Single node{% endif %} × 8 GPU</button>
+          {% endif %}
+          </div>
+          {% if f.node_counts | length > 1 %}<div class="help">A scaling sweep: each node count has its own model cards.</div>{% endif %}
         </div>
       </div>
       {% if f.variants | length > 1 %}
@@ -142,6 +176,20 @@
       </div>
       {% endif %}
       <div class="row">
+        <span class="label">Cluster</span>
+        <div>
+          <div class="opts" role="group" aria-label="Cluster">
+          {% for c, clabel, chelp in clusters %}
+            <button class="pill" type="button" data-pick="c" data-value="{{ c }}" aria-pressed="false">{{ clabel }}</button>
+          {% endfor %}
+          </div>
+          {% for c, clabel, chelp in clusters %}<div class="help" data-c-info="{{ c }}" hidden>{{ chelp }}</div>{% endfor %}
+          {% for v in f.variants %}{% if v.unavailable %}
+          <div class="help" data-v-unavailable="{{ v.index }}" hidden>Not available: {% for c, clabel, chelp in clusters if c in v.unavailable %}<strong>{{ clabel }}</strong> — {{ v.unavailable[c] }}{% if not loop.last %} {% endif %}{% endfor %}</div>
+          {% endif %}{% endfor %}
+        </div>
+      </div>
+      <div class="row">
         <span class="label">Method</span>
         <div>
           <div class="opts" role="group" aria-label="Method">
@@ -151,10 +199,6 @@
           </div>
           {% for m, mlabel, mhelp in methods %}<div class="help" data-m-info="{{ m }}" hidden>{{ mhelp | capitalize }}.</div>{% endfor %}
         </div>
-      </div>
-      <div class="row">
-        <span class="label">Nodes</span>
-        <div class="opts"><button class="pill" type="button" aria-pressed="true" disabled style="text-decoration:none;color:var(--sel-ink)">{% if f.nodes > 1 %}Multi-node · {{ f.nodes }} × 8 GPU (SLURM){% else %}Single-node{% endif %}</button></div>
       </div>
     </div>
 
@@ -166,7 +210,7 @@
           <tbody>
           {% for v in f.variants %}
             <tr>
-              <td>{{ v.label }}{% if v.hf_repo %}<div class="faint mono" style="font-size:12px">{{ v.hf_repo }}</div>{% endif %}</td>
+              <td>{{ v.label }}{% if f.node_counts | length > 1 %} · {{ v.nodes }} node{{ "s" if v.nodes != 1 }}{% endif %}{% if v.hf_repo %}<div class="faint mono" style="font-size:12px">{{ v.hf_repo }}</div>{% endif %}</td>
               {% for sku in snap.skus %}<td class="mark">{% if sku in v.by_sku %}<a href="?v={{ v.index }}&amp;sku={{ sku }}" data-select-v="{{ v.index }}" data-select-sku="{{ sku }}" title="{{ v.by_sku[sku].name }}"><span class="yes">✓</span><span class="sr"> {{ sku }}: </span></a>{% else %}{{ ui.mark(false, sku) }}{% endif %}</td>{% endfor %}
             </tr>
           {% endfor %}
@@ -184,10 +228,17 @@
           The image is built from <a href="{{ gh }}/blob/{{ gh_ref }}/{{ row.run.dockerfile_path }}" class="mono">{{ row.run.dockerfile_path }}</a>
           on <span class="mono">{{ row.image }}</span> (ROCm {{ row.rocm }}).
           {% if row.run.launcher == "slurm_multi" %}The SLURM launcher <span class="mono">{{ row.run.scripts }}</span> runs on the host{% if row.run.args %} with <code>{{ row.run.args }}</code>{% endif %} and starts one container per node.
-          {% else %}<span class="mono">{{ row.run.scripts }}</span> is copied into the container and run{% if row.run.args %} with <code>{{ row.run.args }}</code>{% endif %}.{% endif %}</p>
+          {% else %}<span class="mono">{{ row.run.scripts }}</span> is copied into the container and run{% if row.run.args %} with <code>{{ row.run.args }}</code>{% endif %}.{% endif %}
+          {% if row.deployment.status == "opt-in" %}Across nodes, madengine's <code>primus</code> launcher starts it on every node of the SLURM allocation.{% endif %}</p>
         <h2>Prerequisites</h2>
         <ul>
-          <li>{% if row.nodes > 1 %}{{ row.nodes }} nodes with 8 GPUs each, a SLURM cluster, RDMA networking and a registry all nodes can pull from{% else %}One node with {{ "8" if row.n_gpus == "all" else row.n_gpus }} AMD Instinct GPU{{ "s" if row.n_gpus != "1" }}{% endif %}: {{ row.skus | join(", ") }}.</li>
+          {% if row.deployment.scheduler == "slurm" %}
+          <li>{% if row.deployment.status == "opt-in" %}Two or more nodes{% else %}{{ row.nodes }} node{{ "s" if row.nodes != 1 }}{% endif %} with 8 GPUs each: {{ row.skus | join(", ") }}.</li>
+          <li>For SLURM: a partition you can submit to from a login node{% if row.nodes > 1 or row.deployment.status == "opt-in" %}, RDMA networking between the nodes{% endif %} and a registry every node can pull from.</li>
+          {% else %}
+          <li>One node with {{ "8" if row.n_gpus == "all" else row.n_gpus }} AMD Instinct GPU{{ "s" if row.n_gpus != "1" }}: {{ row.skus | join(", ") }}.</li>
+          {% endif %}
+          {% if row.deployment.k8s == "manual" %}<li>For Kubernetes or bare metal: InfiniBand between the two nodes, storage both mount for the MAD checkout and results, and privileged containers with host networking.</li>{% endif %}
           <li>Docker and the ROCm kernel driver (amdgpu) on the host.</li>
           <li>A Hugging Face token with access to gated models, if the model is gated.</li>
           {% if "primus" in row.dockerfile %}<li>The <code>scripts/Primus</code> submodule checked out.</li>{% endif %}
@@ -197,7 +248,8 @@
           <tr><td>madengine tag</td><td><code>{{ row.name }}</code></td></tr>
           <tr><td>Script</td><td><code>{{ row.run.scripts }}</code></td></tr>
           <tr><td>Arguments</td><td>{% if row.run.args %}<code>{{ row.run.args }}</code>{% else %}<span class="faint">none</span>{% endif %}</td></tr>
-          <tr><td>GPUs</td><td>{{ row.n_gpus }}{% if row.nodes > 1 %} per node × {{ row.nodes }} nodes{% endif %}</td></tr>
+          <tr><td>GPUs</td><td>{{ row.n_gpus }}{% if row.deployment.status == "opt-in" %} per node × 2+ nodes{% elif row.nodes > 1 %} per node × {{ row.nodes }} nodes{% endif %}</td></tr>
+          <tr><td>Cluster</td><td>{% if row.deployment.status == "opt-in" %}SLURM, madengine <code>primus</code> launcher (opt-in: <code>{{ row.deployment.switch }}=1</code>){% elif row.run.launcher == "slurm_multi" %}SLURM, <code>slurm_multi</code> launcher{% else %}Single node{% endif %}{% if row.deployment.k8s == "manual" %}; Kubernetes / bare metal by hand{% endif %}</td></tr>
           <tr><td>Precision</td><td>{{ row.precision or "model default" }}</td></tr>
           {% if row.run.multiple_results %}<tr><td>Results file</td><td><code>{{ row.run.multiple_results }}</code></td></tr>{% endif %}
           {% if row.run.env_vars %}<tr><td>Environment</td><td>{% for k, val in row.run.env_vars.items() %}<code>{{ k }}={{ val }}</code> {% endfor %}</td></tr>{% endif %}
@@ -211,44 +263,72 @@
 {% endblock %}
 {% block scripts %}
 <script>
-  // Hardware × variant × method picker; every combination is pre-rendered, this only shows one.
+  // Nodes × variant × hardware × cluster × method picker. Every combination that has a recipe is
+  // pre-rendered as a .cmd; each choice is resolved in that order against the ones before it.
   (function () {
-    var state = { v: "0", sku: {{ default_sku | tojson }}, m: "madengine" };
+    var ORDER = ["n", "v", "sku", "c", "m"];
+    var state = { n: "", v: "0", sku: {{ default_sku | tojson }}, c: "", m: "madengine" };
     var params = new URLSearchParams(location.search);
-    ["v", "sku", "m"].forEach(function (k) { if (params.get(k)) state[k] = params.get(k); });
-    function supported(sku) {
-      var b = document.querySelector('[data-pick="sku"][data-value="' + sku + '"]');
-      return b && b.dataset.variants.split(" ").indexOf(state.v) >= 0;
+    ORDER.forEach(function (k) { if (params.get(k)) state[k] = params.get(k); });
+    var nodePicker = !!document.querySelector('[data-pick="n"]');
+    function find(sel) {
+      var css = ".cmd";
+      Object.keys(sel).forEach(function (k) { css += "[data-" + k + '="' + sel[k] + '"]'; });
+      return document.querySelector(css);
+    }
+    function resolve() {
+      var fixed = {};
+      ORDER.forEach(function (k) {
+        var probe = Object.assign({}, fixed);
+        probe[k] = state[k];
+        if (!state[k] || !find(probe)) state[k] = find(fixed).dataset[k];
+        fixed[k] = state[k];
+      });
     }
     function apply() {
-      if (!supported(state.sku)) {
-        var first = Array.prototype.find.call(document.querySelectorAll('[data-pick="sku"]'), function (b) { return supported(b.dataset.value); });
-        if (first) state.sku = first.dataset.value;
-      }
-      document.querySelectorAll("[data-pick]").forEach(function (b) {
-        var key = b.dataset.pick;
-        b.setAttribute("aria-pressed", state[key] === b.dataset.value);
-        if (key === "sku") b.disabled = !supported(b.dataset.value);
+      resolve();
+      var fixed = {};
+      ORDER.forEach(function (k) {
+        document.querySelectorAll('[data-pick="' + k + '"]').forEach(function (b) {
+          var probe = Object.assign({}, fixed);
+          probe[k] = b.dataset.value;
+          var ok = !!find(probe);
+          b.setAttribute("aria-pressed", state[k] === b.dataset.value);
+          // Variants of another node count are not "unsupported", just elsewhere: hide them.
+          if (k === "v" && nodePicker) b.hidden = !ok; else b.disabled = !ok;
+        });
+        fixed[k] = state[k];
       });
       document.querySelectorAll(".cmd").forEach(function (c) {
-        c.hidden = !(c.dataset.v === state.v && c.dataset.sku === state.sku && c.dataset.m === state.m);
+        c.hidden = !ORDER.every(function (k) { return c.dataset[k] === state[k]; });
       });
       document.querySelectorAll("[data-v-info]").forEach(function (e) { e.hidden = e.dataset.vInfo !== state.v; });
+      document.querySelectorAll("[data-v-unavailable]").forEach(function (e) { e.hidden = e.dataset.vUnavailable !== state.v; });
+      document.querySelectorAll("[data-c-info]").forEach(function (e) { e.hidden = e.dataset.cInfo !== state.c; });
       document.querySelectorAll("[data-m-info]").forEach(function (e) { e.hidden = e.dataset.mInfo !== state.m; });
       document.querySelectorAll("[data-guide]").forEach(function (e) {
         e.hidden = !(e.dataset.guide === state.v && e.dataset.guideSkus.split(" ").indexOf(state.sku) >= 0);
       });
-      history.replaceState(null, "", "?" + new URLSearchParams(state).toString());
+      var out = new URLSearchParams();
+      ORDER.forEach(function (k) { if (k !== "n" || nodePicker) out.set(k, state[k]); });
+      history.replaceState(null, "", "?" + out.toString());
     }
+    // A variant carries its node count; picking one moves the node choice with it.
+    function pickVariant(v) { state.v = v; state.n = find({ v: v }).dataset.n; }
     document.querySelectorAll("[data-pick]").forEach(function (b) {
-      b.addEventListener("click", function () { state[b.dataset.pick] = b.dataset.value; apply(); });
+      b.addEventListener("click", function () {
+        if (b.dataset.pick === "v") pickVariant(b.dataset.value); else state[b.dataset.pick] = b.dataset.value;
+        apply();
+      });
     });
     document.querySelectorAll("[data-select-v]").forEach(function (a) {
       a.addEventListener("click", function (ev) {
-        ev.preventDefault(); state.v = a.dataset.selectV; state.sku = a.dataset.selectSku; apply();
+        ev.preventDefault(); pickVariant(a.dataset.selectV); state.sku = a.dataset.selectSku; apply();
         window.scrollTo({ top: 0, behavior: "smooth" });
       });
     });
+    // A shared ?v= link without n: take the variant's node count.
+    if (params.get("v") && !params.get("n") && find({ v: state.v })) pickVariant(state.v);
     document.querySelectorAll(".copy").forEach(function (b) {
       b.addEventListener("click", function () {
         var text = Array.prototype.map.call(b.closest(".cmd").querySelectorAll("pre"), function (p) { return p.textContent; }).join("\n\n");

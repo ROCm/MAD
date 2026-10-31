@@ -18,6 +18,9 @@ release: v26.10
 # workload: inference | training | microbenchmark.
 # by_launcher: split the registry by its launcher tag (tags[1]), e.g. Primus Megatron.
 # readme: guide linked from the recipe pages.
+# one_page: one recipe page for the whole registry, one variant per card (node-count sweeps,
+#   per-backend microbenchmarks).
+# k8s: manual -- the readme documents a per-node run outside SLURM (Kubernetes, bare metal).
 frameworks:
   vllm:                      {name: vLLM, workload: inference, readme: benchmark/vllm/README.md}
   vllm_dissag:               {name: vLLM disaggregated P/D, workload: inference, readme: scripts/vllm_dissag/README.MD}
@@ -38,8 +41,8 @@ frameworks:
   huggingface_bert:          {name: PyTorch training, workload: training}
   huggingface_gpt2:          {name: PyTorch training, workload: training}
   ncf:                       {name: PyTorch training, workload: training}
-  large-ep-benchmark:        {name: Large EP microbenchmark, workload: microbenchmark, readme: scripts/large-ep-benchmark/README.md}
-  kvcache_transfer_bench:    {name: KV cache transfer microbenchmark, workload: microbenchmark, readme: scripts/kvcache_transfer_bench/README.md}
+  large-ep-benchmark:        {name: Large EP microbenchmark, workload: microbenchmark, readme: scripts/large-ep-benchmark/README.md, one_page: true}
+  kvcache_transfer_bench:    {name: KV cache transfer microbenchmark, workload: microbenchmark, readme: scripts/kvcache_transfer_bench/README.md, one_page: true, k8s: manual}
 
 # Tags worth a column in the model tables, with the legend shown on the page.
 suite_tags:
@@ -103,7 +106,8 @@ roadmap: []
 #    note: optional one-liner
 
 # QA scope. Statements derivable from the registry (performance coverage, multi-node runs,
-# NIAH, floating :latest images) are added automatically; list the rest here.
+# Kubernetes, opt-in multi-node configs, NIAH, floating :latest images) are added
+# automatically; list the rest here.
 qa:
   covered:
     - area: Serving accuracy (GSM8K via lm-eval, 250 samples)
@@ -122,9 +126,6 @@ qa:
     - area: Per-product hardware validation from the registry
       scope: All models
       note: The GPU columns reflect where madengine will run a model (skip_gpu_arch / config directory), not where it was last tested. See CI coverage.
-    - area: Multi-node JAX models
-      scope: grok1, Llama 3.1 405B, Mixtral 8x22B (MaxText)
-      note: Excluded from discovery unless JAX_MAXTEXT_INCLUDE_MULTINODE=1.
 
 # Architectures with CI. GPU CI runs outside GitHub, so this is maintained by hand.
 # TODO(owners): add one entry per product with GPU CI, e.g.
