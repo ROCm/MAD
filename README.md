@@ -31,6 +31,7 @@ Below are blueprints of supported models along with their documentation.
 | [**GLM-5.2 disaggregated P/D inference**](scripts/GLM-5.2-disagg/README.md) | Two-node prefill/decode disaggregation for GLM-5.2 on MI355X (ATOM + atomesh + mooncake TCP KV transfer, TP8/TP8) | GLM-5.2 (MXFP4) |
 | [**AgentX Case-A conformance trace**](scripts/AgentX_CaseA/README.md) | Engine- and topology-agnostic agentic replay trace (deterministic, matches ExplainX Case-A on 6 axes) + aiperf driver for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
 | [**AgentX Case-B conformance trace**](scripts/AgentX_CaseB/README.md) | Large-context (up to 500K input) agentic replay trace (deterministic, matches customer Case-B on 6 axes) + aiperf driver, for GLM-5.2-class serving benchmarks on MI355X (1-node / 2-node / disagg) | GLM-5.2 (any engine) |
+| [**Shared DI: MoRI GPU-atomic-free on MI355X + ionic**](scripts/shared_DI_gpu_atomics_free_MI355X_ionic/README.md) | MoRI-EP GPU-atomic-free mode (PR #736) for ACS-enabled virtualized MI355X + AMD Pensando AI NIC nodes: how to enable it, EP16 / EP32 test steps, driver versions, and measured GLM-5.3-Flash and Kimi K3 disaggregated serving results (EP8 vs EP16, AgentX up to 750K context) | GLM-5.3-Flash, Kimi K3 (MXFP4) |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 
 ## Table of Contents
