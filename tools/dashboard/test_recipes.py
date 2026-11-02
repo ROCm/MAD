@@ -112,6 +112,17 @@ def test_xpyd_topology_step():
     assert not any("topolog" in s["title"] for s in recipes.madengine_steps(ep, "MI355X") + recipes.docker_steps(ep, "MI355X"))
 
 
+def test_slurm_image_reaches_the_launcher_that_reads_it():
+    # Large-EP's launcher reads DOCKER_IMAGE, which its card pins to a prebuilt image.
+    ep = make_row(name="large-ep-benchmark/b", registry="large-ep-benchmark", launcher="slurm_multi", nodes=4,
+                  args="-N 4 -n 4", scripts="scripts/large-ep-benchmark/run_benchmark.sbatch",
+                  env_vars={"DOCKER_IMAGE": "rocm/pytorch-private:prebuilt", "DOCKER_IMAGE_NAME": "<supply-your-image>"})
+    submit = code(recipes.docker_steps(ep, "MI355X")[-1:])
+    image = "'<registry>/<repo>:large-ep-benchmark-b'"
+    assert f"export DOCKER_IMAGE={image}" in submit and f"export DOCKER_IMAGE_NAME={image}" in submit
+    assert "prebuilt" not in submit
+
+
 def test_recipe_clusters():
     assert list(recipes.recipe(make_row(), "MI355X")) == ["local"]
     assert recipes.unavailable(make_row()) == {"slurm": "single-node model card.",

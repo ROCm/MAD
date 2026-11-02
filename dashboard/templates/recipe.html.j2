@@ -327,6 +327,11 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
       });
     });
+    // A ?sku= link without v (the catalog's GPU links): start on the first variant that supports that GPU.
+    if (params.get("sku") && !params.get("v")) {
+      var hit = (params.get("n") && find({ n: params.get("n"), sku: params.get("sku") })) || find({ sku: params.get("sku") });
+      if (hit) { state.v = hit.dataset.v; state.n = hit.dataset.n; }
+    }
     // A shared ?v= link without n: take the variant's node count.
     if (params.get("v") && !params.get("n") && find({ v: state.v })) pickVariant(state.v);
     document.querySelectorAll(".copy").forEach(function (b) {

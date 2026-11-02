@@ -97,7 +97,7 @@
         <tr class="group"><th colspan="{{ 5 + snap.skus | length }}"><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span><span>{{ fw.workload }}</span></th></tr>
         {% for f in fw.families %}
         {% set href = root ~ "/models/" ~ f.page ~ "/index.html" %}
-        <tr class="item" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
+        <tr class="item" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-sp="{{ f.sku_precisions | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
           <td><div class="with-ico" style="gap:10px">{{ icons.logo(f.name, f.org, 30) }}<div><a href="{{ href }}" class="m-name">{{ f.name }}</a>{% if f.org %}<div class="m-org">{{ f.org }}</div>{% endif %}</div></div></td>
           <td>{% for v in f.variants %}<span class="chip">{{ v.label }}</span>{% endfor %}</td>
           {% for sku in snap.skus %}<td class="mark">{{ ui.support_cell(f.support[sku], sku, href ~ "?sku=" ~ sku) }}</td>{% endfor %}
@@ -117,7 +117,7 @@
       <h3><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span> <span class="faint">{{ fw.workload }}</span></h3>
       <div class="grid">
       {% for f in fw.families %}
-        <a class="tile item" href="{{ root }}/models/{{ f.page }}/index.html" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
+        <a class="tile item" href="{{ root }}/models/{{ f.page }}/index.html" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-sp="{{ f.sku_precisions | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
           <div class="with-ico" style="gap:10px;align-items:flex-start;margin-bottom:8px">
             {{ icons.logo(f.name, f.org, 38) }}
             <div style="min-width:0"><div class="t-name">{{ f.name }}</div><div class="t-org" style="margin-bottom:0">{{ f.org or f.framework }}</div></div>
@@ -174,6 +174,7 @@
         && (!state.gpu || d.skus.split(" ").indexOf(state.gpu) >= 0)
         && (!state.workload || d.workload === state.workload)
         && (!state.precision || d.prec.split(" ").indexOf(state.precision) >= 0)
+        && (!state.gpu || !state.precision || d.sp.split(" ").indexOf(state.gpu + ":" + state.precision) >= 0)
         && (!state.scale || d.scale.split(" ").indexOf(state.scale) >= 0)
         && words.every(function (w) { return d.k.indexOf(w) >= 0; });
     }

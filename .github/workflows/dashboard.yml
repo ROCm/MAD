@@ -35,6 +35,9 @@ on:
 
 permissions:
   contents: read
+  # The Roadmap page queries open issues and PRs through GraphQL.
+  issues: read
+  pull-requests: read
 
 concurrency:
   group: dashboard-${{ github.ref }}

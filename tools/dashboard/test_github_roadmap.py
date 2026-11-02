@@ -64,7 +64,9 @@ def card(name, skip=""):
 
 
 CATALOG = [{"name": "vllm/pyt_vllm_command-a-plus", "hf_repo": "CohereLabs/command-a-plus-05-2026-bf16",
-            "model": "command-a-plus-05-2026-bf16"}]
+            "model": "command-a-plus-05-2026-bf16", "precision": "bf16", "framework": "vLLM"}]
+FP8_ROW = {"name": "vllm/pyt_vllm_command-a-plus_fp8", "hf_repo": "CohereLabs/command-a-plus-05-2026-fp8",
+           "model": "command-a-plus-05-2026-fp8", "precision": "fp8", "framework": "vLLM"}
 
 
 def test_parse_issue_form_and_hf_id():
@@ -99,7 +101,7 @@ def test_status_mapping():
     assert gr.status_of(set(), [pr(2, labels=("blocked",))]) == "blocked"
 
 
-def test_build_roadmap_links_issue_and_pr_and_flags_landed():
+def test_build_roadmap_links_issue_and_pr():
     raw = {
         "issues": [
             issue(10, milestone="v26.11"),
@@ -118,7 +120,7 @@ def test_build_roadmap_links_issue_and_pr_and_flags_landed():
     )
     oncoming, landed = gr.build_roadmap(raw, CATALOG, FRAMEWORKS, "new-model", files)
     by_number = {i["number"]: i for i in oncoming}
-    assert set(by_number) == {10, 21}  # PR 20 folds into issue 10; PR 22 is not on the roadmap
+    assert set(by_number) == {10, 11, 21}  # PR 20 folds into issue 10; PR 22 is not on the roadmap
     planned = by_number[10]
     assert planned["status"] == "in progress" and planned["target"] == "v26.11"
     assert planned["hf_repo"] == "zai-org/GLM-5.3-Flash" and planned["skus"] == ["MI300X", "MI355X"]
@@ -126,8 +128,22 @@ def test_build_roadmap_links_issue_and_pr_and_flags_landed():
     pr_only = by_number[21]
     assert pr_only["source"] == "pr" and pr_only["status"] == "in review"
     assert pr_only["framework"] == "vLLM disaggregated P/D" and pr_only["tags"] == ["vllm_dissag/pyt_vllm_disagg_mimo"]
-    # command-a-plus already landed (bf16 in the catalog; the issue asks for fp8 of the same model).
-    assert [i["number"] for i in landed] == [11]
+    # Issue 11 asks for fp8; the catalog only has bf16 of that model, so it is still oncoming.
+    assert landed == []
+
+
+def test_landed_needs_the_requested_precision_and_framework():
+    fp8 = issue(11, body="HF repo: CohereLabs/command-a-plus-05-2026-fp8")
+    raw = {"issues": [fp8], "prs": []}
+    files = FakeFiles()
+    landed = lambda rows, body=None: gr.build_roadmap(
+        {"issues": [issue(11, body=body)] if body else raw["issues"], "prs": []}, rows, FRAMEWORKS, "new-model", files)[1]
+    assert landed(CATALOG) == []
+    assert [i["number"] for i in landed(CATALOG + [FP8_ROW])] == [11]
+    # Same checkpoint, but only in another framework than the issue's.
+    sglang = FORM_BODY.replace("zai-org/GLM-5.3-Flash", "CohereLabs/command-a-plus-05-2026-fp8").replace("vLLM", "SGLang")
+    assert landed(CATALOG + [FP8_ROW], body=sglang) == []
+    assert [i["number"] for i in landed(CATALOG + [FP8_ROW], body=sglang.replace("SGLang", "vLLM"))] == [11]
 
 
 def test_unlabeled_model_prs():

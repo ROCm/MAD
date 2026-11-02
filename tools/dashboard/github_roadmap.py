@@ -220,6 +220,25 @@ def family_key(text):
 # --------------------------------------------------------------------------- roadmap
 
 
+def is_landed(item, catalog_rows):
+    """True when one catalog card already is what the item asks for: same model family, the
+    requested precision (when the checkpoint names one) and a requested framework (when known)."""
+    if not item["hf_repo"]:
+        return False
+    family = family_key(item["hf_repo"])
+    precision = collect.precision_of({"name": item["hf_repo"], "args": f"--model_repo {item['hf_repo']}"})
+    frameworks = {f.strip().lower() for f in item["framework"].split(",")} - {"", "–"}
+    for row in catalog_rows:
+        if family not in {family_key(row["model"]), family_key(row["hf_repo"] or row["model"])}:
+            continue
+        if precision and row["precision"] != precision:
+            continue
+        if frameworks and row["framework"].lower() not in frameworks:
+            continue
+        return True
+    return False
+
+
 def short_list(names, limit=4):
     return ", ".join(names[:limit]) + (f" +{len(names) - limit} more" if len(names) > limit else "")
 
@@ -250,8 +269,6 @@ def build_roadmap(raw, catalog_rows, frameworks, label, files):
         for ref in pr["closingIssuesReferences"]["nodes"]:
             prs_by_issue.setdefault(ref["number"], []).append(pr)
     known_tags = {r["name"] for r in catalog_rows}
-    known_families = {family_key(r["hf_repo"]) for r in catalog_rows if r["hf_repo"]}
-    known_families |= {family_key(r["model"]) for r in catalog_rows}
 
     items, linked = [], set()
     for issue in raw["issues"]:
@@ -289,8 +306,7 @@ def build_roadmap(raw, catalog_rows, frameworks, label, files):
 
     oncoming, landed = [], []
     for item in items:
-        family_landed = item["hf_repo"] and family_key(item["hf_repo"]) in known_families
-        (landed if family_landed else oncoming).append(item)
+        (landed if is_landed(item, catalog_rows) else oncoming).append(item)
     # By status, most recently updated first within each.
     order = {"in review": 0, "in progress": 1, "planned": 2, "blocked": 3}
     oncoming.sort(key=lambda i: i["updated"], reverse=True)

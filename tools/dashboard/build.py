@@ -175,6 +175,8 @@ def catalog(snapshot):
             "precisions": sorted({r["precision"].upper() for r in rows if r["precision"]}),
             "suites": sorted({s for r in rows for s in r["suites"]}),
             "skus": skus,
+            # GPU/precision pairs one card offers, so the two filters agree on a single configuration.
+            "sku_precisions": sorted({f"{s}:{r['precision'].upper()}" for r in rows if r["precision"] for s in r["skus"]}),
             "sku_label": sku_label(skus, snapshot["skus"]),
             "gpus": ("8 GPU" if n_gpus == ["all"] else " / ".join(n_gpus) + " GPU") + ("/node" if node_counts[-1] > 1 else ""),
             "nodes": node_counts[-1],

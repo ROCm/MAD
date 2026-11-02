@@ -251,9 +251,11 @@ def slurm_steps(row, sku, ref=None, repo=DEFAULT_REPO):
     # SLURM_SUBMIT_DIR), naming the script relative to it.
     submit_dir = os.path.join("scripts", row["registry"])
     script = os.path.relpath(run["scripts"], submit_dir)
-    # The launchers start one container per node from DOCKER_IMAGE_NAME.
-    exports = [f"export DOCKER_IMAGE_NAME={shlex.quote(image)}"]
-    exports += [f"export {k}={shlex.quote(v)}" for k, v in run["env_vars"].items() if k != "DOCKER_IMAGE_NAME"]
+    # The launchers start one container per node from DOCKER_IMAGE_NAME, except Large-EP's, which
+    # reads DOCKER_IMAGE and has the card pin it to a prebuilt image.
+    image_vars = ["DOCKER_IMAGE_NAME"] + (["DOCKER_IMAGE"] if "DOCKER_IMAGE" in run["env_vars"] else [])
+    exports = [f"export {k}={shlex.quote(image)}" for k in image_vars]
+    exports += [f"export {k}={shlex.quote(v)}" for k, v in run["env_vars"].items() if k not in image_vars]
     exports.append(f"export MAD_MODEL_NAME={shlex.quote(row['name'])}")
     if run["multiple_results"]:
         exports.append(f"export MAD_OUTPUT_CSV={shlex.quote(run['multiple_results'])}")
