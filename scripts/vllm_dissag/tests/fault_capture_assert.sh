@@ -53,13 +53,13 @@ _has "${_wpids:-none}" "${_wpids:-x}" "the script recorded its watcher's pid"
 
 echo ""
 echo "=== CONTAINER_ENV ==="
-LINES="$(sed -n '/^_EXTRA_ENV=""$/,/^for _v in \${CONTAINER_ENV/p' "$DIR/run_xPyD_models.slurm")"
+LINES="$(sed -n '/^_EXTRA_ENV=""$/,/^for _v in \${CONTAINER_ENV/p' "$DIR/node.sh")"
 _env() { env -i CONTAINER_ENV="$1" bash -c "$LINES"'
 echo "[$_EXTRA_ENV]"'; }
 _has "$(_env 'HSA_NO_SCRATCH_RECLAIM,ROCM_AITER_FA')" "[ -e HSA_NO_SCRATCH_RECLAIM -e ROCM_AITER_FA]" "comma-separated names become bare -e NAME"
 _has "$(_env 'A B,C')" "[ -e A -e B -e C]" "spaces and commas both separate"
 _has "$(_env '')" "[]" "unset: nothing added"
-_has "$(grep -c '^    \${_EXTRA_ENV} \\$' "$DIR/run_xPyD_models.slurm")" "1" "docker run carries the extra -e flags"
+_has "$(grep -c '^    \${_EXTRA_ENV} \\$' "$DIR/node.sh")" "1" "docker run carries the extra -e flags"
 
 echo "======================================================"
 echo "  fault_capture_assert: ${pass} passed, ${fail} failed"

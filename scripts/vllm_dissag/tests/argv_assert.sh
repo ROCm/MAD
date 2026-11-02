@@ -12,6 +12,9 @@
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SLURM="$DIR/run_xPyD_models.slurm"
+# What runs on each node is node.sh, which the launcher starts with srun; checks of
+# what reaches the container read both.
+NODE="$DIR/node.sh"
 pass=0; fail=0
 
 # emit argv for a cell at a given NODE_RANK (xP=1 yD=1: rank 0 prefill, rank 1 decode)
@@ -252,7 +255,7 @@ done
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.
-S="$(cat "$SLURM")"
+S="$(cat "$SLURM" "$NODE")"
 _has "$S" 'CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"' "slurm sources connector .env"
 _has "$S" '${CONNECTOR_ENV_ARGS}' "slurm forwards CONNECTOR_ENV_ARGS in docker run"
 for cf in moriio rixl; do
@@ -297,8 +300,8 @@ print("[" + ",".join(sorted(optin)) + "]")
 PY
 )"
 _has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
-_has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
-_has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+_has "$(cat "$SLURM" "$NODE")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
+_has "$(cat "$SLURM" "$NODE")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
 
 echo ""
 echo "=== moriio + wideEP (Kimi-K3-MXFP4-MI355X, native MXFP4, 2P/2D TP1xDP16) ==="
@@ -314,7 +317,7 @@ _count  "$M5" "--compilation-config" 1 "MI355X: exactly one --compilation-config
 M5D="$(_argv_rank moriio 1 mori Kimi-K3-MXFP4-MI355X 2 2 2)"
 _has    "$M5D" '"cudagraph_mode":"PIECEWISE"' "MI355X decode: cudagraph PIECEWISE"
 _has    "$M5D" "mori_low_latency" "MI355X decode: all2all = mori_low_latency"
-_has "$(cat "$SLURM")" 'CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"' "slurm: MoRI JIT arch follows the detected GPU"
+_has "$(cat "$SLURM" "$NODE")" 'CONNECTOR_ENV_ARGS+=" -e MORI_GPU_ARCHS=${MAD_GPU_ARCH}"' "slurm: MoRI JIT arch follows the detected GPU"
 
 echo ""
 echo "=== GPU-arch gate (cluster_require_gpu_arch) ==="
@@ -331,8 +334,8 @@ _gate gfx950 gfx942 && { echo "  FAIL  gfx942 recipe on gfx950 was allowed"; fai
 _gate gfx950 "gfx942,gfx950" && { echo "  PASS  multi-arch recipe on gfx950 runs"; pass=$((pass+1)); } || { echo "  FAIL  multi-arch recipe on gfx950 refused"; fail=$((fail+1)); }
 _gate gfx950 "" && { echo "  PASS  unrestricted recipe runs anywhere"; pass=$((pass+1)); } || { echo "  FAIL  unrestricted recipe refused"; fail=$((fail+1)); }
 _gate gfx950 gfx942 GPU_ARCH_CHECK=0 && { echo "  PASS  GPU_ARCH_CHECK=0 bypasses"; pass=$((pass+1)); } || { echo "  FAIL  GPU_ARCH_CHECK=0 did not bypass"; fail=$((fail+1)); }
-_has "$(cat "$SLURM")" 'cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}"' "slurm gates on the recipe's GPU_ARCHS"
-_has "$(cat "$SLURM")" '${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=' "slurm forwards the detected arch for the perf CSV"
+_has "$(cat "$SLURM" "$NODE")" 'cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}"' "slurm gates on the recipe's GPU_ARCHS"
+_has "$(cat "$SLURM" "$NODE")" '${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=' "slurm forwards the detected arch for the perf CSV"
 if python3 "$DIR/../common/check_gpu_arch_declarations.py" "$DIR/../.." >/dev/null; then
   echo "  PASS  card skip_gpu_arch agrees with recipe GPU_ARCHS"; pass=$((pass+1))
 else
@@ -499,7 +502,7 @@ _has "$T1" '"post_batch_size":-1' "set: post_batch_size accepts -1"
 _has "$(_argv_tune 0 VLLM_MORIIO_QP_PER_TRANSFER=2)" '"qp_per_transfer":2' "set: prefill gets it too"
 _hasnot "$(cat "$DIR/connectors/moriio.env")" "VLLM_MORIIO_QP_PER_TRANSFER=" "moriio.env no longer sets a value the connector ignores"
 _hasnot "$(cat "$DIR/models.yaml")" "VLLM_MORIIO_" "no recipe sets the ignored VLLM_MORIIO_* tuning variables"
-_has "$(cat "$DIR/run_xPyD_models.slurm")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=' "slurm forwards VLLM_MORIIO_POST_BATCH_SIZE"
+_has "$(cat "$DIR/run_xPyD_models.slurm" "$DIR/node.sh")" '${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=' "slurm forwards VLLM_MORIIO_POST_BATCH_SIZE"
 
 echo ""
 echo "=== every multi-node card tells madengine where its results are ==="

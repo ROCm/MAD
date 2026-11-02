@@ -56,16 +56,15 @@ _has "$O" "rc=0" "no GPUs readable: exits cleanly"
 _has "took<5=$([ $(( $(date +%s) - _t0 )) -lt 5 ] && echo yes || echo no)" "took<5=yes" "it stops after GPU_MEM_TRACE_SECS"
 
 echo ""
-echo "=== run_xPyD_models.slurm ==="
-S="$(cat "$DIR/run_xPyD_models.slurm")"
+echo "=== node.sh (what run_xPyD_models.slurm runs on each node) ==="
+S="$(cat "$DIR/node.sh")"
 _has "$S" 'bash "$NIXL_REPO_DIR/gpu_mem_trace.sh" "$_trace_out" </dev/null >/dev/null 2>&1 &' \
      "the tracer runs in the background, off the job's output"
 _has "$S" 'if [ "${GPU_MEM_TRACE:-0}" = "1" ]' "off unless GPU_MEM_TRACE=1"
 _has "$(sed -n '/^wait "\$_docker_pid"$/,/^exit "\$_docker_rc"$/p' <<<"$S")" 'kill "$_trace_pid"' \
      "it is stopped when the container ends"
 _has "$(sed -n '/^_stop_container() {$/,/^}$/p' <<<"$S")" 'kill "$_trace_pid"' "it is stopped when the job is cancelled"
-_body="$(sed -n '/_trace_pid="";$/,/^docker run --rm/p' <<<"$S")"
-_hasnot "$_body" "'" "no single quote inside the single-quoted srun body"
+_has "$(cat "$DIR/run_xPyD_models.slurm")" 'bash "${SCRIPT_DIR}/node.sh"' "the launcher runs node.sh on each node"
 [ "$(sed -n '/_trace_pid="";$/=' <<<"$S" | head -n 1)" -lt "$(sed -n '/^docker run --rm/=' <<<"$S" | head -n 1)" ] \
     && { printf "  PASS  %s\n" "it starts before the container"; pass=$((pass+1)); } \
     || { printf "  FAIL  %s\n" "it starts before the container"; fail=$((fail+1)); }

@@ -51,8 +51,9 @@ _has "$(diff <(_func "$D") <(_func "$C") >/dev/null && echo same || echo differs
 _has "$(awk '/^    _clear_stale_jit_locks$/{c=NR} /^    _check_gpus_clean$/{g=NR} END{print (c && g && c<g) ? "first" : "later"}' "$D")" "first" \
      "vllm_disagg.sh clears locks before anything else starts"
 for B in "$DIR/run_xPyD_models.slurm" "$DIR/../vllm_multinode/run_multinode.slurm"; do
-    _hasnot "$(grep -v '^ *#' "$B")" "rm -rf \"\$_l\"" "$(basename "$B"): no host-side removal (it cannot delete root's files)"
-    _has "$(grep -c 'JIT_CACHE_HOST:+-e JIT_CACHE_HOST' "$B")" "1" "$(basename "$B"): passes JIT_CACHE_HOST into the container"
+    N="$(dirname "$B")/node.sh"   # what the launcher runs on each node
+    _hasnot "$(grep -hv '^ *#' "$B" "$N")" "rm -rf \"\$_l\"" "$(basename "$B"): no host-side removal (it cannot delete root's files)"
+    _has "$(cat "$B" "$N" | grep -c 'JIT_CACHE_HOST:+-e JIT_CACHE_HOST')" "1" "$(basename "$B"): passes JIT_CACHE_HOST into the container"
 done
 
 echo "======================================================"
