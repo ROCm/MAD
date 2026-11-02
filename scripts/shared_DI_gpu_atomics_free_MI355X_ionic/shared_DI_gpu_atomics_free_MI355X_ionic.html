@@ -46,6 +46,7 @@
 <li><b>GLM-5.3-Flash-MXFP4 is prefill-bound:</b> scale it with independent EP8 instances, not wider EP. Per-node 2P/2D delivers 172K tok/s at AgentX 512k c64 (TTFT p50 14 s), 1.54× 1P/1D and 1.86× EP16 2P/2D. EP16 is 7–28 % slower than 1P/1D everywhere, with KV usage only 23–30 %.</li>
 <li><b>Kimi K3 MXFP4: disaggregation is what makes long-context agents interactive.</b> One TP8 + DCP8 node (the published recipe) serves every context length but decodes at 0.3–0.6 s per token from 512k up. Every disaggregated layout stays at 9–35 ms. TEP8 1P/1D (TP8 attention + EP8, 16 GPUs) is the best expert-parallel recipe at 256k / 512k and at 750k up to c16.</li>
 <li><b>EP16 earns its place only where context × concurrency outgrows an EP8 decode node.</b> At 750k c32 TEP8's TTFT p50 reaches 23 minutes. On 128K-in / 8K-out at c64 TEP8 collapses to 126 tok/s with 186 ms TPOT, while EP16 keeps 51–56 ms TPOT at 468–517 tok/s (3.7–4×). EP16 is also the only DP-attention layout that can start at 800K context. But one TP8 + DCP8 node (35.2M-token DCP-sharded cache) still beats EP16 per GPU at every point measured.</li>
+<li><b>EP16 over MoRI-EP (atomic-free) is correct at the model level for both models</b> once the configuration rules in sections 3.2 and 8 are followed. GLM-5.3-Flash EP16 2P/2D scores GSM8K in the same 0.887–0.913 band as every EP8 layout and completed its full static and AgentX matrix (prefill batch 4096, GPU util 0.4 / 0.35 with a 16 GiB MoRI heap, <code>--dp-sync-interval 1</code>). Kimi K3 EP16 2P/2D scores 0.938–0.948 (single-node reference 0.940) and serves 750K-token contexts (8 GiB heap, util 0.60). The caveats are settings and throughput, not accuracy.</li>
 <li><b>EP16 stability:</b> its prefill deadlocked under long-context load (5 occurrences; GPUs spinning, workers idle). Turning off the ionic CCQE path (<code>MORI_DISABLE_IONIC_CCQE=1</code>) removed it in a direct replica at the same settings. Halving the prefill batch to 4096 is a second workaround (≈ 12 % throughput cost).</li>
 </ul>
 </div>
@@ -65,7 +66,15 @@
 <h2 id="mori">3. MoRI GPU-atomic-free (PR #736)</h2>
 <h3>3.1 What changes</h3>
 <ul>
-<li>Upstream MoRI-EP's inter-node dispatch / combine kernels signal completion to remote GPUs with <b>RDMA atomic operations</b> on counters in GPU memory. PR #736 (<code>amirakb89/mori</code>) adds a mode that signals with <b>ordinary RDMA WRITEs</b> instead, selected at runtime by <code>MORI_EP_DISABLE_RDMA_ATOMICS=1</code> (default off = atomics).</li>
+<li>Upstream MoRI-EP's inter-node dispatch / combine kernels signal completion to remote GPUs with <b>RDMA atomic operations</b> on counters in GPU memory. PR #736 (<code>amirakb89/mori</code>, branch <code>feat/ep-v1-rdma-atomic-free</code>) adds a mode that signals with <b>RDMA WRITE chunk flags</b> instead, selected at runtime by <code>MORI_EP_DISABLE_RDMA_ATOMICS=1</code> (default off = atomics).</li>
+<li><b>Prerequisites (needed by both modes on hosts without a GPU peer-memory client):</b>
+  <ul>
+  <li><a href="https://github.com/ROCm/mori/pull/649">ROCm/mori#649</a> registers the Ionic CQ / SQ / RQ rings and the atomic buffer through dma-buf (merged as <code>15dfb3e0</code>). Without it MoRI-EP cannot create its Ionic queues.</li>
+  <li><a href="https://github.com/ROCm/mori/pull/591">ROCm/mori#591</a> adds <code>MORI_ENABLE_RAIL_ONLY=1</code>, which keeps every RDMA QP on its own rail (ionic_N only reaches ionic_N on other nodes, no cross-rail path).</li>
+  <li>An ionic host driver with dma-buf support (26.08.18 in this work) and the matching libionic GDA userspace provider inside the container (exports <code>ionic_dv_pd_set_dmabuf_alloc</code>).</li>
+  </ul>
+  All three PRs (#591, #649, #736) are in <code>ROCm/mori</code> main at <code>6731ee1</code>.</li>
+<li><b>Alternative for the atomic build:</b> NIC firmware <code>1.117.5-a-196</code> plus PCIe ACS disabled makes RDMA atomics complete under KVM (the original firmware 5a-77 fails even with ACS off). That needs a hypervisor change; the atomic-free mode needs neither firmware nor ACS changes.</li>
 <li>Why it matters here: with ACS on, NIC→GPU traffic goes through the root complex / IOMMU / VM passthrough. Posted writes survive that path; PCIe AtomicOps do not, so a kernel waiting on an atomically updated counter spins forever. Measured on 13 nodes without exception: on every ACS-off node atomics complete; on every ACS-on node they hang.</li>
 <li>Cost: none measurable. On ACS-off nodes atomic-free dispatch was ~2 % <i>faster</i> than atomic at 4096 tokens; combine identical (table 3.3).</li>
 </ul>
@@ -194,6 +203,7 @@ MORI_STRESS_ROUNDS=500000 python $S --cmd stress --kernel-type v1 --max-tokens 4
 <p><b>Reading:</b> EP16 is a capacity tier. Its value grows with context length × concurrent sessions, because its decode pool holds 4–6× what an EP8 decode node holds. On this stack its prefill is limited to TP4 attention per DP rank: the two routes to TP8 prefill (DP2×TP8 per leg; TP8 prefill servers feeding an EP16 decode group) are both blocked in MoRIIO. So EP16's TTFT stays high, and the single TP8 + DCP8 node (35.2M-token DCP-sharded cache) remains the per-GPU leader in every cell measured. EP16 becomes the scale-out choice for agentic long-context fleets once a TP8 prefill can feed it.</p>
 
 <h2 id="issues">8. Open issues and upstream asks</h2>
+<p>Items 1–3 were found under vLLM disaggregated serving load (long contexts, CUDA graphs, high concurrency), beyond the reference MoRI-EP report, which covers the microbenchmarks (bench, accuracy, stress), MoRI-IO and a correctness-under-load check of DeepSeek-R1 EP16.</p>
 <table>
 <tr><th>#</th><th>Issue</th><th>Status</th></tr>
 <tr><td>1</td><td>MoRI-EP InterNode prefill deadlock under load with ionic CCQE on (GPUs spinning)</td><td class="warn">Workaround <code>MORI_DISABLE_IONIC_CCQE=1</code>; report to MoRI with py-spy dumps</td></tr>
