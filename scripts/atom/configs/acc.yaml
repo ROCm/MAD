@@ -13,7 +13,7 @@
     - framework: lm_eval
       task: gsm8k
       apply_chat_template: false
-      num_fewshot: 0
+      num_fewshot: 5
       base_url: http://localhost:8000/v1/completions
       lm_eval_model: local-completions
       num_concurrent: 64
