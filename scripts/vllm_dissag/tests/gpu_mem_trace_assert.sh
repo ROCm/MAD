@@ -61,9 +61,11 @@ S="$(cat "$DIR/node.sh")"
 _has "$S" 'bash "$NIXL_REPO_DIR/gpu_mem_trace.sh" "$_trace_out" </dev/null >/dev/null 2>&1 &' \
      "the tracer runs in the background, off the job's output"
 _has "$S" 'if [ "${GPU_MEM_TRACE:-0}" = "1" ]' "off unless GPU_MEM_TRACE=1"
-_has "$(sed -n '/^wait "\$_docker_pid"$/,/^exit "\$_docker_rc"$/p' <<<"$S")" 'kill "$_trace_pid"' \
-     "it is stopped when the container ends"
-_has "$(sed -n '/^_stop_container() {$/,/^}$/p' <<<"$S")" 'kill "$_trace_pid"' "it is stopped when the job is cancelled"
+# Stopped through node_run_container's hook, which runs when the container ends and
+# when the task is signalled (behaviour checked in common/tests/node_lib_assert.sh).
+_has "$(sed -n '/^_stop_trace()/p' <<<"$S")" 'kill "$_trace_pid"' "_stop_trace stops the sampler"
+_has "$S" 'node_run_container _node_docker_run _stop_trace' \
+     "it is stopped when the container ends or the job is cancelled"
 _has "$(cat "$DIR/run_xPyD_models.slurm")" 'bash "${SCRIPT_DIR}/node.sh"' "the launcher runs node.sh on each node"
 [ "$(sed -n '/_trace_pid="";$/=' <<<"$S" | head -n 1)" -lt "$(sed -n '/^docker run --rm/=' <<<"$S" | head -n 1)" ] \
     && { printf "  PASS  %s\n" "it starts before the container"; pass=$((pass+1)); } \

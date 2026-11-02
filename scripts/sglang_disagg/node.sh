@@ -3,31 +3,11 @@
 # (`srun ... bash node.sh`), with SLURM_PROCID as the node rank and the launcher's
 # exported settings as its environment. Starts this node's container and exits
 # with the container's status.
+. "$(dirname "${BASH_SOURCE[0]}")/../common/node/node_lib.sh"
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
-# Stop this node container when the task is signalled. scancel sends SIGTERM here, but
-# the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
-# SIGTERM, so a cancelled job left its container running and holding every GPU: one
-# cancelled job left its container holding 1535 GB on a node. docker run
-# runs in the background so the trap fires as soon as the signal lands.
-_stop_container() {
-    docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
-    docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
-}
-trap "_stop_container; exit 143" TERM INT
-# Site storage, bound at the same path inside: shared storage, local NVMe, and
-# MODEL_DIR when it is outside both. All three come from cluster.sh or the caller.
-# Only paths present on this node: docker creates a missing bind source as an empty
-# directory, which would shadow the weights. Evaluated here, on each node.
-_SITE_MOUNTS=""
-for _p in ${SHARED_MOUNT:-/shared_inference} ${NVME_ROOT:-/mnt/m2m_nobackup} ${MODEL_DIR:-}; do
-    [ -d "$_p" ] || continue
-    _covered=0
-    for _m in $_SITE_MOUNTS; do case "$_p/" in "${_m%%:*}"/*) _covered=1 ;; esac; done
-    [ "$_covered" = 1 ] || _SITE_MOUNTS="$_SITE_MOUNTS $_p:$_p"
-done
-_SITE_MOUNTS="$(for _m in $_SITE_MOUNTS; do printf -- " -v %s" "$_m"; done)"
-echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
+node_site_mounts
+_node_docker_run() {
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -103,9 +83,8 @@ docker run --rm \
         set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
-    " &
-_docker_pid=$!
-wait "$_docker_pid"
-_docker_rc=$?
-trap - TERM INT
-exit "$_docker_rc"
+    "
+}
+
+# Stops and removes the container on cancel; exits with its status (node_lib.sh).
+node_run_container _node_docker_run

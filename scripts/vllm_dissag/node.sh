@@ -3,6 +3,7 @@
 # (`srun ... bash node.sh`), with SLURM_PROCID as the node rank and the launcher's
 # exported settings as its environment. Starts this node's container and exits
 # with the container's status.
+. "$(dirname "${BASH_SOURCE[0]}")/../common/node/node_lib.sh"
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
@@ -15,78 +16,17 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
 
-# --- Persistent JIT cache mount ---
-# The image points AITER_JIT_DIR/TRITON_CACHE_DIR/VLLM_CACHE_ROOT/COMGR_CACHE_DIR at
-# /opt/vllm_cache. Mount a host dir there so AITER CK kernels compile ONCE and are reused
-# across runs. Cold compile is ~15 min for the DeepSeek MoE/FP8 GEMM kernel set; a warm
-# boot is ~1 min. Keyed by image ID so a new image starts a fresh cache and does not reuse
-# stale-ABI shared objects. Host dir on local NVMe. Override JIT_CACHE_HOST, or set
-# JIT_CACHE_PERSIST=0 to disable and fall back to the image empty in-container cache.
-if [ "${JIT_CACHE_PERSIST:-1}" = "1" ]; then
-    _IMG_RAW=$(docker image inspect --format "{{.Id}}" "$DOCKER_IMAGE_NAME" 2>/dev/null);
-    _IMG_KEY=$(printf "%s" "$_IMG_RAW" | tr -cd "a-f0-9" | cut -c1-12);
-    _IMG_KEY="${_IMG_KEY:-noimg}";
-    _JIT_BASE="${JIT_CACHE_HOST:-${NVME_ROOT:-/mnt/m2m_nobackup}/${USER}/vllm_jit_cache/${_IMG_KEY}}";
-    # TP-within-EP (EP_TP_SIZE>1): prefill/decode compile different AITER kernel variants — separate caches.
-    if (( ${EP_TP_SIZE:-1} > 1 )) && [ "${JIT_CACHE_SPLIT_ROLE:-1}" = "1" ]; then
-        if [ "${SLURM_PROCID}" -lt "${xP}" ]; then
-            _JIT_ROLE="prefill";
-        else
-            _JIT_ROLE="decode";
-        fi
-        _JIT_CACHE_HOST="${_JIT_BASE}/${_JIT_ROLE}";
-    else
-        _JIT_CACHE_HOST="${_JIT_BASE}";
-    fi
-    mkdir -p "$_JIT_CACHE_HOST"/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
-    # Inline, not cluster_mark_dir: node.sh runs in a separate shell on
-    # the compute node where cluster.sh was never sourced, so the function is not
-    # defined here and would fail with "command not found" once per node.
-    if [ ! -e "$_JIT_CACHE_HOST/README.ci" ]; then
-        printf "Signature: 8a477f597d28d172789f06886806bc55\n# Cache directory created by MAD CI.\n" \
-            > "$_JIT_CACHE_HOST/CACHEDIR.TAG" 2>/dev/null || true
-        printf "%s\n%s\n\n%s\n" \
-            "What: JIT/Triton/AITER kernel cache for one docker image" \
-            "Written by: MAD CI disagg launcher" \
-            "Safe to delete when no job is running; it is rebuilt on demand." \
-            > "$_JIT_CACHE_HOST/README.ci" 2>/dev/null || true
-    fi
-    # Stale AITER build locks in this cache are cleared inside the container, which
-    # owns them (_clear_stale_jit_locks); JIT_CACHE_HOST / JIT_LOCK_STALE_MIN go in.
-    _JIT_CACHE_MOUNT="-v ${_JIT_CACHE_HOST}:/opt/vllm_cache";
-    echo "[jit-cache] persistent image ${_IMG_KEY}: ${_JIT_CACHE_HOST} to /opt/vllm_cache";
-else
-    _JIT_CACHE_MOUNT="";
+# --- Persistent JIT cache (node_jit_cache) ---
+# TP-within-EP (EP_TP_SIZE>1): prefill and decode compile different AITER kernel
+# variants, so they get separate caches.
+_JIT_ROLE=""
+if (( ${EP_TP_SIZE:-1} > 1 )) && [ "${JIT_CACHE_SPLIT_ROLE:-1}" = "1" ]; then
+    if [ "${SLURM_PROCID}" -lt "${xP}" ]; then _JIT_ROLE="prefill"; else _JIT_ROLE="decode"; fi
 fi
+node_jit_cache disagg "$_JIT_ROLE"
 
-# --- Build host RDMA library mounts ---
-_RDMA_MOUNTS=""
-_LIBDIR=/usr/lib/x86_64-linux-gnu
-
-# -f, not -e: docker creates a DIRECTORY at a bind-mount source that does not
-# exist, so on a node lacking one of these libs the first run leaves an empty
-# directory behind and every later run mounts a directory over a file inside the
-# image, which docker rejects ("not a directory"). Self-propagating and per-node,
-# so it presents as an intermittent failure. Full note in
-# scripts/vllm_multinode/run_multinode.slurm.
-for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
-done
-for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-done
-
-for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
-    for _vlib in $_LIBDIR/${_pattern}; do
-        # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
-        # matching one of these globs, and docker then bind-mounts a directory onto a
-        # file target -> "not a directory" -> container create exit 125.
-        [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-    done
-done
-
-[ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
-[ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+# --- Host RDMA library mounts (node_rdma_mounts) ---
+node_rdma_mounts
 echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="${AGENTIC_CONFIG/#$HOME/$HOME}"
@@ -104,30 +44,9 @@ _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
 if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
 echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
-# Stop this node container when the task is signalled. scancel sends SIGTERM here, but
-# the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
-# SIGTERM, so a cancelled job left its container running and holding every GPU: one
-# cancelled job left its container holding 1535 GB on a node. docker run
-# runs in the background so the trap fires as soon as the signal lands.
-_stop_container() {
-    [ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null;
-    docker stop -t 10 "$DOCKER_CONT_NAME" >/dev/null 2>&1
-    docker rm -f "$DOCKER_CONT_NAME" >/dev/null 2>&1
-}
-trap "_stop_container; exit 143" TERM INT
-# Site storage, bound at the same path inside: shared storage, local NVMe, and
-# MODEL_DIR when it is outside both. All three come from cluster.sh or the caller.
-# Only paths present on this node: docker creates a missing bind source as an empty
-# directory, which would shadow the weights. Evaluated here, on each node.
-_SITE_MOUNTS=""
-for _p in ${SHARED_MOUNT:-/shared_inference} ${NVME_ROOT:-/mnt/m2m_nobackup} ${MODEL_DIR:-}; do
-    [ -d "$_p" ] || continue
-    _covered=0
-    for _m in $_SITE_MOUNTS; do case "$_p/" in "${_m%%:*}"/*) _covered=1 ;; esac; done
-    [ "$_covered" = 1 ] || _SITE_MOUNTS="$_SITE_MOUNTS $_p:$_p"
-done
-_SITE_MOUNTS="$(for _m in $_SITE_MOUNTS; do printf -- " -v %s" "$_m"; done)"
-echo "[mounts] site storage:${_SITE_MOUNTS:- none}"
+# Stops the GPU memory sampler (below) when the container ends or the task is signalled.
+_stop_trace() { [ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null; }
+node_site_mounts
 # Any further variables the run needs inside the container, by name: CONTAINER_ENV is a
 # comma- or space-separated list of names, each passed as a bare `-e NAME`, so docker
 # takes the value from this environment (values with spaces or quotes pass unchanged).
@@ -148,6 +67,7 @@ if [ "${GPU_MEM_TRACE:-0}" = "1" ] && [ -f "$NIXL_REPO_DIR/gpu_mem_trace.sh" ]; 
     _trace_pid=$!;
     echo "[gpu-mem-trace] $(hostname): GPU memory holders sampled into $_trace_out";
 fi
+_node_docker_run() {
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -300,10 +220,8 @@ docker run --rm \
         set -o pipefail
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
-    " &
-_docker_pid=$!
-wait "$_docker_pid"
-_docker_rc=$?
-[ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null;
-trap - TERM INT
-exit "$_docker_rc"
+    "
+}
+
+# Stops and removes the container on cancel; exits with its status (node_lib.sh).
+node_run_container _node_docker_run _stop_trace
