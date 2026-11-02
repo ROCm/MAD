@@ -14,6 +14,7 @@
 #   MODEL_PATH            path the server was launched with (required)
 #   MODEL                 served model name aiperf sends (auto-resolved if unset)
 #   AGENTIC_PORT          endpoint port (default 2322 for sglang router)
+#   AGENTIC_TRAFFIC_PORT  port aiperf sends requests to (default AGENTIC_PORT)
 #   AGENTIC_CONC          session-tree concurrency (default 16)
 #   DURATION              measurement window seconds (default 120; scenario min 900)
 #   RESULT_DIR            output dir (default /run_logs/$SLURM_JOB_ID)
@@ -371,7 +372,7 @@ build_replay_cmd() {
     export AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800
 
     REPLAY_CMD="$AIPERF_CLI profile --scenario ${AGENTIC_SCENARIO:-inferencex-agentx-mvp}"
-    REPLAY_CMD+=" --url http://localhost:${AGENTIC_PORT}"
+    REPLAY_CMD+=" --url http://localhost:${AGENTIC_TRAFFIC_PORT:-$AGENTIC_PORT}"
     REPLAY_CMD+=" --endpoint /v1/chat/completions --endpoint-type chat --streaming"
     REPLAY_CMD+=" --model ${MODEL:-auto}"
     REPLAY_CMD+=" --concurrency $conc"

@@ -261,8 +261,10 @@ if [ "$NODE_RANK" -eq 0 ]; then
     # shared harness (scripts/common/agentic_lib.sh) gates readiness + served-model
     # resolution on GET /v1/models, so start a tiny side-port shim that answers
     # /v1/models (gated on the router's /health) and stream-proxies everything else
-    # to the router, then point AGENTIC_PORT at the shim. Byte-for-byte no-op for the
-    # default sweep (guarded by BENCHMARK_SCRIPT_FILE).
+    # to the router, then point AGENTIC_PORT at the shim. aiperf traffic still goes to the
+    # router directly (AGENTIC_TRAFFIC_PORT): the shim relays SSE in 8 KB blocks, which
+    # delays TTFT by ~35 tokens. Byte-for-byte no-op for the default sweep (guarded by
+    # BENCHMARK_SCRIPT_FILE).
     _agentic_shim_pid=""
     if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" ]]; then
         _shim_port="${AGENTIC_SHIM_PORT:-$((BENCHMARK_PORT + 1))}"
@@ -274,8 +276,8 @@ if [ "$NODE_RANK" -eq 0 ]; then
             python3 "$NIXL_COOKBOOK_PATH/agentic_models_shim.py" \
             > >(tee /run_logs/${SLURM_JOB_ID}/agentic_models_shim_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
         _agentic_shim_pid=$!
-        export AGENTIC_PORT="${_shim_port}"
-        echo "[agentic-shim] models shim on :${_shim_port} -> router :${BENCHMARK_PORT} (model=${_shim_model})"
+        export AGENTIC_PORT="${_shim_port}" AGENTIC_TRAFFIC_PORT="${BENCHMARK_PORT}"
+        echo "[agentic-shim] models shim on :${_shim_port} -> router :${BENCHMARK_PORT} (model=${_shim_model}); aiperf -> router :${BENCHMARK_PORT}"
         sleep 3
     fi
 

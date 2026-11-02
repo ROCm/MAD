@@ -29,39 +29,39 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LISTEN_PORT = int(os.environ["AGENTIC_SHIM_PORT"])
 UPSTREAM = os.environ.get("AGENTIC_SHIM_UPSTREAM", "127.0.0.1:30000")
 MODEL = os.environ.get("AGENTIC_SHIM_MODEL", "")
-PREFILL = os.environ.get("AGENTIC_SHIM_PREFILL", "").strip()  # host:port of prefill backend (diag only)
+PREFILL = os.environ.get("AGENTIC_SHIM_PREFILL", "").strip()  # host:port of prefill backend (readiness fallback)
 UP_HOST, UP_PORT = UPSTREAM.split(":")
 UP_PORT = int(UP_PORT)
 _HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length"}
 
 
-def _health_ok(host, port):
+def _health_status(host, port):
     try:
         c = http.client.HTTPConnection(host, port, timeout=5)
         c.request("GET", "/health")
         r = c.getresponse()
         r.read()
         c.close()
-        return r.status == 200
+        return r.status
     except Exception:
-        return False
+        return None
 
 
 def _upstream_health_ok():
     # Readiness signal: the production vllm-router serves GET /health (200 when
     # workers are registered). The MoRIIO toy proxy does NOT implement /health
-    # (404), so fall back to the prefill backend's /health (a real vLLM OpenAI
-    # server, 200 when the engine is up) when a PREFILL backend is configured.
-    if _health_ok(UP_HOST, UP_PORT):
-        return True
-    if PREFILL:
-        try:
-            h, pt = PREFILL.split(":")
-            return _health_ok(h, int(pt))
-        except Exception:
-            return False
-    return False
+    # (404), so only then fall back to the prefill backend's /health (a real vLLM
+    # OpenAI server, 200 when the engine is up) when a PREFILL backend is configured.
+    # Any other router answer, or no answer, means not ready.
+    status = _health_status(UP_HOST, UP_PORT)
+    if status != 404 or not PREFILL:
+        return status == 200
+    try:
+        h, pt = PREFILL.split(":")
+        return _health_status(h, int(pt)) == 200
+    except Exception:
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -95,19 +95,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._proxy("POST")
 
-    def _replay_backend(self, method, body, headers):
-        if not PREFILL:
-            return
-        try:
-            h, pt = PREFILL.split(":")
-            c = http.client.HTTPConnection(h, int(pt), timeout=60)
-            c.request(method, self.path, body=body, headers=headers)
-            r = c.getresponse(); b = r.read(); c.close()
-            print(f"[agentic-shim][diag] backend {PREFILL} {self.path} -> {r.status}: "
-                  f"{b[:800].decode('utf-8','replace')}", flush=True)
-        except Exception as e:
-            print(f"[agentic-shim][diag] backend replay failed: {e}", flush=True)
-
     def _proxy(self, method):
         length = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(length) if length else b""
@@ -125,8 +112,6 @@ class Handler(BaseHTTPRequestHandler):
             err = resp.read()
             print(f"[agentic-shim] upstream {method} {self.path} -> {resp.status} "
                   f"(req_bytes={length}): {err[:600].decode('utf-8', 'replace')}", flush=True)
-            if resp.status >= 500 and self.path.rstrip('/').endswith('/chat/completions'):
-                self._replay_backend(method, body, headers)
             self.send_response(resp.status)
             for k, v in resp.getheaders():
                 if k.lower() in _HOP:
@@ -159,17 +144,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         if force_sse:
             self.send_header("Content-Type", "text/event-stream")
+        # Chunked, so a relay that breaks off is missing the terminating chunk and the client sees
+        # an incomplete body instead of a clean end of stream.
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
             while True:
-                chunk = resp.read(8192)
+                # read1, not read: read(n) blocks until n bytes arrive, which holds back SSE events.
+                chunk = resp.read1(8192)
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
                 self.wfile.flush()
-        except Exception:
-            pass
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+        except Exception as e:
+            print(f"[agentic-shim] relay {method} {self.path} aborted: {e!r}", flush=True)
         finally:
             conn.close()
 
