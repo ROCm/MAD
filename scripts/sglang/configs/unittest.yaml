@@ -1,0 +1,79 @@
+- benchmark: serving
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: bfloat16
+  num_prompts: 252
+  max_concurrency: 128
+  extra_args:
+    --load-format: dummy
+
+- benchmark: serving
+  model: amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2
+  num_prompts: 252
+  max_concurrency: 128
+  extra_args:
+    --load-format: dummy
+
+- benchmark: latency
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 512
+  out: 128
+  dtype: bfloat16
+  bs: 1 16
+  extra_args:
+    --load-format: dummy
+
+- benchmark: latency
+  model: amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  inp: 512
+  out: 128
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2
+  bs: 1 16
+  extra_args:
+    --load-format: dummy
+
+- benchmark: throughput
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: bfloat16
+  num_prompts: 10
+  extra_args:
+    --load-format: dummy
+
+- benchmark: throughput
+  model: amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2
+  num_prompts: 10
+  extra_args:
+    --load-format: dummy
+
+- benchmark: accuracy
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  dtype: bfloat16
+
+- benchmark: accuracy
+  model: amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2

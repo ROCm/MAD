@@ -39,6 +39,9 @@ import subprocess
 import time
 from typing import List, Dict
 
+# Import atom-specific accuracy runner
+from accuracy_runner_atom import run_accuracy_atom
+
 SUPPORTED_LIST_ARGS = ['model', 'tp', 'inp', 'out', 'bs', 'num_prompts', 'max_concurrency']
 CSV_HEADER = [
     "hf_pipeline_tag",
@@ -97,6 +100,30 @@ def _fill_missing(base, overrides):
     return out
 
 
+PARALLELISM_KEYS = ('tp', 'ep', 'dp', 'pp')
+
+
+def find_parallelism_override(overrides, cfg):
+    """Return the first override entry whose tp/ep/dp/pp filters all match cfg, or None."""
+    for ov in overrides:
+        if all(str(cfg.get(k)) == str(ov[k]) for k in PARALLELISM_KEYS if k in ov):
+            return ov
+    return None
+
+
+def deep_merge_evaluations(base_evals, model_evals):
+    """Index-based merge: model evals override into corresponding base evals."""
+    merged = []
+    for i, model_eval in enumerate(model_evals):
+        if i < len(base_evals):
+            m = dict(base_evals[i])
+            m.update(model_eval)
+            merged.append(m)
+        else:
+            merged.append(model_eval)
+    return merged
+
+
 def load_perf_entries(perf_path):
     """Load perf.yaml into a normalized list of override entries.
 
@@ -112,10 +139,46 @@ def load_perf_entries(perf_path):
         entries.append({
             'models': _tokens(e.get('model')),
             'extra_args': e.get('extra_args', {}) or {},
+            'bench_args': e.get('bench_args', {}) or {},
             'env': e.get('env', {}) or {},
             'bench_serving': e.get('bench_serving', {}) or {},
         })
     return entries
+
+
+def load_acc_entries(acc_path):
+    """Load acc.yaml with task-level and model-level entries.
+
+    Returns (task_defaults, model_entries) where:
+    - task_defaults: dict[hf_pipeline_tag -> entry dict with 'evaluations']
+    - model_entries: list of model-specific entries with 'models' set and 'raw' dict
+
+    Task-level entries have 'hf_pipeline_tag' but no 'model' field.
+    Model-level entries have 'model' field.
+    """
+    if not acc_path or not os.path.exists(acc_path):
+        return {}, []
+    with open(acc_path, 'r') as f:
+        raw = yaml.safe_load(f) or []
+
+    task_defaults = {}
+    model_entries = []
+
+    for e in raw:
+        if 'model' not in e and 'hf_pipeline_tag' in e:
+            # Task-level default entry
+            task_defaults[e['hf_pipeline_tag']] = e
+        elif 'model' in e:
+            # Model-level entry
+            model_entries.append({
+                'models': _tokens(e.get('model')),
+                'extra_args': e.get('extra_args', {}) or {},
+                'bench_args': e.get('bench_args', {}) or {},
+                'env': e.get('env', {}) or {},
+                'raw': e  # Keep full entry for evaluations and other fields
+            })
+
+    return task_defaults, model_entries
 
 
 def apply_perf_overrides(configs, perf_entries):
@@ -136,8 +199,10 @@ def apply_perf_overrides(configs, perf_entries):
             continue
 
         base_extra = cfg.get('extra_args') or {}
+        base_bench = cfg.get('bench_args') or {}
         base_env   = cfg.get('env') or {}
         cfg['extra_args'] = _fill_missing(base_extra, matched['extra_args'])
+        cfg['bench_args'] = _fill_missing(base_bench, matched.get('bench_args') or {})
         cfg['env']        = _fill_missing(base_env,   matched['env'])
 
         # gap-fill per-model bench_serving knobs from perf.yaml (base wins)
@@ -149,6 +214,8 @@ def apply_perf_overrides(configs, perf_entries):
             'matched_perf_models': sorted(matched['models']),
             'extra_args_added':   sorted(k for k in matched['extra_args'] if k not in base_extra),
             'extra_args_skipped': sorted(k for k in matched['extra_args'] if k in base_extra),
+            'bench_args_added':   sorted(k for k in (matched.get('bench_args') or {}) if k not in base_bench),
+            'bench_args_skipped': sorted(k for k in (matched.get('bench_args') or {}) if k in base_bench),
             'env_added':          sorted(k for k in matched['env'] if k not in base_env),
             'env_skipped':        sorted(k for k in matched['env'] if k in base_env),
         })
@@ -228,6 +295,20 @@ def parse_args():
                             action='store_true',
                             help='Disable auto-merge of sibling perf.yaml into --config',
                         )
+    parser.add_argument('--acc',
+                            type=str,
+                            help='Path to acc.yaml (default: <dir of --config>/acc.yaml)',
+                            required=False,
+                            default=None,
+                        )
+    parser.add_argument('--acc-output',
+                            type=str,
+                            help='Where to write the merged accuracy config '
+                                 '(default: <dir of --config>/acc_config.yaml). '
+                                 'The original --config file is never modified.',
+                            required=False,
+                            default=None,
+                        )
     parser.add_argument('--profile',
                             action='store_true',
                             help='Kernel-profiling run: serve under rtl trace + roctx markers and aggregate a kernel payload',
@@ -281,12 +362,63 @@ def expand_configs(args, configs: List[Dict]):
             print(f"Filtering configs by {arg_name}={arg_val}")
             filtered_configs = [cfg for cfg in filtered_configs if cfg.get(arg_name, None) == arg_val]
 
-    # filter configs by benchmark
+    # Benchmark field logic:
+    # - If config lacks 'benchmark' field: use CLI args.benchmark (basic.yaml case)
+    # - If config has 'benchmark: all' and CLI specifies one: normalize to CLI benchmark
+    #   (treat "all" as "supports both, run whichever is requested")
+    # - Otherwise: keep config's benchmark field
+    for cfg in filtered_configs:
+        if "benchmark" not in cfg:
+            cfg["benchmark"] = args.benchmark
+        elif cfg["benchmark"] == "all" and args.benchmark and args.benchmark != "all":
+            # Normalize "all" to the requested benchmark
+            cfg["benchmark"] = args.benchmark
+
+    # filter configs by benchmark if CLI specifies one
     if args.benchmark and args.benchmark != "all":
         print(f"Filtering configs by benchmark={args.benchmark}")
         filtered_configs = [cfg for cfg in filtered_configs if cfg["benchmark"] == args.benchmark]
 
     return filtered_configs
+
+def adjust_glm_batched_tokens(config):
+    """Adjust max-num-batched-tokens for GLM-5.x models with large ISL.
+
+    GLM-5.x models with MLA (Multi-head Latent Attention) require special handling
+    for long context. This function calculates the appropriate max-num-batched-tokens
+    and attn-prefill-chunk-size based on the input sequence length.
+
+    Calculation: next power of 2 after the largest power of 2 less than inp.
+    - For inp=100000: 2^17 = 131072 (128K)
+    - For inp=50000: 2^16 = 65536 (64K)
+    - For inp=10000: 2^14 = 16384 (16K, default)
+
+    Only applies to models with 'GLM-5' in the model name.
+    """
+    if 'GLM-5' not in config.get('model', ''):
+        return
+
+    inp = config.get('inp')
+    if not inp:
+        return
+
+    inp = int(inp)
+    default_max_batched = 16384
+
+    import math
+    # Calculate next power of 2 after largest power of 2 less than inp
+    calculated = 2 ** (int(math.log2(inp)) + 1)
+    max_batched = max(calculated, default_max_batched)
+
+    # Only adjust if different from default
+    if max_batched != default_max_batched:
+        if 'extra_args' not in config:
+            config['extra_args'] = {}
+
+        print(f"INFO: GLM-5 model with inp={inp}, setting max-num-batched-tokens={max_batched}")
+        config['extra_args']['--max-num-batched-tokens'] = max_batched
+        # Also set MLA-specific chunk size for GLM models
+        config['extra_args']['--attn-prefill-chunk-size'] = max_batched
 
 def _wait_for_server(server, port=8000, timeout=5400, poll_interval=30):
     """Wait until the server's /v1/models endpoint responds.
@@ -370,7 +502,6 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -515,7 +646,6 @@ def run_serving_profile(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--random-range-ratio 0.8 "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -576,122 +706,21 @@ def run_serving_profile(model, config):
     return [result]
 
 def run_accuracy(model, config):
-    output_json = (
-        f"{config['model']}_accuracy_{config['tp']}.json"
-    )
-    server_cmd = (
-        "python -m atom.entrypoints.openai_server "
-        f"--model {model} "
-        f"-tp {config['tp']} "
-    )
+    """Run accuracy evaluation using atom-specific accuracy framework.
 
-    # Add kv_cache_dtype if specified
-    if 'kv_cache_dtype' in config and config['kv_cache_dtype']:
-        server_cmd += f"--kv_cache_dtype {config['kv_cache_dtype']} "
-
-    # Get env and extra args from config (keep as dicts)
-    env_dict = config.pop('env', {})
-    extra_args_dict = config.pop('extra_args', {})
-
-    # Convert dicts to command line strings
-    env_str = dict_to_env(env_dict) if env_dict else ""
-    extra_args_str = dict_to_args(extra_args_dict) if extra_args_dict else ""
-
-    server_cmd = f"{env_str} {server_cmd} {extra_args_str}".strip()
-    config["cmd"] = server_cmd
-
-    # start server
-    print(server_cmd)
-    server = subprocess.Popen(server_cmd, shell=True)
-
-    try:
-        # wait for server to start; fail fast if the process dies (e.g. OOM
-        # during init) instead of blocking on a dead endpoint for 30 minutes
-        if not _wait_for_server(server):
-            print("Server failed to start")
-            return [config]
-        else:
-            print(f"Server at {server.pid} contacted successfully", flush=True)
-
-        # run benchmark
-        num_concurrent = config.get("num_concurrent", 64)
-        max_gen_toks = config.get("max_gen_toks", 2048)
-        limit = config.get("limit")
-        num_fewshot = config.get("num_fewshot", 3)
-        apply_chat_template = config.get("apply_chat_template", True)
-        model_args = {
-            "model": model,
-            "max_gen_toks": max_gen_toks,
-            "num_concurrent": num_concurrent,
-            "max_retries": 3,
-            "base_url": "http://localhost:8000/v1/completions",
-            "tokenized_requests": False,
-        }
-        model_args = ",".join([f"{k}={v}" for k, v in model_args.items()])
-        bench_cmd = (
-            "lm_eval "
-            "--model local-completions "
-            f"--model_args {model_args} "
-            f"--tasks gsm8k "
-            f"--num_fewshot {num_fewshot} "
-            f"--output_path ./tmp "
-        )
-        if limit is not None:
-            bench_cmd += f"--limit {limit} "
-        if apply_chat_template:
-            bench_cmd += "--apply_chat_template "
-        bench_args = config.pop('bench_args', {})
-        bench_args_str = ""
-        for k, v in bench_args.items():
-            if isinstance(v, bool):
-                bench_args_str += f"{k} "
-            else:
-                bench_args_str += f"{k} {v} "
-        bench_cmd = f"{bench_cmd} {bench_args_str}".strip()
-        config["cmd"] = f"{server_cmd};{bench_cmd}"
-        print(bench_cmd)
-        subprocess.run(bench_cmd, shell=True, check=True)
-
-        # find output file and move into output_json
-        output_files = glob.glob("./tmp/*/*.json")
-        if len(output_files) == 0:
-            print("No output files found")
-            return [config]
-        elif len(output_files) > 1:
-            print(f"Multiple output files found: {output_files}")
-            return [config]
-        else:
-            output_file = output_files[0]
-            shutil.move(output_file, output_json)
-            shutil.rmtree("./tmp")
-
-        # parse output json
-        results = []
-
-        with open(output_json, "r", newline="", encoding="utf-8") as f:
-            output = json.load(f)
-            if "results" in output and "gsm8k" in output["results"]:
-                gsm8k_results = output["results"]["gsm8k"]
-
-                for metric_key in ("exact_match,flexible-extract", "exact_match,strict-match"):
-                    if metric_key in gsm8k_results:
-                        results.append({
-                            "performance": gsm8k_results[metric_key],
-                            "metric": metric_key,
-                            "unit": "percent",
-                            **config
-                        })
-
-        return results
-
-    finally:
-        # kill server and children
+    Delegates to accuracy_runner_atom which handles atom-specific server
+    management and evaluation logic.
+    """
+    def _kill_atom_server(server):
+        """Kill atom server and children."""
         parent = psutil.Process(server.pid)
         for child in parent.children(recursive=True):
             child.send_signal(signal.SIGINT)
         server.send_signal(signal.SIGINT)
         _ = server.communicate()
         del server
+
+    return run_accuracy_atom(model, config, _wait_for_server, _kill_atom_server)
 
 def main():
     args = parse_args()
@@ -743,6 +772,89 @@ def main():
         else:
             print(f"No perf.yaml found at {perf_path} (or empty); skipping perf merge")
 
+    # Accuracy merge: two-level merge from acc.yaml (task defaults + model overrides).
+    # For atom-accuracy tag, always merge (tag implies accuracy, benchmark field irrelevant)
+    # Only skip for benchmark=="all" (which does its own inline merge)
+    if args.benchmark != "all":
+        config_dir = os.path.dirname(os.path.abspath(args.config))
+        acc_path = args.acc or os.path.join(config_dir, 'acc.yaml')
+        acc_output = args.acc_output or os.path.join(config_dir, 'acc_config.yaml')
+
+        if os.path.abspath(acc_output) == os.path.abspath(args.config):
+            raise ValueError(
+                f"--acc-output must differ from --config to keep the source untouched; "
+                f"both resolved to {acc_output}"
+            )
+
+        task_defaults, model_entries = load_acc_entries(acc_path)
+        if task_defaults or model_entries:
+            # Apply two-level merge to each config
+            for cfg in configs:
+                pipeline_tag = cfg.get('hf_pipeline_tag', 'text-generation')
+
+                # Level 1: Apply task-level defaults based on hf_pipeline_tag
+                if pipeline_tag in task_defaults:
+                    task_entry = task_defaults[pipeline_tag]
+                    if 'evaluations' not in cfg and 'evaluations' in task_entry:
+                        cfg['evaluations'] = task_entry['evaluations']
+                        print(f"  Applied task-level defaults for {cfg.get('model')}: hf_pipeline_tag={pipeline_tag}")
+
+                # Level 2: Apply model-specific overrides
+                base_tokens = _tokens(cfg.get('model'))
+                matched = next((p for p in model_entries if p['models'] & base_tokens), None)
+
+                if matched:
+                    base_extra = cfg.get('extra_args') or {}
+                    base_bench = cfg.get('bench_args') or {}
+                    base_env = cfg.get('env') or {}
+
+                    cfg['extra_args'] = _fill_missing(base_extra, matched['extra_args'])
+                    cfg['bench_args'] = _fill_missing(base_bench, matched['bench_args'])
+                    cfg['env'] = _fill_missing(base_env, matched['env'])
+
+                    if 'evaluations' in matched['raw']:
+                        cfg['evaluations'] = deep_merge_evaluations(
+                            cfg.get('evaluations', []),
+                            matched['raw']['evaluations']
+                        )
+
+                    # Level 3: Apply parallelism-specific overrides (tp/ep/dp/pp)
+                    parallelism_overrides = matched['raw'].get('overrides', [])
+                    if parallelism_overrides:
+                        ov = find_parallelism_override(parallelism_overrides, cfg)
+                        if ov:
+                            if 'evaluations' in ov:
+                                cfg['evaluations'] = deep_merge_evaluations(
+                                    cfg.get('evaluations', []),
+                                    ov['evaluations']
+                                )
+                            ov_extra = ov.get('extra_args', {})
+                            if ov_extra:
+                                cfg['extra_args'] = _fill_missing(cfg.get('extra_args') or {}, ov_extra)
+                            ov_env = ov.get('env', {})
+                            if ov_env:
+                                cfg['env'] = _fill_missing(cfg.get('env') or {}, ov_env)
+                            print(
+                                f"  Applied parallelism override "
+                                f"({', '.join(f'{k}={ov[k]}' for k in PARALLELISM_KEYS if k in ov)})"
+                            )
+
+                    for k, v in matched['raw'].items():
+                        if k not in ['model', 'extra_args', 'bench_args', 'env', 'evaluations', 'overrides']:
+                            if k not in cfg:
+                                cfg[k] = v
+
+                    print(f"  Applied model-specific overrides for {cfg.get('model')}")
+
+            with open(acc_output, 'w') as f:
+                yaml.safe_dump(configs, f, sort_keys=False, default_flow_style=False)
+            print(
+                f"Wrote merged accuracy config to {acc_output} "
+                f"(original {args.config} left untouched)"
+            )
+        else:
+            print(f"No acc.yaml found at {acc_path} (or empty); skipping accuracy merge")
+
     # Expand and filter configs
     configs = expand_configs(args, configs)
     print(f"Running configs: ", *configs, sep='\n')
@@ -767,10 +879,18 @@ def main():
                 os.environ['HF_TOKEN'] = MAD_SECRETS_HFTOKEN
             else:
                 print("Warning: MAD_SECRETS_HFTOKEN is not set. If a gated model is used, please set MAD_SECRETS_HFTOKEN=<your-huggingface-token>")
+            # Use CHECK_LOCAL_DATA env var to control whether to check for local data
+            # By default, this is set to False and can be enabled through madengine additional_context
+            CHECK_LOCAL_DATA = os.environ.get('CHECK_LOCAL_DATA', 'false').lower() == 'true'
+
             # Use dataprovider if present for model weights
-            if MAD_DATAHOME := os.environ.get('MAD_DATAHOME'):
+            if CHECK_LOCAL_DATA and (MAD_DATAHOME := os.environ.get('MAD_DATAHOME')) and os.path.exists(os.path.join(MAD_DATAHOME, model)):
+                model = os.path.join(MAD_DATAHOME, model)
+                print("Found MAD_DATAHOME updating model path.")
+            elif (MAD_DATAHOME := os.environ.get('MAD_DATAHOME')) and os.path.isfile(os.path.join(MAD_DATAHOME, 'config.json')):
+                # MAD_DATAHOME points directly at a model checkpoint (e.g. a mounted /model_weights)
                 model = MAD_DATAHOME
-                print(f"Using MAD_DATAHOME as model path: {model}")
+                print(f"Found model checkpoint at MAD_DATAHOME={MAD_DATAHOME}")
             elif config.get('extra_args', {}).get('--load_dummy', False):
                 print("Found --load_dummy in config, using dummy weights for benchmarking")
             else:
@@ -831,11 +951,100 @@ def main():
                     )
                 print(f"Downloaded {model} to {snapshot_path}")
 
+            # Adjust max-num-batched-tokens for GLM-5.x models if needed
+            adjust_glm_batched_tokens(config)
+
+            # Keep dict forms for potential acc.yaml merge (for benchmark: all)
+            env_vars = config.get("env", {})
+            extra_args = config.get("extra_args", {})
+
+            config["env_dict"] = env_vars  # Preserve dict for acc.yaml merge
+            config["extra_args_dict"] = extra_args  # Preserve dict for acc.yaml merge
+
             # run benchmark
             results = []
             benchmark = config["benchmark"]
             profile = bool(config.pop('profile', False)) or getattr(args, 'profile', False)
-            if benchmark == "serving":
+            if benchmark == "all":
+                # Run serving first, then accuracy (similar to vllm)
+                print(f"\n=== Running serving benchmark for {model} ===")
+                serving_config = dict(config)
+                serving_config["benchmark"] = "serving"
+                serving_results = run_serving_profile(model, serving_config) if profile else run_serving(model, serving_config)
+
+                # Write serving results
+                for result in serving_results:
+                    writer.writerow(result)
+
+                # Run accuracy with acc.yaml merge
+                print(f"\n=== Running accuracy benchmark for {model} ===")
+                acc_config = dict(config)
+                acc_config["benchmark"] = "accuracy"
+
+                # Load and merge acc.yaml for accuracy run
+                config_dir = os.path.dirname(os.path.abspath(args.config))
+                acc_path = args.acc or os.path.join(config_dir, 'acc.yaml')
+
+                if os.path.exists(acc_path):
+                    task_defaults, model_entries = load_acc_entries(acc_path)
+                    if task_defaults or model_entries:
+                        full_model = model
+                        pipeline_tag = acc_config.get('hf_pipeline_tag', 'text-generation')
+
+                        # Level 1: Apply task-level defaults
+                        if pipeline_tag in task_defaults:
+                            task_entry = task_defaults[pipeline_tag]
+                            if 'evaluations' not in acc_config and 'evaluations' in task_entry:
+                                acc_config['evaluations'] = task_entry['evaluations']
+                                print(f"  Applied task-level defaults for hf_pipeline_tag={pipeline_tag}")
+
+                        # Level 2: Apply model-specific overrides
+                        base_tokens = _tokens(full_model)
+                        matched = next((p for p in model_entries if p['models'] & base_tokens), None)
+                        if matched:
+                            base_extra = acc_config.get('extra_args_dict', {})
+                            base_env = acc_config.get('env_dict', {})
+                            acc_config['extra_args_dict'] = _fill_missing(base_extra, matched['extra_args'])
+                            acc_config['env_dict'] = _fill_missing(base_env, matched['env'])
+                            if 'evaluations' in matched['raw']:
+                                acc_config['evaluations'] = deep_merge_evaluations(
+                                    acc_config.get('evaluations', []),
+                                    matched['raw']['evaluations']
+                                )
+
+                            # Apply parallelism-specific overrides
+                            parallelism_overrides = matched['raw'].get('overrides', [])
+                            if parallelism_overrides:
+                                ov = find_parallelism_override(parallelism_overrides, acc_config)
+                                if ov:
+                                    if 'evaluations' in ov:
+                                        acc_config['evaluations'] = deep_merge_evaluations(
+                                            acc_config.get('evaluations', []),
+                                            ov['evaluations']
+                                        )
+                                    ov_extra = ov.get('extra_args', {})
+                                    if ov_extra:
+                                        acc_config['extra_args_dict'] = _fill_missing(
+                                            acc_config.get('extra_args_dict', {}), ov_extra
+                                        )
+                                    ov_env = ov.get('env', {})
+                                    if ov_env:
+                                        acc_config['env_dict'] = _fill_missing(
+                                            acc_config.get('env_dict', {}), ov_env
+                                        )
+                                    print(
+                                        f"  Applied parallelism override "
+                                        f"({', '.join(f'{k}={ov[k]}' for k in PARALLELISM_KEYS if k in ov)})"
+                                    )
+
+                            print(f"  Applied model-specific overrides from acc.yaml")
+
+                    # Copy merged dicts back to non-suffixed keys for run_accuracy to use
+                    acc_config['extra_args'] = acc_config.get('extra_args_dict', {})
+                    acc_config['env'] = acc_config.get('env_dict', {})
+
+                results = run_accuracy(model, acc_config)
+            elif benchmark == "serving":
                 results = run_serving_profile(model, config) if profile else run_serving(model, config)
             elif benchmark == "accuracy":
                 results = run_accuracy(model, config)

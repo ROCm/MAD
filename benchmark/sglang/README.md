@@ -1,18 +1,31 @@
-# LLM inference performance validation with SGLang on the AMD Instinct MI300X accelerator
+# LLM inference performance validation with SGLang on AMD Instinct accelerators
 
 ## Overview 🎉
 --------
 
 SGLang is a large language model (LLM) inference and serving engine. 
 
-This Docker image packages SGLang with PyTorch for an AMD Instinct™ MI300X
-accelerator. It includes:
+MAD builds its SGLang image from [docker/pyt_sglang.ubuntu.amd.Dockerfile](../../docker/pyt_sglang.ubuntu.amd.Dockerfile)
+on top of `lmsysorg/sglang:v0.5.18-rocm720-mi35x`, which includes:
 
--   ✅ ROCm™ 6.3.0
--   ✅ SGLang 0.4.5 (0.4.5-rocm)
--   ✅ PyTorch 2.6.0 (2.6.0a0+git8d4926e)
+-   ✅ ROCm™ 7.2.0
+-   ✅ SGLang 0.5.18
 
-With this Docker image, users can quickly validate the expected inference performance numbers on the MI300X accelerator. 
+Three model families build from their own Dockerfiles instead, because their support landed in a
+different SGLang ROCm build:
+
+| Models | Dockerfile | Base image |
+| ------ | ---------- | ---------- |
+| DeepSeek-V4 (`pyt_sglang_deepseek-v4-*`) | [docker/pyt_sglang_dsv4.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_dsv4.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:v0.5.13-rocm720-mi35x-20260612` |
+| FLUX (`pyt_sglang_flux.*`) | [docker/pyt_sglang_flux.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_flux.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712` |
+| Kimi-K3 (`pyt_sglang_kimi-k3*`) | [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` |
+
+>[!IMPORTANT]
+>The default base is the MI350X/MI355X (gfx950) build. Its `sgl_kernel` ops are compiled for gfx950
+>only and segfault on an MI300X (gfx942). For MI300X, build with
+>`--build-arg BASE_DOCKER=<matching lmsysorg/sglang-rocm mi30x image>`, as described in the Dockerfile.
+
+With this Docker image, users can quickly validate the expected inference performance numbers on AMD Instinct accelerators. 
 This guide also provides tips and techniques so that users can get optimal performance with popular AI models.
 
 
@@ -20,7 +33,7 @@ This guide also provides tips and techniques so that users can get optimal perfo
 -----------------------------
 
 Use the following instructions to reproduce the benchmark results on an
-MI300X accelerator with a prebuilt SGLang Docker image.
+AMD Instinct accelerator with a prebuilt SGLang Docker image.
 
 Users have two choices to reproduce the benchmark results.
 
@@ -43,10 +56,11 @@ cat /proc/sys/kernel/numa_balancing
 
 ### Download the Docker image 🐳
 
-The following command pulls the Docker image from Docker Hub.
+The following command pulls the default Docker image from Docker Hub. For the DeepSeek-V4, FLUX and
+Kimi-K3 models, pull the base image listed in the [Overview](#overview-) instead.
 
 ```sh
-docker pull lmsysorg/sglang:v0.4.5-rocm630
+docker pull lmsysorg/sglang:v0.5.18-rocm720-mi35x
 ```
 
 ### MAD-integrated benchmarking
@@ -66,7 +80,10 @@ export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated mod
 madengine run --tags pyt_sglang_deepseek-r1-distill-qwen-32b --keep-model-dir --live-output --timeout 28800
 ```
 
-ROCm MAD launches a Docker container with the name `container_ci-pyt_sglang_deepseek-r1-distill-qwen-32b`. The latency and throughput reports of the model are collected in the following path:
+ROCm MAD launches a Docker container with the name `container_ci-pyt_sglang_deepseek-r1-distill-qwen-32b`. The benchmark configs come from
+[scripts/sglang/configs/default.yaml](../../scripts/sglang/configs/default.yaml); entries for the same model in
+[scripts/sglang/configs/perf.yaml](../../scripts/sglang/configs/perf.yaml) fill in any tuned `env` / `extra_args`
+that the base config does not set. The reports of the model are collected in the following path:
 
 ```sh
 ~/MAD/perf_DeepSeek-R1-Distill-Qwen-32B.csv
@@ -77,14 +94,33 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 
 #### Available models
 
-| model_name                              |
-| --------------------------------------- |
-| pyt_sglang_deepseek-r1-distill-qwen-32b  |
-| pyt_sglang_kimi-k3                       |
-| pyt_sglang_kimi-k3_dspark                |
+| model_name                              | Model                                    | Notes                                  |
+| --------------------------------------- | ---------------------------------------- | -------------------------------------- |
+| pyt_sglang_deepseek-r1-distill-qwen-32b | deepseek-ai/DeepSeek-R1-Distill-Qwen-32B |                                        |
+| pyt_sglang_deepseek-r1                  | deepseek-ai/DeepSeek-R1                  |                                        |
+| pyt_sglang_deepseek-v4-flash            | deepseek-ai/DeepSeek-V4-Flash            | gfx950 only                            |
+| pyt_sglang_deepseek-v4-pro              | deepseek-ai/DeepSeek-V4-Pro              | gfx950 only                            |
+| pyt_sglang_llama-3.3-70b                | meta-llama/Llama-3.3-70B-Instruct        |                                        |
+| pyt_sglang_llama-3.3-70b_fp8            | amd/Llama-3.3-70B-Instruct-FP8-KV        |                                        |
+| pyt_sglang_flux.1-dev                   | black-forest-labs/FLUX.1-dev             | gfx950 only; `-throughput` and `-latency` variants run those benchmarks instead of serving |
+| pyt_sglang_flux.2-dev                   | black-forest-labs/FLUX.2-dev             | gfx950 only                            |
+| pyt_sglang_wan2.2-t2v-a14b              | Wan-AI/Wan2.2-T2V-A14B-Diffusers         | `-throughput` and `-latency` variants run those benchmarks instead of serving |
+| pyt_sglang_kimi-k3                      | moonshotai/Kimi-K3                       | gfx950 only; see the note below        |
+| pyt_sglang_kimi-k3_dspark               | moonshotai/Kimi-K3                       | gfx950 only; see the note below        |
+
+All entries except the Kimi-K3 ones read [scripts/sglang/configs/default.yaml](../../scripts/sglang/configs/default.yaml).
+"gfx950 only" means the entry sets `skip_gpu_arch: gfx942`. The DeepSeek-V4 and FLUX entries build from
+their own images; see the [Overview](#overview-).
 
 >[!NOTE]
->The two `pyt_sglang_kimi-k3*` entries are the exception to everything described above. They track the
+>`models.json` also defines two generic entries, `sglang-perf` and `sglang-accuracy`. They have empty `args` and
+>write `perf_auto.csv`, because they are meant to be driven by a dispatcher that supplies `--model_repo`,
+>`--config` and `MAD_OUTPUT_CSV`. `run.sh` infers the benchmark from the tag name: a name containing `-perf`
+>runs `serving`, `-accuracy` runs `accuracy`, and anything else runs `all` (serving, then accuracy).
+>Run on their own, these two entries fail because no model is given.
+
+>[!NOTE]
+>The two `pyt_sglang_kimi-k3*` entries are the exception to most of what is described above. They track the
 >AMD day-0 recipes in [sgl-project/sglang#32548](https://github.com/sgl-project/sglang/issues/32548)
 >(day-0 support: [#32541](https://github.com/sgl-project/sglang/pull/32541), see also the
 >[SGLang K3 cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3)) and differ in
@@ -92,31 +128,35 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 >
 >- **Image.** They build from `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` via
 >  [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile),
->  not the shared `lmsysorg/sglang:v0.4.5-rocm630` above, which predates K3 support.
->- **Benchmark.** They measure *online serving* (`sglang serve` + `sglang.benchmark.serving`) through
->  [scripts/sglang/run_sglang.py](../../scripts/sglang/run_sglang.py) and
->  [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml), rather than the
->  offline latency/throughput path documented below.
+>  not the shared `lmsysorg/sglang:v0.5.18-rocm720-mi35x` above. K3 support is not in a versioned
+>  SGLang ROCm release yet.
+>- **Benchmark.** They measure *online serving* only (`sglang.launch_server` + `sglang.bench_serving`)
+>  through [scripts/sglang/run_kimi_k3.sh](../../scripts/sglang/run_kimi_k3.sh) and
+>  [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml). Each entry
+>  selects one variant of that config (`nospec` or `dspark`) with `--variant`.
 >- **Hardware.** 8x MI350X/MI355X (gfx950) TP8 only, hence `skip_gpu_arch: gfx942`. The checkpoint is
 >  large, so make sure `HF_HUB_CACHE` has room; `pyt_sglang_kimi-k3_dspark` additionally pulls the
 >  [RadixArk/Kimi-K3-DSpark](https://huggingface.co/RadixArk/Kimi-K3-DSpark) draft checkpoint.
->- **Invocation.** They carry no sweep tag, so a tag run does not pull the checkpoint and hold 8 GPUs.
->  Run them explicitly by name:
+>- **Invocation.** They carry the same `pyt` / `sglang` / `inference` tags as every other entry, so a
+>  broad `--tags sglang` run includes them and will pull the checkpoint and hold 8 GPUs. To run them
+>  on their own, select them by name:
 >
 >```sh
 >madengine run --tags pyt_sglang_kimi-k3 --keep-model-dir --live-output
 >madengine run --tags pyt_sglang_kimi-k3_dspark --keep-model-dir --live-output
 >```
 >
->The sweep is 8192-token input / 1024-token output at concurrency 2/4/8/16/32. The issue does not state
+>The sweep is 8192-token input / 1024-token output at concurrency 1/4/8/16/32/64/128/256, with
+>`--random-range-ratio 1.0` so every request has exactly those lengths (other SGLang configs use the
+>runner default of 0.8). The sweep covers the issue's rows except concurrency 2. The issue does not state
 >its input and output lengths; they were recovered from its own tables, where
 >`(E2EL - TTFT) / TPOT + 1` lands on ~1024 output tokens on every row and
 >`concurrency x (inp + out) / E2EL` reproduces the reported total throughput only at 8192 input tokens.
 >Keeping that shape is what makes MAD's numbers comparable to the issue's.
 >
->The runner emits `--tp-size` where the issue writes `--tp`. There is no `--tp` server argument;
->`tp_size` has a single alias, `--tensor-parallel-size`, and `--tp` resolves only through argparse
->prefix matching, which a future `--tp*` option would silently break.
+>The runner emits `--tensor-parallel-size` where the issue writes `--tp`. There is no `--tp` server
+>argument; `tp_size` is `--tp-size` with the single alias `--tensor-parallel-size`, and `--tp` resolves
+>only through argparse prefix matching, which a future `--tp*` option would silently break.
 
 >[!WARNING]
 >The published performance tables were measured on **MI355X**. A commenter on the tracking issue reports
@@ -129,8 +169,8 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull lmsysorg/sglang:v0.4.5-rocm630
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HUGGINGFACE_HUB_CACHE=/workspace --name test lmsysorg/sglang:v0.4.5-rocm630
+docker pull lmsysorg/sglang:v0.5.18-rocm720-mi35x
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HF_HUB_CACHE=/workspace --name test lmsysorg/sglang:v0.5.18-rocm720-mi35x
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/sglang*. 
@@ -143,11 +183,18 @@ cd MAD/scripts/sglang
 #### Command
 
 ```sh
-./sglang_benchmark_report.sh -s $test_option -m $model_repo -g $num_gpu -d $datatype [-a $dataset]
+python3 run_sglang.py --config $config --model $model_repo --benchmark $benchmark [filters]
 ```
 
+`run_sglang.py` reads every entry in `$config` for `$model_repo`, expands the space-separated lists
+(`tp`, `inp`, `out`, `bs`, `max_concurrency`, ...) into one run per combination, and writes the results
+to `perf_<model name>.csv` in the current directory. If a `perf.yaml` sits next to `$config`, the runner
+merges it in first (pass `--no-perf-merge` to skip this). `./run.sh --model_repo $model_repo --config $config`
+is the wrapper that MAD calls; it also installs `lm-eval` and moves the CSV up one directory.
+
 >[!NOTE]
->The input sequence length, output sequence length, and tensor parallel (TP) are already configured. You don't need to specify them with this script.
+>The input sequence length, output sequence length, tensor parallel (TP), and batch sizes or concurrencies
+>come from the config file. Edit the config, or pass a filter such as `--inp 1024 --bs 8` to run a subset.
 
 >[!NOTE]
 >If you encounter this error, pass your access-authorized Hugging Face token to the gated models.
@@ -162,42 +209,37 @@ cd MAD/scripts/sglang
 
 | Name         | Options                                 | Description                                      |
 | ------------ | --------------------------------------- | ------------------------------------------------ |
-| $test_option | latency                                 | Measure decoding token latency                   |
-|              | throughput                              | Measure token generation throughput              |
-|              | all                                     | Measure both throughput and latency              |
-| $model_repo  |                                         |                                                  |
-| (bfloat16)   | deepseek-ai/DeepSeek-R1-Distill-Qwen-32B|[DeepSeek-R1-Distill-Qwen 32B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B) |
-| $num_gpu     |      8                                  | Number of GPUs                                   |
-| $datatype    | bfloat16                                | Data type                                        |
-| $dataset     | random                                  | Dataset                                          |
+| $config      | configs/default.yaml                    | Benchmark configs (see [scripts/sglang/configs](../../scripts/sglang/configs/)) |
+| $model_repo  | deepseek-ai/DeepSeek-R1-Distill-Qwen-32B|[DeepSeek-R1-Distill-Qwen 32B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B) |
+| $benchmark   | latency                                 | Measure decoding token latency (`sglang.bench_one_batch`) |
+|              | throughput                              | Measure offline token generation throughput (`sglang.bench_offline_throughput`) |
+|              | serving                                 | Measure online serving (`sglang.launch_server` + `sglang.bench_serving`) |
+|              | accuracy                                | Run the accuracy evaluation (see `configs/acc.yaml`) |
+|              | all                                     | Run every benchmark the config defines for the model |
 
-#### Run the benchmark tests on the MI300X accelerator 🏃
+#### Run the benchmark tests 🏃
 
-Here are some examples and the test results:
+Here are some examples:
 
 - Benchmark example - latency
 
   Use this command to benchmark the latency of the DeepSeek-R1-Distill-Qwen 32B model on 8 GPUs with the bfloat16 data type.
 
   ```sh
-  ./sglang_benchmark_report.sh -s latency -m deepseek-ai/DeepSeek-R1-Distill-Qwen-32B -g 8 -d bfloat16
+  python3 run_sglang.py --config configs/default.yaml --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --benchmark latency
   ```
 
-  The latency reports are available at:
+- Benchmark example - a single latency point
 
-  - `./reports_bfloat16/summary/DeepSeek-R1-Distill-Qwen-32B_latency_report.csv`
-
-- Benchmark example - throughput
-
-  Use this command to benchmark the throughput of the DeepSeek-R1-Distill-Qwen 32B model on 8 GPUs with the bfloat16 data type.
+  Use the filters to run one combination from the sweep, for example input 1024, output 1024 and batch size 8.
 
   ```sh
-  ./sglang_benchmark_report.sh -s throughput -m deepseek-ai/DeepSeek-R1-Distill-Qwen-32B -g 8 -d bfloat16 -a random
+  python3 run_sglang.py --config configs/default.yaml --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --benchmark latency --inp 1024 --out 1024 --bs 8
   ```
 
-  The throughput reports are available at:
+  The results of both examples are written to:
 
-  - `./reports_bfloat16/summary/DeepSeek-R1-Distill-Qwen-32B_throughput_report.csv`
+  - `./perf_DeepSeek-R1-Distill-Qwen-32B.csv`
 
 >[!NOTE]
 >Throughput is calculated as:

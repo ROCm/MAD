@@ -652,18 +652,22 @@ You can also check the Primus repository directly for the latest supported confi
 
 ### Other Backends
 
-These launchers are discovered and runnable through the same `primus_train/` tags, but are not
-tabulated here. Use `madengine discover --tags <backend>` for the full list, or browse the configs
-in the Primus repository.
+These launchers are not tabulated here. Megatron-Bridge, NeMo-AutoModel, Diffusion and MoE-Package
+are discovered and runnable through the same `primus_train/` tags; use `madengine discover --tags <backend>`
+for the full list, or browse the configs in the Primus repository. MaxText and MaxDiffusion are the
+exception: `primus_train` discovery skips them, and they run as `jax-maxtext/maxtext_<DEVICE>_<config>` and
+`jax-maxdiffusion/maxdiffusion_<DEVICE>_<config>` instead. See [../jax_maxtext/README.md](../jax_maxtext/README.md).
 
 | Backend | MI300X | MI325X | MI355X | Configs |
 | --- | --- | --- | --- | --- |
 | Megatron-Bridge | 9 | — | 9 | [`examples/megatron_bridge/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/megatron_bridge/configs) |
-| MaxText | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxtext/configs) |
-| MaxDiffusion | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxdiffusion/configs) |
+| MaxText ¹ | 22 | 22 | 25 | [`examples/maxtext/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxtext/configs) |
+| MaxDiffusion ¹ | 3 | — | 3 | [`examples/maxdiffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/maxdiffusion/configs) |
 | NeMo-AutoModel | — | — | 4 | [`examples/nemo_automodel/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/nemo_automodel/configs) |
 | Diffusion | — | — | 6 | [`examples/diffusion/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/diffusion/configs) |
 | MoE-Package | — | — | 2 | [`examples/moe_package/configs`](https://github.com/AMD-AGI/Primus/tree/release/v26.8/examples/moe_package/configs) |
+
+¹ Not under `primus_train/`; run via the `jax-maxtext` / `jax-maxdiffusion` tags.
 
 > **Note:** MaxDiffusion and MaxText are JAX backends and NeMo-AutoModel requires the
 > `third_party/Automodel` submodule; see the Primus documentation for their prerequisites.
