@@ -1,0 +1,15 @@
+{%- for message in messages %}
+{%- if message['role'] == 'system' %}
+{{- message['content'] }}<|separator|>
+
+{%- elif message['role'] == 'user' %}
+{{- 'Human: ' + message['content'] }}<|separator|>
+
+{%- elif message['role'] == 'assistant' %}
+{{- 'Assistant: ' + message['content'] }}<|separator|>
+
+{%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+{{- 'Assistant:' }}
+{%- endif %}

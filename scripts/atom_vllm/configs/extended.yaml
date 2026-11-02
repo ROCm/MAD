@@ -1,0 +1,26 @@
+# ATOM vLLM Plugin - Extended benchmarks with more configurations
+# Multiple input/output length combinations
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 128 512 1024 2048
+  out: 128 512 1024
+  dtype: auto
+  max_concurrency: 1 8 32
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-405B-Instruct meta-llama/Llama-3.1-405B-Instruct-FP8
+  tp: 8
+  inp: 128 512 1024 2048
+  out: 128 512 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  model: meta-llama/Llama-3.3-70B-Instruct
+  tp: 8
+  inp: 128 512 1024 2048
+  out: 128 512 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128

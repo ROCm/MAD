@@ -33,8 +33,9 @@ Models are discovered from `scripts/Primus/examples/maxtext/configs/` and `scrip
 
 ```sh
 bash tools/fetch_primus.sh
-# or: git submodule update --init scripts/Primus
 ```
+
+Avoid `git submodule update --init scripts/Primus` for the JAX models. The submodule is pinned to Primus `release/v26.8` for the `primus_train` (PyTorch) stack, which does not match the `rocm/jax-training:maxtext-v26.7` image these models run on.
 
 `tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `jax-maxtext-v26.7`, the branch that matches `rocm/jax-training:maxtext-v26.7`. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
 
