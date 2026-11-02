@@ -5,7 +5,9 @@
 # with the container's status.
 . "$(dirname "${BASH_SOURCE[0]}")/../common/node/node_lib.sh"
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
+# Leftover containers of this launcher (any job) only, by name; any other container
+# on the node is not ours to stop.
+docker ps -q --filter "name=^container_" | xargs --no-run-if-empty docker stop;
 node_site_mounts
 _node_docker_run() {
 docker run --rm \

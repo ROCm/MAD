@@ -527,6 +527,12 @@ export BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT}"
 export BENCHMARK_SCRIPT_FILE="${BENCHMARK_SCRIPT_FILE}"
 
 export DOCKER_CONT_NAME="container_${MODEL_NAME}_${SLURM_JOB_ID}"
+# Container-creation barrier ports (connectors/rixl.sh: BARRIER_PORT, moriio.sh:
+# BARRIER_PORT_MORI), one per job unless set (cluster_barrier_port). They used to be
+# fixed (15000, 2222), and each node freed them first with `fuser -k`, which killed
+# whatever else -- another job of this user on a shared node -- was listening there.
+export BARRIER_PORT="${BARRIER_PORT:-$(cluster_barrier_port)}"
+export BARRIER_PORT_MORI="${BARRIER_PORT_MORI:-$BARRIER_PORT}"
 export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 
 # Use only the selected nodes for srun execution

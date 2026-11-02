@@ -32,10 +32,9 @@ connector_init() {
         # Container-creation barrier port. Env-overridable (BARRIER_PORT). The default
         # was 5000, which this comment already called collision-prone: on the OCI hosts
         # something the job cannot kill holds 5000, and the barrier "passed" on both
-        # nodes by connecting to it. 15000 is the port this connector's
-        # wideEP branch already uses for the same barrier, and the launcher's cleanup
-        # already frees it (run_xPyD_models.slurm: fuser -k 15000/tcp). The two
-        # branches never run in the same job.
+        # nodes by connecting to it. run_xPyD_models.slurm sets BARRIER_PORT per job;
+        # 15000 is the fallback when this runs without it. The two branches never run
+        # in the same job.
         CONTAINER_BARRIER_PORT="${BARRIER_PORT:-15000}"
     fi
 

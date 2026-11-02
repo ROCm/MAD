@@ -462,19 +462,22 @@ comes from the model's `tp:` flags.
 | moriio | toy proxy | `MORI_PROXY_PORT` | 10001 |
 | moriio | proxy ping / local ping | `MORI_PROXY_PING_PORT` / `MORI_LOCAL_PING_PORT` | 36367 / 61555 |
 | moriio | handshake / notify | `MORI_HANDSHAKE_PORT` / `MORI_NOTIFY_PORT` | 8405 / 61005 |
-| moriio | container barrier | `BARRIER_PORT_MORI` | 2222 |
+| moriio | container barrier | `BARRIER_PORT_MORI` | per job: `21000 + job id mod 8000` (2222 when run without the launcher) |
 | rixl | vLLM server | fixed | 2584 |
 | rixl | KV | fixed | 14600 |
 | rixl | RPC (deepep) | fixed | 13345 |
-| rixl | container barrier | `BARRIER_PORT` | 15000 |
+| rixl | container barrier | `BARRIER_PORT` | per job: `21000 + job id mod 8000` (15000 when run without the launcher) |
 | both | router HTTP | `ROUTER_PORT` (moriio also reads `VLLM_ROUTER_HTTP_PORT`) | 30000 |
 | both | router Prometheus | `VLLM_ROUTER_PROMETHEUS_PORT` | 29000 |
 | driver | torch distributed | `MASTER_PORT` | 39566 (set by `run_xPyD_models.slurm`) |
 
 The rixl + TP barrier used to default to 5000, which was collision-prone: on one
 cluster something the job could not kill held 5000, and the barrier "passed" on both
-nodes by connecting to it. Before starting containers, the launcher frees ports 2222
-and 15000 (and `BARRIER_PORT`) on every node.
+nodes by connecting to it. The launcher now gives every job its own barrier port
+(`cluster_barrier_port` in `cluster.sh`) instead of freeing fixed ports on every node,
+which killed whatever another job had listening there. At start-up it stops only
+leftover containers of its own launcher (named `container_*`), not every container on
+the node.
 
 ## Proxy options
 
@@ -511,7 +514,7 @@ Every connector implements the same six hooks; the driver calls them in a fixed 
 
 | Hook | `rixl.sh` | `moriio.sh` |
 |---|---|---|
-| `connector_init` | Ports 2584 and the router; `PROXY_TYPE`; barrier 15000 | Ports 20005 and 10001; per-role MoRI backend; barrier 2222 |
+| `connector_init` | Ports 2584 and the router; `PROXY_TYPE`; barrier `BARRIER_PORT` (15000 without the launcher) | Ports 20005 and 10001; per-role MoRI backend; barrier `BARRIER_PORT_MORI` (2222 without the launcher) |
 | `connector_setup_env` | UCX/NIXL (TP), or rocSHMEM/UCX/NIXL plus an in-place `sed` fix from vLLM PR #39276, so the engine id uses the DP rank (deepep) | MoRI/RDMA/rocSHMEM and the kernel caches |
 | `connector_runtime_patch` | No-op (deepep patches are inline in `setup_env`) | No-op (the disagg fixes are in the image's vLLM source) |
 | `connector_launch_worker` | TP server, or deepep DP+EP server | MoRIIO + TP server, or MoRI-EP DP+EP server |

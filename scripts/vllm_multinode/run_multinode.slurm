@@ -231,8 +231,8 @@ echo "[env] to the container:${COLOCATED_ENV_ARGS:- none}"
 
 # The container barrier port (serve_colocated.sh). One per job, not a fixed 2223: the
 # launcher used to free 2223 with `fuser -k`, which on a node shared with another job
-# killed whatever that job had listening there. Below MASTER_PORT (29500).
-export CONTAINER_BARRIER_PORT="${CONTAINER_BARRIER_PORT:-$(( 20000 + ${SLURM_JOB_ID:-0} % 9000 ))}"
+# killed whatever that job had listening there (cluster_barrier_port).
+export CONTAINER_BARRIER_PORT="${CONTAINER_BARRIER_PORT:-$(cluster_barrier_port)}"
 
 # Tear the containers down however the job ends, installed BEFORE the blocking srun.
 #

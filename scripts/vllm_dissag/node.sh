@@ -5,12 +5,11 @@
 # with the container's status.
 . "$(dirname "${BASH_SOURCE[0]}")/../common/node/node_lib.sh"
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
+# Leftover containers of this launcher (any job) only, by name; any other container
+# on the node is not ours to stop. A node whose GPUs are still held fails the start-up
+# GPU check with the reason (vllm_disagg.sh _check_gpus_clean).
+docker ps -q --filter "name=^container_" | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
-fuser -k ${BARRIER_PORT:-15000}/tcp 2>/dev/null || true;
-fuser -k 2222/tcp 2>/dev/null || true;
-fuser -k 15000/tcp 2>/dev/null || true;
-sleep 2;
 docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
 
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
@@ -146,6 +145,7 @@ docker run --rm \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
     ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
+    ${BARRIER_PORT_MORI:+-e BARRIER_PORT_MORI=$BARRIER_PORT_MORI} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \

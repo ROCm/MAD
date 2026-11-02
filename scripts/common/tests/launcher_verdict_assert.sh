@@ -83,7 +83,7 @@ _stub() { cat "$TMP/run/stub.log" 2>/dev/null; }
 
 _is "$(_colo)" "0" "2 nodes, no PP_SIZE given: runs (PP defaults to the node count)"
 _has "$(_stub)" "-e PP_SIZE=2 " "PP_SIZE=2 reaches the container"
-_has "$(_stub)" "-e CONTAINER_BARRIER_PORT=24242 " "barrier port derived from the job id"
+_has "$(_stub)" "-e CONTAINER_BARRIER_PORT=25242 " "barrier port derived from the job id"
 _hasnot "$(_stub)" "fuser" "nothing is killed on a fixed port"
 _has "$(_stub)" "set -o pipefail" "the container command keeps the server's exit status through tee"
 _has "$(cat "$TMP/run/perf_M.csv" 2>/dev/null)" "SUCCESS" "perf CSV published to the job directory"
@@ -114,6 +114,22 @@ kill -TERM "$_lp"; wait "$_lp"; _rc=$?
 _is "$_rc" "143" "TERM during the run ends the job with 143"
 _has "$(_stub)" "docker stop colocated_M_4242" "TERM during the run stops the containers"
 pkill -f "sleep 30" 2>/dev/null
+
+echo ""
+echo "=== run_xPyD_models.slurm (vLLM disagg): ports and containers of this job only ==="
+# On a copy of scripts/: this launcher publishes its CSV into its own directory.
+cp -a "$DIR" "$TMP/scripts"
+rm -rf "$TMP/run"; mkdir -p "$TMP/run/logs"
+( cd "$TMP/run" && env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
+    LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \
+    DOCKER_IMAGE_NAME=img MODEL_NAME=DeepSeek-V3 MODEL_PATH="$TMP/model" MAD_GPU_ARCH=gfx942 xP=1 yD=1 \
+    RUN_MORI=1 WIDE_EP=1 CLUSTER_SYSFS_IB="$TMP/none" NVME_ROOT="$TMP/nvme" SHARED_MOUNT="$TMP/shared" \
+    JIT_CACHE_HOST="$TMP/jit" STUB_CSV="$CSV_OK" \
+    bash "$TMP/scripts/vllm_dissag/run_xPyD_models.slurm" > "$TMP/run/out.txt" 2>&1 )
+_has "$(_stub)" "-e BARRIER_PORT=25242 " "rixl barrier port derived from the job id"
+_has "$(_stub)" "-e BARRIER_PORT_MORI=25242 " "moriio barrier port derived from the job id"
+_hasnot "$(_stub)" "fuser" "nothing is killed on a fixed port"
+_has "$(_stub)" "docker ps -q --filter name=^container_" "only this launcher's leftover containers are stopped"
 
 echo ""
 echo "=== the NIAH wrapper leaves max_tokens to benchmark_niah.py ==="
