@@ -106,6 +106,7 @@ scripts/common/agentx/
     README.md             # profile/preset authoring guide (see profiles/README.md)
     conformance_256k.yaml # Case-A generated conformance profile (ExplainX targets)
     conformance_512k.yaml # Case-B longer-context conformance profile (ISL tail to 500k)
+    conformance_750k.yaml # Case-B longer-context conformance profile (ISL tail to 750k; needs max-model-len >= 800000)
     inferencex_256k.yaml  # reusable source=hf preset (loader + bundled sweep + Tier 1 knobs)
     small.yaml            # tiny generated profile (fast smoke)
     custom.example.yaml   # annotated template for a user-defined profile
