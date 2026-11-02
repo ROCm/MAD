@@ -492,7 +492,9 @@ SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
+# Leftover containers of this launcher (any job) only, by name; any other container
+# on the node is not ours to stop.
+docker ps -q --filter "name=^container_" | xargs --no-run-if-empty docker stop;
 # Stop this node container when the task is signalled. scancel sends SIGTERM here, but
 # the container belongs to the docker daemon and its PID 1 is a plain bash that ignores
 # SIGTERM, so a cancelled job left its container running and holding every GPU: one

@@ -671,7 +671,7 @@ these through `env_vars`.
 | `DISTRIBUTED_TIMEOUT_SECONDS` | `7200` | `--distributed-timeout-seconds` (device and NCCL groups). |
 | `CPU_DISTRIBUTED_TIMEOUT_SECONDS` | `7200` | `--cpu-distributed-timeout-seconds`, the gloo CPU group, where the start-up barrier waits. Unset, both fall back to PyTorch's 1800 s. |
 | `LOG_WAIT_TIMEOUT_SECONDS` | `4000` | How long the head waits for readiness. |
-| `CONTAINER_BARRIER_PORT` | `20000 + job id mod 9000` | Container-creation barrier port, one per job so jobs sharing a node do not collide. |
+| `CONTAINER_BARRIER_PORT` | `21000 + job id mod 8000` | Container-creation barrier port, one per job so jobs sharing a node do not collide. |
 | `COLOCATED_FORWARD_ENV` | empty | Comma-separated names of extra variables to forward into the containers (timeouts, pre-warm), without editing the launcher. |
 | `PREWARM_CHECKPOINT` | `0` | `1` reads the whole checkpoint into page cache on every node before serving. Off because it made things worse: every node reads the whole checkpoint while PP2 x TP8 loads only its own shard, about 4 times the necessary I/O against one NFS export. Bounded by `PREWARM_TIMEOUT_SECONDS` (default 900); `PREWARM_JOBS` (default 4) sets parallel readers. Useful only as a storage probe: a large spread between nodes means storage is the bottleneck. |
 | `JIT_CACHE_PERSIST` / `JIT_CACHE_HOST` | `1` / `/mnt/m2m_nobackup/$USER/vllm_jit_cache/<image id>` | Persistent AITER/Triton kernel cache per image. Stale AITER build locks in it are removed before each job (`JIT_LOCK_STALE_MIN`, see [vllm-disagg.md](vllm-disagg.md)). |

@@ -111,6 +111,13 @@ cluster_expand_nodelist() {
         scontrol show hostnames "$nl"
     fi
 }
+# A container-creation barrier port for this job: 21000 + job id mod 8000. One per job,
+# so jobs sharing a node do not meet on one port, and no launcher has to free a fixed
+# port first (`fuser -k` killed whatever else listened there). The range avoids every
+# fixed port the launchers and engines use (2222 .. 20005, 29000 and up).
+cluster_barrier_port() {
+    echo $(( 21000 + ${SLURM_JOB_ID:-0} % 8000 ))
+}
 # How many rows of a perf.csv are FAILURE (a stalled cell, lost requests, zero
 # throughput, an errored NIAH length -- see the parsers). The launchers fail the
 # job on any, so a standalone sbatch run reports what madengine reports for the
