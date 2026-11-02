@@ -1,0 +1,16 @@
+#!/bin/bash
+# Stand-in docker. `docker run` records its full argument list as
+# $STUB_DIR/run_rank<SLURM_PROCID>.json, writes a passing perf.csv where the
+# container would, and exits STUB_DOCKER_RC (default 0). Other subcommands are
+# recorded and succeed; `image inspect` prints a fixed image id.
+echo "docker $1 $2" >> "$STUB_DIR/calls.log"
+case "$1" in
+    run)
+        python3 -c 'import json, os, sys
+open(os.path.join(os.environ["STUB_DIR"], "run_rank%s.json" % os.environ.get("SLURM_PROCID", "x")), "w").write(json.dumps(sys.argv[1:]))' "$@"
+        mkdir -p "$LOG_PATH/$SLURM_JOB_ID"
+        printf 'model,performance,metric,status\nm,1,x,SUCCESS\n' > "$LOG_PATH/$SLURM_JOB_ID/perf.csv"
+        exit "${STUB_DOCKER_RC:-0}" ;;
+    image) [ "$2" = inspect ] && echo "sha256:0123456789abcdef0123456789abcdef" ;;
+esac
+exit 0

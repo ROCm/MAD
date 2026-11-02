@@ -1,0 +1,20 @@
+#!/bin/bash
+# Stand-in srun: runs the `bash -c BODY` once per node of --nodelist (else of
+# SLURM_JOB_NODELIST), in order, as SLURM_PROCID 0..n-1 with SLURMD_NODENAME set.
+# Records each step's node list. Exit status: the worst of the per-node runs.
+nl=""; body=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --nodelist=*) nl="${1#*=}" ;;
+        bash) shift; [ "$1" = -c ] && shift; body="$1"; break ;;
+    esac
+    shift
+done
+nl="${nl:-$SLURM_JOB_NODELIST}"
+echo "srun ${nl}" >> "$STUB_DIR/calls.log"
+i=0; rc=0
+for n in ${nl//,/ }; do
+    SLURMD_NODENAME="$n" SLURM_PROCID="$i" bash -c "$body" || rc=$?
+    i=$((i + 1))
+done
+exit "$rc"

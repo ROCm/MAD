@@ -1,0 +1,14 @@
+{
+ "card": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+ "catalog": "vllm_multinode",
+ "inputs": {
+  "nodes": 2,
+  "gpu_arch": "gfx942"
+ },
+ "exit_code": 1,
+ "calls": [],
+ "ranks": [],
+ "stderr_tail": [
+  "<WORK>/scripts/vllm_multinode/run_multinode.slurm: line 86: MODEL_NAME: set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)"
+ ]
+}

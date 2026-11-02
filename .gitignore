@@ -92,3 +92,6 @@ run_directory/
 perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
+
+# The snapshot goldens are test data, not output: keep them despite *.json above.
+!scripts/common/tests/snapshot/golden/**/*.json

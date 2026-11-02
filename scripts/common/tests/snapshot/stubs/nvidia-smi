@@ -1,0 +1,3 @@
+#!/bin/bash
+# Stand-in: succeeds, prints nothing.
+exit 0
