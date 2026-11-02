@@ -41,7 +41,7 @@ _is "$(env -i PATH="$PATH" HOME="$TMP" bash -c '. "$0" >/dev/null 2>&1; echo "${
 
 echo ""
 echo "=== run_multinode.slurm, end to end with stand-ins ==="
-B="$TMP/bin"; mkdir -p "$B" "$TMP/model"
+B="$TMP/bin"; mkdir -p "$B" "$TMP/model" "$TMP/nvme" "$TMP/shared" "$TMP/jit"
 cat > "$B/srun" <<'EOF'
 #!/bin/bash
 # Runs the bash -c body once per node of --nodelist, as SLURM_PROCID 0..n-1.
@@ -76,7 +76,7 @@ _colo() { # [VAR=value ...] -> runs the launcher; prints its exit status; stand-
     ( cd "$TMP/run" && env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
         LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \
         DOCKER_IMAGE_NAME=img MODEL_NAME=M MODEL_PATH="$TMP/model" MAD_GPU_ARCH=gfx950 \
-        CLUSTER_SYSFS_IB="$TMP/none" STUB_CSV="$CSV_OK" "$@" \
+        CLUSTER_SYSFS_IB="$TMP/none" NVME_ROOT="$TMP/nvme" SHARED_MOUNT="$TMP/shared" JIT_CACHE_HOST="$TMP/jit" STUB_CSV="$CSV_OK" "$@" \
         bash "$DIR/vllm_multinode/run_multinode.slurm" > "$TMP/run/out.txt" 2>&1; echo $? )
 }
 _stub() { cat "$TMP/run/stub.log" 2>/dev/null; }
@@ -106,7 +106,7 @@ rm -rf "$TMP/run"; mkdir -p "$TMP/run/logs"
 ( cd "$TMP/run" && exec env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
     LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \
     DOCKER_IMAGE_NAME=img MODEL_NAME=M MODEL_PATH="$TMP/model" MAD_GPU_ARCH=gfx950 \
-    CLUSTER_SYSFS_IB="$TMP/none" STUB_SLEEP=30 \
+    CLUSTER_SYSFS_IB="$TMP/none" NVME_ROOT="$TMP/nvme" SHARED_MOUNT="$TMP/shared" JIT_CACHE_HOST="$TMP/jit" STUB_SLEEP=30 \
     bash "$DIR/vllm_multinode/run_multinode.slurm" > "$TMP/run/out.txt" 2>&1 ) &
 _lp=$!
 for _i in $(seq 1 50); do grep -q "docker run" "$TMP/run/stub.log" 2>/dev/null && break; sleep 0.2; done
