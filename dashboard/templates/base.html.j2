@@ -81,7 +81,6 @@
   .logo { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 650; font-size: 15px; white-space: nowrap; }
   .logo:hover { text-decoration: none; }
   .logo .mark { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; }
-  .logo .sep { color: var(--ink-3); font-weight: 400; }
   .sections { display: flex; gap: 4px; }
   .sections a { color: var(--ink-2); font-size: 14px; padding: 6px 10px; border-radius: 7px; white-space: nowrap; }
   .sections a:hover { background: var(--subtle); text-decoration: none; color: var(--ink); }
@@ -180,7 +179,7 @@
     .sections { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 16px; }
     .topbar.open .sections { display: flex; }
   }
-  @media (max-width: 760px) { .search { display: none; } .tools a { display: none; } .brand .divider, .logo .sep, .logo .mark ~ span { display: none; } }
+  @media (max-width: 760px) { .search { display: none; } .tools a { display: none; } }
   @media print { .topbar, .frozen, .filters { display: none; } }
   {% block style %}{% endblock %}
 </style>
@@ -195,7 +194,7 @@
   <div class="brand">
     <a class="amd-link" href="https://www.amd.com/" title="AMD">{{ icons.amd_logo(72) }}</a>
     <span class="divider" aria-hidden="true"></span>
-    <a class="logo" href="{{ root }}/index.html"{% if active == "overview" %} aria-current="page"{% endif %}><span class="mark">MAD</span><span class="sep">/</span><span>Recipes</span></a>
+    <a class="logo" href="{{ root }}/index.html"{% if active == "overview" %} aria-current="page"{% endif %}><span class="mark">MAD</span></a>
   </div>
   <nav class="sections" id="sections" aria-label="Sections">
     {% for key, path, label in nav %}<a href="{{ root }}/{{ path }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
