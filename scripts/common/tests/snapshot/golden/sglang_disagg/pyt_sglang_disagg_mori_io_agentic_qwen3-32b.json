@@ -126,6 +126,8 @@
        "--disable-cuda-graph",
        "--disaggregation-transfer-backend",
        "mori",
+       "--enable-metrics",
+       "--enable-metrics-for-all-schedulers",
        "--log-level-http",
        "warning"
       ]

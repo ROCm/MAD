@@ -562,6 +562,7 @@ if [[ "$_HOSTS_ROUTER" == 1 ]]; then
         _prefill_cmd+=" \
             --decode-log-interval 1 \
             ${PREFILL_MODEL_CONFIG} \
+            ${SERVER_METRICS_FLAGS} \
             --log-level-http warning"
 
         export _prefill_cmd PREFILL_NODE_RANK
