@@ -1,0 +1,51 @@
+{
+  "name": "sglang-disagg",
+  "engine": "sglang",
+  "replaces": "docker/sglang_disagg_inference.ubuntu.amd.Dockerfile",
+  "about": "SGLang disaggregated stack: the SGLang release image per architecture, sglang-router, and MoRI 158c7e8 on gfx942 (gfx950's image ships the MoRI it needs).",
+  "gpu_archs": [
+    "gfx942",
+    "gfx950"
+  ],
+  "base_image": {
+    "gfx942": "lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x@sha256:c57e916022622cd9ce00da1ab95314f531abc55de8146bf226dd8f4d938e5d5a",
+    "gfx950": "rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924@sha256:baadaba198e23c46c1dd651b5edefae8000bd5430943bd10b246b563905b3ecf"
+  },
+  "build": {
+    "pip_constraints": []
+  },
+  "components": {
+    "mori": {
+      "repo": "https://github.com/ROCm/mori.git",
+      "commit": "158c7e8335a0b19b3f1f422ff134d7869252135e",
+      "archs": [
+        "gfx942"
+      ],
+      "mode": "sgl_workspace",
+      "why": "gfx942 only (INSTALL_MORI=auto); installed editable in the image's /sgl-workspace/mori. No dma-buf fallback (see mori#721)."
+    }
+  },
+  "pip": [
+    {
+      "name": "sglang-router",
+      "version": null,
+      "pending": "`pip install --upgrade sglang-router` in the legacy image; pin to the version in the built image",
+      "upgrade": true
+    },
+    {
+      "name": "py-spy",
+      "version": null,
+      "pending": "unpinned in the legacy image"
+    },
+    {
+      "name": "flask",
+      "version": null,
+      "pending": "unpinned in the legacy image"
+    },
+    {
+      "name": "pyyaml",
+      "version": null,
+      "pending": "unpinned in the legacy image"
+    }
+  ]
+}

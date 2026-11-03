@@ -1,0 +1,80 @@
+{
+  "name": "vllm-glm51",
+  "engine": "vllm",
+  "replaces": "docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile",
+  "about": "GLM-5.1-FP8 disaggregated stack: MoRI 624002c, AITER with the ROCm/aiter#4957 gqa64 fix, vLLM for GLM-5.1, vllm-router; MoRI-EP only by default.",
+  "gpu_archs": [
+    "gfx942"
+  ],
+  "base_image": {
+    "gfx942": "rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03@sha256:c513ec5e374842bc85b6757dac120385303cad7cbf1882907eb26f2d33b66d56"
+  },
+  "build": {
+    "max_jobs": 32,
+    "nic_arch": "cx7",
+    "pip_constraints": []
+  },
+  "components": {
+    "mori": {
+      "repo": "https://github.com/ROCm/mori.git",
+      "commit": "624002c897a30928ec04c14fc167bf2b8a93f6ce",
+      "ref": "624002c897a3"
+    },
+    "aiter": {
+      "repo": "https://github.com/raviguptaamd/aiter.git",
+      "commit": "624e43586bbdb33617812ff1de5abce83d42db65",
+      "ref": "624e43586b",
+      "flydsl": {
+        "version": "0.3.1",
+        "pip_flags": [
+          "--no-deps",
+          "-U"
+        ]
+      },
+      "why": "AITER with ROCm/aiter#4957 (gqa64). Personal fork until #4957 is in an AITER release."
+    },
+    "vllm": {
+      "repo": "https://github.com/raviguptaamd/vllm.git",
+      "commit": "094820b5deeb1b93733586ca8942589e385a25dc",
+      "why": "vLLM for GLM-5.1 disaggregated serving. Personal fork."
+    },
+    "router": {
+      "repo": "https://github.com/raviguptaamd/router.git",
+      "commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
+      "ref": "ravgupta/discovery-dp-rank-roundrobin",
+      "rust_toolchain": "1.88.0",
+      "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Personal fork until vllm-project/router PR #181 lands."
+    },
+    "transports": {
+      "enabled": false,
+      "why": "UCX + RIXL (+python) + rocSHMEM + DeepEP for the rixl connector (NIXL TP, DeepEP wideEP). Off builds a MoRI-EP-only image.",
+      "subcomponents": {
+        "ucx": {
+          "repo": "https://github.com/ROCm/ucx.git",
+          "commit": "da3fac2afcb55df7605f619ee19b37f4505bd4e4",
+          "ref": "da3fac2a"
+        },
+        "googletest": {
+          "tarball": "https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz",
+          "why": "RIXL build dependency"
+        },
+        "rixl": {
+          "repo": "https://github.com/ROCm/RIXL.git",
+          "commit": "f33a5599400eb8da47ecdad20111ccb35b41a709",
+          "ref": "f33a5599"
+        },
+        "rocshmem": {
+          "repo": "https://github.com/ROCm/rocm-systems.git",
+          "commit": "9c43b23229cf2f835b838f72c0d1af3d4876167c",
+          "why": "Parent of rocm-systems 16dc5673 (2026-09-25), whose scoped float/double atomics this ROCm 7.2 compiler rejects; the rocSHMEM these images last built with. The legacy GLM image cloned rocm-systems develop, which no longer builds; the stack is off by default there."
+        },
+        "deepep": {
+          "repo": "https://github.com/ROCm/DeepEP.git",
+          "commit": "0f63d3e97f0e43b47926179d7f3f304b3bc9554e",
+          "ref": "default branch",
+          "why": "the legacy images cloned the default branch with no ref; its tip on 2026-11-03 (last commit 2026-06-30)"
+        }
+      }
+    }
+  }
+}

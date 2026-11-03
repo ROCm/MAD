@@ -97,3 +97,5 @@ scripts/jax-maxdiffusion/output/
 !scripts/common/tests/snapshot/golden/**/*.json
 # Topology spec examples are inputs, not output.
 !scripts/common/topology/specs/*.json
+# Pin sets are image inputs, not output.
+!docker/pins/*.json

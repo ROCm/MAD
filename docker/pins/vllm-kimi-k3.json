@@ -1,0 +1,93 @@
+{
+  "name": "vllm-kimi-k3",
+  "engine": "vllm",
+  "replaces": "docker/vllm_kimi_k3.ubuntu.amd.Dockerfile",
+  "about": "Kimi-K3 stack for gfx942 and gfx950: MoRI fe12a11, AITER 68e42f5f from source, vLLM for Kimi-K3, vllm-router, and the rixl transport stack.",
+  "gpu_archs": [
+    "gfx942",
+    "gfx950"
+  ],
+  "base_image": {
+    "gfx942": "rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298",
+    "gfx950": "rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298"
+  },
+  "build": {
+    "max_jobs": 32,
+    "nvcc_threads": 8,
+    "nic_arch": "cx7",
+    "pip_constraints": [
+      "setuptools<80"
+    ]
+  },
+  "components": {
+    "mori": {
+      "repo": "https://github.com/ROCm/mori.git",
+      "commit": "fe12a11a7d6c6acd0771b772366ed9ed5e0d3d44"
+    },
+    "aiter": {
+      "repo": "https://github.com/ROCm/aiter.git",
+      "commit": "68e42f5f461556596ae294200f1a3f13378c8582",
+      "gpu_archs_env": true,
+      "check_triton_conv": true,
+      "flydsl": {
+        "version": "0.2.4",
+        "pip_flags": [
+          "--no-deps",
+          "--force-reinstall"
+        ]
+      },
+      "why": "needs aiter.ops.triton.conv"
+    },
+    "vllm": {
+      "repo": "https://github.com/raviguptaamd/vllm.git",
+      "commit": "862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543",
+      "why": "vLLM for Kimi-K3. Personal fork."
+    },
+    "router": {
+      "repo": "https://github.com/raviguptaamd/router.git",
+      "commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
+      "ref": "ravgupta/discovery-dp-rank-roundrobin",
+      "rust_toolchain": "1.88.0",
+      "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Personal fork until vllm-project/router PR #181 lands."
+    },
+    "transports": {
+      "enabled": true,
+      "why": "UCX + RIXL (+python) + rocSHMEM + DeepEP for the rixl connector (NIXL TP, DeepEP wideEP). Off builds a MoRI-EP-only image.",
+      "subcomponents": {
+        "ucx": {
+          "repo": "https://github.com/ROCm/ucx.git",
+          "commit": "da3fac2afcb55df7605f619ee19b37f4505bd4e4",
+          "ref": "da3fac2a"
+        },
+        "googletest": {
+          "tarball": "https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz",
+          "why": "RIXL build dependency"
+        },
+        "rixl": {
+          "repo": "https://github.com/ROCm/RIXL.git",
+          "commit": "f33a5599400eb8da47ecdad20111ccb35b41a709",
+          "ref": "f33a5599"
+        },
+        "rocshmem": {
+          "repo": "https://github.com/ROCm/rocm-systems.git",
+          "commit": "9c43b23229cf2f835b838f72c0d1af3d4876167c",
+          "why": "Parent of rocm-systems 16dc5673 (2026-09-25), whose scoped float/double atomics this ROCm 7.2 compiler rejects; the rocSHMEM these images last built with."
+        },
+        "deepep": {
+          "repo": "https://github.com/ROCm/DeepEP.git",
+          "commit": "0f63d3e97f0e43b47926179d7f3f304b3bc9554e",
+          "ref": "default branch",
+          "why": "the legacy images cloned the default branch with no ref; its tip on 2026-11-03 (last commit 2026-06-30)"
+        }
+      }
+    }
+  },
+  "pip": [
+    {
+      "name": "pyyaml",
+      "version": null,
+      "stage": "after_engine",
+      "pending": "unpinned in the legacy image (pip install pyyaml); pin to the version in the built image"
+    }
+  ]
+}

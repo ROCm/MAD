@@ -20,3 +20,6 @@ scripts/jax-maxdiffusion/output/
 **/.jax_cache/
 **/core.*
 scripts/Primus/data/
+# Python caches, and the pin-set tests (docker/pins/ is copied into the DI images).
+**/__pycache__/
+docker/pins/tests/

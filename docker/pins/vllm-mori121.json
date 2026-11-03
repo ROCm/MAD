@@ -1,0 +1,80 @@
+{
+  "name": "vllm-mori121",
+  "engine": "vllm",
+  "replaces": "docker/vllm_disagg_inference.ubuntu.amd.Dockerfile",
+  "about": "The validated v1.2.1 (mori121) disaggregated stack: MoRI v1.2.1, AITER 0.1.16.post3 wheel, the Wide-EP WRITE-mode vLLM branch of 06/29, vllm-router, and (default) the rixl transport stack.",
+  "gpu_archs": [
+    "gfx942"
+  ],
+  "base_image": {
+    "gfx942": "rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298"
+  },
+  "build": {
+    "max_jobs": 32,
+    "nic_arch": "cx7",
+    "pip_constraints": []
+  },
+  "components": {
+    "mori": {
+      "repo": "https://github.com/ROCm/mori.git",
+      "commit": "e31d426a13e96e1cbff96a1c904d291aefe8c46a",
+      "ref": "v1.2.1",
+      "why": "EP/RDMA correctness fixes and the ROCm 7.2.3 dma-buf registration path the connector .env relies on. Built with BUILD_UMBP=OFF and the default NIC backends (disabling them deadlocked the cross-node EP all-to-all init)."
+    },
+    "aiter": {
+      "wheel": {
+        "url": "https://github.com/ROCm/aiter/releases/download/v0.1.16.post3/amd_aiter-0.1.16.post3%2Brocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+        "version": "0.1.16.post3"
+      },
+      "flydsl": {
+        "version": "0.2.2",
+        "pip_flags": []
+      },
+      "why": "prebuilt rocm7.2 release wheel"
+    },
+    "vllm": {
+      "repo": "https://github.com/shikamd123/vllm.git",
+      "commit": "1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31",
+      "ref": "vllm_2p2d_wide-ep_write_shikpate_test_06_29_customer",
+      "why": "Wide-EP multi-pod PD WRITE mode with the MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native. Branch tip on 2026-11-03 (last commit 2026-06-26). Personal fork until the fixes are upstream."
+    },
+    "router": {
+      "repo": "https://github.com/raviguptaamd/router.git",
+      "commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
+      "ref": "ravgupta/discovery-dp-rank-roundrobin",
+      "rust_toolchain": "1.88.0",
+      "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Personal fork until vllm-project/router PR #181 lands."
+    },
+    "transports": {
+      "enabled": true,
+      "why": "UCX + RIXL (+python) + rocSHMEM + DeepEP for the rixl connector (NIXL TP, DeepEP wideEP). Off builds a MoRI-EP-only image.",
+      "subcomponents": {
+        "ucx": {
+          "repo": "https://github.com/ROCm/ucx.git",
+          "commit": "da3fac2afcb55df7605f619ee19b37f4505bd4e4",
+          "ref": "da3fac2a"
+        },
+        "googletest": {
+          "tarball": "https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz",
+          "why": "RIXL build dependency"
+        },
+        "rixl": {
+          "repo": "https://github.com/ROCm/RIXL.git",
+          "commit": "f33a5599400eb8da47ecdad20111ccb35b41a709",
+          "ref": "f33a5599"
+        },
+        "rocshmem": {
+          "repo": "https://github.com/ROCm/rocm-systems.git",
+          "commit": "9c43b23229cf2f835b838f72c0d1af3d4876167c",
+          "why": "Parent of rocm-systems 16dc5673 (2026-09-25), whose scoped float/double atomics this ROCm 7.2 compiler rejects; the rocSHMEM these images last built with."
+        },
+        "deepep": {
+          "repo": "https://github.com/ROCm/DeepEP.git",
+          "commit": "0f63d3e97f0e43b47926179d7f3f304b3bc9554e",
+          "ref": "default branch",
+          "why": "the legacy images cloned the default branch with no ref; its tip on 2026-11-03 (last commit 2026-06-30)"
+        }
+      }
+    }
+  }
+}
