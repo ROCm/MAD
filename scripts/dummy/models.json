@@ -15,12 +15,7 @@
     {
         "name": "dummy_image_spec",
         "image_spec": {
-            "rocm": {
-                "version": "10.1"
-            },
-            "cuda": {
-                "version": "12.8"
-            }
+            "rocm": "10.1"
         },
         "scripts": "run_multi.sh",
         "n_gpus": "1",

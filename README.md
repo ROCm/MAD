@@ -244,60 +244,50 @@ WORKDIR /workspace
 
 #### Alternative: Declarative `image_spec`
 
-A card can describe the stack it needs instead of pointing at its own
-Dockerfile. madengine resolves the spec against `compat/rocm.json` and
-`compat/cuda.json` and builds the shared `docker/global_univ2.ubuntu.amd.Dockerfile`
-or `docker/global_univ2.ubuntu.nvidia.Dockerfile` with the resolved build args.
-Cards with a `dockerfile` keep working unchanged.
+A workload folder can describe its image instead of pointing at a Dockerfile.
+`compat/rocm.yaml` is the compatibility matrix: the ROCm releases, wheel
+indexes and component builds MAD authorizes. A folder's `image_spec.yaml`, next
+to its `models.json`, selects from it; what a spec selects is what that workload
+is locked to. madengine adds every build a selection requires, installs them in
+dependency order (one image layer each), and fails before building if a
+requirement has no authorized build.
+
+```yaml
+# scripts/vllm/image_spec.yaml
+rocm: "10.1"
+python: "3.14"
+components:
+  vllm: "0.29.1.dev0+rocm10.1.0.g98dff2a81.d20261002@frameworks-vllm"
+```
+
+A card opts in by referencing the folder's spec with OmegaConf, and can
+override any part of it; cards with a `dockerfile` are unchanged:
 
 ```json
-{
-  "name": "my_model",
-  "image_spec": {
-    "rocm": {"version": "10.1"},
-    "cuda": {"version": "12.8"},
-    "torch": "2.11",
-    "components": [
-      {"name": "migraphx", "amd": {"url": "https://.../migraphx.whl"}, "sha256": "..."}
-    ],
-    "sources": [{"repo": "https://github.com/ROCm/AMDMIGraphX", "commit": "<sha>"}]
-  },
-  "scripts": "run.sh",
-  "n_gpus": "1",
-  "tags": ["my_model"]
-}
+"image_spec": "${image_spec}"
+"image_spec": {"extends": "${image_spec}", "gpu_arch": "gfx942"}
 ```
 
-- `madengine build --tags my_model --explain` prints the resolved plan without building.
-- `--additional-context '{"image_spec": {...}}'` overrides a card's spec for one run, and
-  `docker_build_arg` still overrides any resolved build arg.
-- `build_manifest.json` records the resolved plan (`build_plan`) and the installed
-  stack (`image_info`) for each image.
-- `compat/rocm.json` lists the ROCm releases a spec can name. `compat/cuda.json` is
-  generated from [replicate/cog](https://github.com/replicate/cog) (Apache-2.0); refresh it
-  with `python tools/sync_cuda_matrix_from_cog.py`.
+A spec can force a relative install order with `order: [a, b]`; it adds to
+the dependency order and fails if it contradicts what a component requires.
 
-See `scripts/dummy/models.json` (`dummy_image_spec`) for a working card and the
-madengine configuration guide for every `image_spec` key.
-
-#### Full framework stacks: `compat/stacks/`
-
-ROCm framework stacks are built by separate teams, so the same component (torch,
-aiter, MoRI, NIXL, ...) exists as different builds in each. A **stack lock** in
-`compat/stacks/<name>.json` names the exact artifacts of one best-known stack:
-wheel URLs or pip requirements against a named index, plus pinned source builds,
-for one platform (ROCm, python, gfx targets). A card selects it with
-`"image_spec": {"stack": "vllm"}` and can replace single artifacts with
-`"override"`; madengine checks the declared pins between artifacts before
-building and generates the Dockerfile (one layer per artifact) under
-`.madengine/build/`.
+To move an existing workload onto a spec, build its image as today and let
+madengine draft the spec from what the Dockerfile added on top of its base:
 
 ```bash
-madengine stack show vllm -a gfx942            # what the stack is made of
-madengine stack check vllm kvcache-transfer    # declared pins between artifacts
-madengine stack diff vllm kvcache-transfer     # where two stacks differ
-madengine stack harvest https://rocm.frameworks.amd.com/whl-multi-arch/   # what an index offers
+madengine stack infer <built-image> --base <base-image> -o scripts/<dir>/image_spec.yaml
 ```
+
+The draft selects the authorized builds it found; packages compat has no build
+for yet are listed as candidates for new `compat/rocm.yaml` entries.
+
+- `madengine build --tags <card> --explain` prints the resolved plan without building.
+- `madengine stack show scripts/vllm` lists the components in install order and why
+  each is there; `stack check` compares the wheels' declared dependencies with the
+  plan; `stack diff scripts/vllm scripts/kvcache_transfer_bench` shows where two
+  workloads differ; `stack harvest <index>` lists what an index offers.
+- `build_manifest.json` records the resolved plan (`build_plan`) and the installed
+  stack (`image_info`) for each image.
 
 #### Step 4: Script Implementation
 

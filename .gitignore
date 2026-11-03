@@ -70,8 +70,6 @@ venv.bak/
 *.csv
 *.json
 !models.json
-!compat/*.json
-!compat/stacks/*.json
 *.log
 *.out
 *.html

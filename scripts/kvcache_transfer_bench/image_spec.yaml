@@ -1,0 +1,21 @@
+# Image spec form of docker/kvcache_transfer_bench, for cards that opt in with
+# "image_spec": "${image_spec}". The SGLang ROCm 10 image provides ROCm, python
+# and torch; the transfer backends are pinned source builds from
+# compat/rocm.yaml (nixl requires ucx, which madengine adds and builds first).
+base: lmsysorg/sglang:v0.5.20-rocm10-mi30x
+gpu_arch: gfx942
+setup:
+  - sed -i 's|http://|https://|g' /etc/apt/sources.list
+env:
+  MORI_ROOT: /sgl-workspace/mori
+  MORI_IO_BENCH_ENGINE_BIN: /sgl-workspace/mori/build_bench/tests/cpp/bench_engine
+  MOONCAKE_HOME: /sgl-workspace/Mooncake
+  UCX_HOME: /sgl-workspace/ucx
+  NIXL_HOME: /sgl-workspace/nixl
+  PYTHONPATH: /sgl-workspace/mori:/sgl-workspace/aiter
+  PATH: /sgl-workspace/ucx/bin:$PATH:/usr/local/bin/etcd
+  LD_LIBRARY_PATH: /sgl-workspace/nixl/lib/x86_64-linux-gnu:/sgl-workspace/ucx/lib:$LD_LIBRARY_PATH
+components:
+  mori: "1.2.3.post1@kvcache"
+  mooncake: "0.3.13.post1@kvcache"
+  nixl: "1.4.1+pr2191@kvcache"
