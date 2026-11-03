@@ -107,10 +107,15 @@ fi
 export MOONCAKE_REPO_DIR=$(pwd)
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs}"
 
+# Configuration layers (common/config/layers.sh): what was set at submit time is
+# recorded first, so later layers can tell a chosen value from a default.
+# (The scripts are found from the working directory here, as MOONCAKE_REPO_DIR is.)
+. "${MOONCAKE_REPO_DIR}/../common/config/layers.sh"
+config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
-# (The scripts are found from the working directory here, as MOONCAKE_REPO_DIR is.)
 . "${MOONCAKE_REPO_DIR}/../common/topology/apply.sh" sglang_disagg
+config_layer topology
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp flags, omit dp/ep CLI flags
@@ -159,6 +164,8 @@ for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED
 _SHAPE_PASSED=""
 for _v in GPUS_PER_NODE GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+config_layer site
+# SGLang recipes carry no env: block (flags only), so there is no recipe layer here.
 
 # The container sets its own fabric defaults (mori_ep_env.sh, set_env_vars.sh),
 # which name one CX7 cluster's NICs and GID 3. Forward into it:
@@ -503,6 +510,7 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
+dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
 dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${MOONCAKE_REPO_DIR}/node.sh"
 _srun_rc=$?
 dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'

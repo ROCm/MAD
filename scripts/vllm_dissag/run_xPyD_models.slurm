@@ -63,14 +63,20 @@ cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Configuration layers (common/config/layers.sh): what was set at submit time is
+# recorded first, so the recipe below can tell a chosen value from a site default.
+. "${MAD_SCRIPTS_DIR}/common/config/layers.sh"
+config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
 . "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_dissag
+config_layer topology
 if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
     echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
     exit 1
 fi
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+config_layer site
 
 REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
 for f in "${REQUIRED_FILES[@]}"; do
@@ -251,6 +257,9 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # KEY=VALUE lines into CONNECTOR_ENV_ARGS as `-e KEY=${KEY:-VALUE}` pairs, so a
 # submit-time export of the same name still overrides. Forwarded in the docker run.
 # ---------------------------------------------------------------------------
+# The recipe's env: block first, over site and connector defaults and under what was
+# submitted or set by the topology spec (common/config/layers.sh).
+config_apply_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" "${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_ARGS=""
 if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
@@ -258,6 +267,7 @@ if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
   while IFS= read -r _line; do
     [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
     _k="${_line%%=*}"; _v="${_line#*=}"
+    [[ -z "${!_k:-}" ]] && config_note "$_k" "$_v" connector-env
     CONNECTOR_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"   # submit-time export of $_k wins
   done < "$CONNECTOR_ENV_FILE"
 else
@@ -555,6 +565,7 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
+dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
 dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${SCRIPT_DIR}/node.sh"
 _srun_rc=$?
 dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'

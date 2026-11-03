@@ -68,9 +68,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Configuration layers (common/config/layers.sh): what was set at submit time is
+# recorded first, so later layers can tell a chosen value from a default.
+. "${MAD_SCRIPTS_DIR}/common/config/layers.sh"
+config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
 . "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_multinode
+config_layer topology
 SHARED_DIR="${MAD_SCRIPTS_DIR}/vllm_dissag"
 
 REQUIRED_FILES=(
@@ -101,6 +106,10 @@ _FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_NET_GDR_LEVEL NCCL_CROSS_NIC NC
 _FABRIC_PASSED=""
 for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+config_layer site
+# The recipe's env: block over site defaults, under what was submitted
+# (common/config/layers.sh); serve_colocated.sh applies the rest in the container.
+config_apply_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
 GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
@@ -275,6 +284,7 @@ trap 'trap - EXIT; _colocated_teardown; exit 143' INT TERM
 # the perf CSV. Both parse_to_csv.py implementations read them (_get_run_metadata
 # for docker_image and machine_name) but run inside the container, so a name the
 # list omits is simply absent and the column comes out blank.
+dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
 dispatch_run node "$SELECTED_NODELIST" bash "${SCRIPT_DIR}/node.sh" &
 _srun_pid=$!
 _srun_rc=0

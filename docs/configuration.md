@@ -256,28 +256,22 @@ when `BENCHMARK_SCRIPT=agentic` or `ENABLE_RADIX_CACHE=1`. See
 
 ### Per-model ENV layering (vLLM disaggregated)
 
-This is the layering the vLLM README and ARCHITECTURE file describe, lowest to highest:
+The recipe's place in the [one order](#b-the-container-environment), lowest to highest:
 
 1. Connector default: `export VAR=${VAR:-default}` in `connectors/<connector>.sh`.
-2. `models.yaml` `env:`, exported before the connector's `setup_env`.
-3. Submit-time `-e VAR=...`: a site or per-run override. It wins.
+2. Site defaults (`cluster.sh`) and `connectors/<connector>.env`.
+3. `models.yaml` `env:`.
+4. A topology spec file, then submit-time values (card `env_vars`, `--additional-context`,
+   your `export`). They win.
 
 So a model can override a connector default (for example a `MORI_*` knob) without editing any
 script, and a per-run or per-cluster value still wins.
 
-Step 3 is broader than it looks. Everything the batch script forwards with `docker run -e` is
-already in the container when the recipe is read, so it beats the recipe. That includes:
-
-- every `KEY=VALUE` in `connectors/<connector>.env` (with your export of the same name winning
-  over the file);
-- the `cluster.sh` defaults the batch script forwards, for example
-  `DISTRIBUTED_TIMEOUT_SECONDS`, `LOG_WAIT_TIMEOUT_SECONDS`, `GPUS_PER_NODE`,
-  `NCCL_SOCKET_IFNAME`, `NCCL_IB_GID_INDEX`;
-- names the batch script always forwards with its own default, for example
-  `MORI_SOCKET_IFNAME` (`eth0`), `VLLM_RPC_TIMEOUT` and `VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS`.
-
-A recipe value for one of those names does not take effect on the `run_xPyD_models.slurm` path.
-To change one, export it at submit time.
+So a model can override a connector default, a connector `.env` value or a site default (for
+example a `MORI_*` knob or `DISTRIBUTED_TIMEOUT_SECONDS`) without editing any script, and a
+per-run or per-cluster value still wins. Until the configuration layers were introduced, a
+recipe value for a name the batch script forwards was ignored whenever `cluster.sh` or the
+connector `.env` had a value for it.
 
 The batch script forwards a fixed list of names, not the whole environment. If you export a
 variable that is not on the list, it does not reach the container. Check the `docker run`
@@ -800,36 +794,41 @@ The partition, `--gpus-per-node=8` and `--exclusive` that madengine would use ar
 pass them yourself. `cluster.sh`'s `SBATCH_PARTITION` is only for running a launcher by hand
 outside `sbatch`.
 
-### (b) The container environment (vLLM disaggregated)
+### (b) The container environment
 
-Weakest first:
+One order for every launcher, weakest first. The strongest layer that sets a name wins:
 
-1. Image `ENV`. The Kimi-K3 and shared disagg images ship no recipe or platform env, only cache
-   locations such as `AITER_JIT_DIR`.
-2. Connector script defaults: `${VAR:-default}` in `connectors/<connector>.sh`, and the launcher's
-   `GPU_MEMORY_UTILIZATION` fallback.
-3. The recipe's `env:` block in `models.yaml`. It sets only names not already set.
-4. What the batch script forwards with `docker run -e`. For each forwarded name the value is
-   whatever the batch script's environment holds, so within this layer, weakest first:
-   1. `connectors/<connector>.env` values (used only when the environment has no value);
-   2. `cluster.sh` defaults (filled only when the name is unset);
-   3. the submit-time environment, which is, weakest first:
-      - `mad-config.yaml` `model:`, then `benchmark:` (madengine only);
-      - `docker_env_vars` from the additional context (madengine only);
-      - the card's `env_vars`;
-      - `env_vars` from `--additional-context` (madengine), or your own `export` (plain `sbatch`).
+1. Image `ENV`, then the in-container `${VAR:-default}` values (`connectors/<connector>.sh`,
+   SGLang's `mori_ep_env.sh`, the launcher's `GPU_MEMORY_UTILIZATION` fallback).
+2. **Site**: `cluster.sh` defaults, filled only where nothing else set the name.
+3. **Connector `.env`**: `connectors/<connector>.env` (vLLM disaggregated).
+4. **Recipe**: the model's `env:` block in `models.yaml` (vLLM disaggregated and colocated;
+   SGLang recipes have none).
+5. **Topology spec**: what a `MAD_TOPOLOGY` file sets (`xP`, `yD`, `EP_TP_SIZE`, ...). A name
+   also given at submit time must agree with it, or the launcher stops.
+6. **Submit time**: everything in the environment when the launcher starts. Within it, weakest
+   first: `mad-config.yaml` `model:` then `benchmark:` (madengine), `docker_env_vars` from the
+   additional context (madengine), the card's `env_vars`, then `env_vars` from
+   `--additional-context` (madengine) or your own `export` (plain `sbatch`).
 
-   Only names on the batch script's forward list reach the container. madengine preset
-   `env_vars` are not passed to `slurm_multi` cards.
+The launcher records the submit-time names before it sources `cluster.sh`
+(`scripts/common/config/layers.sh`), so it can tell a value you chose from a default. On the
+batch node it applies the recipe over site defaults and connector `.env` values where they
+differ, and leaves the rest of the recipe to the container, which applies it to the names it
+was not given. A recipe value therefore takes effect even for names the launcher forwards with
+`docker run -e`; before, a site default or connector value for such a name silently won. The
+launcher prints each override (`[config] recipe X=... over ... (site)`).
 
-In short: `cluster.sh`
-defaults, then the recipe, then the card's `env_vars`, then anything you set yourself. The long
-form above adds that a name `cluster.sh` sets and the batch script forwards is already present
-when the recipe is read.
+Only names on the launcher's forward list reach the container; exporting another name has no
+effect there. madengine preset `env_vars` are not passed to `slurm_multi` cards.
 
-The colocated launcher follows the same order for the recipe's `env:`. SGLang has no recipe
-`env:`; its container environment is the forwarded names over the `${VAR:-default}` values in
-`mori_ep_env.sh`.
+### The resolved environment, per job
+
+Each run writes `config.resolved.json` into its log directory (`$LOG_PATH/<job id>/`): every
+name in the run's environment with its value and the layer that set it (`site`,
+`connector-env`, `recipe`, `topology`, `submit`, or `launcher` for values the launcher derives,
+such as node lists). Values of secret-looking names (`*TOKEN*`, `*SECRET*`, `*PASSW*`,
+`*_KEY`, ...) are written as `<set>`.
 
 ## Where do I change X
 
@@ -857,7 +856,8 @@ The colocated launcher follows the same order for the recipe's `env:`. SGLang ha
 | GPU arch check | `GPU_ARCHS` in the recipe; card `skip_gpu_arch`; `GPU_ARCH_CHECK=0` to bypass | |
 | One-off override for a single run | `--additional-context '{"env_vars": {...}, "slurm": {...}}'`; plain `sbatch`: `export` before `sbatch` | Only forwarded names reach the container |
 | Ports | `ROUTER_PORT`, `MORI_SERVE_PORT`, `MORI_PROXY_PORT`, `SERVE_PORT`, `MASTER_PORT` | |
-| Timeouts | `DISTRIBUTED_TIMEOUT_SECONDS`, `LOG_WAIT_TIMEOUT_SECONDS`: export them (they are always forwarded, so a recipe value does not apply). `VLLM_ENGINE_READY_TIMEOUT_S`: recipe `env:` or export | |
+| Timeouts | `DISTRIBUTED_TIMEOUT_SECONDS`, `LOG_WAIT_TIMEOUT_SECONDS`, `VLLM_ENGINE_READY_TIMEOUT_S`: recipe `env:` for a model, or export for a run | |
+| Where a value came from | `config.resolved.json` in the job's log directory | Value and layer for every name |
 | madengine's own timeout | card `timeout`, or `madengine run --timeout` | `0` means none |
 
 ## See also
