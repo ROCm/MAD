@@ -120,7 +120,13 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # vLLM >= v0.29 ignores the VLLM_MORIIO_* transfer env vars and reads these keys only
+    # from kv_connector_extra_config, so forward whichever ones are set.
+    local transfer=""
+    [[ -n "${VLLM_MORIIO_QP_PER_TRANSFER:-}" ]] && transfer+=',"qp_per_transfer":'"${VLLM_MORIIO_QP_PER_TRANSFER}"
+    [[ -n "${VLLM_MORIIO_NUM_WORKERS:-}" ]] && transfer+=',"num_workers":'"${VLLM_MORIIO_NUM_WORKERS}"
+    [[ -n "${VLLM_MORIIO_POST_BATCH_SIZE:-}" ]] && transfer+=',"post_batch_size":'"${VLLM_MORIIO_POST_BATCH_SIZE}"
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${transfer}"'}}'
 }
 
 connector_runtime_patch() {

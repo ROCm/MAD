@@ -7,6 +7,7 @@
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
 #SBATCH --output="/shared_inference/%u/model_blog_logs/slurm-%j.out"
 #SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
+#SBATCH --open-mode=append      # keep earlier attempts' output when a preempted job is requeued
 
 
 # ------------------------
@@ -88,6 +89,8 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +99,8 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -182,7 +187,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "DeepSeek-V4-Flash-FP8" "DeepSeek-V4-Pro-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -462,6 +467,11 @@ if [ ! -d "$LOG_PATH" ]; then
 else
     echo "Directory already exists: $LOG_PATH"
 fi
+# A requeued job reuses its job ID; move the previous attempt's run logs aside so they survive.
+if [[ "${SLURM_RESTART_COUNT:-0}" -gt 0 && -d "$LOG_PATH/$SLURM_JOB_ID" ]]; then
+    mv "$LOG_PATH/$SLURM_JOB_ID" "$LOG_PATH/${SLURM_JOB_ID}.attempt$((SLURM_RESTART_COUNT - 1))"
+    echo "Requeue ${SLURM_RESTART_COUNT}: previous run logs moved to $LOG_PATH/${SLURM_JOB_ID}.attempt$((SLURM_RESTART_COUNT - 1))"
+fi
 
 export CONNECTOR_ENV_ARGS="$CONNECTOR_ENV_ARGS"
 export LOG_PATH=$LOG_PATH
@@ -488,7 +498,9 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+# --kill-on-bad-exit: if one rank's docker run fails (e.g. exit 125), end the step instead
+# of leaving the other ranks waiting at the container barrier until the time limit.
+srun --kill-on-bad-exit=1 --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
@@ -527,10 +539,10 @@ _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
 for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
 done
 for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+    [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
 done
 
 for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
@@ -671,6 +683,7 @@ docker run --rm \
     ${MORI_NUM_QP_PER_PE:+-e MORI_NUM_QP_PER_PE=$MORI_NUM_QP_PER_PE} \
     ${VLLM_MORIIO_QP_PER_TRANSFER:+-e VLLM_MORIIO_QP_PER_TRANSFER=$VLLM_MORIIO_QP_PER_TRANSFER} \
     ${VLLM_MORIIO_NUM_WORKERS:+-e VLLM_MORIIO_NUM_WORKERS=$VLLM_MORIIO_NUM_WORKERS} \
+    ${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=$VLLM_MORIIO_POST_BATCH_SIZE} \
     ${GPU_MEMORY_UTILIZATION:+-e GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION} \
     -e _GPU_MEM_UTIL_LAUNCHER_DEFAULT=$_GPU_MEM_UTIL_LAUNCHER_DEFAULT \
     -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
@@ -694,6 +707,11 @@ docker run --rm \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
     --name $DOCKER_CONT_NAME \
     $DOCKER_IMAGE_NAME -c "
+        # Every container on this node was stopped above, so any AITER build lock left in the
+        # persistent cache is from a killed/preempted run and would make the next compile wait
+        # forever. Cleared in here because the cache is root-owned.
+        echo jit-cache: clearing stale AITER build locks in ${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build
+        rm -rfv ${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}/build/lock_* 2>/dev/null
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
