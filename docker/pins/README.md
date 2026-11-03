@@ -23,9 +23,28 @@ docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
 another base image. The image records `/app/versions.txt` (every component's commit)
 and `/app/pins.json`, and its last step checks them against the set.
 
+## Patches instead of forks
+
+Changes that are not upstream yet are patch files in `docker/patches/<component>/`,
+applied after the upstream commit is checked out; the pin set names each with its
+sha256 and the upstream PR it waits on, and keeps the fork commit it reproduces as
+`fork_commit`. Each patch is `git diff <upstream merge-base> <fork commit>`, so applying
+it to the upstream commit gives the fork commit's tree exactly; `docker/patches/verify.py`
+checks that against GitHub. When a change lands upstream, move the pin set to an
+upstream commit that has it and delete the patch.
+
+| Patch | Component | Reproduces |
+|---|---|---|
+| `vllm/wide-ep-write-0629.patch` | vLLM | the Wide-EP WRITE-mode branch of the mori121 stack (15 commits) |
+| `vllm/kimi-k3.patch` | vLLM | the Kimi-K3 vLLM (67 commits) |
+| `vllm/glm51.patch` | vLLM | the GLM-5.1 vLLM (10 commits) |
+| `router/dp-rank-kv-notify.patch` | vllm-router | DP-rank round-robin + 2P2D KV-notify fix (vllm-project/router#181) |
+| `aiter/gqa64.patch` | AITER | the gqa64 fix (ROCm/aiter#4957) |
+
 ## Rules
 
-- A component is a full 40-hex commit. A branch, tag or short SHA may be kept in
+- A component is a full 40-hex commit of its upstream repository, plus patches. No
+  personal fork is a source. A branch, tag or short SHA may be kept in
   `ref` as a note; it is never what is built.
 - A base image is a digest (`repo:tag@sha256:...`).
 - A pip package has an exact version. One that was unpinned in the image a set

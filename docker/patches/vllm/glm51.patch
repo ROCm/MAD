@@ -1,0 +1,393 @@
+MAD pin-set patch: vLLM changes for GLM-5.1 disaggregated serving
+Upstream: https://github.com/vllm-project/vllm.git @ d626108b1841888ec90aced33367149a6bbc7e4b
+Reproduces: fork commit 094820b5deeb1b93733586ca8942589e385a25dc of vllm.git (applying this to the upstream commit gives its tree exactly)
+Fork commits:
+  094820b5d [MoE][ROCm] MoRI combine() must use original (pre-dispatch) topk_ids (fixes 4P/4D EP32)
+  448f0e883 [MoE][ROCm] Plumb mori max_total_recv_tokens (decouple recv capacity from send width)
+  1624c7d1f [MoE][ROCm] Make MoRI EP sizing env-tunable (3.4x decode speedup)
+  0c20e4198 [ROCm][DSA] Revert invalid-index sentinel -1->0 (fixes disagg decode GPU fault)
+  3d4c1beee [ROCm][DSA] Bounds-guard sparse-indexer k-cache Triton kernel
+  3b2111e71 [Compile] Split kv_cache_update ops out of compiled graph (v0.27 MLA fix)
+  f2b832de8 [ROCm][MLA] Call concat_and_cache_mla positionally (v0.27 stable-ABI fix)
+  b500b0ecc [ROCm][MoRIIO] Transfer DSA indexer KV cache prefill->decode (fixes long-context collapse)
+  d3b3f08c1 [ROCm] Key sparse-MLA persistent metadata on per-request context lengths (disagg-hardened)
+  4c0922c60 [ROCm][DSA] Map invalid token slots to -1 in sparse-MLA index kernel
+
+diff --git a/vllm/config/compilation.py b/vllm/config/compilation.py
+index 3cd227d72ce4ca651a8b09511267439f1762d0db..2f42cc1dc15edbebe379f23f87ab64f0c3f1ab1a 100644
+--- a/vllm/config/compilation.py
++++ b/vllm/config/compilation.py
+@@ -1211,6 +1211,25 @@ class CompilationConfig:
+                     self.cudagraph_mode = CUDAGraphMode.FULL
+                 self.splitting_ops = []
+ 
++        # The *_kv_cache_update ops carry a `str` param and, for MLA, dispatch the
++        # STABLE-ABI concat_and_cache_mla whose boxed kernel does NOT compose inside
++        # the compiled/inductor graph on v0.27 (torch 2.12) -> "RuntimeError: unknown
++        # parameter type" on the first real MLA decode forward. They MUST run as an
++        # eager boundary. Upstream only appends them when splitting_ops starts as None;
++        # when it is pre-populated (e.g. from _attention_ops) the KV-update op is left
++        # in the compiled graph. Normalize: if an attention op is split, split its
++        # paired kv_cache_update op too. No-op with inductor graph partition.
++        if not self.use_inductor_graph_partition and self.splitting_ops:
++            _kv_pairs = {
++                "vllm::unified_attention_with_output": "vllm::unified_kv_cache_update",
++                "vllm::unified_mla_attention_with_output": (
++                    "vllm::unified_mla_kv_cache_update"
++                ),
++            }
++            for _attn_op, _kv_op in _kv_pairs.items():
++                if _attn_op in self.splitting_ops and _kv_op not in self.splitting_ops:
++                    self.splitting_ops.append(_kv_op)
++
+         if (
+             not self.use_inductor_graph_partition
+             and (self.pass_config.enable_sp or self.pass_config.fuse_gemm_comms)
+diff --git a/vllm/distributed/device_communicators/all2all.py b/vllm/distributed/device_communicators/all2all.py
+index 657ad9fd0e13be83b9017f1fe0db6bd1fd389da7..fb63138e6fd59eb798328d93376f40df1a0ea6f4 100644
+--- a/vllm/distributed/device_communicators/all2all.py
++++ b/vllm/distributed/device_communicators/all2all.py
+@@ -962,6 +962,40 @@ class MoriAll2AllManager(All2AllManagerBase):
+                     "mori currently only support arch gfx942 and gfx950"
+                 )
+ 
++        # Env overrides; 0 / -1 keep the per-arch defaults selected above.
++        if envs.VLLM_MORI_WARP_NUM_PER_BLOCK > 0:
++            warp_num_per_block = envs.VLLM_MORI_WARP_NUM_PER_BLOCK
++        if envs.VLLM_MORI_BLOCK_NUM > 0:
++            block_num = envs.VLLM_MORI_BLOCK_NUM
++        if envs.VLLM_MORI_RDMA_BLOCK_NUM >= 0:
++            rdma_block_num = envs.VLLM_MORI_RDMA_BLOCK_NUM
++
++        # Dispatch/combine buffer width. By default this inherits
++        # max_num_batched_tokens, which is a chunked-prefill SCHEDULER setting (default
++        # 8192) unrelated to how many tokens an EP rank actually dispatches. On a decode
++        # instance that makes every step move an 8192-token-wide buffer per layer -- a
++        # large fixed per-step cost independent of the real batch size (measured on
++        # GLM-5.1-FP8 EP8: 302ms -> 88ms TPOT, 3.4x, when sized for the real work).
++        #
++        # NOTE: this value must still cover vLLM's profiling/warmup dummy run, which
++        # deliberately pushes max_num_batched_tokens through the model. Shrinking it
++        # alone trips mori's device assert
++        #   "Total recv token overflow: increase maxTotalRecvTokens"
++        # because MaxNumTokensToRecvPerRank() falls back to maxNumInpTokenPerRank.
++        # Prefer VLLM_MORI_MAX_TOTAL_RECV_TOKENS (below) to keep the receive capacity
++        # large while narrowing what each step actually dispatches.
++        if envs.VLLM_MORI_MAX_TOKENS_PER_RANK > 0:
++            max_num_tokens_per_dp_rank = envs.VLLM_MORI_MAX_TOKENS_PER_RANK
++
++        # Receive capacity, decoupled from the send width. mori honours
++        # maxTotalRecvTokens when > 0 (dispatch_combine.hpp:
++        #   MaxNumTokensToRecvPerRank() = ceil(maxTotalRecvTokens / worldSize)
++        #                                 clamped to maxNumInpTokenPerRank)
++        # vLLM never plumbed this field, so recv capacity was always tied to the send
++        # width. Exposing it lets a decode instance keep enough headroom for the
++        # profiling dummy run / bursty routing without paying 8192-wide dispatches.
++        max_total_recv_tokens = envs.VLLM_MORI_MAX_TOTAL_RECV_TOKENS
++
+         return dict(
+             rank=rank,
+             world_size=num_ep_ranks,
+@@ -971,6 +1005,7 @@ class MoriAll2AllManager(All2AllManagerBase):
+             scale_type_size=scale_type_size,
+             max_token_type_size=input_dtype.itemsize,
+             max_num_inp_token_per_rank=max_num_tokens_per_dp_rank,
++            max_total_recv_tokens=max_total_recv_tokens,
+             num_experts_per_rank=num_local_experts,
+             num_experts_per_token=num_experts_per_token,
+             warp_num_per_block=warp_num_per_block,
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+index c53c0eb99eb37fa4e6bdc18470b423bf5ee48dc0..14471fb0320f2b3f4781322a38e7f8de5f963c97 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+@@ -1785,6 +1785,37 @@ class MoRIIOConnectorWorker:
+         self.num_regions = len(caches_data)
+         self.num_layers = len(self.kv_caches.keys())
+ 
++        # DSA Bug B fix (GLM-5.1): pair each main-attention KV cache to its DSA
++        # indexer k_cache by layer index, so the producer can transfer the indexer
++        # cache alongside the main one. The indexer module forward() is a no-op (the
++        # write happens inside the fused SparseAttnIndexer op), so the indexer cache
++        # is registered but never calls save_kv_layer; without this the decode pod
++        # selects top-k over a COLD indexer cache -> long-context collapse. The
++        # '.indexer.' substring is the discriminator (78 main + 78 indexer = 156).
++        import re as _glm_re
++
++        _glm_idx_by_lnum: dict[str, str] = {}
++        for _k in self.kv_caches:
++            if ".indexer." not in _k:
++                continue
++            _m = _glm_re.search(r"layers\.(\d+)\.", _k)
++            if _m:
++                _glm_idx_by_lnum[_m.group(1)] = _k
++        self._glm_main_to_indexer: dict[str, str] = {}
++        for _k in self.kv_caches:
++            if ".indexer." in _k:
++                continue
++            _m = _glm_re.search(r"layers\.(\d+)\.", _k)
++            if _m and _m.group(1) in _glm_idx_by_lnum:
++                self._glm_main_to_indexer[_k] = _glm_idx_by_lnum[_m.group(1)]
++        if self._glm_main_to_indexer:
++            logger.info(
++                "[moriio] DSA indexer transfer enabled: paired %d main->indexer "
++                "layers (total caches=%d)",
++                len(self._glm_main_to_indexer),
++                self.num_layers,
++            )
++
+         # Optimization for models with local attention (Llama 4)
+         if self.vllm_config.model_config.hf_config.model_type == "llama4":
+             from transformers import Llama4TextConfig
+@@ -2408,6 +2439,25 @@ class MoRIIOConnectorWorker:
+             remote_notify_port=meta.remote_notify_port,
+             remote_ip=meta.remote_host,
+         )
++        # DSA Bug B fix (GLM-5.1): transfer the paired DSA indexer k_cache too. It is
++        # registered but never goes through save_kv_layer (its module forward() is a
++        # no-op; the write happens inside the fused SparseAttnIndexer op), so without
++        # this the decode pod selects top-k over a COLD indexer cache -> long-context
++        # collapse. Same block_ids / block pool as the main MLA layer; the per-layer
++        # indexer geometry is handled by the geometry-keyed offset cache in the writer.
++        _glm_idx_name = getattr(self, "_glm_main_to_indexer", {}).get(layer_name)
++        if _glm_idx_name is not None:
++            self.schedule_write_blocks(
++                request_id=req_id,
++                transfer_id=meta.transfer_id,
++                dst_engine_id=meta.remote_engine_id,
++                local_block_ids=meta.local_block_ids,
++                remote_block_ids=meta.remote_block_ids,
++                layer_name=_glm_idx_name,
++                kv_layer=self.kv_caches[_glm_idx_name],
++                remote_notify_port=meta.remote_notify_port,
++                remote_ip=meta.remote_host,
++            )
+ 
+     def merge_contiguous_blocks(
+         self,
+diff --git a/vllm/envs.py b/vllm/envs.py
+index a928461da21020b5f924686e65533c25fa3677e8..c770801c0f36dfac756555ec506fcf6a3b196650 100755
+--- a/vllm/envs.py
++++ b/vllm/envs.py
+@@ -273,6 +273,11 @@ if TYPE_CHECKING:
+     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
+     VLLM_OBJECT_STORAGE_SHM_BUFFER_NAME: str = "VLLM_OBJECT_STORAGE_SHM_BUFFER"
+     VLLM_DEEPEP_BUFFER_SIZE_MB: int = 1024
++    VLLM_MORI_MAX_TOKENS_PER_RANK: int = 0
++    VLLM_MORI_MAX_TOTAL_RECV_TOKENS: int = 0
++    VLLM_MORI_WARP_NUM_PER_BLOCK: int = 0
++    VLLM_MORI_BLOCK_NUM: int = 0
++    VLLM_MORI_RDMA_BLOCK_NUM: int = -1
+     VLLM_DEEPEP_HIGH_THROUGHPUT_FORCE_INTRA_NODE: bool = False
+     VLLM_DEEPEP_LOW_LATENCY_USE_MNNVL: bool = False
+     VLLM_DEEPEP_V2_ALLOW_HYBRID_MODE: bool = True
+@@ -1928,6 +1933,33 @@ environment_variables: dict[str, Callable[[], Any]] = {
+     "VLLM_DEEPEP_BUFFER_SIZE_MB": lambda: int(
+         os.getenv("VLLM_DEEPEP_BUFFER_SIZE_MB", "1024")
+     ),
++    # MoRI EP tuning (parity with the VLLM_DEEPEP_* knobs above; MoRI previously had
++    # none of these and hardcoded every value).
++    #
++    # VLLM_MORI_MAX_TOKENS_PER_RANK: width of the MoRI dispatch/combine buffer
++    # (max_num_inp_token_per_rank). 0 = keep the legacy behaviour of inheriting
++    # max_num_batched_tokens. That default is a SCHEDULER knob for chunked prefill
++    # (8192), so a decode instance ends up running an 8192-token-wide all2all every
++    # step, per layer -- a large fixed per-step cost that is independent of the real
++    # batch. Set this to ~max_num_seqs on decode instances to size the buffer for the
++    # work actually being done.
++    "VLLM_MORI_MAX_TOKENS_PER_RANK": lambda: int(
++        os.getenv("VLLM_MORI_MAX_TOKENS_PER_RANK", "0")
++    ),
++    # MoRI receive capacity, decoupled from the send width. mori honours
++    # maxTotalRecvTokens when > 0; vLLM never plumbed it, so recv capacity was always
++    # tied to max_num_inp_token_per_rank. 0 = legacy behaviour.
++    "VLLM_MORI_MAX_TOTAL_RECV_TOKENS": lambda: int(
++        os.getenv("VLLM_MORI_MAX_TOTAL_RECV_TOKENS", "0")
++    ),
++    # MoRI kernel launch geometry. 0 / -1 mean "keep the per-arch default".
++    "VLLM_MORI_WARP_NUM_PER_BLOCK": lambda: int(
++        os.getenv("VLLM_MORI_WARP_NUM_PER_BLOCK", "0")
++    ),
++    "VLLM_MORI_BLOCK_NUM": lambda: int(os.getenv("VLLM_MORI_BLOCK_NUM", "0")),
++    "VLLM_MORI_RDMA_BLOCK_NUM": lambda: int(
++        os.getenv("VLLM_MORI_RDMA_BLOCK_NUM", "-1")
++    ),
+     # Force DeepEP to use intranode kernel for inter-node communication in
+     # high throughput mode. This is useful archive higher prefill throughput
+     # on system supports multi-node nvlink (e.g GB200).
+diff --git a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+index fe3a53941806a15156bac59fb3f549efafe23a28..99467a1e896bd03d5ddfcffa1d300e2f3f34aba9 100644
+--- a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
++++ b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+@@ -29,6 +29,9 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         self.num_dispatchers_ = num_dispatchers
+         self.max_tokens_per_rank = max_tokens_per_rank
+         self.use_fp8_dispatch = use_fp8_dispatch
++        # Original (pre-dispatch) topk_ids, stashed in prepare() for use in
++        # finalize() -- see the comment in prepare() for why.
++        self._original_topk_ids: torch.Tensor | None = None
+ 
+     @property
+     def activation_format(self) -> mk.FusedMoEActivationFormat:
+@@ -73,6 +76,18 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         assert not apply_router_weight_on_input, (
+             "mori does not support apply_router_weight_on_input=True now."
+         )
++        # combine() needs the ORIGINAL (pre-dispatch) topk_ids, not the
++        # dispatched ids that modular_kernel.py's forward() substitutes in
++        # for the expert GEMM stage. MoRI's combine kernel uses these ids
++        # (via tokenIndices) to decide which remote nodes' partial results
++        # to gather for each of THIS rank's own tokens -- the dispatched
++        # ids describe OTHER ranks' tokens that were routed here, not the
++        # original routing of this rank's own tokens, so passing them to
++        # combine() causes it to gather from the wrong nodes. Stash the
++        # original ids here; finalize() below uses this instead of the
++        # topk_ids it's given (which is also the post-dispatch value, for
++        # the same reason).
++        self._original_topk_ids = topk_ids
+         scale = None
+         # When defer_input_quant is True, the expert kernel handles
+         # quantization internally, so skip FP8 dispatch quantization.
+@@ -119,6 +134,6 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         result = self.mori_op.combine(
+             fused_expert_output,
+             None,
+-            topk_ids,
++            self._original_topk_ids,
+         )[0]
+         output.copy_(result[:num_token])
+diff --git a/vllm/v1/attention/backend.py b/vllm/v1/attention/backend.py
+index 04e91abb03d09eddc778689e7fd00f6434c8a530..472c35c47940245bfb158982e74fcf6a52d0d15d 100644
+--- a/vllm/v1/attention/backend.py
++++ b/vllm/v1/attention/backend.py
+@@ -1150,13 +1150,20 @@ class MLAAttentionImpl(AttentionImplBase[T], Generic[T]):
+             return
+         from vllm import _custom_ops as ops
+ 
++        # NOTE: concat_and_cache_mla is registered under the libtorch STABLE ABI
++        # (STABLE_TORCH_LIBRARY) on v0.27, whose boxed kernel dispatches POSITIONALLY
++        # only -- passing kv_cache_dtype=/scale= as kwargs raises "unknown parameter
++        # type" on the first real forward (the fake/compile path returns early, so it
++        # survives warmup then crashes on first decode). Pass positionally like every
++        # other caller (the _custom_ops wrapper + tests). Upstream v0.27 stable-ABI
++        # regression, not GLM/DSA-specific.
+         ops.concat_and_cache_mla(
+             kv_c_normed,
+             k_pe.squeeze(1),
+             kv_cache,
+             slot_mapping.flatten(),
+-            kv_cache_dtype=kv_cache_dtype,
+-            scale=k_scale,
++            kv_cache_dtype,
++            k_scale,
+         )
+ 
+ 
+diff --git a/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py b/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py
+index 6ae880251f87c3922a7f6b152317c891b316ba4b..64eb97c0b9579b4b524b747605743d7464915c67 100644
+--- a/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py
++++ b/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py
+@@ -90,7 +90,12 @@ def _convert_req_index_to_global_index_kernel(
+     bt_ptr = block_table_ptr + req * bt_stride0 + block_id * bt_stride1
+     base = tl.load(bt_ptr, mask=valid_block, other=0)
+ 
+-    # # If token == -1 OR block_id OOB, output 0; else base * BLOCK_SIZE + offset
++    # If token == -1 OR block_id OOB, output 0 (NOT -1): the downstream aiter
++    # mla_decode_fwd sparse kernel dereferences paged_kv_indices, so a -1 becomes
++    # kv_cache + (-1)*stride -> page-aligned GPU memory access fault. Only bites at
++    # disagg long context, where -1 padding lands inside a paged_kv_indptr range;
++    # short/standalone contexts never fault. 0 is masked by paged_kv_indptr/
++    # last_page_len, so it reads block 0 harmlessly.
+     out_val = tl.where(
+         is_invalid_tok | (~valid_block), 0, base * BLOCK_SIZE + inblock_off
+     )
+@@ -559,13 +564,26 @@ class ROCMAiterMLASparseMetadataBuilder(
+         # context lengths (both clamped to topk_tokens, past which per-token KV
+         # length saturates) and num_heads; fingerprint those CPU-side and skip
+         # the launch when nothing changed.
++        #
++        # vllm#47766: keying on min(seq_lens, topk) ALONE collides a first prefill
++        # chunk (context ramps 1->topk) with a continuation chunk (uniform at topk),
++        # so a >=3-chunk prefill reuses the first chunk's work partition and corrupts
++        # output (compounds across layers -> long-context collapse, vllm#47042). Add
++        # clamped per-request context length + per-request query lengths to the key.
++        #
++        # DISAGG HARDENING (ours): under cudagraph/DP dummy-batch padding, seg_lengths
++        # (= np.diff(query_start_loc_cpu)) has length num_reqs_PADDED, while
++        # seq_lens_cpu[:num_reqs] has length num_reqs. Subtracting/keying them raw
++        # broadcast-mismatches on any DP rank where padded != real (numpy ValueError;
++        # that rank dies, peers see only a gloo reset). Slice seg_lengths[:num_reqs].
+         num_reqs = common_attn_metadata.num_reqs
++        _seg_lengths_nr = seg_lengths[:num_reqs]
+         clamped_seq_lens = np.minimum(
+             common_attn_metadata.seq_lens_cpu[:num_reqs].numpy(),
+             self.topk_tokens,
+         )
+         clamped_context_lens = np.minimum(
+-            common_attn_metadata.seq_lens_cpu[:num_reqs].numpy() - seg_lengths,
++            common_attn_metadata.seq_lens_cpu[:num_reqs].numpy() - _seg_lengths_nr,
+             self.topk_tokens,
+         )
+         metadata_key = (
+@@ -574,7 +592,7 @@ class ROCMAiterMLASparseMetadataBuilder(
+             self._num_attention_heads,
+             clamped_seq_lens.tobytes(),
+             clamped_context_lens.tobytes(),
+-            seg_lengths.tobytes(),
++            _seg_lengths_nr.tobytes(),
+         )
+         if metadata_key != self._prev_metadata_key:
+             from aiter import get_mla_metadata_v1
+diff --git a/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py b/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py
+index 0f55556c5dfb1e0f31bc25906549b2a30c79a1fc..3228a9a7aa4dcfd6b094f20ec17c06df0fc2015b 100644
+--- a/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py
++++ b/vllm/v1/attention/ops/rocm_aiter_mla_sparse.py
+@@ -36,6 +36,8 @@ def _indexer_k_quant_and_cache_kernel(
+     kv_cache_value_stride,
+     block_size,
+     num_tokens,
++    num_k_rows,
++    num_blocks,
+     head_dim: tl.constexpr,
+     LAYOUT: tl.constexpr,
+     BLOCK_TILE_SIZE: tl.constexpr,
+@@ -44,6 +46,11 @@ def _indexer_k_quant_and_cache_kernel(
+     USE_UE8M0: tl.constexpr,
+ ):
+     tid = tl.program_id(0)
++    # Guard the source read: at decode the grid is sized to slot_mapping, which
++    # can exceed the number of key rows actually provided (MoRIIO-transferred KV
++    # / speculative padding). Reading k_ptr past num_k_rows GPU-faults.
++    if tid >= num_k_rows:
++        return
+     offset = tl.arange(0, head_dim)
+     if LAYOUT == "SHUFFLE":
+         tile_offset = (
+@@ -58,6 +65,11 @@ def _indexer_k_quant_and_cache_kernel(
+     slot_id = tl.load(slot_mapping_ptr + tid)
+     if slot_id < 0:
+         return
++    # Upper-bound guard: a decode slot_id that maps to a block >= num_blocks
++    # (stale/remote position after MoRIIO KV transfer) would store past the end
++    # of the local indexer KV cache -> page-aligned GPU memory access fault.
++    if (slot_id // block_size) >= num_blocks:
++        return
+     # The packed KV layout makes per-block strides large
+     # enough that block_id * stride can exceed 32-bit range.
+     block_id = (slot_id // block_size).to(tl.int64)
+@@ -113,6 +125,7 @@ def indexer_k_quant_and_cache_triton(
+     head_tile_size = head_tile_size // kv_cache.element_size()
+     layout = "NORMAL" if block_size == 1 else "SHUFFLE"
+     grid = (num_tokens,)
++    num_k_rows = k.shape[0]
+     _indexer_k_quant_and_cache_kernel[grid](
+         k,
+         kv_cache_value,
+@@ -122,6 +135,8 @@ def indexer_k_quant_and_cache_triton(
+         kv_cache_value.stride(0),
+         block_size,
+         num_tokens,
++        num_k_rows,
++        num_blocks,
+         head_dim,
+         layout,
+         block_tile_size,

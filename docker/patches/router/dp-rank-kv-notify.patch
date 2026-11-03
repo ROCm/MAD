@@ -1,0 +1,226 @@
+MAD pin-set patch: vllm-router DP-rank round-robin + 2P2D KV-notify fix (vllm-project/router PR #181)
+Upstream: https://github.com/vllm-project/router.git @ 1d10e71fb7bb4c0adc9f2c16ec77bf5dd4aa1586
+Reproduces: fork commit 82dc9811af17412e6e24b5942a5486bc502df23a of router.git (applying this to the upstream commit gives its tree exactly)
+Fork commits:
+  82dc981 dpfix: moriio_dp_size + effective_dp_size + remote_dp_rank_override for 2P2D KV-notify (rebased onto upstream tip; upstream already has round-robin)
+
+diff --git a/src/config/types.rs b/src/config/types.rs
+index 413022f770dd18f2b44c88f58ace5fe511682d45..c50b53025de69cfea99654920c3c8546eaf266e0 100644
+--- a/src/config/types.rs
++++ b/src/config/types.rs
+@@ -28,6 +28,13 @@ pub struct RouterConfig {
+     /// Intra-node data parallel size (number of DP replicas per worker URL). When > 1, the router will create multiple worker instances per URL, one for each DP rank.
+     #[serde(default = "default_intra_node_data_parallel_size")]
+     pub intra_node_data_parallel_size: usize,
++    /// Total (cross-pod) MoRI-IO DP world size for Wide-EP. For multi-pod 2P2D
++    /// DP=16 this is 16 (vs intra_node=8). Used to round-robin a single per-request
++    /// DP rank over the FULL world and to stamp remote_dp_size/remote_dp_rank_override
++    /// so the MoRIIO connector pins both prefill and decode legs to the same rank
++    /// (no decode-side re-hash). 0 -> fall back to intra_node_data_parallel_size.
++    #[serde(default)]
++    pub moriio_dp_size: usize,
+     /// The api key used for the authorization with the worker
+     pub api_key: Option<String>,
+     /// API key validation URLs (if set, incoming requests must validate against them)
+@@ -456,6 +463,7 @@ impl Default for RouterConfig {
+             worker_startup_timeout_secs: 600,
+             worker_startup_check_interval_secs: 30,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             api_key_validation_urls: vec![],
+             discovery: None,
+@@ -1023,6 +1031,7 @@ mod tests {
+             worker_startup_timeout_secs: 60,
+             worker_startup_check_interval_secs: 5,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             api_key_validation_urls: vec![],
+             discovery: Some(DiscoveryConfig {
+@@ -1089,6 +1098,7 @@ mod tests {
+             worker_startup_timeout_secs: 180,
+             worker_startup_check_interval_secs: 15,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             api_key_validation_urls: vec![],
+             discovery: Some(DiscoveryConfig {
+@@ -1146,6 +1156,7 @@ mod tests {
+             worker_startup_timeout_secs: 600,
+             worker_startup_check_interval_secs: 20,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             api_key_validation_urls: vec![],
+             discovery: Some(DiscoveryConfig {
+diff --git a/src/lib.rs b/src/lib.rs
+index 5c4c4066bf03889633cacd9acf78b568d5cea1a0..f4afd11fd564e0f3da45e0b0cb56dae63709466e 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -186,6 +186,7 @@ impl Router {
+             worker_startup_timeout_secs: self.worker_startup_timeout_secs,
+             worker_startup_check_interval_secs: self.worker_startup_check_interval,
+             intra_node_data_parallel_size: self.intra_node_data_parallel_size,
++            moriio_dp_size: 0,
+             api_key: self.api_key.clone(),
+             api_key_validation_urls: self.api_key_validation_urls.clone(),
+             discovery,
+diff --git a/src/main.rs b/src/main.rs
+index a642898b5dcaa7cc18fdbdc08570806be196a9a0..9a60c6e980805818f6fde8c1fe3f2fe1c4eadab0 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -167,6 +167,11 @@ struct CliArgs {
+     #[arg(long, default_value_t = 1)]
+     intra_node_data_parallel_size: usize,
+ 
++    /// Total (cross-pod) MoRI-IO DP world size for Wide-EP (e.g. 16 for 2P2D DP=16,
++    /// vs intra_node=8). 0 -> fall back to intra_node_data_parallel_size.
++    #[arg(long, default_value_t = 0)]
++    moriio_dp_size: usize,
++
+     /// API key for worker authorization
+     #[arg(long)]
+     api_key: Option<String>,
+@@ -511,6 +516,7 @@ impl CliArgs {
+             worker_startup_timeout_secs: self.worker_startup_timeout_secs,
+             worker_startup_check_interval_secs: self.worker_startup_check_interval,
+             intra_node_data_parallel_size: self.intra_node_data_parallel_size,
++            moriio_dp_size: self.moriio_dp_size,
+             api_key: self.api_key.clone(),
+             api_key_validation_urls,
+             discovery,
+diff --git a/src/routers/http/router.rs b/src/routers/http/router.rs
+index f68e4b088f92807ec35427d5e8d27eb6c1e94b6f..71101d285ec9172fe0f21ed2d1bdad46a1544860 100644
+--- a/src/routers/http/router.rs
++++ b/src/routers/http/router.rs
+@@ -1798,6 +1798,7 @@ mod tests {
+             worker_startup_timeout_secs: 5,
+             worker_startup_check_interval_secs: 1,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             client: Client::new(),
+             retry_config: RetryConfig::default(),
+@@ -1870,6 +1871,7 @@ mod tests {
+             worker_startup_timeout_secs: 5,
+             worker_startup_check_interval_secs: 1,
+             intra_node_data_parallel_size: 1,
++            moriio_dp_size: 0,
+             api_key: None,
+             client: Client::new(),
+             retry_config: RetryConfig::default(),
+diff --git a/src/routers/http/vllm_pd_router.rs b/src/routers/http/vllm_pd_router.rs
+index 52012c609d52e73bcd270f3e55e341a4926931f7..39618bb365e901162ecca4cdb7aec2388795bf7a 100644
+--- a/src/routers/http/vllm_pd_router.rs
++++ b/src/routers/http/vllm_pd_router.rs
+@@ -57,6 +57,9 @@ pub struct VllmPDRouter {
+     intra_node_data_parallel_size: usize,
+     /// Round-robin counter for prefill DP rank selection
+     prefill_dp_round_robin: Arc<AtomicUsize>,
++    /// Total (cross-pod) MoRI-IO DP world size for Wide-EP (e.g. 16 for 2P2D DP=16).
++    /// 0 -> fall back to intra_node_data_parallel_size.
++    moriio_dp_size: usize,
+     /// KV connector type
+     kv_connector: KvConnector,
+     /// Mooncake bootstrap info: prefill base_url -> MooncakePrefillInfo
+@@ -205,6 +208,18 @@ impl VllmPDRouter {
+         }
+     }
+ 
++    /// Effective MoRI-IO DP world size: the total cross-pod DP size when configured
++    /// (--moriio-dp-size, e.g. 16 for 2P2D DP=16), else the intra-node size. Used to
++    /// round-robin a single per-request DP rank over the whole world and to stamp
++    /// remote_dp_size so the MoRIIO connector's rank arithmetic matches the topology.
++    fn effective_dp_size(&self) -> usize {
++        if self.moriio_dp_size > 0 {
++            self.moriio_dp_size
++        } else {
++            self.intra_node_data_parallel_size
++        }
++    }
++
+     /// Build kv_transfer_params for the prefill request.
+     ///
+     /// Returns an error for MoRI-IO when no transfer mode has been registered yet, so that
+@@ -242,7 +257,7 @@ impl VllmPDRouter {
+                         "do_remote_prefill": false,
+                         "remote_engine_id": serde_json::Value::Null,
+                         "remote_block_ids": serde_json::Value::Null,
+-                        "remote_dp_size": self.intra_node_data_parallel_size,
++                        "remote_dp_size": self.effective_dp_size(),
+                         "remote_tp_size": remote_tp_size,
+                         "transfer_id": transfer_id.unwrap_or(""),
+                     });
+@@ -258,7 +273,7 @@ impl VllmPDRouter {
+                         "remote_engine_id": serde_json::Value::Null,
+                         "remote_block_ids": serde_json::Value::Null,
+                         "transfer_id": transfer_id.unwrap_or(""),
+-                        "remote_dp_size": self.intra_node_data_parallel_size,
++                        "remote_dp_size": self.effective_dp_size(),
+                     }))
+                 }
+             }
+@@ -315,12 +330,18 @@ impl VllmPDRouter {
+                         "remote_engine_id": serde_json::Value::Null,
+                         "remote_block_ids": serde_json::Value::Null,
+                         "transfer_id": transfer_id.unwrap_or(""),
+-                        "remote_dp_size": self.intra_node_data_parallel_size,
++                        "remote_dp_size": self.effective_dp_size(),
+                         "remote_tp_size": tp_size,
+                     });
+-                    if self.intra_node_data_parallel_size > 1 {
++                    if self.effective_dp_size() > 1 {
+                         if let Some(rank) = prefill_dp_rank {
+                             params["remote_dp_rank"] = json!(rank);
++                            // Sentinel: tell the MoRIIO connector (vllm#45043) to honor
++                            // this rank VERBATIM on both legs instead of re-hashing
++                            // blake2s(rid)%dp_size for the decode notify. Without it the
++                            // decode notify targets a different rank than the prefill was
++                            // pinned to -> "remote blocks never arrived" write expiry.
++                            params["remote_dp_rank_override"] = json!(true);
+                         }
+                     }
+                     Some(params)
+@@ -803,14 +824,22 @@ impl VllmPDRouter {
+ 
+         let (prefill_base_http, mut prefill_dp_rank) =
+             extract_base_http_and_dp_rank(prefill_http, self.intra_node_data_parallel_size);
+-        let (decode_base_http, decode_dp_rank) =
++        let (decode_base_http, mut decode_dp_rank) =
+             extract_base_http_and_dp_rank(decode_http, self.intra_node_data_parallel_size);
+ 
+-        if self.intra_node_data_parallel_size > 1 && prefill_dp_rank.is_none() {
++        // Round-robin a single DP rank H over the FULL (cross-pod) DP world (effective_dp_size:
++        // --moriio-dp-size when set, else intra-node) so the prefill request is pinned to rank H
++        // and the decode kv_transfer_params carry remote_dp_rank=H (+ override).
++        let _eff_dp = self.effective_dp_size();
++        if _eff_dp > 1 && prefill_dp_rank.is_none() {
+             let rank = self.prefill_dp_round_robin.fetch_add(1, Ordering::Relaxed)
+-                % self.intra_node_data_parallel_size;
++                % _eff_dp;
+             prefill_dp_rank = Some(rank);
+         }
++        // Pin decode to the SAME rank as prefill (override contract requires it).
++        if prefill_dp_rank.is_some() {
++            decode_dp_rank = prefill_dp_rank;
++        }
+ 
+         // Add kv_transfer_params for KV connector support at top level
+         prefill_request["kv_transfer_params"] = self.build_prefill_kv_transfer_params(
+@@ -1618,6 +1647,7 @@ impl VllmPDRouter {
+                 profiling_tasks: Arc::new(Mutex::new(HashMap::new())),
+                 intra_node_data_parallel_size: ctx.router_config.intra_node_data_parallel_size,
+                 prefill_dp_round_robin: Arc::new(AtomicUsize::new(0)),
++                moriio_dp_size: ctx.router_config.moriio_dp_size,
+                 kv_connector,
+                 mooncake_prefill_info: Arc::new(Mutex::new(HashMap::new())),
+             })
+@@ -1707,6 +1737,7 @@ impl VllmPDRouter {
+                 profiling_tasks: Arc::new(Mutex::new(HashMap::new())),
+                 intra_node_data_parallel_size: ctx.router_config.intra_node_data_parallel_size,
+                 prefill_dp_round_robin: Arc::new(AtomicUsize::new(0)),
++                moriio_dp_size: ctx.router_config.moriio_dp_size,
+                 kv_connector,
+                 mooncake_prefill_info,
+             })

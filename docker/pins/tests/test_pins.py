@@ -50,6 +50,22 @@ DEVIATIONS = {
 }
 
 
+def source(c):
+    """(repository, commit) a component reproduces: its fork commit when carried as patches."""
+    if c.get("patches"):
+        return ("fork", c["fork_commit"])
+    return (c["repo"], c["commit"])
+
+
+def legacy_source(repo, ref):
+    sha = resolve(repo, ref)
+    return ("fork", sha) if any(u in repo for u in FORK_OWNERS) else (repo, sha)
+
+
+# Legacy repositories that are personal forks; their pins are upstream + patches now.
+FORK_OWNERS = ("github.com/raviguptaamd/", "github.com/shikamd123/")
+
+
 def resolve(repo, ref):
     if re.fullmatch(r"[0-9a-f]{40}", ref):
         return ref
@@ -149,17 +165,15 @@ class LegacyEquivalence(unittest.TestCase):
             self.same(name, "aiter wheel", (aiter["wheel"]["url"], aiter["wheel"]["version"]),
                       (a["AITER_WHEEL_URL"], a["AITER_VERSION"]))
         else:
-            self.same(name, "aiter", (aiter["repo"], aiter["commit"]),
-                      (a["AITER_REPO"], resolve(a["AITER_REPO"], a["AITER_REF"])))
+            self.same(name, "aiter", source(aiter), legacy_source(a["AITER_REPO"], a["AITER_REF"]))
             self.same(name, "aiter GPU_ARCHS", bool(aiter.get("gpu_archs_env")), 'GPU_ARCHS="${K3_GFX_ARCH}"' in text)
             self.same(name, "aiter conv check", bool(aiter.get("check_triton_conv")), "aiter/ops/triton/conv/" in text)
         fly = re.findall(r'pip install ([^"\n]*?)"?flydsl==([0-9.]+)', text)
         self.same(name, "flydsl", (aiter["flydsl"]["version"], " ".join(aiter["flydsl"]["pip_flags"])),
                   (fly[0][1], fly[0][0].strip()))
-        self.same(name, "vllm", (c["vllm"]["repo"], c["vllm"]["commit"]),
-                  (a["VLLM_REPO"], resolve(a["VLLM_REPO"], a["VLLM_REF"])))
-        self.same(name, "router", (c["router"]["repo"], c["router"]["commit"], c["router"]["rust_toolchain"]),
-                  (a["ROUTER_REPO"], resolve(a["ROUTER_REPO"], a["ROUTER_REF"]), a["RUST_TOOLCHAIN"]))
+        self.same(name, "vllm", source(c["vllm"]), legacy_source(a["VLLM_REPO"], a["VLLM_REF"]))
+        self.same(name, "router", (*source(c["router"]), c["router"]["rust_toolchain"]),
+                  (*legacy_source(a["ROUTER_REPO"], a["ROUTER_REF"]), a["RUST_TOOLCHAIN"]))
         after = [p["name"] for p in s.get("pip") or [] if p.get("stage") == "after_engine"]
         self.same(name, "pip after engine", after, ["pyyaml"] if "RUN pip install pyyaml" in text else [])
         t, subs = c["transports"], c["transports"]["subcomponents"]
@@ -204,6 +218,34 @@ class LegacyEquivalence(unittest.TestCase):
         self.assertEqual(self.diffs, [])
 
 
+class Patches(unittest.TestCase):
+    """A patched component is its upstream commit plus patches that rebuild the fork's tree.
+
+    Each patch was made as `git diff <upstream merge-base> <fork commit>`, and applying it
+    to the upstream commit gives the fork commit's tree exactly (checked with
+    docker/patches/verify.py, which needs GitHub). Here: the pin set and the patch header
+    agree on both commits, no source is a personal fork, and every patch file is used.
+    """
+
+    def test_headers_match_the_pin_sets(self):
+        used = set()
+        for n in pins.names():
+            for comp, c in pins.load(n)["components"].items():
+                for p in c.get("patches") or []:
+                    used.add(p["file"])
+                    head = (DOCKER / "patches" / p["file"]).read_text().split("\ndiff --git", 1)[0]
+                    self.assertIn(f"Upstream: {c['repo']} @ {c['commit']}", head, (n, comp))
+                    self.assertIn(f"fork commit {c['fork_commit']}", head, (n, comp))
+        on_disk = {str(f.relative_to(DOCKER / "patches")) for f in (DOCKER / "patches").rglob("*.patch")}
+        self.assertEqual(on_disk, used)
+
+    def test_no_personal_fork_is_a_source(self):
+        for n in pins.names():
+            text = (PINS_DIR / f"{n}.json").read_text()
+            for owner in FORK_OWNERS:
+                self.assertNotIn(owner, text, n)
+
+
 class Dockerfiles(unittest.TestCase):
     """The two Dockerfiles read every value they use from the pin set's build env."""
 
@@ -211,6 +253,7 @@ class Dockerfiles(unittest.TestCase):
         s = pins.load("vllm-kimi-k3")
         env = set(pins.build_env(s, "gfx942", s["base_image"]["gfx942"]))
         builtin = {"BASE_IMAGE", "PINS", "MAD_SYSTEM_GPU_ARCHITECTURE", "MAX_JOBS", "PATH", "LD_LIBRARY_PATH",
+                   "AITER_PATCHES", "VLLM_PATCHES", "ROUTER_PATCHES",
                    "PYTHONPATH", "_ROCM_DIR", "_UCX_INSTALL_DIR", "_RIXL_INSTALL_DIR", "_W", "_ARG_MAX_JOBS",
                    "GPU_ARCHS"}
         for f in ("di_vllm.ubuntu.amd.Dockerfile", "di_sglang.ubuntu.amd.Dockerfile"):

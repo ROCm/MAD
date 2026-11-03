@@ -45,20 +45,21 @@ ARG BASE_IMAGE
 ARG PINS
 ARG MAD_SYSTEM_GPU_ARCHITECTURE
 
-COPY docker/pins/ /opt/mad-pins/
+COPY docker/pins/ /opt/mad/pins/
+COPY docker/patches/ /opt/mad/patches/
 RUN test -n "${PINS}" || { echo "PINS is not set (a name in docker/pins/)" >&2; exit 1; } && \
-    python3 /opt/mad-pins/pins.py env "${PINS}" --arch "${MAD_SYSTEM_GPU_ARCHITECTURE}" \
-        --base "${BASE_IMAGE}" > /opt/mad-pins/build.env && \
-    . /opt/mad-pins/build.env && \
-    mkdir -p /app && cp "/opt/mad-pins/${PINS}.json" /app/pins.json && \
+    python3 /opt/mad/pins/pins.py env "${PINS}" --arch "${MAD_SYSTEM_GPU_ARCHITECTURE}" \
+        --base "${BASE_IMAGE}" > /opt/mad/pins/build.env && \
+    . /opt/mad/pins/build.env && \
+    mkdir -p /app && cp "/opt/mad/pins/${PINS}.json" /app/pins.json && \
     printf 'PIN_SET=%s\nGPU_ARCH=%s\nBASE_IMAGE=%s\n' "${PIN_SET}" "${GPU_ARCH}" "${BASE_IMAGE}" > /app/versions.txt && \
-    cat /opt/mad-pins/build.env
+    cat /opt/mad/pins/build.env
 
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
 ENV PYTHONPATH=$PYTHONPATH:/sgl-workspace/mori:/sgl-workspace/aiter:
 
 WORKDIR /sgl-workspace
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     if [ -n "${PIP_EARLY_UPGRADE}" ]; then pip install --upgrade ${PIP_EARLY_UPGRADE}; fi && \
     if [ -n "${PIP_EARLY}" ]; then pip install ${PIP_EARLY}; fi
 
@@ -73,7 +74,7 @@ RUN apt-get update && \
 # MoRI at the pinned commit, editable in the image's own /sgl-workspace/mori, where
 # the pin set asks for it on this architecture.
 WORKDIR /sgl-workspace/mori
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     if [ "${MORI_BUILD}" = "1" ]; then \
       git fetch origin "${MORI_COMMIT}" && git checkout "${MORI_COMMIT}" && \
       pip install -r requirements-build.txt && \

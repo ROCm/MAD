@@ -35,7 +35,8 @@
 # Build context = repo root. The pin set says what is built: the base image per
 # architecture, MoRI, AITER (a release wheel or a commit), vLLM, vllm-router and,
 # when enabled, the UCX / RIXL / rocSHMEM / DeepEP transport stack -- each at a
-# full commit. BASE_IMAGE must be the pin set's base for the architecture (the
+# full upstream commit, with the pin set's patches (docker/patches/) applied on top
+# where a change is not upstream yet. BASE_IMAGE must be the pin set's base for the architecture (the
 # build stops otherwise); build-args prints it. /app/versions.txt lists every
 # component's commit and /app/pins.json is the pin set the image was built from.
 #
@@ -55,21 +56,22 @@ ARG MAD_SYSTEM_GPU_ARCHITECTURE
 ARG MAX_JOBS=32
 
 # -----------------------------------------------------------------------------
-# 0. The pin set, resolved for this architecture and base: /opt/mad-pins/build.env
+# 0. The pin set, resolved for this architecture and base: /opt/mad/pins/build.env
 #    is sourced by every step below. Stops on an invalid set, an architecture the
 #    set is not for, or another base image.
 # -----------------------------------------------------------------------------
-COPY docker/pins/ /opt/mad-pins/
+COPY docker/pins/ /opt/mad/pins/
+COPY docker/patches/ /opt/mad/patches/
 RUN test -n "${PINS}" || { echo "PINS is not set (a name in docker/pins/)" >&2; exit 1; } && \
-    python3 /opt/mad-pins/pins.py env "${PINS}" --arch "${MAD_SYSTEM_GPU_ARCHITECTURE}" \
-        --base "${BASE_IMAGE}" > /opt/mad-pins/build.env && \
-    _ARG_MAX_JOBS="${MAX_JOBS}" && . /opt/mad-pins/build.env && \
+    python3 /opt/mad/pins/pins.py env "${PINS}" --arch "${MAD_SYSTEM_GPU_ARCHITECTURE}" \
+        --base "${BASE_IMAGE}" > /opt/mad/pins/build.env && \
+    _ARG_MAX_JOBS="${MAX_JOBS}" && . /opt/mad/pins/build.env && \
     { [ "${_ARG_MAX_JOBS}" = "${MAX_JOBS}" ] || \
       { echo "MAX_JOBS=${_ARG_MAX_JOBS}, but pin set ${PINS} says ${MAX_JOBS} (use pins.py build-args)" >&2; exit 1; }; } && \
-    mkdir -p /app && cp "/opt/mad-pins/${PINS}.json" /app/pins.json && \
+    mkdir -p /app && cp "/opt/mad/pins/${PINS}.json" /app/pins.json && \
     printf 'PIN_SET=%s\nGPU_ARCH=%s\nBASE_IMAGE=%s\n' "${PIN_SET}" "${GPU_ARCH}" "${BASE_IMAGE}" > /app/versions.txt && \
     printf '%s\n' "${PIP_CONSTRAINTS}" > /etc/pip-constraints.txt && \
-    cat /opt/mad-pins/build.env
+    cat /opt/mad/pins/build.env
 
 # Pip constraints from the pin set (empty file = none), in effect for every pip below.
 ENV PIP_CONSTRAINT=/etc/pip-constraints.txt
@@ -85,7 +87,7 @@ ENV MORI_GPU_ARCHS=${MAD_SYSTEM_GPU_ARCHITECTURE} \
 #    (UMBP needs gRPC, unrelated to EP); default NIC backends (disabling them
 #    deadlocked the cross-node EP all-to-all init).
 # -----------------------------------------------------------------------------
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true && \
     sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -109,7 +111,7 @@ RUN . /opt/mad-pins/build.env && \
 # 2. AITER: the pinned release wheel, or the pinned commit built from source; then
 #    flydsl at its pinned version, and the stale prewarmed AITER JIT cache cleared.
 # -----------------------------------------------------------------------------
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     (pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true) && \
     case "${AITER_KIND}" in \
       wheel) \
@@ -122,6 +124,8 @@ RUN . /opt/mad-pins/build.env && \
         git init -q && git remote add origin "${AITER_REPO}" && \
         git fetch -q --tags origin "${AITER_COMMIT}" && git checkout -q FETCH_HEAD && \
         git submodule update --init --recursive && \
+        for _p in ${AITER_PATCHES}; do git apply --binary "$_p" && \
+            echo "AITER_PATCH=$(basename "$_p") sha256:$(sha256sum "$_p" | cut -d' ' -f1)" >> /app/versions.txt || exit 1; done && \
         if [ "${AITER_ARCH_ENV}" = "1" ]; then export GPU_ARCHS="${GPU_ARCH}"; fi && \
         pip install --no-build-isolation --no-deps -v . && \
         echo "AITER_COMMIT=$(git rev-parse HEAD)" >> /app/versions.txt && \
@@ -129,7 +133,7 @@ RUN . /opt/mad-pins/build.env && \
       *) echo "pin set has no AITER" >&2; exit 1 ;; \
     esac && \
     if [ -n "${FLYDSL_VERSION}" ]; then pip install ${FLYDSL_PIP_FLAGS} "flydsl==${FLYDSL_VERSION}"; fi && \
-    python3 /opt/mad-pins/check_vllm_stack.py aiter && \
+    python3 /opt/mad/pins/check_vllm_stack.py aiter && \
     rm -rf /opt/vllm_cache/aiter_jit /root/.aiter && echo "cleared stale AITER JIT cache"
 
 # -----------------------------------------------------------------------------
@@ -137,24 +141,26 @@ RUN . /opt/mad-pins/build.env && \
 #    .py-only overlay would be ABI-mismatched), then the pin set's after-engine pip
 #    packages, and a check that MoRI and AITER survived the vLLM install.
 # -----------------------------------------------------------------------------
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     rm -rf /tmp/vllm-src && \
     git clone "${VLLM_REPO}" /tmp/vllm-src && \
     cd /tmp/vllm-src && git checkout "${VLLM_COMMIT}" && \
     echo "VLLM_COMMIT=$(git rev-parse HEAD)" >> /app/versions.txt && \
+    for _p in ${VLLM_PATCHES}; do git apply --binary "$_p" && \
+            echo "VLLM_PATCH=$(basename "$_p") sha256:$(sha256sum "$_p" | cut -d' ' -f1)" >> /app/versions.txt || exit 1; done && \
     pip uninstall -y vllm 2>/dev/null || true && \
     MAX_JOBS="${MAX_JOBS}" ${NVCC_THREADS:+NVCC_THREADS="${NVCC_THREADS}"} \
       pip install --no-deps --no-build-isolation -v . && \
     python3 -c "import vllm; print('vLLM', vllm.__version__, 'from', vllm.__file__)" && \
     cd / && rm -rf /tmp/vllm-src && \
     if [ -n "${PIP_AFTER_ENGINE}" ]; then pip install ${PIP_AFTER_ENGINE}; fi && \
-    python3 /opt/mad-pins/check_vllm_stack.py aiter mori
+    python3 /opt/mad/pins/check_vllm_stack.py aiter mori
 
 # -----------------------------------------------------------------------------
 # 4. vllm-router at the pinned commit, built in (no external ROUTER_BINARY needed).
 #    Rust toolchain from the pin set (router deps need rustc >= 1.88).
 # -----------------------------------------------------------------------------
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     if ! command -v cargo >/dev/null 2>&1; then \
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "${RUST_TOOLCHAIN}"; \
     fi && \
@@ -162,6 +168,8 @@ RUN . /opt/mad-pins/build.env && \
     rm -rf /tmp/vllm-router-src && \
     git clone --filter=blob:none "${ROUTER_REPO}" /tmp/vllm-router-src && \
     cd /tmp/vllm-router-src && git checkout "${ROUTER_COMMIT}" && \
+    for _p in ${ROUTER_PATCHES}; do git apply --binary "$_p" && \
+            echo "ROUTER_PATCH=$(basename "$_p") sha256:$(sha256sum "$_p" | cut -d' ' -f1)" >> /app/versions.txt || exit 1; done && \
     cargo build --release && \
     install -m 755 target/release/vllm-router /usr/local/bin/vllm-router && \
     vllm-router --help 2>&1 | grep -q moriio && \
@@ -177,7 +185,7 @@ ENV _ROCM_DIR=/opt/rocm \
     _UCX_INSTALL_DIR=/usr/local/ucx/ \
     _RIXL_INSTALL_DIR=/usr/local/RIXL/install \
     _NIXLBENCH_INSTALL_DIR=/usr/local/RIXL
-RUN . /opt/mad-pins/build.env && \
+RUN . /opt/mad/pins/build.env && \
     if [ "${TRANSPORTS_BUILD}" != "1" ]; then \
       echo "transports off in ${PIN_SET}: no UCX/RIXL/rocSHMEM/DeepEP"; \
     else set -e && \
@@ -235,7 +243,7 @@ ENV AITER_JIT_DIR=/opt/vllm_cache/aiter_jit \
 #    `import mori` checks above leave .hsaco.lock files under /root/.mori whose owner
 #    is gone at runtime, and MoriAll2AllManager then deadlocks at ep:0 init.
 # -----------------------------------------------------------------------------
-RUN python3 /opt/mad-pins/check_vllm_stack.py all && \
+RUN python3 /opt/mad/pins/check_vllm_stack.py all && \
     rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori && \
     echo "JIT_SCRUBBED=1" >> /app/versions.txt && \
     cat /app/versions.txt

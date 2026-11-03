@@ -28,6 +28,7 @@ CLI:
   pins.py env NAME --arch ARCH --base IMAGE    shell assignments for the Dockerfile
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,8 @@ import shlex
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# docker/patches next to docker/pins, in the repo and in the image (/opt/mad/{pins,patches}).
+PATCHES = os.path.join(os.path.dirname(HERE), "patches")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 
@@ -82,6 +85,14 @@ def problems(spec, strict=False):
             err.append(f"{n}: {comp}.commit {c['commit']!r} is not a full 40-hex SHA")
         if "wheel" in c and not (c["wheel"].get("url") and c["wheel"].get("version")):
             err.append(f"{n}: {comp}.wheel needs url and version")
+        for p in c.get("patches") or []:
+            f = os.path.join(PATCHES, p.get("file", ""))
+            if not os.path.isfile(f):
+                err.append(f"{n}: {comp} patch {p.get('file')} not found in docker/patches")
+            elif hashlib.sha256(open(f, "rb").read()).hexdigest() != p.get("sha256"):
+                err.append(f"{n}: {comp} patch {p['file']} does not match its sha256")
+        if "fork_commit" in c and not SHA.match(str(c["fork_commit"])):
+            err.append(f"{n}: {comp}.fork_commit {c['fork_commit']!r} is not a full 40-hex SHA")
         if c.get("archs") and not set(c["archs"]) <= set(archs):
             err.append(f"{n}: {comp}.archs {c['archs']} not all in gpu_archs")
         if "commit" not in c and "wheel" not in c and "subcomponents" not in c:
@@ -153,6 +164,7 @@ def build_env(spec, arch, base):
                AITER_WHEEL_URL=(aiter.get("wheel") or {}).get("url", ""),
                AITER_VERSION=(aiter.get("wheel") or {}).get("version", ""),
                AITER_REPO=aiter.get("repo", ""), AITER_COMMIT=aiter.get("commit", ""),
+               AITER_PATCHES=_patches(aiter),
                AITER_ARCH_ENV=int(bool(aiter.get("gpu_archs_env"))),
                AITER_CHECK_CONV=int(bool(aiter.get("check_triton_conv"))),
                FLYDSL_VERSION=flydsl.get("version", ""), FLYDSL_PIP_FLAGS=" ".join(flydsl.get("pip_flags") or []))
@@ -162,6 +174,7 @@ def build_env(spec, arch, base):
         out[f"{prefix}_BUILD"] = int(bool(x) and x.get("enabled", True))
         out[f"{prefix}_REPO"] = x.get("repo", "")
         out[f"{prefix}_COMMIT"] = x.get("commit", "")
+        out[f"{prefix}_PATCHES"] = _patches(x)
     out["RUST_TOOLCHAIN"] = (c.get("router") or {}).get("rust_toolchain", "")
     out["SGLANG_ROUTER"] = (c.get("sglang_router") or {}).get("pip", "")
 
@@ -174,6 +187,11 @@ def build_env(spec, arch, base):
         out[f"{prefix}_COMMIT"] = s.get("commit", "")
     out["GTEST_TARBALL"] = (subs.get("googletest") or {}).get("tarball", "")
     return out
+
+
+def _patches(component):
+    """The component's patch files, as paths in the image, space-separated."""
+    return " ".join(f"/opt/mad/patches/{p['file']}" for p in component.get("patches") or [])
 
 
 def _shell(env):

@@ -21,9 +21,16 @@
       "ref": "624002c897a3"
     },
     "aiter": {
-      "repo": "https://github.com/raviguptaamd/aiter.git",
-      "commit": "624e43586bbdb33617812ff1de5abce83d42db65",
-      "ref": "624e43586b",
+      "repo": "https://github.com/ROCm/aiter.git",
+      "commit": "1d872fa07aadfcbb199851fe17e6822efaceca61",
+      "patches": [
+        {
+          "file": "aiter/gqa64.patch",
+          "sha256": "a5b9c3e4b2c823c21fb24ee81ff7f1993571b52ad88b15d02124264687b85b5f",
+          "upstream": "ROCm/aiter#4957"
+        }
+      ],
+      "fork_commit": "624e43586bbdb33617812ff1de5abce83d42db65",
       "flydsl": {
         "version": "0.3.1",
         "pip_flags": [
@@ -31,19 +38,36 @@
           "-U"
         ]
       },
-      "why": "AITER with ROCm/aiter#4957 (gqa64). Personal fork until #4957 is in an AITER release."
+      "fork_ref": "624e43586b",
+      "why": "AITER with ROCm/aiter#4957 (gqa64). Carried as a patch on upstream until it is merged there."
     },
     "vllm": {
-      "repo": "https://github.com/raviguptaamd/vllm.git",
-      "commit": "094820b5deeb1b93733586ca8942589e385a25dc",
-      "why": "vLLM for GLM-5.1 disaggregated serving. Personal fork."
+      "repo": "https://github.com/vllm-project/vllm.git",
+      "commit": "d626108b1841888ec90aced33367149a6bbc7e4b",
+      "patches": [
+        {
+          "file": "vllm/glm51.patch",
+          "sha256": "589467a471532a9750a7eccbc488cdb02d71649a463d4a29fe64923af9586bc5",
+          "upstream": "not yet proposed upstream"
+        }
+      ],
+      "fork_commit": "094820b5deeb1b93733586ca8942589e385a25dc",
+      "why": "vLLM for GLM-5.1 disaggregated serving. Carried as a patch on upstream."
     },
     "router": {
-      "repo": "https://github.com/raviguptaamd/router.git",
-      "commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
-      "ref": "ravgupta/discovery-dp-rank-roundrobin",
+      "repo": "https://github.com/vllm-project/router.git",
+      "commit": "1d10e71fb7bb4c0adc9f2c16ec77bf5dd4aa1586",
+      "patches": [
+        {
+          "file": "router/dp-rank-kv-notify.patch",
+          "sha256": "4c8531f15317601e25cf72b5a2bef6790a1fcfd49f9d9ca606adaa6db0c19ed0",
+          "upstream": "vllm-project/router#181"
+        }
+      ],
+      "fork_commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
       "rust_toolchain": "1.88.0",
-      "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Personal fork until vllm-project/router PR #181 lands."
+      "fork_ref": "ravgupta/discovery-dp-rank-roundrobin",
+      "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Carried as a patch on upstream until it is merged there."
     },
     "transports": {
       "enabled": false,

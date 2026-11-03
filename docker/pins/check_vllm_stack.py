@@ -14,7 +14,7 @@ import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError, files, version
 
-ENV_FILE = "/opt/mad-pins/build.env"
+ENV_FILE = "/opt/mad/pins/build.env"
 VERSIONS = "/app/versions.txt"
 
 
@@ -66,12 +66,12 @@ def check_all(env):
     assert shutil.which("vllm-router"), "vllm-router not on PATH"
     out = subprocess.run(["vllm-router", "--help"], capture_output=True, text=True).stdout
     assert "moriio" in out, "vllm-router has no moriio support"
-    recorded = {}
+    lines = []
     with open(VERSIONS) as f:
         for line in f:
             if "=" in line:
-                k, v = line.strip().split("=", 1)
-                recorded[k] = v
+                lines.append(tuple(line.strip().split("=", 1)))
+    recorded = dict(lines)
     want = {"VLLM_COMMIT": env["VLLM_COMMIT"], "VLLM_ROUTER_COMMIT": env["ROUTER_COMMIT"]}
     if env["MORI_BUILD"] == "1":
         want["MORI_COMMIT"] = env["MORI_COMMIT"]
@@ -81,6 +81,12 @@ def check_all(env):
         for k in ("UCX", "RIXL", "ROCSHMEM", "DEEPEP"):
             want[f"{k}_COMMIT"] = env[f"{k}_COMMIT"]
         assert os.path.exists("/usr/local/ucx/bin/ucx_info"), "UCX is not installed"
+    for comp in ("AITER", "VLLM", "ROUTER"):
+        names = [os.path.basename(f) for f in env.get(f"{comp}_PATCHES", "").split()]
+        got = [v.split()[0] for k, v in lines if k == f"{comp}_PATCH"]
+        if names != got:
+            want[f"{comp}_PATCH"] = " ".join(names)
+            recorded[f"{comp}_PATCH"] = " ".join(got)
     bad = {k: (recorded.get(k), v) for k, v in want.items() if recorded.get(k) != v}
     assert not bad, f"versions.txt disagrees with the pin set: {bad}"
     print(f"pin set {env['PIN_SET']}: {len(want)} commits match")
