@@ -3,7 +3,10 @@
 {% set live = snap.state == "live" %}
 {% block title %}MAD {{ snap.release if live else snap.version }} — Overview{% endblock %}
 {% block style %}
-  .grid.overview { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+  /* Six tiles: 3 per row, then 2, then 1, so no row is left half-empty. */
+  .grid.overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 960px) { .grid.overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 620px) { .grid.overview { grid-template-columns: 1fr; } }
   .overview .tile .t-sub { color: var(--ink-3); font-size: 12.5px; }
   .overview .tile ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
   .gpu-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
