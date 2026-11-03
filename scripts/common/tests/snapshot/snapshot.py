@@ -161,7 +161,7 @@ def normalize(obj, work):
     return json.loads(SHELL_LINE.sub(r"\1<N>:", TIMESTAMP.sub("<TIME>", text)))
 
 
-def run_as_tasks(script, env, nodes, mode):
+def run_as_tasks(script, env, nodes, mode, cwd=None):
     """The launcher once per node, all at once, sharing the work directory as the nodes
     share storage: spur-array as the single-node tasks of array job JOB_ID; k8s-indexed
     as the pods of an Indexed Job, with the environment k8s/mad_k8s_node.sh gives them.
@@ -183,13 +183,13 @@ def run_as_tasks(script, env, nodes, mode):
                 "SLURM_JOB_ID": JOB_ID, "SLURM_NNODES": str(nodes), "SLURM_PROCID": str(k),
                 "SLURM_JOB_NODELIST": ",".join(f"node{i + 1}" for i in range(nodes)),
             })
-        procs.append(subprocess.Popen(["bash", str(script)], cwd=script.parent, env=task_env,
+        procs.append(subprocess.Popen(["bash", str(script)], cwd=cwd or script.parent, env=task_env,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
     outs = [p.communicate(timeout=300)[0] for p in procs]
     return procs[0].returncode, outs[0]
 
 
-def snapshot_card(catalog, card, dispatch="slurm-srun"):
+def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
     work = Path(tempfile.mkdtemp(prefix="madsnap."))
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
@@ -219,12 +219,21 @@ def snapshot_card(catalog, card, dispatch="slurm-srun"):
         # From the launcher's own directory, as documented (`cd scripts/<dir> &&
         # sbatch ...`) and as madengine runs it: the SGLang launcher finds its role
         # scripts in the working directory.
+        cwd = script.parent
+        if spooled:
+            # As sbatch runs it: a copy in the scheduler's spool directory, started in
+            # the submit directory (the launcher's own, as documented).
+            spool = work / "spool"
+            spool.mkdir()
+            shutil.copy(script, spool / "slurm_script")
+            env["SLURM_SUBMIT_DIR"] = str(script.parent)
+            script = spool / "slurm_script"
         if dispatch == "slurm-srun":
-            p = subprocess.run(["bash", str(script)], cwd=script.parent, env=env,
+            p = subprocess.run(["bash", str(script)], cwd=cwd, env=env,
                                capture_output=True, text=True, timeout=300)
             rc, output = p.returncode, p.stdout + p.stderr
         else:
-            rc, output = run_as_tasks(script, env, nodes, dispatch)
+            rc, output = run_as_tasks(script, env, nodes, dispatch, cwd)
         calls_file = work / "stub" / "calls.log"
         calls = calls_file.read_text().splitlines() if calls_file.exists() else []
         ranks = []
@@ -255,6 +264,10 @@ def main():
     ap.add_argument("--spec-file", action="store_true",
                     help="run every card from a topology spec file (MAD_TOPOLOGY) instead of its "
                          "xP / yD / ... settings and require the same run as the goldens")
+    ap.add_argument("--spooled", action="store_true",
+                    help="run each launcher as sbatch does: a copy in a spool directory, "
+                         "started in the submit directory (with --equivalence: under that "
+                         "dispatch); require the same run as the goldens")
     ap.add_argument("--equivalence", choices=("spur-array", "k8s-indexed"),
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
@@ -262,7 +275,7 @@ def main():
     a = ap.parse_args()
     if a.spec_file:
         return spec_file_equivalence(a)
-    if a.equivalence:
+    if a.equivalence or a.spooled:
         return equivalence(a)
     changed, checked = [], 0
     for catalog in CATALOGS:
@@ -363,7 +376,7 @@ def equivalence(a):
                 continue
             checked += 1
             gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
-            got = snapshot_card(catalog, card, a.equivalence)
+            got = snapshot_card(catalog, card, a.equivalence or "slurm-srun", a.spooled)
             problems = []
             if got["exit_code"] != gold["exit_code"]:
                 problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
@@ -377,14 +390,15 @@ def equivalence(a):
                 if len(got["ranks"]) != len(gold["ranks"]):
                     problems.append(f"{len(got['ranks'])} ranks (golden {len(gold['ranks'])})")
             srun_calls = [c for c in got["calls"] if c.startswith("srun")]
-            if srun_calls:
+            if srun_calls and a.equivalence:
                 problems.append(f"srun called: {srun_calls}")
             if problems:
                 bad.append(f"{catalog}/{card['name']}")
                 print(f"DIFF  {catalog}/{card['name']}")
                 for pr in problems:
                     print("   " + pr.replace("\n", "\n   "))
-    print(f"equivalence ({a.equivalence}): {checked} card(s) checked, {len(bad)} differ")
+    mode = " + ".join(m for m in (a.equivalence, "spooled" if a.spooled else "") if m)
+    print(f"equivalence ({mode}): {checked} card(s) checked, {len(bad)} differ")
     return 1 if bad else 0
 
 

@@ -103,13 +103,27 @@ if test -z "${DOCKER_IMAGE_NAME:-}"; then
   exit 1
 fi
 
-# Set current directory to be REPO directory with all relevant scripts
-export MOONCAKE_REPO_DIR=$(pwd)
+# This launcher's directory. Under sbatch the scheduler runs a copy of this script
+# from its spool directory (SLURM's slurmd, Spur's /var/spool/spur), so the script's
+# own path is not the repo: then the submit directory names it, as
+# `cd <MAD>/scripts/sglang_disagg && sbatch ...` or `sbatch scripts/sglang_disagg/...` from the root.
+_resolve_launcher_dir() {
+    local _d
+    for _d in "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" \
+              "${SLURM_SUBMIT_DIR:+$SLURM_SUBMIT_DIR/scripts/sglang_disagg}" "${SLURM_SUBMIT_DIR:-}" "$PWD"; do
+        [[ -n "$_d" && -f "$_d/sglang_disagg_mori_io_ep.sh" ]] && { (cd "$_d" && pwd); return 0; }
+    done
+    echo "Error: cannot find scripts/sglang_disagg (looked next to this script, in SLURM_SUBMIT_DIR and in $PWD);" \
+         "run sbatch from MAD/scripts/sglang_disagg or from the MAD root" >&2
+    return 1
+}
+SCRIPT_DIR="$(_resolve_launcher_dir)" || exit 1
+# The directory with all the role scripts, mounted into the containers.
+export MOONCAKE_REPO_DIR="$SCRIPT_DIR"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs}"
 
 # Configuration layers (common/config/layers.sh): what was set at submit time is
 # recorded first, so later layers can tell a chosen value from a default.
-# (The scripts are found from the working directory here, as MOONCAKE_REPO_DIR is.)
 . "${MOONCAKE_REPO_DIR}/../common/config/layers.sh"
 config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
@@ -144,7 +158,6 @@ echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 # sbatch and madengine drive this script identically -- both speak only
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
     echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2

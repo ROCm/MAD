@@ -423,9 +423,13 @@ sbatch --partition=amd-rccl --nodes=2 --ntasks=2 --gpus-per-node=8 --exclusive \
 - **Image access:** the launcher pulls `DOCKER_IMAGE_NAME` on every node and tolerates a
   failed pull. For a private registry, log in on the nodes first, or the job fails later
   at `docker run`.
-- **Where to submit from:** `run_xPyD_models.slurm` finds its own directory (from the
-  script path, or `$SLURM_SUBMIT_DIR/scripts/vllm_dissag` when submitted from the repo
-  root), then checks its required files are there.
+- **Where to submit from:** the launcher's directory or the MAD root. `sbatch` runs a
+  copy of the script from the scheduler's spool directory, so every launcher finds its
+  own directory from the script path when that holds its files, else from
+  `$SLURM_SUBMIT_DIR/scripts/<launcher>`, `$SLURM_SUBMIT_DIR` or the working directory,
+  and stops with `cannot find scripts/<launcher>` otherwise. (The SGLang and colocated
+  launchers used the script path only, so under `sbatch` they looked for
+  `common/cluster.sh` in the spool directory and stopped at once.)
 - **The launcher's `#SBATCH` defaults:** `-N 2`, one task per node, `--gres=gpu:8`,
   `--time=24:00:00`, and output to
   `/shared_inference/%u/model_blog_logs/slurm-%j.out` and `.err`. Your command-line
