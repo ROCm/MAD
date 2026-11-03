@@ -178,6 +178,7 @@ _SHAPE_PASSED=""
 for _v in GPUS_PER_NODE GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 config_layer site
+. "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
 # SGLang recipes carry no env: block (flags only), so there is no recipe layer here.
 
 # The container sets its own fabric defaults (mori_ep_env.sh, set_env_vars.sh),
@@ -340,137 +341,14 @@ case "$ROUTER_NODE" in 0|1) ;; *) echo "ERROR: ROUTER_NODE=${ROUTER_NODE} (0 or 
 NUM_NODES=$((xP + yD + ROUTER_NODE))
 echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + ROUTER_NODE=$ROUTER_NODE) DP_MODE=$DP_MODE"
 
-# ------------------------
-# Extract NUM_NODES from SLURM allocation and select nodes
-# ------------------------
-echo "Original SLURM allocation:"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-
-FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
-AVAILABLE_COUNT=$(echo "$FULL_NODELIST" | wc -l)
-
-if (( AVAILABLE_COUNT < NUM_NODES )); then
-    echo "ERROR: Need ${NUM_NODES} nodes (xP=${xP} + yD=${yD} + ROUTER_NODE=${ROUTER_NODE}) but only ${AVAILABLE_COUNT} allocated." >&2
-    exit 1
-fi
-
-# Pick the first NUM_NODES nodes from the allocation and sort alphabetically.
-# srun assigns PROCID=0 to the alphabetically-first hostname regardless of --nodelist order.
-# IPADDRS[0..xP-1] = prefill, IPADDRS[xP..] = decode, so the sorted order must match.
-SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n "$NUM_NODES" | sort)
-SELECTED_NODELIST_STR=$(echo "$SELECTED_NODES" | tr '\n' ',' | sed 's/,$//')
-
-# Create new nodelist in SLURM format
-# This is a simplified approach - for complex ranges, you might need more sophisticated parsing
-NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd, | sed 's/,/,/g')
-
-# Update SLURM environment variables
-export SLURM_NNODES=$NUM_NODES
-export SLURM_NTASKS=$NUM_NODES
-export SLURM_JOB_NUM_NODES=$NUM_NODES
-export SLURM_NPROCS=$NUM_NODES
-export SLURM_JOB_NODELIST="$NEW_SLURM_NODELIST"
-export SLURM_NODELIST="$NEW_SLURM_NODELIST"
-
-# Keep other SLURM variables as they were or set defaults
-export SLURM_TASKS_PER_NODE="1(x$NUM_NODES)"
-# SLURM_SUBMIT_DIR, SLURM_CLUSTER_NAME, SLURM_JOB_PARTITION, SLURM_JOB_ACCOUNT,
-# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh. The rest
-# are per-job and stay here. (SLURM_SUBMIT_DIR used to default to one person's
-# home directory, which only ever worked for that account.)
-export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
-export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_NTASKS_PER_NODE=1
-export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
-export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_JOB_NAME="${SLURM_JOB_NAME:-${xP}p${yD}d_bench-serving}"
-
-echo ""
-echo "Updated SLURM Environment Variables:"
-echo "SLURM_JOB_ID: $SLURM_JOB_ID"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-echo "SLURM_TASKS_PER_NODE: $SLURM_TASKS_PER_NODE"
-echo "SLURM_JOB_CPUS_PER_NODE: $SLURM_JOB_CPUS_PER_NODE"
-echo "SLURM_JOB_PARTITION: $SLURM_JOB_PARTITION"
-echo "SLURM_JOB_NUM_NODES: $SLURM_JOB_NUM_NODES"
-echo "SLURM_JOBID: $SLURM_JOBID"
-echo "SLURM_JOB_QOS: $SLURM_JOB_QOS"
-echo "SLURM_NODELIST: $SLURM_NODELIST"
-echo "SLURM_JOB_ACCOUNT: $SLURM_JOB_ACCOUNT"
-echo "SLURM_NPROCS: $SLURM_NPROCS"
-echo "SLURM_SUBMIT_HOST: $SLURM_SUBMIT_HOST"
-echo "SLURM_CONF: $SLURM_CONF"
-echo "SLURM_JOB_NAME: $SLURM_JOB_NAME"
-echo "SLURM_NTASKS_PER_NODE: $SLURM_NTASKS_PER_NODE"
-echo "SLURM_SUBMIT_DIR: $SLURM_SUBMIT_DIR"
-echo "SLURM_CLUSTER_NAME: $SLURM_CLUSTER_NAME"
-echo "ulimit: $(ulimit -a)"
-echo ""
-echo "Selected nodes for execution:"
-echo "$SELECTED_NODES"
-echo ""
-
-# Node information
+# The first NUM_NODES nodes of the allocation, the SLURM_* view narrowed to them, and
+# their addresses (common/launcher/launcher_lib.sh). Nodes are multi-homed: the address
+# on the fabric subnet (FABRIC_SUBNET_PREFIX, a cluster.sh site fact) is preferred, as a
+# barrier across subnets hangs; the first address otherwise.
+launcher_select_nodes "$NUM_NODES" "${xP}p${yD}d_bench-serving"
 USER_NAME=$(whoami)
-MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE")
-# Prefer the fabric-subnet IP: nodes are multi-homed and picking the first
-# hostname -I address can land on a different subnet, which hangs the socket
-# barrier on mixed-subnet coordination. The preferred subnet prefix is
-# overridable via FABRIC_SUBNET_PREFIX (default "10.158." for the OCI
-# useocpm2m fabric); setting it empty is not intended (an empty prefix would
-# match every address), so when it is empty we skip the prefix match and go
-# straight to the first-address fallback. Fall back to the first address if no
-# matching address is present; fail fast if empty.
-# Default set in cluster.sh (site fact).
-# Escape regex-special chars so the prefix is matched literally, anchored at start.
-FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
-MASTER_ADDR_RAW="$MASTER_ADDR"
-if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
-    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
-else
-    MASTER_ADDR=""
-fi
-if [ -z "$MASTER_ADDR" ]; then
-    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | awk '{print $1}')
-fi
-if [ -z "$MASTER_ADDR" ]; then
-    echo "ERROR: could not resolve MASTER_ADDR for node '$MASTER_NODE' from 'hostname -I' output: '$MASTER_ADDR_RAW'" >&2
-    exit 1
-fi
 MASTER_PORT=39566  # Choose an open port
-
-IPS=()
-
-for NODE in $SELECTED_NODES; do
-    IP=$(dispatch_node_addresses "$NODE")
-    IP_RAW="$IP"
-    if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
-        IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
-    else
-        IP=""
-    fi
-    if [ -z "$IP" ]; then
-        IP=$(echo "$IP_RAW" | awk '{print $1}')
-    fi
-    if [ -z "$IP" ]; then
-        echo "ERROR: could not resolve IP for node '$NODE' from 'hostname -I' output: '$IP_RAW'" >&2
-        exit 1
-    fi
-    IPS+=("$IP")
-done
-
-echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
-# The router's address, for the servers' wait for it to end. Unset when the router
-# shares the first prefill node (MASTER_ADDR).
-if [[ "$ROUTER_NODE" == "1" ]]; then
-    export ROUTER_ADDR="${IPS[-1]}"
-    echo "Router node: ${ROUTER_ADDR}"
-fi
+launcher_node_ips "$FABRIC_SUBNET_PREFIX"
 
 MOONCAKE_COOKBOOK_PATH="/opt/mooncake-cookbook"
 BENCHMARK_FILE="${BENCHMARK_FILE:-$MOONCAKE_COOKBOOK_PATH/disagg_blog_p1/models_blog/run_xPyD_models.slurm}"
@@ -520,8 +398,6 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="$(eval echo "$AGENTIC_CONFIG")"
 
-# Use only the selected nodes for srun execution
-SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
 # The container's own defaults (connectors/mori.env, applied by mori_ep_env.sh to names
 # it was not given), for the record.
@@ -530,24 +406,11 @@ while IFS= read -r _line; do
     _k="${_line%%=*}"
     [[ -n "${!_k:-}" ]] || config_note "$_k" "${_line#*=}" container-default
 done < "${MOONCAKE_REPO_DIR}/connectors/mori.env"
-dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
-dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${MOONCAKE_REPO_DIR}/node.sh"
-_srun_rc=$?
-dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
-
-# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
-# for the run, and the others end with their own node's status.
-dispatch_is_leader || exit "$_srun_rc"
-
-# The job's verdict. This script used to end with the cleanup srun above, so its exit status,
-# and the SLURM job's, was the cleanup's: a run whose servers died at start-up and produced no
-# results still ended COMPLETED, and madengine collected "0 successful, 0 failed" as a pass.
-# A node's container exits non-zero when its server or benchmark fails (passing runs exit 0 on
-# every node), and a benchmark that ran writes /run_logs/$SLURM_JOB_ID/perf.csv (= $LOG_PATH on
-# the host). The CSV is published before any failure is reported, so the cells that passed
-# still reach madengine. SKIP_BENCHMARK=1 serves without benchmarking, so it has no results
-# to require. Same verdict as the vLLM launchers (cluster_job_verdict, cluster.sh).
+# Every selected node runs node.sh, then the containers are removed; rank 0 gives the
+# job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict). SKIP_BENCHMARK=1
+# serves without benchmarking, so it has no results to require.
+launcher_run_nodes "${MOONCAKE_REPO_DIR}/node.sh" 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
 _require_csv=1
 [ "${SKIP_BENCHMARK}" = "1" ] && _require_csv=0
-cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" "$_require_csv" || exit $?
+launcher_verdict "$_require_csv" || exit $?
 

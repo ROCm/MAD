@@ -9,52 +9,21 @@
 #SBATCH --error="/shared_inference/%u/model_blog_logs/slurm-%j.err"
 
 
-# ------------------------
-# Auto-detect and cd to the script directory so that $(pwd) always
-# points to the folder containing the server scripts, regardless of
-# where the user called sbatch from.
-#
-# Priority:
-# 1. BASH_SOURCE — works for direct invocation (bash script.sh)
-# 2. SLURM_SUBMIT_DIR + script path — when sbatch submits from repo root,
-#    SLURM_SUBMIT_DIR is the CWD, not the script dir. Append the relative
-#    path from the SBATCH command to get the actual script directory.
-# 3. SLURM_SUBMIT_DIR alone — last resort (assumes sbatch was run from
-#    the script directory).
-# ------------------------
-_resolve_script_dir() {
-    # Try BASH_SOURCE first (works for direct invocation)
-    if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-        local _d
-        _d="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-        if [[ -n "$_d" && -f "$_d/vllm_disagg.sh" ]]; then
-            echo "$_d"
-            return 0
-        fi
-    fi
-
-    # Try SLURM_SUBMIT_DIR + relative script path
-    # When madengine does: sbatch scripts/vllm_dissag/run_xPyD_models.slurm
-    # SLURM_SUBMIT_DIR = repo root, so we need to append the dirname
-    if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
-        local _candidate="$SLURM_SUBMIT_DIR/scripts/vllm_dissag"
-        if [[ -f "$_candidate/vllm_disagg.sh" ]]; then
-            echo "$_candidate"
-            return 0
-        fi
-        # Maybe they ran sbatch from the script dir itself
-        if [[ -f "$SLURM_SUBMIT_DIR/vllm_disagg.sh" ]]; then
-            echo "$SLURM_SUBMIT_DIR"
-            return 0
-        fi
-    fi
-
-    # Fallback
-    echo "."
+# This launcher's directory. Under sbatch the scheduler runs a copy of this script
+# from its spool directory (SLURM's slurmd, Spur's /var/spool/spur), so the script's
+# own path is not the repo: then the submit directory names it, as
+# `cd <MAD>/scripts/vllm_dissag && sbatch ...` or `sbatch scripts/vllm_dissag/...` from the root.
+_resolve_launcher_dir() {
+    local _d
+    for _d in "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" \
+              "${SLURM_SUBMIT_DIR:+$SLURM_SUBMIT_DIR/scripts/vllm_dissag}" "${SLURM_SUBMIT_DIR:-}" "$PWD"; do
+        [[ -n "$_d" && -f "$_d/vllm_disagg.sh" ]] && { (cd "$_d" && pwd); return 0; }
+    done
+    echo "Error: cannot find scripts/vllm_dissag (looked next to this script, in SLURM_SUBMIT_DIR and in $PWD);" \
+         "run sbatch from MAD/scripts/vllm_dissag or from the MAD root" >&2
     return 1
 }
-
-SCRIPT_DIR="$(_resolve_script_dir)"
+SCRIPT_DIR="$(_resolve_launcher_dir)" || exit 1
 cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
@@ -77,6 +46,7 @@ if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
 fi
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 config_layer site
+. "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
 
 REQUIRED_FILES=("vllm_disagg.sh" "parallelism.sh" "connectors/rixl.sh" "connectors/moriio.sh" "models.yaml" "benchmark_xPyD.sh" "parse_to_csv.py" "socket_barrier.py" "socket_wait.py" "connectors/moriio.env" "connectors/rixl.env")
 for f in "${REQUIRED_FILES[@]}"; do
@@ -394,103 +364,12 @@ if [[ "$_run_deepep" == "1" ]]; then
     echo "DeepEP config: PREFILL_BACKEND=$PREFILL_DEEPEP_BACKEND DECODE_BACKEND=$DECODE_DEEPEP_BACKEND DBO=$ENABLE_DBO"
 fi
 
-# ------------------------
-# Extract first NUM_NODES from SLURM allocation and update SLURM variables
-# ------------------------
-echo "Original SLURM allocation:"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-
-# Get the full nodelist and extract first NUM_NODES
-FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
-
-# NUM_NODES comes from xP+yD, not from the allocation, so a short allocation used
-# to be truncated by the `head` below into a silently wrong topology: pools would
-# be built from nodes that were never allocated, and the run would fail much later
-# with a confusing connector timeout. Fail here instead, while the cause is obvious.
-_AVAILABLE_NODES=$(echo "$FULL_NODELIST" | grep -c .)
-if [ "$_AVAILABLE_NODES" -lt "$NUM_NODES" ]; then
-    echo "Error: topology needs ${NUM_NODES} nodes (xP=${xP} + yD=${yD} + ROUTER_NODE=${ROUTER_NODE}) but the allocation has ${_AVAILABLE_NODES}." >&2
-    echo "       Size the allocation to match: 'distributed.nnodes' in the model card," >&2
-    echo "       'sbatch -N ${NUM_NODES}', or 'salloc -N ${NUM_NODES}'." >&2
-    exit 1
-fi
-
-SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n $NUM_NODES)
-NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
-
-# Update SLURM environment variables
-export SLURM_NNODES=$NUM_NODES
-export SLURM_NTASKS=$NUM_NODES
-export SLURM_JOB_NUM_NODES=$NUM_NODES
-export SLURM_NPROCS=$NUM_NODES
-export SLURM_JOB_NODELIST="$NEW_SLURM_NODELIST"
-export SLURM_NODELIST="$NEW_SLURM_NODELIST"
-
-# Keep other SLURM variables as they were or set defaults
-export SLURM_TASKS_PER_NODE="1(x$NUM_NODES)"
-
-export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME}"
-export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
-export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION}"
-export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT}"
-export SLURM_NTASKS_PER_NODE=1
-export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
-export SLURM_JOB_ID="${SLURM_JOB_ID}"
-# SLURM_JOB_QOS and SLURM_CONF are site facts and come from cluster.sh.
-export SLURM_JOB_NAME="${SLURM_JOB_NAME:-1p1d_bench-serving}"
-
-echo ""
-echo "Updated SLURM Environment Variables:"
-echo "SLURM_JOB_ID: $SLURM_JOB_ID"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-echo "SLURM_TASKS_PER_NODE: $SLURM_TASKS_PER_NODE"
-echo "SLURM_JOB_CPUS_PER_NODE: $SLURM_JOB_CPUS_PER_NODE"
-echo "SLURM_JOB_PARTITION: $SLURM_JOB_PARTITION"
-echo "SLURM_JOB_NUM_NODES: $SLURM_JOB_NUM_NODES"
-echo "SLURM_JOBID: $SLURM_JOBID"
-echo "SLURM_JOB_QOS: $SLURM_JOB_QOS"
-echo "SLURM_NODELIST: $SLURM_NODELIST"
-echo "SLURM_JOB_ACCOUNT: $SLURM_JOB_ACCOUNT"
-echo "SLURM_NPROCS: $SLURM_NPROCS"
-echo "SLURM_SUBMIT_HOST: $SLURM_SUBMIT_HOST"
-echo "SLURM_CONF: $SLURM_CONF"
-echo "SLURM_JOB_NAME: $SLURM_JOB_NAME"
-echo "SLURM_NTASKS_PER_NODE: $SLURM_NTASKS_PER_NODE"
-#echo "SLURM_SUBMIT_DIR: $SLURM_SUBMIT_DIR"
-echo "SLURM_CLUSTER_NAME: $SLURM_CLUSTER_NAME"
-echo "ulimit: $(ulimit -a)"
-echo ""
-echo "Selected nodes for execution:"
-echo "$SELECTED_NODES"
-echo ""
-
-# Node information
+# The first NUM_NODES nodes of the allocation, the SLURM_* view narrowed to them, and
+# their addresses (common/launcher/launcher_lib.sh).
+launcher_select_nodes "$NUM_NODES" "1p1d_bench-serving"
 USER_NAME=$(whoami)
-MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE")
-MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
 MASTER_PORT=39566  # Choose an open port
-
-IPS=()
-
-for NODE in $SELECTED_NODES; do
-    IP=$(dispatch_node_addresses "$NODE")
-    IP=$(echo "$IP" | awk 'NR==1 {print $1}')
-    IPS+=("$IP")
-done
-
-echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
-# The router's address, for the servers' proxy settings and their wait for it to end.
-# Unset when the router shares the first prefill node (MASTER_ADDR).
-if [[ "$ROUTER_NODE" == "1" ]]; then
-    export ROUTER_ADDR="${IPS[-1]}"
-    echo "Router node: ${ROUTER_ADDR}"
-fi
+launcher_node_ips
 
 NIXL_COOKBOOK_PATH="/opt/nixl-vllm-cookbook"
 BENCHMARK_ITR="${BENCHMARK_ITR:-1}"
@@ -562,26 +441,9 @@ export BARRIER_PORT="${BARRIER_PORT:-$(cluster_barrier_port)}"
 export BARRIER_PORT_MORI="${BARRIER_PORT_MORI:-$BARRIER_PORT}"
 export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 
-# Use only the selected nodes for srun execution
-SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
-
-dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
-dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${SCRIPT_DIR}/node.sh"
-_srun_rc=$?
-dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
-
-# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
-# for the run, and the others end with their own node's status.
-dispatch_is_leader || exit "$_srun_rc"
-
-# The job's verdict (cluster_job_verdict, cluster.sh). benchmark_xPyD.sh / benchmark_niah.sh
-# write /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but
-# madengine resolves a model's `multiple_results` against the JOB DIRECTORY it launched us
-# from, so the CSV is published there under the declared name first. Then the job fails when a
-# node's container exited non-zero, when there are no parseable results (madengine would
-# otherwise record exit_code=0 and "0 successful, 0 failed", the same as a clean run), or when
-# any row is FAILURE. The container's exit status used to be dropped here: the run script's
-# output is piped through tee, and nothing read the srun status, so a node whose server died
-# still ended the job COMPLETED when an earlier cell had written a CSV.
-cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" || exit $?
+# Every selected node runs node.sh, then the containers are removed; rank 0 gives the
+# job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict).
+launcher_run_nodes "${SCRIPT_DIR}/node.sh" \
+    'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+launcher_verdict || exit $?
 

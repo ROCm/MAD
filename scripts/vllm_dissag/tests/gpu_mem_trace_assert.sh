@@ -66,7 +66,7 @@ _has "$S" 'if [ "${GPU_MEM_TRACE:-0}" = "1" ]' "off unless GPU_MEM_TRACE=1"
 _has "$(sed -n '/^_stop_trace()/p' <<<"$S")" 'kill "$_trace_pid"' "_stop_trace stops the sampler"
 _has "$S" 'node_run_container _node_docker_run _stop_trace' \
      "it is stopped when the container ends or the job is cancelled"
-_has "$(cat "$DIR/run_xPyD_models.slurm")" 'bash "${SCRIPT_DIR}/node.sh"' "the launcher runs node.sh on each node"
+_has "$(cat "$DIR/run_xPyD_models.slurm")" 'launcher_run_nodes "${SCRIPT_DIR}/node.sh"' "the launcher runs node.sh on each node"
 [ "$(sed -n '/_trace_pid="";$/=' <<<"$S" | head -n 1)" -lt "$(sed -n '/^docker run --rm/=' <<<"$S" | head -n 1)" ] \
     && { printf "  PASS  %s\n" "it starts before the container"; pass=$((pass+1)); } \
     || { printf "  FAIL  %s\n" "it starts before the container"; fail=$((fail+1)); }

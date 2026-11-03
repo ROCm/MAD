@@ -121,6 +121,7 @@ _FABRIC_PASSED=""
 for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 config_layer site
+. "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
 # The recipe's env: block over site defaults, under what was submitted
 # (common/config/layers.sh); serve_colocated.sh applies the rest in the container.
 config_apply_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME"
@@ -165,18 +166,11 @@ fi
 # ------------------------
 # Node discovery: rank-ordered IPs, master = first node
 # ------------------------
+# The whole allocation is the run (NUM_NODES = the allocation), so the SLURM_* view is
+# not narrowed; the addresses come from common/launcher/launcher_lib.sh.
 SELECTED_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST" | head -n "$NUM_NODES")
 SELECTED_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
-MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE" | awk '{print $1}')
-
-IPS=()
-for NODE in $SELECTED_NODES; do
-    IP=$(dispatch_node_addresses "$NODE" | awk '{print $1}')
-    IPS+=("$IP")
-    echo "  node ${NODE} -> ${IP}"
-done
-IPADDRS=$(echo "${IPS[*]}" | tr ' ' ',')
+launcher_node_ips
 
 # ------------------------
 # Weight location: local NVMe first, NFS second
@@ -301,25 +295,16 @@ trap 'trap - EXIT; _colocated_teardown; exit 143' INT TERM
 dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
 dispatch_run node "$SELECTED_NODELIST" bash "${SCRIPT_DIR}/node.sh" &
 _srun_pid=$!
-_srun_rc=0
-wait "$_srun_pid" || _srun_rc=$?
+LAUNCHER_RC=0
+wait "$_srun_pid" || LAUNCHER_RC=$?
 
 _colocated_teardown
 
-# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
-# for the run, and the others end with their own node's status.
-dispatch_is_leader || exit "$_srun_rc"
-
-# The job's verdict (cluster_job_verdict, cluster.sh). The benchmark writes
-# /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but
-# madengine resolves a model's `multiple_results` against the JOB DIRECTORY it launched
-# us from, so the CSV is published there under the declared name first. Then the job
-# fails when a node's container exited non-zero, when there are no parseable results,
-# or when any row is FAILURE. A run with no results must not pass: madengine would
-# record exit_code=0 and collect "0 successful, 0 failed", so a hard engine crash
-# (seen with the gfx942 MoE LLVM abort, which died in determine_available_memory and
-# still exited 0) would read as a clean run.
-cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv" || {
+# Rank 0 gives the job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict).
+# A run with no results must not pass: a hard engine crash (seen with the gfx942 MoE
+# LLVM abort, which died in determine_available_memory and still exited 0) would
+# otherwise read as a clean run.
+launcher_verdict || {
     _rc=$?
     echo "Colocated multi-node run FAILED. Logs: ${LOG_PATH}/${SLURM_JOB_ID}" >&2
     exit "$_rc"

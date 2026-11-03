@@ -8,7 +8,6 @@
  "exit_code": 0,
  "calls": [
   "srun node1",
-  "srun node1",
   "srun node2",
   "srun node1,node2",
   "docker ps -q",

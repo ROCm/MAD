@@ -528,11 +528,18 @@ PY
 )"
   _has "$_bad" "none" "$(basename "$(dirname "$_cat")")/models.json: every card declares multiple_results=perf_<MODEL_NAME>.csv"
 done
+# launcher_verdict (common/launcher/launcher_lib.sh, behaviour in launcher_lib_assert.sh)
+# publishes the run's perf.csv as perf_<MODEL_NAME>.csv through cluster_job_verdict.
+_has "$(cat "$DIR/../common/launcher/launcher_lib.sh")" \
+    'cluster_job_verdict "${LAUNCHER_RC:-1}" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" \' \
+    "launcher_verdict publishes the run's perf.csv"
+_has "$(cat "$DIR/../common/launcher/launcher_lib.sh")" '"$(pwd)/perf_${MODEL_NAME}.csv" "$require"' \
+    "as perf_<MODEL_NAME>.csv in the job directory"
 # Each launcher publishes through cluster_job_verdict (cluster.sh); its behaviour is
 # checked in common/tests/launcher_verdict_assert.sh.
 for _l in run_xPyD_models.slurm ../sglang_disagg/run_xPyD_models.slurm ../vllm_multinode/run_multinode.slurm; do
-  _has "$(cat "$DIR/$_l")" 'cluster_job_verdict "$_srun_rc" "${LOG_PATH}/${SLURM_JOB_ID}/perf.csv" "$(pwd)/perf_${MODEL_NAME}.csv"' \
-      "$(basename "$(dirname "$DIR/$_l")") launcher publishes perf_<MODEL_NAME>.csv"
+  _has "$(cat "$DIR/$_l")" 'launcher_verdict' \
+      "$(basename "$(dirname "$DIR/$_l")") launcher gives the verdict through launcher_verdict"
 done
 
 echo "======================================================"
