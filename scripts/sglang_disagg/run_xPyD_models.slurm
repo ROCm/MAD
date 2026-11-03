@@ -313,9 +313,12 @@ echo ""
 
 
 # Calculate NUM_NODES based on xP and yD
-# The proxy/router runs on the first prefill node (NODE_RANK=0), so no extra node is needed.
-NUM_NODES=$((xP + yD))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD) DP_MODE=$DP_MODE"
+# The proxy/router runs on the first prefill node (NODE_RANK=0), unless ROUTER_NODE=1
+# gives it (and the benchmark client) a node of its own, after the decode nodes.
+export ROUTER_NODE="${ROUTER_NODE:-0}"   # node.sh resolves each rank with it
+case "$ROUTER_NODE" in 0|1) ;; *) echo "ERROR: ROUTER_NODE=${ROUTER_NODE} (0 or 1)" >&2; exit 1 ;; esac
+NUM_NODES=$((xP + yD + ROUTER_NODE))
+echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + ROUTER_NODE=$ROUTER_NODE) DP_MODE=$DP_MODE"
 
 # ------------------------
 # Extract NUM_NODES from SLURM allocation and select nodes
@@ -329,7 +332,7 @@ FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 AVAILABLE_COUNT=$(echo "$FULL_NODELIST" | wc -l)
 
 if (( AVAILABLE_COUNT < NUM_NODES )); then
-    echo "ERROR: Need ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but only ${AVAILABLE_COUNT} allocated." >&2
+    echo "ERROR: Need ${NUM_NODES} nodes (xP=${xP} + yD=${yD} + ROUTER_NODE=${ROUTER_NODE}) but only ${AVAILABLE_COUNT} allocated." >&2
     exit 1
 fi
 
@@ -442,6 +445,12 @@ for NODE in $SELECTED_NODES; do
 done
 
 echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
+# The router's address, for the servers' wait for it to end. Unset when the router
+# shares the first prefill node (MASTER_ADDR).
+if [[ "$ROUTER_NODE" == "1" ]]; then
+    export ROUTER_ADDR="${IPS[-1]}"
+    echo "Router node: ${ROUTER_ADDR}"
+fi
 
 MOONCAKE_COOKBOOK_PATH="/opt/mooncake-cookbook"
 BENCHMARK_FILE="${BENCHMARK_FILE:-$MOONCAKE_COOKBOOK_PATH/disagg_blog_p1/models_blog/run_xPyD_models.slurm}"

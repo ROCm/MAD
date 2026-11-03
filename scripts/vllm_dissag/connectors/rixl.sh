@@ -432,7 +432,7 @@ connector_start_proxy() {
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
     fi
     for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do PREFILL_ARGS+="${IP_ARRAY[$i]} "; PREFILL_PORTS+="$SERVER_PORT "; done
-    for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do DECODE_ARGS+="${IP_ARRAY[$i]} "; DECODE_PORTS+="$SERVER_PORT "; done
+    for ((i=xP; i<xP+yD && i<${#IP_ARRAY[@]}; i++)); do DECODE_ARGS+="${IP_ARRAY[$i]} "; DECODE_PORTS+="$SERVER_PORT "; done
 
     if [ "$PROXY_TYPE" == "vllm_router" ]; then
         echo "Starting vLLM Router (Production Proxy) on port ${PROXY_PORT}..."

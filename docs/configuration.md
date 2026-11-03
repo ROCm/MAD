@@ -430,6 +430,7 @@ holding a different variant, is a hard failure with a message saying what to fix
 | `GPUS_PER_NODE` | `8` | |
 | `NNODES` | `${SLURM_NNODES:-1}` | |
 | `xP`, `yD` | `1`, `1` | Prefill and decode node counts |
+| `ROUTER_NODE` | `0` | `1`: the router and the benchmark client on a node of their own, after decode (`xP + yD + 1` nodes). The launcher passes that node's address as `ROUTER_ADDR` |
 | `TP_SIZE` | `${GPUS_PER_NODE}` | For the colocated launcher. The vLLM wideEP path uses `EP_TP_SIZE` instead, so this default does not turn a TP1/DP16 recipe into TP8/DP2 |
 | `PP_SIZE` | unset | The colocated launcher defaults it to the node count; no other launcher reads it |
 | `MAD_TOPOLOGY` | unset | A topology spec file in place of the settings above; see [Topology spec files](#topology-spec-files) |
@@ -453,13 +454,17 @@ The launcher turns the file into its own settings before anything else reads the
 
 | Launcher | `parallel.mode` | Settings it gives |
 |---|---|---|
-| `vllm_dissag` | `wide_ep` (`ep_tp`), `tp` | `xP`, `yD`, `GPUS_PER_NODE`, `WIDE_EP`, `EP_TP_SIZE` |
-| `sglang_disagg` | `dp_ep`, `tp` (`tp`) | `xP`, `yD`, `GPUS_PER_NODE`, `DP_MODE`, `GENERIC_TP_SIZE` |
+| `vllm_dissag` | `wide_ep` (`ep_tp`), `tp` | `xP`, `yD`, `ROUTER_NODE`, `GPUS_PER_NODE`, `WIDE_EP`, `EP_TP_SIZE` |
+| `sglang_disagg` | `dp_ep`, `tp` (`tp`) | `xP`, `yD`, `ROUTER_NODE`, `GPUS_PER_NODE`, `DP_MODE`, `GENERIC_TP_SIZE` |
 | `vllm_multinode` | `tp_pp` (`tp`, `pp`, optional `ep`, `all2all`) | `GPUS_PER_NODE`, `TP_SIZE`, `PP_SIZE`, `ENABLE_EP`, `ALL2ALL_BACKEND`; the role's `nodes` must equal the allocation |
 
+The disagg launchers run roles prefill then decode, optionally followed by a `router` role of
+one node (no `parallel`) that the spec's `router` names: `"router": {"host": "router", "index": 0}`
+is `ROUTER_NODE=1`. Without a `router` role the router is on the first prefill node.
+
 The launcher stops before it starts anything when the file asks for what it cannot run:
-another engine or layout, roles other than prefill then decode, the router anywhere but the
-first prefill node, or different parallelism for prefill and decode. A setting given both
+another engine or layout, other roles or another order, the router anywhere but the first
+prefill node or the router role's one node, or different parallelism for prefill and decode. A setting given both
 ways must agree (`xP=1 disagrees with MAD_TOPOLOGY (xP=2); set one or the other`). Keep the
 card's `slurm.nodes` equal to the spec's total node count.
 

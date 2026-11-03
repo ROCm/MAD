@@ -298,7 +298,7 @@ def main():
 # The settings a spec file replaces. With MAD_TOPOLOGY they are all set explicitly,
 # so a launcher that forwards one only when set (`${X:+-e X=...}`) passes one more,
 # with the value the default gave; the comparison leaves these entries out.
-TOPOLOGY_SETTINGS = {"xP", "yD", "WIDE_EP", "EP_TP_SIZE", "DP_MODE", "GENERIC_TP_SIZE", "GPUS_PER_NODE",
+TOPOLOGY_SETTINGS = {"xP", "yD", "ROUTER_NODE", "WIDE_EP", "EP_TP_SIZE", "DP_MODE", "GENERIC_TP_SIZE", "GPUS_PER_NODE",
                      "TP_SIZE", "PP_SIZE", "ENABLE_EP", "ALL2ALL_BACKEND", "MAD_TOPOLOGY", "MAD_TOPOLOGY_NNODES"}
 
 

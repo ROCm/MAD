@@ -329,15 +329,19 @@ TP), `mori_dp` (MoRI IO, DP_MODE=1) and `mooncake`. Details are in
 launcher assigns roles like this, in every mode:
 
 ```
-Node 0          -> Prefill MASTER + Proxy (co-located)
+Node 0          -> Prefill MASTER + Proxy (co-located; Prefill MASTER only with ROUTER_NODE=1)
 Nodes 1..xP-1   -> Prefill CHILD (if xP > 1, wideEP)
 Node xP         -> Decode MASTER
-Nodes xP+1..end -> Decode CHILD (if yD > 1, wideEP)
+Nodes xP+1..xP+yD-1 -> Decode CHILD (if yD > 1, wideEP)
+Node xP+yD      -> Router (proxy + benchmark client), only with ROUTER_NODE=1
 ```
 
 - `num_nodes = xP + yD`.
 - The proxy or router runs on the prefill master (node 0). It is CPU-only and listens
   on its own port, separate from the vLLM server.
+- `ROUTER_NODE=1` (both disagg launchers) moves the router and the benchmark client to a node
+  of their own after the decode nodes: `num_nodes = xP + yD + 1`. The other nodes keep their
+  ranks and find the router at `ROUTER_ADDR`. See [vllm-disagg.md](vllm-disagg.md#node-topology-and-ports).
 - Child nodes exist only when a pool spans more than one node. In TP 1P/1D there is
   just rank 0 (prefill master and proxy) and rank `xP` (decode master).
 - Only rank 0 runs the benchmark. The other ranks wait for the proxy to come up, then

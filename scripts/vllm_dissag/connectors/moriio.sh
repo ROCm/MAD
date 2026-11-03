@@ -141,7 +141,7 @@ _moriio_build_kv_transfer_config() {
         [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
         _tune+=',"'"${_k#*:}"'":'"${_v}"
     done
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${ROUTER_ADDR:-${MASTER_ADDR}}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
 }
 
 connector_runtime_patch() {

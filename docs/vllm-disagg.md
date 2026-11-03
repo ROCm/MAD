@@ -421,14 +421,24 @@ none, so vLLM used its built-in 0.92 and RCCL had no room for its first all-redu
 ## Node topology and ports
 
 ```
-Node 0          -> Prefill MASTER + Proxy (co-located)
+Node 0          -> Prefill MASTER + Proxy (co-located; Prefill MASTER only with ROUTER_NODE=1)
 Nodes 1..xP-1   -> Prefill CHILD (if xP > 1, wideEP)
 Node xP         -> Decode MASTER
-Nodes xP+1..end -> Decode CHILD (if yD > 1, wideEP)
+Nodes xP+1..xP+yD-1 -> Decode CHILD (if yD > 1, wideEP)
+Node xP+yD      -> Router (proxy + benchmark client), only with ROUTER_NODE=1
 ```
 
 `num_nodes = xP + yD`. The proxy or router is co-located on the prefill master
 (node 0), is CPU-only, and uses a separate port from the vLLM server.
+
+`ROUTER_NODE=1` gives the router (or proxy) and the benchmark client a node of their own, after
+the decode nodes: `num_nodes = xP + yD + 1`, so set the card's `slurm.nodes` to match. The
+prefill and decode nodes keep their ranks and run the same servers; they find the router at
+`ROUTER_ADDR` (the launcher passes it) instead of the prefill master. The router node starts a
+container like the others but no server, and needs the model at the same `MODEL_PATH` for the
+benchmark client's tokenizer (with `REQUIRE_LOCAL_WEIGHTS=1`, on its local NVMe). A topology spec
+file states the same with a `router` role last
+(`scripts/common/topology/specs/*_router_node.json`).
 
 On the wideEP path, a master runs `--api-server-count` (the GPUs per node, clamped to
 the DP size) and a child runs `--data-parallel-start-rank <r> --headless`. The DP

@@ -14,6 +14,10 @@ parallelised and where the router runs:
      "roles": [{"name": "server", "nodes": 2, "parallel": {"mode": "tp_pp", "tp": 8, "pp": 2}}],
      "gpus_per_node": 8}
 
+With "roles": [..prefill.., ..decode.., {"name": "router", "nodes": 1}] and
+"router": {"host": "router", "index": 0}, the router has a node of its own after the
+servers (the launchers' ROUTER_NODE=1).
+
 Roles take consecutive node ranks in the order listed. Resolving a spec for a rank
 gives that node's role, its index within the role, the role's first rank (its
 master), whether the node hosts the router, and for data-parallel roles the DP size
@@ -86,10 +90,13 @@ def from_env(env, launcher):
         dp_mode = env.get("DP_MODE", "0") == "1"
         parallel = {"mode": "dp_ep"} if dp_mode else {"mode": "tp", "tp": _int(env, "GENERIC_TP_SIZE", 8)}
         engine = "sglang"
-    return {"engine": engine, "layout": "disagg", "gpus_per_node": gpus,
-            "roles": [{"name": "prefill", "nodes": xp, "parallel": dict(parallel)},
-                      {"name": "decode", "nodes": yd, "parallel": dict(parallel)}],
-            "router": {"host": "prefill", "index": 0}}
+    roles = [{"name": "prefill", "nodes": xp, "parallel": dict(parallel)},
+             {"name": "decode", "nodes": yd, "parallel": dict(parallel)}]
+    router = {"host": "prefill", "index": 0}
+    if env.get("ROUTER_NODE", "0") == "1":      # the router on a node of its own, after decode
+        roles.append({"name": "router", "nodes": 1})
+        router = {"host": "router", "index": 0}
+    return {"engine": engine, "layout": "disagg", "gpus_per_node": gpus, "roles": roles, "router": router}
 
 
 def validate(spec):
@@ -174,16 +181,22 @@ def legacy_env(spec, launcher, env=None):
             if p.get("all2all"):
                 out["ALL2ALL_BACKEND"] = p["all2all"]
     elif launcher in ("vllm_dissag", "sglang_disagg"):
-        if spec["layout"] != "disagg" or [r["name"] for r in roles] != ["prefill", "decode"]:
-            raise TopologyError(f"{launcher} runs roles prefill then decode (layout disagg)")
+        names = [r["name"] for r in roles]
+        if spec["layout"] != "disagg" or names not in (["prefill", "decode"], ["prefill", "decode", "router"]):
+            raise TopologyError(f"{launcher} runs roles prefill then decode, optionally then router (layout disagg)")
+        own_node = names[-1] == "router"
+        if own_node and roles[2]["nodes"] != 1:
+            raise TopologyError(f"{launcher} runs one router node (got {roles[2]['nodes']})")
         router = spec.get("router") or {}
-        if (router.get("host"), router.get("index", 0)) != ("prefill", 0):
-            raise TopologyError(f"{launcher} runs the router on the first prefill node "
-                                '(router: {"host": "prefill", "index": 0})')
+        where = ("router", 0) if own_node else ("prefill", 0)
+        if (router.get("host"), router.get("index", 0)) != where:
+            raise TopologyError(f"{launcher} runs the router on the first prefill node, or on the router "
+                                f'role\'s node when the spec has one (router: {{"host": "{where[0]}", "index": 0}})')
         pp, pd = roles[0].get("parallel") or {}, roles[1].get("parallel") or {}
         if pp != pd:
             raise TopologyError(f"{launcher} runs prefill and decode with the same parallelism (got {pp} and {pd})")
-        out = {"GPUS_PER_NODE": gpus, "xP": roles[0]["nodes"], "yD": roles[1]["nodes"]}
+        out = {"GPUS_PER_NODE": gpus, "xP": roles[0]["nodes"], "yD": roles[1]["nodes"],
+               "ROUTER_NODE": int(own_node)}
         mode = pp.get("mode")
         if launcher == "vllm_dissag":
             if mode == "wide_ep":

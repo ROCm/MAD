@@ -574,9 +574,12 @@ sbatch -N 3 -n 3 -p amd-rccl --time=90 \
 server-side Prometheus metrics (`--enable-metrics --enable-metrics-for-all-schedulers`) and strips
 `--disable-radix-cache` (cache on).
 
-The README describes the topology as `xP` prefill + `yD` decode + 1 router node (minimum 3 nodes
-for 1P/1D), and its examples request 3 nodes. The batch script uses only the first `xP + yD` nodes
-of the allocation and runs the router on node 0, co-located with the first prefill server.
+By default the batch script uses the first `xP + yD` nodes of the allocation and runs the router
+on node 0, co-located with the first prefill server. The README's layout of `xP` prefill + `yD`
+decode + 1 router node (3 nodes for 1P/1D) is `ROUTER_NODE=1`: the router, the smoke test and the
+benchmark client run on node `xP + yD`, and the prefill and decode servers wait for the router at
+`ROUTER_ADDR`. The router node runs no server, but the benchmark client needs the model at the
+same `MODEL_PATH` for its tokenizer.
 
 ### Environment variables
 

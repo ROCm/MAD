@@ -19,10 +19,11 @@
 # Per-model flags + env come from models.yaml (parsed below).
 #
 # Node roles (by NODE_RANK), co-located proxy on rank 0:
-#   0           -> Prefill MASTER + Proxy
-#   1 .. xP-1   -> Prefill CHILD  (--headless, wideEP only)
-#   xP          -> Decode  MASTER
-#   xP+1 .. end -> Decode  CHILD   (--headless, wideEP only)
+#   0                -> Prefill MASTER + Proxy (Proxy on its own node with ROUTER_NODE=1)
+#   1 .. xP-1        -> Prefill CHILD  (--headless, wideEP only)
+#   xP               -> Decode  MASTER
+#   xP+1 .. xP+yD-1  -> Decode  CHILD   (--headless, wideEP only)
+#   xP+yD            -> Router: proxy + benchmark client, no server (ROUTER_NODE=1 only)
 #
 # Back-compat shim: RUN_MORI=1 -> moriio/wideEP/mori; RUN_DEEPEP=1 -> rixl/wideEP/deepep.
 # DRY_RUN=1 echoes each worker's assembled `vllm serve` argv instead of running.
@@ -72,6 +73,9 @@ echo "[vllm_disagg] CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BA
 # Common Environment Configuration
 # =============================================================================
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
+# The router (proxy): on the first prefill node (MASTER_ADDR) unless the launcher gave
+# it a node of its own (ROUTER_NODE=1), whose address it passes as ROUTER_ADDR.
+ROUTER_ADDR="${ROUTER_ADDR:-$MASTER_ADDR}"
 MASTER_PORT="${MASTER_PORT:-23731}"
 NODE_RANK="${NODE_RANK:-0}"
 NNODES="${NNODES:-1}"
@@ -137,13 +141,24 @@ DECODE_DP_SIZE=$((yD * _DP_PER_NODE))
 DP_PARALLEL_SIZE_LOCAL=${_DP_PER_NODE}
 # This node's part of the run: from the topology spec when the launcher passed it
 # (MAD_TOPO_*, scripts/common/topology/topology.py), else from NODE_RANK and xP as
-# before -- ranks 0..xP-1 prefill, xP.. decode, each pool's first node its master.
+# before -- ranks 0..xP-1 prefill, xP..xP+yD-1 decode, each pool's first node its
+# master, and a router node after them when the launcher gave it one.
 if [ -n "${MAD_TOPO_ROLE:-}" ]; then
     _ROLE="$MAD_TOPO_ROLE"; _ROLE_INDEX="$MAD_TOPO_ROLE_INDEX"
 elif [ "$NODE_RANK" -lt "$xP" ]; then
     _ROLE=prefill; _ROLE_INDEX="$NODE_RANK"
-else
+elif [ "$NODE_RANK" -lt $(( xP + yD )) ]; then
     _ROLE=decode; _ROLE_INDEX=$(( NODE_RANK - xP ))
+else
+    _ROLE=router; _ROLE_INDEX=0
+fi
+# Whether this node runs the router and the benchmark client.
+if [ -n "${MAD_TOPO_ROUTER:-}" ]; then
+    _HOSTS_ROUTER="$MAD_TOPO_ROUTER"
+elif [ "$_ROLE" = router ] || { [ "$_ROLE" = prefill ] && [ "$_ROLE_INDEX" -eq 0 ] && [ "$ROUTER_ADDR" = "$MASTER_ADDR" ]; }; then
+    _HOSTS_ROUTER=1
+else
+    _HOSTS_ROUTER=0
 fi
 _DP_START_RANK="${MAD_TOPO_DP_START_RANK:-$(( _ROLE_INDEX * _DP_PER_NODE ))}"
 PREFILL_DP_START_RANK="$_DP_START_RANK"
@@ -413,11 +428,11 @@ _wait_log_signal_or_fail() {
 wait_for_proxy_and_cleanup() {
     local worker_pid="$1" label="$2"
     echo "Waiting for proxy server to be up..."
-    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${MASTER_ADDR} --node-ports $PROXY_PORT \
+    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${ROUTER_ADDR} --node-ports $PROXY_PORT \
         --abort-file "${JOB_ABORT_FILE}" \
-        || _job_fail "the proxy on ${MASTER_ADDR}:${PROXY_PORT} never came up for the ${label}"
+        || _job_fail "the proxy on ${ROUTER_ADDR}:${PROXY_PORT} never came up for the ${label}"
     echo "Waiting until proxy server closes..."
-    python $NIXL_COOKBOOK_PATH/socket_wait.py --remote-ip ${MASTER_ADDR} --remote-port $PROXY_PORT
+    python $NIXL_COOKBOOK_PATH/socket_wait.py --remote-ip ${ROUTER_ADDR} --remote-port $PROXY_PORT
     echo "Killing the ${label} server"
     pkill -P "$worker_pid" 2>/dev/null; kill "$worker_pid" 2>/dev/null || true
 }
@@ -565,12 +580,19 @@ fi
 # =============================================================================
 # Node Role Assignment and Server Launch
 # =============================================================================
-if [ "$_ROLE" = prefill ] && [ "$_ROLE_INDEX" -eq 0 ]; then
-    print_node_info "Prefill master + Proxy node (co-located)"
-    connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
-    local_worker_pid=$WORKER_PID
-    [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] rank0 prefill master emitted; skipping proxy/benchmark."; exit 0; }
-    _watch_gpu_faults prefill
+if [ "$_HOSTS_ROUTER" = 1 ]; then
+    local_worker_pid=""
+    if [ "$_ROLE" = prefill ]; then
+        print_node_info "Prefill master + Proxy node (co-located)"
+        connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
+        local_worker_pid=$WORKER_PID
+        [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] rank0 prefill master emitted; skipping proxy/benchmark."; exit 0; }
+        _watch_gpu_faults prefill
+    else
+        # A node of its own: no server here, only the router and the benchmark client.
+        print_node_info "Router node (proxy + benchmark client)"
+        [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] router node: no server; skipping proxy/benchmark."; exit 0; }
+    fi
 
     connector_wait_workers_ready
     connector_start_proxy
@@ -612,8 +634,17 @@ if [ "$_ROLE" = prefill ] && [ "$_ROLE_INDEX" -eq 0 ]; then
 
     echo "Killing the proxy server.."
     pkill -P $proxy_pid 2>/dev/null; kill $proxy_pid 2>/dev/null || true
-    echo "Killing the prefill master server.."
-    pkill -P $local_worker_pid 2>/dev/null; kill $local_worker_pid 2>/dev/null || true
+    if [ -n "$local_worker_pid" ]; then
+        echo "Killing the prefill master server.."
+        pkill -P $local_worker_pid 2>/dev/null; kill $local_worker_pid 2>/dev/null || true
+    fi
+
+elif [ "$_ROLE" = prefill ] && [ "$_ROLE_INDEX" -eq 0 ]; then
+    print_node_info "Prefill master node (router on ${ROUTER_ADDR})"
+    connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
+    [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] prefill master emitted."; exit 0; }
+    _watch_gpu_faults prefill
+    wait_for_proxy_and_cleanup $WORKER_PID "prefill master"
 
 elif [ "$_ROLE" = prefill ]; then
     print_node_info "Prefill child node"
@@ -629,12 +660,14 @@ elif [ "$_ROLE" = decode ] && [ "$_ROLE_INDEX" -eq 0 ]; then
     _watch_gpu_faults decode
     wait_for_proxy_and_cleanup $WORKER_PID "decode master"
 
-else
+elif [ "$_ROLE" = decode ]; then
     print_node_info "Decode child node"
     connector_launch_worker "child" "${DECODE_DP_SIZE}" "${DECODE_MASTER_ADDR}" "kv_consumer" "decode" "${DECODE_DP_START_RANK}"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] decode child emitted."; exit 0; }
     _watch_gpu_faults decode
     wait_for_proxy_and_cleanup $WORKER_PID "decode child"
+else
+    _job_fail "node ${NODE_RANK}: role '${_ROLE}' is not one this script runs (prefill, decode, router)"
 fi
 
 echo "Script completed successfully."

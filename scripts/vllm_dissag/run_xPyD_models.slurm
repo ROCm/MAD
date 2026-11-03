@@ -281,6 +281,10 @@ LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs
 
 xP="${xP:-1}" #-> Number of Prefill NODES (a pool may span >1 node)
 yD="${yD:-1}" #-> Number of Decode  NODES (a pool may span >1 node)
+# ROUTER_NODE=1: the router (proxy) and the benchmark client get a node of their own,
+# after the decode nodes, instead of sharing the first prefill node.
+export ROUTER_NODE="${ROUTER_NODE:-0}"   # node.sh resolves each rank with it
+case "$ROUTER_NODE" in 0|1) ;; *) echo "Error: ROUTER_NODE=${ROUTER_NODE} (0 or 1)" >&2; exit 1 ;; esac
 # MODEL_DIR / MODEL_NAME defaults come from cluster.sh.
 # EP_TP_SIZE: tensor-parallel degree within each DP rank on the wideEP path. Default 1
 # keeps the historical one-DP-rank-per-GPU layout; >1 only when the replicated
@@ -358,8 +362,12 @@ echo ""
 
 
 # Calculate NUM_NODES based on xP and yD
-NUM_NODES=$((xP + yD))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+NUM_NODES=$((xP + yD + ROUTER_NODE))
+if [[ "$ROUTER_NODE" == "1" ]]; then
+    echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + 1 router node)"
+else
+    echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
+fi
 if [[ "${WIDE_EP:-0}" == "1" ]]; then
     echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$EP_TP_SIZE (wideEP)"
 else
@@ -393,7 +401,7 @@ FULL_NODELIST=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 # with a confusing connector timeout. Fail here instead, while the cause is obvious.
 _AVAILABLE_NODES=$(echo "$FULL_NODELIST" | grep -c .)
 if [ "$_AVAILABLE_NODES" -lt "$NUM_NODES" ]; then
-    echo "Error: topology needs ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but the allocation has ${_AVAILABLE_NODES}." >&2
+    echo "Error: topology needs ${NUM_NODES} nodes (xP=${xP} + yD=${yD} + ROUTER_NODE=${ROUTER_NODE}) but the allocation has ${_AVAILABLE_NODES}." >&2
     echo "       Size the allocation to match: 'distributed.nnodes' in the model card," >&2
     echo "       'sbatch -N ${NUM_NODES}', or 'salloc -N ${NUM_NODES}'." >&2
     exit 1
@@ -467,6 +475,12 @@ for NODE in $SELECTED_NODES; do
 done
 
 echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
+# The router's address, for the servers' proxy settings and their wait for it to end.
+# Unset when the router shares the first prefill node (MASTER_ADDR).
+if [[ "$ROUTER_NODE" == "1" ]]; then
+    export ROUTER_ADDR="${IPS[-1]}"
+    echo "Router node: ${ROUTER_ADDR}"
+fi
 
 NIXL_COOKBOOK_PATH="/opt/nixl-vllm-cookbook"
 BENCHMARK_ITR="${BENCHMARK_ITR:-1}"

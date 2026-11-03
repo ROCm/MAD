@@ -35,6 +35,9 @@ mori_dp_mode1_allowed_models_lines() {
 # =============================================================================
 
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
+# The router (proxy): on the first prefill node (MASTER_ADDR) unless the launcher gave
+# it a node of its own (ROUTER_NODE=1), whose address it passes as ROUTER_ADDR.
+ROUTER_ADDR="${ROUTER_ADDR:-$MASTER_ADDR}"
 MASTER_PORT="${MASTER_PORT:-23731}"
 NODE_RANK="${NODE_RANK:-0}"
 MODEL_PATH=$MODEL_PATH
@@ -407,7 +410,7 @@ else
     for ((i=0; i<xP && i<${#IP_ARRAY[@]}; i++)); do
         PREFILL_ARGS+=" --prefill http://${IP_ARRAY[$i]}:3000"
     done
-    for ((i=xP; i<${#IP_ARRAY[@]}; i++)); do
+    for ((i=xP; i<xP+yD && i<${#IP_ARRAY[@]}; i++)); do
         DECODE_ARGS+=" --decode http://${IP_ARRAY[$i]}:3000"
     done
 fi
@@ -492,75 +495,97 @@ _wait_for_tcp() {
 
 # This node's part of the run: from the topology spec when the launcher passed it
 # (MAD_TOPO_*, scripts/common/topology/topology.py), else from NODE_RANK, xP and yD as
-# before -- ranks 0..xP-1 prefill (0 also hosts the router), xP..xP+yD-1 decode.
+# before -- ranks 0..xP-1 prefill (0 also hosts the router), xP..xP+yD-1 decode, and
+# a router node after them when the launcher gave it one (ROUTER_ADDR).
 if [[ -n "${MAD_TOPO_ROLE:-}" ]]; then
     _ROLE="$MAD_TOPO_ROLE"; _ROLE_INDEX="$MAD_TOPO_ROLE_INDEX"
 elif [[ "$NODE_RANK" -lt "$xP" ]]; then
     _ROLE=prefill; _ROLE_INDEX="$NODE_RANK"
 elif [[ "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
     _ROLE=decode; _ROLE_INDEX=$((NODE_RANK - xP))
+elif [[ "$NODE_RANK" -eq $((xP + yD)) && "$ROUTER_ADDR" != "$MASTER_ADDR" ]]; then
+    _ROLE=router; _ROLE_INDEX=0
 else
     _ROLE=""; _ROLE_INDEX=""
 fi
+# Whether this node runs the router and the benchmark client.
+if [[ -n "${MAD_TOPO_ROUTER:-}" ]]; then
+    _HOSTS_ROUTER="$MAD_TOPO_ROUTER"
+elif [[ "$_ROLE" == router ]] || [[ "$_ROLE" == prefill && "$_ROLE_INDEX" -eq 0 && "$ROUTER_ADDR" == "$MASTER_ADDR" ]]; then
+    _HOSTS_ROUTER=1
+else
+    _HOSTS_ROUTER=0
+fi
 
-if [[ "$_ROLE" == prefill && "$_ROLE_INDEX" -eq 0 ]]; then
-    echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
-
-    _dry_run || mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
-
-    # --- Launch first prefill server on this node (co-located with router) ---
-    setup_sglang_worker_env
-    PREFILL_NODE_RANK=0
-
-    # DP_MODE=1 with dp-size>1: router must use follow_bootstrap_room so each
-    # request is pinned to the DP rank that owns its bootstrap slot, preventing
-    # KV-transfer rank mismatches that cause requests to hang indefinitely.
-    _prefill_lb_method="round_robin"
-    [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
-
-    _prefill_cmd="python3 -m sglang.launch_server \
-        --model-path ${MODEL_PATH} \
-        --disaggregation-mode prefill \
-        --load-balance-method ${_prefill_lb_method} \
-        ${_SGL_PRR_FLAG} \
-        --disaggregation-ib-device ${IB_DEVICES} \
-        --host ${host_ip} \
-        --port 3000 \
-        --trust-remote-code \
-        --tp-size ${PREFILL_TP_SIZE}"
-
-    if [[ "$DP_MODE" == "1" ]]; then
-        _prefill_cmd+=" \
-            --dp-size ${PREFILL_DP_SIZE} \
-            --ep-size ${PREFILL_EP_SIZE} \
-            --dist-init-addr ${PREFILL_DIST_INIT_ADDR} \
-            --nnodes ${PREFILL_NNODES} \
-            --node-rank ${PREFILL_NODE_RANK}"
+if [[ "$_HOSTS_ROUTER" == 1 ]]; then
+    if [[ "$_ROLE" == prefill ]]; then
+        echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
+    else
+        # A node of its own: no server here, only the router and the benchmark client.
+        echo "${host_name}:${host_ip} is the Router node (proxy + benchmark client, NODE_RANK=${NODE_RANK})"
     fi
 
-    _prefill_cmd+=" \
-        --decode-log-interval 1 \
-        ${PREFILL_MODEL_CONFIG} \
-        --log-level-http warning"
+    _dry_run || mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
+    _node0_prefill_pid=""
 
-    export _prefill_cmd PREFILL_NODE_RANK
+    if [[ "$_ROLE" == prefill ]]; then
+        # --- Launch first prefill server on this node (co-located with router) ---
+        setup_sglang_worker_env
+        PREFILL_NODE_RANK=0
 
-    if _dry_run; then
-        _dry_run_emit prefill "$_prefill_cmd"
-    else
-        PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
-        {
-            echo "========== PREFILL_CMD (NODE_RANK=0, PREFILL_NODE_RANK=0, co-located with router) =========="
-            echo "$_prefill_cmd"
-            echo ""
-        } | tee "$PREFILL_LOG"
-        _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
-        set -x
-        eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
-        set +x
-        _node0_prefill_pid=$!
-        _dbg "prefill server started pid=${_node0_prefill_pid}"
-        _watch_gpu_faults prefill
+        # DP_MODE=1 with dp-size>1: router must use follow_bootstrap_room so each
+        # request is pinned to the DP rank that owns its bootstrap slot, preventing
+        # KV-transfer rank mismatches that cause requests to hang indefinitely.
+        _prefill_lb_method="round_robin"
+        [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
+
+        _prefill_cmd="python3 -m sglang.launch_server \
+            --model-path ${MODEL_PATH} \
+            --disaggregation-mode prefill \
+            --load-balance-method ${_prefill_lb_method} \
+            ${_SGL_PRR_FLAG} \
+            --disaggregation-ib-device ${IB_DEVICES} \
+            --host ${host_ip} \
+            --port 3000 \
+            --trust-remote-code \
+            --tp-size ${PREFILL_TP_SIZE}"
+
+        if [[ "$DP_MODE" == "1" ]]; then
+            _prefill_cmd+=" \
+                --dp-size ${PREFILL_DP_SIZE} \
+                --ep-size ${PREFILL_EP_SIZE} \
+                --dist-init-addr ${PREFILL_DIST_INIT_ADDR} \
+                --nnodes ${PREFILL_NNODES} \
+                --node-rank ${PREFILL_NODE_RANK}"
+        fi
+
+        _prefill_cmd+=" \
+            --decode-log-interval 1 \
+            ${PREFILL_MODEL_CONFIG} \
+            --log-level-http warning"
+
+        export _prefill_cmd PREFILL_NODE_RANK
+
+        if _dry_run; then
+            _dry_run_emit prefill "$_prefill_cmd"
+        else
+            PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
+            {
+                echo "========== PREFILL_CMD (NODE_RANK=0, PREFILL_NODE_RANK=0, co-located with router) =========="
+                echo "$_prefill_cmd"
+                echo ""
+            } | tee "$PREFILL_LOG"
+            _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
+            set -x
+            eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+            set +x
+            _node0_prefill_pid=$!
+            _dbg "prefill server started pid=${_node0_prefill_pid}"
+            _watch_gpu_faults prefill
+        fi
+    fi
+
+    if ! _dry_run; then
 
         # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
         # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
@@ -649,7 +674,7 @@ if [[ "$_ROLE" == prefill && "$_ROLE_INDEX" -eq 0 ]]; then
         _dry_run_emit router "$ROUTER_CMD"
         exit 0
     fi
-    echo "========== ROUTER_CMD (NODE_RANK=0, DP_MODE=${DP_MODE}) ==========" >&2
+    echo "========== ROUTER_CMD (NODE_RANK=${NODE_RANK}, DP_MODE=${DP_MODE}) ==========" >&2
     echo "$ROUTER_CMD"
     set -x
     eval "$ROUTER_CMD" 2>&1 | tee "/run_logs/${SLURM_JOB_ID:-0}/proxy_NODE${NODE_RANK}.log" >/dev/null &
@@ -765,8 +790,10 @@ PY
     echo "Killing the proxy server (pid=${proxy_pid})"
     kill "${proxy_pid}"
 
-    echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
-    kill "${_node0_prefill_pid}"
+    if [[ -n "${_node0_prefill_pid}" ]]; then
+        echo "Killing the co-located prefill server (pid=${_node0_prefill_pid})"
+        kill "${_node0_prefill_pid}"
+    fi
 
     if [[ "${benchmark_status}" -ne 0 ]]; then
         echo "ERROR: benchmark failed with status ${benchmark_status}" >&2
@@ -839,17 +866,17 @@ elif [[ "$_ROLE" == prefill ]]; then
     _dbg "prefill server started pid=${prefill_pid}"
     _watch_gpu_faults prefill
 
-    _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
+    _dbg "waiting for proxy server to be up (ROUTER_ADDR=${ROUTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
-        --node-ips "${MASTER_ADDR}" \
+        --node-ips "${ROUTER_ADDR}" \
         --node-ports 2322 \
         --abort-file "${JOB_ABORT_FILE}" \
-        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
+        || _job_fail "the proxy on ${ROUTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
-        --remote-ip "${MASTER_ADDR}" \
+        --remote-ip "${ROUTER_ADDR}" \
         --remote-port 2322
 
     echo "Killing the prefill server"
@@ -928,24 +955,24 @@ elif [[ "$_ROLE" == decode ]]; then
     _dbg "decode server started pid=${decode_pid}"
     _watch_gpu_faults decode
 
-    _dbg "waiting for proxy server to be up (MASTER_ADDR=${MASTER_ADDR}:2322) ..."
+    _dbg "waiting for proxy server to be up (ROUTER_ADDR=${ROUTER_ADDR}:2322) ..."
     echo "Waiting for proxy server to be up..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_barrier.py" \
-        --node-ips "${MASTER_ADDR}" \
+        --node-ips "${ROUTER_ADDR}" \
         --node-ports 2322 \
         --abort-file "${JOB_ABORT_FILE}" \
-        || _job_fail "the proxy on ${MASTER_ADDR}:2322 never came up"
+        || _job_fail "the proxy on ${ROUTER_ADDR}:2322 never came up"
 
     echo "Waiting until proxy server closes..."
     python "$MOONCAKE_COOKBOOK_PATH/socket_wait.py" \
-        --remote-ip "${MASTER_ADDR}" \
+        --remote-ip "${ROUTER_ADDR}" \
         --remote-port 2322
 
     echo "Killing the decode server"
     kill "${decode_pid}"
 
 else
-    echo "ERROR: NODE_RANK=${NODE_RANK} out of range (expected 0..$((xP + yD))) for xP=${xP} yD=${yD}" >&2
+    echo "ERROR: NODE_RANK=${NODE_RANK} has no role (role '${_ROLE}'; xP=${xP} yD=${yD}, router ${ROUTER_ADDR})" >&2
     exit 1
 fi
 
