@@ -63,7 +63,6 @@
       ],
       "fork_commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
       "rust_toolchain": "1.88.0",
-      "fork_ref": "ravgupta/discovery-dp-rank-roundrobin",
       "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Carried as a patch on upstream until it is merged there."
     },
     "transports": {

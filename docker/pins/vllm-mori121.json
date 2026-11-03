@@ -43,7 +43,6 @@
         }
       ],
       "fork_commit": "1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31",
-      "fork_ref": "vllm_2p2d_wide-ep_write_shikpate_test_06_29_customer",
       "why": "Wide-EP multi-pod PD WRITE mode with the MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native. Branch tip on 2026-11-03 (last commit 2026-06-26). Carried as a patch on upstream until it is merged there."
     },
     "router": {
@@ -58,7 +57,6 @@
       ],
       "fork_commit": "82dc9811af17412e6e24b5942a5486bc502df23a",
       "rust_toolchain": "1.88.0",
-      "fork_ref": "ravgupta/discovery-dp-rank-roundrobin",
       "why": "vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Carried as a patch on upstream until it is merged there."
     },
     "transports": {

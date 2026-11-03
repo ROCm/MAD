@@ -4,9 +4,8 @@
 For every patched component of every pin set: fetch the upstream commit and the
 fork commit (no file contents beyond what the patch touches), apply the patch to
 the upstream tree in a scratch index, and require the result to be the fork
-commit's tree. Needs git and network access to the upstream repository and to a
-repository that has the fork commit (--fork-remote COMPONENT=URL, or the repos in
-FORK_REMOTES below).
+commit's tree. Needs git and network access to the upstream repository; GitHub
+serves a fork's commits through the repository it was forked from.
 
   docker/patches/verify.py [--work DIR]
 """
@@ -20,12 +19,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "pins"))
 import pins  # noqa: E402
 
-# Where the fork commits can be fetched from (personal forks: provenance only).
-FORK_REMOTES = {
-    "vllm": ["https://github.com/shikamd123/vllm.git", "https://github.com/raviguptaamd/vllm.git"],
-    "router": ["https://github.com/raviguptaamd/router.git"],
-    "aiter": ["https://github.com/raviguptaamd/aiter.git"],
-}
 
 
 def git(repo, *args, env=None, check=True):
@@ -44,11 +37,7 @@ def main():
                 repo = os.path.join(work, comp)
                 if not os.path.isdir(repo):
                     subprocess.run(["git", "init", "-q", "--bare", repo], check=True)
-                git(repo, "fetch", "-q", "--filter=blob:none", c["repo"], c["commit"])
-                for url in FORK_REMOTES.get(comp, []):
-                    if git(repo, "fetch", "-q", "--filter=blob:none", url, c["fork_commit"], check=False) == "" and \
-                            git(repo, "cat-file", "-t", c["fork_commit"], check=False) == "commit":
-                        break
+                git(repo, "fetch", "-q", "--filter=blob:none", c["repo"], c["commit"], c["fork_commit"])
                 idx = os.path.join(work, f"index-{os.getpid()}")
                 env = dict(os.environ, GIT_INDEX_FILE=idx)
                 git(repo, "read-tree", c["commit"], env=env)

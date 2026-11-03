@@ -28,17 +28,17 @@ LEGACY = {
     "sglang-disagg": "sglang_disagg_inference.ubuntu.amd.Dockerfile",
 }
 
-# (repository, ref as the legacy Dockerfile wrote it) -> the commit it named.
+# (pin set, legacy build arg) -> the commit that arg's ref named in the legacy Dockerfile
+# (resolved with git ls-remote / rev-parse on 2026-11-03). Branches, tags and short SHAs;
+# full SHAs in the legacy files need no entry.
 RESOLVED = {
-    ("https://github.com/ROCm/mori.git", "v1.2.1"): "e31d426a13e96e1cbff96a1c904d291aefe8c46a",
-    ("https://github.com/ROCm/mori.git", "624002c897a3"): "624002c897a30928ec04c14fc167bf2b8a93f6ce",
-    ("https://github.com/raviguptaamd/aiter.git", "624e43586b"): "624e43586bbdb33617812ff1de5abce83d42db65",
-    ("https://github.com/shikamd123/vllm.git", "vllm_2p2d_wide-ep_write_shikpate_test_06_29_customer"):
-        "1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31",
-    ("https://github.com/raviguptaamd/router.git", "ravgupta/discovery-dp-rank-roundrobin"):
-        "82dc9811af17412e6e24b5942a5486bc502df23a",
-    ("https://github.com/ROCm/ucx.git", "da3fac2a"): "da3fac2afcb55df7605f619ee19b37f4505bd4e4",
-    ("https://github.com/ROCm/RIXL.git", "f33a5599"): "f33a5599400eb8da47ecdad20111ccb35b41a709",
+    ("vllm-mori121", "MORI_REF"): "e31d426a13e96e1cbff96a1c904d291aefe8c46a",      # tag v1.2.1
+    ("vllm-mori121", "VLLM_REF"): "1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31",      # fork branch tip
+    ("vllm-mori121", "ROUTER_REF"): "82dc9811af17412e6e24b5942a5486bc502df23a",    # fork branch tip
+    ("vllm-glm51", "MORI_REF"): "624002c897a30928ec04c14fc167bf2b8a93f6ce",        # short SHA
+    ("vllm-glm51", "AITER_REF"): "624e43586bbdb33617812ff1de5abce83d42db65",       # short SHA
+    ("*", "_UCX_BRANCH"): "da3fac2afcb55df7605f619ee19b37f4505bd4e4",              # short SHA
+    ("*", "_RIXL_BRANCH"): "f33a5599400eb8da47ecdad20111ccb35b41a709",             # short SHA
 }
 
 # Differences from the legacy file that are intended, with the reason.
@@ -57,19 +57,20 @@ def source(c):
     return (c["repo"], c["commit"])
 
 
-def legacy_source(repo, ref):
-    sha = resolve(repo, ref)
-    return ("fork", sha) if any(u in repo for u in FORK_OWNERS) else (repo, sha)
+def legacy_source(name, repo, ref_arg, ref):
+    sha = resolve(name, ref_arg, ref)
+    return (repo, sha) if repo.startswith(UPSTREAM) else ("fork", sha)
 
 
-# Legacy repositories that are personal forks; their pins are upstream + patches now.
-FORK_OWNERS = ("github.com/raviguptaamd/", "github.com/shikamd123/")
+# Repositories that are sources of record; a legacy source elsewhere was a fork, which a
+# pin set now carries as upstream + patches.
+UPSTREAM = ("https://github.com/ROCm/", "https://github.com/vllm-project/")
 
 
-def resolve(repo, ref):
+def resolve(name, ref_arg, ref):
     if re.fullmatch(r"[0-9a-f]{40}", ref):
         return ref
-    return RESOLVED[(repo, ref)]
+    return RESOLVED.get((name, ref_arg)) or RESOLVED[("*", ref_arg)]
 
 
 # The commit the per-model Dockerfiles were last in, before they were retired.
@@ -175,28 +176,28 @@ class LegacyEquivalence(unittest.TestCase):
                   [a["SETUPTOOLS_CONSTRAINT"]] if "SETUPTOOLS_CONSTRAINT" in a else [])
         self.same(name, "mori built", c["mori"].get("enabled", True), a.get("WITH_MORI_BUILD", "1") == "1")
         self.same(name, "mori", (c["mori"]["repo"], c["mori"]["commit"]),
-                  (a["MORI_REPO"], resolve(a["MORI_REPO"], a["MORI_REF"])))
+                  (a["MORI_REPO"], resolve(name, "MORI_REF", a["MORI_REF"])))
         aiter = c["aiter"]
         if "AITER_WHEEL_URL" in a:
             self.same(name, "aiter wheel", (aiter["wheel"]["url"], aiter["wheel"]["version"]),
                       (a["AITER_WHEEL_URL"], a["AITER_VERSION"]))
         else:
-            self.same(name, "aiter", source(aiter), legacy_source(a["AITER_REPO"], a["AITER_REF"]))
+            self.same(name, "aiter", source(aiter), legacy_source(name, a["AITER_REPO"], "AITER_REF", a["AITER_REF"]))
             self.same(name, "aiter GPU_ARCHS", bool(aiter.get("gpu_archs_env")), 'GPU_ARCHS="${K3_GFX_ARCH}"' in text)
             self.same(name, "aiter conv check", bool(aiter.get("check_triton_conv")), "aiter/ops/triton/conv/" in text)
         fly = re.findall(r'pip install ([^"\n]*?)"?flydsl==([0-9.]+)', text)
         self.same(name, "flydsl", (aiter["flydsl"]["version"], " ".join(aiter["flydsl"]["pip_flags"])),
                   (fly[0][1], fly[0][0].strip()))
-        self.same(name, "vllm", source(c["vllm"]), legacy_source(a["VLLM_REPO"], a["VLLM_REF"]))
+        self.same(name, "vllm", source(c["vllm"]), legacy_source(name, a["VLLM_REPO"], "VLLM_REF", a["VLLM_REF"]))
         self.same(name, "router", (*source(c["router"]), c["router"]["rust_toolchain"]),
-                  (*legacy_source(a["ROUTER_REPO"], a["ROUTER_REF"]), a["RUST_TOOLCHAIN"]))
+                  (*legacy_source(name, a["ROUTER_REPO"], "ROUTER_REF", a["ROUTER_REF"]), a["RUST_TOOLCHAIN"]))
         after = [p["name"] for p in s.get("pip") or [] if p.get("stage") == "after_engine"]
         self.same(name, "pip after engine", after, ["pyyaml"] if "RUN pip install pyyaml" in text else [])
         t, subs = c["transports"], c["transports"]["subcomponents"]
         self.same(name, "transports", t["enabled"], a["WITH_NIXL"] == "1")
         for sub, repo_k, ref_k in (("ucx", "_UCX_SOURCE", "_UCX_BRANCH"), ("rixl", "_RIXL_SOURCE", "_RIXL_BRANCH")):
             self.same(name, sub, (subs[sub]["repo"], subs[sub]["commit"]),
-                      (a[repo_k], resolve(a[repo_k], a[ref_k])))
+                      (a[repo_k], resolve(name, ref_k, a[ref_k])))
         rocshmem = a.get("ROCSHMEM_REF") or re.search(r"projects/rocshmem && git checkout (\S+?) ", text).group(1)
         self.same(name, "rocshmem", subs["rocshmem"]["commit"], rocshmem)
         deepep = re.search(r"git clone (https://github.com/ROCm/DeepEP.git)( && cd DeepEP && git checkout (\S+))?", text)
@@ -257,9 +258,10 @@ class Patches(unittest.TestCase):
 
     def test_no_personal_fork_is_a_source(self):
         for n in pins.names():
-            text = (PINS_DIR / f"{n}.json").read_text()
-            for owner in FORK_OWNERS:
-                self.assertNotIn(owner, text, n)
+            for comp, c in pins.load(n)["components"].items():
+                for x in [c, *(c.get("subcomponents") or {}).values()]:
+                    if "repo" in x:
+                        self.assertTrue(x["repo"].startswith(UPSTREAM), (n, comp, x["repo"]))
 
 
 class Dockerfiles(unittest.TestCase):
@@ -288,9 +290,11 @@ class Dockerfiles(unittest.TestCase):
     def test_no_model_or_fork_in_the_dockerfiles(self):
         for f in ("di_vllm.ubuntu.amd.Dockerfile", "di_sglang.ubuntu.amd.Dockerfile"):
             text = (DOCKER / f).read_text()
-            for word in ("kimi", "glm", "shikamd123", "raviguptaamd", "Kimi", "GLM"):
-                body = "\n".join(l for l in text.splitlines() if not l.startswith("#"))
+            body = "\n".join(l for l in text.splitlines() if not l.startswith("#"))
+            for word in ("kimi", "glm", "Kimi", "GLM"):
                 self.assertNotIn(word, body, f)
+            for url in re.findall(r"https://github\.com/[^\s\"']+", text):
+                self.assertTrue(url.startswith(UPSTREAM + ("https://github.com/google/",)), (f, url))
 
 
 if __name__ == "__main__":
