@@ -490,7 +490,20 @@ _wait_for_tcp() {
     done
 }
 
-if [[ "$NODE_RANK" -eq 0 ]]; then
+# This node's part of the run: from the topology spec when the launcher passed it
+# (MAD_TOPO_*, scripts/common/topology/topology.py), else from NODE_RANK, xP and yD as
+# before -- ranks 0..xP-1 prefill (0 also hosts the router), xP..xP+yD-1 decode.
+if [[ -n "${MAD_TOPO_ROLE:-}" ]]; then
+    _ROLE="$MAD_TOPO_ROLE"; _ROLE_INDEX="$MAD_TOPO_ROLE_INDEX"
+elif [[ "$NODE_RANK" -lt "$xP" ]]; then
+    _ROLE=prefill; _ROLE_INDEX="$NODE_RANK"
+elif [[ "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
+    _ROLE=decode; _ROLE_INDEX=$((NODE_RANK - xP))
+else
+    _ROLE=""; _ROLE_INDEX=""
+fi
+
+if [[ "$_ROLE" == prefill && "$_ROLE_INDEX" -eq 0 ]]; then
     echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
 
     _dry_run || mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
@@ -760,10 +773,10 @@ PY
         exit "${benchmark_status}"
     fi
 
-elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
+elif [[ "$_ROLE" == prefill ]]; then
     echo "${host_name}:${host_ip} is Prefill Node (Model: ${MODEL_NAME:-default})"
     # NODE_RANK 0..xP-1 map directly to PREFILL_NODE_RANK 0..xP-1 (proxy co-located on NODE_RANK=0).
-    PREFILL_NODE_RANK=$((NODE_RANK))
+    PREFILL_NODE_RANK="$_ROLE_INDEX"
     setup_sglang_worker_env
     #if [[ "$DP_MODE" == "0" ]]; then
     #    export SGLANG_MORI_NUM_MAX_DISPATCH_TOKENS_PER_RANK="${MORI_MAX_DISPATCH_TOKENS_PREFILL}"
@@ -842,9 +855,9 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
     echo "Killing the prefill server"
     kill "${prefill_pid}"
 
-elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
+elif [[ "$_ROLE" == decode ]]; then
     echo "${host_name}:${host_ip} is Decode Node (Model: ${MODEL_NAME:-default})"
-    DECODE_NODE_RANK=$((NODE_RANK - xP))
+    DECODE_NODE_RANK="$_ROLE_INDEX"
     setup_sglang_worker_env
     _dbg "decode node: DECODE_NODE_RANK=${DECODE_NODE_RANK} DECODE_TP_SIZE=${DECODE_TP_SIZE} DECODE_DP_SIZE=${DECODE_DP_SIZE:-n/a} DECODE_EP_SIZE=${DECODE_EP_SIZE:-n/a}"
     _dbg "DECODE_DIST_INIT_ADDR=${DECODE_DIST_INIT_ADDR} DECODE_NNODES=${DECODE_NNODES}"

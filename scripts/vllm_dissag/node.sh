@@ -46,6 +46,8 @@ echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT
 # Stops the GPU memory sampler (below) when the container ends or the task is signalled.
 _stop_trace() { [ -n "$_trace_pid" ] && kill "$_trace_pid" 2>/dev/null; }
 node_site_mounts
+# This node's part of the run (topology.py), passed in as MAD_TOPO_*.
+node_topology vllm_dissag
 # Any further variables the run needs inside the container, by name: CONTAINER_ENV is a
 # comma- or space-separated list of names, each passed as a bare `-e NAME`, so docker
 # takes the value from this environment (values with spaces or quotes pass unchanged).
@@ -94,6 +96,7 @@ docker run --rm \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e NNODES=$NNODES \
     -e NODE_RANK=$SLURM_PROCID \
+    ${_TOPO_ENV} \
     -e MASTER_ADDR=$MASTER_ADDR \
     -e MASTER_PORT=$MASTER_PORT \
     -e MODEL_PATH=$MODEL_PATH \

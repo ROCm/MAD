@@ -9,6 +9,8 @@ echo "Rank $SLURM_PROCID on $(hostname)";
 # on the node is not ours to stop.
 docker ps -q --filter "name=^container_" | xargs --no-run-if-empty docker stop;
 node_site_mounts
+# This node's part of the run (topology.py), passed in as MAD_TOPO_*.
+node_topology sglang_disagg
 _node_docker_run() {
 docker run --rm \
     --device /dev/dri \
@@ -30,6 +32,7 @@ docker run --rm \
     -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
     -e NNODES=$NNODES \
     -e NODE_RANK=$SLURM_PROCID \
+    ${_TOPO_ENV} \
     -e MASTER_ADDR=$MASTER_ADDR \
     -e MASTER_PORT=$MASTER_PORT \
     -e MODEL_PATH=$MODEL_PATH \

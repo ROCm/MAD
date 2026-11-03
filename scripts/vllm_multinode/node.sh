@@ -12,6 +12,8 @@ docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true
 node_rdma_mounts
 
 node_site_mounts
+# This node's part of the run (topology.py), passed in as MAD_TOPO_*.
+node_topology vllm_multinode
 
 # Host-local compilation cache dirs (ext4, survive container restarts).
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true
@@ -50,6 +52,7 @@ docker run --rm \
     --entrypoint /bin/bash \
     -e SLURM_JOB_ID=$SLURM_JOB_ID \
     -e NODE_RANK=$SLURM_PROCID \
+    ${_TOPO_ENV} \
     -e NNODES=$NNODES \
     -e MASTER_ADDR=$MASTER_ADDR \
     -e MASTER_PORT=$MASTER_PORT \

@@ -135,9 +135,20 @@ _DP_PER_NODE=$(( _GPUS_PER_NODE / _EP_TP ))
 PREFILL_DP_SIZE=$((xP * _DP_PER_NODE))
 DECODE_DP_SIZE=$((yD * _DP_PER_NODE))
 DP_PARALLEL_SIZE_LOCAL=${_DP_PER_NODE}
-PREFILL_DP_START_RANK=$(( NODE_RANK * _DP_PER_NODE ))
+# This node's part of the run: from the topology spec when the launcher passed it
+# (MAD_TOPO_*, scripts/common/topology/topology.py), else from NODE_RANK and xP as
+# before -- ranks 0..xP-1 prefill, xP.. decode, each pool's first node its master.
+if [ -n "${MAD_TOPO_ROLE:-}" ]; then
+    _ROLE="$MAD_TOPO_ROLE"; _ROLE_INDEX="$MAD_TOPO_ROLE_INDEX"
+elif [ "$NODE_RANK" -lt "$xP" ]; then
+    _ROLE=prefill; _ROLE_INDEX="$NODE_RANK"
+else
+    _ROLE=decode; _ROLE_INDEX=$(( NODE_RANK - xP ))
+fi
+_DP_START_RANK="${MAD_TOPO_DP_START_RANK:-$(( _ROLE_INDEX * _DP_PER_NODE ))}"
+PREFILL_DP_START_RANK="$_DP_START_RANK"
 PREFILL_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' '{print $1}')
-DECODE_DP_START_RANK=$(( (NODE_RANK - xP) * _DP_PER_NODE ))
+DECODE_DP_START_RANK="$_DP_START_RANK"
 DECODE_MASTER_ADDR=$(echo "$IPADDRS" | awk -F',' -v pos="$xP" '{print $(pos+1)}')
 
 # Peer-pool node IPs, ordered by pod index (= global_dp_rank / dp_per_node).
@@ -554,7 +565,7 @@ fi
 # =============================================================================
 # Node Role Assignment and Server Launch
 # =============================================================================
-if [ "$NODE_RANK" -eq 0 ]; then
+if [ "$_ROLE" = prefill ] && [ "$_ROLE_INDEX" -eq 0 ]; then
     print_node_info "Prefill master + Proxy node (co-located)"
     connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
     local_worker_pid=$WORKER_PID
@@ -604,14 +615,14 @@ if [ "$NODE_RANK" -eq 0 ]; then
     echo "Killing the prefill master server.."
     pkill -P $local_worker_pid 2>/dev/null; kill $local_worker_pid 2>/dev/null || true
 
-elif [ "$NODE_RANK" -gt 0 ] && [ "$NODE_RANK" -lt "$xP" ]; then
+elif [ "$_ROLE" = prefill ]; then
     print_node_info "Prefill child node"
     connector_launch_worker "child" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill" "${PREFILL_DP_START_RANK}"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] prefill child emitted."; exit 0; }
     _watch_gpu_faults prefill
     wait_for_proxy_and_cleanup $WORKER_PID "prefill child"
 
-elif [ "$NODE_RANK" -eq "$xP" ]; then
+elif [ "$_ROLE" = decode ] && [ "$_ROLE_INDEX" -eq 0 ]; then
     print_node_info "Decode master node"
     connector_launch_worker "master" "${DECODE_DP_SIZE}" "${DECODE_MASTER_ADDR}" "kv_consumer" "decode"
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] decode master emitted."; exit 0; }

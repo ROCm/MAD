@@ -143,9 +143,9 @@ def resolve(spec, rank):
 
 
 def _shell(d, prefix="MAD_TOPO_"):
-    import shlex
-    return "\n".join(f"{prefix}{k.upper()}={shlex.quote(str(int(v) if isinstance(v, bool) else v))}"
-                     for k, v in d.items())
+    """KEY=VALUE lines. Every value is a role name, a number or 0/1, so the lines are
+    safe both as shell assignments and as `docker run -e` arguments."""
+    return "\n".join(f"{prefix}{k.upper()}={int(v) if isinstance(v, bool) else v}" for k, v in d.items())
 
 
 def main(argv=None):

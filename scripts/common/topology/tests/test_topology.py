@@ -90,5 +90,40 @@ class Spec(unittest.TestCase):
             T.resolve(T.from_env({}, "sglang_disagg"), 2)
 
 
+class RoleScriptsFollowTheSpec(unittest.TestCase):
+    """The role scripts take their part from MAD_TOPO_* when given, over NODE_RANK:
+    node rank 0 told it is a decode master (or a colocated worker) acts as one."""
+
+    def _dry(self, script, env):
+        import os, subprocess
+        base = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"), "DRY_RUN": "1",
+                "NODE_RANK": "0", "xP": "1", "yD": "1", "MODEL_PATH": "/m/M", "MASTER_ADDR": "10.0.0.1",
+                "IPADDRS": "10.0.0.1,10.0.0.2", "GPUS_PER_NODE": "8", "SLURM_JOB_ID": "T"}
+        base.update(env)
+        p = subprocess.run(["bash", str(script)], env=base, capture_output=True, text=True, timeout=120)
+        return [l for l in p.stdout.splitlines() if l.startswith("===DRYRUN")]
+
+    def test_vllm_disagg(self):
+        d = SCRIPTS / "vllm_dissag"
+        h = self._dry(d / "vllm_disagg.sh", {"NIXL_COOKBOOK_PATH": str(d), "CONNECTOR": "moriio", "WIDE_EP": "1",
+                                             "EP_BACKEND": "mori", "MODEL_NAME": "DeepSeek-V3",
+                                             "PROXY_TYPE": "vllm_router", "ROUTER_PORT": "30000",
+                                             "MAD_TOPO_ROLE": "decode", "MAD_TOPO_ROLE_INDEX": "0"})
+        self.assertTrue(h and "log_prefix=decode" in h[0] and "role=master" in h[0], h)
+
+    def test_sglang_disagg(self):
+        d = SCRIPTS / "sglang_disagg"
+        h = self._dry(d / "sglang_disagg_mori_io_ep.sh", {"MOONCAKE_COOKBOOK_PATH": str(d), "_SGL_HELP": "",
+                                                          "MODEL_NAME": "Qwen3-32B",
+                                                          "MAD_TOPO_ROLE": "decode", "MAD_TOPO_ROLE_INDEX": "0"})
+        self.assertEqual([x.split("role=")[1].split()[0] for x in h], ["decode"], h)
+
+    def test_colocated(self):
+        d = SCRIPTS / "vllm_multinode"
+        h = self._dry(d / "serve_colocated.sh", {"SHARED_DIR": str(SCRIPTS / "vllm_dissag"), "MODEL_NAME": "M",
+                                                 "NNODES": "2", "MAD_TOPO_ROLE": "server", "MAD_TOPO_ROLE_INDEX": "1"})
+        self.assertTrue(h and "role=worker" in h[0], h)
+
+
 if __name__ == "__main__":
     unittest.main()

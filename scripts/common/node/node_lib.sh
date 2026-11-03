@@ -97,6 +97,23 @@ node_jit_cache() {
     echo "[jit-cache] persistent image ${_img_key}: ${_JIT_CACHE_HOST} to /opt/vllm_cache"
 }
 
+# This node's part of the run, from the topology spec (topology/topology.py), as
+# `-e MAD_TOPO_*` flags for its container:  node_topology LAUNCHER
+# The role scripts take their role from these when present. Sets _TOPO_ENV; empty,
+# with the reason on stderr, when the spec cannot be resolved, and the role scripts
+# then decide from NODE_RANK as before.
+node_topology() {
+    local out
+    _TOPO_ENV=""
+    if ! out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../topology/topology.py" node \
+            --launcher "$1" --rank "${SLURM_PROCID:-0}" 2>&1)"; then
+        echo "[topology] not resolved: $out" >&2
+        return 0
+    fi
+    _TOPO_ENV="$(printf '%s\n' "$out" | sed 's/^/-e /' | tr '\n' ' ')"
+    echo "[topology] node ${SLURM_PROCID:-0}:${_TOPO_ENV//-e / }"
+}
+
 # Run this node's container and exit with its status:  node_run_container RUN_FN [STOP_HOOK]
 # RUN_FN runs `docker run --name $DOCKER_CONT_NAME ...` in the foreground; STOP_HOOK, if
 # given, runs when the container ends or the task is signalled (e.g. stop a sampler).

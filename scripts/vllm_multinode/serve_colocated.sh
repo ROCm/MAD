@@ -29,6 +29,14 @@ SHARED_DIR="${SHARED_DIR:-${SCRIPT_DIR}/../vllm_dissag}"
 : "${MODEL_PATH:?MODEL_PATH must be set (path to the model dir)}"
 MODEL_NAME="${MODEL_NAME:-}"
 NODE_RANK="${NODE_RANK:-0}"
+# The head serves the API and benchmarks; the other nodes serve headless. From the
+# topology spec when the launcher passed it (MAD_TOPO_*, topology.py: the server
+# role's first node), else rank 0 as before.
+if [[ -n "${MAD_TOPO_ROLE_INDEX:-}" ]]; then
+    _HEAD=$([[ "$MAD_TOPO_ROLE_INDEX" -eq 0 ]] && echo 1 || echo 0)
+else
+    _HEAD=$([[ "$NODE_RANK" -eq 0 ]] && echo 1 || echo 0)
+fi
 NNODES="${NNODES:-1}"
 MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-29500}"
@@ -100,7 +108,7 @@ if [[ "${ENABLE_EP}" == "1" ]]; then
     serve_args+=(--enable-expert-parallel)
     [[ -n "${ALL2ALL_BACKEND}" ]] && serve_args+=(--all2all-backend "${ALL2ALL_BACKEND}")
 fi
-if [[ "${NODE_RANK}" -eq 0 ]]; then
+if [[ "$_HEAD" == 1 ]]; then
     serve_args+=(--port "${SERVE_PORT}")
 else
     serve_args+=(--headless)
@@ -113,7 +121,7 @@ if [[ -n "${COLOCATED_EXTRA_ARGS:-}" ]]; then
 fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "===DRYRUN colocated role=$([ "$NODE_RANK" -eq 0 ] && echo head || echo worker) NODE_RANK=${NODE_RANK}==="
+    echo "===DRYRUN colocated role=$([ "$_HEAD" == 1 ] && echo head || echo worker) NODE_RANK=${NODE_RANK}==="
     printf '%s\n' vllm serve "${MODEL_PATH}" "${serve_args[@]}"
     echo "===END==="
     exit 0
@@ -219,7 +227,7 @@ _alive() {
 # observed as 4.5 hours of two idle exclusive nodes after results were written.
 SHUTDOWN_FLAG="/run_logs/${SLURM_JOB_ID:-0}/.shutdown"
 
-if [[ "${NODE_RANK}" -ne 0 ]]; then
+if [[ "$_HEAD" != 1 ]]; then
     # Workers have no API server: hold until the head tears the job down.
     echo "[colocated] worker ${NODE_RANK} serving headless; log ${LOG}"
     while _alive "${WORKER_PID}"; do
