@@ -9,6 +9,6 @@
  "calls": [],
  "ranks": [],
  "stderr_tail": [
-  "<WORK>/scripts/vllm_multinode/run_multinode.slurm: line 86: MODEL_NAME: set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)"
+  "<WORK>/scripts/vllm_multinode/run_multinode.slurm: line <N>: MODEL_NAME: set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)"
  ]
 }

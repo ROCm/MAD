@@ -148,6 +148,7 @@ def engine_dry_run(catalog, docker, work):
     return {"exit_code": p.returncode, "blocks": blocks}
 
 
+SHELL_LINE = re.compile(r"(\.(?:sh|slurm): line )\d+:")
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^\"]*?(?=\"|$)")
 
 
@@ -156,7 +157,8 @@ def normalize(obj, work):
     text = json.dumps(obj)
     for path, mark in ((str(work), "<WORK>"), (str(STUBS), "<STUBS>")):
         text = text.replace(path, mark)
-    return json.loads(TIMESTAMP.sub("<TIME>", text))
+    # A shell error names the script line it failed on; any edit above it moves it.
+    return json.loads(SHELL_LINE.sub(r"\1<N>:", TIMESTAMP.sub("<TIME>", text)))
 
 
 def run_as_tasks(script, env, nodes, mode):
@@ -250,11 +252,16 @@ def main():
     ap.add_argument("--update", action="store_true", help="rewrite the golden files")
     ap.add_argument("--card", default="", help="only cards whose name contains this")
     ap.add_argument("--catalog", choices=CATALOGS, help="only this catalog")
+    ap.add_argument("--spec-file", action="store_true",
+                    help="run every card from a topology spec file (MAD_TOPOLOGY) instead of its "
+                         "xP / yD / ... settings and require the same run as the goldens")
     ap.add_argument("--equivalence", choices=("spur-array", "k8s-indexed"),
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
                          "goldens (recorded under slurm-srun); no srun may be called")
     a = ap.parse_args()
+    if a.spec_file:
+        return spec_file_equivalence(a)
     if a.equivalence:
         return equivalence(a)
     changed, checked = [], 0
@@ -286,6 +293,63 @@ def main():
     for c in changed:
         print(f"  DIFF  {c}")
     return 1 if changed else 0
+
+
+# The settings a spec file replaces. With MAD_TOPOLOGY they are all set explicitly,
+# so a launcher that forwards one only when set (`${X:+-e X=...}`) passes one more,
+# with the value the default gave; the comparison leaves these entries out.
+TOPOLOGY_SETTINGS = {"xP", "yD", "WIDE_EP", "EP_TP_SIZE", "DP_MODE", "GENERIC_TP_SIZE", "GPUS_PER_NODE",
+                     "TP_SIZE", "PP_SIZE", "ENABLE_EP", "ALL2ALL_BACKEND", "MAD_TOPOLOGY", "MAD_TOPOLOGY_NNODES"}
+
+
+def _without_settings(ranks):
+    out = json.loads(json.dumps(ranks))
+    for r in out:
+        r["docker"]["env"] = [e for e in r["docker"]["env"] if e.split("=", 1)[0] not in TOPOLOGY_SETTINGS]
+    return out
+
+
+def spec_file_equivalence(a):
+    """Each card from a spec file (MAD_TOPOLOGY) instead of its topology settings."""
+    sys.path.insert(0, str(SCRIPTS / "common" / "topology"))
+    import topology
+    bad, checked = [], 0
+    for catalog in CATALOGS:
+        if a.catalog and catalog != a.catalog:
+            continue
+        for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
+            if a.card not in card["name"]:
+                continue
+            checked += 1
+            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
+            env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+            env["SLURM_NNODES"] = str(node_count(card))
+            spec = topology.from_env(env, catalog)
+            with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                json.dump(spec, f)
+            spec_card = dict(card)
+            spec_card["env_vars"] = {k: v for k, v in (card.get("env_vars") or {}).items()
+                                     if k not in TOPOLOGY_SETTINGS}
+            spec_card["env_vars"]["MAD_TOPOLOGY"] = f.name
+            try:
+                got = snapshot_card(catalog, spec_card)
+            finally:
+                os.unlink(f.name)
+            problems = []
+            if got["exit_code"] != gold["exit_code"]:
+                problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
+            if _without_settings(got["ranks"]) != _without_settings(gold["ranks"]):
+                diff = difflib.unified_diff(json.dumps(_without_settings(gold["ranks"]), indent=1).splitlines(),
+                                            json.dumps(_without_settings(got["ranks"]), indent=1).splitlines(),
+                                            lineterm="", n=1)
+                problems.append("ranks differ:\n" + "\n".join(list(diff)[:30]))
+            if problems:
+                bad.append(f"{catalog}/{card['name']}")
+                print(f"DIFF  {catalog}/{card['name']}")
+                for pr in problems:
+                    print("   " + pr.replace("\n", "\n   "))
+    print(f"spec-file equivalence: {checked} card(s) checked, {len(bad)} differ")
+    return 1 if bad else 0
 
 
 def equivalence(a):

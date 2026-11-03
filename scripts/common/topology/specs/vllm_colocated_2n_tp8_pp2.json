@@ -1,0 +1,8 @@
+{
+  "engine": "vllm",
+  "layout": "colocated",
+  "gpus_per_node": 8,
+  "roles": [
+    {"name": "server", "nodes": 2, "parallel": {"mode": "tp_pp", "tp": 8, "pp": 2}}
+  ]
+}

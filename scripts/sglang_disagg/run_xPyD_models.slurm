@@ -107,6 +107,10 @@ fi
 export MOONCAKE_REPO_DIR=$(pwd)
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs}"
 
+# A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
+# before the defaults below; see common/topology/apply.sh.
+# (The scripts are found from the working directory here, as MOONCAKE_REPO_DIR is.)
+. "${MOONCAKE_REPO_DIR}/../common/topology/apply.sh" sglang_disagg
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp flags, omit dp/ep CLI flags

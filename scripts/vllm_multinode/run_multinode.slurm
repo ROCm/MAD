@@ -68,6 +68,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
+# before the defaults below; see common/topology/apply.sh.
+. "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_multinode
 SHARED_DIR="${MAD_SCRIPTS_DIR}/vllm_dissag"
 
 REQUIRED_FILES=(
@@ -127,6 +130,10 @@ echo "  parallelism: TP=${TP_SIZE} PP=${PP_SIZE} EP=${ENABLE_EP} all2all=${ALL2A
 echo "  benchmark  : ${BENCHMARK_SCRIPT} -> ${BENCHMARK_SCRIPT_FILE}"
 echo "============================================================================"
 
+if [ -n "${MAD_TOPOLOGY_NNODES:-}" ] && [ "$MAD_TOPOLOGY_NNODES" != "$NUM_NODES" ]; then
+    echo "Error: MAD_TOPOLOGY describes ${MAD_TOPOLOGY_NNODES} nodes but the allocation has ${NUM_NODES}." >&2
+    exit 1
+fi
 if [ $(( TP_SIZE * PP_SIZE )) -ne $(( NUM_NODES * GPUS_PER_NODE )) ]; then
     echo "Error: TP_SIZE*PP_SIZE (${TP_SIZE}x${PP_SIZE}=$((TP_SIZE*PP_SIZE))) != total GPUs (${NUM_NODES}x${GPUS_PER_NODE}=$((NUM_NODES*GPUS_PER_NODE)))." >&2
     exit 1

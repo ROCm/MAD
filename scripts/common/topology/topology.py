@@ -24,9 +24,15 @@ TP_SIZE / PP_SIZE, in shell; from_env() states those settings as a spec, and the
 snapshot goldens check that the spec resolves to the role every rank's script
 actually takes (tests/test_topology.py).
 
+A spec can also be the input: MAD_TOPOLOGY names a spec file, and legacy_env() turns
+it into the launcher's own settings (apply.sh, sourced by each launcher before its
+defaults), refusing shapes the launcher cannot run and settings that disagree.
+Examples: specs/. `snapshot.py --spec-file` checks every card runs the same from one.
+
 CLI:
-    topology.py spec   --launcher L           spec from the environment, as JSON
-    topology.py node   --launcher L --rank R  this rank's resolution, as shell assignments
+    topology.py spec       --launcher L           spec from the environment, as JSON
+    topology.py node       --launcher L --rank R  this rank's resolution, as shell assignments
+    topology.py legacy-env --launcher L           MAD_TOPOLOGY as the launcher's settings
 """
 import argparse
 import json
@@ -142,10 +148,82 @@ def resolve(spec, rank):
     return out
 
 
-def _shell(d, prefix="MAD_TOPO_"):
+# The settings each launcher reads, by the spec it can express today. A spec outside
+# that shape is refused with what the launcher can run, rather than run differently.
+def legacy_env(spec, launcher, env=None):
+    """The launcher's own settings for a spec (MAD_TOPOLOGY): what it would otherwise
+    read from xP / yD / WIDE_EP / ... A setting the caller also gave must agree."""
+    validate(spec)
+    roles = spec["roles"]
+    gpus = spec.get("gpus_per_node", 8)
+    engine = {"vllm_multinode": "vllm", "vllm_dissag": "vllm", "sglang_disagg": "sglang"}.get(launcher)
+    if engine and spec.get("engine", engine) != engine:
+        raise TopologyError(f"{launcher} runs {engine}, the spec is for {spec['engine']}")
+    if launcher == "vllm_multinode":
+        if spec["layout"] != "colocated" or len(roles) != 1:
+            raise TopologyError("vllm_multinode runs one colocated role: "
+                                '{"layout": "colocated", "roles": [{"name": ..., "nodes": N, "parallel": '
+                                '{"mode": "tp_pp", "tp": T, "pp": P}}]}')
+        p = roles[0].get("parallel") or {}
+        if p.get("mode", "tp_pp") != "tp_pp":
+            raise TopologyError(f"vllm_multinode: parallel mode {p.get('mode')!r} (tp_pp)")
+        out = {"GPUS_PER_NODE": gpus, "TP_SIZE": p.get("tp", gpus), "PP_SIZE": p.get("pp", roles[0]["nodes"]),
+               "MAD_TOPOLOGY_NNODES": roles[0]["nodes"]}
+        if p.get("ep"):
+            out["ENABLE_EP"] = 1
+            if p.get("all2all"):
+                out["ALL2ALL_BACKEND"] = p["all2all"]
+    elif launcher in ("vllm_dissag", "sglang_disagg"):
+        if spec["layout"] != "disagg" or [r["name"] for r in roles] != ["prefill", "decode"]:
+            raise TopologyError(f"{launcher} runs roles prefill then decode (layout disagg)")
+        router = spec.get("router") or {}
+        if (router.get("host"), router.get("index", 0)) != ("prefill", 0):
+            raise TopologyError(f"{launcher} runs the router on the first prefill node "
+                                '(router: {"host": "prefill", "index": 0})')
+        pp, pd = roles[0].get("parallel") or {}, roles[1].get("parallel") or {}
+        if pp != pd:
+            raise TopologyError(f"{launcher} runs prefill and decode with the same parallelism (got {pp} and {pd})")
+        out = {"GPUS_PER_NODE": gpus, "xP": roles[0]["nodes"], "yD": roles[1]["nodes"]}
+        mode = pp.get("mode")
+        if launcher == "vllm_dissag":
+            if mode == "wide_ep":
+                out.update({"WIDE_EP": 1, "EP_TP_SIZE": pp.get("ep_tp", 1)})
+            elif mode == "tp":
+                out["WIDE_EP"] = 0
+            else:
+                raise TopologyError(f"vllm_dissag: parallel mode {mode!r} (wide_ep or tp)")
+        else:
+            if mode == "dp_ep":
+                out["DP_MODE"] = 1
+            elif mode == "tp":
+                out.update({"DP_MODE": 0, "GENERIC_TP_SIZE": pp.get("tp", 8)})
+            else:
+                raise TopologyError(f"sglang_disagg: parallel mode {mode!r} (dp_ep or tp)")
+    else:
+        raise TopologyError(f"unknown launcher {launcher!r}")
+    for k, v in out.items():
+        given = (env or {}).get(k, "")
+        if given != "" and given != str(v):
+            raise TopologyError(f"{k}={given} disagrees with MAD_TOPOLOGY ({k}={v}); set one or the other")
+    return out
+
+
+def load(path, scripts_dir=None):
+    """A spec file. A relative path is taken from scripts/ (scripts_dir)."""
+    p = path if os.path.isabs(path) or not scripts_dir else os.path.join(scripts_dir, path)
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        raise TopologyError(f"MAD_TOPOLOGY={path}: {e}")
+
+
+def _shell(d, prefix="MAD_TOPO_", upper=True):
     """KEY=VALUE lines. Every value is a role name, a number or 0/1, so the lines are
-    safe both as shell assignments and as `docker run -e` arguments."""
-    return "\n".join(f"{prefix}{k.upper()}={int(v) if isinstance(v, bool) else v}" for k, v in d.items())
+    safe both as shell assignments and as `docker run -e` arguments. The launchers'
+    own settings keep their names as they are (xP, yD)."""
+    return "\n".join(f"{prefix}{k.upper() if upper else k}={int(v) if isinstance(v, bool) else v}"
+                     for k, v in d.items())
 
 
 def main(argv=None):
@@ -156,12 +234,19 @@ def main(argv=None):
     n = sub.add_parser("node", help="one rank's resolution, as shell assignments (MAD_TOPO_*)")
     n.add_argument("--launcher", choices=LAUNCHERS, required=True)
     n.add_argument("--rank", type=int, required=True)
+    e = sub.add_parser("legacy-env", help="the launcher's own settings for MAD_TOPOLOGY, as shell assignments")
+    e.add_argument("--launcher", choices=LAUNCHERS, required=True)
     a = ap.parse_args(argv)
+    scripts_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     try:
         path = os.environ.get("MAD_TOPOLOGY")
-        spec = validate(json.load(open(path)) if path else from_env(os.environ, a.launcher))
+        spec = validate(load(path, scripts_dir) if path else from_env(os.environ, a.launcher))
         if a.cmd == "spec":
             print(json.dumps(spec, indent=1))
+        elif a.cmd == "legacy-env":
+            if not path:
+                raise TopologyError("legacy-env needs MAD_TOPOLOGY (a spec file)")
+            print(_shell(legacy_env(spec, a.launcher, os.environ), prefix="", upper=False))
         else:
             print(_shell(resolve(spec, a.rank)))
     except TopologyError as e:

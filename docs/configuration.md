@@ -432,6 +432,39 @@ holding a different variant, is a hard failure with a message saying what to fix
 | `xP`, `yD` | `1`, `1` | Prefill and decode node counts |
 | `TP_SIZE` | `${GPUS_PER_NODE}` | For the colocated launcher. The vLLM wideEP path uses `EP_TP_SIZE` instead, so this default does not turn a TP1/DP16 recipe into TP8/DP2 |
 | `PP_SIZE` | unset | The colocated launcher defaults it to the node count; no other launcher reads it |
+| `MAD_TOPOLOGY` | unset | A topology spec file in place of the settings above; see [Topology spec files](#topology-spec-files) |
+
+### Topology spec files
+
+`MAD_TOPOLOGY` names a JSON file that states a run's shape as data: its roles in node-rank
+order, how many nodes each takes, how each is parallelised and where the router runs. A
+relative path is taken from `scripts/`. Examples are in `scripts/common/topology/specs/`:
+
+```json
+{"engine": "vllm", "layout": "disagg", "gpus_per_node": 8,
+ "roles": [{"name": "prefill", "nodes": 2, "parallel": {"mode": "wide_ep", "ep_tp": 2}},
+           {"name": "decode",  "nodes": 2, "parallel": {"mode": "wide_ep", "ep_tp": 2}}],
+ "router": {"host": "prefill", "index": 0}}
+```
+
+The launcher turns the file into its own settings before anything else reads them
+(`scripts/common/topology/apply.sh`, printed as a `[topology]` line). The file above gives
+`xP=2 yD=2 WIDE_EP=1 EP_TP_SIZE=2 GPUS_PER_NODE=8`:
+
+| Launcher | `parallel.mode` | Settings it gives |
+|---|---|---|
+| `vllm_dissag` | `wide_ep` (`ep_tp`), `tp` | `xP`, `yD`, `GPUS_PER_NODE`, `WIDE_EP`, `EP_TP_SIZE` |
+| `sglang_disagg` | `dp_ep`, `tp` (`tp`) | `xP`, `yD`, `GPUS_PER_NODE`, `DP_MODE`, `GENERIC_TP_SIZE` |
+| `vllm_multinode` | `tp_pp` (`tp`, `pp`, optional `ep`, `all2all`) | `GPUS_PER_NODE`, `TP_SIZE`, `PP_SIZE`, `ENABLE_EP`, `ALL2ALL_BACKEND`; the role's `nodes` must equal the allocation |
+
+The launcher stops before it starts anything when the file asks for what it cannot run:
+another engine or layout, roles other than prefill then decode, the router anywhere but the
+first prefill node, or different parallelism for prefill and decode. A setting given both
+ways must agree (`xP=1 disagrees with MAD_TOPOLOGY (xP=2); set one or the other`). Keep the
+card's `slurm.nodes` equal to the spec's total node count.
+
+Every card runs the same from a spec file as from its settings:
+`python3 scripts/common/tests/snapshot/snapshot.py --spec-file`.
 
 ### Fabric
 
@@ -805,7 +838,7 @@ The colocated launcher follows the same order for the recipe's `env:`. SGLang ha
 | AITER knobs | `VLLM_ROCM_USE_AITER*`, `AITER_*` in the recipe `env:` | SGLang: `SGLANG_USE_AITER` in `mori_ep_env.sh` |
 | MoRI all-to-all backend per role | `PREFILL_MORI_BACKEND`, `DECODE_MORI_BACKEND`, `VLLM_ALL2ALL_BACKEND` in the recipe `env:` | |
 | TP inside each EP pool | `EP_TP_SIZE` in the recipe `env:` or the card | Must divide `GPUS_PER_NODE`; needs equal pools when above 1 |
-| Node count | `slurm.nodes` in `--additional-context`, and `xP` / `yD` in `env_vars` | Keep the card's `slurm.nodes` and `distributed.nnodes` equal; plain `sbatch`: `--nodes` |
+| Node count | `slurm.nodes` in `--additional-context`, and `xP` / `yD` (or a `MAD_TOPOLOGY` spec file) in `env_vars` | Keep the card's `slurm.nodes` and `distributed.nnodes` equal; plain `sbatch`: `--nodes` |
 | Time limit | `slurm.time` in `--additional-context` | Plain `sbatch`: `--time` |
 | Partition | `slurm.partition` in `--additional-context` | Plain `sbatch`: `--partition` |
 | NIC / RDMA devices | Export `NCCL_IB_HCA`, `MORI_RDMA_DEVICES`, `NCCL_IB_GID_INDEX`, `MORI_IB_GID_INDEX`, `NCCL_SOCKET_IFNAME`, or `CLUSTER_ARCHETYPE` | SGLang: `USE_CX7_NICS` (its batch script does not forward `IB_DEVICES` or `NCCL_IB_HCA`). Never in a recipe |

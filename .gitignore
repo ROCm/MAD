@@ -95,3 +95,5 @@ scripts/jax-maxdiffusion/output/
 
 # The snapshot goldens are test data, not output: keep them despite *.json above.
 !scripts/common/tests/snapshot/golden/**/*.json
+# Topology spec examples are inputs, not output.
+!scripts/common/topology/specs/*.json

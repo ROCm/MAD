@@ -63,6 +63,9 @@ cd "$SCRIPT_DIR" || { echo "Error: cannot cd to $SCRIPT_DIR" >&2; exit 1; }
 # environment variables, and this file just fills what neither of them set.
 # Model-specific performance flags stay in models.yaml, not here.
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
+# before the defaults below; see common/topology/apply.sh.
+. "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_dissag
 if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
     echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
     exit 1
