@@ -71,6 +71,7 @@ venv.bak/
 *.json
 !models.json
 !compat/*.json
+!compat/stacks/*.json
 *.log
 *.out
 *.html
@@ -99,3 +100,6 @@ slurm_output/
 scripts/kvcache_transfer_bench/shared/
 madengine_build_*
 .madengine_session_start
+
+# madengine generated build files (image_spec stacks)
+.madengine/

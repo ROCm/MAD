@@ -280,6 +280,25 @@ Cards with a `dockerfile` keep working unchanged.
 See `scripts/dummy/models.json` (`dummy_image_spec`) for a working card and the
 madengine configuration guide for every `image_spec` key.
 
+#### Full framework stacks: `compat/stacks/`
+
+ROCm framework stacks are built by separate teams, so the same component (torch,
+aiter, MoRI, NIXL, ...) exists as different builds in each. A **stack lock** in
+`compat/stacks/<name>.json` names the exact artifacts of one best-known stack:
+wheel URLs or pip requirements against a named index, plus pinned source builds,
+for one platform (ROCm, python, gfx targets). A card selects it with
+`"image_spec": {"stack": "vllm"}` and can replace single artifacts with
+`"override"`; madengine checks the declared pins between artifacts before
+building and generates the Dockerfile (one layer per artifact) under
+`.madengine/build/`.
+
+```bash
+madengine stack show vllm -a gfx942            # what the stack is made of
+madengine stack check vllm kvcache-transfer    # declared pins between artifacts
+madengine stack diff vllm kvcache-transfer     # where two stacks differ
+madengine stack harvest https://rocm.frameworks.amd.com/whl-multi-arch/   # what an index offers
+```
+
 #### Step 4: Script Implementation
 
 Create a script directory in `scripts/` with a `run.sh` file:

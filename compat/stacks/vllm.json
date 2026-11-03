@@ -1,0 +1,52 @@
+{
+  "name": "vllm",
+  "description": "vLLM from the ROCm frameworks wheels on TheRock ROCm 10.1",
+  "owner": "mad.support@amd.com",
+  "platform": {
+    "vendor": "AMD",
+    "rocm": "10.1",
+    "python": "3.14",
+    "gpu_arch": [],
+    "nic": []
+  },
+  "base": "ubuntu:24.04",
+  "indexes": {
+    "therock": "https://stable.repo.amd.com/rocm/whl-next/",
+    "frameworks-vllm": "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/"
+  },
+  "artifacts": [
+    {
+      "name": "rocm",
+      "index": "therock",
+      "requirement": "rocm[libraries,devel,device-{gpu_arch}]==10.1.0"
+    },
+    {
+      "name": "torch",
+      "index": "therock",
+      "requirement": "torch[device-{gpu_arch}]==2.13.0+rocm10.1.0",
+      "note": "Not declared by the vllm wheel; vllm 98dff2a81 builds against torch == 2.13.0 (pyproject build-system)."
+    },
+    {
+      "name": "amd-aiter",
+      "url": "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/amd-aiter/amd_aiter-0.1.22.post2.dev0%2Bgb4d9154d1.d20261002-cp314-cp314-linux_x86_64.whl",
+      "built_by": "frameworks/vllm"
+    },
+    {
+      "name": "flash-attn",
+      "url": "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/flash-attn/flash_attn-2.8.3-cp314-cp314-linux_x86_64.whl",
+      "built_by": "frameworks/vllm"
+    },
+    {
+      "name": "vllm",
+      "url": "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.29.1.dev0%2Brocm10.1.0.g98dff2a81.d20261002-cp314-cp314-linux_x86_64.whl",
+      "built_by": "frameworks/vllm"
+    }
+  ],
+  "exclude": [
+    {
+      "name": "amd-quark",
+      "reason": "vllm pins amd-quark==0.12.post1, whose only build requires python <3.14, and this vllm build exists only for cp314; Quark-quantized models fail until a 3.14-compatible amd-quark is published"
+    }
+  ],
+  "validated": null
+}
