@@ -390,7 +390,7 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
+MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE")
 # Prefer the fabric-subnet IP: nodes are multi-homed and picking the first
 # hostname -I address can land on a different subnet, which hangs the socket
 # barrier on mixed-subnet coordination. The preferred subnet prefix is
@@ -420,7 +420,7 @@ MASTER_PORT=39566  # Choose an open port
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
+    IP=$(dispatch_node_addresses "$NODE")
     IP_RAW="$IP"
     if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
         IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
@@ -490,9 +490,13 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash "${MOONCAKE_REPO_DIR}/node.sh"
+dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${MOONCAKE_REPO_DIR}/node.sh"
 _srun_rc=$?
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+
+# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
+# for the run, and the others end with their own node's status.
+dispatch_is_leader || exit "$_srun_rc"
 
 # The job's verdict. This script used to end with the cleanup srun above, so its exit status,
 # and the SLURM job's, was the cleanup's: a run whose servers died at start-up and produced no

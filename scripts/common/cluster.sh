@@ -95,6 +95,11 @@ export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
 # hardcoded home only ever works for the one account it names.
 export SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-$PWD}"
 
+# How the launchers reach their nodes: srun under one allocation, or one job-array
+# task per node (dispatch/dispatch.sh).
+# shellcheck source=dispatch/dispatch.sh
+. "$(dirname "${BASH_SOURCE[0]}")/dispatch/dispatch.sh"
+
 # One hostname per line from a SLURM nodelist, compressed or not.
 # Stock SLURM gives the compressed form (node[01-03,05]), which only `scontrol
 # show hostnames` expands. Spur, a SLURM-compatible scheduler, gives the list
@@ -346,7 +351,7 @@ cluster_check_model_path() {
     # EMPTY is its own case because a staged directory can exist while holding
     # nothing: a `[ -d ]` test alone would pick it over a working NFS copy.
     echo "Checking ${label}: ${path}"
-    out="$(srun --nodes="${nodes}" --ntasks="${nodes}" /bin/bash -c "
+    out="$(dispatch_gather "model-${model_label}-${label//[^A-Za-z0-9]/_}" /bin/bash -c "
         _p='${path}'
         _d=\"\$(dirname \"\$_p\")\"
         if [ ! -d \"\$_d\" ]; then
@@ -579,11 +584,11 @@ cluster_detect_gpu_arch() {
         return 0
     fi
     local out archs n
-    if [ -n "${SLURM_JOB_ID:-}" ] && command -v srun >/dev/null 2>&1; then
+    if [ -n "${SLURM_JOB_ID:-}" ] && { [ "$(dispatch_mode)" = spur-array ] || command -v srun >/dev/null 2>&1; }; then
         n="${SLURM_NNODES:-1}"
         # Same shape as cluster_check_model_path: the body always exits 0, so a node
         # that cannot answer shows up as a missing line, not as a failed step in sacct.
-        out="$(srun --nodes="${n}" --ntasks="${n}" /bin/bash -c \
+        out="$(dispatch_gather gpu-arch /bin/bash -c \
             "$(declare -f _cluster_local_gpu_arch); echo \"\$(hostname) \$(_cluster_local_gpu_arch)\"; exit 0" \
             2>/dev/null || true)"
     else
@@ -661,3 +666,10 @@ cluster_report_rdma_rails() {
     [ -z "${bad}" ] || echo "WARN: rails not ACTIVE on $(hostname):${bad} -- traffic on them will fall back or fail" >&2
     return 0
 }
+
+# A job-array task (spur-array) joins the others here, before any launcher reads the
+# run's nodes: from now on SLURM_JOB_ID / SLURM_NNODES / SLURM_JOB_NODELIST describe
+# the whole run. Nothing to do under one allocation.
+if [ "$(dispatch_mode)" = spur-array ]; then
+    _dispatch_array_init || { echo "ERROR: could not join the other tasks of this run" >&2; exit 1; }
+fi

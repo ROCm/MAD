@@ -451,14 +451,14 @@ echo ""
 # Node information
 USER_NAME=$(whoami)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
+MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE")
 MASTER_ADDR=$(echo "$MASTER_ADDR" | awk 'NR==1 {print $1}')
 MASTER_PORT=39566  # Choose an open port
 
 IPS=()
 
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
+    IP=$(dispatch_node_addresses "$NODE")
     IP=$(echo "$IP" | awk 'NR==1 {print $1}')
     IPS+=("$IP")
 done
@@ -538,9 +538,13 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash "${SCRIPT_DIR}/node.sh"
+dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${SCRIPT_DIR}/node.sh"
 _srun_rc=$?
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+dispatch_run cleanup "$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
+
+# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
+# for the run, and the others end with their own node's status.
+dispatch_is_leader || exit "$_srun_rc"
 
 # The job's verdict (cluster_job_verdict, cluster.sh). benchmark_xPyD.sh / benchmark_niah.sh
 # write /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but

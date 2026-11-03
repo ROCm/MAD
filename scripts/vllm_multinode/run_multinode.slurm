@@ -138,11 +138,11 @@ fi
 SELECTED_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST" | head -n "$NUM_NODES")
 SELECTED_NODELIST=$(echo "$SELECTED_NODES" | paste -sd,)
 MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I' | awk '{print $1}')
+MASTER_ADDR=$(dispatch_node_addresses "$MASTER_NODE" | awk '{print $1}')
 
 IPS=()
 for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I' | awk '{print $1}')
+    IP=$(dispatch_node_addresses "$NODE" | awk '{print $1}')
     IPS+=("$IP")
     echo "  node ${NODE} -> ${IP}"
 done
@@ -250,7 +250,7 @@ export CONTAINER_BARRIER_PORT="${CONTAINER_BARRIER_PORT:-$(cluster_barrier_port)
 # script waits on it, so a TERM is handled as soon as it lands rather than when srun
 # exits. Idempotent, so the explicit call after the run and the traps can all fire.
 _colocated_teardown() {
-    srun --nodelist="$SELECTED_NODELIST" bash -c \
+    dispatch_run teardown "$SELECTED_NODELIST" bash -c \
         'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true' \
         2>/dev/null || true
 }
@@ -268,12 +268,16 @@ trap 'trap - EXIT; _colocated_teardown; exit 143' INT TERM
 # the perf CSV. Both parse_to_csv.py implementations read them (_get_run_metadata
 # for docker_image and machine_name) but run inside the container, so a name the
 # list omits is simply absent and the column comes out blank.
-srun --nodelist="$SELECTED_NODELIST" bash "${SCRIPT_DIR}/node.sh" &
+dispatch_run node "$SELECTED_NODELIST" bash "${SCRIPT_DIR}/node.sh" &
 _srun_pid=$!
 _srun_rc=0
 wait "$_srun_pid" || _srun_rc=$?
 
 _colocated_teardown
+
+# Under spur-array (dispatch.sh) every node's task gets here; rank 0 makes the verdict
+# for the run, and the others end with their own node's status.
+dispatch_is_leader || exit "$_srun_rc"
 
 # The job's verdict (cluster_job_verdict, cluster.sh). The benchmark writes
 # /run_logs/$SLURM_JOB_ID/perf.csv inside the container (= $LOG_PATH on the host), but

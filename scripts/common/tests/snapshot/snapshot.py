@@ -159,7 +159,26 @@ def normalize(obj, work):
     return json.loads(TIMESTAMP.sub("<TIME>", text))
 
 
-def snapshot_card(catalog, card):
+def run_as_array(script, env, nodes):
+    """The launcher as a job array (spur-array dispatch): one process per node, all at
+    once, each a single-node task of array job JOB_ID; they share the work directory as
+    the tasks share storage. Returns the leader's (rank 0's) exit status and output."""
+    procs = []
+    for k in range(nodes):
+        task_env = dict(env)
+        task_env.update({
+            "SLURM_ARRAY_JOB_ID": JOB_ID, "SLURM_ARRAY_TASK_ID": str(k),
+            "SLURM_JOB_ID": str(int(JOB_ID) + 1 + k), "SLURM_NNODES": "1",
+            "SLURM_JOB_NODELIST": f"node{k + 1}", "SLURMD_NODENAME": f"node{k + 1}",
+            "MAD_NNODES": str(nodes), "MAD_RENDEZVOUS_TIMEOUT": "60",
+        })
+        procs.append(subprocess.Popen(["bash", str(script)], cwd=script.parent, env=task_env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
+    outs = [p.communicate(timeout=300)[0] for p in procs]
+    return procs[0].returncode, outs[0]
+
+
+def snapshot_card(catalog, card, dispatch="slurm-srun"):
     work = Path(tempfile.mkdtemp(prefix="madsnap."))
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
@@ -189,8 +208,12 @@ def snapshot_card(catalog, card):
         # From the launcher's own directory, as documented (`cd scripts/<dir> &&
         # sbatch ...`) and as madengine runs it: the SGLang launcher finds its role
         # scripts in the working directory.
-        p = subprocess.run(["bash", str(script)], cwd=script.parent, env=env,
-                           capture_output=True, text=True, timeout=300)
+        if dispatch == "slurm-srun":
+            p = subprocess.run(["bash", str(script)], cwd=script.parent, env=env,
+                               capture_output=True, text=True, timeout=300)
+            rc, output = p.returncode, p.stdout + p.stderr
+        else:
+            rc, output = run_as_array(script, env, nodes)
         calls_file = work / "stub" / "calls.log"
         calls = calls_file.read_text().splitlines() if calls_file.exists() else []
         ranks = []
@@ -202,12 +225,12 @@ def snapshot_card(catalog, card):
             "card": card["name"],
             "catalog": catalog,
             "inputs": {"nodes": nodes, "gpu_arch": env["MAD_GPU_ARCH"]},
-            "exit_code": p.returncode,
+            "exit_code": rc,
             "calls": calls,
             "ranks": ranks,
         }
-        if p.returncode != 0:
-            snap["stderr_tail"] = (p.stdout + p.stderr).splitlines()[-5:]
+        if rc != 0:
+            snap["stderr_tail"] = output.splitlines()[-5:]
         return normalize(snap, work)
     finally:
         shutil.rmtree(work)
@@ -218,7 +241,13 @@ def main():
     ap.add_argument("--update", action="store_true", help="rewrite the golden files")
     ap.add_argument("--card", default="", help="only cards whose name contains this")
     ap.add_argument("--catalog", choices=CATALOGS, help="only this catalog")
+    ap.add_argument("--equivalence", choices=("spur-array",),
+                    help="run every card under this dispatch instead and require the same "
+                         "per-node docker run and engine command, and exit status, as the "
+                         "goldens (recorded under slurm-srun); no srun may be called")
     a = ap.parse_args()
+    if a.equivalence:
+        return equivalence(a)
     changed, checked = [], 0
     for catalog in CATALOGS:
         if a.catalog and catalog != a.catalog:
@@ -248,6 +277,42 @@ def main():
     for c in changed:
         print(f"  DIFF  {c}")
     return 1 if changed else 0
+
+
+def equivalence(a):
+    """Same per-node work under another dispatch: compare with the goldens."""
+    bad, checked = [], 0
+    for catalog in CATALOGS:
+        if a.catalog and catalog != a.catalog:
+            continue
+        for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
+            if a.card not in card["name"]:
+                continue
+            checked += 1
+            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
+            got = snapshot_card(catalog, card, a.equivalence)
+            problems = []
+            if got["exit_code"] != gold["exit_code"]:
+                problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
+            if got["ranks"] != gold["ranks"]:
+                g = {r["rank"]: r for r in gold["ranks"]}
+                for r in got["ranks"]:
+                    if r != g.get(r["rank"]):
+                        diff = difflib.unified_diff(json.dumps(g.get(r["rank"]), indent=1).splitlines(),
+                                                    json.dumps(r, indent=1).splitlines(), lineterm="", n=1)
+                        problems.append(f"rank {r['rank']} differs:\n" + "\n".join(list(diff)[:30]))
+                if len(got["ranks"]) != len(gold["ranks"]):
+                    problems.append(f"{len(got['ranks'])} ranks (golden {len(gold['ranks'])})")
+            srun_calls = [c for c in got["calls"] if c.startswith("srun")]
+            if srun_calls:
+                problems.append(f"srun called: {srun_calls}")
+            if problems:
+                bad.append(f"{catalog}/{card['name']}")
+                print(f"DIFF  {catalog}/{card['name']}")
+                for pr in problems:
+                    print("   " + pr.replace("\n", "\n   "))
+    print(f"equivalence ({a.equivalence}): {checked} card(s) checked, {len(bad)} differ")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

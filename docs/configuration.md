@@ -495,6 +495,9 @@ directory that shadows it), and `MODEL_DIR` only when it is outside the other tw
 |---|---|
 | `cluster_expand_nodelist LIST` | One hostname per line. A list without brackets (as SLURM-compatible schedulers such as Spur give it) is split on commas; only the compressed form (`node[01-03]`) goes to `scontrol show hostnames` |
 | `cluster_perf_failures CSV` | The number of `FAILURE` rows in a `perf.csv`. The launchers fail the job on any |
+| `cluster_job_verdict RC SRC DST [REQUIRE]` | Publishes the perf CSV, then fails on a node's non-zero status, missing results, or a `FAILURE` row |
+| `cluster_barrier_port` | This job's container barrier port, `21000 + job id mod 8000` |
+| `dispatch_node_addresses NODE`, `dispatch_gather STEP CMD`, `dispatch_run STEP NODES CMD`, `dispatch_is_leader` | How a launcher reaches its nodes: `srun` under one allocation, or a job array (`scripts/common/dispatch/dispatch.sh`, [multinode-running.md](multinode-running.md#as-a-job-array-one-task-per-node)) |
 
 ### Ports, timeouts, container
 

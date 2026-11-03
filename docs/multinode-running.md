@@ -19,6 +19,7 @@ to do about it. It covers the three SLURM launchers under
 - [Site settings: a worked example](#site-settings-a-worked-example)
 - [With sbatch directly](#with-sbatch-directly)
 - [Inside an salloc allocation](#inside-an-salloc-allocation)
+- [As a job array: one task per node](#as-a-job-array-one-task-per-node)
 - [How the image reaches the nodes](#how-the-image-reaches-the-nodes)
 - [Logs](#logs)
 - [How a run fails fast](#how-a-run-fails-fast)
@@ -494,6 +495,35 @@ attaches to a job with `srun --overlap` and starts one container per node throug
 failures, worker deaths and per-cell benchmark summaries. See
 [vllm-disagg.md](vllm-disagg.md#testing).
 
+## As a job array: one task per node
+
+On a scheduler where one job cannot start a step on each of its nodes -- SLURM-compatible
+schedulers such as Spur, where `srun` does not fan out -- submit the launcher as a job
+array instead, one single-node task per node. Every task runs the same launcher; the
+tasks find each other through a directory on shared storage, then each starts its own
+node's container, and task 0 waits for the others and makes the job's verdict. What
+each node runs is the same as under one allocation.
+
+```bash
+cd scripts/vllm_dissag
+export DOCKER_IMAGE_NAME=<image> xP=1 yD=1 MODEL_NAME=DeepSeek-V3 MAD_NNODES=2
+sbatch --array=0-1 -N 1 --gres=gpu:8 -p <partition> run_xPyD_models.slurm
+```
+
+A job-array task selects this by itself (`MAD_DISPATCH=spur-array`; set
+`MAD_DISPATCH=slurm-srun` to override). madengine's Spur backend submits the same way.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MAD_NNODES` | the array size | Nodes in the run |
+| `MAD_RENDEZVOUS_DIR` | `$LOG_PATH/rendezvous/<array job id>` | Where the tasks meet; must be shared by all nodes |
+| `MAD_RENDEZVOUS_TIMEOUT` | `900` | Seconds a task waits for the others before failing; tasks of an array are not started together |
+
+How it works is in `scripts/common/dispatch/dispatch.sh`. The launchers reach their nodes
+only through it, so a run as an array and a run under one allocation start the same
+container with the same engine command on every node (checked by
+`snapshot.py --equivalence spur-array`, below).
+
 ## How the image reaches the nodes
 
 - **madengine with a registry.** `madengine build --registry <registry>` pushes the
@@ -691,7 +721,15 @@ bash scripts/vllm_dissag/tests/parse_to_csv_assert.sh # perf.csv rows and FAILUR
 python3 scripts/common/check_srun_quotes.py           # no apostrophe truncates an srun body
 python3 scripts/common/check_continuations.py         # no comment inside a backslash continuation
 python3 scripts/common/check_gpu_arch_declarations.py # cards and recipes agree on GPUs
+python3 scripts/common/tests/snapshot/snapshot.py     # every card's docker run and engine command per node, against the goldens
+python3 scripts/common/tests/snapshot/snapshot.py --equivalence spur-array  # the same, run as a job array
+bash scripts/common/tests/launcher_verdict_assert.sh  # job verdict, exit status, cancel, ports, env
+bash scripts/common/tests/node_lib_assert.sh          # the per-node library (mounts, JIT cache, run/trap)
+bash scripts/common/tests/dispatch_assert.sh          # dispatch selection, failing nodes, missing tasks
 ```
+
+A change that alters what a node runs on purpose shows up as a snapshot difference:
+review it, then record it with `snapshot.py --update` and commit the goldens with it.
 
 Run them from the repository root. The two shell-hygiene checkers take file paths, or
 scan every `scripts/**/*.slurm` and `scripts/**/*.sh` when given none. What each vLLM
