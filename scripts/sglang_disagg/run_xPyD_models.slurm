@@ -510,6 +510,13 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
+# The container's own defaults (connectors/mori.env, applied by mori_ep_env.sh to names
+# it was not given), for the record.
+while IFS= read -r _line; do
+    [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    _k="${_line%%=*}"
+    [[ -n "${!_k:-}" ]] || config_note "$_k" "${_line#*=}" container-default
+done < "${MOONCAKE_REPO_DIR}/connectors/mori.env"
 dispatch_is_leader && config_write "${LOG_PATH}/${SLURM_JOB_ID}/config.resolved.json"
 dispatch_run node "$SELECTED_NODELIST_SRUN" bash "${MOONCAKE_REPO_DIR}/node.sh"
 _srun_rc=$?

@@ -112,6 +112,7 @@ at start-up.
 | `sglang_disagg_mori_io_ep.sh` | Container entrypoint. Starts the prefill and decode servers, the router (proxy), and the benchmark. |
 | `models.yaml` | Model-specific SGLang CLI flags for all supported models. |
 | `mori_ep_env.sh` | RDMA, NCCL, Gloo and MoRI environment variables. Sourced by the entrypoint. |
+| `connectors/mori.env` | The constant defaults `mori_ep_env.sh` applies (NCCL tuning, MoRI QPs, timeouts, runtime switches), one `KEY=VALUE` per line. |
 | `benchmark_xPyD.sh` | Concurrency sweep using `sglang.bench_serving`. |
 | `benchmark_agentic.sh` | Agentic trace replay. A thin shim over `scripts/common/benchmark_agentic.sh --backend sglang` that also writes `perf.csv`. |
 | `benchmark_parser.py` | Parses a `*_CONCURRENCY.log` into a table, optionally CSV. |
@@ -315,7 +316,9 @@ mode-level flags, they live in `dp_flags`; role-specific batch tuning is in `pre
 ## RDMA and NCCL environment
 
 [`mori_ep_env.sh`](../scripts/sglang_disagg/mori_ep_env.sh) sets the fabric environment inside the
-container. Every value is `${VAR:-default}`.
+container. Every value is `${VAR:-default}`. The constant defaults are in
+[`connectors/mori.env`](../scripts/sglang_disagg/connectors/mori.env); the script derives the NIC
+set, socket interface, MoRI GID and the DP_MODE-only MoRI EP tuning.
 
 ### NICs and rail placement
 

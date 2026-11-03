@@ -71,7 +71,16 @@ _is "$(_src A_BOOL)"      "recipe:True"        "values as the container's reader
 _is "$(_src CONN_ONLY)"   "connector-env:connector" "a connector .env value passed only as -e is recorded"
 _is "$(_src HF_TOKEN)"    "recipe:<set>"       "a secret-looking name's value is not written"
 _is "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["order"])' "$J")" \
-    "['site', 'connector-env', 'recipe', 'topology', 'submit']" "the order is stated in the record"
+    "['container-default', 'site', 'connector-env', 'recipe', 'topology', 'submit']" "the order is stated in the record"
+
+echo ""
+echo "=== madengine's sources (MAD_ENV_SOURCES) ==="
+out="$(run MAD_ENV_SOURCES="SUBMITTED=card,SPEC=additional-context,NOT_SET=card,bad" A=1)"
+_has "$out" "SUBMITTED=submitted" "a sourced submitted value still beats the recipe"
+_is "$(_src SUBMITTED)" "submit:card:submitted" "the record names madengine's source"
+_is "$(_src SPEC)" "topology:spec" "a later layer that changed the value still owns it"
+_is "$(_src SITE)" "recipe:recipe" "word splitting of later layers is unaffected"
+_is "$(_src A)" "submit:1" "a submitted name madengine did not list stays plain submit"
 
 echo ""
 echo "======================================================"

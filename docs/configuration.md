@@ -36,7 +36,7 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 | Site facts | `scripts/common/cluster.sh` | Weight roots, fabric, ports, timeouts, partition default for hand runs | The launcher | In the batch script, before `docker run` |
 | Connector env files | `scripts/vllm_dissag/connectors/*.env` | Platform env each connector must have at container start | `scripts/vllm_dissag/run_xPyD_models.slurm` | Before `docker run`, forwarded with `-e` |
 | Recipe | `scripts/vllm_dissag/models.yaml`, `scripts/sglang_disagg/models.yaml` | Serve flags per role and mode, per-model env | The in-container launcher | In the job |
-| Connector and launcher defaults | `connectors/moriio.sh`, `connectors/rixl.sh`, `scripts/sglang_disagg/mori_ep_env.sh` | `${VAR:-default}` fallbacks | The in-container launcher | In the job |
+| Connector and launcher defaults | `connectors/moriio.sh`, `connectors/rixl.sh`, `scripts/sglang_disagg/mori_ep_env.sh` with `scripts/sglang_disagg/connectors/mori.env` | `${VAR:-default}` fallbacks | The in-container launcher | In the job |
 | Image | `docker/*.Dockerfile` | Build-time pins, cache locations | `docker build` | At build |
 
 Everything that reaches a serving process ends up as an environment variable or a serve flag.
@@ -351,8 +351,11 @@ Inside the container, the connector scripts fill every name nobody else set, wit
 | `DISTRIBUTED_TIMEOUT_SECONDS` | `7200` |
 | `CUDAGRAPH_CAPTURE_SIZES` | `1 2 4 8 16 32 64 128 256` |
 
-The SGLang equivalent is [`mori_ep_env.sh`](../scripts/sglang_disagg/mori_ep_env.sh); its
-variables are listed in [sglang-disagg.md](sglang-disagg.md#rdma-and-nccl-environment).
+The SGLang equivalent is [`mori_ep_env.sh`](../scripts/sglang_disagg/mori_ep_env.sh). Its
+constant defaults are data in
+[`sglang_disagg/connectors/mori.env`](../scripts/sglang_disagg/connectors/mori.env), applied the
+same way; the script keeps the values that depend on something (NIC set, socket interface,
+DP_MODE). They are listed in [sglang-disagg.md](sglang-disagg.md#rdma-and-nccl-environment).
 
 ## 5. Site facts (`scripts/common/cluster.sh`)
 
@@ -825,10 +828,18 @@ effect there. madengine preset `env_vars` are not passed to `slurm_multi` cards.
 ### The resolved environment, per job
 
 Each run writes `config.resolved.json` into its log directory (`$LOG_PATH/<job id>/`): every
-name in the run's environment with its value and the layer that set it (`site`,
+name in the launcher's environment with its value and the layer that set it:
+`container-default` (SGLang's `connectors/mori.env`, for names nothing else set), `site`,
 `connector-env`, `recipe`, `topology`, `submit`, or `launcher` for values the launcher derives,
-such as node lists). Values of secret-looking names (`*TOKEN*`, `*SECRET*`, `*PASSW*`,
-`*_KEY`, ...) are written as `<set>`.
+such as node lists. Under madengine the submit layer says where each value came from:
+`submit:mad-config`, `submit:docker-env-vars`, `submit:card`, `submit:additional-context`,
+`submit:distributed` (`xP`/`yD` from the card's `sglang_disagg` block) or `submit:madengine`
+(the image, `MAD_TOOLS`). madengine passes these as `MAD_ENV_SOURCES`, and builds the same
+submit layer on SLURM, Spur and Kubernetes.
+
+It is the launcher's environment: a name reaches the containers only if the launcher forwards
+it. Values of secret-looking names (`*TOKEN*`, `*SECRET*`, `*PASSW*`, `*_KEY`, ...) are
+written as `<set>`.
 
 ## Where do I change X
 
@@ -839,7 +850,7 @@ such as node lists). Values of secret-looking names (`*TOKEN*`, `*SECRET*`, `*PA
 | KV cache size | `KV_CACHE_MEMORY_BYTES` in the recipe `env:` | Also `GPU_MEMORY_UTILIZATION`; SGLang: `--mem-fraction-static` in the flags |
 | KV block size, KV dtype | `KV_BLOCK_SIZE`, `KV_CACHE_DTYPE` in the recipe `env:` | |
 | Cudagraph mode | `PREFILL_CUDAGRAPH_MODE`, `DECODE_CUDAGRAPH_MODE`, `VLLM_CUDAGRAPH_MODE`, `CUDAGRAPH_CAPTURE_SIZES` in the recipe `env:` | SGLang: `--cuda-graph-bs` / `--disable-cuda-graph` in the flags |
-| AITER knobs | `VLLM_ROCM_USE_AITER*`, `AITER_*` in the recipe `env:` | SGLang: `SGLANG_USE_AITER` in `mori_ep_env.sh` |
+| AITER knobs | `VLLM_ROCM_USE_AITER*`, `AITER_*` in the recipe `env:` | SGLang: `SGLANG_USE_AITER` in `connectors/mori.env` |
 | MoRI all-to-all backend per role | `PREFILL_MORI_BACKEND`, `DECODE_MORI_BACKEND`, `VLLM_ALL2ALL_BACKEND` in the recipe `env:` | |
 | TP inside each EP pool | `EP_TP_SIZE` in the recipe `env:` or the card | Must divide `GPUS_PER_NODE`; needs equal pools when above 1 |
 | Node count | `slurm.nodes` in `--additional-context`, and `xP` / `yD` (or a `MAD_TOPOLOGY` spec file) in `env_vars` | Keep the card's `slurm.nodes` and `distributed.nnodes` equal; plain `sbatch`: `--nodes` |

@@ -7,6 +7,8 @@
 # the card's env_vars, madengine's layered config and --additional-context, or your
 # own `export` before sbatch. Those names are recorded first (config_begin), so the
 # later layers can tell a value someone chose from a default some layer filled in.
+# madengine passes where each of them came from as MAD_ENV_SOURCES (NAME=label,...);
+# the record then says e.g. "submit:card" or "submit:additional-context".
 #
 # Before this, the recipe was applied only inside the container and only to names
 # that were not set there yet. Every name the launcher forwards with `docker run -e`
@@ -31,8 +33,16 @@
 # Names set when the launcher started, and the layer that last set each name.
 config_begin() {
     declare -gA _CONFIG_SRC=() _CONFIG_VAL=() _CONFIG_NOTE=()
-    local n
+    local n p
     for n in $(compgen -e); do _CONFIG_SRC[$n]=submit; done
+    # madengine says where each submitted value came from (card, additional-context,
+    # mad-config, docker-env-vars, distributed, madengine): MAD_ENV_SOURCES=NAME=label,...
+    local -a parts=()
+    IFS=, read -ra parts <<<"${MAD_ENV_SOURCES:-}"
+    for p in "${parts[@]}"; do
+        n="${p%%=*}"
+        [[ -n "$n" && "$p" == *=* && -v "_CONFIG_SRC[$n]" ]] && _CONFIG_SRC[$n]="submit:${p#*=}"
+    done
     _config_snapshot
 }
 
@@ -80,7 +90,7 @@ config_apply_recipe() {
     while IFS= read -r -d '' line; do
         k="${line%%=*}"; v="${line#*=}"
         case "$(config_source "$k")" in
-            submit|topology)
+            submit|submit:*|topology)
                 [[ "${!k}" != "$v" ]] && echo "[config] ${k}=${!k} ($(config_source "$k")) over the recipe's ${v}"
                 continue ;;
         esac
@@ -132,7 +142,9 @@ for n, (label, value) in notes.items():
 for n in env:
     if secret.search(n):
         env[n]["value"] = "<set>"
-json.dump({"order": ["site", "connector-env", "recipe", "topology", "submit"], "env": env},
+json.dump({"order": ["container-default", "site", "connector-env", "recipe", "topology", "submit"],
+           "note": "the launcher\x27s environment; only the names it forwards reach the containers",
+           "env": env},
           open(sys.argv[1], "w"), indent=1, sort_keys=True)
 ' "$f" && echo "[config] resolved environment: $f"
 }
