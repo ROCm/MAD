@@ -3,7 +3,7 @@
 {% block title %}ROCm support matrix — MAD Recipes{% endblock %}
 {% block body %}
 <main class="wrap">
-  {{ ui.page_header("ROCm support matrix", "The base image and ROCm version each framework is benchmarked on, and the GPU products its models are registered for. “floating” means the Dockerfile builds from an unpinned :latest tag.", snap, glyph="layers") }}
+  {{ ui.page_header("ROCm support matrix", "The base image and ROCm version each framework is benchmarked on, and the GPU products its models are registered for. “latest” means the Dockerfile builds from an unpinned latest tag, so its ROCm version changes when the image is republished.", snap, glyph="layers") }}
   <section>
     <div class="card">
       <table>
@@ -26,7 +26,7 @@
         </tbody>
       </table>
     </div>
-    <p class="faint" style="font-size:12.5px">ROCm versions come from the image tag where it encodes one, otherwise from <code>rocm_overrides</code> in <code>dashboard/status.yaml</code>.</p>
+    <p class="faint" style="font-size:12.5px">ROCm versions come from <code>rocm_overrides</code> in <code>dashboard/status.yaml</code> where set, otherwise from the image tag where it encodes one, otherwise from the image's registry metadata: a ROCm label, the <code>THE_ROCK_VERSION</code> / <code>ROCM_SDK_VERSION</code> / <code>ROCM_VERSION</code> build argument, or the <code>+rocm</code> version of its PyTorch/JAX wheels.</p>
   </section>
 </main>
 {% endblock %}

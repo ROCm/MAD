@@ -74,22 +74,15 @@ exclude:
   - jax-maxtext/default
   - jax-maxdiffusion/default
 
-# ROCm version for images whose tag does not encode one, keyed by madengine dockerfile
-# reference. Leave a value empty to show "unknown" (build --strict fails on those).
+# ROCm version for images whose tag does not encode one and whose registry metadata does
+# not state one either (labels, ROCM_VERSION-style build args, +rocm wheel versions; see
+# tools/dashboard/image_registry.py), keyed by madengine dockerfile reference. An entry
+# wins over both; the build warns when the registry disagrees with it. Leave a value empty
+# to show "unknown" (build --strict fails on those).
 rocm_overrides:
-  docker/pyt_vllm: "7.2.3"                    # benchmark/vllm/README.md overview
-  docker/vllm_disagg_inference: "7.2"         # docker/vllm_disagg_inference.ubuntu.amd.Dockerfile header
-  docker/pyt_xdit: "TheRock preview"          # benchmark/xdit/README.md
+  docker/pyt_xdit: "TheRock preview"          # benchmark/xdit/README.md; built from TheRock artifacts, no version in its metadata
   # TODO(owners): fill in from the image release notes.
-  docker/vllm_disagg_inference.glmv5.1: ""    # rocm/vllm-dev:ci_base-dedbf6be...
-  docker/atom_vllm: ""                        # rocm/atom-dev:vllm-latest (floating tag)
-  docker/vllm-omni: ""                        # vllm/vllm-omni-rocm:v0.22.0
-  docker/primus: ""                           # rocm/primus:v26.7
-  docker/primus_maxtext: ""                   # rocm/jax-training:maxtext-v26.7
-  docker/primus_maxdiffusion: ""              # rocm/jax-training:maxtext-v26.7
-  docker/pytorch_train: ""                    # unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_*
-  docker/pyt_training_huggingface: ""         # rocm/pytorch-training:v25.5
-  docker/pyt_ncf_training: ""                 # rocm/pytorch-training:v25.5
+  docker/pytorch_train: ""                    # unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_* (private registry)
 
 # Oncoming models are read from GitHub: open issues labeled `label` (from the "Model
 # onboarding" issue form) are the plan, the PRs that close them -- or PRs carrying the
@@ -110,7 +103,7 @@ roadmap: []
 #    note: optional one-liner
 
 # QA scope. Statements derivable from the registry (performance coverage, multi-node runs,
-# Kubernetes, opt-in multi-node configs, NIAH, floating :latest images) are added
+# Kubernetes, opt-in multi-node configs, NIAH, unpinned latest images) are added
 # automatically; list the rest here.
 qa:
   covered:

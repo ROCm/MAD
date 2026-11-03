@@ -48,6 +48,14 @@ def test_resolve_dockerfile_does_not_match_variants(tmp_path):
     assert collect.resolve_dockerfile("docker/missing", str(tmp_path)) is None
 
 
+def test_is_unpinned():
+    assert collect.is_unpinned("rocm/pytorch")
+    assert collect.is_unpinned("rocm/pytorch:latest")
+    assert collect.is_unpinned("rocm/atom-dev:vllm-latest")
+    assert not collect.is_unpinned("rocm/primus:v26.7")
+    assert not collect.is_unpinned("img:latest-2026")
+
+
 def test_describe_image_sources(tmp_path):
     docker = tmp_path / "docker"
     docker.mkdir()
@@ -56,13 +64,48 @@ def test_describe_image_sources(tmp_path):
     (docker / "c.ubuntu.amd.Dockerfile").write_text("ARG BASE_DOCKER=img:rocm720\n")
     warnings = []
     root = str(tmp_path)
-    assert collect.describe_image("docker/a", {}, warnings, root)["rocm"] == "floating"
+    assert collect.describe_image("docker/a", {}, warnings, root)["rocm"] == "latest"
     assert collect.describe_image("docker/c", {}, warnings, root)["rocm"] == "7.2.0"
     assert warnings == []
     assert collect.describe_image("docker/b", {"docker/b": ""}, warnings, root)["rocm"] == "unknown"
     assert len(warnings) == 1
     overridden = collect.describe_image("docker/b", {"docker/b": "7.1"}, warnings, root)
     assert (overridden["rocm"], overridden["rocm_source"]) == ("7.1", "status.yaml")
+
+
+def test_describe_image_registry_lookup(tmp_path):
+    docker = tmp_path / "docker"
+    docker.mkdir()
+    (docker / "a.ubuntu.amd.Dockerfile").write_text("ARG BASE_DOCKER=rocm/atom-dev:vllm-latest\n")
+    (docker / "b.ubuntu.amd.Dockerfile").write_text("ARG BASE_DOCKER=rocm/primus:v26.8\n")
+    (docker / "c.ubuntu.amd.Dockerfile").write_text("ARG BASE_DOCKER=private.azurecr.io/x:y\n")
+    (docker / "d.ubuntu.amd.Dockerfile").write_text("ARG BASE_DOCKER=img:rocm720\n")
+    answers = {"rocm/atom-dev:vllm-latest": ("7.2.4", "registry label com.amd.rocm.version"),
+               "rocm/primus:v26.8": ("10.1.0", "registry THE_ROCK_VERSION build arg"),
+               "private.azurecr.io/x:y": (None, "registry: HTTP 401")}
+    asked = []
+
+    def lookup(image):
+        asked.append(image)
+        return answers[image]
+
+    warnings = []
+    root = str(tmp_path)
+    latest = collect.describe_image("docker/a", {}, warnings, root, lookup)
+    assert (latest["rocm"], latest["rocm_source"]) == ("latest", "unpinned :vllm-latest, ROCm 7.2.4 at build time")
+    resolved = collect.describe_image("docker/b", {}, warnings, root, lookup)
+    assert (resolved["rocm"], resolved["rocm_source"]) == ("10.1.0", "registry THE_ROCK_VERSION build arg")
+    assert warnings == []
+    assert collect.describe_image("docker/c", {}, warnings, root, lookup)["rocm"] == "unknown"
+    assert "HTTP 401" in warnings[-1]
+    # The tag already answers: the registry is not asked.
+    asked.clear()
+    assert collect.describe_image("docker/d", {}, warnings, root, lookup)["rocm"] == "7.2.0" and asked == []
+    # An override wins, but one the registry contradicts is flagged; a less precise one is not.
+    assert collect.describe_image("docker/b", {"docker/b": "10.1"}, warnings, root, lookup)["rocm"] == "10.1"
+    assert len(warnings) == 1
+    assert collect.describe_image("docker/b", {"docker/b": "7.2"}, warnings, root, lookup)["rocm"] == "7.2"
+    assert len(warnings) == 2 and "update or drop the override" in warnings[-1]
 
 
 def test_skus_for():

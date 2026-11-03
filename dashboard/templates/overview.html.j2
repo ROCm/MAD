@@ -43,9 +43,9 @@
       <div class="t-sub">ROCm versions across {{ snap.images | length }} base images</div>
       <ul>
         <li>{{ rocm_known | join(", ") }}</li>
-        {% set floating = snap.images | selectattr("rocm", "equalto", "floating") | list | length %}
+        {% set unpinned = snap.images | selectattr("rocm", "equalto", "latest") | list | length %}
         {% set unknown = snap.images | selectattr("rocm", "equalto", "unknown") | list | length %}
-        {% if floating %}<li>{{ floating }} image{{ "s" if floating != 1 }} on a floating <code>:latest</code> tag</li>{% endif %}
+        {% if unpinned %}<li>{{ unpinned }} image{{ "s" if unpinned != 1 }} on an unpinned <code>latest</code> tag</li>{% endif %}
         {% if unknown %}<li>{{ unknown }} image{{ "s" if unknown != 1 }} with an unrecorded ROCm version</li>{% endif %}
       </ul>
     </a>

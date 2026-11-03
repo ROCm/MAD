@@ -3,9 +3,9 @@ Collect a MAD status snapshot: model support, ROCm images, QA scope, CI coverage
 
 Everything the repository already knows is derived here: the model registry comes from
 madengine's own discovery (scripts/*/models.json and scripts/*/get_models_json.py), base
-images from the Dockerfiles. Facts the repository cannot know (CI matrix, QA statements,
-public roadmap, ROCm versions of images whose tags don't encode one) come from the curated
-dashboard/status.yaml. The resulting snapshot is plain JSON so a release can be frozen
+images from the Dockerfiles. ROCm versions come from image tags, else from the images' registry metadata
+(image_registry.py). Facts the repository cannot know (CI matrix, QA statements, public
+roadmap, ROCm versions neither source states) come from the curated dashboard/status.yaml. The resulting snapshot is plain JSON so a release can be frozen
 into dashboard/releases/<version>.json and re-rendered later without the repo state.
 """
 import argparse
@@ -18,6 +18,8 @@ import subprocess
 import sys
 
 import yaml
+
+import image_registry
 
 REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 STATUS_PATH = os.path.join(REPO_ROOT, "dashboard", "status.yaml")
@@ -228,8 +230,18 @@ def image_tag(image):
     return name.split(":", 1)[1] if ":" in name else "latest"
 
 
-def describe_image(dockerfile, overrides, warnings, repo_root=REPO_ROOT):
-    """Base image and ROCm version for a madengine dockerfile reference."""
+def is_unpinned(image):
+    """True for a moving tag: 'latest' and its variants ('vllm-latest')."""
+    return re.search(r"(?:^|[-_.])latest$", image_tag(image)) is not None
+
+
+def describe_image(dockerfile, overrides, warnings, repo_root=REPO_ROOT, lookup=None):
+    """Base image and ROCm version for a madengine dockerfile reference.
+
+    The version comes from rocm_overrides in status.yaml, else the image tag, else `lookup`
+    (image_registry.rocm_version: the image's registry metadata). Unpinned images report
+    "latest", since their ROCm moves with every rebuild; the source notes today's version.
+    """
     path = resolve_dockerfile(dockerfile, repo_root)
     if path is None:
         warn(f"{dockerfile}: no matching .amd.Dockerfile found", warnings)
@@ -237,13 +249,22 @@ def describe_image(dockerfile, overrides, warnings, repo_root=REPO_ROOT):
     with open(os.path.join(repo_root, path)) as f:
         image = base_image(f.read())
     rocm, source = rocm_from_image(image), "image tag"
-    if dockerfile in overrides and overrides[dockerfile]:
-        rocm, source = str(overrides[dockerfile]), "status.yaml"
-    elif rocm is None and image_tag(image) == "latest":
-        rocm, source = "floating", "unpinned :latest"
+    override = str(overrides.get(dockerfile) or "")
+    if override or rocm is None:
+        found, evidence = lookup(image) if lookup and image else (None, "registry not checked")
+    if override:
+        rocm, source = override, "status.yaml"
+        if found and found != override and not found.startswith(override + "."):
+            warn(f"{dockerfile}: status.yaml says ROCm {override} but '{image}' says {found} ({evidence}); "
+                 "update or drop the override", warnings)
+    elif rocm is None and is_unpinned(image):
+        rocm, source = "latest", f"unpinned :{image_tag(image)}" + (f", ROCm {found} at build time" if found else "")
+    elif rocm is None and found:
+        rocm, source = found, evidence
     elif rocm is None:
         rocm, source = "unknown", "unknown"
-        warn(f"{dockerfile}: ROCm version not in image tag '{image}'; add it to rocm_overrides in status.yaml", warnings)
+        warn(f"{dockerfile}: ROCm version of '{image}' not in its tag ({evidence}); "
+             "add it to rocm_overrides in status.yaml", warnings)
     return {"dockerfile": dockerfile, "path": path, "image": image, "rocm": rocm, "rocm_source": source}
 
 
@@ -485,12 +506,12 @@ def derived_qa(rows, images):
             "note": f"Discovered only with {' / '.join(switches)}=1. The recipe uses madengine's primus launcher "
                     "on SLURM and is not validated by MAD.",
         })
-    floating = [i for i in images if i["rocm_source"] == "unpinned :latest"]
-    if floating:
+    unpinned = [i for i in images if i["rocm"] == "latest"]
+    if unpinned:
         not_covered.append({
             "area": "Pinned base images",
-            "scope": f"{len(floating)} Dockerfiles build from a floating :latest tag",
-            "note": ", ".join(i["dockerfile"] for i in floating) + " — results are not reproducible across rebuilds.",
+            "scope": f"{len(unpinned)} Dockerfiles build from an unpinned latest tag",
+            "note": ", ".join(i["dockerfile"] for i in unpinned) + " — results are not reproducible across rebuilds.",
         })
     return covered, not_covered
 
@@ -516,9 +537,11 @@ def roadmap_items(status, rows, warnings, github=True):
     return manual + oncoming, landed
 
 
-def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, source_repo=None, github=True):
+def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, source_repo=None, github=True,
+                   inspect_images=True):
     """Everything the site shows. `repo_root` is the MAD tree to describe (models, docker/, Primus);
-    `status` (the curated data) can come from a different checkout."""
+    `status` (the curated data) can come from a different checkout. `inspect_images` reads base
+    images' ROCm versions from their registries where the tag does not encode one."""
     warnings = []
     excluded = set(status["exclude"])
     models = [m for m in discover_models(repo_root) if m["name"] not in excluded]
@@ -538,9 +561,10 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
         warn("scripts/Primus is not checked out; Primus/JAX configs are missing from this snapshot", warnings)
 
     images = {}
+    lookup = image_registry.rocm_version if inspect_images else None
     for m in models:
         if m["dockerfile"] not in images:
-            images[m["dockerfile"]] = describe_image(m["dockerfile"], status["rocm_overrides"], warnings, repo_root)
+            images[m["dockerfile"]] = describe_image(m["dockerfile"], status["rocm_overrides"], warnings, repo_root, lookup)
 
     hidden = multinode_only(repo_root)
     rows = [describe_model(m, status["frameworks"], status["suite_tags"], images, is_opt_in(m, hidden)) for m in models]

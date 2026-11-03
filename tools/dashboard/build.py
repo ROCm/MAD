@@ -222,7 +222,7 @@ def summarize(snapshot, pages, frameworks):
         "sku_families": {sku: sum(sku in f["skus"] for f in pages) for sku in snapshot["skus"]},
         "fw_slugs": {fw["name"]: fw["slug"] for fw in frameworks},
         "scale": {t: sum(t in f["scale"] for f in pages) for t in ("multi", "both", "slurm", "k8s", "opt-in")},
-        "rocm_versions": sorted({i["rocm"] for i in snapshot["images"]} - {"unknown", "floating"}, key=_version_order),
+        "rocm_versions": sorted({i["rocm"] for i in snapshot["images"]} - {"unknown", "latest"}, key=_version_order),
     }
 
 
@@ -410,7 +410,7 @@ def roadmap_report(status, repo_root):
     if not source.get("repo") or not token:
         sys.exit("ERROR: --roadmap-report needs roadmap_source in status.yaml and a GitHub token")
     raw = github_roadmap.fetch(source["repo"], source.get("label", "new-model"), token)
-    rows = collect.build_snapshot(status, repo_root=repo_root, github=False)["models"]
+    rows = collect.build_snapshot(status, repo_root=repo_root, github=False, inspect_images=False)["models"]
     files = github_roadmap.Files(token)
     oncoming, landed = github_roadmap.build_roadmap(raw, rows, status["frameworks"], source.get("label", "new-model"), files)
     print(f"Roadmap from {source['repo']} (label '{source.get('label', 'new-model')}'): {len(oncoming)} oncoming")
@@ -436,7 +436,8 @@ def main():
     parser.add_argument("--repo-root", default=collect.REPO_ROOT,
                         help="MAD checkout to describe (default: this one); dashboard/ data always comes from here")
     parser.add_argument("--source-repo", help="GitHub owner/name of --repo-root for links and recipes (default: its origin)")
-    parser.add_argument("--offline", action="store_true", help="do not read the roadmap from GitHub")
+    parser.add_argument("--offline", action="store_true",
+                        help="do not read the roadmap from GitHub or base images' ROCm versions from their registries")
     parser.add_argument("--logos", choices=["official", "neutral"],
                         help="brand logos or neutral monograms/glyphs (default: `logos:` in dashboard/icons.yaml)")
     parser.add_argument("--roadmap-report", action="store_true",
@@ -450,7 +451,8 @@ def main():
 
     status = collect.load_status(internal_roadmap_path=collect.INTERNAL_ROADMAP_PATH if args.internal else None)
     repo_root = os.path.abspath(args.repo_root)
-    snapshot_args = {"repo_root": repo_root, "source_repo": args.source_repo, "github": not args.offline}
+    snapshot_args = {"repo_root": repo_root, "source_repo": args.source_repo, "github": not args.offline,
+                     "inspect_images": not args.offline}
 
     if args.roadmap_report:
         roadmap_report(status, repo_root)
