@@ -33,8 +33,9 @@ SHELL ["/bin/bash", "-c"]
 WORKDIR /workspace
 # =============================================================================
 # Step 1: Python in a venv at /opt/mad/venv (same path as the AMD backend)
+# pipefail: a failed uv download piped into sh must fail here, not as "uv: not found".
 # =============================================================================
-RUN set -e; \
+RUN set -eo pipefail; \
     apt-get update -y && \
     apt-get install -y --no-install-recommends \
         ca-certificates curl git jq python3 python3-venv wget; \
