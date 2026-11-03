@@ -3,7 +3,7 @@
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rc=0
-for t in gate_check.sh argv_assert.sh; do
+for t in gate_check.sh argv_assert.sh gpu_clean_assert.sh fault_capture_assert.sh jit_lock_assert.sh parse_to_csv_assert.sh bench_model_name_assert.sh gpu_mem_trace_assert.sh; do
   echo "############### $t ###############"
   env -i PATH="$PATH" HOME="$HOME" bash "$DIR/$t" || rc=1
   echo ""

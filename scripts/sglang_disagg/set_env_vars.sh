@@ -21,7 +21,7 @@ export NCCL_SOCKET_IFNAME=$(ip route | grep '^default' | awk '{print $NF}' | hea
 export GLOO_SOCKET_IFNAME=$(ip route | grep '^default' | awk '{print $NF}' | head -n 1)
 
 export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME},mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9
-export IBDEVICES=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9
+export IBDEVICES="${IBDEVICES:-${IB_DEVICES:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}}"
 
 
 # export CUDA_DEVICE_MAX_CONNECTIONS=1
