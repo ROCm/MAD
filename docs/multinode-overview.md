@@ -4,7 +4,8 @@ This page explains the ideas behind the multinode inference workloads in MAD. Re
 before [multinode-running.md](multinode-running.md), which shows how to run them, and
 before the per-launcher references ([vllm-disagg.md](vllm-disagg.md),
 [sglang-disagg.md](sglang-disagg.md)). For the words used across all docs pages, see the
-glossary in [README.md](README.md).
+glossary in [README.md](README.md). For a map of the code a run goes through, layer by layer,
+see [multinode-architecture.md](multinode-architecture.md).
 
 ## Contents
 
@@ -129,14 +130,15 @@ nodes joined by the MoRIIO connector. See [kimi-k3.md](kimi-k3.md) for the model
 ## The three launchers
 
 Each workload directory holds **model cards** in its `models.json`. A card names the
-launcher script, the node count, the Dockerfile and the environment. The launcher is
-one SLURM batch script.
+launcher script, the node count, the Dockerfile and pin set, and the environment. The
+launcher is one SLURM batch script; on every node it runs that directory's `node.sh`,
+which starts the node's container.
 
-| Directory | Launcher | What it runs | In-container entry point |
-|---|---|---|---|
-| [`scripts/vllm_dissag/`](../scripts/vllm_dissag/) | `run_xPyD_models.slurm` | vLLM disaggregated prefill/decode | `vllm_disagg.sh` |
-| [`scripts/sglang_disagg/`](../scripts/sglang_disagg/) | `run_xPyD_models.slurm` | SGLang disaggregated prefill/decode | `sglang_disagg_mori_io_ep.sh` |
-| [`scripts/vllm_multinode/`](../scripts/vllm_multinode/) | `run_multinode.slurm` | vLLM colocated, one instance across N nodes | `serve_colocated.sh` |
+| Directory | Launcher | What it runs | Per-node program | In-container entry point |
+|---|---|---|---|---|
+| [`scripts/vllm_dissag/`](../scripts/vllm_dissag/) | `run_xPyD_models.slurm` | vLLM disaggregated prefill/decode | `node.sh` | `vllm_disagg.sh` |
+| [`scripts/sglang_disagg/`](../scripts/sglang_disagg/) | `run_xPyD_models.slurm` | SGLang disaggregated prefill/decode | `node.sh` | `sglang_disagg_mori_io_ep.sh` |
+| [`scripts/vllm_multinode/`](../scripts/vllm_multinode/) | `run_multinode.slurm` | vLLM colocated, one instance across N nodes | `node.sh` | `serve_colocated.sh` |
 
 All three source [`scripts/common/cluster.sh`](../scripts/common/cluster.sh), the
 site configuration: weight locations, fabric devices, ports and timeouts. Every value
@@ -145,15 +147,32 @@ there is `${VAR:-default}`, so anything you set in the environment wins. See
 
 Every launcher follows the same pattern:
 
-1. It runs on the first node of the allocation (the batch host).
-2. It validates the model and the topology, checks the GPU architecture, and finds the
+1. It runs on the first node of the allocation (the batch host), or, under a per-node
+   dispatch, once on every node.
+2. It records the submitted environment, applies a topology spec file if `MAD_TOPOLOGY`
+   names one, sources `cluster.sh`, and applies the recipe (configuration layers).
+3. It validates the model and the topology, checks the GPU architecture, and finds the
    weights on every node.
-3. It gathers the IP address of each node with `srun`.
-4. It starts one container per node with `srun ... docker run`. Inside each container,
-   `NODE_RANK` is the task's `SLURM_PROCID`, and the entry point branches on it.
-5. When the benchmark finishes, it stops the containers. The two vLLM launchers then
-   copy `perf.csv` to `perf_<MODEL_NAME>.csv` for madengine to collect, and exit 1 if
-   there is none.
+4. It takes the nodes it needs in the scheduler's order and gathers each one's IP address.
+5. Through the dispatcher it runs `node.sh` once per node. `node.sh` starts that node's
+   container with `docker run`. Inside each container, `NODE_RANK` is the node's rank
+   (`SLURM_PROCID`), and the entry point branches on it.
+6. When every node is done, it removes the containers. Rank 0 copies `perf.csv` to
+   `perf_<MODEL_NAME>.csv` for madengine to collect, and fails the job when a node's
+   container failed, there are no results, or a row is `FAILURE`.
+
+How the launcher reaches its nodes is the dispatcher's job
+([`scripts/common/dispatch/dispatch.sh`](../scripts/common/dispatch/dispatch.sh)),
+selected by `MAD_DISPATCH`:
+
+| `MAD_DISPATCH` | How the nodes are reached | Used by |
+|---|---|---|
+| `slurm-srun` (default) | One allocation spanning every node; one `srun` step per call | `sbatch`, `salloc`, madengine on SLURM |
+| `spur-array` | A job array, one single-node task per node; the tasks meet in a rendezvous directory on shared storage, and task 0 makes the verdict. Selected by itself in a job-array task | Schedulers where `srun` does not fan out across nodes, such as Spur |
+| `k8s-indexed` | One pod per node of a Kubernetes Indexed Job, meeting the same way on the shared results volume | Kubernetes (set by the pod entry point) |
+
+Each node runs the same container command under all three; `snapshot.py --equivalence`
+checks it for every card. See [multinode-architecture.md](multinode-architecture.md).
 
 ## How madengine runs a launcher: slurm_multi
 
@@ -177,14 +196,14 @@ What madengine does on `madengine run`:
 3. For registry images, it runs a parallel `srun docker pull` on all allocated nodes.
 4. It submits the wrapper with `sbatch`. Inside an existing `salloc` allocation
    (`SLURM_JOB_ID` is set), it runs the wrapper synchronously with `bash` instead.
-5. The `.slurm` script starts the per-node containers with `srun` and writes
+5. The `.slurm` script runs `node.sh` on every node (one container each) and writes
    `perf.csv`.
 6. madengine writes a completion marker and collects the results.
 
 ```
 madengine build --use-image <image>   -> manifest with the image, card's slurm/distributed merged in
 madengine run --manifest-file ...     -> wrapper SBATCH, parallel docker pull, sbatch (or bash in salloc)
-card's .slurm script on the head node -> srun + docker run per node, writes perf.csv
+card's .slurm script on the head node -> node.sh + docker run per node, writes perf.csv
 ```
 
 Consequences worth knowing:
@@ -203,13 +222,14 @@ How to run a card this way is in [multinode-running.md](multinode-running.md).
 ### On Kubernetes
 
 The same cards run on Kubernetes without changing their launchers. The nodes are pods of an
-Indexed Job (one per node of the card, reachable by hostname through a headless Service), every
-pod runs the card's image, and pod 0 runs the card's `.slurm` script with the `SLURM_*` variables
-a batch script sees. Small stand-ins on `PATH` turn its `srun` into tasks sent to the other pods,
-its `docker run` into the command run in the pod itself, and its `scontrol show hostnames` into
-the list of pods. A card can be submitted this way with madengine (a `k8s` block instead of
-`slurm`) or standalone with [`scripts/common/k8s/submit.py`](../scripts/common/k8s/submit.py),
-the counterpart of `sbatch`. See [multinode-kubernetes.md](multinode-kubernetes.md).
+Indexed Job (one per node of the card, reachable by hostname through a headless Service), and
+every pod runs the card's image. Each pod runs the card's `.slurm` script as its own node
+(`MAD_DISPATCH=k8s-indexed`), with the `SLURM_*` variables a batch script sees; the pods meet in a
+rendezvous directory on the shared results volume, and pod 0 makes the verdict. Because the pod
+already is the container, a stand-in on `PATH` runs the launcher's `docker run` command in the pod
+itself. A card can be submitted this way with madengine (a `k8s` block instead of `slurm`) or
+standalone with [`scripts/common/k8s/submit.py`](../scripts/common/k8s/submit.py), the
+counterpart of `sbatch`. See [multinode-kubernetes.md](multinode-kubernetes.md).
 
 ## Parallelism terms
 
@@ -367,11 +387,11 @@ How the pieces fit, from `sbatch` down to the per-node `vllm serve` workers.
 flowchart TB
     user([user / CI]) -->|"sbatch + env\n(CONNECTOR, WIDE_EP, EP_BACKEND,\nMODEL_NAME, xP, yD, RUN_MORI/RUN_DEEPEP)"| slurm
 
-    subgraph host["Submit host"]
-        slurm["run_xPyD_models.slurm\n• resolve script dir\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• docker run per node (-e env plumb)"]
+    subgraph host["Batch host"]
+        slurm["run_xPyD_models.slurm\n• resolve script dir\n• config layers + topology spec\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• node.sh on every node (dispatcher)"]
     end
 
-    slurm -->|"srun + docker run\n(one container per node)"| n0
+    slurm -->|"dispatch_run: node.sh\n→ docker run (one container per node)"| n0
     slurm --> n1
     slurm --> n2
     slurm --> n3
@@ -559,7 +579,7 @@ flowchart TD
     bf & mf & rf & ef --> compose["MODEL_CONFIG_PREFILL / _DECODE\n(passed to connector_launch_worker)"]
 
     subgraph envlayer["ENV precedence (low → high)"]
-        c1["connector default\nexport VAR=\${VAR:-default}"] --> c2["models.yaml env:\n(exported before setup_env)"] --> c3["slurm -e VAR=…\n(submit/site override, wins)"]
+        c1["connector default\nexport VAR=\${VAR:-default}"] --> c2["models.yaml env:\n(exported before setup_env)"] --> c3["submit time -e VAR=…\n(wins)"]
     end
     envb -.-> c2
 

@@ -17,8 +17,8 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 
 | Term | Meaning |
 |---|---|
-| Model card | One entry in a `models.json` file. It names the Dockerfile, the launcher script, the node count and the environment. madengine selects cards by `--tags`. |
-| Launcher | The batch script a card names in `scripts`, for example `scripts/vllm_dissag/run_xPyD_models.slurm`. It runs on the first node of the allocation and starts one container per node with `srun` and `docker run`. |
+| Model card | One entry in a `models.json` file. It names the Dockerfile (and, for the distributed-inference images, the pin set), the launcher script, the node count and the environment. madengine selects cards by `--tags`. |
+| Launcher | The batch script a card names in `scripts`, for example `scripts/vllm_dissag/run_xPyD_models.slurm`. It runs on the first node of the allocation (or once per node under a per-node dispatch), and runs its `node.sh` on every node through the dispatcher; `node.sh` starts that node's container with `docker run`. See [multinode-architecture.md](multinode-architecture.md). |
 | Recipe | The per-model serving settings in `scripts/vllm_dissag/models.yaml` or `scripts/sglang_disagg/models.yaml`: serve flags per role and mode, and (vLLM only) per-model environment. |
 | Allocation | What SLURM gives the job: partition, node count, GPUs per node, exclusivity, time limit. |
 | Container environment | The environment variables the serving processes see inside each container. |
@@ -33,11 +33,12 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 | Additional context | `--additional-context`, `--additional-context-file` | Per-site and per-run overrides of anything madengine handles | madengine | Before submit |
 | Model card | `scripts/<dir>/models.json`, root `models.json` | Image, launcher, node count, topology env | madengine; you, under plain `sbatch` | Before submit |
 | Layered config | `mad-config.yaml` (or a file named by `MAD_CONFIG`) | A model's env and its benchmark env, by layer | madengine | Before submit |
+| Topology spec | A JSON file named by `MAD_TOPOLOGY` | The run's roles, node counts and parallelism, in place of `xP` / `yD` / ... | The launcher (`scripts/common/topology/apply.sh`) | In the batch script, before `cluster.sh` |
 | Site facts | `scripts/common/cluster.sh` | Weight roots, fabric, ports, timeouts, partition default for hand runs | The launcher | In the batch script, before `docker run` |
 | Connector env files | `scripts/vllm_dissag/connectors/*.env` | Platform env each connector must have at container start | `scripts/vllm_dissag/run_xPyD_models.slurm` | Before `docker run`, forwarded with `-e` |
-| Recipe | `scripts/vllm_dissag/models.yaml`, `scripts/sglang_disagg/models.yaml` | Serve flags per role and mode, per-model env | The in-container launcher | In the job |
+| Recipe | `scripts/vllm_dissag/models.yaml`, `scripts/sglang_disagg/models.yaml` | Serve flags per role and mode, per-model env | The launcher (its `env:` block, over site and connector defaults) and the in-container launcher | In the batch script and in the job |
 | Connector and launcher defaults | `connectors/moriio.sh`, `connectors/rixl.sh`, `scripts/sglang_disagg/mori_ep_env.sh` with `scripts/sglang_disagg/connectors/mori.env` | `${VAR:-default}` fallbacks | The in-container launcher | In the job |
-| Image | `docker/*.Dockerfile` | Build-time pins, cache locations | `docker build` | At build |
+| Image | `docker/di_vllm.ubuntu.amd.Dockerfile`, `docker/di_sglang.ubuntu.amd.Dockerfile` and the pin sets in `docker/pins/` | Every source by commit, the base image per GPU architecture, cache locations | `docker build` | At build |
 
 Everything that reaches a serving process ends up as an environment variable or a serve flag.
 The environment is the only thing that crosses both the container boundary and the choice of
@@ -56,7 +57,9 @@ Example, from [`scripts/vllm_dissag/models.json`](../scripts/vllm_dissag/models.
 ```json
 {
   "name": "pyt_vllm_disagg_mori_kimi-k3",
-  "dockerfile": "../../docker/vllm_kimi_k3",
+  "dockerfile": "../../docker/di_vllm",
+  "dockercontext": ".",
+  "docker_build_arg": {"PINS": "vllm-kimi-k3"},
   "scripts": "run_xPyD_models.slurm",
   "multiple_results": "perf_Kimi-K3.csv",
   "tags": ["pyt", "vllm", "vllm_disagg", "mori_ep", "inference"],
@@ -81,14 +84,15 @@ Example, from [`scripts/vllm_dissag/models.json`](../scripts/vllm_dissag/models.
 
 | Field | What it holds | Who reads it |
 |---|---|---|
-| `dockerfile` | The Dockerfile prefix. `../../docker/vllm_kimi_k3` means `docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`. | madengine build |
+| `dockerfile` | The Dockerfile prefix. `../../docker/di_vllm` means `docker/di_vllm.ubuntu.amd.Dockerfile`. | madengine build |
+| `dockercontext` | The build context. The distributed-inference cards use `.` (the repository root), because their Dockerfiles copy `docker/pins/` and `docker/patches/`. | madengine build |
 | `scripts` | The launcher, relative to the card's directory. | madengine; you under `sbatch` |
 | `env_vars` | The launcher's contract: model name, topology, benchmark selection, model properties such as `REQUIRE_LOCAL_WEIGHTS`. | madengine exports them into the generated batch script; under plain `sbatch` you export them yourself |
 | `slurm` | Allocation for this card: `nodes`, `gpus_per_node`, `time`. madengine copies `partition`, `nodes`, `gpus_per_node`, `time`, `exclusive`, `reservation`, `output_dir` and `nodelist` from it, but only for keys you did not set in `--additional-context`. | madengine |
 | `distributed` | `launcher` (`slurm_multi` for every multinode card here) and `nnodes`. `slurm_multi` means the card's own script manages its per-node containers. | madengine |
 | `args` | Arguments. madengine passes them to the launcher script, not to `sbatch`. See the note below. | madengine; you |
 | `skip_gpu_arch` | GPU architectures the card must not run on. madengine enforces it before submission. | madengine |
-| `docker_build_arg` | Build arguments for this card's image. The additional context overrides the card for the same key. | madengine build |
+| `docker_build_arg` | Build arguments for this card's image. The distributed-inference cards name their pin set here (`PINS`), and some also `MAD_SYSTEM_GPU_ARCHITECTURE`. The additional context overrides the card for the same key. | madengine build |
 | `timeout` | madengine's per-model timeout in seconds. `0` or `-1` means no timeout. | madengine |
 | `multiple_results` | The CSV name the launcher publishes for madengine. | madengine |
 
@@ -532,7 +536,8 @@ directory that shadows it), and `MODEL_DIR` only when it is outside the other tw
 | `cluster_perf_failures CSV` | The number of `FAILURE` rows in a `perf.csv`. The launchers fail the job on any |
 | `cluster_job_verdict RC SRC DST [REQUIRE]` | Publishes the perf CSV, then fails on a node's non-zero status, missing results, or a `FAILURE` row |
 | `cluster_barrier_port` | This job's container barrier port, `21000 + job id mod 8000` |
-| `dispatch_node_addresses NODE`, `dispatch_gather STEP CMD`, `dispatch_run STEP NODES CMD`, `dispatch_is_leader` | How a launcher reaches its nodes: `srun` under one allocation, or a job array (`scripts/common/dispatch/dispatch.sh`, [multinode-running.md](multinode-running.md#as-a-job-array-one-task-per-node)) |
+| `dispatch_node_addresses NODE`, `dispatch_gather STEP CMD`, `dispatch_run STEP NODES CMD`, `dispatch_is_leader` | How a launcher reaches its nodes: `srun` under one allocation, a job array, or Kubernetes pods (`MAD_DISPATCH`; `scripts/common/dispatch/dispatch.sh`, [multinode-running.md](multinode-running.md#as-a-job-array-one-task-per-node)) |
+| `launcher_select_nodes`, `launcher_node_ips`, `launcher_run_nodes`, `launcher_verdict` | The steps every launcher takes around its own settings: pick its nodes in the scheduler's order, find their addresses, run `node.sh` on each, give the verdict (`scripts/common/launcher/launcher_lib.sh`; see [multinode-architecture.md](multinode-architecture.md)) |
 
 ### Ports, timeouts, container
 
@@ -676,14 +681,17 @@ Where each of these values comes from when you do not pass it is in the
 
 ## 8. `MAD_SYSTEM_GPU_ARCHITECTURE` for images built per GPU
 
-Some Dockerfiles compile for exactly one GPU and have no default. The Kimi-K3 image,
-[`docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`](../docker/vllm_kimi_k3.ubuntu.amd.Dockerfile),
-declares `ARG MAD_SYSTEM_GPU_ARCHITECTURE` and refuses anything but `gfx942` or `gfx950`. MoRI's
-JIT target, the vLLM compile, and (with `WITH_NIXL=1`) rocSHMEM and DeepEP follow it. An image
-built for the wrong arch fails at run time, so the build refuses to guess.
+The distributed-inference images are built for exactly one GPU. Their Dockerfiles,
+[`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile) and
+[`docker/di_sglang.ubuntu.amd.Dockerfile`](../docker/di_sglang.ubuntu.amd.Dockerfile), build the pin
+set named by `PINS` for `MAD_SYSTEM_GPU_ARCHITECTURE` on the set's base image for that architecture,
+and stop on an architecture the set is not for or on another base image. The vLLM Dockerfile has
+no default for the architecture; the SGLang one defaults to `gfx942`. Pin sets are described in
+[`docker/pins/README.md`](../docker/pins/README.md).
 
 Where the value comes from:
 
+- Some cards name it in `docker_build_arg` (the `vllm-mori121` and `vllm-glm51` cards say `gfx942`).
 - A full local `madengine run` (build and run on one GPU node) auto-detects the local GPU and
   injects it into `docker_build_arg`, unless you set it.
 - A `madengine build` on a host without the target GPU (for example a SLURM login node) cannot
@@ -695,11 +703,15 @@ madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --registry <your-registry> \
   --additional-context '{"slurm": {}, "docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 ```
 
-- By hand:
+madengine adds the pin set's base image for the build's architecture.
+
+- By hand, from the repository root, `pins.py build-args` prints `PINS`, the base image and the
+  architecture:
 
 ```bash
-docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
-  --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 -t <registry>/vllm-kimi-k3:gfx942 .
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
+  -t <registry>/di-vllm:vllm-kimi-k3-gfx942 .
 ```
 
 Runtime differences between the arches (AITER MLA on gfx950 only, the int4 MoE requant on gfx942)
@@ -862,7 +874,7 @@ written as `<set>`.
 | Log location | `LOG_PATH` | |
 | Benchmark knobs | Card or `--additional-context` `env_vars`: `BENCHMARK_SCRIPT`, `BENCHMARK_COMBINATIONS`, `BENCHMARK_CON`, `BENCHMARK_ITR`, `NIAH_WORDS`, `DURATION`, `AGENTIC_*` | Or `benchmark:` in `mad-config.yaml` |
 | Image | `--use-image` on `madengine build`, or `MAD_CONTAINER_IMAGE`; plain `sbatch`: `DOCKER_IMAGE_NAME` | The card's `dockerfile` for what madengine builds |
-| Image base or build pins | `docker_build_arg` in the card or the additional context | e.g. `BASE_DOCKER`, `WITH_NIXL` |
+| Image sources and build pins | The pin set in `docker/pins/<name>.json`; which set a card builds is `docker_build_arg.PINS` | See [`docker/pins/README.md`](../docker/pins/README.md). Other images: `docker_build_arg`, e.g. `BASE_DOCKER` |
 | GPU arch for a build | `docker_build_arg.MAD_SYSTEM_GPU_ARCHITECTURE` | `--build-arg` by hand |
 | GPU arch check | `GPU_ARCHS` in the recipe; card `skip_gpu_arch`; `GPU_ARCH_CHECK=0` to bypass | |
 | One-off override for a single run | `--additional-context '{"env_vars": {...}, "slurm": {...}}'`; plain `sbatch`: `export` before `sbatch` | Only forwarded names reach the container |

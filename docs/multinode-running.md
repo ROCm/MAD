@@ -52,26 +52,29 @@ path set, so a card runs the same either way.
 |---|---|
 | The card: launcher, node count, image recipe, environment | `scripts/<dir>/models.json` |
 | The recipe: serve flags and env per model (vLLM disagg; the colocated launcher reads its `env:` block) | [`scripts/vllm_dissag/models.yaml`](../scripts/vllm_dissag/models.yaml) |
-| The image | `docker/<name>.ubuntu.amd.Dockerfile`, named by the card's `dockerfile` |
+| The image | `docker/di_vllm.ubuntu.amd.Dockerfile` or `docker/di_sglang.ubuntu.amd.Dockerfile`, built from the pin set the card names (`docker_build_arg.PINS`, a file in [`docker/pins/`](../docker/pins/README.md)) |
 | The allocation defaults: partition, GPUs per node, exclusive | madengine's SLURM presets (`amd-rccl`, 8, exclusive); override in `--additional-context` |
 | The cluster's in-job facts: weights, fabric, ports | [`scripts/common/cluster.sh`](../scripts/common/cluster.sh) |
 
-The environment the launcher starts with is layered, weakest first:
+The launcher's environment is layered, weakest first:
 
-1. `cluster.sh` defaults
-2. the recipe in `models.yaml`
-3. the card's `env_vars`
-4. anything you set yourself: madengine's `env_vars`, or your exported environment
-   under `sbatch`
+1. `cluster.sh` defaults (site)
+2. the connector's `.env` file (vLLM disaggregated)
+3. the recipe's `env:` block in `models.yaml`
+4. a topology spec file named by `MAD_TOPOLOGY`, if any
+5. submit time: the card's `env_vars`, then anything you set yourself (madengine's
+   `env_vars`, or your exported environment under `sbatch`)
 
-[configuration.md](configuration.md) covers every layer in detail.
+Each run records every name with the layer that set it in `$LOG_PATH/<job id>/config.resolved.json`.
+[configuration.md](configuration.md#precedence) covers every layer in detail, and
+[multinode-architecture.md](multinode-architecture.md) shows where each step of a run lives.
 
 ## Prerequisites
 
 | Requirement | Detail |
 |---|---|
 | A SLURM cluster | `xP + yD` nodes for a disaggregated card (minimum 2: `xP=1`, `yD=1`); the card's node count for a colocated card. 8 GPUs per node. |
-| Docker on the compute nodes | Not only on the login node. The launchers call `docker run` under `srun`; podman- or apptainer-only clusters will not work without editing the launcher. |
+| Docker on the compute nodes | Not only on the login node. Each node's `node.sh` calls `docker run` there; podman- or apptainer-only clusters will not work without editing the launcher. |
 | A way to get the image onto the nodes | A registry the compute nodes can pull from, or `docker save` / `docker load` through shared storage. See [How the image reaches the nodes](#how-the-image-reaches-the-nodes). |
 | An RDMA fabric between nodes | The defaults assume 8 NICs per node. See [Fabric](#fabric). |
 | Model weights on every allocated node | Local NVMe or shared NFS. See [Model weights](#model-weights). |
@@ -532,8 +535,9 @@ container with the same engine command on every node (checked by
 
 - **madengine with a registry.** `madengine build --registry <registry>` pushes the
   image. At run time madengine runs a parallel `srun docker pull` on all nodes.
-- **Every launcher pulls too.** Each node runs `docker pull $DOCKER_IMAGE_NAME` before
-  `docker run`, and tolerates a failed pull. A local-only tag must therefore already be
+- **The vLLM launchers pull too.** Each node's `node.sh` runs `docker pull $DOCKER_IMAGE_NAME`
+  before `docker run`, and tolerates a failed pull. The SGLang launcher does not pull; the image
+  must already be on every node, or `docker run` pulls it. A local-only tag must therefore already be
   on every node or be in a registry the nodes can reach. For a private registry, log in
   on the nodes first.
 - **No registry.** `--build-on-compute` requires `--registry`, so on a registry-less
@@ -541,8 +545,10 @@ container with the same engine command on every node (checked by
   `docker save` to shared storage, then `docker load` on each node. That works and
   needs no registry.
 
-Build instructions for each image are in [vllm-disagg.md](vllm-disagg.md#building-the-docker-image),
-[sglang-disagg.md](sglang-disagg.md) and [kimi-k3.md](kimi-k3.md).
+Every distributed-inference image is built from a pin set; how to build one by hand is in
+[`docker/pins/README.md`](../docker/pins/README.md), and per launcher in
+[vllm-disagg.md](vllm-disagg.md#building-the-docker-image),
+[sglang-disagg.md](sglang-disagg.md#building-the-image) and [kimi-k3.md](kimi-k3.md#the-image).
 
 ## Logs
 
@@ -670,7 +676,7 @@ which. Run a card at one of those shapes before suspecting the recipe.
 | `OSError: libibverbs.so.1: version IBVERBS_PRIVATE_57 not found (required by libmlx5.so.1)`, about ten seconds into start-up | Only the versioned host `libibverbs` was mounted, so the image copy was still loaded while the host `libmlx5` needed the host one. | Fixed: the launchers mount the SONAME files and the versioned files. |
 | `RuntimeError: The memory capacity is unbalanced. Some GPUs may be occupied by other processes.` | A previous job's container still holds GPU memory. | Fixed going forward (cancelled jobs stop their containers). On an affected node, stop the leftover container. |
 | `LLVM ERROR: Do not know how to expand this operator's operand!` in `determine_available_memory`, with `quantization_config=None` | gfx942 cannot codegen the a16w4 SiTUv2 heuristic kernel; the MoE must be requantised to int4. | All Kimi-K3 gfx942 cards set `AITER_SITUV2_A8W4=1` and `--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'`. See [kimi-k3.md](kimi-k3.md). |
-| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (setuptools 80 or later). | `PIP_CONSTRAINT` in the Dockerfile. See [kimi-k3.md](kimi-k3.md). |
+| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (setuptools 80 or later). | The pin set's `build.pip_constraints`, applied as `PIP_CONSTRAINT`. See [kimi-k3.md](kimi-k3.md#the-image). |
 | Engine init fails with a `module_gemm_common` import error, or `device_gemm ... does not support this GEMM problem` | A MoE model on an image whose AITER is not co-versioned for its MoE GEMM path. | Use the purpose-built MoRI-EP image for MoE serving. Dense models serve on the standard image. |
 | Every request returns 500 after the first disagg write; MoRI `RegisterRdmaMemoryRegion` fails with EFAULT (errno 14) | ROCm 7.2.3 cannot dmabuf-export HIP-VMM memory, and `expandable_segments` was on. | `connectors/<connector>.env` sets `expandable_segments:False` on both allocators and forwards it at container start. Do not override it. |
 | `Error: vllm-router not found` | The image has no router on `PATH`. | Set `ROUTER_BINARY=<path>` to a built `vllm-router` on a shared mount, or use the toy proxy (`PROXY_TYPE`). |
@@ -731,6 +737,15 @@ python3 scripts/common/tests/snapshot/snapshot.py --equivalence k8s-indexed # th
 bash scripts/common/tests/launcher_verdict_assert.sh  # job verdict, exit status, cancel, ports, env
 bash scripts/common/tests/node_lib_assert.sh          # the per-node library (mounts, JIT cache, run/trap)
 bash scripts/common/tests/dispatch_assert.sh          # dispatch selection, failing nodes, missing tasks
+bash scripts/common/tests/launcher_lib_assert.sh      # node selection, addresses, node program, verdict
+bash scripts/common/tests/config_layers_assert.sh     # the configuration layers and config.resolved.json
+bash scripts/common/tests/cluster_fabric_assert.sh    # cluster.sh's fabric fallback on fake sysfs trees
+python3 scripts/common/tests/snapshot/snapshot.py --spooled    # each launcher run as sbatch runs it, from a spool copy
+python3 scripts/common/tests/snapshot/snapshot.py --spec-file  # every card run from a topology spec file
+python3 -m unittest discover -s scripts/common/topology/tests -v
+python3 -m unittest discover -s scripts/common/config/tests -v
+python3 -m unittest discover -s scripts/common/k8s/tests -v
+python3 -m unittest discover -s docker/pins/tests -v           # the pin sets
 ```
 
 A change that alters what a node runs on purpose shows up as a snapshot difference:

@@ -335,7 +335,7 @@ count, not the EP width. TP8 within each node and PP across nodes puts about 102
 - An RDMA fabric between nodes. The defaults assume 8 NICs per node.
 - The checkpoint is about 1.5 TB. Local NVMe on every node is strongly recommended; the cards set
   `REQUIRE_LOCAL_WEIGHTS=1` (see [Weights](#weights)).
-- Docker on the compute nodes. The launchers call `docker run` under `srun`; podman or
+- Docker on the compute nodes. Each node's `node.sh` calls `docker run` there; podman or
   apptainer-only clusters will not work without editing the launcher.
 
 ### Quick start
@@ -383,7 +383,7 @@ The launcher then pulls the image onto every node in parallel.
 
 **How madengine runs these cards.** All of them are `slurm_multi` cards. madengine generates a
 wrapper batch script that runs the card's `.slurm` script on the head node with `bash`, and that
-script manages its own per-node containers through `srun`. The `#SBATCH` header inside the launcher
+script manages its own per-node containers (`node.sh` on every node, through `srun` by default). The `#SBATCH` header inside the launcher
 is inert; every allocation setting comes from madengine. Nothing is passed to the `.slurm` script
 on its command line; the topology travels in `env_vars`.
 
@@ -477,87 +477,85 @@ explicit `MODEL_PATH` skips the probe.
 
 ### The image
 
-Every multinode Kimi-K3 vLLM card, colocated and disaggregated, MI300X and MI355X, builds one
-Dockerfile:
-[`docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`](../docker/vllm_kimi_k3.ubuntu.amd.Dockerfile). The card
-field is `"dockerfile": "../../docker/vllm_kimi_k3"`. It replaced three earlier per-arch and
-per-launcher Dockerfiles that were the same stack apart from the GPU arch and a few pins.
+Every multinode Kimi-K3 vLLM card, colocated and disaggregated, MI300X and MI355X, builds the
+vLLM distributed-inference Dockerfile from the `vllm-kimi-k3` pin set:
 
-It is built for exactly one GPU, `MAD_SYSTEM_GPU_ARCHITECTURE` (`gfx942` or `gfx950`). There is no
-default; any other value fails the build. madengine passes it (see
-[configuration.md](configuration.md#8-mad_system_gpu_architecture-for-images-built-per-gpu)).
-MoRI's JIT target, the vLLM compile, and (with `WITH_NIXL=1`) rocSHMEM and DeepEP follow it.
-Runtime differences between the arches (AITER MLA on gfx950 only, the int4 MoE requant on gfx942)
-are recipe settings in `models.yaml`, not build steps.
+```json
+"dockerfile": "../../docker/di_vllm",
+"dockercontext": ".",
+"docker_build_arg": {"PINS": "vllm-kimi-k3"}
+```
+
+[`docker/pins/README.md`](../docker/pins/README.md) is the reference for pin sets: what each one
+pins, the patches carried on upstream commits, and the rules. The pin set itself is
+[`docker/pins/vllm-kimi-k3.json`](../docker/pins/vllm-kimi-k3.json).
+
+The set is for `gfx942` and `gfx950`, and an image is built for exactly one of them,
+`MAD_SYSTEM_GPU_ARCHITECTURE`. The Kimi-K3 cards do not name it, so madengine needs it from the
+build host or from you (see
+[configuration.md](configuration.md#8-mad_system_gpu_architecture-for-images-built-per-gpu));
+madengine adds the set's base image for that architecture. Runtime differences between the arches
+(AITER MLA on gfx950 only, the int4 MoE requant on gfx942) are recipe settings in `models.yaml`,
+not build steps.
 
 Build by hand, from the repository root:
 
 ```bash
-docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
-  --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 \
-  -t <registry>/vllm-kimi-k3:gfx942 .
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
+  -t <registry>/di-vllm:vllm-kimi-k3-gfx942 .
 ```
 
-Build once per cluster, and again after a vLLM pin change. Operators building by hand tag the image
-themselves and pass `DOCKER_IMAGE_NAME` to the slurm script.
+`build-args` prints `PINS`, the base image for the architecture and
+`MAD_SYSTEM_GPU_ARCHITECTURE`; the build stops on another architecture or base. Build once per
+cluster, and again after the pin set moves. Operators building by hand tag the image themselves and
+pass `DOCKER_IMAGE_NAME` to the slurm script.
 
-What it builds, every source pinned to an immutable commit SHA on the open ROCm vLLM CI base
-(`rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491`):
+What the set builds, on the open ROCm vLLM CI base
+(`rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491`, by digest):
 
 | Component | Pin | Notes |
 |---|---|---|
-| MoRI | v1.2.2 (`fe12a11a`) | The shared disagg image pins v1.2.1. Do not disable NIC backends (`USE_IONIC=OFF`, `USE_BNXT=OFF`): that produced a MoRI that deadlocked at the cross-node EP all-to-all init. |
-| AITER | `ROCm/aiter` `68e42f5f` (0.1.17.dev395), built from source | The commit the Kimi-K3 release images ship. Carries the Kimi-K3 tuned MoE configs (`kimik3_{a8w4,fp4}_tuned_fmoe`), `aiter.ops.triton.conv` (K3's vision tower), and the top_k_top_p fix DP-EP disaggregation needs. |
+| MoRI | `fe12a11a` | The `vllm-mori121` set pins v1.2.1. Do not disable NIC backends (`USE_IONIC=OFF`, `USE_BNXT=OFF`): that produced a MoRI that deadlocked at the cross-node EP all-to-all init. |
+| AITER | `ROCm/aiter` `68e42f5f`, built from source | Carries the Kimi-K3 tuned MoE configs (`kimik3_{a8w4,fp4}_tuned_fmoe`), `aiter.ops.triton.conv` (K3's vision tower), and the top_k_top_p fix DP-EP disaggregation needs. |
 | flydsl | 0.2.4 | K3's int4 SiTUv2 path on gfx942 needs flydsl 0.2.4 or later. |
-| vLLM | fork commit `862bfd8` (branch `kimi-k3-wideep-disagg-fullsource-v3`) | Full source compile of the K3 + MoRIIO branch, with all K3 connector fixes committed (see [The three fixes](#the-three-fixes-behind-these-numbers)). |
-| vllm-router | commit `82dc9811` | DP-rank round robin plus the 2P2D KV-notify fix (`remote_dp_rank_override`, `remote_dp_size`). Without it a 2P2D EP16 run wedges on "remote blocks never arrived" expiries, because decode's notify targets the wrong DP rank. |
-| UCX / RIXL / rocSHMEM / DeepEP | with `WITH_NIXL=1` (default) | For the rixl connector. The Kimi recipes use moriio, so `WITH_NIXL=0` is a faster build with the same serving path. |
+| vLLM | upstream `9a7ae4b8` plus `docker/patches/vllm/kimi-k3.patch` | The patch reproduces the Kimi-K3 vLLM fork commit `862bfd8`, with all K3 connector fixes (see [The three fixes](#the-three-fixes-behind-these-numbers)). |
+| vllm-router | upstream `1d10e71f` plus `docker/patches/router/dp-rank-kv-notify.patch` | DP-rank round robin plus the 2P2D KV-notify fix (`remote_dp_rank_override`, `remote_dp_size`; vllm-project/router#181). Without it a 2P2D EP16 run wedges on "remote blocks never arrived" expiries, because decode's notify targets the wrong DP rank. |
+| UCX / RIXL / rocSHMEM / DeepEP | on in this set | For the rixl connector. The Kimi recipes use moriio. |
 
 Why the AITER commit matters: without the K3 tuned MoE configs, K3's MoE profiling shape finds no
 tuned FlyDSL config, falls back to a heuristic kernel, and aborts LLVM inside
-`determine_available_memory`. The worker dies natively with no Python traceback. The two earlier
-donor images carried this same AITER build; building it here replaces copying their site-packages
-over a separately installed AITER, so the image has one base and no second image to pull.
+`determine_available_memory`. The worker dies natively with no Python traceback.
 
 Other build facts:
 
 - **No runtime patchers.** All K3 MoRIIO connector fixes are in the vLLM source the image builds.
   Nothing patches site-packages at start.
-- **No runtime recipe env.** The image ships only cache locations
+- **No runtime recipe env.** Beyond build and library paths, the image sets only cache locations
   (`AITER_JIT_DIR`, `VLLM_CACHE_ROOT`, `TRITON_CACHE_DIR`, `COMGR_CACHE_DIR` under
   `/opt/vllm_cache`). The K3 serving recipe lives in `scripts/vllm_dissag/models.yaml`, and the
   ROCm 7.2.3 GPU-RDMA platform env and MoRI fabric tuning in
   `scripts/vllm_dissag/connectors/moriio.env`. The same image serves any cluster without a rebuild.
 - **Build-time MoRI JIT state is scrubbed.** Verifying `import mori` during the build leaves stale
-  `.hsaco.lock` files under `/root/.mori/jit`. At run time MoRI would wait on a build whose owner is
+  `.hsaco.lock` files under `/root/.mori`. At run time MoRI would wait on a build whose owner is
   gone and deadlock at `ep:0` init, so the image ships `/root/.mori` empty.
 - **The build pins its toolchain, not only its sources.** pip resolves build dependencies in an
   isolated environment from PyPI at build time, so a newer setuptools can break a build whose
   sources have not moved. setuptools 80 added `assert isinstance(self.compiler, CCompiler)` to
   distutils' `build_ext.build_extension`, which MoRI's legacy `Cython.Distutils.build_ext` path
   violates: the `amd_mori` wheel failed with `AssertionError: run() must precede build_extension()`
-  while every pinned SHA was still correct. The Dockerfile sets `PIP_CONSTRAINT` globally
-  (`setuptools<80`). That is the only mechanism that reaches inside pip's build isolation; a plain
-  `pip install setuptools==X` in the image does not.
-
-Build arguments:
-
-| Arg | Default | Meaning |
-|---|---|---|
-| `MAD_SYSTEM_GPU_ARCHITECTURE` | none (required) | `gfx942` or `gfx950` |
-| `BASE_IMAGE` | `rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491` | Open ROCm vLLM CI base |
-| `WITH_NIXL` | `1` | Build UCX/RIXL/rocSHMEM/DeepEP |
-| `NIC_COMPILATION_ARCH` | `cx7` | |
-| `MAX_JOBS`, `NVCC_THREADS` | `32`, `8` | Build parallelism |
-| `SETUPTOOLS_CONSTRAINT` | `setuptools<80` | Written to the global pip constraint |
-| `MORI_REF`, `AITER_REF`, `VLLM_REF`, `ROUTER_REF`, `ROCSHMEM_REF` | the pins above | Commit pins |
+  while every pinned SHA was still correct. The pin set's `build.pip_constraints`
+  (`setuptools<80`) is written to a global `PIP_CONSTRAINT` file. That is the only mechanism that
+  reaches inside pip's build isolation; a plain `pip install setuptools==X` in the image does not.
+- **The image records what it was built from:** `/app/versions.txt` (every component's commit)
+  and `/app/pins.json`.
 
 **Status.** gfx942 (MI300X) is the stack the Kimi-K3 cards run today; single-needle NIAH passed
 from 10K to 900K on 2 prefill and 2 decode nodes with these pins (PR #193), with AITER from the same
 68e42f5f build. gfx950 (MI355X) is bring-up and not validated: nothing shows MoRIIO disaggregation
-with Kimi-K3 has run on gfx950, and the vLLM ref is the fork's gfx942 branch. The same stack has run
+with Kimi-K3 has run on gfx950, and the vLLM patch is the gfx942 line. The same stack has run
 MoRIIO and MoRI-EP on gfx950 for GLM, which needed EP16 start-up deadlock gates and a MoRI combine
-fix that are not in this vLLM ref, and ionic NICs needed a patched MoRI. Expect the first gfx950
+fix that are not in this vLLM, and ionic NICs needed a patched MoRI. Expect the first gfx950
 runs to hit those.
 
 ### Known failure modes
@@ -567,7 +565,7 @@ in every case the symptom is far from the cause.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (above) | `PIP_CONSTRAINT` in the Dockerfile |
+| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (above) | `pip_constraints` in the pin set, applied as `PIP_CONSTRAINT` |
 | `OCI runtime create failed: ... not a directory`, then the surviving node loops on `Waiting for nodes. . .` forever | Docker creates a directory at a missing bind-mount source, so the first run on a node lacking an RDMA library poisons it for all later runs; a `[ -e ]` test matches that directory | The launchers test with `[ -f ]` |
 | `LLVM ERROR: Do not know how to expand this operator's operand!` in `determine_available_memory`, `quantization_config=None` | gfx942 cannot codegen the a16w4 SiTUv2 heuristic kernel; the MoE must be requantized to int4 | All colocated cards set `AITER_SITUV2_A8W4=1` and `--quantization-config` |
 | The job reports COMPLETED with `0 successful, 0 failed` and no `perf.csv` | The launchers warned but returned 0, so a crash looked like a clean run | The launchers `exit 1` when no perf CSV is produced |
@@ -577,17 +575,17 @@ intermittent multinode failure. A node that has never run the launcher works; on
 lacked the library, fails every time after.
 
 **Open: recall at concurrency above 1 on the disaggregated recipes.** The image's vLLM
-(`raviguptaamd/vllm@862bfd8`, 2026-08-11) predates four fixes for requests that share a decode
+(the Kimi-K3 fork commit `862bfd8`, 2026-08-11, which the pin set's patch reproduces) predates four fixes for requests that share a decode
 batch:
 - zeroing KDA (mamba) state blocks when they are recycled;
 - de-aliasing the KDA decode state-index view;
 - trimming the MoRI-EP dispatch output to valid tokens;
 - having the MoRIIO connector wait for every KV group's transfer.
 
-They are in `raviguptaamd/vllm@206fffe` (2026-09-13), together with the int4-SiTU MoE restore on
+They are in the later fork commit `206fffe` (2026-09-13), together with the int4-SiTU MoE restore on
 gfx942 and the MoRI `combine()` fix for 4P/4D. Without them, NIAH recall can drop well below 100%
 once several requests decode together; the single-request NIAH cards don't show it. Moving the
-image to `206fffe` also moves the base image, MoRI and AITER, so it is a separate change that needs
+pin set to `206fffe` also moves the base image, MoRI and AITER, so it is a separate change that needs
 its own validation above concurrency 1. Until then, read disaggregated Kimi-K3 accuracy above
 concurrency 1 with this in mind.
 
@@ -639,7 +637,7 @@ three Kimi models are wideEP only and moriio only; the slurm gate rejects any ot
 | `Kimi-K3-MXFP4` | MI300X gfx942 | 2P/2D, TP2 x DP8 (`EP_TP_SIZE=2`) | `pyt_vllm_disagg_mori_kimi-k3-mxfp4` | Recipe from the out-of-tree standalone launcher (PR #241) |
 | `Kimi-K3-MXFP4-MI355X` | MI355X gfx950 | 2P/2D, TP1 x DP16 (`EP_TP_SIZE=1`) | `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` | Bring-up, not yet run |
 
-All three cards: `dockerfile ../../docker/vllm_kimi_k3`, launcher `run_xPyD_models.slurm`,
+All three cards: `dockerfile ../../docker/di_vllm` with pin set `vllm-kimi-k3`, launcher `run_xPyD_models.slurm`,
 `slurm_multi` with 4 nodes, `slurm.time 24:00:00`, and `env_vars` `xP=2`, `yD=2`, `RUN_MORI=1`,
 `WIDE_EP=1`, `BENCHMARK_SCRIPT=niah`, `NIAH_WORDS=10000,50000,100000,200000`,
 `REQUIRE_LOCAL_WEIGHTS=1`. The MI355X card also sets `MODEL_WEIGHTS_NAME=Kimi-K3-MXFP4`. Results

@@ -8,7 +8,10 @@ flags supplied by a `models.yaml` catalog.
 ## Architecture at a glance
 
 ```
-run_xPyD_models.slurm     # sbatch entry: picks nodes, plumbs env, launches the container per node
+run_xPyD_models.slurm     # sbatch entry: validates, picks nodes, runs node.sh on each node
+        │                 #   (../common/{config,topology,launcher,dispatch})
+        ▼
+node.sh                   # one node: mounts, topology for its rank, docker run (../common/node/node_lib.sh)
         │
         ▼
 vllm_disagg.sh            # THE launcher: role branching, barrier, proxy, benchmark, cleanup
@@ -17,6 +20,9 @@ vllm_disagg.sh            # THE launcher: role branching, barrier, proxy, benchm
    ├── connectors/moriio.sh #  MoRIIOConnector (MoRI-EP wideEP, and MoRIIO+TP)
    └── models.yaml        #   per-model CLI flags + per-model env overrides
 ```
+
+The layers around `vllm_disagg.sh`, and the file that implements each, are mapped in
+[docs/multinode-architecture.md](../../docs/multinode-architecture.md).
 
 Three axes select behavior: the KV-transfer **CONNECTOR**, the **WIDE_EP** parallelism
 mode, and (for wideEP only) the all-to-all **EP_BACKEND**, which is validated against the
@@ -55,24 +61,24 @@ path). The DeepSeek family is wideEP plus moriio+TP (`MORIIO_TP_MODELS`), the TP
 | `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | needs a co-versioned AITER image (see Caveats) |
-| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
-| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
-| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `docker/vllm_kimi_k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
-| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `docker/vllm_kimi_k3` image (built for gfx950); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own pin set (`vllm-glm51`); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
+| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
+| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `vllm-kimi-k3` image (built for gfx950); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
 
 Standalone reference launcher (debug / OCI): the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
 See [ARCHITECTURE.md — Kimi-K3 worker taxonomy](ARCHITECTURE.md#5-kimi-k3-mxfp4-worker-taxonomy-w1w5) for W1–W5 ↔ `NODE_RANK` mapping.
 
-**Docker image (in-tree):** every Kimi-K3 card builds `docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`,
-for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950; madengine and the MAD CI
-pipeline pass it). MAD integration is launcher + yaml + this Dockerfile; the vLLM fork, AITER
-and connector fixes are pinned in it by commit.
+**Docker image:** every Kimi-K3 card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from the
+`vllm-kimi-k3` pin set, for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950).
+The vLLM, AITER and connector fixes are pinned in the set by commit, with patches on upstream
+(see [docker/pins/README.md](../../docker/pins/README.md)).
 
 ```bash
-# Build (once per cluster / after vLLM pin change), from the MAD repo root:
-docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
-  --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 \
+# Build (once per cluster / after the pin set moves), from the MAD repo root:
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
   -t kimik3-wideep-disagg:latest .
 
 # Run via unified launcher (sbatch options, --export included, go BEFORE the script;
@@ -108,34 +114,26 @@ come from `scripts/common/cluster.sh`, which detects the fabric from the adapter
 
 ## Building the Docker image
 
-No public prebuilt image ships — build your own from the fullsource Dockerfile (MoRI +
-AITER + vLLM + vllm-router + optional UCX/RIXL/rocSHMEM/DeepEP, from Git pins on an open
-ROCm ci_base):
+No public prebuilt image ships. Every card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from
+the pin set it names in `docker_build_arg.PINS`:
+
+| Pin set | Models | Transport stack (rixl, DeepEP) |
+|---------|--------|--------------------------------|
+| `vllm-mori121` | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | on |
+| `vllm-glm51` | `GLM-5.1-FP8` | off (MoRI-EP only) |
+| `vllm-kimi-k3` | the Kimi-K3 models | on |
+
+From the MAD root:
 
 ```bash
-cd MAD
-docker build -t <your-registry>/vllm-disagg:local \
-  -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile .
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-mori121 --arch gfx942) \
+  -t <your-registry>/di-vllm:vllm-mori121-gfx942 .
 ```
 
-That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`. `WITH_NIXL=1` (default) builds every transport (moriio TP/wideEP + rixl
-NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image
-(moriio + deepep-from-base, faster build).
-
-`GLM-5.1-FP8` needs its own per-model image, because its vLLM/AITER/MoRI pins differ
-from the DeepSeek-V3/R1 stack the shared Dockerfile is pinned to:
-
-```bash
-docker build -t <your-registry>/vllm-disagg:glmv5.1 \
-  -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile .
-```
-
-That Dockerfile defaults to `WITH_NIXL=0` (MoRI-EP only, which is all GLM-5.1 uses) and
-its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime patchers,
-so every GLM DSA fix has to be in-source in that image. Add a
-`vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
-own pins rather than repinning the shared one.
+What each set pins, the patches it carries and the per-model Dockerfiles they replace are in
+[docker/pins/README.md](../../docker/pins/README.md). MAD ships no runtime patchers, so every
+fix a model needs is in its pin set; a future model that needs its own pins gets its own set.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -218,7 +216,11 @@ Setting both `RUN_MORI=1` and `RUN_DEEPEP=1` exits with an error.
 
 Env precedence (lowest → highest): connector default → `models.yaml` `env:` block → submit-time
 `-e VAR=...`. So a model can override a connector default (e.g. a `MORI_*` knob) without editing any
-script, and a per-run/per-cluster `-e` still wins.
+script, and a per-run `-e` still wins. Across every layer the order is site (`cluster.sh`) <
+connector `.env` < recipe < topology spec (`MAD_TOPOLOGY`) < submit time; the launcher applies the
+recipe over site and connector defaults before `docker run`, and records where each value came from
+in `$LOG_PATH/<job id>/config.resolved.json`. See
+[docs/configuration.md](../../docs/configuration.md#precedence).
 
 **GPU_MEMORY_UTILIZATION**: If not set in yaml or submit-time, the launcher defaults to **0.70** at
 EP≥32 (to accommodate MoRI buffer scaling at high EP width) and **0.8** otherwise. Models needing
@@ -262,13 +264,13 @@ but each combo also needs the connector's transport built into the image:
 
 | Combo | Live-validated | Image requirement |
 |-------|----------------|-------------------|
-| moriio + TP | ✅ | MoRI (mori121 image) |
-| moriio + wideEP (mori) | ✅ 1P/1D + 2P/2D | MoRI (mori121 image) |
+| moriio + TP | ✅ | MoRI (`vllm-mori121` image) |
+| moriio + wideEP (mori) | ✅ 1P/1D + 2P/2D | MoRI (`vllm-mori121` image) |
 | rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
 
-The `mori_ep_fullsource` Dockerfile builds the MoRI stack; rixl/DeepEP combos need an image
-where those transports are validated (e.g. develop's `vllm_disagg_inference` for NIXL).
+rixl/DeepEP combos need an image whose pin set turns the transport stack on (`vllm-mori121`,
+`vllm-kimi-k3`); the pin sets' notes say the moriio paths are the validated ones.
 
 ## DeepEP options (optional)
 

@@ -1,6 +1,7 @@
 #!/bin/bash
 # One node of a colocated vLLM run: started once per node by run_multinode.slurm
-# (`srun ... bash node.sh`), with SLURM_PROCID as the node rank and the launcher's
+# (through the dispatcher, common/dispatch/dispatch.sh: srun, a job-array task or a pod),
+# with SLURM_PROCID as the node rank and the launcher's
 # exported settings as its environment. Starts this node's container and exits
 # with the container's status.
 . "$(dirname "${BASH_SOURCE[0]}")/../common/node/node_lib.sh"

@@ -23,15 +23,16 @@ card runs on SLURM ([multinode-running.md](multinode-running.md)).
 
 ## How a card runs on Kubernetes
 
-A launcher does two jobs. It **orchestrates**: it finds the allocation's nodes
-(`scontrol show hostnames`), asks each one for its address (`srun --nodelist=<node>
-hostname -I`), and starts one container per node (`srun --nodelist=<all> bash -c 'docker
-run ...'`). And it **is the per-node body**: what each container runs.
+A launcher reaches its nodes only through the dispatcher,
+[`scripts/common/dispatch/dispatch.sh`](../scripts/common/dispatch/dispatch.sh): it asks it for
+each node's address and has it run the per-node program, `node.sh`, on every node, and `node.sh`
+starts that node's container with `docker run` (see
+[multinode-architecture.md](multinode-architecture.md)). On SLURM the dispatcher uses `srun`.
 
-Kubernetes has no `srun` and no `docker`, but a pod already is a container of the card's
-image. MAD's launchers reach their nodes only through `scripts/common/dispatch/dispatch.sh`,
-so a card runs **per pod**, one pod per node, each running the launcher as its own node
-(`MAD_DISPATCH=k8s-indexed`, set by the pod entry point `mad_k8s_node.sh`):
+Kubernetes has no `srun` and no `docker`, but a pod already is a container of the card's image.
+So a card runs **per pod**: one pod per node, each running the card's launcher as its own node
+(`MAD_DISPATCH=k8s-indexed`, set by the pod entry point
+[`scripts/common/k8s/mad_k8s_node.sh`](../scripts/common/k8s/mad_k8s_node.sh)):
 
 ```
 Indexed Job, one pod per node of the card          headless Service <run>
@@ -39,38 +40,35 @@ Indexed Job, one pod per node of the card          headless Service <run>
                 makes the run's verdict               <run>-0, <run>-1, ...)
   pod <run>-1   runs the card's launcher as node 1
   ...
-ConfigMap       the card's script directory, its siblings (default: ../common) and the shim
+ConfigMap       the card's script directory, its siblings (default: ../common) and the pod entry point
 PVC <run>-results   mounted at /results in every pod; LOG_PATH defaults to /results/logs
 ```
 
 Every pod gets the `SLURM_*` variables a batch script sees (`SLURM_JOB_ID`,
-`SLURM_JOB_NODELIST`, `SLURM_NNODES`, `SLURM_PROCID`). The pods meet in a rendezvous
-directory under `LOG_PATH` on the results volume, where each publishes its address;
-then each starts its own node's part, and pod 0 waits for the others' status, makes
-the verdict and publishes the results. Nothing fans out from one pod to another, so
-the only stand-ins on `PATH` (`mad_k8s.py`) are `docker` and `scontrol`. A node runs
-the same container command as on SLURM: `snapshot.py --equivalence k8s-indexed`
-checks it for every card.
+`SLURM_JOB_NODELIST`, `SLURM_NNODES`, `SLURM_PROCID`), with its rank from the Job's completion
+index. The pods meet in a rendezvous directory under `LOG_PATH` on the results volume, where each
+publishes its name and address; then each runs its own node's part, and pod 0 waits for the
+others' status, makes the verdict and publishes the results. Nothing fans out from one pod to
+another.
 
-A card whose scripts predate `dispatch.sh` (an older MAD checkout) still runs **from
-pod 0**: pod 0 runs the launcher, the other pods serve its `srun` tasks through an
-agent, and these stand-ins are on `PATH`:
+Two stand-ins from [`scripts/common/k8s/mad_k8s.py`](../scripts/common/k8s/mad_k8s.py) are first
+on `PATH`:
 
 | The launcher runs | The stand-in does |
 |---|---|
-| `scontrol show hostnames` | Lists the run's pods (`<run>-0,<run>-1,...`) |
-| `srun [--nodes=N] [--nodelist=...] CMD` | Sends `CMD` to each named pod, one task per node, with the caller's environment and `SLURM_PROCID` / `SLURM_NODEID` set as srun would; streams stdout and stderr; returns the highest exit status |
 | `docker run -e ... -v SRC:DST --entrypoint E IMAGE CMD` | Runs `CMD` **in the pod itself**, on the image's own environment plus `-e`, with `DST` made to show `SRC` |
 | `docker stop / rm / ps / pull / image inspect` | Acts on those processes and on the pod's image |
+| `scontrol show hostnames` | Lists the run's pods (`<run>-0,<run>-1,...`) |
 
 Host-level `docker run` options in a launcher (`--device`, `--network host`,
 `--privileged`, `--ulimit`, `--shm-size`) are ignored: on Kubernetes they are the pod
-spec's job, configured as described below. Any `srun`, `docker` or `scontrol` form the
+spec's job, configured as described below. Any `docker` or `scontrol` form the
 stand-ins do not implement fails with a message naming it, rather than being guessed at.
 
-Because the launcher is unchanged, everything it does on SLURM it does here: `cluster.sh`
-resolves weights and fabric, the recipe comes from `models.yaml`, servers fail fast, the
-benchmark writes `perf.csv`, and the launcher exits non-zero on failure.
+A node runs the same container command as on SLURM: `snapshot.py --equivalence k8s-indexed`
+checks it for every card. Because the launcher is unchanged, everything it does on SLURM it does
+here: `cluster.sh` resolves weights and fabric, the recipe comes from `models.yaml`, servers fail
+fast, the benchmark writes `perf.csv`, and the launcher exits non-zero on failure.
 
 ## Two ways to submit
 
@@ -82,7 +80,7 @@ benchmark writes `perf.csv`, and the launcher exits non-zero on failure.
 
 They are separate implementations and they deploy the same thing: for one card and one
 configuration file, the Job, Service and ConfigMap they create are identical apart from
-resource names and the run id, and the pods run byte-identical stand-ins. See
+resource names and the run id. See
 [Checking that both paths deploy the same thing](#checking-that-both-paths-deploy-the-same-thing).
 
 ## What the cluster must provide
@@ -301,7 +299,8 @@ Measured on MI300X (one sweep pass per cell, 1024/1024 tokens), every cell `SUCC
 | Servers start with TP 8 on pods with fewer GPUs | Set `GPUS_PER_NODE` (and `GENERIC_TP_SIZE` / `TP_SIZE`) in `env_vars` |
 | `No RDMA devices found` (Mooncake), `RegisterRdmaMemoryRegion failed` (MoRI) | The pod has no RDMA device, or the node cannot register GPU memory for RDMA. See [What the cluster must provide](#what-the-cluster-must-provide) |
 | Every benchmark request `Not Found` (404) | The benchmark asked for a model name the server does not serve. The launchers pass `--served-model-name`; check a custom `COLOCATED_EXTRA_ARGS` or recipe does not rename the model differently |
-| `[mad-k8s srun] unsupported option ...` / `[mad-k8s docker] run: unsupported option ...` | The launcher uses a form the stand-ins do not implement. The message names it |
+| `[mad-k8s docker] run: unsupported option ...` | The launcher uses a form the stand-in does not implement. The message names it |
+| `dispatch: rank(s) ... did not report ... within 900s` | A pod did not reach the rendezvous in time (not scheduled, image pull, or a crash before the launcher started). Check that pod's events and log; `MAD_RENDEZVOUS_TIMEOUT` sets the wait |
 | `metadata.annotations: Too long` | Something applied the ConfigMap with `kubectl apply`. Both paths create objects instead; do the same if you apply the dry-run output by hand |
 
 ## Checking that both paths deploy the same thing
@@ -314,12 +313,9 @@ python3 scripts/common/k8s/submit.py --card <card> --image <image> --config k8s.
 
 madengine writes the manifests it would apply when the context sets `"debug": true`. The two
 must agree on everything except resource names, the `app` label, the run id (`MAD_K8S_JOB_ID`)
-and the bundle's bytes (compare the file list instead). The stand-ins are the same file in both
-paths: `scripts/common/k8s/mad_k8s.py` here and `madengine/deployment/k8s_shim/mad_k8s.py` in
-madengine.
+and the bundle's bytes (compare the file list instead).
 
-Offline tests for the standalone path, including the stand-ins run end to end with two agents
-on loopback:
+Offline tests for the standalone path and the stand-ins:
 
 ```bash
 python3 -m unittest discover -s scripts/common/k8s/tests -v

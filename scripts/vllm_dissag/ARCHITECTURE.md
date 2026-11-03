@@ -14,11 +14,11 @@ How the pieces fit, from sbatch down to the per-node `vllm serve` workers.
 flowchart TB
     user([user / CI]) -->|"sbatch + env\n(CONNECTOR, WIDE_EP, EP_BACKEND,\nMODEL_NAME, xP, yD, RUN_MORI/RUN_DEEPEP)"| slurm
 
-    subgraph host["Submit host"]
-        slurm["run_xPyD_models.slurm\n• resolve script dir\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• docker run per node (-e env plumb)"]
+    subgraph host["Batch host"]
+        slurm["run_xPyD_models.slurm\n• resolve script dir\n• config layers + topology spec\n• validate MODEL_NAME (VALID_MODELS)\n• axis resolution + back-compat shim\n• pick nodes, gather IPs\n• node.sh on every node (dispatcher)"]
     end
 
-    slurm -->|"srun + docker run\n(one container per node)"| n0
+    slurm -->|"dispatch_run: node.sh\n→ docker run (one container per node)"| n0
     slurm --> n1
     slurm --> n2
     slurm --> n3
@@ -214,7 +214,7 @@ flowchart TD
     bf & mf & rf & ef --> compose["MODEL_CONFIG_PREFILL / _DECODE\n(passed to connector_launch_worker)"]
 
     subgraph envlayer["ENV precedence (low → high)"]
-        c1["connector default\nexport VAR=\${VAR:-default}"] --> c2["models.yaml env:\n(exported before setup_env)"] --> c3["slurm -e VAR=…\n(submit/site override, wins)"]
+        c1["connector default\nexport VAR=\${VAR:-default}"] --> c2["models.yaml env:\n(exported before setup_env)"] --> c3["submit time -e VAR=…\n(wins)"]
     end
     envb -.-> c2
 
@@ -227,7 +227,8 @@ flowchart TD
 
 | File | Role |
 |------|------|
-| `run_xPyD_models.slurm` | sbatch entry: node pick, validation, axis shim, `docker run` env plumb |
+| `run_xPyD_models.slurm` | sbatch entry: validation, axis shim, config layers, node pick, runs `node.sh` on each node, verdict |
+| `node.sh` | one node: mounts, JIT cache, topology for its rank, the `docker run` and its `-e` list |
 | `vllm_disagg.sh` | **the launcher** — axis resolve, yaml parse, role branch, barrier/benchmark/cleanup |
 | `parallelism.sh` | TP-vs-wideEP shared helpers |
 | `connectors/rixl.sh` | NixlConnector profile (TP + DeepEP) |
@@ -280,16 +281,16 @@ flowchart TB
 into each rank's kv JSON as `moriio_pod_hosts`.
 
 **JIT cache:** K3 prefill (mori HT/LL + cudagraph NONE) and decode (LL + PIECEWISE) compile different
-kernel variants; Slurm mounts separate `.../prefill` vs `.../decode` cache dirs under the image key
+kernel variants; `node.sh` mounts separate `.../prefill` vs `.../decode` cache dirs under the image key
 when `EP_TP_SIZE>1` (set for K3 in `models.yaml`; gated by `JIT_CACHE_SPLIT_ROLE`).
 
 Reference standalone launcher: the Kimi-K3 disagg recipe in PR#241 (out of tree; not part of this framework-only branch).
 
 ### Docker image
 
-Every Kimi-K3 card (MI300X and MI355X, disagg and colocated) builds one in-tree
-`docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`, a K3-pinned sibling of the generalized
-`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`: vLLM fork `862bfd8`
-(`kimi-k3-wideep-disagg-fullsource-v3`), MoRI v1.2.2, AITER 68e42f5f from source, the
-DP-rank vllm-router, built for `MAD_SYSTEM_GPU_ARCHITECTURE`. Operators building by hand
-tag it themselves and pass `DOCKER_IMAGE_NAME` to slurm.
+Every Kimi-K3 card (MI300X and MI355X, disagg and colocated) builds
+`docker/di_vllm.ubuntu.amd.Dockerfile` from the `vllm-kimi-k3` pin set: upstream vLLM with the
+Kimi-K3 patch (it reproduces fork commit `862bfd8`), MoRI `fe12a11a`, AITER 68e42f5f from source,
+the DP-rank vllm-router, built for `MAD_SYSTEM_GPU_ARCHITECTURE`. Pin sets are described in
+[docker/pins/README.md](../../docker/pins/README.md). Operators building by hand tag the image
+themselves and pass `DOCKER_IMAGE_NAME` to slurm.

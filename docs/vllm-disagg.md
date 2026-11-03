@@ -42,7 +42,10 @@ and failures are in [multinode-running.md](multinode-running.md). The benchmarks
 ## Architecture at a glance
 
 ```
-run_xPyD_models.slurm     # sbatch entry: picks nodes, plumbs env, launches the container per node
+run_xPyD_models.slurm     # sbatch entry: validates, picks nodes, runs node.sh on each node
+        │                 #   (scripts/common/{config,topology,launcher,dispatch})
+        ▼
+node.sh                   # one node: mounts, topology for its rank, docker run (common/node/node_lib.sh)
         │
         ▼
 vllm_disagg.sh            # THE launcher: role branching, barrier, proxy, benchmark, cleanup
@@ -54,19 +57,28 @@ vllm_disagg.sh            # THE launcher: role branching, barrier, proxy, benchm
 
 `run_xPyD_models.slurm` runs on the batch host. It:
 
-1. finds its own directory and checks its required files are there;
+1. finds its own directory, records the submitted environment
+   (`scripts/common/config/layers.sh`), applies a `MAD_TOPOLOGY` spec file if one is
+   named, and checks its required files are there;
 2. sources [`scripts/common/cluster.sh`](../scripts/common/cluster.sh) for site
    defaults;
 3. validates `MODEL_NAME` and resolves the axes, gating the model against the
    per-combination allowlists;
-4. loads `connectors/<CONNECTOR>.env` and forwards each line as `docker -e`;
+4. applies the recipe's `env:` block over site and connector defaults, then loads
+   `connectors/<CONNECTOR>.env` and forwards each line as `docker -e`;
 5. reads `EP_TP_SIZE` and `GPU_ARCHS` from the model's recipe, checks the GPU
    architecture, reports the RDMA rails, and resolves `MODEL_PATH` on every node;
-6. picks the first `xP + yD` nodes and gathers their IPs;
-7. on each node, stops old containers, frees the barrier ports, pulls the image, and
-   runs one container whose entry point is `vllm_disagg.sh`;
-8. copies `perf.csv` to `perf_<MODEL_NAME>.csv` beside itself, or exits 1 if there is
-   none.
+6. picks the first `xP + yD` nodes (`+ 1` with `ROUTER_NODE=1`) in the scheduler's
+   order and gathers their IPs (`scripts/common/launcher/launcher_lib.sh`);
+7. writes `config.resolved.json` and runs [`node.sh`](../scripts/vllm_dissag/node.sh) on
+   every node through the dispatcher (`scripts/common/dispatch/dispatch.sh`). `node.sh`
+   stops this launcher's leftover containers, pulls the image, and runs one container
+   whose entry point is `vllm_disagg.sh`;
+8. copies `perf.csv` to `perf_<MODEL_NAME>.csv` beside itself, and fails the job when a
+   node's container failed, there is no `perf.csv`, or a row is `FAILURE`.
+
+The whole path, with the file that implements each step, is in
+[multinode-architecture.md](multinode-architecture.md).
 
 Inside each container, `vllm_disagg.sh` resolves the axes again, does the topology
 math, parses `models.yaml`, sources `parallelism.sh` and the connector, waits at a
@@ -123,10 +135,10 @@ rejected.
 | `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | Validated serving (moriio + MoRI-EP). |
 | `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | Smoke and development variant. |
 | `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | Needs a co-versioned AITER image (see [Caveats](#caveats)). |
-| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | Own image (`glmv5.1` Dockerfile). 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH about 93 to 97 percent). moriio + TP is untested. |
-| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8 (`EP_TP_SIZE=2`). `docker/vllm_kimi_k3` image. Card `pyt_vllm_disagg_mori_kimi-k3`. |
-| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8. `docker/vllm_kimi_k3` image. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4`. Its recipe serves the name `kimi-k3`. |
-| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | MI355X gfx950, bring-up (not yet run). Native MXFP4, TP1 x DP16 (`EP_TP_SIZE=1`). `docker/vllm_kimi_k3` image built for gfx950. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x`. |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | Own pin set (`vllm-glm51`). 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH about 93 to 97 percent). moriio + TP is untested. |
+| `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8 (`EP_TP_SIZE=2`). `vllm-kimi-k3` image. Card `pyt_vllm_disagg_mori_kimi-k3`. |
+| `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8. `vllm-kimi-k3` image. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4`. Its recipe serves the name `kimi-k3`. |
+| `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | MI355X gfx950, bring-up (not yet run). Native MXFP4, TP1 x DP16 (`EP_TP_SIZE=1`). `vllm-kimi-k3` image built for gfx950. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x`. |
 
 The allowlists in `run_xPyD_models.slurm`:
 
@@ -146,28 +158,28 @@ in PR #241; it is not part of this framework.
 The cards in [`models.json`](../scripts/vllm_dissag/models.json). All run
 `run_xPyD_models.slurm` with the `slurm_multi` launcher.
 
-| Card | `MODEL_NAME` | Nodes | Axes | Benchmark | Image |
+| Card | `MODEL_NAME` | Nodes | Axes | Benchmark | Pin set |
 |---|---|---|---|---|---|
-| `pyt_vllm_disagg_nixl_deepseek-v3` | `DeepSeek-V3` | 2 | `WIDE_EP=1`, no legacy flag: rixl + deepep | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_nixl_deepseek-r1` | `DeepSeek-R1` | 2 | same | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_nixl_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | same | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_nixl_llama-3.1-405b-fp8` | `Llama-3.1-405B-Instruct-FP8-KV` | 2 | no flags: rixl + TP | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_nixl_llama-3.3-70b-fp8` | `amd-Llama-3.3-70B-Instruct-FP8-KV` | 2 | rixl + TP | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_nixl_gpt-oss-120b` | `gpt-oss-120b` | 2 | rixl + TP | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_tp_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1`, `WIDE_EP=0`: moriio + TP8 | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_deepseek-r1` | `DeepSeek-R1` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_glm-5.1-fp8` | `GLM-5.1-FP8` | 2 | `RUN_MORI=1`, `EP_TP_SIZE=8` | sweep 1024/1024 | `vllm_disagg_inference.glmv5.1` |
-| `pyt_vllm_disagg_mori_glm-5.1-fp8_niah` | `GLM-5.1-FP8` | 2 | `RUN_MORI=1`, `EP_TP_SIZE=8` | niah | `vllm_disagg_inference.glmv5.1` |
-| `pyt_vllm_disagg_deepep_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_deepep_deepseek-r1` | `DeepSeek-R1` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_deepep_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_agentic_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1` | agentic, `conformance_256k` | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_MORI=1` | agentic, `conformance_256k` | `vllm_disagg_inference` |
-| `pyt_vllm_disagg_mori_kimi-k3` | `Kimi-K3` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=2` | niah | `vllm_kimi_k3` |
-| `pyt_vllm_disagg_mori_kimi-k3-mxfp4` | `Kimi-K3-MXFP4` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=2` | niah | `vllm_kimi_k3` |
-| `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` | `Kimi-K3-MXFP4-MI355X` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=1`, `MODEL_WEIGHTS_NAME=Kimi-K3-MXFP4` | niah | `vllm_kimi_k3` |
+| `pyt_vllm_disagg_nixl_deepseek-v3` | `DeepSeek-V3` | 2 | `WIDE_EP=1`, no legacy flag: rixl + deepep | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_nixl_deepseek-r1` | `DeepSeek-R1` | 2 | same | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_nixl_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | same | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_nixl_llama-3.1-405b-fp8` | `Llama-3.1-405B-Instruct-FP8-KV` | 2 | no flags: rixl + TP | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_nixl_llama-3.3-70b-fp8` | `amd-Llama-3.3-70B-Instruct-FP8-KV` | 2 | rixl + TP | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_nixl_gpt-oss-120b` | `gpt-oss-120b` | 2 | rixl + TP | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_tp_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1`, `WIDE_EP=0`: moriio + TP8 | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_deepseek-r1` | `DeepSeek-R1` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_MORI=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_glm-5.1-fp8` | `GLM-5.1-FP8` | 2 | `RUN_MORI=1`, `EP_TP_SIZE=8` | sweep 1024/1024 | `vllm-glm51` |
+| `pyt_vllm_disagg_mori_glm-5.1-fp8_niah` | `GLM-5.1-FP8` | 2 | `RUN_MORI=1`, `EP_TP_SIZE=8` | niah | `vllm-glm51` |
+| `pyt_vllm_disagg_deepep_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_deepep_deepseek-r1` | `DeepSeek-R1` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_deepep_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_DEEPEP=1` | sweep 1024/1024 | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_agentic_deepseek-v3` | `DeepSeek-V3` | 2 | `RUN_MORI=1` | agentic, `conformance_256k` | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` | `DeepSeek-V3-5layer` | 2 | `RUN_MORI=1` | agentic, `conformance_256k` | `vllm-mori121` |
+| `pyt_vllm_disagg_mori_kimi-k3` | `Kimi-K3` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=2` | niah | `vllm-kimi-k3` |
+| `pyt_vllm_disagg_mori_kimi-k3-mxfp4` | `Kimi-K3-MXFP4` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=2` | niah | `vllm-kimi-k3` |
+| `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` | `Kimi-K3-MXFP4-MI355X` | 4 (2P/2D) | `RUN_MORI=1`, `EP_TP_SIZE=1`, `MODEL_WEIGHTS_NAME=Kimi-K3-MXFP4` | niah | `vllm-kimi-k3` |
 
 The GLM cards run TP8 within each pool (one DP rank per node) because they carry
 `EP_TP_SIZE=8`. When wideEP moved from `TP_SIZE` to `EP_TP_SIZE` (default 1), they
@@ -179,19 +191,17 @@ use `NIAH_WORDS=10000,50000,100000,200000`, declare `multiple_results`
 
 ## Kimi-K3 notes
 
-**Docker image.** Every Kimi-K3 card builds `docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`,
-for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950; madengine and the
-MAD CI pipeline pass it). It is a Kimi-K3-pinned sibling of the generalised
-`docker/vllm_disagg_inference.ubuntu.amd.Dockerfile`: vLLM fork `862bfd8`
-(`kimi-k3-wideep-disagg-fullsource-v3`), MoRI v1.2.2, AITER `68e42f5f` from source,
-and the DP-rank vllm-router. MAD integration is the launcher, the yaml and this
-Dockerfile; the vLLM fork, AITER and connector fixes are pinned in it by commit. By
-hand:
+**Docker image.** Every Kimi-K3 card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from the
+`vllm-kimi-k3` pin set, for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950;
+the cards do not name it, so pass it when building on a host without that GPU). The set pins
+MoRI `fe12a11a`, AITER `68e42f5f` from source, upstream vLLM with the Kimi-K3 patch (it
+reproduces fork commit `862bfd8`), and the DP-rank vllm-router; see
+[kimi-k3.md](kimi-k3.md#the-image). By hand:
 
 ```bash
-# Build (once per cluster, or after a vLLM pin change), from the MAD repo root:
-docker build -f docker/vllm_kimi_k3.ubuntu.amd.Dockerfile \
-  --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx942 \
+# Build (once per cluster, or after the pin set moves), from the MAD repo root:
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
   -t kimik3-wideep-disagg:latest .
 
 # Run via the unified launcher. sbatch options, --export included, go BEFORE the
@@ -244,38 +254,38 @@ The full list, including Docker on the compute nodes and the wall-time check, is
 
 ## Building the Docker image
 
-No public prebuilt image ships. Build your own from the full-source Dockerfile (MoRI,
-AITER, vLLM, vllm-router, and optionally UCX, RIXL, rocSHMEM and DeepEP, from Git pins
-on an open ROCm CI base):
+No public prebuilt image ships. Every card builds
+[`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile) from a pin set
+in [`docker/pins/`](../docker/pins/README.md): MoRI, AITER, vLLM, vllm-router and, where the set
+turns it on, the UCX / RIXL / rocSHMEM / DeepEP transport stack, each at a full upstream commit
+with any changes not yet upstream applied as patches from `docker/patches/`. A card names its set:
 
-```bash
-cd MAD
-docker build -t <your-registry>/vllm-disagg:local \
-  -f docker/vllm_disagg_inference.ubuntu.amd.Dockerfile .
+```json
+"dockerfile": "../../docker/di_vllm",
+"dockercontext": ".",
+"docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}
 ```
 
-That image serves all connectors for every model in the table above except
-`GLM-5.1-FP8` and the Kimi-K3 models. `WITH_NIXL=1` (the default) builds every
-transport (moriio TP and wideEP, rixl NIXL TP, DeepEP wideEP). Add
-`--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio plus DeepEP from the
-base), which builds faster.
-
-`GLM-5.1-FP8` needs its own image, because its vLLM, AITER and MoRI pins differ from the
-DeepSeek-V3/R1 stack the shared Dockerfile is pinned to:
+madengine adds the set's base image for the build's GPU architecture. By hand, from the MAD root:
 
 ```bash
-docker build -t <your-registry>/vllm-disagg:glmv5.1 \
-  -f docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile .
+docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args vllm-mori121 --arch gfx942) \
+  -t <your-registry>/di-vllm:vllm-mori121-gfx942 .
 ```
 
-That Dockerfile defaults to `WITH_NIXL=0` (MoRI-EP only, which is all GLM-5.1 uses).
-Its `VLLM_REF` is a hard requirement, not a preference: MAD ships no runtime patchers,
-so every GLM DSA fix has to be in the source of that image. For a future model that
-needs its own pins, add a `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` rather
-than repinning the shared one.
+| Pin set | Cards | Architectures | Transport stack (rixl, DeepEP) |
+|---|---|---|---|
+| `vllm-mori121` | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | gfx942 | on |
+| `vllm-glm51` | `GLM-5.1-FP8` | gfx942 | off (MoRI-EP only) |
+| `vllm-kimi-k3` | the Kimi-K3 models, disaggregated and colocated | gfx942, gfx950 | on |
 
-Kimi-K3 uses `docker/vllm_kimi_k3.ubuntu.amd.Dockerfile`; see
-[Kimi-K3 notes](#kimi-k3-notes).
+Whether the rixl transport stack is built is part of the pin set, not a build argument.
+`GLM-5.1-FP8` needs its own set because its vLLM, AITER and MoRI pins differ from the
+DeepSeek-V3/R1 stack: MAD ships no runtime patchers, so every GLM DSA fix has to be in the source
+of that image. For a future model that needs its own pins, add a pin set rather than moving a
+shared one. What each set pins and why, the patches, and the rules are in
+[`docker/pins/README.md`](../docker/pins/README.md).
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The
 launcher runs `docker pull` on every node, so a local-only tag must be pushed to a
@@ -402,11 +412,15 @@ Environment precedence, lowest to highest:
 3. **submit-time** value (an exported variable forwarded with `docker -e`)
 
 So a model can override a connector default (for example a `MORI_*` knob) without
-editing any script, and a per-run or per-cluster value still wins. The launcher only
-exports a yaml key that is not already in the environment.
+editing any script, and a per-run value still wins. Inside the container the launcher
+only exports a yaml key that is not already in the environment.
 
-The connector platform env files (`connectors/<connector>.env`) are a separate layer
-forwarded at container start; a submit-time export of the same name overrides them too.
+On the batch node, before `docker run`, the launcher applies the same `env:` block over
+`cluster.sh` defaults and the connector platform env file (`connectors/<connector>.env`)
+where they differ, and under anything submitted or set by a topology spec
+(`config_apply_recipe`, `scripts/common/config/layers.sh`), so a recipe value takes effect
+even for names the launcher forwards with `docker -e`. Each override is printed as a
+`[config]` line.
 The full picture across `cluster.sh`, the card and madengine is in
 [configuration.md](configuration.md).
 
@@ -660,10 +674,12 @@ The moriio connector's own fallbacks, used when nothing else sets a value, inclu
 
 Each node's container runs with host networking and IPC, the GPU and InfiniBand
 devices, `--privileged`, `--shm-size ${DOCKER_SHM_SIZE:-256G}`, and unlimited
-`memlock`. It mounts `$HOME`, `/shared_inference`, `/mnt/m2m_nobackup`, `$LOG_PATH` at
+`memlock`. It mounts `$HOME`, the site storage that exists on the node (`SHARED_MOUNT`,
+`NVME_ROOT`, and `MODEL_DIR` when it is outside both; `node_site_mounts`), `$LOG_PATH` at
 `/run_logs`, and this directory at `/opt/nixl-vllm-cookbook` (`NIXL_COOKBOOK_PATH`).
-Only an explicit list of variables is forwarded with `-e`; to pass a new variable you
-must add it to that list in `run_xPyD_models.slurm`.
+Only an explicit list of variables is forwarded with `-e`; to pass a new variable add it
+to that list in [`node.sh`](../scripts/vllm_dissag/node.sh), or name it in
+`CONTAINER_ENV` (below).
 
 **Host RDMA libraries.** The host's userspace RDMA libraries must match the host kernel
 driver, so the launcher mounts them over the image's copies: `libibverbs` and
@@ -693,14 +709,13 @@ The launcher assembles correct argv for all four combinations (checked offline i
 
 | Combo | Live-validated | Image requirement |
 |---|---|---|
-| moriio + TP | yes | MoRI (mori121 image) |
-| moriio + wideEP (mori) | yes, 1P/1D and 2P/2D | MoRI (mori121 image) |
+| moriio + TP | yes | MoRI (`vllm-mori121` image) |
+| moriio + wideEP (mori) | yes, 1P/1D and 2P/2D | MoRI (`vllm-mori121` image) |
 | rixl + TP | needs a NIXL-validated image | NixlConnector and a working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
 
-The `mori_ep_fullsource` Dockerfile builds the MoRI stack; the rixl and DeepEP
-combinations need an image where those transports are validated (for example the
-`vllm_disagg_inference` image for NIXL).
+The rixl and DeepEP combinations need an image whose pin set turns the transport stack on
+(`vllm-mori121`, `vllm-kimi-k3`); the pin sets' notes say the moriio paths are the validated ones.
 
 A recipe is validated on specific shapes and GPUs, and its `models.yaml` entry says
 which. Run a card at one of those shapes before suspecting the recipe.
@@ -1020,7 +1035,7 @@ memory snapshot to `$LOG_PATH/<job>/gpu_fault_NODE<n>.log`, and prints where.
 
 ## Passing other variables into the container
 
-The batch script passes a fixed set of variables to `docker run`. For anything else, such
+`node.sh` passes a fixed set of variables to `docker run`. For anything else, such
 as the environment variables a benchmark request names or debug switches, list the names
 in `CONTAINER_ENV` (comma- or space-separated):
 
@@ -1079,7 +1094,8 @@ bash tests/run_all.sh             # every suite below; expect ALL OFFLINE SUITES
   treat an ordinary memory INFO line as fatal.
 
 The repository-wide checks (`check_srun_quotes.py`, `check_continuations.py`,
-`check_gpu_arch_declarations.py`) are listed in
+`check_gpu_arch_declarations.py`, the per-node snapshot harness and the `scripts/common`
+suites) are listed in
 [multinode-running.md](multinode-running.md#checks-that-need-no-gpus).
 
 ### Live tests on an allocation
@@ -1087,7 +1103,7 @@ The repository-wide checks (`check_srun_quotes.py`, `check_continuations.py`,
 | Script | Purpose |
 |---|---|
 | `tests/drive_cell.sh` | Drives one test cell on an existing allocation via `srun --overlap` (no `sbatch`), one container per node, `NODE_RANK` per node. Requires `JOBID`, `NODES`, `IPS`, `MODEL_NAME`, `MODEL_PATH`, `CONNECTOR`, `WIDE_EP`, `xP`, `yD`, `TAG`, `DOCKER_IMAGE_NAME` (and `EP_BACKEND` for wideEP). Optional: `NODE_PREFIX`, `BENCHMARK_CON`, `BENCHMARK_COMBINATIONS`, `PROXY_TYPE`, `ROUTER_BINARY`, `ROUTER_PORT`, `RUN_MORI`, `RUN_DEEPEP`. |
-| `tests/run_interactive.sh <NODE_RANK>` | The per-node container launch that `drive_cell.sh` uses; mirrors the `docker run` in `run_xPyD_models.slurm`. |
+| `tests/run_interactive.sh <NODE_RANK>` | The per-node container launch that `drive_cell.sh` uses; mirrors the `docker run` in `node.sh`. |
 | `tests/harvest.sh <RUN_TAG>` | Prints prefill start-up, `RegisterRdmaMemoryRegion failed` and `died unexpectedly` counts, and per-cell concurrency, successes, failures, output tok/s, median TTFT and ITL. |
 
 [`tests/TEST_PLAN.md`](../scripts/vllm_dissag/tests/TEST_PLAN.md) is the before/after
@@ -1108,7 +1124,8 @@ an image and AITER concern, independent of the launcher.
 
 | File | Role |
 |---|---|
-| `run_xPyD_models.slurm` | sbatch entry: node pick, validation, axis shim, `docker run` env plumbing |
+| `run_xPyD_models.slurm` | sbatch entry: validation, axis shim, config layers, node pick, runs `node.sh` on each node, verdict |
+| `node.sh` | One node: mounts, JIT cache, topology for its rank, the `docker run` and its `-e` list |
 | `vllm_disagg.sh` | The launcher: axis resolution, yaml parse, role branch, barrier, benchmark, cleanup |
 | `parallelism.sh` | TP versus wideEP shared helpers |
 | `connectors/rixl.sh` | NixlConnector profile (TP and DeepEP) |

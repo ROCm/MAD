@@ -50,65 +50,55 @@ the valid ones:
 - A shared filesystem for log collection. The path is cluster-specific; it defaults to
   `LOG_PATH=/shared_inference/$USER/model_blog_logs` from
   [`cluster.sh`](../scripts/common/cluster.sh).
-- Docker on the compute nodes. The batch script runs `docker run` on each node under `srun`.
+- Docker on the compute nodes. Each node's `node.sh` runs `docker run` there.
 - The model weights on every allocated node, or on shared storage every node reads.
 
 ## Building the image
 
-The Dockerfile is [`docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`](../docker/sglang_disagg_inference.ubuntu.amd.Dockerfile).
-It picks its stack from `MAD_SYSTEM_GPU_ARCHITECTURE`, which madengine passes:
+The cards build [`docker/di_sglang.ubuntu.amd.Dockerfile`](../docker/di_sglang.ubuntu.amd.Dockerfile)
+from the `sglang-disagg` pin set ([`docker/pins/sglang-disagg.json`](../docker/pins/sglang-disagg.json)):
 
-| Architecture | Base image | MoRI |
+```json
+"dockerfile": "../../docker/di_sglang",
+"dockercontext": ".",
+"docker_build_arg": {"PINS": "sglang-disagg"}
+```
+
+[`docker/pins/README.md`](../docker/pins/README.md) is the reference for pin sets. The set picks the
+stack by `MAD_SYSTEM_GPU_ARCHITECTURE` (default `gfx942`), which madengine passes along with the
+set's base image for that architecture:
+
+| Architecture | Base image (pinned by digest) | MoRI |
 |---|---|---|
-| `gfx942` (MI300X), the default | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | built at `MORI_COMMIT` |
+| `gfx942` (MI300X) | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | built at the set's commit `158c7e8` |
 | `gfx950` (MI355X) | `rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924` (sglang 0.5.20) | the base image's, v1.2.3 |
 
 MoRI before v1.2.2 registers GPU memory with `ibv_reg_mr` only, which fails (`errno 22`) on nodes
 without a GPU peer-memory module, for example MI355X with AMD AINIC NICs. v1.2.3 falls back to
 dma-buf. The launchers adapt the recipes' flags to sglang 0.5.20 (`sglang_compat.sh`).
 
-```bash
-cd MAD/docker
-docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-```
-
-### Build arguments
-
-| Arg | Default | Description |
-|---|---|---|
-| `MAD_SYSTEM_GPU_ARCHITECTURE` | `gfx942` | Selects the stack (table above). |
-| `INSTALL_MORI` | `auto` | `1` builds and installs MoRI at `MORI_COMMIT`; `0` keeps the base image's MoRI. `auto`: `1` on gfx942, `0` elsewhere. |
-| `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when MoRI is installed. |
-| `BASE_DOCKER` | per architecture | Base SGLang ROCm image; when set, overrides the per-architecture base. |
-| `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
-
-Examples:
+By hand, from the repository root:
 
 ```bash
-# Default build (gfx942): sglang 0.5.12, MoRI pinned at MORI_COMMIT
-docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-
-# MI355X (gfx950): sglang 0.5.20 with its own MoRI
-docker build --build-arg MAD_SYSTEM_GPU_ARCHITECTURE=gfx950 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-
-# Skip MoRI (for example when using Mooncake KV transfer only)
-docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-
-# Pin a different MoRI commit
-docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+docker build -f docker/di_sglang.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args sglang-disagg --arch gfx942) \
+  -t <registry>/di-sglang:sglang-disagg-gfx942 .
 ```
 
-Through madengine, pass the same arguments as `docker_build_arg` in `--additional-context`.
+To change what is built (another MoRI commit, another base), change the pin set; the build stops
+on an architecture the set is not for or a base image other than the set's.
 
-The launcher expects `py-spy`, `flask` and `pyyaml` in the image. It installs any that is missing,
-so an image supplied through `DOCKER_IMAGE_NAME` still works, but a MAD-built image does no work
-at start-up.
+The set also installs `sglang-router`, `py-spy`, `flask` and `pyyaml`; their versions are not
+pinned yet (`python3 docker/pins/pins.py validate` lists them as pending). The launcher expects
+`py-spy`, `flask` and `pyyaml` in the image. It installs any that is missing, so an image supplied
+through `DOCKER_IMAGE_NAME` still works, but a MAD-built image does no work at start-up.
 
 ## Files
 
 | File | Description |
 |---|---|
-| `run_xPyD_models.slurm` | SLURM batch script. Validates the model, picks nodes, resolves the weights, and launches one container per node with `srun` and `docker run`. |
+| `run_xPyD_models.slurm` | SLURM batch script. Validates the model, picks nodes, resolves the weights, and runs `node.sh` on every node through the dispatcher (`scripts/common/dispatch/dispatch.sh`). |
+| `node.sh` | The per-node program: mounts, the topology for its rank, and this node's `docker run`. Shared parts are in `scripts/common/node/node_lib.sh`. |
 | `sglang_disagg_mori_io_ep.sh` | Container entrypoint. Starts the prefill and decode servers, the router (proxy), and the benchmark. |
 | `models.yaml` | Model-specific SGLang CLI flags for all supported models. |
 | `mori_ep_env.sh` | RDMA, NCCL, Gloo and MoRI environment variables. Sourced by the entrypoint. |
@@ -121,7 +111,6 @@ at start-up.
 | `models.json` | The model cards. See [Model cards](#model-cards). |
 | `salloc_launch.sh` | Sample commands for running inside an `salloc` allocation. |
 | `benchmark_xPyD_GSP.sh` | Runs the SGLang GSM8K benchmark (`benchmark/gsm8k/bench_sglang.py`). |
-| `sglang_disagg_server.sh`, `set_env_vars.sh` | An earlier server launcher and its NCCL environment. `run_xPyD_models.slurm` always uses `sglang_disagg_mori_io_ep.sh`. |
 
 ## Quick start
 
@@ -173,14 +162,19 @@ script's model list, so those two lines are rejected.
 2. It checks same-rail placement when `USE_CX7_NICS=1` (see [NICs](#nics-and-rail-placement)).
 3. It checks the GPU architecture (`cluster_require_gpu_arch`) and resolves the weights on every
    node (`cluster_resolve_model_path`).
-4. It takes the first `xP + yD` nodes of the allocation, sorted by name. The first `xP` are prefill,
-   the rest are decode. Node 0 also runs the router, so no extra node is needed.
+4. It takes the first `xP + yD` nodes of the allocation (`xP + yD + 1` with `ROUTER_NODE=1`), in
+   the scheduler's order (`launcher_select_nodes`, `scripts/common/launcher/launcher_lib.sh`). The
+   first `xP` are prefill, the rest are decode. Node 0 also runs the router unless `ROUTER_NODE=1`
+   gives it a node of its own after decode.
 5. It resolves each node's IP from `hostname -I`, preferring an address that starts with
    `FABRIC_SUBNET_PREFIX` (nodes are multi-homed, and picking the wrong subnet hangs the socket
    barrier).
-6. It stops any running containers on each node and starts one container per node with
-   `docker run --network host --ipc host --privileged`, the GPU and InfiniBand devices, a 64 GB
-   `/dev/shm`, the logs at `/run_logs`, and this directory at `/opt/mooncake-cookbook`.
+6. It runs [`node.sh`](../scripts/sglang_disagg/node.sh) on every node through the dispatcher
+   (`scripts/common/dispatch/dispatch.sh`: one `srun` by default, or one task per node as a job
+   array or Kubernetes pods). `node.sh` stops this launcher's leftover containers on its node and
+   starts the node's container with `docker run --network host --ipc host --privileged`, the GPU
+   and InfiniBand devices, a 64 GB `/dev/shm`, the logs at `/run_logs`, this directory at
+   `/opt/mooncake-cookbook`, and its part of the topology as `MAD_TOPO_*`.
 7. In each container, `sglang_disagg_mori_io_ep.sh` reads `models.yaml`, sources `mori_ep_env.sh`,
    waits at a container barrier, and starts its role.
 
@@ -211,9 +205,12 @@ time limit. A cancelled job stops its containers.
 `run_xPyD_models.slurm` fails the job (and so the madengine run) when:
 
 - any node's container exited non-zero, which it does when its server or the benchmark failed; or
-- the benchmark ran (`SKIP_BENCHMARK` is not `1`) and wrote no `/run_logs/<job>/perf.csv`.
+- the benchmark ran (`SKIP_BENCHMARK` is not `1`) and wrote no `/run_logs/<job>/perf.csv`; or
+- any row of that `perf.csv` is `FAILURE`.
 
-A passing run exits 0 on every node and leaves a `perf.csv`. Each of its rows then carries its own
+The CSV is published as `perf_<MODEL_NAME>.csv` before any failure is reported, so the rows that
+passed still reach madengine. Under a per-node dispatch, node 0 makes this verdict
+(`launcher_verdict`, `scripts/common/launcher/launcher_lib.sh`). Each row carries its own
 `SUCCESS` or `FAILURE` (see [benchmarks-and-results.md](benchmarks-and-results.md#throughput-rows)).
 
 ## Current support status
@@ -443,7 +440,7 @@ caught at once, not after `ROUTER_READY_TIMEOUT_SECONDS`.
 ## Model cards
 
 [`models.json`](../scripts/sglang_disagg/models.json) has one card per backend, mode and model.
-Every card uses `docker/sglang_disagg_inference`, launcher `run_xPyD_models.slurm`,
+Every card uses `docker/di_sglang` with pin set `sglang-disagg`, launcher `run_xPyD_models.slurm`,
 `distributed.launcher: slurm_multi` with `nnodes: 2`, `slurm: {nodes: 2, gpus_per_node: 8, time: 24:00:00}`,
 `args: "-N 2 -n 2"`, and `env_vars` with `xP=1`, `yD=1`.
 
