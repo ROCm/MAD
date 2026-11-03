@@ -1,6 +1,6 @@
 #!/bin/bash
 # Adapting the recipes' sglang flags to the sglang that is installed. Sourced by the
-# disagg launchers (sglang_disagg_mori_io_ep.sh, sglang_disagg_server.sh).
+# disagg role script (sglang_disagg_mori_io_ep.sh, for MoRI and Mooncake alike).
 #
 # The recipes were tuned on sglang 0.5.12. Later releases changed the command line:
 #   - --prefill-round-robin-balance was removed: 0.5.20 refuses to start with

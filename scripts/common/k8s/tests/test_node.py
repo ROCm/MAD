@@ -91,5 +91,17 @@ class PerPod(unittest.TestCase):
         self.assertEqual((self.tmp / "results" / "run-0" / "exit_code").read_text().strip(), "5")
 
 
+    def test_a_card_without_per_pod_dispatch_is_refused(self):
+        """An older MAD checkout's scripts (no dispatch.sh) cannot run per pod, and the
+        fan-out from pod 0 they would need is gone: every pod stops with a clear reason."""
+        import shutil as _sh
+        _sh.rmtree(self.ws / "scripts" / "common" / "dispatch")
+        rcs, outs = self.run_pods()
+        self.assertEqual(rcs, [2, 2], outs)
+        self.assertIn("update MAD to run it on Kubernetes", outs[0])
+        self.assertEqual((self.tmp / "results" / "run-0" / "exit_code").read_text().strip(), "2")
+        self.assertFalse((self.tmp / "logs" / "ran").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

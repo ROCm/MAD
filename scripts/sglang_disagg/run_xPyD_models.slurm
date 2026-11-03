@@ -181,7 +181,7 @@ config_layer site
 . "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
 # SGLang recipes carry no env: block (flags only), so there is no recipe layer here.
 
-# The container sets its own fabric defaults (mori_ep_env.sh, set_env_vars.sh),
+# The container sets its own fabric defaults (mori_ep_env.sh, connectors/mori.env),
 # which name one CX7 cluster's NICs and GID 3. Forward into it:
 #   - every fabric value the caller passed, on any cluster, so an override reaches
 #     the container the way it reaches every other launcher;

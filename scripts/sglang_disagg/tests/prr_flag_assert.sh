@@ -50,7 +50,6 @@ echo "=== launchers ==="
 M="$DIR/sglang_disagg_mori_io_ep.sh"
 _is "$(grep -c -- '--prefill-round-robin-balance \\$' "$M")" "0" "no launch command hardcodes the flag"
 _is "$(grep -c 'source "${SCRIPT_DIR}/sglang_compat.sh"' "$M")" "1" "the MoRI launcher uses sglang_compat.sh"
-_is "$(grep -c 'sglang_compat.sh"' "$DIR/sglang_disagg_server.sh")" "1" "the Mooncake launcher uses sglang_compat.sh"
 RE="$(sed -n "s/^_FATAL_SERVER_LOG_RE='\(.*\)'$/\1/p" "$M")"
 for line in 'sglang serve: error: unrecognized arguments: --prefill-round-robin-balance' \
             'sglang serve: error: ambiguous option: --cuda-graph-bs could match --cuda-graph-bs-decode, --cuda-graph-bs-prefill'; do

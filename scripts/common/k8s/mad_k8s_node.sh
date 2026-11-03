@@ -11,16 +11,13 @@
 #   MAD_K8S_MULTIPLE_RESULTS  the card's multiple_results file name, if any
 #   JOB_COMPLETION_INDEX      set by Kubernetes for an Indexed Job
 #
-# Two ways to run the card's script:
-#   per pod   When the card's scripts reach their nodes through
-#             scripts/common/dispatch/dispatch.sh, every pod runs the script as its
-#             own node (MAD_DISPATCH=k8s-indexed): the pods meet in a rendezvous
-#             directory on the shared results volume, each starts its own node's
-#             part, and pod 0 makes the verdict. Nothing fans out, so there is no
-#             srun stand-in and no agent; `docker run` runs in the pod (mad_k8s.py).
-#   from pod 0  Otherwise (an older MAD checkout): pod 0 runs the script, and the
-#             srun / docker / scontrol stand-ins and an agent on every pod carry its
-#             steps to the other pods.
+# Every pod runs the card's script as its own node (MAD_DISPATCH=k8s-indexed): its
+# scripts reach their nodes through scripts/common/dispatch/dispatch.sh, the pods
+# meet in a rendezvous directory on the shared results volume, each starts its own
+# node's part, and pod 0 makes the verdict. Nothing fans out from one pod to the
+# others; `docker run` runs in the pod and `scontrol show hostnames` lists the pods
+# (mad_k8s.py). A card whose scripts predate dispatch.sh (an older MAD checkout)
+# is refused: update MAD.
 set -u
 
 WORKSPACE="${MAD_K8S_WORKSPACE:-/workspace}"
@@ -35,11 +32,14 @@ export MAD_K8S_IMAGE_WORKDIR="$PWD"
 python3 -c 'import json, os, sys; json.dump(dict(os.environ), open(sys.argv[1], "w"))' "$STATE/base_env.json"
 
 script="${WORKSPACE}/${MAD_K8S_SCRIPT}"
-per_pod=""
-[ -f "$(dirname "$script")/../common/dispatch/dispatch.sh" ] && per_pod=1
-tools="srun docker scontrol"
-[ -n "$per_pod" ] && tools="docker scontrol"
-for tool in $tools; do
+if [ ! -f "$(dirname "$script")/../common/dispatch/dispatch.sh" ]; then
+    echo "[mad-k8s] ${MAD_K8S_SCRIPT} does not reach its nodes through common/dispatch/dispatch.sh" \
+         "(a MAD checkout from before per-pod dispatch); update MAD to run it on Kubernetes" >&2
+    mkdir -p "${RESULTS}/${MAD_K8S_NODE_PREFIX}-${JOB_COMPLETION_INDEX:-0}" && \
+        echo 2 > "${RESULTS}/${MAD_K8S_NODE_PREFIX}-${JOB_COMPLETION_INDEX:-0}/exit_code"
+    exit 2
+fi
+for tool in docker scontrol; do
     printf '#!/bin/bash\nexec python3 %s/mad_k8s.py %s "$@"\n' "$SHIM" "$tool" > "$SHIM/bin/$tool"
     chmod +x "$SHIM/bin/$tool"
 done
@@ -84,45 +84,13 @@ publish_results() {
     fi
 }
 
-if [ -n "$per_pod" ]; then
-    export MAD_DISPATCH=k8s-indexed
-    cd "$(dirname "$script")"
-    echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF}): running $(basename "$script") ${MAD_K8S_ARGS:-} as its own node of ${SLURM_JOB_NODELIST}"
-    # shellcheck disable=SC2086
-    bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
-    rc=$?
-    echo "[mad-k8s] $(basename "$script") exited ${rc} on node ${idx}"
-    [ "$idx" = "0" ] && publish_results
-    mkdir -p "${RESULTS}/${MAD_K8S_SELF}" && echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
-    exit "$rc"
-fi
-
-if [ "$idx" != "0" ]; then
-    echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF} on $(hostname)): serving tasks for ${MAD_K8S_NODE_PREFIX}-0"
-    exec python3 "$SHIM/mad_k8s.py" agent
-fi
-
-# Node 0: the batch host. It serves tasks too -- srun on SLURM runs a step's task on
-# the batch node like any other.
-python3 "$SHIM/mad_k8s.py" agent &
-agent_pid=$!
-release() {
-    python3 "$SHIM/mad_k8s.py" shutdown-peers
-    kill "$agent_pid" 2>/dev/null
-}
-trap 'release; exit 143' TERM INT
-
-python3 "$SHIM/mad_k8s.py" wait-peers || { echo "[mad-k8s] not every node came up" >&2; release; exit 1; }
-
+export MAD_DISPATCH=k8s-indexed
 cd "$(dirname "$script")"
-echo "[mad-k8s] running $(basename "$script") ${MAD_K8S_ARGS:-} on ${SLURM_JOB_NODELIST}"
+echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF}): running $(basename "$script") ${MAD_K8S_ARGS:-} as its own node of ${SLURM_JOB_NODELIST}"
 # shellcheck disable=SC2086
 bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
 rc=$?
-echo "[mad-k8s] $(basename "$script") exited ${rc}"
-
-publish_results
-echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
-
-release
+echo "[mad-k8s] $(basename "$script") exited ${rc} on node ${idx}"
+[ "$idx" = "0" ] && publish_results
+mkdir -p "${RESULTS}/${MAD_K8S_SELF}" && echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
 exit "$rc"

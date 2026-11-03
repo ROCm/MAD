@@ -9,9 +9,10 @@ result rows), which is checked by comparing what each renders.
 
 How a card runs on Kubernetes: an Indexed Job with one pod per node and a headless
 Service, so pods reach each other by hostname ("<run>-0", "<run>-1", ...). Every pod
-runs the card's image; pod 0 runs the card's script with the SLURM_* variables a
-batch script sees and stand-ins for srun / docker / scontrol (mad_k8s.py, next to
-this file) first on PATH; the others serve its srun tasks. See mad_k8s_node.sh.
+runs the card's image and the card's script as its own node (MAD_DISPATCH=k8s-indexed),
+with the SLURM_* variables a batch script sees and stand-ins for docker / scontrol
+(mad_k8s.py, next to this file) first on PATH; pod 0 gives the verdict. See
+mad_k8s_node.sh.
 
 Usage (from the MAD repo root):
 
@@ -48,7 +49,6 @@ from pathlib import Path
 DEFAULT_IMAGE_PULL_SECRET_NAMES = ["dockerhub-rocm"]
 
 HERE = Path(__file__).resolve().parent
-AGENT_PORT = 29711
 BUNDLE_LIMIT_BYTES = 900 * 1024
 _SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache"}
 MODELS_JSON_GLOB = "scripts/*/models.json"
@@ -144,7 +144,6 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     env.update({
         "MAD_K8S_NNODES": str(nnodes), "MAD_K8S_NODE_PREFIX": name, "MAD_K8S_JOB_ID": run_id,
         "MAD_K8S_IMAGE": image, "MAD_K8S_SCRIPT": script, "MAD_K8S_ARGS": card.get("args") or "",
-        "MAD_K8S_AGENT_PORT": str(AGENT_PORT),
     })
     if card.get("multiple_results"):
         env["MAD_K8S_MULTIPLE_RESULTS"] = card["multiple_results"]
@@ -185,7 +184,6 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
         "args": ["set -e; mkdir -p /workspace; tar -xzf /mad-k8s-bundle/scripts.tgz -C /workspace; "
                  "exec bash /workspace/.mad-k8s/mad_k8s_node.sh"],
         "env": [{"name": k, "value": v} for k, v in sorted(env.items())],
-        "ports": [{"name": "mad-k8s", "containerPort": AGENT_PORT}],
         "resources": {"limits": limits, "requests": requests},
         "volumeMounts": [{"name": "mad-k8s-bundle", "mountPath": "/mad-k8s-bundle", "readOnly": True},
                          {"name": "results", "mountPath": "/results"},
@@ -245,8 +243,7 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
             {"apiVersion": "v1", "kind": "ConfigMap", "metadata": meta(f"{name}-config"),
              "binaryData": {"scripts.tgz": base64.b64encode(bundle).decode()}},
             {"apiVersion": "v1", "kind": "Service", "metadata": meta(name),
-             "spec": {"clusterIP": "None", "publishNotReadyAddresses": True, "selector": {"job-name": name},
-                      "ports": [{"name": "mad-k8s", "port": AGENT_PORT}]}},
+             "spec": {"clusterIP": "None", "publishNotReadyAddresses": True, "selector": {"job-name": name}}},
             {"apiVersion": "batch/v1", "kind": "Job", "metadata": meta(name), "spec": job_spec},
         ],
     }
