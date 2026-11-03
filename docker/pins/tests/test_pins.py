@@ -72,6 +72,22 @@ def resolve(repo, ref):
     return RESOLVED[(repo, ref)]
 
 
+# The commit the per-model Dockerfiles were last in, before they were retired.
+LEGACY_COMMIT = "13cfcac"
+
+
+def legacy_text(name):
+    """A legacy Dockerfile's text: from the tree while it exists, else from git."""
+    f = DOCKER / LEGACY[name]
+    if f.exists():
+        return f.read_text()
+    p = subprocess.run(["git", "-C", str(DOCKER), "show", f"{LEGACY_COMMIT}:docker/{LEGACY[name]}"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        raise unittest.SkipTest(f"legacy {LEGACY[name]} not in the tree and not in git: {p.stderr.strip()}")
+    return p.stdout
+
+
 def legacy_args(text):
     """ARG / ENV defaults of a Dockerfile (last definition wins)."""
     out = {}
@@ -142,7 +158,7 @@ class LegacyEquivalence(unittest.TestCase):
 
     def check_vllm(self, name):
         s = pins.load(name)
-        text = (DOCKER / LEGACY[name]).read_text()
+        text = legacy_text(name)
         a = legacy_args(text)
         c = s["components"]
         arch_from_mad = "MAD_SYSTEM_GPU_ARCHITECTURE must be gfx942 or gfx950" in text
@@ -201,7 +217,7 @@ class LegacyEquivalence(unittest.TestCase):
     def test_sglang(self):
         name = "sglang-disagg"
         s = pins.load(name)
-        text = (DOCKER / LEGACY[name]).read_text()
+        text = legacy_text(name)
         a = legacy_args(text)
         stacks = dict((arch, img) for img, arch in re.findall(r"^FROM (\S+) AS stack-(gfx\d+)", text, re.M))
         self.same(name, "gpu_archs", s["gpu_archs"], sorted(stacks))

@@ -225,8 +225,8 @@ DeepSeek-R1:
 #
 # IMAGE CONTRACT: config only, NO vLLM source fixes. The DSA enablement (upstream
 # #47766, DSA indexer KV transfer over MoRIIO) must be IN-SOURCE in the image's vLLM.
-# Build from docker/vllm_disagg_inference.glmv5.1.ubuntu.amd.Dockerfile, whose VLLM_REF
-# pin IS the contract. DOCKER_IMAGE_NAME is submit-time, not set here.
+# Build the vllm-glm51 pin set (docker/pins/vllm-glm51.json), whose vLLM commit and
+# patch ARE the contract. DOCKER_IMAGE_NAME is submit-time, not set here.
 #
 # NOT SUPPORTED: images predating the in-source DSA fixes boot and serve but return
 # silently wrong output (rocm/pytorch-private:glm-dockerimage-built-09072026 scored NIAH
@@ -476,7 +476,7 @@ Kimi-K3-MXFP4:
 
 # ============================ Kimi-K3 native MXFP4 on MI355X / gfx950 ============================
 # BRING-UP RECIPE, NOT VALIDATED. MoRIIO disagg with Kimi-K3 has only run on MI300X; see
-# docker/vllm_kimi_k3.ubuntu.amd.Dockerfile STATUS for what a first gfx950 run may hit.
+# docker/pins/README.md (vllm-kimi-k3) for what a first gfx950 run may hit.
 # The launcher refuses it on any GPU but gfx950 (GPU_ARCHS), as the MI300X recipes refuse gfx950.
 #
 # What changes from the MI300X recipes, and why:

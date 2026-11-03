@@ -24,7 +24,7 @@ Rules (validate):
 
 CLI:
   pins.py validate [--strict] [NAME ...]       check pin sets (all by default)
-  pins.py build-args NAME --arch ARCH          the docker build --build-arg list
+  pins.py build-args NAME --arch ARCH [--json] the docker build --build-arg list
   pins.py env NAME --arch ARCH --base IMAGE    shell assignments for the Dockerfile
 """
 import argparse
@@ -210,6 +210,8 @@ def main(argv=None):
         p.add_argument("--arch", required=True)
         if cmd == "env":
             p.add_argument("--base", required=True)
+        else:
+            p.add_argument("--json", action="store_true", help="as a JSON object (for madengine)")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "validate":
@@ -226,7 +228,8 @@ def main(argv=None):
             return 1 if bad else 0
         spec = load(a.name)
         if a.cmd == "build-args":
-            print(" ".join(f"--build-arg {k}={shlex.quote(v)}" for k, v in build_args(spec, a.arch).items()))
+            args = build_args(spec, a.arch)
+            print(json.dumps(args) if a.json else " ".join(f"--build-arg {k}={shlex.quote(v)}" for k, v in args.items()))
         else:
             print(_shell(build_env(spec, a.arch, a.base)))
     except PinError as e:

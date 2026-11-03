@@ -80,7 +80,7 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # =============================================================================
 
 # These are expected to be baked into the image
-# (docker/sglang_disagg_inference.ubuntu.amd.Dockerfile). Install only what is
+# (docker/di_sglang.ubuntu.amd.Dockerfile, pin set sglang-disagg). Install only what is
 # genuinely missing, so a MAD-built image does no work here while an image supplied
 # through DOCKER_IMAGE_NAME still self-heals. The unconditional
 # "--ignore-installed --force-reinstall flask" this replaces mutated the image on

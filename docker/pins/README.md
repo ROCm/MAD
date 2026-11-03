@@ -41,6 +41,37 @@ upstream commit that has it and delete the patch.
 | `router/dp-rank-kv-notify.patch` | vllm-router | DP-rank round-robin + 2P2D KV-notify fix (vllm-project/router#181) |
 | `aiter/gqa64.patch` | AITER | the gqa64 fix (ROCm/aiter#4957) |
 
+## Per pin set
+
+**The image is the contract.** MAD's scripts are catalog and configuration only and
+patch nothing in the image at start, so every source fix a model needs is in its pin
+set: a commit or a patch. Serving a model from an image built off an older pin is
+unsupported and can fail silently (it boots, then returns garbage or stalls the KV
+transfer). To take a fix, move the pin and rebuild.
+
+- `vllm-mori121`: the validated v1.2.1 MoRI stack for DeepSeek-V3/R1 and the other
+  shared-image cards, gfx942. The MoRIIO disagg fixes (notify, LL split, DP-rank
+  hash fail-safe) are in its vLLM patch. The rixl transport stack is on (all
+  connectors); the moriio paths are the validated ones.
+- `vllm-glm51`: GLM-5.1-FP8 (MLA + DeepSeek sparse attention) over MoRI-EP wide-EP,
+  gfx942. 2P/2D EP16 and 4P/4D EP32 were validated on these pins (NIAH 2k/8k at
+  9.3-9.7/10 over three seeds; no failed requests or GPU faults in the sweeps). The
+  vLLM patch carries the DSA indexer KV transfer over MoRIIO (vLLM #47766) and the
+  EP32 combine-topk fix; AITER carries the gfx942 gqa64 decode fix. MoRI-EP only.
+- `vllm-kimi-k3`: every Kimi-K3 vLLM card, colocated and disaggregated, built for
+  one architecture at a time. gfx942 (MI300X) is the validated stack (single-needle
+  NIAH 10K-900K on 2 prefill + 2 decode nodes). gfx950 (MI355X) is bring-up, not
+  validated: the vLLM patch is the gfx942 line, and the gfx950 GLM work needed EP16
+  start-up gates and a MoRI combine fix that are not in it. AITER 68e42f5f carries the
+  Kimi-K3 tuned MoE configs, `aiter.ops.triton.conv` and flydsl 0.2.4. Runtime
+  differences between the architectures are recipe settings in `models.yaml`.
+- `sglang-disagg`: the SGLang release image per architecture; MoRI 158c7e8 is added on
+  gfx942 only (gfx950's image ships its MoRI).
+
+The ROCm 7.2.3 GPU-RDMA settings (`expandable_segments:False`,
+`HSA_ENABLE_IPC_MODE_LEGACY=0`) are not in any image: they are in
+`scripts/vllm_dissag/connectors/<connector>.env`, applied at launch.
+
 ## Rules
 
 - A component is a full 40-hex commit of its upstream repository, plus patches. No
@@ -53,7 +84,7 @@ upstream commit that has it and delete the patch.
 
 ## The images these replace
 
-Each set reproduces one per-model Dockerfile; `tests/test_pins.py` checks that it
+Each set reproduces one per-model Dockerfile (removed; in git at 13cfcac); `tests/test_pins.py` checks that it
 builds the same sources, switches and settings (the refs those files named are
 resolved to commits in its `RESOLVED` table):
 
@@ -64,7 +95,10 @@ resolved to commits in its `RESOLVED` table):
 | `vllm-kimi-k3` | `vllm_kimi_k3.ubuntu.amd.Dockerfile` | DeepEP pinned |
 | `sglang-disagg` | `sglang_disagg_inference.ubuntu.amd.Dockerfile` | none (its pip packages are pending pins) |
 
-The cards still name the per-model Dockerfiles until each pin set has been built and
-its `versions.txt` compared with the image it replaces.
+The cards name `docker/di_vllm` or `docker/di_sglang` and their pin set
+(`"docker_build_arg": {"PINS": "<name>"}`, `"dockercontext": "."`); madengine adds the
+base image for the build's architecture. The per-model Dockerfiles were removed after
+commit 13cfcac; the test reads them from there. Before relying on a set, build it and
+compare its `/app/versions.txt` with the image it replaces.
 
 Run the tests from the MAD root: `python3 -m unittest discover -s docker/pins/tests -v`.

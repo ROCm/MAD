@@ -38,6 +38,9 @@
 # set's base for the architecture; build-args prints it.
 # =============================================================================
 
+# The architecture defaults to gfx942, as the image this replaces did; madengine reads
+# this default to pick BASE_IMAGE from the pin set.
+ARG MAD_SYSTEM_GPU_ARCHITECTURE=gfx942
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
