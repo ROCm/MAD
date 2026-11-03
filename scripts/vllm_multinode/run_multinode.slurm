@@ -66,7 +66,21 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# This launcher's directory. Under sbatch the scheduler runs a copy of this script
+# from its spool directory (SLURM's slurmd, Spur's /var/spool/spur), so the script's
+# own path is not the repo: then the submit directory names it, as
+# `cd <MAD>/scripts/vllm_multinode && sbatch ...` or `sbatch scripts/vllm_multinode/...` from the root.
+_resolve_launcher_dir() {
+    local _d
+    for _d in "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" \
+              "${SLURM_SUBMIT_DIR:+$SLURM_SUBMIT_DIR/scripts/vllm_multinode}" "${SLURM_SUBMIT_DIR:-}" "$PWD"; do
+        [[ -n "$_d" && -f "$_d/serve_colocated.sh" ]] && { (cd "$_d" && pwd); return 0; }
+    done
+    echo "Error: cannot find scripts/vllm_multinode (looked next to this script, in SLURM_SUBMIT_DIR and in $PWD);" \
+         "run sbatch from MAD/scripts/vllm_multinode or from the MAD root" >&2
+    return 1
+}
+SCRIPT_DIR="$(_resolve_launcher_dir)" || exit 1
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SHARED_DIR="${MAD_SCRIPTS_DIR}/vllm_dissag"
 
