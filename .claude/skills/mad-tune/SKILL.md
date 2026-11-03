@@ -1,17 +1,18 @@
 ---
 name: mad-tune
 description: Tune a MAD training or inference model for better performance with a measure-change-measure loop. Use when the user wants to optimize, tune, or speed up an existing MAD model.
-argument-hint: "<tag-or-model> [target: throughput|latency] [operator|dispatch|kernel]"
+argument-hint: "<tag-or-model> [target: throughput|latency] [operator|dispatch|kernel|assembly]"
 disable-model-invocation: true
 context: fork
 agent: mad-tuner
-allowed-tools: Bash(madengine discover *) Bash(madengine report *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash .claude/skills/mad-common/preflight.sh) Bash(bash .claude/skills/mad-common/mad-run.sh *) Read Edit Grep Glob
+allowed-tools: Bash(madengine discover *) Bash(madengine report *) Bash(rocm-smi *) Bash(amd-smi *) Bash(bash .claude/skills/mad-common/preflight.sh) Bash(bash .claude/skills/mad-common/mad-run.sh *) Bash(python3 .claude/skills/mad-common/kernel-tools.py *) Read Edit Grep Glob
 ---
 
 Tune `$ARGUMENTS`.
 
 The model tag is the first whitespace-delimited token of `$ARGUMENTS`. A later
-token may be `throughput` or `latency`, and `operator`, `dispatch`, or `kernel`.
+token may be `throughput` or `latency`, and `operator`, `dispatch`, `kernel`,
+or `assembly`.
 Use the tag token in every `madengine` command.
 
 ## Pre-flight
@@ -34,10 +35,13 @@ bash .claude/skills/mad-common/preflight.sh
 2. Profile once at the requested depth before changing anything. Default depth
    is `dispatch` (`rocm_trace_lite`), which works for training and inference.
    `operator` is TraceLens via `torch_profiler_dynolog` + `tracelens`
-   (inference sets `TORCH_PROFILE_ITERATIONS=0`). `kernel` is one of
-   `rocprofv3_compute`, `rocprofv3_memory`, `rocprofv3_communication`.
-   Never combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled
-   perf number is not the baseline.
+   (inference sets `TORCH_PROFILE_ITERATIONS=0`). `kernel` and `assembly`
+   follow `.claude/skills/mad-common/kernel-analysis.md`: dispatch first for
+   the top kernel, then one counter run of that kernel through
+   `kernel-tools.py context`, then `kernel-tools.py card` and `asm`. The card's
+   `bound` (compute, bandwidth, latency or unknown) is the evidence. Never
+   combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled perf
+   number is not the baseline.
 3. Propose levers for that family, changing ONE at a time so deltas are
    attributable:
    - training: batch, precision, TP/PP/EP, `RCCL_*`/`NCCL_*`, recompute,
@@ -45,8 +49,11 @@ bash .claude/skills/mad-common/preflight.sh
    - inference: `gpu-memory-utilization`, `max-num-seqs`,
      `max-num-batched-tokens`, tensor-parallel size, precision, HIP graphs,
      attention backend;
-   - kernel evidence, either family: `PYTORCH_TUNABLEOP_ENABLED`, hipBLASLt,
-     the kernel flag the counters name.
+   - kernel evidence, either family: take levers from the "Levers by bound"
+     table in `kernel-analysis.md` that match the card's `bound`. A latency
+     kernel does not get a bandwidth lever. Library kernels (hipBLASLt,
+     rocBLAS, CK) take `PYTORCH_TUNABLEOP_ENABLED` or hipBLASLt tuning. When
+     `bound` is `unknown`, say so and fall back to the family levers.
 4. Re-measure each change with a clean `madengine run` (`tools` removed). Run
    the baseline and each change at least twice and compare medians; a delta
    inside the run-to-run spread is noise. Keep improvements
@@ -62,7 +69,8 @@ ranked list of candidate changes with rationale and the exact `madengine run` co
 to test each, then stop.
 
 Never alter the `performance: <value> <unit>` output contract. Report: family,
-baseline, the profile evidence, each change tried with its measured effect, and
+baseline, the profile evidence (the kernel card line when you went to the
+kernel depth), each change tried with its measured effect, and
 the final recommended config with before/after numbers.
 
 Primus projection is not part of this loop. For a multi-depth search, use the

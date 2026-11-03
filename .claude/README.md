@@ -43,9 +43,10 @@ delegate to them. Codex gets generated copies in `.codex/agents/` (see
 host-wide GPU lock.
 
 ### Claude Code-only workflows
-The `mad-benchmark-sweep` and `mad-tune-search` workflows in
-`.claude/workflows/` need Claude Code's workflow runtime. Both plan by default
-and run only with `--execute`; `CLAUDE.md` describes them, and
+The `mad-benchmark-sweep`, `mad-tune-search`, and `mad-optimize` workflows in
+`.claude/workflows/` need Claude Code's workflow runtime. They plan by default
+and run only with `--execute`; `CLAUDE.md` describes the first two,
+`docs/mad-optimize.md` describes the GEAK handoff, and
 `node --test tools/tests/*.test.mjs` tests them against a mock agent.
 
 ## Quick Start
@@ -70,7 +71,7 @@ and run only with `--execute`; `CLAUDE.md` describes them, and
 ├── settings.json                       # Shared permissions + models.json hook
 ├── agents/                             # Subagents the skills fork into (Claude Code, Cursor)
 ├── hooks/validate-models-json.sh       # Validates models.json edits
-├── workflows/                          # mad-benchmark-sweep, mad-tune-search (Claude Code)
+├── workflows/                          # mad-benchmark-sweep, mad-tune-search, mad-optimize (Claude Code)
 ├── skills/
 │   ├── mad-add-model/                  # Model addition wizard
 │   │   ├── SKILL.md
@@ -80,7 +81,7 @@ and run only with `--execute`; `CLAUDE.md` describes them, and
 │   │   ├── scripts/render_dockerfile.py  # Template renderer
 │   │   └── framework_templates/        # Jinja2 templates
 │   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-report/, primus-projection/
-│   └── mad-common/                     # preflight.sh, mad-run.sh (shared helpers)
+│   └── mad-common/                     # preflight.sh, mad-run.sh, geak-run.sh, kernel-tools.py, kernel-analysis.md (shared helpers)
 └── prompts/
     └── model_addition_guide.md         # Detailed guide
 

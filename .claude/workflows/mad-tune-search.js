@@ -1,11 +1,12 @@
 export const meta = {
   name: 'mad-tune-search',
-  description: 'Descend operator, dispatch, and kernel profiling for a training or inference MAD model, then measure clean candidates and synthesize the winning config',
+  description: 'Descend operator, dispatch, kernel, and assembly profiling for a training or inference MAD model, then measure clean candidates and synthesize the winning config',
   phases: [
     { title: 'Baseline', detail: 'resolve exactly one model, classify it, and measure a clean baseline (N runs)' },
     { title: 'Operator', detail: 'TraceLens on a PyTorch Kineto trace, when the model is PyTorch' },
     { title: 'Dispatch', detail: 'rocm-trace-lite kernel-dispatch timeline' },
-    { title: 'Kernel', detail: 'one rocprofv3 counter preset chosen from the dispatch class' },
+    { title: 'Kernel', detail: 'rocprofv3 counters for the top dispatch kernel, reduced to a kernel card' },
+    { title: 'Assembly', detail: 'code-object summary of that kernel; no GPU run' },
     { title: 'Expect', detail: 'Primus projection numbers only when --expect is passed' },
     { title: 'Propose', detail: 'one-lever candidates citing the deepest evidence' },
     { title: 'Evaluate', detail: 'measure each candidate cleanly (sequential, N runs) and verify its delta' },
@@ -15,21 +16,30 @@ export const meta = {
 
 // ARGS — accepts EITHER:
 //   (a) a structured object: { tag, target?, candidates?, execute?, repeats?,
-//       additionalContext?, timeout?, depth?, profileTool?, expect? }
+//       additionalContext?, timeout?, depth?, profileTool?, kernel?, expect? }
 //   (b) a CLI-style string, e.g.
 //       --tag pyt_vllm_qwen3-8b --target latency --depth auto --candidates 4 --execute
 //       --tag primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain --expect
 //
 // The tag is required and must resolve (madengine discover) to exactly ONE model.
 //
-// THREE DEPTHS, ONE MODEL AT A TIME. madengine is the harness. Each depth is its
+// FOUR RUNGS, ONE MODEL AT A TIME. madengine is the harness. Each GPU rung is its
 // own run. Never put rocm_trace_lite and rocprofv3_* in the same tools array.
+// The method is .claude/skills/mad-common/kernel-analysis.md.
 //   - operator: torch_profiler_dynolog + tracelens (TRACELENS_MODE=pytorch).
 //     Training counts optimizer.step(). Inference sets TORCH_PROFILE_ITERATIONS=0.
 //     Skip when the model is not PyTorch.
 //   - dispatch: rocm_trace_lite. Any HIP workload, training or inference.
-//   - kernel: rocprofv3_compute | rocprofv3_memory | rocprofv3_communication,
-//     chosen from the dispatch class. Skipped on auto when dispatch is launch-bound.
+//   - kernel: rocprofv3 counters for the top dispatch kernel (or --kernel NAME),
+//     a compute or memory group chosen from the dispatch class, built by
+//     kernel-tools.py context and reduced by kernel-tools.py card to a kernel
+//     card with a bound (compute | bandwidth | latency | unknown). Communication
+//     uses the rocprofv3_communication preset. Skipped on auto when dispatch is
+//     launch-bound.
+//   - assembly: kernel-tools.py asm on the code objects the kernel run kept.
+//     No GPU run.
+// Kernel and assembly candidates must name the bound their lever addresses; a
+// lever for another bound is dropped before anything is measured.
 //
 // CLEAN vs PROFILED: baseline and every candidate measurement strip `tools`.
 // A profiled perf number is evidence, not the score.
@@ -44,8 +54,8 @@ export const meta = {
 // scores Primus training configs. Inference and every other trainer skip it even
 // then. --expect off and --no-expect force it off.
 //
-// --depth operator|dispatch|kernel runs that rung only. --profile-tool NAME forces
-// the matching rung and uses NAME as its tool. Default --depth auto descends.
+// --depth operator|dispatch|kernel|assembly runs that rung only. --profile-tool NAME
+// forces the matching rung and uses NAME as its tool. Default --depth auto descends.
 //
 // EXECUTE: plans by default — resolves the model, prints every command, and
 // ranks candidates without touching GPUs. --execute (or execute:true) runs them;
@@ -162,6 +172,8 @@ function parseCli(s) {
       cfg.repeats = parseInt(next(), 10)
     } else if (t === '--profile-tool') {
       cfg.profileTool = next()
+    } else if (t === '--kernel') {
+      cfg.kernel = next()
     } else if (t === '--depth') {
       cfg.depth = next()
     } else if (t === '--timeout') {
@@ -213,6 +225,18 @@ function gate(base, cand, baseMetric, candMetric, higherIsBetter) {
   }
 }
 
+function regexEscape(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// A kernel or assembly candidate must address the bound the kernel card found.
+// "any" covers levers that do not depend on it (library tuning, LDS bank conflicts).
+function leverFits(cand, bound) {
+  if (!['kernel', 'assembly'].includes(cand.depth)) return true
+  if (!bound || bound === 'unknown') return true
+  return cand.leverBound === bound || cand.leverBound === 'any'
+}
+
 let cfg
 if (typeof args === 'string') {
   cfg = parseCli(args)
@@ -225,7 +249,7 @@ if (typeof args === 'string') {
 
 if (!cfg.tag)
   throw new Error('mad-tune-search needs one model tag, e.g. --tag pyt_vllm_qwen3-8b [--target latency] [--execute]')
-const DEPTHS = ['auto', 'operator', 'dispatch', 'kernel']
+const DEPTHS = ['auto', 'operator', 'dispatch', 'kernel', 'assembly']
 const tag = cfg.tag
 const target = cfg.target || 'throughput'
 const nCandidates = Math.max(1, Math.min(cfg.candidates || 4, 8))
@@ -235,6 +259,7 @@ const timeout = cfg.timeout || null
 const expectOn = cfg.expect === true
 let depth = DEPTHS.includes(cfg.depth) ? cfg.depth : 'auto'
 const profileTool = cfg.profileTool || null
+const kernelOverride = cfg.kernel || null
 
 function depthForTool(name) {
   if (!name) return null
@@ -268,11 +293,26 @@ function toolsPayload(tools) {
 function ctxFlag(payload) {
   return payload ? ` --additional-context ${shellQuote(payload)}` : ''
 }
-function runCmd(outFile, payload) {
+function runCmd(outFile, payload, ctxArg) {
   const flags = ['--tags ' + shellQuote(tag), '--live-output', '-o ' + outFile]
   if (timeout) flags.push('--timeout ' + timeout)
-  return `madengine run ${flags.join(' ')}${ctxFlag(payload)}`
+  return `madengine run ${flags.join(' ')}${ctxArg ? ' ' + ctxArg : ctxFlag(payload)}`
 }
+const KERNEL_TOOLS = 'python3 .claude/skills/mad-common/kernel-tools.py'
+const kernelCtxArg = cleanCtx ? ` --context ${shellQuote(cleanCtx)}` : ''
+// Two plain commands, not ctx=$(...): a headless session cannot approve a
+// command substitution.
+function ctxFileFlag(mode) {
+  return `--additional-context-file ${KERNEL_RUN_DIR}/${mode === 'counters' ? 'context.json' : `context_${mode}.json`}`
+}
+function warmSteps() {
+  return [
+    `${KERNEL_TOOLS} context --mode warm --run-dir ${KERNEL_RUN_DIR}${kernelCtxArg}`,
+    runCmd('perf_tune_warm.csv', null, ctxFileFlag('warm')),
+  ]
+}
+// The code-object cache runs to hundreds of MB; keep it out of the repo.
+const KERNEL_RUN_DIR = `/var/tmp/mad-kernel/tune_${String(tag).replace(/[^A-Za-z0-9._-]/g, '_')}_kernel`
 function want(rung) {
   return depth === 'auto' || depth === rung
 }
@@ -290,11 +330,12 @@ function skipped(reason) {
   }
 }
 
-const KERNEL_PRESET = {
-  compute: 'rocprofv3_compute',
-  memory: 'rocprofv3_memory',
+// Counter group per dispatch class. Communication keeps the madengine preset.
+const KERNEL_GROUP = {
+  compute: 'compute',
+  memory: 'memory',
   communication: 'rocprofv3_communication',
-  mixed: 'rocprofv3_compute',
+  mixed: 'compute',
 }
 
 if (cfg._extraTags && cfg._extraTags.length)
@@ -306,7 +347,8 @@ if (!execute) log('Plan mode: commands are printed and candidates ranked, nothin
 
 const PREFLIGHT = 'Pre-flight: run `bash .claude/skills/mad-common/preflight.sh` and stop if it exits non-zero.'
 const MAD_RUN = 'bash .claude/skills/mad-common/mad-run.sh'
-const RUN_HOW = `Run every madengine command through the run helper, never in the foreground (a tool call ends after 10 minutes):
+const RUN_HOW = `Each Bash tool call runs exactly one command. A call containing &&, ;, or a newline that joins two commands is denied and stops the phase. Never join commands. Never prepend a rocm-smi or GPU check.
+Run every madengine command through the run helper, never in the foreground (a tool call ends after 10 minutes):
   ${MAD_RUN} start <run-id> -- <madengine command>
 then repeat \`${MAD_RUN} wait <run-id>\` until its first line says MAD_RUN_STATUS=succeeded or failed. Use a fresh run-id per run (append -2, -3, ... if start says it exists).`
 
@@ -416,6 +458,17 @@ const RUNG_SCHEMA = {
     tracePath: { type: ['string', 'null'] },
     hotspots: { type: 'array', items: { type: 'object' } },
     topOperators: { type: 'array', items: { type: 'object' } },
+    card: { type: ['object', 'null'], properties: {
+      kernel: { type: 'string' },
+      bound: { type: 'string', enum: ['compute', 'bandwidth', 'latency', 'unknown'] },
+      pctPeakBandwidth: { type: ['number', 'null'] },
+      pctPeakMfma: { type: ['number', 'null'] },
+      flopsPerByte: { type: ['number', 'null'] },
+      occupancy: { type: ['number', 'null'] },
+      occupancyLimiter: { type: ['string', 'null'] },
+      mix: { type: ['string', 'null'] },
+      line: { type: 'string' },
+    } },
   },
 }
 
@@ -453,18 +506,29 @@ let dispatch
 if (!want('dispatch')) {
   dispatch = skipped(`depth=${depth}; dispatch rung not selected`)
 } else {
-  const dPayload = toolsPayload(dispatchTools())
-  const dCmd = runCmd('perf_tune_dispatch.csv', dPayload)
+  const dTools = dispatchTools()
+  // Warm the shared cache, then a rocprofv3 kernel trace: a cold torch.compile
+  // traces its own autotuning, and rocm_trace_lite misses kernels replayed from HIP graphs.
+  const ranked = dTools.length === 1 && dTools[0].name === 'rocm_trace_lite'
+  const dCmd = ranked
+    ? [...warmSteps(),
+       `${KERNEL_TOOLS} context --mode dispatch --run-dir ${KERNEL_RUN_DIR}${kernelCtxArg}`,
+       runCmd('perf_tune_dispatch.csv', null, ctxFileFlag('dispatch')),
+       `${KERNEL_TOOLS} rank --run-dir ${KERNEL_RUN_DIR}`].join('\n')
+    : runCmd('perf_tune_dispatch.csv', toolsPayload(dTools))
+  const traceRead = ranked
+    ? `${KERNEL_RUN_DIR}/kernel_rank.json (kernel names and share_pct of GPU time)`
+    : 'rocm_trace_lite_output/ (trace.db or trace_summary.txt) for kernel dispatch names and their share of GPU time'
   const dAction = execute
-    ? `If AMD GPUs are present, run this command once. ${RUN_HOW}
-Then read rocm_trace_lite_output/ (trace.db or trace_summary.txt) from this run for kernel dispatch names and their share of GPU time. If no GPUs, set status "skipped". The perf number is profiled — ignore it as a score.`
-    : 'Do NOT run anything. Read an existing rocm_trace_lite_output/ if present. Print the command. Set status "planned" when you only printed it, "skipped" when there is nothing to read.'
+    ? `If AMD GPUs are present, run these commands in order, once each. Each kernel-tools.py context line writes the context file the madengine line after it reads. The warm-up run fills the code-object cache; its perf number is not a score. ${RUN_HOW}
+Then read ${traceRead}. If no GPUs, set status "skipped". The perf number is profiled — ignore it as a score.`
+    : `Do NOT run anything. Read ${traceRead} if present. Print the commands. Set status "planned" when you only printed them, "skipped" when there is nothing to read.`
   dispatch = await agent(
     `Dispatch-level profile of "${baseline.model}" (family: ${baseline.family}).
 ${PREFLIGHT}
-This rung is rocm-trace-lite only. Command:
+This rung is one kernel trace, nothing else. Commands:
 ${dCmd}
-Do not add rocprof, rocprofv3_*, or tracelens to this command. rocm-trace-lite and rocprofv3 cannot share a run.
+Do not add counters, tracelens, or a second profiler to the trace run. rocm-trace-lite and rocprofv3 cannot share a run.
 Operator evidence so far: ${operator.evidence || operator.reason || 'none'}
 ${dAction}
 Classify bottleneck as compute, memory, communication, launch, mixed, or unknown:
@@ -472,22 +536,25 @@ Classify bottleneck as compute, memory, communication, launch, mixed, or unknown
 - memory: attention, elementwise, norm, or copy kernels dominate
 - communication: RCCL/NCCL collectives are a large share
 - launch: many tiny kernels and timeline gaps
+A kernel that only runs while torch.compile autotunes (triton_mm and other candidates, all early in the trace) is compile work, not a hotspot.
 Return status, bottleneck, evidence citing hotspot percents, hotspots [{name, pct}], tracePath.`,
     { phase: 'Dispatch', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('dispatch agent returned no result')
 }
 log(`Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''}. ${(dispatch.hotspots || []).slice(0, 3).map(h => `${h.name} ${h.pct != null ? h.pct + '%' : ''}`).join(', ')}`)
 
-// ── Phase 4: Kernel (one rocprofv3 preset) ─────────────────────────────────
+// ── Phase 4: Kernel (counters for one kernel → kernel card) ────────────────
 phase('Kernel')
 let kernel
 let kernelPreset = null
 if (depth === 'kernel' && profileTool && String(profileTool).startsWith('rocprof'))
   kernelPreset = profileTool
-else if (dispatch && KERNEL_PRESET[dispatch.bottleneck])
-  kernelPreset = KERNEL_PRESET[dispatch.bottleneck]
+else if (dispatch && KERNEL_GROUP[dispatch.bottleneck])
+  kernelPreset = KERNEL_GROUP[dispatch.bottleneck]
 else if (depth === 'kernel')
-  kernelPreset = 'rocprofv3_compute'
+  kernelPreset = 'compute'
+const usesCard = kernelPreset === 'compute' || kernelPreset === 'memory'
+const topKernel = kernelOverride || ((dispatch.hotspots || [])[0] || {}).name || null
 
 const skipKernel = !want('kernel')
   || (depth === 'auto' && dispatch.bottleneck === 'launch')
@@ -500,27 +567,67 @@ if (skipKernel) {
       : 'dispatch did not name a compute, memory, or communication hotspot')
   kernel = skipped(why)
 } else {
-  const kPayload = toolsPayload([{ name: kernelPreset }])
-  const kCmd = runCmd('perf_tune_kernel.csv', kPayload)
+  let kSteps
+  if (usesCard) {
+    const kernelArg = topKernel ? shellQuote(regexEscape(topKernel)) : "'<top dispatch kernel>'"
+    const warmed = want('dispatch') && dispatch.status !== 'skipped'
+    kSteps = [
+      ...(warmed ? [] : warmSteps()),
+      `${KERNEL_TOOLS} context --mode counters --group ${kernelPreset} --kernel ${kernelArg} --run-dir ${KERNEL_RUN_DIR}${kernelCtxArg}`,
+      runCmd('perf_tune_kernel.csv', null, ctxFileFlag('counters')),
+      `${KERNEL_TOOLS} card --run-dir ${KERNEL_RUN_DIR}`,
+    ].join('\n')
+  } else {
+    kSteps = runCmd('perf_tune_kernel.csv', toolsPayload([{ name: kernelPreset }]))
+  }
   const kAction = execute
-    ? `If AMD GPUs are present, run this command once. ${RUN_HOW}
-Then read rocprof_output/ from this run for the counter or kernel summary. If no GPUs, set status "skipped". Ignore the profiled perf number as a score.`
-    : 'Do NOT run anything. Read an existing rocprof_output/ if present. Print the command and set status "planned" or "skipped".'
+    ? `If AMD GPUs are present, run the madengine commands in order, once each (through the run helper). Each kernel-tools.py context line writes the context file the madengine line after it reads. ${RUN_HOW}
+${usesCard ? `Then run the card command and read ${KERNEL_RUN_DIR}/kernel_card.json.` : 'Then read rocprof_output/ from this run.'} If no GPUs, set status "skipped". Ignore the profiled perf number as a score. rocprofv3 runs the workload once per counter pass, so this run takes several times longer than a clean one.`
+    : `Do NOT run anything. ${usesCard ? `Read ${KERNEL_RUN_DIR}/kernel_card.json if it already exists.` : 'Read an existing rocprof_output/ if present.'} Print the commands and set status "planned" or "skipped".`
   kernel = await agent(
-    `Kernel-level profile of "${baseline.model}" using preset ${kernelPreset}.
+    `Kernel-level profile of "${baseline.model}"${usesCard ? `, kernel ${topKernel || '(the top kernel from dispatch)'}, counter group ${kernelPreset}` : ` using preset ${kernelPreset}`}.
 ${PREFLIGHT}
+Read .claude/skills/mad-common/kernel-analysis.md first.
 Dispatch said ${dispatch.bottleneck || 'unknown'}-bound. Evidence: ${dispatch.evidence || dispatch.reason || 'none'}
-Command (this preset only — do not add rocm_trace_lite):
-${kCmd}
+Commands (one rocprofv3 run — do not add rocm_trace_lite):
+${kSteps}
 ${kAction}
-Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath.`,
+Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath${usesCard ? ', and card {kernel, bound, pctPeakBandwidth, pctPeakMfma, flopsPerByte, line} copied from kernel_card.json (bound exactly as the file states it; "unknown" when it is missing)' : ''}.`,
     { phase: 'Kernel', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('kernel agent returned no result')
   kernel.preset = kernel.preset || kernelPreset
 }
-log(`Kernel: ${kernel.status} preset=${kernel.preset || kernelPreset || 'none'}. ${kernel.evidence || kernel.reason || ''}`)
+const cardBound = (kernel.card && kernel.card.bound) || 'unknown'
+log(`Kernel: ${kernel.status} preset=${kernel.preset || kernelPreset || 'none'} bound=${cardBound}. ${kernel.evidence || kernel.reason || ''}`)
 
-// ── Phase 5: Expect (opt-in Primus projection) ─────────────────────────────
+// ── Phase 5: Assembly (code-object summary, no GPU run) ────────────────────
+phase('Assembly')
+let assembly
+const asmKernel = (kernel.card && kernel.card.kernel) || topKernel
+if (!want('assembly')) {
+  assembly = skipped(`depth=${depth}; assembly rung not selected`)
+} else if (depth === 'auto' && (kernel.status === 'skipped' || !usesCard)) {
+  assembly = skipped(kernel.status === 'skipped'
+    ? 'the kernel rung did not run, so there are no code objects to read'
+    : 'the communication preset keeps no code objects')
+} else {
+  const asmCmd = `${KERNEL_TOOLS} asm --run-dir ${KERNEL_RUN_DIR}${asmKernel ? ' --kernel ' + shellQuote(asmKernel) : ''}`
+  const asmAction = execute || kernel.status === 'ran'
+    ? `Run it (it reads files; no GPU). If ${KERNEL_RUN_DIR}/co is missing, set status "skipped" and say the kernel rung has to run first.`
+    : `Do NOT run anything that needs a GPU. If ${KERNEL_RUN_DIR}/co exists, run the command and set status "ran"; otherwise print it and set status "planned".`
+  assembly = await agent(
+    `Assembly-level summary of kernel ${asmKernel || '(the kernel from the kernel rung)'} in "${baseline.model}".
+Read .claude/skills/mad-common/kernel-analysis.md (Assembly rung). Command:
+${asmCmd}
+${asmAction}
+A status "no code object" means a library kernel: say so and point to PC sampling. "ambiguous" means several autotuned variants; report what they share.
+Return status, evidence (registers, LDS, spills, occupancy and its limiter, the instruction mix, memory widths, the largest loop's mix), and card {kernel, bound "${cardBound}", occupancy, occupancyLimiter, mix, line}.`,
+    { phase: 'Assembly', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
+  ) || skipped('assembly agent returned no result')
+}
+log(`Assembly: ${assembly.status}. ${assembly.evidence || assembly.reason || ''}`)
+
+// ── Phase 6: Expect (opt-in Primus projection) ─────────────────────────────
 phase('Expect')
 const EXPECT_SCHEMA = {
   type: 'object',
@@ -568,7 +675,7 @@ Return source, fits, memoryPerGpuGb, expectedTokensPerSecPerGpu, expectedTflops,
 }
 log(`Expect: ${expectResult.source}. ${expectResult.reason || ''}`)
 
-// ── Phase 6: Propose ───────────────────────────────────────────────────────
+// ── Phase 7: Propose ───────────────────────────────────────────────────────
 phase('Propose')
 const CANDS_SCHEMA = {
   type: 'object',
@@ -582,8 +689,9 @@ const CANDS_SCHEMA = {
         change: { type: 'string' },
         hypothesis: { type: 'string' },
         evidence: { type: 'string' },
-        depth: { type: 'string', enum: ['operator', 'dispatch', 'kernel', 'expect'] },
+        depth: { type: 'string', enum: ['operator', 'dispatch', 'kernel', 'assembly', 'expect'] },
         leverKind: { type: 'string', enum: ['env', 'arg', 'config', 'other'] },
+        leverBound: { type: 'string', enum: ['compute', 'bandwidth', 'latency', 'any'] },
       },
     } },
   },
@@ -596,24 +704,29 @@ Top operators: ${JSON.stringify((operator.topOperators || []).slice(0, 5))}
 Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''} — ${dispatch.evidence || dispatch.reason || ''}
 Hotspots: ${JSON.stringify((dispatch.hotspots || []).slice(0, 5))}
 Kernel: ${kernel.status} preset=${kernel.preset || 'none'} — ${kernel.evidence || kernel.reason || ''}
+Kernel card: ${JSON.stringify(kernel.card || null)}
+Assembly: ${assembly.status} — ${assembly.evidence || assembly.reason || ''}
 Expect: ${JSON.stringify(expectResult)}
 Levers available on this model: ${(baseline.levers || []).join(', ')}
 
 Use the deepest rung that actually returned evidence. Cite that evidence on every candidate.
 - Operator evidence: precision, batch or sequence, attention backend, the module TraceLens named. Training may also change microbatch or recompute. Inference may change gpu-memory-utilization, max-num-seqs, max-num-batched-tokens, prefix cache, or HIP graphs.
 - Dispatch launch-bound: HIP graphs, fewer syncs, larger batch.
-- Kernel evidence: PYTORCH_TUNABLEOP_ENABLED, hipBLASLt, or the kernel flag the counters implicate.
+- Kernel or assembly evidence: the kernel card's bound is "${cardBound}". Take levers from the "Levers by bound" table in .claude/skills/mad-common/kernel-analysis.md for that bound, and set leverBound to the bound the lever addresses ("any" for library tuning such as PYTORCH_TUNABLEOP_ENABLED or hipBLASLt, and for LDS bank conflicts). A kernel or assembly candidate whose leverBound is neither "${cardBound}" nor "any" is dropped before it is measured${cardBound === 'unknown' ? ' (the bound is unknown, so nothing is dropped; say the evidence is weak)' : ''}.
 - Training parallelism (TP/PP/EP, RCCL_*) only when dispatch or the kernel preset shows collectives.
 - When Expect source is "projection" and recommended is set, prefer candidates from that config, best projected tokens/s first, and drop a config Projection says will not fit. Read the optimization tables in scripts/Primus/skills/primus-projection/SKILL.md and propose only a lever that file lists and this config supports. Still change ONE lever per candidate.
 - Prefer levers that need no file edit: leverKind "env" (docker_env_vars) or "arg" (madengine passes --tags <model>:<arg>=<value> to the script as --<arg> <value>).
-Each candidate returns id, change, hypothesis, evidence, depth (operator|dispatch|kernel|expect), leverKind (env|arg|config|other).`,
+Each candidate returns id, change, hypothesis, evidence, depth (operator|dispatch|kernel|assembly|expect), leverKind (env|arg|config|other), and leverBound (compute|bandwidth|latency|any) for a kernel or assembly candidate.`,
   { phase: 'Propose', schema: CANDS_SCHEMA, agentType: 'mad-tuner' }
 )
 if (!proposed) throw new Error('Propose step returned no result; no candidates to evaluate.')
-const candidates = (proposed.candidates || []).slice(0, nCandidates)
+const dropped = (proposed.candidates || []).filter(c => !leverFits(c, cardBound))
+for (const c of dropped)
+  log(`Dropped candidate ${c.id}: its lever addresses ${c.leverBound || 'no stated'} bound, but the kernel card says ${cardBound}.`)
+const candidates = (proposed.candidates || []).filter(c => leverFits(c, cardBound)).slice(0, nCandidates)
 log(`Evaluating ${candidates.length} candidate(s) sequentially, CLEAN (profiler off), ${repeats} run(s) each. execute=${execute}`)
 
-// ── Phase 7: Evaluate (CLEAN, sequential, N runs) + adversarial verify ─────
+// ── Phase 8: Evaluate (CLEAN, sequential, N runs) + adversarial verify ─────
 phase('Evaluate')
 const VERDICT_SCHEMA = {
   type: 'object',
@@ -722,7 +835,7 @@ The numeric gate passed: ${g.reason}. Look for what the numbers cannot show: the
   }
 }
 
-// ── Phase 8: Synthesize ────────────────────────────────────────────────────
+// ── Phase 9: Synthesize ────────────────────────────────────────────────────
 phase('Synthesize')
 const clean = evaluated.filter(Boolean)
 const report = await agent(
@@ -732,12 +845,15 @@ Baseline: ${baseline.baselineSummary}${baseStats.n ? ` (clean median ${baseStats
 Operator: ${operator.status} — ${operator.evidence || operator.reason || ''}
 Dispatch: ${dispatch.status} ${dispatch.bottleneck || ''} — ${dispatch.evidence || dispatch.reason || ''}
 Kernel: ${kernel.status} preset=${kernel.preset || 'none'} — ${kernel.evidence || kernel.reason || ''}
+Kernel card: ${JSON.stringify(kernel.card || null)}
+Assembly: ${assembly.status} — ${assembly.evidence || assembly.reason || ''}
 Expect: ${JSON.stringify(expectResult)}
+Dropped before measuring (lever did not match the card's bound): ${JSON.stringify(dropped.map(c => ({ id: c.id, change: c.change, leverBound: c.leverBound || null })))}
 Evaluated candidates (JSON; median, spreadPct, deltaPct and gate are computed, verdict.trustworthy is final): ${JSON.stringify(clean)}
 
 Produce:
 (1) a one-line headline: the depth that explained the bottleneck, and the best trustworthy improvement (or that none beat baseline);
-(2) one paragraph each for operator, dispatch, and kernel, including a skipped reason when that rung did not run;
+(2) one paragraph each for operator, dispatch, kernel, and assembly, including a skipped reason when that rung did not run; when the kernel card exists, quote its line (bound and the numbers behind it) as given;
 (3) a table: Candidate | Depth | Change | Evidence | Status | Median (n) | vs Baseline | Trustworthy;
 (4) when Expect source is "projection", the projected tokens/s/GPU beside the measured number;
 (5) the recommended configuration — ONLY from candidates whose verdict.trustworthy is true; if none ran, present the ranked plan to test on a GPU host;
@@ -758,7 +874,9 @@ return {
   operator,
   dispatch,
   kernel,
+  assembly,
   expectResult,
+  dropped,
   candidates: clean,
   report,
 }

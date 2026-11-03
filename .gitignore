@@ -70,6 +70,8 @@ venv.bak/
 *.csv
 *.json
 !models.json
+# rocprofv3 and Triton output the kernel-tools test reads.
+!tools/tests/fixtures/kernel/**
 *.log
 *.out
 *.html
@@ -95,3 +97,6 @@ scripts/jax-maxdiffusion/output/
 
 # madengine runs started by .claude/skills/mad-common/mad-run.sh
 .mad-runs/
+
+# Kernel-profile run directories (kernel-tools.py --run-dir)
+runs/

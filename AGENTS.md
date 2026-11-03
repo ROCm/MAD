@@ -50,8 +50,10 @@ that you are at the repo root. It never installs anything.
 
 ### Claude Code, Cursor and Codex
 
-- **Workflows are Claude Code only.** `mad-benchmark-sweep` and
-  `mad-tune-search` (`.claude/workflows/`) need Claude Code's workflow runtime.
+- **Workflows are Claude Code only.** `mad-benchmark-sweep`,
+  `mad-tune-search`, and `mad-optimize` (`.claude/workflows/`) need Claude
+  Code's workflow runtime. `mad-optimize` profiles one model and runs GEAK
+  `kernel_workflow`; see `docs/mad-optimize.md`.
   In Cursor and Codex, use `mad-benchmark` with several tags
   (`/mad-benchmark bert,pyt_vllm_qwen3-8b` runs them in one `madengine run`)
   and `mad-tune`.
@@ -194,14 +196,34 @@ Add a `tools` list to `--additional-context`. One depth per run. Do not put
 |-------|-----------------|-------|
 | operator | Which PyTorch op or module dominates | `torch_profiler_dynolog` + `tracelens` (`TRACELENS_MODE=pytorch`). Inference sets `TORCH_PROFILE_ITERATIONS=0`. |
 | dispatch | Which kernels are on the timeline | `rocm_trace_lite` |
-| kernel | Why that kernel is slow | `rocprofv3_compute`, `rocprofv3_memory`, or `rocprofv3_communication` |
+| kernel | Why that kernel is slow | rocprofv3 counters for that one kernel, from `kernel-tools.py context`, read by `kernel-tools.py card` (the presets `rocprofv3_compute`, `rocprofv3_memory`, `rocprofv3_communication` also work) |
+| assembly | What the compiler emitted | no GPU run: `kernel-tools.py asm` on the code objects the kernel run kept |
 
 ```bash
 madengine run --tags <tag> --additional-context '{"tools": [{"name": "rocm_trace_lite"}]}'
 ```
 
-The same three depths cover training and inference. A perf number measured
+The same depths cover training and inference. A perf number measured
 under a profiler is evidence, not a benchmark score.
+
+The kernel and assembly depths end in a **kernel card**: the kernel's share of
+GPU time, its bound (compute, bandwidth, latency or unknown) with the roofline
+numbers behind it, registers, LDS, occupancy, the instruction mix, and one
+lever for that bound. `.claude/skills/mad-common/kernel-tools.py` (standard
+library only) builds the context and the JSON files, and
+`.claude/skills/mad-common/kernel-analysis.md` holds the rules and the levers.
+PC sampling (`kernel-tools.py context --mode pc_sampling`, then `pcsample`) is
+optional and beta. A model keeps its Triton and Inductor code objects for the
+assembly depth when it honors `MAD_CODE_OBJECT_DIR` (`scripts/pyt_fam` does).
+For a `torch.compile` model, run `kernel-tools.py context --mode warm` once
+before profiling, in a run directory on local disk: a cold compile
+under a profiler measures autotuning, not the model. Take the kernel for the
+kernel depth from `kernel-tools.py rank` on a `--mode dispatch` run (a rocprofv3
+kernel trace); `rocm_trace_lite` does not see kernels replayed from HIP graphs.
+
+`madengine run -m <manifest>` saves the context's `tools` into the manifest and
+reuses them on any later run whose context has no `tools` key. After a profiled
+run, pass `"tools": []` for a clean measurement from the same manifest.
 
 Other tool names: `rpd`, `rocprofv3`, `rccl_trace`, `gpu_info_power_profiler`.
 Pre-built profiling context files live in the madengine package's

@@ -24,10 +24,14 @@ Method:
   wants a higher number. Latency wants a lower number.
 - Profile once before editing. Default depth is dispatch (`rocm_trace_lite`).
   Operator is TraceLens (`torch_profiler_dynolog` + `tracelens`); inference
-  capture sets `TORCH_PROFILE_ITERATIONS=0`. Kernel is one rocprofv3 preset
-  (`rocprofv3_compute`, `rocprofv3_memory`, or `rocprofv3_communication`).
-  Never combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled
-  number is evidence, not the baseline.
+  capture sets `TORCH_PROFILE_ITERATIONS=0`. Kernel and assembly follow
+  `.claude/skills/mad-common/kernel-analysis.md`: one counter run of the top
+  dispatch kernel through `kernel-tools.py context`, then `kernel-tools.py
+  card` and `asm`. Never combine `rocm_trace_lite` and `rocprofv3_*` in one
+  run. A profiled number is evidence, not the baseline.
+- Match kernel levers to the card's `bound` with the "Levers by bound" table:
+  a latency-bound kernel does not get a bandwidth lever. When `bound` is
+  `unknown`, say so and use the family levers.
 - Change ONE variable per measurement so deltas are attributable. Measure the
   baseline and each change at least twice and compare medians; a delta inside
   the run-to-run spread is noise. Keep a change only if it improves the target
@@ -47,6 +51,7 @@ Execution policy:
   Never run madengine in the foreground: a tool call ends after 10 minutes.
 - Never alter the `performance: <value> <unit>` output contract.
 
-Report: baseline, each change tried with its measured effect, and the final
+Report: baseline, the profile evidence (the kernel card line when there is
+one), each change tried with its measured effect, and the final
 recommended configuration with before/after numbers.
 """

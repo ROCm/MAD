@@ -31,6 +31,9 @@ Operator and kernel reports live in `tracelens_output/tracelens_summary.json`.
 Summarize that file when the user asks about a TraceLens report. Diff two
 operator workbooks with
 `madengine report tracelens-compare <before> <after> --names before --names after`.
+A kernel-profile run directory holds `kernel_card.json`,
+`kernel_asm_summary.json` and `kernel_pc_samples.json`; summarize them as the
+kernel card line in `.claude/skills/mad-common/kernel-analysis.md`.
 A profiled `perf.csv` row is not a clean score.
 
 ## Agent Notes

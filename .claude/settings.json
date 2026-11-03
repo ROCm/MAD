@@ -20,6 +20,7 @@
       "Bash(amd-smi *)",
       "Bash(bash .claude/skills/mad-common/preflight.sh)",
       "Bash(bash .claude/skills/mad-common/mad-run.sh *)",
+      "Bash(python3 .claude/skills/mad-common/kernel-tools.py *)",
       "Bash(python3 tools/validation/model_config_validator.py *)",
       "Read",
       "Grep",
