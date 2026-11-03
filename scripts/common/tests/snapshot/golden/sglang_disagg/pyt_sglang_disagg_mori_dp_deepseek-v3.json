@@ -83,7 +83,89 @@
      "\n        set -o pipefail\n        mkdir -p /run_logs/4242\n        /opt/mooncake-cookbook/sglang_disagg_mori_io_ep.sh 2>&1 | tee /run_logs/4242/pd_sglang_bench_serving.sh_NODE0.log\n    "
     ]
    },
-   "engine": null
+   "engine": {
+    "exit_code": 0,
+    "blocks": [
+     {
+      "header": "===DRYRUN role=prefill NODE_RANK=0===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang.launch_server",
+       "--model-path",
+       "<WORK>/model",
+       "--disaggregation-mode",
+       "prefill",
+       "--load-balance-method",
+       "follow_bootstrap_room",
+       "--prefill-round-robin-balance",
+       "--disaggregation-ib-device",
+       "mlx5_1",
+       "--host",
+       "10.0.0.1",
+       "--port",
+       "3000",
+       "--trust-remote-code",
+       "--tp-size",
+       "8",
+       "--dp-size",
+       "8",
+       "--ep-size",
+       "8",
+       "--dist-init-addr",
+       "10.0.0.1:5757",
+       "--nnodes",
+       "1",
+       "--node-rank",
+       "0",
+       "--decode-log-interval",
+       "1",
+       "--attention-backend",
+       "aiter",
+       "--watchdog-timeout",
+       "1000000",
+       "--mem-fraction-static",
+       "0.73",
+       "--moe-a2a-backend",
+       "mori",
+       "--enable-dp-attention",
+       "--enable-dp-lm-head",
+       "--moe-dense-tp-size",
+       "1",
+       "--enable-dp-attention-local-control-broadcast",
+       "--max-running-requests",
+       "8192",
+       "--cuda-graph-bs",
+       "1",
+       "2",
+       "3",
+       "--mem-fraction-static",
+       "0.65",
+       "--disaggregation-transfer-backend",
+       "mori",
+       "--log-level-http",
+       "warning"
+      ]
+     },
+     {
+      "header": "===DRYRUN role=router NODE_RANK=0===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang_router.launch_router",
+       "--pd-disaggregation",
+       "--prefill",
+       "http://10.0.0.1:3000",
+       "--decode",
+       "http://10.0.0.2:3000",
+       "--host",
+       "0.0.0.0",
+       "--port",
+       "2322"
+      ]
+     }
+    ]
+   }
   },
   {
    "rank": "1",
@@ -146,7 +228,78 @@
      "\n        set -o pipefail\n        mkdir -p /run_logs/4242\n        /opt/mooncake-cookbook/sglang_disagg_mori_io_ep.sh 2>&1 | tee /run_logs/4242/pd_sglang_bench_serving.sh_NODE1.log\n    "
     ]
    },
-   "engine": null
+   "engine": {
+    "exit_code": 0,
+    "blocks": [
+     {
+      "header": "===DRYRUN role=decode NODE_RANK=1===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang.launch_server",
+       "--model-path",
+       "<WORK>/model",
+       "--disaggregation-mode",
+       "decode",
+       "--load-balance-method",
+       "follow_bootstrap_room",
+       "--prefill-round-robin-balance",
+       "--disaggregation-ib-device",
+       "mlx5_1",
+       "--host",
+       "10.0.0.2",
+       "--port",
+       "3000",
+       "--trust-remote-code",
+       "--tp-size",
+       "8",
+       "--dp-size",
+       "8",
+       "--ep-size",
+       "8",
+       "--dist-init-addr",
+       "10.0.0.2:5757",
+       "--nnodes",
+       "1",
+       "--node-rank",
+       "0",
+       "--decode-log-interval",
+       "1",
+       "--attention-backend",
+       "aiter",
+       "--watchdog-timeout",
+       "1000000",
+       "--mem-fraction-static",
+       "0.73",
+       "--moe-a2a-backend",
+       "mori",
+       "--enable-dp-attention",
+       "--enable-dp-lm-head",
+       "--moe-dense-tp-size",
+       "1",
+       "--enable-dp-attention-local-control-broadcast",
+       "--max-running-requests",
+       "8192",
+       "--cuda-graph-bs",
+       "1",
+       "2",
+       "4",
+       "8",
+       "16",
+       "24",
+       "32",
+       "48",
+       "64",
+       "96",
+       "128",
+       "--disaggregation-transfer-backend",
+       "mori",
+       "--log-level-http",
+       "warning"
+      ]
+     }
+    ]
+   }
   }
  ]
 }

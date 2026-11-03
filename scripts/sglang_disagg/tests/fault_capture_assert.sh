@@ -14,7 +14,7 @@ _watcher() { sed -n '/^# A server that dies mid-run of a GPU fault/,/^}$/{/_watc
 
 echo "=== GPU fault capture (sglang) ==="
 _has "$(diff <(_watcher "$L") <(_watcher "$V") >/dev/null && echo same || echo differs)" "same" "the watcher is the vLLM launcher's, unchanged"
-_has "$(grep -c '^    _watch_gpu_faults prefill$' "$L")/$(grep -c '^    _watch_gpu_faults decode$' "$L")" "2/1" "every server launch (2 prefill paths, decode) starts a watcher"
+_has "$(grep -cE '^ +_watch_gpu_faults prefill$' "$L")/$(grep -cE '^ +_watch_gpu_faults decode$' "$L")" "2/1" "every server launch (2 prefill paths, decode) starts a watcher"
 
 mkdir -p "$TMP/bin" "$TMP/logs/7"
 printf '#!/bin/sh\necho "[t] amdgpu 0000:75:00.0: amdgpu: [mmhub0] no-retry page fault (src_id:0 ring:128 vmid:3)"\necho "[t] usb 1-1: new device"\n' > "$TMP/bin/dmesg"; chmod +x "$TMP/bin/dmesg"

@@ -84,12 +84,27 @@ BARRIER_PORT="${BARRIER_PORT:-4342}"
 # every node of every run, downgraded click 8.5.0 -> 8.4.1, and surfaced unrelated
 # dependency conflicts in the log.
 # py-spy ships a binary rather than an importable module, so check for the command.
+# DRY_RUN=1 prints each server command this node would start -- one argument per line,
+# between ===DRYRUN and ===END=== lines, as vllm_disagg.sh does -- and starts, installs,
+# waits for and writes nothing. For offline checks (scripts/common/tests/snapshot).
+_dry_run() { [[ "${DRY_RUN:-0}" == "1" ]]; }
+_dry_run_emit() {  # <role> <command string>
+    echo "===DRYRUN role=$1 NODE_RANK=${NODE_RANK}==="
+    eval "set -- $2"
+    printf '%s\n' "$@"
+    echo "===END==="
+}
+
+if ! _dry_run; then
 command -v py-spy >/dev/null 2>&1 || pip install py-spy
 python3 -c "import flask" >/dev/null 2>&1 || pip install flask
 python3 -c "import yaml"  >/dev/null 2>&1 || pip install pyyaml
+fi
 
 
 host_ip=$(ip route get 1.1.1.1 | awk '/src/ {print $7}')
+# Under DRY_RUN the address is this node's entry in IPADDRS, not the machine running it.
+_dry_run && host_ip="$(cut -d, -f$((NODE_RANK + 1)) <<<"${IPADDRS:-}")"
 host_name=$(hostname)
 
 # Failing the job so every node, and the CI log, finds out. /run_logs is the job's
@@ -405,6 +420,7 @@ echo "DECODE_ARGS: $DECODE_ARGS"
 # Container Synchronization
 # =============================================================================
 
+if ! _dry_run; then
 echo "Waiting at the container creation barrier on $host_name"
 python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-ip ${host_ip} \
@@ -429,6 +445,7 @@ cd /sgl-workspace/sglang || {
     echo "ERROR: cd /sgl-workspace/sglang failed"
     exit 1
 }
+fi
 
 unset PREFILL_CMD DECODE_CMD ROUTER_CMD 2>/dev/null || true
 
@@ -476,7 +493,7 @@ _wait_for_tcp() {
 if [[ "$NODE_RANK" -eq 0 ]]; then
     echo "${host_name}:${host_ip} is Prefill Node 0 + Router/proxy (NODE_RANK=0, co-located)"
 
-    mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
+    _dry_run || mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
 
     # --- Launch first prefill server on this node (co-located with router) ---
     setup_sglang_worker_env
@@ -515,89 +532,93 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
 
     export _prefill_cmd PREFILL_NODE_RANK
 
-    PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
-    {
-        echo "========== PREFILL_CMD (NODE_RANK=0, PREFILL_NODE_RANK=0, co-located with router) =========="
-        echo "$_prefill_cmd"
-        echo ""
-    } | tee "$PREFILL_LOG"
-    _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
-    set -x
-    eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
-    set +x
-    _node0_prefill_pid=$!
-    _dbg "prefill server started pid=${_node0_prefill_pid}"
-    _watch_gpu_faults prefill
-
-    # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
-    # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
-    # Requires shared /run_logs across nodes.
-    SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
-    ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
-    ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
-    _wait_start_ts=$(date +%s)
-    _runlog="/run_logs/${SLURM_JOB_ID:-0}"
-
-    if [[ "$DP_MODE" == "0" ]]; then
-        echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
-        for ((i = 0; i < xP; i++)); do
-            LOG_FILE="${_runlog}/prefill_NODE${i}.log"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                _elapsed=$(( $(date +%s) - _wait_start_ts ))
-                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "prefill NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
-                fi
-                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for prefill NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
-                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})"
-                fi
-                sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-            done
-            echo "Prefill NODE${i} ready."
-        done
-        for ((i = xP; i <= xP + yD - 1; i++)); do
-            LOG_FILE="${_runlog}/decode_NODE${i}.log"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                _elapsed=$(( $(date +%s) - _wait_start_ts ))
-                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "decode NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
-                fi
-                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for decode NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
-                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})"
-                fi
-                sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-            done
-            echo "Decode NODE${i} ready."
-        done
+    if _dry_run; then
+        _dry_run_emit prefill "$_prefill_cmd"
     else
-        _master_prefill_log="${_runlog}/prefill_NODE0.log"
-        _master_decode_log="${_runlog}/decode_NODE${xP}.log"
-        echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
-        for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
-            IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
-            until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
-                _elapsed=$(( $(date +%s) - _wait_start_ts ))
-                if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "${_log_label} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
-                fi
-                [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for ${_log_label}: $(head -n1 "${JOB_ABORT_FILE}")"
-                if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
-                    _print_server_log "$LOG_FILE"
-                    _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})"
-                fi
-                sleep "${ROUTER_POLL_SLEEP_SECONDS}"
-            done
-            echo "${_log_label} ready (${LOG_FILE})."
-        done
-    fi
+        PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
+        {
+            echo "========== PREFILL_CMD (NODE_RANK=0, PREFILL_NODE_RANK=0, co-located with router) =========="
+            echo "$_prefill_cmd"
+            echo ""
+        } | tee "$PREFILL_LOG"
+        _dbg "launching prefill server (PREFILL_NODE_RANK=0, PREFILL_TP_SIZE=${PREFILL_TP_SIZE})"
+        set -x
+        eval "$_prefill_cmd" 2>&1 | tee -a "$PREFILL_LOG" >/dev/null &
+        set +x
+        _node0_prefill_pid=$!
+        _dbg "prefill server started pid=${_node0_prefill_pid}"
+        _watch_gpu_faults prefill
 
-    echo "Prefill/decode backends report ready per logs; starting sglang_router (proxy)."
+        # DP_MODE=0: wait for SEARCH_SIGNAL in every prefill (NODE 0..xP-1) and decode (NODE xP..xP+yD-1) log.
+        # DP_MODE=1: wait for master prefill NODE 0 + master decode NODE xP only.
+        # Requires shared /run_logs across nodes.
+        SEARCH_SIGNAL="${SEARCH_SIGNAL:-The server is fired up and ready to roll!}"
+        ROUTER_READY_TIMEOUT_SECONDS="${ROUTER_READY_TIMEOUT_SECONDS:-4000}"
+        ROUTER_POLL_SLEEP_SECONDS="${ROUTER_POLL_SLEEP_SECONDS:-10}"
+        _wait_start_ts=$(date +%s)
+        _runlog="/run_logs/${SLURM_JOB_ID:-0}"
+
+        if [[ "$DP_MODE" == "0" ]]; then
+            echo "Waiting for all ${xP} prefill + ${yD} decode servers (grep: ${SEARCH_SIGNAL}) before starting router..."
+            for ((i = 0; i < xP; i++)); do
+                LOG_FILE="${_runlog}/prefill_NODE${i}.log"
+                until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                    _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                    if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "prefill NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                    fi
+                    [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for prefill NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
+                    if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for prefill NODE${i} (${LOG_FILE})"
+                    fi
+                    sleep "${ROUTER_POLL_SLEEP_SECONDS}"
+                done
+                echo "Prefill NODE${i} ready."
+            done
+            for ((i = xP; i <= xP + yD - 1; i++)); do
+                LOG_FILE="${_runlog}/decode_NODE${i}.log"
+                until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                    _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                    if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "decode NODE${i} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                    fi
+                    [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for decode NODE${i}: $(head -n1 "${JOB_ABORT_FILE}")"
+                    if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for decode NODE${i} (${LOG_FILE})"
+                    fi
+                    sleep "${ROUTER_POLL_SLEEP_SECONDS}"
+                done
+                echo "Decode NODE${i} ready."
+            done
+        else
+            _master_prefill_log="${_runlog}/prefill_NODE0.log"
+            _master_decode_log="${_runlog}/decode_NODE${xP}.log"
+            echo "Waiting for master prefill (NODE 0) + master decode (NODE ${xP}) — grep: ${SEARCH_SIGNAL} — DP_MODE=${DP_MODE}"
+            for _label_and_file in "master prefill|${_master_prefill_log}" "master decode|${_master_decode_log}"; do
+                IFS='|' read -r _log_label LOG_FILE <<< "${_label_and_file}"
+                until [[ -f "$LOG_FILE" ]] && grep -q "${SEARCH_SIGNAL}" "$LOG_FILE" 2>/dev/null; do
+                    _elapsed=$(( $(date +%s) - _wait_start_ts ))
+                    if grep -Eq "${_FATAL_SERVER_LOG_RE}" "$LOG_FILE" 2>/dev/null; then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "${_log_label} died during start-up after ${_elapsed}s (log tail above: $LOG_FILE)"
+                    fi
+                    [[ -f "${JOB_ABORT_FILE}" ]] && _job_fail "stopped waiting for ${_log_label}: $(head -n1 "${JOB_ABORT_FILE}")"
+                    if (( _elapsed >= ROUTER_READY_TIMEOUT_SECONDS )); then
+                        _print_server_log "$LOG_FILE"
+                        _job_fail "Timeout (${_elapsed}s >= ${ROUTER_READY_TIMEOUT_SECONDS}s) waiting for ${_log_label} (${LOG_FILE})"
+                    fi
+                    sleep "${ROUTER_POLL_SLEEP_SECONDS}"
+                done
+                echo "${_log_label} ready (${LOG_FILE})."
+            done
+        fi
+
+        echo "Prefill/decode backends report ready per logs; starting sglang_router (proxy)."
+    fi
 
     # Build and launch only after worker logs confirm servers are up (avoids the proxy probing backends too early).
     # 0.0.0.0 so bench_serving (--host 127.0.0.1 in benchmark_xPyD.sh) can connect; binding only ${host_ip} rejects loopback.
@@ -611,6 +632,10 @@ if [[ "$NODE_RANK" -eq 0 ]]; then
         --port 2322"
     export ROUTER_CMD
 
+    if _dry_run; then
+        _dry_run_emit router "$ROUTER_CMD"
+        exit 0
+    fi
     echo "========== ROUTER_CMD (NODE_RANK=0, DP_MODE=${DP_MODE}) ==========" >&2
     echo "$ROUTER_CMD"
     set -x
@@ -782,6 +807,10 @@ elif [[ "$NODE_RANK" -ge 1 && "$NODE_RANK" -lt "$xP" ]]; then
         _dbg "PREFILL_NODE_RANK=${PREFILL_NODE_RANK}: launching without gating on dist-init port (rendezvous requires all ranks concurrent)"
     fi
 
+    if _dry_run; then
+        _dry_run_emit prefill "$PREFILL_CMD"
+        exit 0
+    fi
     PREFILL_LOG="/run_logs/${SLURM_JOB_ID:-0}/prefill_NODE${NODE_RANK}.log"
     mkdir -p "$(dirname "$PREFILL_LOG")"
     {
@@ -867,6 +896,10 @@ elif [[ "$NODE_RANK" -ge $xP && "$NODE_RANK" -le $((xP + yD - 1)) ]]; then
 
     export DECODE_CMD DECODE_NODE_RANK
 
+    if _dry_run; then
+        _dry_run_emit decode "$DECODE_CMD"
+        exit 0
+    fi
     DECODE_LOG="/run_logs/${SLURM_JOB_ID:-0}/decode_NODE${NODE_RANK}.log"
     mkdir -p "$(dirname "$DECODE_LOG")"
     {

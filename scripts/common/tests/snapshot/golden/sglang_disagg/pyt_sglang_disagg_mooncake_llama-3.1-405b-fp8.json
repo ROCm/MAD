@@ -84,7 +84,66 @@
      "\n        set -o pipefail\n        mkdir -p /run_logs/4242\n        /opt/mooncake-cookbook/sglang_disagg_mori_io_ep.sh 2>&1 | tee /run_logs/4242/pd_sglang_bench_serving.sh_NODE0.log\n    "
     ]
    },
-   "engine": null
+   "engine": {
+    "exit_code": 0,
+    "blocks": [
+     {
+      "header": "===DRYRUN role=prefill NODE_RANK=0===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang.launch_server",
+       "--model-path",
+       "<WORK>/model",
+       "--disaggregation-mode",
+       "prefill",
+       "--load-balance-method",
+       "round_robin",
+       "--prefill-round-robin-balance",
+       "--disaggregation-ib-device",
+       "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9",
+       "--host",
+       "10.0.0.1",
+       "--port",
+       "3000",
+       "--trust-remote-code",
+       "--tp-size",
+       "8",
+       "--decode-log-interval",
+       "1",
+       "--attention-backend",
+       "aiter",
+       "--watchdog-timeout",
+       "1000000",
+       "--mem-fraction-static",
+       "0.65",
+       "--disable-cuda-graph",
+       "--disable-radix-cache",
+       "--disaggregation-transfer-backend",
+       "mooncake",
+       "--log-level-http",
+       "warning"
+      ]
+     },
+     {
+      "header": "===DRYRUN role=router NODE_RANK=0===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang_router.launch_router",
+       "--pd-disaggregation",
+       "--prefill",
+       "http://10.0.0.1:3000",
+       "--decode",
+       "http://10.0.0.2:3000",
+       "--host",
+       "0.0.0.0",
+       "--port",
+       "2322"
+      ]
+     }
+    ]
+   }
   },
   {
    "rank": "1",
@@ -148,7 +207,57 @@
      "\n        set -o pipefail\n        mkdir -p /run_logs/4242\n        /opt/mooncake-cookbook/sglang_disagg_mori_io_ep.sh 2>&1 | tee /run_logs/4242/pd_sglang_bench_serving.sh_NODE1.log\n    "
     ]
    },
-   "engine": null
+   "engine": {
+    "exit_code": 0,
+    "blocks": [
+     {
+      "header": "===DRYRUN role=decode NODE_RANK=1===",
+      "argv": [
+       "python3",
+       "-m",
+       "sglang.launch_server",
+       "--model-path",
+       "<WORK>/model",
+       "--disaggregation-mode",
+       "decode",
+       "--load-balance-method",
+       "round_robin",
+       "--prefill-round-robin-balance",
+       "--disaggregation-ib-device",
+       "mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9",
+       "--host",
+       "10.0.0.2",
+       "--port",
+       "3000",
+       "--trust-remote-code",
+       "--tp-size",
+       "8",
+       "--decode-log-interval",
+       "1",
+       "--attention-backend",
+       "aiter",
+       "--watchdog-timeout",
+       "1000000",
+       "--mem-fraction-static",
+       "0.65",
+       "--disable-radix-cache",
+       "--cuda-graph-bs",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6",
+       "7",
+       "8",
+       "--disaggregation-transfer-backend",
+       "mooncake",
+       "--log-level-http",
+       "warning"
+      ]
+     }
+    ]
+   }
   }
  ]
 }

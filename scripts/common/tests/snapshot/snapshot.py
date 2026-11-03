@@ -7,9 +7,9 @@ srun / docker / hostname in stubs/, and records per node rank:
 
   - the `docker run` it issues: flags, mounts, environment (in order), image,
     and the command run in the container;
-  - for the vLLM launchers, the engine command that rank would run, from the
-    role script (vllm_disagg.sh / serve_colocated.sh) in DRY_RUN mode with
-    exactly that rank's container environment.
+  - the engine command(s) that rank would run, from the role script
+    (vllm_disagg.sh, sglang_disagg_mori_io_ep.sh, serve_colocated.sh) in DRY_RUN
+    mode with exactly that rank's container environment.
 
 plus the launcher's exit status and the order of its srun / docker calls. Paths
 that differ between runs are replaced with placeholders. The results are
@@ -54,7 +54,8 @@ VALUE_OPTS = {
     "--hostname", "--add-host", "--mount", "--memory", "--pids-limit",
 }
 # Where the launchers mount scripts inside the container, and what that is here.
-CONTAINER_SCRIPT_DIRS = {"/opt/nixl-vllm-cookbook": "vllm_dissag", "/mad_scripts": ""}
+CONTAINER_SCRIPT_DIRS = {"/opt/nixl-vllm-cookbook": "vllm_dissag", "/opt/mooncake-cookbook": "sglang_disagg",
+                         "/mad_scripts": ""}
 
 
 def gpu_arch(card):
@@ -112,8 +113,6 @@ def container_env(docker):
 
 def engine_dry_run(catalog, docker, work):
     """The engine command(s) this rank's role script would run, from DRY_RUN."""
-    if catalog not in ("vllm_dissag", "vllm_multinode"):
-        return None
     scripts = work / "scripts"
     env = {}
     for k, v in container_env(docker).items():
@@ -124,6 +123,13 @@ def engine_dry_run(catalog, docker, work):
     if catalog == "vllm_dissag":
         script = scripts / "vllm_dissag" / "vllm_disagg.sh"
         env["NIXL_COOKBOOK_PATH"] = str(scripts / "vllm_dissag")
+    elif catalog == "sglang_disagg":
+        script = scripts / "sglang_disagg" / "sglang_disagg_mori_io_ep.sh"
+        env["MOONCAKE_COOKBOOK_PATH"] = str(scripts / "sglang_disagg")
+        # sglang_compat.sh adapts the recipe to the installed sglang's --help; empty
+        # help means "every option exists", i.e. the recipe as written, whether or not
+        # sglang is installed where this runs.
+        env["_SGL_HELP"] = ""
     else:
         script = scripts / "vllm_multinode" / "serve_colocated.sh"
         env["SHARED_DIR"] = str(scripts / "vllm_dissag")
