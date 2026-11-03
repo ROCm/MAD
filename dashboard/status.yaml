@@ -27,6 +27,8 @@ frameworks:
   sglang:                    {name: SGLang, workload: inference, readme: benchmark/sglang/README.md}
   sglang_disagg:             {name: SGLang disaggregated P/D, workload: inference, readme: scripts/sglang_disagg/README.MD}
   atom:                      {name: ATOM, workload: inference, readme: benchmark/kimi_k3/README.md}
+  atom_vllm:                 {name: ATOM vLLM plugin, workload: inference, readme: scripts/atom_vllm/README.md}
+  vllm-omni:                 {name: vLLM-Omni diffusion, workload: inference, readme: scripts/vllm-omni/README.md}
   pyt_xdit:                  {name: xDiT diffusion, workload: inference, readme: benchmark/xdit/README.md}
   mochi:                     {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
   pyt_chai1_inference:       {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
@@ -80,6 +82,8 @@ rocm_overrides:
   docker/pyt_xdit: "TheRock preview"          # benchmark/xdit/README.md
   # TODO(owners): fill in from the image release notes.
   docker/vllm_disagg_inference.glmv5.1: ""    # rocm/vllm-dev:ci_base-dedbf6be...
+  docker/atom_vllm: ""                        # rocm/atom-dev:vllm-latest (floating tag)
+  docker/vllm-omni: ""                        # vllm/vllm-omni-rocm:v0.22.0
   docker/primus: ""                           # rocm/primus:v26.7
   docker/primus_maxtext: ""                   # rocm/jax-training:maxtext-v26.7
   docker/primus_maxdiffusion: ""              # rocm/jax-training:maxtext-v26.7
