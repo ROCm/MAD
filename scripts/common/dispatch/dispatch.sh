@@ -29,6 +29,13 @@
 #               MAD_RENDEZVOUS_TIMEOUT (default 900 s) bounds each wait for the
 #               other tasks, except the wait for a run step, which lasts as long as
 #               the run.
+#   k8s-indexed The same, one pod per node of a Kubernetes Indexed Job (set by
+#               k8s/mad_k8s_node.sh): rank JOB_COMPLETION_INDEX, run id
+#               MAD_K8S_JOB_ID, size MAD_K8S_NNODES, this node's name MAD_K8S_SELF
+#               (the pod's; with host networking `hostname` is the Kubernetes
+#               node's). The rendezvous is on the shared results volume, under
+#               LOG_PATH. The pod is the container: `docker run` in it is the
+#               stand-in from k8s/mad_k8s.py.
 
 dispatch_mode() {
     if [ -n "${MAD_DISPATCH:-}" ]; then
@@ -40,13 +47,20 @@ dispatch_mode() {
     fi
 }
 
+# A mode where every node runs the launcher as its own task.
+_dispatch_per_task() {
+    case "$(dispatch_mode)" in spur-array|k8s-indexed) return 0 ;; esac
+    return 1
+}
+
 dispatch_is_leader() {
-    [ "$(dispatch_mode)" != spur-array ] || [ "${_DISPATCH_RANK:-${SLURM_ARRAY_TASK_ID:-0}}" = 0 ]
+    _dispatch_per_task || return 0
+    [ "${_DISPATCH_RANK:-${SLURM_ARRAY_TASK_ID:-${JOB_COMPLETION_INDEX:-0}}}" = 0 ]
 }
 
 dispatch_node_addresses() {  # NODE
     case "$(dispatch_mode)" in
-        spur-array)
+        spur-array|k8s-indexed)
             _dispatch_array_init || return 1
             local r
             r="$(_dispatch_rank_of "$1")" || { echo "dispatch: $1 is not a node of this run" >&2; return 1; }
@@ -59,7 +73,7 @@ dispatch_node_addresses() {  # NODE
 dispatch_gather() {  # STEP CMD...
     local step="$1"; shift
     case "$(dispatch_mode)" in
-        spur-array)
+        spur-array|k8s-indexed)
             _dispatch_array_init || return 1
             local out rc=0 r
             out="$("$@")" || rc=$?
@@ -81,10 +95,10 @@ dispatch_gather() {  # STEP CMD...
 dispatch_run() {  # STEP NODELIST CMD...
     local step="$1" nodelist="$2"; shift 2
     case "$(dispatch_mode)" in
-        spur-array)
+        spur-array|k8s-indexed)
             _dispatch_array_init || return 1
             local me i=0 rc=0 n=0 worst=0 r node
-            me="$(hostname)"
+            me="$_DISPATCH_SELF"
             for node in ${nodelist//,/ }; do
                 if [ "$node" = "$me" ]; then
                     SLURMD_NODENAME="$node" SLURM_PROCID="$i" "$@" || rc=$?
@@ -105,33 +119,47 @@ dispatch_run() {  # STEP NODELIST CMD...
     esac
 }
 
-# --- spur-array internals -----------------------------------------------------
+# --- per-task internals (spur-array, k8s-indexed) ----------------------------
 
 _dispatch_array_init() {
     [ -n "${_DISPATCH_DIR:-}" ] && return 0
-    local job="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-}}" rank="${SLURM_ARRAY_TASK_ID:-}"
-    local n="${MAD_NNODES:-${SLURM_ARRAY_TASK_COUNT:-}}"
-    [ -z "$n" ] && [ -n "${SLURM_ARRAY_TASK_MAX:-}" ] && n=$(( SLURM_ARRAY_TASK_MAX + 1 ))
-    # A task's own SLURM_NNODES is 1; above 1 it was set by a wrapper that knows the
-    # run's size (madengine's Spur backend exports it for every task).
-    [ -z "$n" ] && [ "${SLURM_NNODES:-1}" -gt 1 ] 2>/dev/null && n="$SLURM_NNODES"
+    local job rank n self mode
+    mode="$(dispatch_mode)"
+    if [ "$mode" = k8s-indexed ]; then
+        job="${MAD_K8S_JOB_ID:-${SLURM_JOB_ID:-}}"
+        rank="${JOB_COMPLETION_INDEX:-}"
+        n="${MAD_K8S_NNODES:-}"
+        self="${MAD_K8S_SELF:-$(hostname)}"
+    else
+        job="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-}}"
+        rank="${SLURM_ARRAY_TASK_ID:-}"
+        n="${MAD_NNODES:-${SLURM_ARRAY_TASK_COUNT:-}}"
+        [ -z "$n" ] && [ -n "${SLURM_ARRAY_TASK_MAX:-}" ] && n=$(( SLURM_ARRAY_TASK_MAX + 1 ))
+        # A task's own SLURM_NNODES is 1; above 1 it was set by a wrapper that knows the
+        # run's size (madengine's Spur backend exports it for every task).
+        [ -z "$n" ] && [ "${SLURM_NNODES:-1}" -gt 1 ] 2>/dev/null && n="$SLURM_NNODES"
+        self="$(hostname)"
+    fi
     if [ -z "$job" ] || [ -z "$rank" ] || [ -z "$n" ]; then
-        echo "dispatch: spur-array needs SLURM_ARRAY_JOB_ID, SLURM_ARRAY_TASK_ID and MAD_NNODES (or the array size)" >&2
+        echo "dispatch: ${mode} needs its run id, this task's rank and the node count" \
+             "(spur-array: SLURM_ARRAY_JOB_ID, SLURM_ARRAY_TASK_ID, MAD_NNODES or the array size;" \
+             "k8s-indexed: MAD_K8S_JOB_ID, JOB_COMPLETION_INDEX, MAD_K8S_NNODES)" >&2
         return 1
     fi
     _DISPATCH_DIR="${MAD_RENDEZVOUS_DIR:-${LOG_PATH:?dispatch: LOG_PATH must be set (shared storage)}/rendezvous/${job}}"
     _DISPATCH_RANK="$rank"
     _DISPATCH_NNODES="$n"
+    _DISPATCH_SELF="$self"
     mkdir -p "$_DISPATCH_DIR" || return 1
-    _dispatch_publish "host_rank$rank" "$(hostname)"
+    _dispatch_publish "host_rank$rank" "$self"
     _dispatch_publish "addr_rank$rank" "$(hostname -I)"
     _dispatch_wait_all host_rank "$n" "${MAD_RENDEZVOUS_TIMEOUT:-900}" || return 1
     local r hosts=""
     for r in $(seq 0 $((n - 1))); do hosts="${hosts:+$hosts,}$(cat "$_DISPATCH_DIR/host_rank$r")"; done
     # The whole run, as one allocation would describe it.
     export SLURM_JOB_ID="$job" SLURM_PROCID="$rank" SLURM_NNODES="$n" SLURM_JOB_NODELIST="$hosts"
-    export _DISPATCH_DIR _DISPATCH_RANK _DISPATCH_NNODES
-    echo "[dispatch] spur-array: rank ${rank} of ${n} on $(hostname); nodes ${hosts}; rendezvous ${_DISPATCH_DIR}"
+    export _DISPATCH_DIR _DISPATCH_RANK _DISPATCH_NNODES _DISPATCH_SELF
+    echo "[dispatch] ${mode}: rank ${rank} of ${n} on ${self}; nodes ${hosts}; rendezvous ${_DISPATCH_DIR}"
 }
 
 _dispatch_publish() {  # NAME VALUE: written whole, so a reader never sees half of it

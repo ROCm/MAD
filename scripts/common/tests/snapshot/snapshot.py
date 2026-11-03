@@ -159,19 +159,28 @@ def normalize(obj, work):
     return json.loads(TIMESTAMP.sub("<TIME>", text))
 
 
-def run_as_array(script, env, nodes):
-    """The launcher as a job array (spur-array dispatch): one process per node, all at
-    once, each a single-node task of array job JOB_ID; they share the work directory as
-    the tasks share storage. Returns the leader's (rank 0's) exit status and output."""
+def run_as_tasks(script, env, nodes, mode):
+    """The launcher once per node, all at once, sharing the work directory as the nodes
+    share storage: spur-array as the single-node tasks of array job JOB_ID; k8s-indexed
+    as the pods of an Indexed Job, with the environment k8s/mad_k8s_node.sh gives them.
+    Returns the leader's (rank 0's) exit status and output."""
     procs = []
     for k in range(nodes):
         task_env = dict(env)
-        task_env.update({
-            "SLURM_ARRAY_JOB_ID": JOB_ID, "SLURM_ARRAY_TASK_ID": str(k),
-            "SLURM_JOB_ID": str(int(JOB_ID) + 1 + k), "SLURM_NNODES": "1",
-            "SLURM_JOB_NODELIST": f"node{k + 1}", "SLURMD_NODENAME": f"node{k + 1}",
-            "MAD_NNODES": str(nodes), "MAD_RENDEZVOUS_TIMEOUT": "60",
-        })
+        task_env.update({"SLURMD_NODENAME": f"node{k + 1}", "MAD_RENDEZVOUS_TIMEOUT": "60"})
+        if mode == "spur-array":
+            task_env.update({
+                "SLURM_ARRAY_JOB_ID": JOB_ID, "SLURM_ARRAY_TASK_ID": str(k),
+                "SLURM_JOB_ID": str(int(JOB_ID) + 1 + k), "SLURM_NNODES": "1",
+                "SLURM_JOB_NODELIST": f"node{k + 1}", "MAD_NNODES": str(nodes),
+            })
+        else:
+            task_env.update({
+                "MAD_DISPATCH": "k8s-indexed", "JOB_COMPLETION_INDEX": str(k),
+                "MAD_K8S_JOB_ID": JOB_ID, "MAD_K8S_NNODES": str(nodes), "MAD_K8S_SELF": f"node{k + 1}",
+                "SLURM_JOB_ID": JOB_ID, "SLURM_NNODES": str(nodes), "SLURM_PROCID": str(k),
+                "SLURM_JOB_NODELIST": ",".join(f"node{i + 1}" for i in range(nodes)),
+            })
         procs.append(subprocess.Popen(["bash", str(script)], cwd=script.parent, env=task_env,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
     outs = [p.communicate(timeout=300)[0] for p in procs]
@@ -213,7 +222,7 @@ def snapshot_card(catalog, card, dispatch="slurm-srun"):
                                capture_output=True, text=True, timeout=300)
             rc, output = p.returncode, p.stdout + p.stderr
         else:
-            rc, output = run_as_array(script, env, nodes)
+            rc, output = run_as_tasks(script, env, nodes, dispatch)
         calls_file = work / "stub" / "calls.log"
         calls = calls_file.read_text().splitlines() if calls_file.exists() else []
         ranks = []
@@ -241,7 +250,7 @@ def main():
     ap.add_argument("--update", action="store_true", help="rewrite the golden files")
     ap.add_argument("--card", default="", help="only cards whose name contains this")
     ap.add_argument("--catalog", choices=CATALOGS, help="only this catalog")
-    ap.add_argument("--equivalence", choices=("spur-array",),
+    ap.add_argument("--equivalence", choices=("spur-array", "k8s-indexed"),
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
                          "goldens (recorded under slurm-srun); no srun may be called")

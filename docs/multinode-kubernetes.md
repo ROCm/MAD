@@ -29,21 +29,32 @@ hostname -I`), and starts one container per node (`srun --nodelist=<all> bash -c
 run ...'`). And it **is the per-node body**: what each container runs.
 
 Kubernetes has no `srun` and no `docker`, but a pod already is a container of the card's
-image. So a card runs as:
+image. MAD's launchers reach their nodes only through `scripts/common/dispatch/dispatch.sh`,
+so a card runs **per pod**, one pod per node, each running the launcher as its own node
+(`MAD_DISPATCH=k8s-indexed`, set by the pod entry point `mad_k8s_node.sh`):
 
 ```
 Indexed Job, one pod per node of the card          headless Service <run>
-  pod <run>-0   the batch host: runs the card's      (pods reach each other as
-                launcher, unchanged                    <run>-0, <run>-1, ...)
-  pod <run>-1   serves the launcher's srun tasks
+  pod <run>-0   runs the card's launcher as node 0;  (pods reach each other as
+                makes the run's verdict               <run>-0, <run>-1, ...)
+  pod <run>-1   runs the card's launcher as node 1
   ...
 ConfigMap       the card's script directory, its siblings (default: ../common) and the shim
 PVC <run>-results   mounted at /results in every pod; LOG_PATH defaults to /results/logs
 ```
 
-Pod 0 runs the launcher with the `SLURM_*` variables a batch script sees (`SLURM_JOB_ID`,
-`SLURM_JOB_NODELIST`, `SLURM_NNODES`, ...) and with small stand-ins first on `PATH`
-(`mad_k8s.py`):
+Every pod gets the `SLURM_*` variables a batch script sees (`SLURM_JOB_ID`,
+`SLURM_JOB_NODELIST`, `SLURM_NNODES`, `SLURM_PROCID`). The pods meet in a rendezvous
+directory under `LOG_PATH` on the results volume, where each publishes its address;
+then each starts its own node's part, and pod 0 waits for the others' status, makes
+the verdict and publishes the results. Nothing fans out from one pod to another, so
+the only stand-ins on `PATH` (`mad_k8s.py`) are `docker` and `scontrol`. A node runs
+the same container command as on SLURM: `snapshot.py --equivalence k8s-indexed`
+checks it for every card.
+
+A card whose scripts predate `dispatch.sh` (an older MAD checkout) still runs **from
+pod 0**: pod 0 runs the launcher, the other pods serve its `srun` tasks through an
+agent, and these stand-ins are on `PATH`:
 
 | The launcher runs | The stand-in does |
 |---|---|

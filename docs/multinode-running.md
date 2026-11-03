@@ -723,6 +723,7 @@ python3 scripts/common/check_continuations.py         # no comment inside a back
 python3 scripts/common/check_gpu_arch_declarations.py # cards and recipes agree on GPUs
 python3 scripts/common/tests/snapshot/snapshot.py     # every card's docker run and engine command per node, against the goldens
 python3 scripts/common/tests/snapshot/snapshot.py --equivalence spur-array  # the same, run as a job array
+python3 scripts/common/tests/snapshot/snapshot.py --equivalence k8s-indexed # the same, run as Kubernetes pods
 bash scripts/common/tests/launcher_verdict_assert.sh  # job verdict, exit status, cancel, ports, env
 bash scripts/common/tests/node_lib_assert.sh          # the per-node library (mounts, JIT cache, run/trap)
 bash scripts/common/tests/dispatch_assert.sh          # dispatch selection, failing nodes, missing tasks

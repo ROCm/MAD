@@ -10,9 +10,21 @@
 #   MAD_K8S_ARGS        the card's args
 #   MAD_K8S_MULTIPLE_RESULTS  the card's multiple_results file name, if any
 #   JOB_COMPLETION_INDEX      set by Kubernetes for an Indexed Job
+#
+# Two ways to run the card's script:
+#   per pod   When the card's scripts reach their nodes through
+#             scripts/common/dispatch/dispatch.sh, every pod runs the script as its
+#             own node (MAD_DISPATCH=k8s-indexed): the pods meet in a rendezvous
+#             directory on the shared results volume, each starts its own node's
+#             part, and pod 0 makes the verdict. Nothing fans out, so there is no
+#             srun stand-in and no agent; `docker run` runs in the pod (mad_k8s.py).
+#   from pod 0  Otherwise (an older MAD checkout): pod 0 runs the script, and the
+#             srun / docker / scontrol stand-ins and an agent on every pod carry its
+#             steps to the other pods.
 set -u
 
 WORKSPACE="${MAD_K8S_WORKSPACE:-/workspace}"
+RESULTS="${MAD_K8S_RESULTS:-/results}"   # the shared results volume
 STATE="${MAD_K8S_STATE:-/tmp/mad-k8s}"
 SHIM="${WORKSPACE}/.mad-k8s"
 mkdir -p "$STATE/containers" "$SHIM/bin"
@@ -22,7 +34,12 @@ mkdir -p "$STATE/containers" "$SHIM/bin"
 export MAD_K8S_IMAGE_WORKDIR="$PWD"
 python3 -c 'import json, os, sys; json.dump(dict(os.environ), open(sys.argv[1], "w"))' "$STATE/base_env.json"
 
-for tool in srun docker scontrol; do
+script="${WORKSPACE}/${MAD_K8S_SCRIPT}"
+per_pod=""
+[ -f "$(dirname "$script")/../common/dispatch/dispatch.sh" ] && per_pod=1
+tools="srun docker scontrol"
+[ -n "$per_pod" ] && tools="docker scontrol"
+for tool in $tools; do
     printf '#!/bin/bash\nexec python3 %s/mad_k8s.py %s "$@"\n' "$SHIM" "$tool" > "$SHIM/bin/$tool"
     chmod +x "$SHIM/bin/$tool"
 done
@@ -48,6 +65,38 @@ export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME:-kubernetes}"
 export USER="${USER:-$(id -un 2>/dev/null || echo root)}"
 export MAD_DEPLOYMENT_TYPE=kubernetes
 
+# Publish the run's results where madengine's collector reads them: what the card
+# declares (multiple_results), else the launcher's per-job perf.csv under LOG_PATH
+# -- the same places the SLURM path looks.
+publish_results() {
+    local out="${RESULTS}/${MAD_K8S_SELF}" published="" cand
+    mkdir -p "$out"
+    if [ -n "${MAD_K8S_MULTIPLE_RESULTS:-}" ]; then
+        published="$(find . "${LOG_PATH:-/nonexistent}" -maxdepth 4 -name "$MAD_K8S_MULTIPLE_RESULTS" -type f 2>/dev/null | head -1)"
+    fi
+    for cand in "${LOG_PATH:-}/${SLURM_JOB_ID}/perf.csv" "./perf.csv"; do
+        [ -z "$published" ] && [ -s "$cand" ] && published="$cand"
+    done
+    if [ -n "$published" ]; then
+        cp "$published" "$out/perf.csv" && echo "[mad-k8s] results: $published -> $out/perf.csv"
+    else
+        echo "[mad-k8s] no perf CSV found (multiple_results='${MAD_K8S_MULTIPLE_RESULTS:-}', LOG_PATH='${LOG_PATH:-}')" >&2
+    fi
+}
+
+if [ -n "$per_pod" ]; then
+    export MAD_DISPATCH=k8s-indexed
+    cd "$(dirname "$script")"
+    echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF}): running $(basename "$script") ${MAD_K8S_ARGS:-} as its own node of ${SLURM_JOB_NODELIST}"
+    # shellcheck disable=SC2086
+    bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
+    rc=$?
+    echo "[mad-k8s] $(basename "$script") exited ${rc} on node ${idx}"
+    [ "$idx" = "0" ] && publish_results
+    mkdir -p "${RESULTS}/${MAD_K8S_SELF}" && echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
+    exit "$rc"
+fi
+
 if [ "$idx" != "0" ]; then
     echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF} on $(hostname)): serving tasks for ${MAD_K8S_NODE_PREFIX}-0"
     exec python3 "$SHIM/mad_k8s.py" agent
@@ -65,7 +114,6 @@ trap 'release; exit 143' TERM INT
 
 python3 "$SHIM/mad_k8s.py" wait-peers || { echo "[mad-k8s] not every node came up" >&2; release; exit 1; }
 
-script="${WORKSPACE}/${MAD_K8S_SCRIPT}"
 cd "$(dirname "$script")"
 echo "[mad-k8s] running $(basename "$script") ${MAD_K8S_ARGS:-} on ${SLURM_JOB_NODELIST}"
 # shellcheck disable=SC2086
@@ -73,24 +121,8 @@ bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
 rc=$?
 echo "[mad-k8s] $(basename "$script") exited ${rc}"
 
-# Publish the run's results where madengine's collector reads them: what the card
-# declares (multiple_results), else the launcher's per-job perf.csv under LOG_PATH
-# -- the same places the SLURM path looks.
-out="/results/${MAD_K8S_SELF}"
-mkdir -p "$out"
-published=""
-if [ -n "${MAD_K8S_MULTIPLE_RESULTS:-}" ]; then
-    published="$(find . "${LOG_PATH:-/nonexistent}" -maxdepth 4 -name "$MAD_K8S_MULTIPLE_RESULTS" -type f 2>/dev/null | head -1)"
-fi
-for cand in "${LOG_PATH:-}/${SLURM_JOB_ID}/perf.csv" "./perf.csv"; do
-    [ -z "$published" ] && [ -s "$cand" ] && published="$cand"
-done
-if [ -n "$published" ]; then
-    cp "$published" "$out/perf.csv" && echo "[mad-k8s] results: $published -> $out/perf.csv"
-else
-    echo "[mad-k8s] no perf CSV found (multiple_results='${MAD_K8S_MULTIPLE_RESULTS:-}', LOG_PATH='${LOG_PATH:-}')" >&2
-fi
-echo "$rc" > "$out/exit_code"
+publish_results
+echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
 
 release
 exit "$rc"

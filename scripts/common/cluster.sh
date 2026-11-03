@@ -584,7 +584,7 @@ cluster_detect_gpu_arch() {
         return 0
     fi
     local out archs n
-    if [ -n "${SLURM_JOB_ID:-}" ] && { [ "$(dispatch_mode)" = spur-array ] || command -v srun >/dev/null 2>&1; }; then
+    if [ -n "${SLURM_JOB_ID:-}" ] && { _dispatch_per_task || command -v srun >/dev/null 2>&1; }; then
         n="${SLURM_NNODES:-1}"
         # Same shape as cluster_check_model_path: the body always exits 0, so a node
         # that cannot answer shows up as a missing line, not as a failed step in sacct.
@@ -667,9 +667,9 @@ cluster_report_rdma_rails() {
     return 0
 }
 
-# A job-array task (spur-array) joins the others here, before any launcher reads the
+# A per-node task (spur-array, k8s-indexed) joins the others here, before any launcher reads the
 # run's nodes: from now on SLURM_JOB_ID / SLURM_NNODES / SLURM_JOB_NODELIST describe
 # the whole run. Nothing to do under one allocation.
-if [ "$(dispatch_mode)" = spur-array ]; then
+if _dispatch_per_task; then
     _dispatch_array_init || { echo "ERROR: could not join the other tasks of this run" >&2; exit 1; }
 fi

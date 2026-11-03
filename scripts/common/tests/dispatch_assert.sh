@@ -56,6 +56,19 @@ for k in 0 1; do env -i PATH="$B:$PATH" SLURMD_NODENAME="node$((k + 1))" SLURM_A
     bash -c '. "$0"; _dispatch_array_init >/dev/null || exit 9; echo "$SLURM_NNODES $SLURM_JOB_NODELIST"' "$LIB" > "$TMP/w$k.out" & done; wait
 _is "$(cat "$TMP/w0.out")" "2 node1,node2" "run size from a wrapper's SLURM_NNODES (madengine)"
 
+echo ""
+echo "=== k8s-indexed: the pods of an Indexed Job ==="
+# Every pod's hostname is the same Kubernetes node here (host networking): the node
+# names must come from MAD_K8S_SELF, not hostname.
+R="$TMP/r5"
+for k in 0 1; do env -i PATH="$B:$PATH" SLURMD_NODENAME=hostnode MAD_DISPATCH=k8s-indexed JOB_COMPLETION_INDEX=$k \
+    MAD_K8S_JOB_ID=99 MAD_K8S_NNODES=2 MAD_K8S_SELF="run-$k" MAD_RENDEZVOUS_DIR="$R" MAD_RENDEZVOUS_TIMEOUT=5 \
+    bash -c '. "$0"; _dispatch_array_init >/dev/null || exit 9; echo "$SLURM_JOB_ID $SLURM_NNODES $SLURM_JOB_NODELIST $SLURM_PROCID"
+             dispatch_run node run-0,run-1 bash -c "exit \$(( SLURM_PROCID + 3 ))"; echo "rc=$?"' "$LIB" > "$TMP/k$k.out" & done; wait
+_is "$(head -1 "$TMP/k1.out")" "99 2 run-0,run-1 1" "pods: run id, size, pod names and own rank"
+_is "$(tail -1 "$TMP/k0.out")" "rc=4" "rank 0 gets the worst status (pod 1 exited 4)"
+_is "$(tail -1 "$TMP/k1.out")" "rc=4" "pod 1 ends with its own status"
+
 R="$TMP/r3"
 _t0=$SECONDS
 _task 0 2 "$R" 'echo joined' > "$TMP/v0.out" 2>&1; _rc=$?
