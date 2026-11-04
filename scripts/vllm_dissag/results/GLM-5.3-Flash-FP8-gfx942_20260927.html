@@ -54,7 +54,7 @@
 </div>
 <p class="note">MI300X (192 GB) results, same image and configuration, are in <a href="#mi300x">their own section</a>.
 All other numbers: MI325X (256 GB), 1 prefill node + 1 decode node, 8 GPUs each. Image
-<code>rocmshared/vllm-glm53flash:glmv5.3-flash.gfx942</code> (<code>sha256:40f16ccd</code>), built from the Dockerfile in
+built from the Dockerfile in
 <a href="https://github.com/ROCm/MAD/pull/259">ROCm/MAD PR #259</a>. The MI325X full suite, 6-round concurrency test and
 AgentX ran on a test image with the same sources (the previous PR image plus the same AITER #3913 files and vLLM
 connector file); the built image itself was re-checked on MI325X (concurrent NIAH 47/48, 256K NIAH pass, 256K TTFT

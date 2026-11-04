@@ -87,7 +87,7 @@ On each leg's load log (`disagg_prefill.log`, `disagg_decode_mtp.log`):
 MXFP4 load lines are unchanged (prefill "converted exactly to FP8 128×128 blocks", decode
 "FlyDSL W4A16 exact e2m1 decode") — MoRI-EP coexists with the 4-bit decode path.
 
-## Measured (MI325X g32→g39, MI300X 148→113, release image, MXFP4)
+## Measured (MI325X and MI300X, 1 prefill + 1 decode node, MXFP4)
 
 Accuracy (both checkpoints, MoRI-EP active): seeded NIAH 100k 20/20 (MXFP4) and 40/40 (FP8);
 GSM8K 250 = 99.2% (MXFP4). 0 errors.
@@ -105,12 +105,8 @@ MoRI-EP is decode-TPOT parity on MI325X and ~6–7% slower on MI300X; TTFT is co
 **not** close the MXFP4-vs-FP8 decode gap on MI300X. The default (MoRIIO + all-gather, with the
 hybrid TP4×DP2 prefill on the `-hyb` cards) remains the performance recipe.
 
-## Open issue: stability under sustained load is not established
+## Not yet validated: sustained agentic load
 
-One AgentX run (MI325X, EP8 MXFP4 card + MoRI-EP, buffer 256) ran `conformance_128k` c1 and c2
-with 0 errors, then the decode engine died ~31 minutes into c4: one decode DP rank exited, the
-other seven waited 60 s on the shared-memory broadcast and were shut down, and only then did the
-router report failed decode requests. The failing rank's stack trace was not captured, so the
-cause (MoRI-EP or otherwise) is unknown. The default all-gather recipe ran the full AgentX matrix
-on MI325X and MI300X with 0 errors. Before relying on MoRI-EP, repeat a long AgentX run with the
-full decode log kept.
+MoRI-EP was validated for bring-up, accuracy and decode speed, not for long agentic runs: in one long AgentX run a
+decode engine exited, and the cause was not established. Run a long AgentX test with the full decode logs kept before
+relying on it; the default all-gather recipe ran the full AgentX matrix on MI325X and MI300X with 0 errors.

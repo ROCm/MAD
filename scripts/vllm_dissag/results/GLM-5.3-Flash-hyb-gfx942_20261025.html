@@ -48,7 +48,7 @@ many concurrent cold long prompts.</p>
 
 <div class="kpis">
   <div class="kpi"><div class="v">1.9–2.6 s</div><div class="l">256K TTFT p50 at 1–4 sessions (MI325X)</div><div class="d">EP8: 4.4–6.1 s</div></div>
-  <div class="kpi"><div class="v">14</div><div class="l">256K capacity, MI325X (target: 2)</div><div class="d">EP8: 12 · MI300X: 9 (EP8: 7)</div></div>
+  <div class="kpi"><div class="v">14</div><div class="l">256K users per prefill node, MI325X</div><div class="d">EP8: 12 · MI300X: 9 (EP8: 7)</div></div>
   <div class="kpi"><div class="v">460/460</div><div class="l">NIAH sweep, both checkpoints, both platforms</div><div class="d">0 disagreements</div></div>
   <div class="kpi"><div class="v">0</div><div class="l">errors in all 32 AgentX steps (16 per platform)</div></div>
 </div>
@@ -64,30 +64,15 @@ many concurrent cold long prompts.</p>
 <tr><td>FlyDSL</td><td>pypi</td><td>0.2.2</td></tr>
 </table>
 
-<h2>Images and tags</h2>
-<div class="box">Public prebuilt image (this PR's Dockerfile build):
+<h2>Image</h2>
+<div class="box">Public prebuilt image of this PR's Dockerfile:
 <code>docker pull rocm/vllm-dev:vllm-glm53flash-mad288-mxfp4-src</code> (digest <code>sha256:786eae0c54e2…</code>).
 Use it as <code>DOCKER_IMAGE_NAME</code>, or build the Dockerfile to get the same image.</div>
-<p>The <code>rocmshared/vllm-glm53flash</code> tags are private. Digests checked against Docker Hub and the serving nodes
-on 25–26 Oct 2026.</p>
-<table>
-<tr><th>Tag</th><th>Digest</th><th>What it is</th><th>Used for</th></tr>
-<tr><td><code>rocm/vllm-dev:vllm-glm53flash-mad288-mxfp4-src</code> (public)<br>= <code>rocmshared/vllm-glm53flash:mad274-mxfp4-src</code></td><td><code>sha256:786eae0c54e2…</code></td>
-<td>Built from this PR's Dockerfile. <code>/app/versions.txt</code>: vLLM <code>439eabe5c</code>, AITER <code>11a6be6e</code> +
-FlyDSL 0.2.2, MoRI <code>78b7a5f3</code>, router <code>076800bf</code> (rustc 1.91), libibverbs v39, base
-<code>rocm/vllm-dev:ci_base-build-01a0d6a8-…@sha256:bd7f0c9b…</code>. All 29 build-time fix markers present.</td>
-<td>MAD harness validation (below)</td></tr>
-<tr><td><code>rocmshared/vllm-glm53flash:release-20261018</code></td><td><code>sha256:c945c89cacf6…</code></td>
-<td>Overlay on <code>glmv5.3-flash.gfx942-20261002</code> (<code>sha256:41de80ce6f39…</code>). vLLM <code>1d239d555</code>, whose
-source tree is identical to <code>439eabe5c</code> (tree <code>f72b4f7ca0ce</code>); AITER, MoRI and router at the same pins as
-above. Bakes in <code>VLLM_ROCM_MXFP4_WEIGHT_ONLY=1</code> and <code>AITER_FLYDSL_W4_FP4=1</code>; the MXFP4 cards set both
-explicitly, so the PR image needs no baked env.</td>
-<td>Every accuracy, NIAH, AgentX and capacity number on this page (both platforms) and the MoRI-EP tests</td></tr>
-</table>
-<p class="note">The <code>release-20261018</code> tag was pushed twice: the first push (<code>sha256:1df760e1…</code>) lacked the
-two MXFP4 env settings and its runs were discarded. An earlier MI300X copy rebuilt on node 113 from
-<code>fp8-hybrid2</code> (Docker Hub rate limit) served only the 19–22 Oct runs; before the final MI300X runs both nodes
-pulled <code>sha256:c945c89c…</code> from Docker Hub.</p>
+<p>Its <code>/app/versions.txt</code>: vLLM <code>439eabe5c</code>, AITER <code>11a6be6e</code> + FlyDSL 0.2.2, MoRI
+<code>78b7a5f3</code>, router <code>076800bf</code> (rustc 1.91), libibverbs v39, base
+<code>rocm/vllm-dev:ci_base-build-01a0d6a8-…@sha256:bd7f0c9b…</code>; all 29 build-time fix markers present. It ran the MAD
+harness validation below. The accuracy, AgentX and capacity results on this page were measured on an equivalent build
+with the same component pins (vLLM source tree identical to <code>439eabe5c</code>).</p>
 
 <h2>Expert parallelism and KV transfer</h2>
 <p>All four GLM-5.3-Flash-gfx942 cards use <b>MoRIIO</b> (RDMA READ) for the prefill → decode KV transfer and vLLM's
@@ -97,17 +82,17 @@ tokens of the 8 ranks before the experts and reduce-scatters the outputs after t
 graphs with uniform batches, vLLM uses AITER's custom all-gather / reduce-scatter kernels instead (default on). All-reduce
 appears only in the TP4 attention of the <code>-hyb</code> prefill.</p>
 <p>MoRI-EP (<code>mori_high_throughput</code> prefill / <code>mori_low_latency</code> decode) is a tested opt-in, not the
-default (<code>skills/glm53-flash-gfx942/Recipe_enable_MoriEP.md</code>). EP8 cards, MXFP4, <code>release-20261018</code>:</p>
+default (<code>skills/glm53-flash-gfx942/Recipe_enable_MoriEP.md</code>). EP8 cards, MXFP4:</p>
 <table>
 <tr><th>Check</th><th>MI325X</th><th>MI300X</th></tr>
 <tr><td>Bring-up (decode MoRI buffer 256 = decode max-num-batched-tokens)</td><td class="pass">clean, both checkpoints</td><td class="pass">clean</td></tr>
 <tr><td>Accuracy</td><td class="pass">NIAH 100K 20/20 (MXFP4), 40/40 (FP8); GSM8K 250 99.2% (MXFP4)</td><td>–</td></tr>
 <tr><td>Decode TPOT median, 8K/1K, 32 users: all-gather / MoRI-EP</td><td>16.74 / 16.75 ms (parity)</td><td>18.86 / 19.99 ms (+6%)</td></tr>
 <tr><td>Decode TPOT median, 8K/1K, 8 users: all-gather / MoRI-EP</td><td>13.93 / 14.20 ms (+1.9%)</td><td>14.29 / 15.29 ms (+7%)</td></tr>
-<tr><td>AgentX conformance_128k (EP8 prefill)</td><td class="warn">1 and 2 users 0 errors; at 4 users one decode rank exited after 31 min (cause not captured)</td><td>–</td></tr>
+<tr><td>Sustained agentic load</td><td class="warn">not yet validated</td><td>–</td></tr>
 </table>
-<p class="note">MoRI-EP is accurate and no faster at one node per leg; its stability under sustained load is open. The default
-stays all-gather / reduce-scatter.</p>
+<p class="note">MoRI-EP is accurate and no faster at one node per leg, and has not yet been validated under long agentic load.
+The default stays all-gather / reduce-scatter.</p>
 
 <h2>What the -hyb cards add (models.yaml env)</h2>
 <table>
@@ -136,8 +121,8 @@ stays all-gather / reduce-scatter.</p>
 <tr><td>MI300X</td><td>400/400</td><td>400/400</td><td>60/60</td><td>60/60</td><td>0</td></tr>
 </table>
 
-<h2>Customer AgentX (conformance_256k / 512k, 900 s per step)</h2>
-<h3>MI325X (prefill g32 → decode g39)</h3>
+<h2>AgentX (conformance_256k / 512k, 900 s per step)</h2>
+<h3>MI325X (1 prefill + 1 decode node)</h3>
 <table>
 <tr><th>Workload</th><th>Conc</th><th>TTFT p50 s FP8 / MXFP4</th><th>TTFT p90 s</th><th>Tok/s/user p50</th><th>Tok/s/user p10</th><th>Requests</th><th>Errors</th><th>TTFT SLO</th></tr>
 <tr><td>256k</td><td>1</td><td>1.92 / 1.85</td><td>5.91 / 5.89</td><td>85.8 / 83.3</td><td>79.5 / 76.4</td><td>51 / 50</td><td>0 / 0</td><td class="pass">pass / pass</td></tr>
@@ -151,7 +136,7 @@ stays all-gather / reduce-scatter.</p>
 </table>
 <p class="note">SLOs: 256K p50 ≤ 5 s, p90 ≤ 15 s; 512K p50 ≤ 15 s, p90 ≤ 45 s. All 16 steps pass on both checkpoints.</p>
 
-<h3>MI300X (prefill 148 → decode 113)</h3>
+<h3>MI300X (1 prefill + 1 decode node)</h3>
 <table>
 <tr><th>Workload</th><th>Conc</th><th>TTFT p50 s FP8 / MXFP4</th><th>TTFT p90 s</th><th>Tok/s/user p50</th><th>Tok/s/user p10</th><th>Requests</th><th>Errors</th><th>TTFT SLO</th></tr>
 <tr><td>256k</td><td>1</td><td>2.01 / 1.86</td><td>4.55 / 4.50</td><td>84.4 / 82.0</td><td>79.2 / 75.4</td><td>45 / 47</td><td>0 / 0</td><td class="pass">pass / pass</td></tr>
@@ -165,7 +150,7 @@ stays all-gather / reduce-scatter.</p>
 </table>
 <p class="note">MI300X at 256K c8 misses p50 by ~0.25 s on both checkpoints (MI300X prefill is ~20% slower than MI325X). All other steps pass.</p>
 
-<h2>Capacity per prefill pod (customer method; target: 2 users at 256K and 512K)</h2>
+<h2>Capacity per prefill node</h2>
 <p>Highest number of concurrent users at which a step still meets every capacity SLO: TTFT p50 ≤ 20 s (256K) / ≤ 40 s
 (512K), tok/s/user p50 ≥ 60, 0 errors. One raw payload per user, 87.5% shared prefix per user (cold on the user's first
 request), 12.5% fresh tail per request, exactly 1024 output tokens; concurrency doubles from 1, then a binary search
@@ -183,8 +168,8 @@ the searches missed on TTFT, none on tok/s/user (lowest passing p50: 61.2) or er
 ~300 s with 21–46 requests and its p50 depends on how many of them are a user's cold first request: MI325X repeats at 5–7
 users passed 3 of 6 (FP8) and 2 of 6 (MXFP4). Treat ±2 users at 512K as run-to-run spread.</p>
 
-<h3>Capacity search, final recipe (HYB+R), every step</h3>
-<h3>MI325X (g32 → g39)</h3>
+<h3>Capacity search, <code>-hyb</code> cards (HYB+R), every step</h3>
+<h3>MI325X</h3>
 <table>
 <tr><th>Context</th><th class="n">Users</th><th>FP8: TTFT p50 s / tok/s/user p50</th><th>FP8</th><th>MXFP4: TTFT p50 s / tok/s/user p50</th><th>MXFP4</th></tr>
 <tr><td>256K</td><td class="n">1</td><td>3.27 / 87.3</td><td class="pass">pass</td><td>3.30 / 86.3</td><td class="pass">pass</td></tr>
@@ -206,7 +191,7 @@ users passed 3 of 6 (FP8) and 2 of 6 (MXFP4). Treat ±2 users at 512K as run-to-
 <tr><td>512K</td><td class="n">12</td><td>–</td><td>–</td><td>73.22 / 77.0</td><td class="warn">miss (TTFT)</td></tr>
 <tr><td>512K</td><td class="n">16</td><td>–</td><td>–</td><td>143.77 / 80.7</td><td class="warn">miss (TTFT)</td></tr>
 </table>
-<h3>MI300X (148 → 113)</h3>
+<h3>MI300X</h3>
 <table>
 <tr><th>Context</th><th class="n">Users</th><th>FP8: TTFT p50 s / tok/s/user p50</th><th>FP8</th><th>MXFP4: TTFT p50 s / tok/s/user p50</th><th>MXFP4</th></tr>
 <tr><td>256K</td><td class="n">1</td><td>4.29 / 86.3</td><td class="pass">pass</td><td>4.41 / 84.4</td><td class="pass">pass</td></tr>
@@ -236,7 +221,7 @@ the image built from the Dockerfile. Confirmed per-leg:</p>
   <li>Prefill MXFP4: "MXFP4 MoE experts converted exactly to FP8 128×128 blocks"</li>
   <li>Decode: "MXFP4 MoE experts on AITER FlyDSL W4A16 with exact e2m1 decode", unchanged from EP8 cards</li>
 </ul>
-<p>10-seed NIAH on MI300X (148 → 113): MXFP4-hyb 35.8/40, FP8-hyb 35.9/40 (equivalent; the 35K dip is the documented
+<p>10-seed NIAH on MI300X: MXFP4-hyb 35.8/40, FP8-hyb 35.9/40 (equivalent; the 35K dip is the documented
 repetitive-filler caveat, present on both checkpoints and on the EP8 cards). AgentX conformance_256k: 428 measured
 requests, 0 measured errors, TTFT p50 6.89 s at concurrency 16.</p>
 
@@ -244,13 +229,13 @@ requests, 0 measured errors, TTFT p50 6.89 s at concurrency 16.</p>
 <ul>
   <li>MXFP4 per-user decode speed trails FP8 by 4–9% on MI300X at 4–8 sessions (the 4-bit FlyDSL W4A16 kernel's
   small-batch efficiency). Does not affect any TTFT result or capacity number. A variant with decode experts also
-  converted to FP8 blocks (<code>HYBMXRD</code>) closes the gap at the cost of the MXFP4 decode KV gain.</li>
+  converted to FP8 blocks closes the gap at the cost of the MXFP4 decode KV gain.</li>
   <li>The <code>-hyb</code> cards have 2 prefill engines instead of 8: bursts of many concurrent cold long prompts
   are served faster by the EP8 cards.</li>
 </ul>
 
 <footer>
-  Generated 25 Oct 2026, updated 26 Oct 2026. Data: <code>reports/customer_criteria/data/</code> in the workspace.
+  Generated 25 Oct 2026, updated 4 Nov 2026.
   Cards: <code>GLM-5.3-Flash-{FP8,MXFP4}-gfx942-hyb</code> in <code>models.yaml</code>.
   Tests: gate_check 37/37, argv_assert 77/77. All 48 EP8 card dry-run outputs byte-identical.
 </footer>
