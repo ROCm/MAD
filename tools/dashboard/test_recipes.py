@@ -292,8 +292,7 @@ def fake_snapshot(state="live", version="v26.10"):
              "model": "Y-Model", "hf_repo": None, "framework": "vLLM disaggregated P/D", "skus": [], "tags": [],
              "target": "", "status": "in review", "prs": [], "updated": "2026-10-28"},   # PR-only: no HF id
         ],
-        "qa": {"covered": [{"area": "Perf", "scope": "all"}], "not_covered": []},
-        "ci": [{"name": "Nightly", "skus": ["MI355X"], "cadence": "nightly"}], "warnings": [],
+        "warnings": [],
     }
 
 

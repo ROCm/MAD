@@ -35,14 +35,6 @@
 </header>
 {%- endmacro %}
 
-{% macro qa_list(items, empty="Nothing recorded.") -%}
-{% if items %}
-<ul>{% for q in items %}
-  <li><div class="area">{{ q.area }}</div><div class="scope">{{ q.scope }}</div>{% if q.note | default("") %}<div class="note">{{ q.note }}</div>{% endif %}</li>
-{% endfor %}</ul>
-{% else %}<div class="empty">{{ empty }}</div>{% endif %}
-{%- endmacro %}
-
 {% macro changes(diff, snap) -%}
 {% if not diff %}
 <p class="lede">{% if snap.state == "live" %}No release has been frozen yet, so there is nothing to compare with. Freeze one with <code>tools/dashboard/build.py --freeze {{ snap.release }}</code>.{% else %}This is the first frozen release; there is no earlier snapshot to compare with.{% endif %}</p>

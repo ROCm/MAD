@@ -6,7 +6,7 @@ Site layout written to --out (develop at the root, each frozen release under <ve
   index.html                    Overview: one card per section and changes since the last release
   models/index.html             Model support catalog (table and card views, filters in the URL)
   models/<framework>/<model>/   one recipe page per model: madengine and plain Docker commands per GPU
-  rocm/ qa/ ci/ roadmap/        ROCm support matrix, QA coverage, CI coverage, oncoming models
+  rocm/ roadmap/                ROCm support matrix, oncoming models
   models.csv, search.js         config-level export and the top-bar search index
   releases/index.html           every release (site root only)
   <version>/...                 the same tree for dashboard/releases/<version>.json; recipes pin its commit
@@ -47,13 +47,6 @@ def load_releases():
         with open(path) as f:
             releases.append(json.load(f))
     return sorted(releases, key=lambda s: collect.version_key(s["version"]))
-
-
-def view(snapshot):
-    """CI coverage per GPU product, and each product's ISA."""
-    ci_skus = {sku: [c for c in snapshot["ci"] if sku in (c.get("skus") or [])] for sku in snapshot["skus"]}
-    sku_isa = {sku: isa for isa, skus in snapshot["isa_skus"].items() for sku in skus}
-    return {"ci_skus": ci_skus, "sku_isa": sku_isa}
 
 
 def upgrade(snapshot):
@@ -247,8 +240,6 @@ SECTION_PAGES = [
     ("overview.html.j2", "index.html", "overview"),
     ("models.html.j2", "models/index.html", "models"),
     ("rocm.html.j2", "rocm/index.html", "rocm"),
-    ("qa.html.j2", "qa/index.html", "qa"),
-    ("ci.html.j2", "ci/index.html", "ci"),
     ("roadmap.html.j2", "roadmap/index.html", "roadmap"),
 ]
 RELEASES_PAGE = "releases/index.html"
@@ -319,7 +310,7 @@ def render_site(env, out_dir, tree, trees, prev):
         render(env, template, out_dir, full, snap=snapshot, root=up(rel), active=active,
                versions=version_links(trees, tree, full, rel), **context)
 
-    common = {"cat": tree["cat"], "view": view(snapshot)}
+    common = {"cat": tree["cat"]}
     for template, rel, active in SECTION_PAGES:
         page(template, rel, active, diff=collect.diff_snapshots(prev, snapshot), fw_slugs=tree["cat"]["fw_slugs"], **common)
     ref = snapshot["commit"] if frozen else None

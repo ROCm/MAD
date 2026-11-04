@@ -178,21 +178,6 @@ def test_merge_one_page():
     assert rows[5]["variant"] == "" and rows[5]["page"] == "fw/Qwen3-8B"
 
 
-def test_derived_qa_multi_node_and_kubernetes():
-    def row(name, nodes, k8s="", status="registered", framework="F"):
-        return {"name": name, "nodes": nodes, "framework": framework, "family": name, "suites": [], "registry": "r",
-                "deployment": {"scheduler": "slurm", "k8s": k8s, "status": status,
-                               "switch": "JAX_MAXTEXT_INCLUDE_MULTINODE" if status == "opt-in" else ""}}
-    rows = [row("a", 1), row("b", 2, k8s="manual", framework="KV"), row("c", 4), row("d", 2, status="opt-in")]
-    covered, not_covered = collect.derived_qa(rows, [])
-    multi = next(q for q in covered if q["area"].startswith("Multi-node"))
-    assert multi["scope"].startswith("2 models on 2–4 nodes")
-    kube = next(q for q in not_covered if q["area"] == "Kubernetes")
-    assert "KV documents a manual per-node run" in kube["note"]
-    opt_in = next(q for q in not_covered if q["area"] == "Multi-node training models")
-    assert opt_in["scope"].startswith("d ") and "JAX_MAXTEXT_INCLUDE_MULTINODE=1" in opt_in["note"]
-
-
 @pytest.mark.parametrize("label, family", [
     ("Llama-3.1-405B-Instruct-MXFP4-Preview", "Llama-3.1-405B-Instruct"),
     ("Llama-3.3-70B-Instruct-FP8-KV", "Llama-3.3-70B-Instruct"),
@@ -230,7 +215,7 @@ def test_load_status(tmp_path):
     status = tmp_path / "status.yaml"
     status.write_text("release: v26.10\nroadmap:\n  - {model: A}\n")
     loaded = collect.load_status(str(status))
-    assert loaded["internal"] is False and loaded["qa"] == {"covered": [], "not_covered": []}
+    assert loaded["internal"] is False
     internal = tmp_path / "roadmap.internal.yaml"
     internal.write_text("- {model: B}\n")
     merged = collect.load_status(str(status), str(internal))

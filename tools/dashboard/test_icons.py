@@ -135,7 +135,7 @@ def test_amd_marks_split_logo_and_arrow():
 
 
 def test_glyphs_cover_every_section_icon():
-    for name in ("cube", "layers", "shield", "server", "flag", "tag", "chip", "terminal", "box", "network", "swap"):
+    for name in ("cube", "layers", "flag", "tag", "chip", "terminal", "box", "network", "swap"):
         assert name in icons.GLYPHS
 
 

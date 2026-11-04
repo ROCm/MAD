@@ -3,9 +3,8 @@
 {% set live = snap.state == "live" %}
 {% block title %}MAD {{ snap.release if live else snap.version }} — Overview{% endblock %}
 {% block style %}
-  /* Six tiles: 3 per row, then 2, then 1, so no row is left half-empty. */
-  .grid.overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  @media (max-width: 960px) { .grid.overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  /* Four tiles: 2 per row, then 1, so no row is left half-empty. */
+  .grid.overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   @media (max-width: 620px) { .grid.overview { grid-template-columns: 1fr; } }
   .overview .tile .t-sub { color: var(--ink-3); font-size: 12.5px; }
   .overview .tile ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
@@ -15,9 +14,8 @@
 {% block body %}
 <main class="wrap">
   {{ ui.page_header("MAD " ~ (snap.release ~ " status" if live else snap.version ~ " release"),
-       "Model support, ROCm support, QA scope, CI coverage and the model roadmap for MAD on AMD Instinct GPUs. Every model links to a recipe with the madengine command and the plain Docker commands that run it.", snap) }}
+       "Model support, ROCm support and the model roadmap for MAD on AMD Instinct GPUs. Every model links to a recipe with the madengine command and the plain Docker commands that run it.", snap) }}
 
-  {% set ci_covered = view.ci_skus.values() | select | list | length %}
   {% set rocm_known = cat.rocm_versions %}
   <div class="section-head"><span class="label">This release</span></div>
   <div class="grid overview">
@@ -48,16 +46,6 @@
         {% if unpinned %}<li>{{ unpinned }} image{{ "s" if unpinned != 1 }} on an unpinned <code>latest</code> tag</li>{% endif %}
         {% if unknown %}<li>{{ unknown }} image{{ "s" if unknown != 1 }} with an unrecorded ROCm version</li>{% endif %}
       </ul>
-    </a>
-    <a class="tile" href="{{ root }}/qa/index.html">
-      <div class="t-name"><span class="with-ico">{{ icons.glyph("shield", 18) }}QA coverage</span><span class="faint">→</span></div>
-      <div class="t-value">{{ snap.qa.covered | length }} <span class="faint" style="font-size:16px">covered</span> · {{ snap.qa.not_covered | length }} <span class="faint" style="font-size:16px">not covered</span></div>
-      <ul>{% for q in snap.qa.not_covered[:3] %}<li>Not covered: {{ q.area }}</li>{% endfor %}</ul>
-    </a>
-    <a class="tile" href="{{ root }}/ci/index.html">
-      <div class="t-name"><span class="with-ico">{{ icons.glyph("server", 18) }}CI coverage</span><span class="faint">→</span></div>
-      <div class="t-value">{{ ci_covered }} <span class="faint" style="font-size:16px">of {{ snap.skus | length }} GPU products</span></div>
-      <div class="gpu-row">{% for sku in snap.skus %}<div>{% if view.ci_skus[sku] %}<span class="status good">CI</span>{% else %}<span class="status critical">none</span>{% endif %}<br>{{ sku }}</div>{% endfor %}</div>
     </a>
     <a class="tile" href="{{ root }}/roadmap/index.html">
       <div class="t-name"><span class="with-ico">{{ icons.glyph("flag", 18) }}Oncoming models</span><span class="faint">→</span></div>
