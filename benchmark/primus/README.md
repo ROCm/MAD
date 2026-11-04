@@ -120,7 +120,7 @@ madengine run --tags primus_train/torchtitan_MI300X_llama3.1_8B-BF16-pretrain --
 
 The tag follows the naming convention `primus_train/<backend>_<GPU_ARCH>_<MODEL_CONFIG>`, where:
 - `<backend>` is the Primus launcher: `megatron`, `torchtitan`, `megatron_bridge`, `nemo_automodel`,
-  `diffusion`, or `moe_package`
+  `diffusion`, or `worldmirror`
 - `<GPU_ARCH>` is the target accelerator (`MI300X`, `MI325X`, `MI355X`, or `MI455X`)
 - `<MODEL_CONFIG>` matches the YAML filename under `examples/<backend>/configs/<GPU_ARCH>/`
 
