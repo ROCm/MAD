@@ -98,6 +98,12 @@ perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
 
+slurm_results/
+slurm_output/
+scripts/kvcache_transfer_bench/shared/
+madengine_build_*
+.madengine_session_start
+
 # NFS silly-rename placeholders: created when a file is replaced while open, and swept in by
 # a blanket `git add`. One reached PR #224 as a byte-identical stale copy of a sampler script.
 .nfs*

@@ -1,0 +1,173 @@
+- benchmark: latency
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
+  tp: 8
+  inp: 128 1024
+  out: 128 1024
+  dtype: bfloat16
+  bs: 1 8 32
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    meta-llama/Llama-3.3-70B-Instruct
+    amd/Llama-3.3-70B-Instruct-FP8-KV
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    deepseek-ai/DeepSeek-R1
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: bfloat16
+  quantization: fp8
+  kv_cache_dtype: fp8_e5m2
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4-Flash
+  tp: 8
+  inp: 1024 8192 102400
+  out: 1024
+  dtype: auto
+  max_concurrency: 16
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4-Pro
+  tp: 8
+  inp: 1024 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 16
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-video
+  model: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  tp: 8
+  dtype: auto
+  num_frames: 81
+  num_inference_steps: 40
+  height: 720
+  width: 1280
+  max_concurrency: 1
+  num_prompts: 1
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  num_images: 1
+  height: 1024
+  width: 1024
+  dtype: auto
+  max_concurrency: 16
+  num_prompts: 32
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  num_images: 1
+  height: 2048
+  width: 2048
+  dtype: auto
+  max_concurrency: 16
+  num_prompts: 32
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 8
+  num_images: 1
+  height: 1024
+  width: 1024
+  dtype: auto
+  max_concurrency: 16
+  num_prompts: 32
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 8
+  num_images: 1
+  height: 2048
+  width: 2048
+  dtype: auto
+  max_concurrency: 16
+  num_prompts: 32
+
+- benchmark: throughput
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  height: 1024
+  width: 1024
+  max_concurrency: 16
+  num_prompts: 32
+  dtype: auto
+
+- benchmark: latency
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  height: 1024
+  width: 1024
+  max_concurrency: 16
+  num_prompts: 32
+  dtype: auto
+
+- benchmark: throughput
+  hf_pipeline_tag: text-to-video
+  model: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  tp: 8
+  height: 720
+  width: 1280
+  num_frames: 81
+  num_inference_steps: 40
+  guidance_scale: 4.0
+  num_prompts: 5
+  dtype: auto
+
+- benchmark: latency
+  hf_pipeline_tag: text-to-video
+  model: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  tp: 8
+  height: 720
+  width: 1280
+  num_frames: 81
+  num_inference_steps: 40
+  guidance_scale: 4.0
+  num_prompts: 3
+  dtype: auto
+  profile: true
+
+- benchmark: accuracy
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 1
+  ulysses_degree: 8
+  dtype: auto
+
+- benchmark: accuracy
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 1
+  ulysses_degree: 8
+  dtype: auto
+
+- benchmark: accuracy
+  hf_pipeline_tag: text-to-video
+  model: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  tp: 1
+  ulysses_degree: 8
+  dtype: auto

@@ -1,0 +1,95 @@
+# SGLang accuracy overrides — merged into config at runtime via two-level merge.
+#
+# Structure:
+# 1. Task-level defaults (entries with hf_pipeline_tag, no model field)
+# 2. Model-level overrides (entries with model field)
+#
+# NOTE: apply_chat_template=true requires serving on /v1/chat/completions.
+# Until run_accuracy() supports endpoint switching, apply_chat_template
+# stays false to avoid HTTP 422.
+
+# ── Task-level defaults (by hf_pipeline_tag) ──
+- hf_pipeline_tag: text-generation
+  evaluations:
+    - framework: lm_eval
+      task: gsm8k
+      apply_chat_template: false
+      num_fewshot: 0
+      base_url: http://localhost:8000/v1/completions
+      lm_eval_model: local-completions
+      num_concurrent: 64
+      max_gen_toks: 2048
+
+- hf_pipeline_tag: text-to-image
+  evaluations:
+    - framework: compute_clip_score
+      prompt: "A professional photograph of an astronaut riding a horse on the moon"
+      height: 1024
+      width: 1024
+      num_inference_steps: 30
+      clip_score_threshold: 0.30
+      seed: 42
+
+- hf_pipeline_tag: text-to-video
+  evaluations:
+    - framework: compute_clip_score
+      prompt: "A serene mountain lake at sunrise with mist rising from the water"
+      height: 480
+      width: 832
+      num_frames: 81
+      num_inference_steps: 50
+      clip_score_threshold: 0.25
+      seed: 42
+
+# ── Model-level overrides ──
+# --- Instruct/Chat models ---
+- model: >
+    Qwen/Qwen3.5-35B-A3B
+    Qwen/Qwen3.5-397B-A17B
+    Qwen/Qwen3.5-397B-A17B-FP8
+    amd/Qwen3.5-35B-A3B-MXFP4
+    amd/Qwen3.5-397B-A17B-MXFP4
+
+- model: >
+    deepseek-ai/DeepSeek-R1
+    deepseek-ai/DeepSeek-V3.1
+    deepseek-ai/DeepSeek-V4-Flash
+    deepseek-ai/DeepSeek-V4-Pro
+    amd/DeepSeek-R1-MXFP4
+    amd/DeepSeek-R1-0528-MXFP4
+    amd/DeepSeek-V3.1-MXFP4-ASQ
+
+- model: >
+    amd/Kimi-K2.5-MXFP4
+    amd/Kimi-K2.6-MXFP4
+    moonshotai/Kimi-K3
+  extra_args:
+    --trust-remote-code: true
+  evaluations:
+    - trust_remote_code: true
+
+- model: xai-org/grok-2
+
+# --- Base models ---
+- model: openai/gpt-oss-120b
+  evaluations:
+    - num_fewshot: 3
+  overrides:
+    - tp: 1
+      extra_args:
+        --page-size: 256
+      evaluations:
+        - num_concurrent: 4
+          max_gen_toks: 512
+
+# --- Image generation models (text-to-image) ---
+# FLUX models - will inherit evaluations from hf_pipeline_tag: text-to-image task defaults
+- model: >
+    black-forest-labs/FLUX.1-dev
+    black-forest-labs/FLUX.2-dev
+
+# --- Video generation models (text-to-video) ---
+# Wan models - will inherit evaluations from hf_pipeline_tag: text-to-video task defaults
+- model: >
+    Wan-AI/Wan2.2-T2V-A14B
+    Wan-AI/Wan2.2-T2V-A14B-Diffusers
