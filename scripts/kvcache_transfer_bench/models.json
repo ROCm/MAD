@@ -175,5 +175,38 @@
             "kvcache_mooncake"
         ],
         "args": ""
+    },
+    {
+        "name": "pyt_kvcache_transfer_bench_all_image_spec",
+        "image_spec": {
+            "extends": "${image_spec}",
+            "gpu_arch": "gfx942"
+        },
+        "scripts": "scripts/run.slurm",
+        "url": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "04:00:00"
+        },
+        "env_vars": {
+            "BENCH_MODEL_NAME": "pyt_kvcache_transfer_bench_all_image_spec",
+            "BENCH_BACKENDS": "all",
+            "START_SIZE": "4096",
+            "STOP_SIZE": "1073741824",
+            "IBDEVICE": "mlx5_0",
+            "SYNC_PORT": "9999"
+        },
+        "tags": [
+            "image_spec",
+            "kvcache_image_spec"
+        ],
+        "args": ""
     }
 ]

@@ -1,0 +1,170 @@
+# Compatibility matrix: the ROCm capabilities MAD authorizes.
+#
+# A workload's scripts/<dir>/image_spec.yaml selects from this file; what a spec
+# selects is what that workload is locked to. madengine adds every build a
+# selection requires (requires:), orders all of them so each installs after what
+# it requires, and fails before building if a requirement has no authorized build.
+#
+# Component builds are keyed "<version>@<origin>": the same version can exist as
+# different builds, one per framework stack, and each is a separate capability.
+# An entry installs as an exact wheel (url), a pip requirement against a named
+# index (requirement + index), or a pinned source build (source). "{gpu_arch}"
+# becomes the target (TheRock "device-all" when unknown). Shell variables in
+# source steps are written $VAR, or \${VAR:-default}: ${...} is interpolation.
+#
+# Index locations: https://github.com/ROCm/TheRock/blob/main/RELEASES.md and
+# docs/packaging/legacy_multi_arch_releases.md; frameworks wheels from
+# https://rocm.frameworks.amd.com/whl-multi-arch/ (madengine stack harvest).
+
+bare_os_base: ubuntu:24.04
+default_release: "10.1"
+
+indexes:
+  therock_multi_arch: https://repo.amd.com/rocm/whl-multi-arch/
+  therock_stable: https://stable.repo.amd.com/rocm/whl-next/
+  therock_nightly: https://nightly.repo.amd.com/rocm/whl-next/
+  frameworks_vllm: https://rocm.frameworks.amd.com/whl-multi-arch/vllm/
+
+# ROCm releases. TheRock entries name their index and pin the release, because
+# an index serves every release in its stream; the pin also keeps torch and
+# rocm-sdk-devel on the same release.
+releases:
+  "7.2":
+    default_install: legacy
+    legacy_installer_url: https://repo.radeon.com/amdgpu-install/7.2/ubuntu/noble/amdgpu-install_7.2.70200-1_all.deb
+  "7.13":
+    default_install: therock
+    index: therock_multi_arch
+    pip_spec: ">=7.13,<7.14"
+  "7.14":
+    default_install: therock
+    index: therock_multi_arch
+    pip_spec: ">=7.14,<7.15"
+  "10.0":
+    default_install: therock
+    index: therock_stable
+    pip_spec: ">=10.0,<10.1"
+  "10.1":
+    default_install: therock
+    index: therock_stable
+    pip_spec: ">=10.1,<10.2"
+  nightly:
+    default_install: therock
+    index: therock_nightly
+
+components:
+  torch:
+    "2.13.0+rocm10.1.0":
+      index: therock_stable
+      requirement: "torch[device-{gpu_arch}]==2.13.0+rocm10.1.0"
+      requires: ["rocm>=10.1,<10.2"]
+    "2.13.0+rocm10.0.0":
+      index: therock_stable
+      requirement: "torch[device-{gpu_arch}]==2.13.0+rocm10.0.0"
+      requires: ["rocm>=10.0,<10.1"]
+
+  torchvision:
+    "0.28.0+rocm10.1.0":
+      index: therock_stable
+      requirement: "torchvision[device-{gpu_arch}]==0.28.0+rocm10.1.0"
+      requires: ["torch==2.13.0+rocm10.1.0"]
+      note: The torchvision release paired with torch 2.13; pinned so pip cannot take a build for another ROCm release.
+
+  amd-aiter:
+    "0.1.22.post2.dev0+gb4d9154d1.d20261002@frameworks-vllm":
+      url: https://rocm.frameworks.amd.com/whl-multi-arch/vllm/amd-aiter/amd_aiter-0.1.22.post2.dev0%2Bgb4d9154d1.d20261002-cp314-cp314-linux_x86_64.whl
+      built_by: frameworks/vllm
+      python: ["3.14"]
+      requires: ["torch==2.13.0+rocm10.1.0"]
+      note: Torch extension; the wheel does not declare torch, the frameworks vllm stack builds it against 2.13.0+rocm10.1.0.
+
+  flash-attn:
+    "2.8.3@frameworks-vllm":
+      url: https://rocm.frameworks.amd.com/whl-multi-arch/vllm/flash-attn/flash_attn-2.8.3-cp314-cp314-linux_x86_64.whl
+      built_by: frameworks/vllm
+      python: ["3.14"]
+      requires: ["torch==2.13.0+rocm10.1.0"]
+
+  vllm:
+    "0.29.1.dev0+rocm10.1.0.g98dff2a81.d20261002@frameworks-vllm":
+      url: https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.29.1.dev0%2Brocm10.1.0.g98dff2a81.d20261002-cp314-cp314-linux_x86_64.whl
+      built_by: frameworks/vllm
+      python: ["3.14"]
+      requires:
+        - "torch==2.13.0+rocm10.1.0"  # not declared by the wheel: vllm 98dff2a81 builds against torch == 2.13.0
+        - "amd-aiter==0.1.22.post2.dev0+gb4d9154d1.d20261002"
+        - "flash-attn==2.8.3"
+        - "torchvision==0.28.0+rocm10.1.0"  # vllm requires torchvision unpinned
+      exclude:
+        - name: amd-quark
+          reason: vllm pins amd-quark==0.12.post1, whose only build requires python <3.14, and this vllm exists only for cp314; Quark-quantized models fail until a 3.14-compatible amd-quark is published
+
+  # KV-cache transfer backends, built from source on the SGLang ROCm 10 image
+  # (see scripts/kvcache_transfer_bench/image_spec.yaml).
+  mori:
+    "1.2.3.post1@kvcache":
+      source:
+        repo: https://github.com/ROCm/mori.git
+        commit: 67632e80e2e492184b589904b63225f82d45537c
+        path: /sgl-workspace/mori
+        steps:
+          - pip install -r requirements-build.txt Cython
+          - MORI_GPU_ARCHS="\${GPU_ARCH_LIST:-{gpu_arch}}" pip install --no-build-isolation -e .
+          - cmake -B build_bench -DCMAKE_PREFIX_PATH="\${ROCM_PATH:-/opt/rocm}/lib/rocm_sysdeps" -DUSE_ROCM=ON -DCMAKE_BUILD_TYPE=Release -DGPU_TARGETS="\${GPU_ARCH_LIST:-{gpu_arch}}" -DBUILD_IO=ON -DBUILD_TESTS=ON -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARK=OFF -DBUILD_UMBP=OFF -DWITH_MPI=OFF -DBUILD_XLA_FFI_OPS=OFF
+          - cmake --build build_bench --target bench_engine -j $(nproc)
+          - $MORI_IO_BENCH_ENGINE_BIN --help > /dev/null
+      system_packages: [ibverbs-utils, libibverbs-dev, openmpi-bin, libopenmpi-dev, libpci-dev, libdw1, locales, libgrpc-dev, libgrpc++-dev, libprotobuf-dev, protobuf-compiler-grpc, cmake, libdrm-dev]
+      note: Python package and the MoRI-IO C++ bench_engine from one checkout.
+
+  mooncake:
+    "0.3.13.post1@kvcache":
+      source:
+        repo: https://github.com/kvcache-ai/Mooncake.git
+        commit: 719735896c86b56fabec6cf3e825fb2ea640597a
+        path: /sgl-workspace/Mooncake
+        steps:
+          - rm -rf /usr/local/go
+          - bash dependencies.sh -y
+          - mkdir build && cd build && cmake .. -DBUILD_SHARED_LIBS=ON -DUSE_HIP=ON -DENABLE_MULTI_PROTOCOL=ON -DUSE_HTTP=ON -DUSE_ETCD=ON -DSTORE_USE_ETCD=ON -DBUILD_UNIT_TESTS=OFF && make -j16 && make install
+          - pip install uv && uv venv --seed /tmp/mooncake-wheel-venv
+          - PATH="/tmp/mooncake-wheel-venv/bin:$PATH" LD_LIBRARY_PATH="$MOONCAKE_HOME/build/mooncake-asio:$LD_LIBRARY_PATH" ./scripts/build_wheel.sh
+          - rm -rf /tmp/mooncake-wheel-venv
+          - pip uninstall -y mooncake-transfer-engine mooncake-transfer-engine-non-cuda
+          - rm -rf "$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/mooncake"
+          - pip install --no-cache-dir mooncake-wheel/dist/*.whl
+          - python3 -c 'from mooncake.engine import TransferEngine'
+          - cp build/mooncake-transfer-engine/benchmark/tebench /usr/local/bin/
+      note: ENABLE_MULTI_PROTOCOL=ON is required with USE_HIP=ON; without it cross-node writes go to HIP IPC and fail.
+
+  ucx:
+    "da3fac2a@rocm":
+      source:
+        repo: https://github.com/ROCm/ucx.git
+        commit: da3fac2a
+        path: /sgl-workspace/ucx
+        steps:
+          - if dpkg -s libabsl-dev >/dev/null 2>&1; then apt-get remove -y libabsl-dev; fi
+          - ./autogen.sh
+          - mkdir build && cd build && ../configure --prefix=$UCX_HOME --enable-shared --disable-static --disable-doxygen-doc --enable-optimizations --enable-devel-headers --with-rocm=/opt/rocm --with-verbs --with-dm --enable-mt --without-go && make -j && make install
+
+  nixl:
+    "1.4.1+pr2191@kvcache":
+      requires: ["ucx"]
+      source:
+        repo: https://github.com/ai-dynamo/nixl.git
+        commit: 778edd1d1a50936b12c264879e12ef465e629002
+        cherry_pick: [fe3244c875ee4a22da6b0140c94c334546e9b715]
+        path: /sgl-workspace/nixl
+        steps:
+          - pip install meson meson-python patchelf tomlkit uv
+          - pip uninstall -y nixl nixl-rocm nixl-cu12 nixl-cu13
+          - SITE=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])') && rm -rf "$SITE/nixl" "$SITE/nixl_rocm"
+          - meson setup build --prefix=$NIXL_HOME -Ducx_path=$UCX_HOME -Dwheel_variant=rocm -Denable_plugins=UCX
+          - ninja -C build install
+          - ./contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml
+          - pip install --no-cache-dir --no-build-isolation . -Csetup-args=-Ducx_path=$UCX_HOME -Csetup-args=-Dwheel_variant=rocm -Csetup-args=-Denable_plugins=UCX
+          - pip install --no-cache-dir --no-deps build/src/bindings/python/nixl-meta/nixl-*-py3-none-any.whl
+          - python3 -c "from nixl._api import nixl_agent, nixl_agent_config; assert 'UCX' in nixl_agent('probe', nixl_agent_config(backends=[])).get_plugin_list()"
+          - wget -q https://github.com/etcd-io/etcd/releases/download/v3.6.0-rc.5/etcd-v3.6.0-rc.5-linux-amd64.tar.gz -O /tmp/etcd.tar.gz
+          - mkdir -p /usr/local/bin/etcd && tar -xf /tmp/etcd.tar.gz -C /usr/local/bin/etcd --strip-components=1 && rm /tmp/etcd.tar.gz
+      note: v1.4.1 plus ai-dynamo/nixl#2191 (ROCm fix, not in v1.4.1). Replaces any NIXL the base ships.

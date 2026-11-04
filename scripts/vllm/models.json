@@ -821,5 +821,22 @@
         ],
         "timeout": -1,
         "args": "--model_repo Qwen/Qwen3.5-397B-A17B-FP8 --config configs/extended.yaml"
+    },
+    {
+        "name": "pyt_vllm_llama-3.1-8b_image_spec",
+        "image_spec": "${image_spec}",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-8B-Instruct.csv",
+        "tags": [
+            "image_spec",
+            "vllm_image_spec"
+        ],
+        "timeout": -1,
+        "args": "--model_repo meta-llama/Llama-3.1-8B-Instruct --config configs/extended.yaml"
     }
 ]

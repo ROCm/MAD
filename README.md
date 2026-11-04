@@ -210,6 +210,7 @@ Add an entry to `models.json`:
 | `timeout` | ❌ | Model-specific timeout override |
 | `multiple_results` | ❌ | CSV file for multiple results |
 | `args` | ❌ | Additional script arguments |
+| `image_spec` | ❌ | Declarative image instead of `dockerfile` (see below) |
 
 #### Step 3: Docker Setup
 
@@ -240,6 +241,53 @@ RUN URL=https://example.com/model-data.zip && \
 # Set working directory
 WORKDIR /workspace
 ```
+
+#### Alternative: Declarative `image_spec`
+
+A workload folder can describe its image instead of pointing at a Dockerfile.
+`compat/rocm.yaml` is the compatibility matrix: the ROCm releases, wheel
+indexes and component builds MAD authorizes. A folder's `image_spec.yaml`, next
+to its `models.json`, selects from it; what a spec selects is what that workload
+is locked to. madengine adds every build a selection requires, installs them in
+dependency order (one image layer each), and fails before building if a
+requirement has no authorized build.
+
+```yaml
+# scripts/vllm/image_spec.yaml
+rocm: "10.1"
+python: "3.14"
+components:
+  vllm: "0.29.1.dev0+rocm10.1.0.g98dff2a81.d20261002@frameworks-vllm"
+```
+
+A card opts in by referencing the folder's spec with OmegaConf, and can
+override any part of it; cards with a `dockerfile` are unchanged:
+
+```json
+"image_spec": "${image_spec}"
+"image_spec": {"extends": "${image_spec}", "gpu_arch": "gfx942"}
+```
+
+A spec can force a relative install order with `order: [a, b]`; it adds to
+the dependency order and fails if it contradicts what a component requires.
+
+To move an existing workload onto a spec, build its image as today and let
+madengine draft the spec from what the Dockerfile added on top of its base:
+
+```bash
+madengine stack infer <built-image> --base <base-image> -o scripts/<dir>/image_spec.yaml
+```
+
+The draft selects the authorized builds it found; packages compat has no build
+for yet are listed as candidates for new `compat/rocm.yaml` entries.
+
+- `madengine build --tags <card> --explain` prints the resolved plan without building.
+- `madengine stack show scripts/vllm` lists the components in install order and why
+  each is there; `stack check` compares the wheels' declared dependencies with the
+  plan; `stack diff scripts/vllm scripts/kvcache_transfer_bench` shows where two
+  workloads differ; `stack harvest <index>` lists what an index offers.
+- `build_manifest.json` records the resolved plan (`build_plan`) and the installed
+  stack (`image_info`) for each image.
 
 #### Step 4: Script Implementation
 
