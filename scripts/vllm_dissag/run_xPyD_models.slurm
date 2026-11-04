@@ -88,6 +88,7 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Flash-FP8-gfx942" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +97,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Flash-FP8-gfx942" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -182,7 +184,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.3-Flash-FP8-gfx942" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -254,12 +256,15 @@ xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Checkpoint directory name, when it differs from the models.yaml key MODEL_NAME
+# (e.g. an arch-suffixed recipe over a shared checkpoint). Unset keeps MODEL_NAME.
+MODEL_WEIGHTS_NAME="${MODEL_WEIGHTS_NAME:-$MODEL_NAME}"
 
 
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-echo "Looking for model: $MODEL_NAME"
+echo "Looking for model: $MODEL_NAME (weights dir: $MODEL_WEIGHTS_NAME)"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
@@ -299,25 +304,25 @@ check_model_path() {
 }
 
 # Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
 if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
     MODEL_PATH="$MODEL_PATH_1"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 # Check /shared-inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+elif check_model_path "/shared_inference/models_blog/$MODEL_WEIGHTS_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
+elif check_model_path "$MODEL_DIR/$MODEL_WEIGHTS_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
+    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
+    echo "  - /shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "Model must be accessible from all nodes for distributed execution."
     echo "Please ensure the model is available on all allocated nodes."
@@ -648,6 +653,7 @@ docker run --rm \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \

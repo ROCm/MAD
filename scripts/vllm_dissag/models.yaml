@@ -281,3 +281,49 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+
+GLM-5.3-Flash-FP8-gfx942:
+  # GLM-5.3-Flash-FP8 (glm5_next: MLA + DSA sparse indexer + KDA, 288 experts) on gfx942
+  # (MI300X / MI325X), EP8 1P/1D over MoRIIO (own image: glmv53flash.gfx942 Dockerfile).
+  # Validated: NIAH 256K / 512K / 750K through the router with MTP on both legs and a
+  # FULL_AND_PIECEWISE decode graph at max-model-len 760000.
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    VLLM_ROCM_USE_AITER_MOE: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_ROCM_USE_AITER_FP8BMM: "0"
+    VLLM_USE_DEEP_GEMM: "0"
+    KV_BLOCK_SIZE: "4"                      # must be a multiple of index_kpool=4; 1 is rejected at load
+    KV_CACHE_DTYPE: "auto"
+    PREFILL_CUDAGRAPH_MODE: "NONE"          # prefill also gets --enforce-eager below
+    # FULL graphs take uniform decode batches (2 tokens/request with MTP), the rest run PIECEWISE.
+    # The MoRIIO READ consumer waits for all in-flight KV reads before every decode forward, so a
+    # just-transferred request is safe in either mode. Without MTP use NONE here: no-MTP decode
+    # under a CUDA graph loses recall at high concurrency.
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    VLLM_USE_BREAKABLE_CUDAGRAPH: "1"       # the DSA indexer must run outside the decode graph
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 32 64"  # <= decode --max-num-seqs
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "4096"
+    VLLM_ALL2ALL_BACKEND: "allgather_reducescatter"
+    DECODE_MORI_BACKEND: "allgather_reducescatter"
+    MORIIO_READ_MODE: "1"                   # READ mode is the validated KV-transfer mode
+    MORI_IO_CP_TIMEOUT_MS: "60000"          # in-worker CreateSession fails errno=11 under DP8 without it
+    MORI_SHMEM_HEAP_SIZE: "8589934592"      # 8 GiB; the 16 GiB default costs KV on 192 GB GPUs
+    GPU_MEMORY_UTILIZATION: "0.6"
+    # Keep a session's turns on one DP rank so agentic replays hit the prefix cache (sweeps
+    # without a session key fall back to a hash of the request body). aiperf sends the
+    # X-Session-ID the router keys on only when asked to.
+    ROUTER_PREFILL_POLICY: "consistent_hash"
+    ROUTER_DECODE_POLICY: "consistent_hash"
+    AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: "true"
+  dp_flags: "--tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string --skip-mm-profiling"
+  tp_flags: ""
+  # MTP goes on BOTH legs: the transferred KV cache groups (and the kpool tail) must match.
+  prefill:
+    tp: "--enforce-eager --max-model-len 760000 --max-num-batched-tokens 16384 --no-enable-prefix-caching"
+    dp: "--enforce-eager --max-model-len 760000 --max-num-batched-tokens 16384 --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":1}'"
+  decode:
+    tp: "--max-model-len 760000 --max-num-batched-tokens 16384 --max-num-seqs 64 --no-enable-prefix-caching"
+    dp: "--max-model-len 760000 --max-num-batched-tokens 16384 --max-num-seqs 64 --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":1}'"

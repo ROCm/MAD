@@ -499,5 +499,191 @@
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
         "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-flash-fp8_gfx942",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv53flash.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "gfx942",
+            "mi300x",
+            "mi325x"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-flash-fp8_gfx942_niah",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv53flash.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "gfx942",
+            "mi300x",
+            "mi325x"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "niah"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-flash-fp8_gfx942_long_context",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv53flash.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "gfx942",
+            "mi300x",
+            "mi325x"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "long_context",
+            "BENCHMARK_COMBINATIONS": "262144/1024 524288/1024",
+            "BENCHMARK_CON": "1 8"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv53flash.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "gfx942",
+            "mi300x",
+            "mi325x",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_256k"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942_512k",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv53flash.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "gfx942",
+            "mi300x",
+            "mi325x",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Flash-FP8-gfx942",
+            "MODEL_WEIGHTS_NAME": "GLM-5.3-Flash-FP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_512k"
+        },
+        "args": "-N 2 -n 2"
     }
 ]
