@@ -120,6 +120,41 @@ def scripts_bundle(script, include_dirs):
     return data, names
 
 
+# On every host-network pod of a slurm_multi run, standalone or madengine's, so any two keep
+# to separate nodes (madengine's k8s_slurm_multi.HOST_NETWORK_LABEL).
+HOST_NETWORK_LABEL = "madengine-slurm-multi-host-network"
+SOURCES_VAR = "MAD_ENV_SOURCES"
+
+
+def submit_environment(card, env_overrides, distributed):
+    """The environment the card's script starts with, and where each value came from.
+
+    With madengine installed this is madengine's own slurm_multi_env.submit_env -- the
+    function its SLURM, Spur and Kubernetes paths use -- so the card's layered config
+    (mad-config.yaml) applies and the sources match a madengine run exactly. Without it:
+    the card's env_vars, then the overrides; a card with a layered config is refused, since
+    resolving that is madengine's code. Returns (env, sources)."""
+    script_dir = Path(card["scripts"]).parent
+    try:
+        from madengine.deployment.slurm_multi_env import submit_env
+    except ImportError:
+        submit_env = None
+    if submit_env is not None:
+        sub, warnings, _ = submit_env(card, {"env_vars": dict(env_overrides)}, script_dir, distributed or {})
+        for w in warnings:
+            print(f"warning: {w}", file=sys.stderr)
+        return dict(sub.env), dict(sub.sources)
+    if (card.get("env_vars") or {}).get("MAD_CONFIG") or (script_dir / "mad-config.yaml").is_file():
+        die(f"{card['name']} has a layered config (mad-config.yaml); resolving it needs madengine "
+            "installed (pip install madengine), as a madengine run would")
+    env, sources = {}, {}
+    for k, v in (card.get("env_vars") or {}).items():
+        env[k], sources[k] = str(v), "card"
+    for k, v in env_overrides.items():
+        env[k], sources[k] = str(v), "additional-context"
+    return env, sources
+
+
 def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     nnodes = first_positive(nnodes_override, (card.get("distributed") or {}).get("nnodes"),
                             (card.get("slurm") or {}).get("nodes")) or 1
@@ -137,10 +172,12 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     bundle, members = scripts_bundle(script, include)
 
     run_id = str(int(time.time()) % 100000000)
-    env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
-    env.update(env_overrides)
+    env, sources = submit_environment(card, env_overrides, k8s.get("distributed"))
     env["DOCKER_IMAGE_NAME"] = image
-    env.setdefault("LOG_PATH", "/results/logs")
+    sources["DOCKER_IMAGE_NAME"] = "madengine"
+    if "LOG_PATH" not in env:
+        env["LOG_PATH"], sources["LOG_PATH"] = "/results/logs", "madengine"
+    env[SOURCES_VAR] = ",".join(f"{k}={v}" for k, v in sorted(sources.items()))
     env.update({
         "MAD_K8S_NNODES": str(nnodes), "MAD_K8S_NODE_PREFIX": name, "MAD_K8S_JOB_ID": run_id,
         "MAD_K8S_IMAGE": image, "MAD_K8S_SCRIPT": script, "MAD_K8S_ARGS": card.get("args") or "",
@@ -202,10 +239,16 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
                     *volumes],
     }
     if k8s.get("host_network"):
+        # On the node's network every fixed port is shared with the node (the card's own
+        # servers and barriers), so no two host-network pods of slurm_multi runs -- of this
+        # run or any other, standalone or madengine's -- may share a node.
         pod["hostNetwork"] = True
         pod["dnsPolicy"] = "ClusterFirstWithHostNet"
+        pod_labels[HOST_NETWORK_LABEL] = "true"
         pod["affinity"] = {"podAntiAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
-            {"labelSelector": {"matchLabels": {"job-name": name}}, "topologyKey": "kubernetes.io/hostname"}]}}
+            {"labelSelector": {"matchLabels": {HOST_NETWORK_LABEL: "true"}},
+             "namespaceSelector": {},
+             "topologyKey": "kubernetes.io/hostname"}]}}
     if k8s.get("node_selector"):
         pod["nodeSelector"] = k8s["node_selector"]
     if k8s.get("tolerations"):

@@ -86,6 +86,38 @@ class TestSubmitDryRun(unittest.TestCase):
         self.assertNotIn("imagePullSecrets", pod)
 
 
+class TestSameAsMadengine(unittest.TestCase):
+    """What madengine's Kubernetes path gives a card, standalone gives too
+    (verify_k8s_path_equivalence.py compares the two in full)."""
+
+    def test_sources_of_the_submit_environment(self):
+        _, _, _, env = dry_run("--env", "BENCHMARK_ITR=3", config={"env_vars": {"TP_SIZE": "8"}})
+        src = dict(p.split("=", 1) for p in env["MAD_ENV_SOURCES"].split(","))
+        self.assertEqual(src["MODEL_NAME"], "card")
+        self.assertEqual((src["TP_SIZE"], src["BENCHMARK_ITR"]), ("additional-context", "additional-context"))
+        self.assertEqual((src["DOCKER_IMAGE_NAME"], src["LOG_PATH"]), ("madengine", "madengine"))
+
+    def test_host_network_pods_keep_apart_across_runs(self):
+        _, objs, pod, _ = dry_run(config={"k8s": {"host_network": True}})
+        label = "madengine-slurm-multi-host-network"
+        self.assertEqual(objs["Job"]["spec"]["template"]["metadata"]["labels"][label], "true")
+        term = pod["affinity"]["podAntiAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
+        self.assertEqual((term["labelSelector"]["matchLabels"], term["namespaceSelector"], term["topologyKey"]),
+                         ({label: "true"}, {}, "kubernetes.io/hostname"))
+
+    def test_a_layered_config_card_needs_madengine(self):
+        try:
+            import madengine.deployment.slurm_multi_env  # noqa: F401
+            self.skipTest("madengine is installed: the card's mad-config.yaml is resolved by it")
+        except ImportError:
+            pass
+        cmd = [sys.executable, str(SUBMIT), "--card", "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+               "--image", "img:t", "--dry-run"]
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("needs madengine", r.stderr)
+
+
 class TestVerdict(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(SUBMIT.parent))

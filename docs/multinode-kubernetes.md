@@ -75,7 +75,7 @@ fast, the benchmark writes `perf.csv`, and the launcher exits non-zero on failur
 | | Standalone | Through madengine |
 |---|---|---|
 | Command | `python3 scripts/common/k8s/submit.py --card <card> ...` | `madengine build --use-image ...` then `madengine run ...` |
-| Needs | Python 3 and `kubectl` | madengine and the `kubernetes` Python package |
+| Needs | Python 3 and `kubectl`; madengine importable for a card with a layered config (`mad-config.yaml`), which it resolves with madengine's code (it refuses such a card otherwise) | madengine and the `kubernetes` Python package |
 | SLURM counterpart | `sbatch run_xPyD_models.slurm` | `madengine run` with a `slurm` block |
 
 They are separate implementations and they deploy the same thing: for one card and one
