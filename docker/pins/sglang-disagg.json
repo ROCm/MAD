@@ -21,7 +21,6 @@
       "archs": [
         "gfx942"
       ],
-      "mode": "sgl_workspace",
       "why": "gfx942 only (INSTALL_MORI=auto); installed editable in the image's /sgl-workspace/mori. No dma-buf fallback (see mori#721)."
     }
   },

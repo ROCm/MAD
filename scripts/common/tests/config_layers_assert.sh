@@ -39,6 +39,7 @@ run() {
         [ -n "${CONN_ARGS:-}" ] || CONN_ARGS="-e CONN=${CONN:-connector} -e CONN_SAME=${CONN_SAME:-same}"
         [[ -z "${CONN_ONLY:-}" ]] && config_note CONN_ONLY connector connector-env
         echo "ARGS $CONN_ARGS"
+        echo "RECIPE_SUBMITTED=$(config_recipe SUBMITTED) RECIPE_NONE=[$(config_recipe NOT_IN_RECIPE)]"
         config_write "$1/out/config.resolved.json" >/dev/null
     ' "$LIB" "$TMP"
 }
@@ -55,6 +56,7 @@ _has "$out" "ONLY_RECIPE=<unset>"   "a recipe name no lower layer sets is left t
 _has "$out" "SITE_SAME=same"        "a site default equal to the recipe is unchanged"
 _has "$out" "SITE_ONLY=site"        "a site default the recipe does not name is unchanged"
 _has "$out" "[config] recipe SITE=recipe over site (site)" "an override is reported"
+_has "$out" "RECIPE_SUBMITTED=recipe RECIPE_NONE=[]" "config_recipe: the recipe's own value, whichever layer won; empty when it sets none"
 _has "$out" "[config] SUBMITTED=submitted (submit) over the recipe's recipe" "a submitted value over the recipe is reported"
 
 echo ""

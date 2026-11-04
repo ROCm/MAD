@@ -155,12 +155,11 @@ def build_env(spec, arch, base):
     mori = c.get("mori") or {}
     mori_on = bool(mori) and mori.get("enabled", True) and arch in (mori.get("archs") or [arch])
     out.update(MORI_BUILD=int(mori_on), MORI_REPO=mori.get("repo", ""),
-               MORI_COMMIT=mori.get("commit", ""), MORI_MODE=mori.get("mode", "pip"))
+               MORI_COMMIT=mori.get("commit", ""))
 
     aiter = c.get("aiter") or {}
     flydsl = aiter.get("flydsl") or {}
-    out.update(AITER_BUILD=int(bool(aiter) and aiter.get("enabled", True)),
-               AITER_KIND="wheel" if "wheel" in aiter else ("source" if "commit" in aiter else ""),
+    out.update(AITER_KIND="wheel" if "wheel" in aiter else ("source" if "commit" in aiter else ""),
                AITER_WHEEL_URL=(aiter.get("wheel") or {}).get("url", ""),
                AITER_VERSION=(aiter.get("wheel") or {}).get("version", ""),
                AITER_REPO=aiter.get("repo", ""), AITER_COMMIT=aiter.get("commit", ""),
@@ -171,12 +170,10 @@ def build_env(spec, arch, base):
 
     for comp, prefix in (("vllm", "VLLM"), ("router", "ROUTER")):
         x = c.get(comp) or {}
-        out[f"{prefix}_BUILD"] = int(bool(x) and x.get("enabled", True))
         out[f"{prefix}_REPO"] = x.get("repo", "")
         out[f"{prefix}_COMMIT"] = x.get("commit", "")
         out[f"{prefix}_PATCHES"] = _patches(x)
     out["RUST_TOOLCHAIN"] = (c.get("router") or {}).get("rust_toolchain", "")
-    out["SGLANG_ROUTER"] = (c.get("sglang_router") or {}).get("pip", "")
 
     t = c.get("transports") or {}
     subs = t.get("subcomponents") or {}

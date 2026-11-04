@@ -274,26 +274,17 @@ case "$ROUTER_NODE" in 0|1) ;; *) echo "Error: ROUTER_NODE=${ROUTER_NODE} (0 or 
 # Resolve it from the recipe (TP within each EP pool; unset/1 = plain wideEP) so
 # submit-time topology/JIT decisions match the in-container launcher. env/-e still wins.
 #
-# _recipe_env KEY: the value of KEY in this model's models.yaml env: block, or empty.
-# The in-container launcher exports that whole block itself; the few keys below
-# are needed earlier, on the batch node, to size the job and gate it.
-_recipe_env() {
-  [[ -n "${MODEL_NAME:-}" && -f "${SCRIPT_DIR}/models.yaml" ]] || return 0
-  MODELS_YAML="${SCRIPT_DIR}/models.yaml" MODEL_NAME="$MODEL_NAME" KEY="$1" python3 - <<'PY'
-import os, yaml
-m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
-cfg = m.get(os.environ["MODEL_NAME"]) or {}
-print((cfg.get("env") or {}).get(os.environ["KEY"], ""))
-PY
-}
-[[ -z "${EP_TP_SIZE:-}" ]] && EP_TP_SIZE="$(_recipe_env EP_TP_SIZE)"
+# The recipe's value (config_recipe, common/config/layers.sh) when nothing set it: the
+# in-container launcher exports the whole env: block itself; the few keys below are
+# needed earlier, on the batch node, to size the job and gate it.
+[[ -z "${EP_TP_SIZE:-}" ]] && EP_TP_SIZE="$(config_recipe EP_TP_SIZE)"
 export EP_TP_SIZE="${EP_TP_SIZE:-1}"
 
 # GPU_ARCHS: the architectures this model's recipe is written for (models.yaml).
 # Checked against the allocated nodes before anything expensive happens -- see
 # cluster_require_gpu_arch in cluster.sh. The model card's skip_gpu_arch states the
 # same thing for orchestrators; tests/argv_assert.sh keeps the two consistent.
-[[ -z "${GPU_ARCHS:-}" ]] && GPU_ARCHS="$(_recipe_env GPU_ARCHS)"
+[[ -z "${GPU_ARCHS:-}" ]] && GPU_ARCHS="$(config_recipe GPU_ARCHS)"
 export GPU_ARCHS
 
 # TP-within-EP (EP_TP_SIZE>1) is only valid on the wideEP MoRIIO path. Per-pool sizing is
@@ -425,7 +416,7 @@ export xP=$xP
 export yD=$yD
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
-export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
+export IPADDRS          # launcher_node_ips
 export BENCHMARK_ITR=$BENCHMARK_ITR
 export BENCHMARK_CON="${BENCHMARK_CON}"
 export BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}"

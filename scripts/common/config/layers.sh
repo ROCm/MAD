@@ -32,7 +32,7 @@
 
 # Names set when the launcher started, and the layer that last set each name.
 config_begin() {
-    declare -gA _CONFIG_SRC=() _CONFIG_VAL=() _CONFIG_NOTE=()
+    declare -gA _CONFIG_SRC=() _CONFIG_VAL=() _CONFIG_NOTE=() _CONFIG_RECIPE=()
     local n p
     for n in $(compgen -e); do _CONFIG_SRC[$n]=submit; done
     # madengine says where each submitted value came from (card, additional-context,
@@ -89,6 +89,7 @@ config_apply_recipe() {
     config_layer launcher
     while IFS= read -r -d '' line; do
         k="${line%%=*}"; v="${line#*=}"
+        _CONFIG_RECIPE[$k]="$v"
         case "$(config_source "$k")" in
             submit|submit:*|topology)
                 [[ "${!k}" != "$v" ]] && echo "[config] ${k}=${!k} ($(config_source "$k")) over the recipe's ${v}"
@@ -113,6 +114,10 @@ for k, v in ((m.get(os.environ["MODEL_NAME"]) or {}).get("env") or {}).items():
 ')
     _config_snapshot
 }
+
+# config_recipe KEY: the recipe's value for KEY (after config_apply_recipe), or empty --
+# for a launcher step that needs a recipe value on the batch node whichever layer won.
+config_recipe() { [[ -v "_CONFIG_RECIPE[$1]" ]] && printf '%s\n' "${_CONFIG_RECIPE[$1]}"; return 0; }
 
 # config_note NAME VALUE LABEL: a value the launcher passes to the containers without
 # exporting it here (e.g. `-e NAME=VALUE` built from a connector .env), for config_write.
