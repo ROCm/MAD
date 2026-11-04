@@ -65,7 +65,7 @@ hf download gpt2
 
 torchrun --nproc_per_node="$MAD_RUNTIME_NGPUS" $HF_PATH/examples/pytorch/language-modeling/run_clm.py --output_dir output \
 	--model_name_or_path gpt2 \
-	--dataset_name wikitext \
+	--dataset_name Salesforce/wikitext \
 	--dataset_config_name wikitext-2-raw-v1 \
 	--do_train \
 	--do_eval \
