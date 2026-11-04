@@ -30,11 +30,11 @@
     },
     {
       "name": "primus_llama70b_4n",
-      "run_dir": "slurm_output/primus_pyt_megatron_lm_train_llama-3.1-70b_overlay/25577",
+      "run_dir": "slurm_output/primus_train/megatron_MI355X_llama3.1_70B-BF16-pretrain/25577",
       "out_dir": "reports/primus_llama70b_4n",
       "rocprof_dir": "prof_llama70b_4n/rocprof",
       "trace_root": "prof_llama70b_4n/primus_out",
-      "note": "Primus training, both datatype phases in one job; traces resolve per datatype from the tensorboard paths"
+      "note": "Primus training via primus_train, one precision per job; traces resolve per datatype from the tensorboard paths"
     }
   ]
 }

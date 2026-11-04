@@ -167,6 +167,62 @@ madengine run --tags primus_train/megatron_MI300X_llama3.1_8B-BF16-pretrain --li
 
 > **Note:** `MAD_SECRETS_HFTOKEN` is only required when training with real data (i.e., `mock_data: false` in the config). The default configs use mock data and do not require a token. Inside the container, this is automatically mapped to `HF_TOKEN`.
 
+### Run Knobs (Megatron configs)
+
+`scripts/primus_train/run.sh` reads these from the container environment. Arguments are
+passed to Primus in this order, and Primus keeps the last value of a key: the config YAML,
+the per-model overrides below, the scaled-out global batch size, the model `args`, then
+the knobs.
+
+| Variable | Effect |
+| --- | --- |
+| `PRIMUS_TRAIN_ITERS` | `--train_iters <N>` |
+| `PRIMUS_DISABLE_PROFILE=1` | `--profile false --use_pytorch_profiler false` |
+| `PRIMUS_CLI_EXTRA` | Extra Primus CLI arguments, the variable madengine's `primus` launcher documents; applied before `PRIMUS_EXTRA_ARGS`, which wins on a repeated key |
+| `PRIMUS_EXTRA_ARGS` | Any Primus CLI arguments, appended last (e.g. `"--use_turbo_deepep true --moe_shared_expert_overlap false"`); both variables split on spaces, tabs and newlines |
+| `RCCL_LOG_DIR` | One RCCL log per rank, `<PRECISION>.node_<N>.<host>.<pid>.log`, with `NCCL_DEBUG` defaulting to `INFO` (set it to choose another level); the directory must be writable by the container user |
+
+The configs tune `global_batch_size` for one 8-GPU node. On any other world size `run.sh`
+rounds it up to the next multiple of micro batch size x data-parallel size, because
+Megatron refuses anything else. With virtual pipeline stages (an interleaved schedule, set directly or implied by a
+`pipeline_model_parallel_layout`) the
+microbatch count must also suit the scheduler, which with the default group size means a
+multiple of the pipeline size (e.g. GPT-OSS-120B on 48 GPUs: 2304, not 2112). A
+`--global_batch_size` in `PRIMUS_EXTRA_ARGS` or the model `args` turns that off.
+
+### Per-Model Overrides and Extra Models
+
+Some configs need CLI arguments to run as benchmarked: Kimi-K2-Thinking batch size and
+recompute, the GPT-OSS-120B memory fallback on gfx942 and at 16 GPUs, the Llama-4-Scout
+tokenizer mirror and dispatcher. They live in `scripts/primus_train/model_overrides.py`,
+which also adds models the submodule glob cannot find:
+
+- `-proxy` models: a few-layer cut of the full shape for fast checks, e.g.
+  `primus_train/megatron_MI355X_deepseek_v3-BF16-pretrain-proxy`,
+  `primus_train/megatron_MI300X_llama3.1_70B-FP8-pretrain-proxy`,
+  `primus_train/megatron_MI355X_mixtral_8x22B_v0.1-BF16-pretrain-proxy`,
+  `primus_train/megatron_MI355X_kimi_k2_thinking-BF16-pretrain-proxy`.
+- `primus_train/megatron_{MI355X,MI300X,MI325X}_kimi_k2_thinking-BF16-pretrain`: its configs
+  ship in `docker/kimi_k2_configs/` and only the RCCL overlay image
+  (`docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile`) carries them. When a
+  mounted MAD checkout puts its `scripts/Primus` submodule first but lacks the requested
+  config, `run.sh` switches to a Primus tree that has it (`PRIMUS_ROOT`, `/workspace/Primus`,
+  `/opt/primus`, `/workspace`) instead of failing while opening the YAML.
+- `primus_train/megatron_{MI300X,MI325X}_gpt_oss_120B-{BF16,FP8}-pretrain`: run the MI355X
+  config with the gfx942 memory overrides.
+
+`scripts/primus_megatron-lm` (`primus_pyt_megatron_lm_train_<model>` tags) is retired; each
+of its models is now one `primus_train/megatron_<GPU_ARCH>_<config>` tag per precision, e.g.
+`primus_pyt_megatron_lm_train_llama-3.1-8b` on MI355X becomes
+`primus_train/megatron_MI355X_llama3.1_8B-{BF16,FP8,MXFP8,MXFP4}-pretrain`.
+
+### Performance Output
+
+Every Primus model writes `primus_perf_output.csv`, one row per metric (`tokens_per_second`,
+`tflops`, `model_flops_utilization`) with `mode`, `precision`, `batch_size`,
+`global_batch_size`, `seq_len`, `device` and `num_gpus`. Batch sizes, sequence length and GPU
+count are read back from the training log, so they are what actually ran.
+
 ---
 
 ## 3. Multi-node Training

@@ -2,9 +2,9 @@
   "built_images": {
     "rocm-primus-maxtext-llama3-8b-overlay": {
       "model": "jax-maxtext/maxtext_MI355X_llama3_8B-fp8-pretrain",
-      "docker_image": "rocm/jax-training:maxtext-v26.6-<FILL_RCCL_TAG e.g. rccl-7.2.1 or rccl-develop-<sha7>>",
+      "docker_image": "rocm/jax-training:maxtext-v26.8-<FILL_RCCL_TAG e.g. rccl-7.2.1 or rccl-develop-<sha7>>",
       "dockerfile": "docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile",
-      "base_docker": "rocm/jax-training:maxtext-v26.6",
+      "base_docker": "rocm/jax-training:maxtext-v26.8",
       "build_duration": 0,
       "local_image": true,
       "registry_image": null,
@@ -56,7 +56,7 @@
       "/dev/infiniband": "/dev/infiniband"
     },
     "docker_build_arg": {
-      "BASE_DOCKER": "rocm/jax-training:maxtext-v26.6",
+      "BASE_DOCKER": "rocm/jax-training:maxtext-v26.8",
       "RCCL_COMMIT": "<FILL_RCCL_COMMIT  the commit to build; leave empty to track RCCL_BRANCH>",
       "RCCL_BRANCH": "develop",
       "RCCL_CMAKE_OPTIONS": "<FILL_RCCL_CMAKE_OPTIONS  e.g. -DFAULT_INJECTION=ON; empty for a plain build>",

@@ -74,7 +74,7 @@ Edits applied to `run_manifest_primus_70b.json`:
 - added the bnxt_re tuning vars to both env blocks (QPS/inline/merge/adaptive/
   gdr/dmabuf — see references/cluster-types.md "Broadcom-Thor2 specifics")
 - added `"/etc/libibverbs.d": "/etc/libibverbs.d"` to `context.docker_mounts`
-- `docker_image=rocm/primus:v26.3-rccl-<branch>-<sha7>`, `base_docker=rocm/primus:v26.3`
+- `docker_image=rocm/primus:v26.8-rccl-<branch>-<sha7>`, `base_docker=rocm/primus:v26.8`
 ```bash
 bash "$SKILL_DIR/scripts/validate_manifest.sh" run_manifest_primus_70b.json
 ```
@@ -88,7 +88,7 @@ madengine run --manifest-file run_manifest_primus_70b.json --live-output \
 squeue -u $USER          # watch the 16-node job (PR #142 auto-selects healthy nodes)
 ```
 Result lands in `rundir/perf_primus_70b.csv` (aggregated) and
-`perf_primus-megatron-Llama-3.1-70B.csv`. Report tok/s/gpu and TFLOPS/gpu from
+`primus_perf_output.csv`. Report tok/s/gpu and TFLOPS/gpu from
 the aggregated CSV (a worker node's local CSV can read header-only — see
 references/launch-and-results.md).
 
