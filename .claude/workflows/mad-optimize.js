@@ -295,7 +295,7 @@ const RESOLVE_SCHEMA = {
 }
 const resolved = await agent(
   `Resolve one MAD model for mad-optimize. Run from the MAD repo root.
-1. Run \`${PREFLIGHT}\`. If it exits non-zero, return preflightOk false with its output and stop.
+1. Run \`${PREFLIGHT}\` exactly as written, as its own command. Append nothing (no \`;\`, \`&&\`, \`|\` or \`echo $?\`): the permission rules allow that exact command only, and the Bash result already reports a non-zero exit. If it exits non-zero, return preflightOk false with its output and stop.
 2. Run \`madengine discover --tags ${shellQuote(tag)} --json\` (read-only). Put every model "name" in resolvedModels.
 3. If there is exactly one model, also return its dockerfile, url, and args from that JSON object.
 Do not build an image and do not start a benchmark.`,
@@ -426,6 +426,7 @@ const SETUP_SCHEMA = {
 const setup = await agent(
   `Set up the GEAK checkout for mad-optimize. Do not run a benchmark. Do not pip install. Do not install or replace Claude Code. Do not invoke e2e_workflow.
 GEAK_HOME is ${geakHome}. The pinned commit is ${GEAK_SHA}. The file that must exist is ${kernelWorkflow}.
+Run each check below as its own command, exactly as written. Do not chain commands with \`;\`, \`&&\`, \`|\` or a subshell: the permission rules refuse a compound command, and each Bash result already reports its own exit.
 1. \`claude --version\` must be at least ${MIN_CLAUDE}. If it is older or missing, return status "error" and name the required version. Do not upgrade it.
 2. \`rocminfo\` must mention gfx950, and one of rocprofv3, rocprof-compute, or rocprof must be on PATH. If either is missing, return status "error" and say which check failed.
 3. If ${kernelWorkflow} exists and \`git -C ${shellQuote(geakHome)} rev-parse HEAD\` is ${GEAK_SHA}, return status "ok" and kernelWorkflowPresent true. Do not fetch and do not move the checkout.

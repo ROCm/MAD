@@ -198,6 +198,7 @@ Add a `tools` list to `--additional-context`. One depth per run. Do not put
 | dispatch | Which kernels are on the timeline | `rocm_trace_lite` |
 | kernel | Why that kernel is slow | rocprofv3 counters for that one kernel, from `kernel-tools.py context`, read by `kernel-tools.py card` (the presets `rocprofv3_compute`, `rocprofv3_memory`, `rocprofv3_communication` also work) |
 | assembly | What the compiler emitted | no GPU run: `kernel-tools.py asm` on the code objects the kernel run kept |
+| thread trace | Which compiled variant ran, and where its cycles go | `kernel-tools.py context --mode thread_trace`, then `threadtrace`. One kernel, one compute unit, a short iteration range. Not part of `mad-tune-search` |
 
 ```bash
 madengine run --tags <tag> --additional-context '{"tools": [{"name": "rocm_trace_lite"}]}'
@@ -213,7 +214,8 @@ lever for that bound. `.claude/skills/mad-common/kernel-tools.py` (standard
 library only) builds the context and the JSON files, and
 `.claude/skills/mad-common/kernel-analysis.md` holds the rules and the levers.
 PC sampling (`kernel-tools.py context --mode pc_sampling`, then `pcsample`) is
-optional and beta. A model keeps its Triton and Inductor code objects for the
+optional and beta. Thread trace (`--mode thread_trace`, then `threadtrace`) is
+optional too: `rocprofv3 --att` for one kernel on one compute unit. A model keeps its Triton and Inductor code objects for the
 assembly depth when it honors `MAD_CODE_OBJECT_DIR` (`scripts/pyt_fam` does).
 For a `torch.compile` model, run `kernel-tools.py context --mode warm` once
 before profiling, in a run directory on local disk: a cold compile

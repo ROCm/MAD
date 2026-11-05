@@ -5,8 +5,9 @@ Standard library only. Every subcommand works on one host run directory and
 writes its JSON result there, so a later step (or another agent) can read it.
 
     context   print the --additional-context for a warm-up run (no profiler),
-              a dispatch trace, a kernel-counter run or a PC-sampling run,
-              all sharing one code-object cache; write the counter file
+              a dispatch trace, a kernel-counter run, a PC-sampling run or a
+              thread trace, all sharing one code-object cache; write the
+              counter file
     rank      rank kernels by GPU time from the dispatch trace
     card      turn the rocprofv3 counter CSVs into a kernel card: duration,
               bytes, MFMA FLOPs, roofline position, bound, instruction mix
@@ -14,6 +15,9 @@ writes its JSON result there, so a later step (or another agent) can read it.
               occupancy, instruction classes, memory widths, hot loops
     pcsample  summarize rocprofv3 PC samples: hottest instructions and
               stall reasons for the kernel
+    threadtrace
+              summarize a rocprofv3 --att trace: per compiled variant, where
+              its cycles go, and which saved code object that variant is
 
 Usage:
 
@@ -23,6 +27,7 @@ Usage:
     python3 .claude/skills/mad-common/kernel-tools.py card --run-dir /var/tmp/mad-kernel/k1
     python3 .claude/skills/mad-common/kernel-tools.py asm --run-dir /var/tmp/mad-kernel/k1
     python3 .claude/skills/mad-common/kernel-tools.py pcsample --run-dir /var/tmp/mad-kernel/k1
+    python3 .claude/skills/mad-common/kernel-tools.py threadtrace --run-dir /var/tmp/mad-kernel/k1
 
 Run --mode warm once before the profiled runs: a cold torch.compile under a
 profiler spends its time compiling and autotuning, and the autotune candidates
@@ -37,6 +42,7 @@ import argparse
 import ast
 import collections
 import csv
+import hashlib
 import json
 import os
 import re
@@ -164,6 +170,16 @@ def cmd_context(args: argparse.Namespace) -> None:
                      "--pc-sampling-unit", "cycles",
                      "--pc-sampling-interval", str(args.interval)]
         tool = "rocprofv3_pc_sampling"
+    elif args.mode == "thread_trace":
+        if not args.kernel:
+            sys.exit("thread_trace needs --kernel, a regex for one kernel. "
+                     "An unfiltered --att trace records every launch.")
+        # One CU and a short iteration range: a full trace of every launch is
+        # gigabytes, and --att records the CU named by --att-target-cu only.
+        profiler += ["--att", "--att-target-cu", str(args.att_cu),
+                     "--kernel-include-regex", args.kernel,
+                     "--kernel-iteration-range", args.iteration_range]
+        tool = "rocprofv3"
     if tool:
         # No -o: the default %hostname%/%pid% names keep child processes apart.
         profiler += ["--output-format", "csv", "-d", out, "--"]
@@ -173,6 +189,11 @@ def cmd_context(args: argparse.Namespace) -> None:
     ctx.setdefault("docker_mounts", {})[inside] = str(run_dir)
     env = ctx.setdefault("docker_env_vars", {})
     env["MAD_CODE_OBJECT_DIR"] = f"{inside}/co"
+    if args.serialize:
+        # Counter collection can stall a host wait (a synchronize or a copy to
+        # the CPU) when the host has queued tens of thousands of tiny launches.
+        # Waiting after every launch keeps the queue short.
+        env["AMD_SERIALIZE_KERNEL"] = "3"
     env.setdefault("TRITON_CACHE_DIR", f"{inside}/co/triton")
     env.setdefault("TORCHINDUCTOR_CACHE_DIR", f"{inside}/co/inductor")
     tools = [t for t in ctx.get("tools", []) if not t.get("name", "").startswith(("rocprof", "rocm_trace_lite"))]
@@ -181,7 +202,8 @@ def cmd_context(args: argparse.Namespace) -> None:
     # Always set tools: a run from a manifest keeps the previous run's tools
     # when the new context has no tools key.
     ctx["tools"] = tools
-    name = "context.json" if args.mode in ("counters", "pc_sampling") else f"context_{args.mode}.json"
+    name = ("context.json" if args.mode in ("counters", "pc_sampling", "thread_trace")
+            else f"context_{args.mode}.json")
     (run_dir / name).write_text(json.dumps(ctx, indent=2) + "\n")
     print(json.dumps(ctx))
 
@@ -544,6 +566,166 @@ def cmd_pcsample(args: argparse.Namespace) -> None:
     })
 
 
+# ---------------------------------------------------------------- thread trace
+
+def att_class(instruction: str) -> str | None:
+    """Instruction class for one row of a rocprofv3 --att stats CSV."""
+    text = instruction.strip()
+    if not text or text.startswith(";"):
+        return None
+    op = text.split()[0]
+    if op.startswith("v_mfma"):
+        return "mfma"
+    if op.startswith("s_waitcnt"):
+        return "waitcnt"
+    if op.startswith("s_barrier"):
+        return "barrier"
+    if op.startswith("ds_"):
+        return "lds"
+    if op.startswith(("buffer_", "global_", "flat_")):
+        return "vmem"
+    if op.startswith(("s_load", "s_buffer_load")):
+        return "smem"
+    if op.startswith("v_"):
+        return "valu"
+    if op.startswith("s_"):
+        return "salu"
+    return "other"
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cmd_threadtrace(args: argparse.Namespace) -> None:
+    """Reduce a rocprofv3 --att run to one record per compiled variant.
+
+    Each stats_*.csv is one traced launch. Launches that saved the same code
+    object are one variant. The .out files --att writes are matched by content
+    to the code objects under co/, which is how two kernels that share a name
+    and a register count are told apart.
+    """
+    run_dir = Path(args.run_dir)
+    out = run_dir / "rocprof" / "thread_trace"
+    names: dict[str, dict] = {}
+    for path in out.rglob("*kernel_trace.csv"):
+        for row in read_csv(path):
+            names[row.get("Dispatch_Id", "")] = row
+    dispatches = []
+    for path in sorted(out.rglob("stats_*.csv")):
+        rows = read_csv(path)
+        kernel = ""
+        instructions = []
+        code_objs = []
+        for row in rows:
+            text = row.get("Instruction", "").strip()
+            if text.startswith(";") and not kernel:
+                kernel = text.lstrip("; ").split()[0]
+            if att_class(text):
+                instructions.append(row)
+                code_objs.append(row.get("CodeObj", ""))
+        found = re.search(r"dispatch_(\d+)", path.name)
+        dispatch_id = found.group(1) if found else ""
+        traced = names.get(dispatch_id, {})
+        dispatches.append({
+            "dispatch_id": dispatch_id,
+            "kernel": traced.get("Kernel_Name") or kernel,
+            "kernel_id": traced.get("Kernel_Id", ""),
+            "code_objects": tuple(sorted(set(code_objs))),
+            "instructions": instructions,
+        })
+    if args.kernel:
+        dispatches = [d for d in dispatches if re.search(args.kernel, d["kernel"])]
+    if not dispatches:
+        write_json(run_dir, "kernel_thread_trace.json", {
+            "status": "no trace",
+            "note": "No stats_*.csv under rocprof/thread_trace. "
+                    "Run context --mode thread_trace first."})
+        return
+
+    cache: dict[str, list[str]] = {}
+    for path in (run_dir / "co").rglob("*"):
+        if path.is_file() and path.suffix in (".hsaco", ".out", ".co"):
+            cache.setdefault(sha256(path), []).append(str(path.relative_to(run_dir)))
+    saved = {}
+    for path in out.rglob("*.out"):
+        found = re.search(r"code_object_id_(\d+)", path.name)
+        if found:
+            saved[found.group(1)] = path
+
+    groups: dict[tuple, list] = {}
+    for dispatch in dispatches:
+        groups.setdefault(dispatch["code_objects"], []).append(dispatch)
+    variants = []
+    for code_objects, items in groups.items():
+        per_class: dict[str, list] = collections.defaultdict(lambda: [0, 0, 0])
+        per_inst: dict[str, list] = collections.defaultdict(lambda: [0, 0, 0])
+        static: collections.Counter = collections.Counter()
+        for row in items[0]["instructions"]:
+            kind = att_class(row.get("Instruction", ""))
+            if kind:
+                static[kind] += 1
+        for item in items:
+            for row in item["instructions"]:
+                kind = att_class(row.get("Instruction", ""))
+                if not kind:
+                    continue
+                hit = int(row.get("Hitcount") or 0)
+                latency = int(row.get("Latency") or 0)
+                stall = int(row.get("Stall") or 0)
+                per_class[kind][0] += hit
+                per_class[kind][1] += latency
+                per_class[kind][2] += stall
+                inst = per_inst[row.get("Instruction", "")]
+                inst[0] += latency
+                inst[1] += stall
+                inst[2] += hit
+        latency_total = sum(v[1] for v in per_class.values()) or 1
+        stall_total = sum(v[2] for v in per_class.values()) or 1
+        objects = []
+        for code_id in code_objects:
+            path = saved.get(code_id)
+            if path is None:
+                objects.append({"id": code_id})
+                continue
+            digest = sha256(path)
+            objects.append({"id": code_id, "file": path.name, "sha256": digest,
+                            "matches": cache.get(digest, [])})
+        variants.append({
+            "code_objects": list(code_objects),
+            "dispatches_traced": len(items),
+            "dispatch_ids": [d["dispatch_id"] for d in items],
+            "kernel_ids": sorted({d["kernel_id"] for d in items if d["kernel_id"]}),
+            "static_instructions": sum(static.values()),
+            "static_mfma": static["mfma"],
+            "issues": sum(v[0] for v in per_class.values()),
+            "latency_cycles": sum(v[1] for v in per_class.values()),
+            "stall_cycles": sum(v[2] for v in per_class.values()),
+            "by_class": {kind: {"issues": v[0],
+                                "latency_share": round(v[1] / latency_total, 3),
+                                "stall_share": round(v[2] / stall_total, 3)}
+                         for kind, v in sorted(per_class.items(), key=lambda kv: -kv[1][1])},
+            "top_instructions": [{"instruction": inst, "latency_share": round(v[0] / latency_total, 3),
+                                  "stall_share": round(v[1] / stall_total, 3), "hits": v[2]}
+                                 for inst, v in sorted(per_inst.items(), key=lambda kv: -kv[1][0])[:6]],
+            "code_object_files": objects,
+        })
+    kernels = collections.Counter(d["kernel"] for d in dispatches)
+    write_json(run_dir, "kernel_thread_trace.json", {
+        "status": "ok",
+        "kernel": args.kernel or kernels.most_common(1)[0][0],
+        "dispatches_traced": len(dispatches),
+        "variants": variants,
+        "scope": "one compute unit (--att-target-cu); a short kernel-iteration range",
+        "device_support": "rocprofv3 documents thread trace for MI200 and MI300. "
+                          "The same command completed on gfx950 with rocprofv3 1.3.2.",
+    })
+
+
 # ---------------------------------------------------------------- rank
 
 def cmd_rank(args: argparse.Namespace) -> None:
@@ -573,11 +755,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("context", help="additional-context for a kernel-counter or PC-sampling run")
-    p.add_argument("--mode", choices=("warm", "dispatch", "counters", "pc_sampling"), default="counters",
+    p.add_argument("--mode", choices=("warm", "dispatch", "counters", "pc_sampling", "thread_trace"),
+                   default="counters",
                    help="warm: no profiler, fills the code-object cache; dispatch: rocprofv3 kernel trace on it")
     p.add_argument("--group", choices=sorted(GROUPS), default="compute")
     p.add_argument("--kernel", default="", help="regex passed to --kernel-include-regex")
     p.add_argument("--interval", type=int, default=1048576, help="PC-sampling interval in cycles")
+    p.add_argument("--att-cu", type=int, default=1, help="compute unit for --att-target-cu")
+    p.add_argument("--iteration-range", default="[1-8]",
+                   help="kernel launches --att records, as a rocprofv3 --kernel-iteration-range")
+    p.add_argument("--serialize", action="store_true",
+                   help="set AMD_SERIALIZE_KERNEL=3 so the host waits after every launch; "
+                        "for an eager model whose counter run stalls at a host wait")
     p.add_argument("--run-dir", required=True, help="host directory mounted at " + CONTAINER_DIR)
     p.add_argument("--context", default="", help="base additional-context (weights mount, env vars)")
     p.set_defaults(func=cmd_context)
@@ -587,7 +776,8 @@ def main() -> None:
     p.set_defaults(func=cmd_rank)
     for name, func, help_text in (("card", cmd_card, "kernel card from counter CSVs"),
                                   ("asm", cmd_asm, "code-object summary"),
-                                  ("pcsample", cmd_pcsample, "PC-sampling summary")):
+                                  ("pcsample", cmd_pcsample, "PC-sampling summary"),
+                                  ("threadtrace", cmd_threadtrace, "rocprofv3 --att summary")):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--run-dir", required=True)
         p.add_argument("--kernel", default="")

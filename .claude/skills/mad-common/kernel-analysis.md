@@ -12,6 +12,7 @@ The helper is `kernel-tools.py` in this directory (standard library only).
 | kernel | Why is that kernel slow? | `kernel-tools.py context --mode counters` | `kernel_card.json` |
 | assembly | What did the compiler emit? | no GPU run: `kernel-tools.py asm` | `kernel_asm_summary.json` |
 | PC sampling (optional) | Which instructions stall, and on what? | `kernel-tools.py context --mode pc_sampling` | `kernel_pc_samples.json` |
+| thread trace (optional) | Which compiled variant ran, and which instructions does it wait on? | `kernel-tools.py context --mode thread_trace` | `kernel_thread_trace.json` |
 
 Climb one rung at a time and stop when the evidence names a lever. One tool per
 run: never put `rocm_trace_lite` and a `rocprofv3_*` tool in the same run. A
@@ -39,8 +40,8 @@ python3 .claude/skills/mad-common/kernel-tools.py rank --run-dir $D
 ```
 
 Each `context` call writes its context file to the run directory
-(`context_warm.json`, `context_dispatch.json`, or `context.json` for counters and
-PC sampling), so `madengine` reads a file instead of `"$(...)"`: a headless agent
+(`context_warm.json`, `context_dispatch.json`, or `context.json` for counters,
+PC sampling and thread trace), so `madengine` reads a file instead of `"$(...)"`: a headless agent
 session cannot approve a command substitution.
 
 `rank` writes `kernel_rank.json`: kernels by summed GPU time from the
@@ -70,8 +71,9 @@ a few minutes, stop the run (`mad-run.sh stop`) and fall back to PC sampling,
 which does not use counters. Choosing a different kernel did not help.
 
 Each profiling mode writes to its own `rocprof/<mode>/`, and moves the
-previous one aside to `<mode>.prev-N`. `card`, `rank` and `pcsample` read only
-their mode's directory, so one run directory can hold several kernel runs.
+previous one aside to `<mode>.prev-N`. `card`, `rank`, `pcsample` and
+`threadtrace` read only their mode's directory, so one run directory can hold
+several kernel runs.
 
 Use a run directory on local disk such as `/var/tmp/mad-kernel/<id>`. The
 code-object cache runs to hundreds of megabytes and does not belong in the
@@ -107,6 +109,23 @@ repo. Copy the JSON results into the repo afterwards if you need them there.
    process the script starts runs under rocprofv3 and its children inherit the
    tool. A model whose script starts its workload some other way needs its own
    launcher.
+
+   A second stall is in the model itself. A model that launches tens of
+   thousands of tiny kernels before its first host wait (an eager PyTorch
+   inference ending in `.to("cpu")` or `synchronize()`) can hang under counter
+   collection with the GPU idle and the host in `BusyWaitSignal::WaitRelaxed`.
+   A kernel filter that matches nothing does not avoid it; the kernel trace
+   without counters does not show it. Add `--serialize` to `context`, which sets
+   `AMD_SERIALIZE_KERNEL=3` so the host waits after every launch. Only use it
+   after a counter run stalls: it slows the host side of the run, not the
+   kernel's own counters. On the FastWAM eager arm it changed the kernel's
+   duration under counters by about 4% from the kernel trace.
+
+   The card averages counters over every dispatch. On a long run, check that
+   the matrix-op count (`SQ_INSTS_VALU_MFMA_MOPS_*`) is identical across the
+   dispatches of one launch shape. The FastWAM eager run with 97,500 dispatches
+   had about one in five inflated (wave counts were exact), which tripled the
+   matrix-core share. Use a short run, or take the median per launch shape.
 4. `python3 .claude/skills/mad-common/kernel-tools.py card --run-dir $D`.
 
 ### Reading the card
@@ -166,6 +185,33 @@ Stochastic sampling counted in cycles (interval 1048576 by default). It is a
 beta rocprofv3 feature: record the run even when it fails, and quote the error.
 `pcsample` reports the hottest instructions, the stall reasons, and the share
 of samples that issued.
+
+## Thread trace
+
+```bash
+python3 .claude/skills/mad-common/kernel-tools.py context --mode thread_trace \
+  --kernel '^_fw_skmm_kernel$' --iteration-range '[300-305]' \
+  --run-dir /var/tmp/mad-kernel/<id> --context '<base context>'
+# then madengine run ... --additional-context-file /var/tmp/mad-kernel/<id>/context.json
+python3 .claude/skills/mad-common/kernel-tools.py threadtrace --run-dir /var/tmp/mad-kernel/<id>
+```
+
+This is `rocprofv3 --kernel-trace --att` for one kernel, on one compute unit
+(`--att-target-cu`, default 1), over `--kernel-iteration-range` (default
+`[1-8]`). Set the range inside the steady state when the kernel launches
+thousands of times: the FastWAM GEAK trace used `[300-305]`. An unfiltered
+trace records every launch, so `--kernel` is required.
+
+`threadtrace` groups the traced launches by the code object they ran. For each
+variant it reports the instruction mix, the share of traced cycles and of stall
+cycles by class, and the instructions that cost the most latency. It hashes the
+`.out` code object `--att` saved and matches it to a file under `co/`, which
+names the compiled variant when several share a kernel name and a register
+count.
+
+rocprofv3 documents thread trace for MI200 and MI300. The same command
+completed on gfx950 with rocprofv3 1.3.2. `mad-tune-search` does not climb
+this rung: it is a closer look at a kernel the dispatch rank already chose.
 
 ## The kernel card in a report
 

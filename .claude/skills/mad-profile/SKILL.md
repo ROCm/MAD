@@ -1,7 +1,7 @@
 ---
 name: mad-profile
-description: Profile a MAD training or inference model at one depth — operator (TraceLens), dispatch (rocm-trace-lite), kernel (rocprofv3 counters and a kernel card), assembly (code-object summary, no GPU run), or PC sampling. Use when the user wants to profile or trace a MAD model.
-argument-hint: "<tag> [operator|dispatch|kernel|assembly|pc_sampling] [kernel name or tool]"
+description: Profile a MAD training or inference model at one depth — operator (TraceLens), dispatch (rocm-trace-lite), kernel (rocprofv3 counters and a kernel card), assembly (code-object summary, no GPU run), PC sampling, or thread trace (rocprofv3 --att). Use when the user wants to profile or trace a MAD model.
+argument-hint: "<tag> [operator|dispatch|kernel|assembly|pc_sampling|thread_trace] [kernel name or tool]"
 disable-model-invocation: true
 context: fork
 agent: mad-benchmark-runner
@@ -11,9 +11,10 @@ allowed-tools: Bash(madengine discover *) Bash(madengine report *) Bash(rocm-smi
 Profile `$ARGUMENTS`.
 
 The model tag is the first whitespace-delimited token of `$ARGUMENTS`. The next
-token, when it is `operator`, `dispatch`, `kernel`, `assembly`, or
-`pc_sampling`, selects the depth. Anything after that is a kernel name (for the
-kernel, assembly and PC-sampling depths) or an explicit madengine tool name.
+token, when it is `operator`, `dispatch`, `kernel`, `assembly`,
+`pc_sampling`, or `thread_trace`, selects the depth. Anything after that is a
+kernel name (for the kernel, assembly, PC-sampling and thread-trace depths) or
+an explicit madengine tool name.
 Use the tag token in every `madengine` command.
 
 ## Pre-flight
@@ -48,7 +49,10 @@ any `rocprofv3_*` tool in the same `tools` array.
    either, run `dispatch` first. Pick the counter group from what the kernel
    does (`compute` for GEMM, attention or convolution; `memory` otherwise),
    build the context with `kernel-tools.py context --mode counters`, run, then
-   `kernel-tools.py card`. Only when the user names `rocprofv3_compute`,
+   `kernel-tools.py card`. If the counter run stalls with the GPU idle and the
+   host waiting at a copy or `synchronize()` (an eager model that queues tens of
+   thousands of tiny launches), rebuild the context with `--serialize`; see
+   kernel-analysis.md. Only when the user names `rocprofv3_compute`,
    `rocprofv3_memory` or `rocprofv3_communication`, run that madengine preset
    instead and read `rocprof_output/`.
 4. `assembly` — no GPU run. `kernel-tools.py asm --run-dir <kernel run dir>`
@@ -57,6 +61,18 @@ any `rocprofv3_*` tool in the same `tools` array.
 5. `pc_sampling` — `kernel-tools.py context --mode pc_sampling`, run, then
    `kernel-tools.py pcsample`. It is a beta rocprofv3 feature: when it fails,
    report the error from the log and stop.
+6. `thread_trace` — rocprofv3 `--att` for one kernel, over a short launch
+   range, on one compute unit. The kernel comes from the user or from the
+   dispatch rank; without either, run `dispatch` first. Build the context with
+   `kernel-tools.py context --mode thread_trace --kernel <regex>`, run, then
+   `kernel-tools.py threadtrace`. Pass `--iteration-range` for a steady-state
+   window when the kernel launches thousands of times (the FastWAM GEAK trace
+   used `[300-305]`). The default `[1-8]` is only a few launches. Report the
+   variants, the code-object match, and the wait and matrix-core shares from
+   `kernel_thread_trace.json`. Say that the trace is one compute unit, and that
+   rocprofv3 documents thread trace for MI200 and MI300; the same command
+   completed on gfx950 with rocprofv3 1.3.2. `mad-tune-search` does not climb
+   this rung.
 
 When the user names a tool and no depth, map it: `rocm_trace_lite` /
 `rocm_trace_lite_default` / `rpd` → dispatch; `rocprof*` → kernel;
@@ -69,8 +85,9 @@ When the user names a tool and no depth, map it: `rocm_trace_lite` /
 2. Build one `madengine run --tags <tag> --live-output --additional-context '{"tools":[...]}'`
    for the selected depth. Keep the user's other context keys (`docker_env_vars`,
    `docker_mounts`, `slurm`, `k8s`) and replace `tools`. For the kernel and
-   PC-sampling depths, pass those keys as `--context` to `kernel-tools.py
-   context` and use its output, with `--run-dir /var/tmp/mad-kernel/<run-id>`.
+   PC-sampling and thread-trace depths, pass those keys as `--context` to
+   `kernel-tools.py context` and use its output, with
+   `--run-dir /var/tmp/mad-kernel/<run-id>`.
    Keep the run directory on local disk, outside the repo.
 3. Check for AMD GPUs (`rocm-smi` / `amd-smi`). If none, print the command and
    stop. Otherwise start it with
@@ -81,7 +98,10 @@ When the user names a tool and no depth, map it: `rocm_trace_lite` /
 4. For the kernel, assembly and PC-sampling depths, end with the kernel card
    line from `kernel-analysis.md`: share, bound and the numbers behind it,
    registers, LDS, occupancy and its limiter, the instruction mix, and one
-   lever from the levers table. Quote numbers from the JSON files only.
+   lever from the levers table. For the thread-trace depth, end with
+   `kernel_thread_trace.json`: variants, dispatches traced, the static MFMA
+   count, the wait and matrix-core shares, and which saved code object each
+   variant matches. Quote numbers from the JSON files only.
 
 For a multi-depth search that also measures clean candidates, use the
 `mad-tune-search` workflow (`depth: auto` climbs operator, dispatch, kernel

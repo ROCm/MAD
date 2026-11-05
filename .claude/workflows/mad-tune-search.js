@@ -345,7 +345,7 @@ if (execute && repeats < 2)
 log(`Tuning "${tag}" for ${target}. depth=${depth}. repeats=${repeats}. expect=${expectOn}. execute=${execute}. ${cleanCtx ? 'clean context ready' : 'no additional-context'}.`)
 if (!execute) log('Plan mode: commands are printed and candidates ranked, nothing runs. Pass --execute to measure on this host.')
 
-const PREFLIGHT = 'Pre-flight: run `bash .claude/skills/mad-common/preflight.sh` and stop if it exits non-zero.'
+const PREFLIGHT = 'Pre-flight: run `bash .claude/skills/mad-common/preflight.sh` exactly as written, as its own command, and stop if it exits non-zero. Append nothing (no `;`, `&&`, `|` or `echo $?`): the permission rules allow that exact command only, and the Bash result already reports a non-zero exit.'
 const MAD_RUN = 'bash .claude/skills/mad-common/mad-run.sh'
 const RUN_HOW = `Each Bash tool call runs exactly one command. A call containing &&, ;, or a newline that joins two commands is denied and stops the phase. Never join commands. Never prepend a rocm-smi or GPU check.
 Run every madengine command through the run helper, never in the foreground (a tool call ends after 10 minutes):

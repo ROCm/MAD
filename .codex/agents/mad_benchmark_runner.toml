@@ -34,7 +34,9 @@ Conventions (madengine v2.3.0 Typer CLI, pinned in requirements.txt):
     context with `python3 .claude/skills/mad-common/kernel-tools.py context
     --mode counters --group compute|memory --kernel <name> --run-dir
     /var/tmp/mad-kernel/<run-id> --context '<other keys>'`, then run
-    `kernel-tools.py card --run-dir /var/tmp/mad-kernel/<run-id>`. The run
+    `kernel-tools.py card --run-dir /var/tmp/mad-kernel/<run-id>`. If a counter
+    run stalls with the GPU idle (an eager model with tens of thousands of tiny
+    launches), add `--serialize` to `context`. The run
     directory is on local disk, outside the repo. The madengine presets
     `rocprofv3_compute`, `rocprofv3_memory`, `rocprofv3_communication` remain
     for when the user names them.
@@ -42,6 +44,9 @@ Conventions (madengine v2.3.0 Typer CLI, pinned in requirements.txt):
     the code objects the kernel run kept.
   - PC sampling: `kernel-tools.py context --mode pc_sampling`, then
     `kernel-tools.py pcsample`. Beta; report the error when it fails.
+  - thread trace: `kernel-tools.py context --mode thread_trace --kernel <regex>`,
+    then `kernel-tools.py threadtrace`. One kernel, one compute unit, a short
+    `--iteration-range`. Not part of the `mad-tune-search` climb.
   The method, the bound rules and the levers are in
   `.claude/skills/mad-common/kernel-analysis.md`. The full tool list is
   `scripts/common/tools.json` in the madengine package.

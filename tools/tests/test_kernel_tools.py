@@ -130,6 +130,57 @@ class KernelToolsTest(unittest.TestCase):
         self.assertEqual(totals, sorted(totals, reverse=True))
         self.assertLessEqual(sum(k["share_pct"] for k in rank["kernels"]), 100.1)
 
+    def test_context_serialize_is_opt_in(self) -> None:
+        plain = run("context", "--mode", "counters", "--kernel", "k", "--run-dir", str(self.tmp))
+        self.assertNotIn("AMD_SERIALIZE_KERNEL", plain["docker_env_vars"])
+        serial = run("context", "--mode", "counters", "--kernel", "k", "--serialize",
+                     "--run-dir", str(self.tmp))
+        self.assertEqual(serial["docker_env_vars"]["AMD_SERIALIZE_KERNEL"], "3")
+
+    def test_context_thread_trace_needs_one_kernel_and_a_short_range(self) -> None:
+        missing = subprocess.run([sys.executable, str(TOOL), "context", "--mode", "thread_trace",
+                                  "--run-dir", str(self.tmp)], capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("needs --kernel", missing.stderr)
+        ctx = run("context", "--mode", "thread_trace", "--kernel", "^_fw_skmm_kernel$",
+                  "--iteration-range", "[300-305]", "--run-dir", str(self.tmp))
+        self.assertEqual(ctx["tools"][0]["name"], "rocprofv3")
+        shim = (self.tmp / "shim" / "python3").read_text()
+        self.assertIn("--att --att-target-cu 1", shim)
+        self.assertIn("--kernel-iteration-range '[300-305]'", shim)
+        self.assertIn("-d /mad_kernel/rocprof/thread_trace --", shim)
+        self.assertTrue((self.tmp / "context.json").exists())
+
+    def test_threadtrace_splits_variants_and_matches_the_saved_code_object(self) -> None:
+        out = self.tmp / "rocprof" / "thread_trace"
+        out.mkdir(parents=True)
+        header = "CodeObj,Vaddr,Instruction,Hitcount,Latency,Stall,Idle,Source\n"
+
+        def stats(name: str, code: str, kernel: str, wait: int, mfma: int) -> None:
+            (out / name).write_text(
+                header
+                + f'{code},0,"; {kernel}",0,0,0,0,""\n'
+                + f'{code},8,"s_waitcnt vmcnt(0)",2,{wait},1,0,""\n'
+                + f'{code},16,"v_mfma_f32_16x16x16_bf16 v[0:3], v[4:5], v[6:7], v[0:3]",1,{mfma},0,0,""\n')
+
+        stats("stats_ui_output_agent_1_dispatch_10.csv", "7", "_fw_skmm_kernel", 80, 20)
+        stats("stats_ui_output_agent_1_dispatch_11.csv", "9", "_fw_skmm_kernel", 40, 60)
+        blob = b"code-object-bytes"
+        (out / "1_gfx950_code_object_id_7.out").write_bytes(blob)
+        cached = self.tmp / "co" / "triton" / "ABC"
+        cached.mkdir(parents=True)
+        (cached / "_fw_skmm_kernel.hsaco").write_bytes(blob)
+        summary = run("threadtrace", "--run-dir", str(self.tmp), "--kernel", "_fw_skmm_kernel")
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["dispatches_traced"], 2)
+        by_code = {tuple(v["code_objects"]): v for v in summary["variants"]}
+        first = by_code[("7",)]
+        self.assertEqual(first["static_mfma"], 1)
+        self.assertAlmostEqual(first["by_class"]["waitcnt"]["latency_share"], 0.8)
+        self.assertEqual(first["code_object_files"][0]["matches"],
+                         ["co/triton/ABC/_fw_skmm_kernel.hsaco"])
+        self.assertAlmostEqual(by_code[("9",)]["by_class"]["mfma"]["latency_share"], 0.6)
+
 
 if __name__ == "__main__":
     unittest.main()

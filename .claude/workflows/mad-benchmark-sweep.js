@@ -187,7 +187,7 @@ const RESOLVE_SCHEMA = {
 }
 const resolved = await agent(
   `Resolve MAD tags for a benchmark sweep. Run from the MAD repo root.
-1. Run \`${PREFLIGHT}\`. If it exits non-zero, return preflightOk false with its output and stop.
+1. Run \`${PREFLIGHT}\` exactly as written, as its own command. Append nothing (no \`;\`, \`&&\`, \`|\` or \`echo $?\`): the permission rules allow that exact command only, and the Bash result already reports a non-zero exit. If it exits non-zero, return preflightOk false with its output and stop.
 2. For each tag below, run \`madengine discover --tags <tag> --json\` (read-only, no GPU) and return the "name" of every model it lists. A tag that matches nothing gets an empty list and the error text.
 Tags: ${JSON.stringify(tags)}`,
   { label: 'resolve', phase: 'Resolve', schema: RESOLVE_SCHEMA, agentType: 'mad-benchmark-runner' }
