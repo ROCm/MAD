@@ -280,6 +280,15 @@ def skus_for(model):
     return [sku for isa, skus in ISA_SKUS.items() if isa not in skipped for sku in skus]
 
 
+def untracked_product(model):
+    """True when a config names an Instinct product the dashboard does not track (e.g. MI455X).
+
+    skus_for() would otherwise fall back to "every product" for such a config, which says the
+    model runs on GPUs it was never registered for.
+    """
+    return any(re.fullmatch(r"MI\d{3}[A-Z]?", tag) and tag not in SKUS for tag in model.get("tags", []))
+
+
 def arg_value(args, flag):
     m = re.search(rf"(?:^|\s){re.escape(flag)}[\s=]+(\S+)", args or "")
     return m.group(1) if m else None
@@ -382,6 +391,12 @@ def framework_of(model, frameworks):
 def describe_model(model, frameworks, suite_tags, images, opt_in=False):
     label, hf_repo = model_label(model)
     framework, workload = framework_of(model, frameworks)
+    # Configs named after a stage or a recipe ("stage1-posttrain") say nothing about the model;
+    # status.yaml gives their launcher a name to put in front.
+    prefix = (frameworks.get(model["registry"], {}).get("label_prefix") or {}).get(
+        model["tags"][1] if len(model.get("tags", [])) > 1 else "")
+    if prefix and not hf_repo:
+        label = f"{prefix}-{label}"
     image = images[model["dockerfile"]]
     family = family_of(label)
     # Opt-in configs size their data-center mesh from the allocation (dcn_* = -1): two or more.
@@ -487,7 +502,7 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
     images' ROCm versions from their registries where the tag does not encode one."""
     warnings = []
     excluded = set(status["exclude"])
-    models = [m for m in discover_models(repo_root) if m["name"] not in excluded]
+    models = [m for m in discover_models(repo_root) if m["name"] not in excluded and not untracked_product(m)]
 
     registries = {}
     for m in models:

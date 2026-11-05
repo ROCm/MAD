@@ -20,6 +20,8 @@ release: v26.10
 # readme: guide linked from the recipe pages.
 # one_page: one recipe page for the whole registry, one variant per card (node-count sweeps,
 #   per-backend microbenchmarks).
+# label_prefix: launcher tag -> model name put in front of config names that do not carry one
+#   (Primus worldmirror configs are called stage1-posttrain, stage2-posttrain, ...).
 # k8s: manual -- the readme documents a per-node run outside SLURM (Kubernetes, bare metal).
 frameworks:
   vllm:                      {name: vLLM, workload: inference, readme: benchmark/vllm/README.md}
@@ -35,7 +37,8 @@ frameworks:
   pyt_clip_inference:        {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
   pyt_hy_video:              {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
   pyt_wan2.1_inference:      {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
-  primus_train:              {name: Primus, workload: training, by_launcher: true, readme: benchmark/primus/README.md}
+  primus_train:              {name: Primus, workload: training, by_launcher: true, readme: benchmark/primus/README.md,
+                              label_prefix: {worldmirror: HunyuanWorld-Mirror}}
   jax-maxtext:               {name: JAX MaxText, workload: training, readme: benchmark/jax_maxtext/README.md}
   jax-maxdiffusion:          {name: JAX MaxDiffusion, workload: training, readme: benchmark/jax_maxtext/README.md}
   pytorch_train:             {name: PyTorch training, workload: training}

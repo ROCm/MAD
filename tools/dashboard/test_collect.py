@@ -116,6 +116,32 @@ def test_skus_for():
     assert collect.skus_for({"tags": ["primus", "megatron", "MI355X", "x"], "skip_gpu_arch": ""}) == ["MI355X"]
 
 
+def test_untracked_product():
+    # A config for a product the dashboard does not track (MI455X) is not shown; without the
+    # filter skus_for() would claim it runs on every tracked product.
+    assert collect.untracked_product({"tags": ["primus", "megatron", "MI455X", "x"]})
+    assert not collect.untracked_product({"tags": ["primus", "megatron", "MI355X", "x"]})
+    assert not collect.untracked_product({"tags": ["vllm", "vllm_default"]})
+
+
+def test_worldmirror_label_prefix():
+    frameworks = {"primus_train": {"name": "Primus", "workload": "training", "by_launcher": True,
+                                   "label_prefix": {"worldmirror": "HunyuanWorld-Mirror"}}}
+    images = {"../../docker/primus": {"image": "rocm/primus:v26.9", "rocm": "7.2", "path": "docker/primus.Dockerfile"}}
+
+    def describe(launcher, config):
+        model = {"name": f"primus_train/{launcher}_MI355X_{config}", "registry": "primus_train",
+                 "dockerfile": "../../docker/primus", "tags": ["primus", launcher, "MI355X", config],
+                 "args": f"--config_path examples/{launcher}/configs/MI355X/{config}.yaml"}
+        return collect.describe_model(model, frameworks, {}, images)
+
+    row = describe("worldmirror", "stage1-posttrain")
+    assert row["model"] == "HunyuanWorld-Mirror-stage1-posttrain" and row["framework"] == "Primus Worldmirror"
+    assert row["skus"] == ["MI355X"]
+    # Other launchers keep their config name.
+    assert describe("megatron", "zaya1_8B-BF16-pretrain")["model"] == "zaya1_8B-BF16-pretrain"
+
+
 def test_model_label():
     assert collect.model_label({"name": "vllm/x", "args": "--model_repo amd/Llama-3.3-70B-FP8 --config c.yaml"}) == \
         ("Llama-3.3-70B-FP8", "amd/Llama-3.3-70B-FP8")
