@@ -76,6 +76,39 @@ _is "$_rc" "9" "a task whose peer never starts fails..."
 _has "$(cat "$TMP/v0.out")" "rank(s) 1 did not report host_rank* within 5s" "...saying which rank is missing"
 _is "$([ $((SECONDS - _t0)) -lt 15 ] && echo bounded || echo hung)" "bounded" "...within MAD_RENDEZVOUS_TIMEOUT"
 
+echo ""
+echo "=== spur-array: tasks that do not run together ==="
+# What a full queue did on a Spur cluster: the array's tasks ran one after another on the
+# same node. Rank 0 gives up alone; rank 1, started later on the node rank 0 left, must stop
+# at once with the reason instead of waiting out its own timeouts.
+R="$TMP/r6"
+_task 0 2 "$R" 'echo joined' > "$TMP/x0.out" 2>&1
+_t0=$SECONDS
+env -i PATH="$B:$PATH" SLURMD_NODENAME=node1 SLURM_ARRAY_JOB_ID=77 SLURM_ARRAY_TASK_ID=1 \
+    MAD_NNODES=2 MAD_RENDEZVOUS_DIR="$R" MAD_RENDEZVOUS_TIMEOUT=60 \
+    bash -c '. "$0"; _dispatch_array_init >/dev/null || exit 9; echo joined' "$LIB" > "$TMP/x1.out" 2>&1; _rc=$?
+_is "$_rc" "9" "a task that starts after the run was given up fails..."
+_is "$([ $((SECONDS - _t0)) -lt 10 ] && echo at-once || echo waited)" "at-once" "...at once, not after its own timeout"
+_has "$(cat "$TMP/x1.out")" "the run was ended by rank 0" "...naming the rank that ended it"
+_has "$(cat "$TMP/x1.out")" "did not report host_rank*" "...and why"
+
+# Two ranks that do meet, but on one node: refused, whichever rank sees it.
+R="$TMP/r7"
+for k in 0 1; do env -i PATH="$B:$PATH" SLURMD_NODENAME=node1 SLURM_ARRAY_JOB_ID=79 SLURM_ARRAY_TASK_ID=$k \
+    MAD_NNODES=2 MAD_RENDEZVOUS_DIR="$R" MAD_RENDEZVOUS_TIMEOUT=10 \
+    bash -c '. "$0"; _dispatch_array_init >/dev/null || exit 9; echo joined' "$LIB" > "$TMP/y$k.out" 2>&1 & done; wait
+_is "$(cat "$TMP/y0.out" "$TMP/y1.out" | grep -c '^joined$')" "0" "two ranks on one node: neither runs"
+_has "$(cat "$TMP/y0.out" "$TMP/y1.out")" "two ranks on node node1" "...with the reason"
+
+# The first meeting can include queue time: its own timeout.
+R="$TMP/r8"
+_t0=$SECONDS
+env -i PATH="$B:$PATH" SLURMD_NODENAME=node1 SLURM_ARRAY_JOB_ID=80 SLURM_ARRAY_TASK_ID=0 \
+    MAD_NNODES=2 MAD_RENDEZVOUS_DIR="$R" MAD_RENDEZVOUS_JOIN_TIMEOUT=3 MAD_RENDEZVOUS_TIMEOUT=60 \
+    bash -c '. "$0"; _dispatch_array_init >/dev/null || exit 9' "$LIB" > "$TMP/z0.out" 2>&1
+_has "$(cat "$TMP/z0.out")" "within 3s" "joining waits MAD_RENDEZVOUS_JOIN_TIMEOUT"
+_is "$([ $((SECONDS - _t0)) -lt 10 ] && echo bounded || echo hung)" "bounded" "...not MAD_RENDEZVOUS_TIMEOUT"
+
 echo "======================================================"
 echo "  dispatch_assert: ${pass} passed, ${fail} failed"
 echo "======================================================"

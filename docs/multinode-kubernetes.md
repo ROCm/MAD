@@ -300,7 +300,7 @@ Measured on MI300X (one sweep pass per cell, 1024/1024 tokens), every cell `SUCC
 | `No RDMA devices found` (Mooncake), `RegisterRdmaMemoryRegion failed` (MoRI) | The pod has no RDMA device, or the node cannot register GPU memory for RDMA. See [What the cluster must provide](#what-the-cluster-must-provide) |
 | Every benchmark request `Not Found` (404) | The benchmark asked for a model name the server does not serve. The launchers pass `--served-model-name`; check a custom `COLOCATED_EXTRA_ARGS` or recipe does not rename the model differently |
 | `[mad-k8s docker] run: unsupported option ...` | The launcher uses a form the stand-in does not implement. The message names it |
-| `dispatch: rank(s) ... did not report ... within 900s` | A pod did not reach the rendezvous in time (not scheduled, image pull, or a crash before the launcher started). Check that pod's events and log; `MAD_RENDEZVOUS_TIMEOUT` sets the wait |
+| `dispatch: rank(s) ... did not report ...`, or `the run was ended by rank N` | A pod did not reach the rendezvous in time (not scheduled, image pull, or a crash before the launcher started); the other pods stop on the first one that gives up. Check that pod's events and log; `MAD_RENDEZVOUS_JOIN_TIMEOUT` (default 3600 s) sets the first wait, `MAD_RENDEZVOUS_TIMEOUT` (900 s) the later ones |
 | `metadata.annotations: Too long` | Something applied the ConfigMap with `kubectl apply`. Both paths create objects instead; do the same if you apply the dry-run output by hand |
 
 ## Checking that both paths deploy the same thing

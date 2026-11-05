@@ -27,24 +27,24 @@
   "pip": [
     {
       "name": "sglang-router",
-      "version": null,
-      "pending": "`pip install --upgrade sglang-router` in the legacy image; pin to the version in the built image",
-      "upgrade": true
+      "version": "0.3.2",
+      "upgrade": true,
+      "why": "as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03"
     },
     {
       "name": "py-spy",
-      "version": null,
-      "pending": "unpinned in the legacy image"
+      "version": "0.4.2",
+      "why": "as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03"
     },
     {
       "name": "flask",
-      "version": null,
-      "pending": "unpinned in the legacy image"
+      "version": "3.1.3",
+      "why": "as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03"
     },
     {
       "name": "pyyaml",
-      "version": null,
-      "pending": "unpinned in the legacy image"
+      "version": "6.0.1",
+      "why": "as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03"
     }
   ]
 }

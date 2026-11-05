@@ -524,7 +524,15 @@ A job-array task selects this by itself (`MAD_DISPATCH=spur-array`; set
 |---|---|---|
 | `MAD_NNODES` | the array size | Nodes in the run |
 | `MAD_RENDEZVOUS_DIR` | `$LOG_PATH/rendezvous/<array job id>` | Where the tasks meet; must be shared by all nodes |
-| `MAD_RENDEZVOUS_TIMEOUT` | `900` | Seconds a task waits for the others before failing; tasks of an array are not started together |
+| `MAD_RENDEZVOUS_JOIN_TIMEOUT` | `MAD_RENDEZVOUS_TIMEOUT` if set, else `3600` | Seconds a task waits for the others to start: the tasks of an array are not scheduled together, so this can include queue time |
+| `MAD_RENDEZVOUS_TIMEOUT` | `900` | Seconds each later meeting (a gather) waits |
+
+The tasks of a job array are not scheduled together. On a busy cluster they can start one
+after another, even on the same node, as each frees up: a task that gives up leaves its reason in
+the rendezvous directory (`abort`) and every other task stops on it at once, and two ranks on one
+node end the run with `two ranks on node <node>`. Where the scheduler runs a multi-node
+allocation with working `srun` steps (Spur 0.15 does), submit one allocation instead
+(`sbatch -N <nodes>`, `slurm-srun`): its nodes start together.
 
 How it works is in `scripts/common/dispatch/dispatch.sh`. The launchers reach their nodes
 only through it, so a run as an array and a run under one allocation start the same

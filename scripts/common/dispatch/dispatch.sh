@@ -26,9 +26,16 @@
 #               runs this task's own rank; rank 0 then waits for every rank's status
 #               and makes the verdict. Node count: MAD_NNODES, else the array size,
 #               else SLURM_NNODES when a wrapper (madengine) set it above 1.
-#               MAD_RENDEZVOUS_TIMEOUT (default 900 s) bounds each wait for the
-#               other tasks, except the wait for a run step, which lasts as long as
-#               the run.
+#               The tasks of a job array are not scheduled together: they start as
+#               nodes free up, possibly one after another. So the first meeting
+#               (joining) waits MAD_RENDEZVOUS_JOIN_TIMEOUT (default
+#               MAD_RENDEZVOUS_TIMEOUT when set, else 3600 s); MAD_RENDEZVOUS_TIMEOUT
+#               (default 900 s) bounds each later wait, except the wait for a run
+#               step, which lasts as long as the run. A task that gives up leaves an
+#               `abort` file with its reason, and every other task's waits stop on it
+#               at once. Two ranks on one node (a later task started on the node an
+#               earlier one left) end the run at once: every rank must be its own
+#               node.
 #   k8s-indexed The same, one pod per node of a Kubernetes Indexed Job (set by
 #               k8s/mad_k8s_node.sh): rank JOB_COMPLETION_INDEX, run id
 #               MAD_K8S_JOB_ID, size MAD_K8S_NNODES, this node's name MAD_K8S_SELF
@@ -153,9 +160,18 @@ _dispatch_array_init() {
     mkdir -p "$_DISPATCH_DIR" || return 1
     _dispatch_publish "host_rank$rank" "$self"
     _dispatch_publish "addr_rank$rank" "$(hostname -I)"
-    _dispatch_wait_all host_rank "$n" "${MAD_RENDEZVOUS_TIMEOUT:-900}" || return 1
-    local r hosts=""
-    for r in $(seq 0 $((n - 1))); do hosts="${hosts:+$hosts,}$(cat "$_DISPATCH_DIR/host_rank$r")"; done
+    _dispatch_wait_all host_rank "$n" "${MAD_RENDEZVOUS_JOIN_TIMEOUT:-${MAD_RENDEZVOUS_TIMEOUT:-3600}}" || return 1
+    local r h hosts="" seen=" "
+    for r in $(seq 0 $((n - 1))); do
+        h="$(cat "$_DISPATCH_DIR/host_rank$r")"
+        if [[ "$seen" == *" $h "* ]]; then
+            _dispatch_abort "two ranks on node ${h}: the tasks did not run together (a later task started" \
+                "on the node an earlier one left); every rank must be its own node"
+            return 1
+        fi
+        seen+="$h "
+        hosts="${hosts:+$hosts,}$h"
+    done
     # The whole run, as one allocation would describe it.
     export SLURM_JOB_ID="$job" SLURM_PROCID="$rank" SLURM_NNODES="$n" SLURM_JOB_NODELIST="$hosts"
     export _DISPATCH_DIR _DISPATCH_RANK _DISPATCH_NNODES _DISPATCH_SELF
@@ -166,16 +182,26 @@ _dispatch_publish() {  # NAME VALUE: written whole, so a reader never sees half 
     printf '%s\n' "$2" > "$_DISPATCH_DIR/.$1.$$" && mv -f "$_DISPATCH_DIR/.$1.$$" "$_DISPATCH_DIR/$1"
 }
 
+# _dispatch_abort REASON...: end the run for every task. The first reason stays.
+_dispatch_abort() {
+    [ -e "$_DISPATCH_DIR/abort" ] || _dispatch_publish abort "rank ${_DISPATCH_RANK:-?} ($(hostname)): $*"
+    echo "dispatch: $(cat "$_DISPATCH_DIR/abort")" >&2
+}
+
 _dispatch_wait_all() {  # PREFIX N TIMEOUT_S (0: no limit): every PREFIX0..PREFIX(N-1)
     local prefix="$1" n="$2" timeout="$3" start=$SECONDS r missing
     while :; do
+        if [ -e "$_DISPATCH_DIR/abort" ]; then
+            echo "dispatch: the run was ended by $(cat "$_DISPATCH_DIR/abort")" >&2
+            return 1
+        fi
         missing=""
         for r in $(seq 0 $((n - 1))); do
             [ -e "$_DISPATCH_DIR/${prefix}$r" ] || missing="$missing $r"
         done
         [ -z "$missing" ] && return 0
         if [ "$timeout" -gt 0 ] && [ $((SECONDS - start)) -ge "$timeout" ]; then
-            echo "dispatch: rank(s)${missing} did not report ${prefix}* within ${timeout}s (${_DISPATCH_DIR})" >&2
+            _dispatch_abort "rank(s)${missing} did not report ${prefix}* within ${timeout}s (${_DISPATCH_DIR})"
             return 1
         fi
         sleep 1
