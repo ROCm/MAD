@@ -281,7 +281,8 @@ refuses a directory that has both.
 
 2. **Check for errors:**
    - Missing required fields
-   - Invalid naming convention
+   - Invalid naming convention or an empty `owner` (the validator warns, since
+     older registered entries break these; a new model must still follow both)
    - Non-existent file references
    - Framework-specific issues
 
