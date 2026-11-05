@@ -10,6 +10,7 @@ Log format (from benchmark_xPyD.sh):
   Total token throughput (tok/s):          <VALUE>
 """
 
+import os
 import re
 import csv
 from pathlib import Path
@@ -43,29 +44,48 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
     current_output_seq_len = None
     current_concurrency = None
 
+    # The text before result i holds that cell's [RUNNING] header. That is true
+    # for i=1 as well: sections[0] is everything from the "iter: 1" marker to
+    # the first result, and the first [RUNNING] lives in there. Guarding this
+    # with `if i > 1` silently dropped the FIRST requested cell of every run --
+    # A run that asked for con=8,16,32 had a CSV reported only 16 and 32, and
+    # another lost its real con=1. The 4-results-vs-3-[RUNNING] shape of those
+    # logs is not a defect: the extra result is the warmup, which sits before
+    # the "iter: 1" marker and is cut by the truncation above.
     for i, section in enumerate(sections[1:], 1):  # Skip first empty section
-        # Look for configuration in previous sections (from [RUNNING] line)
-        if i > 1:
-            prev_section = sections[i-1]
+        # Look for configuration in the text preceding this result.
+        prev_section = sections[i-1]
 
-            # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-            config_match = re.search(
-                r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
-                prev_section
-            )
-            # Fallback: extract from Namespace(...) in vllm bench serve output
-            if not config_match:
-                isl_m = re.search(r'random_input_len=(\d+)', prev_section)
-                osl_m = re.search(r'random_output_len=(\d+)', prev_section)
-                con_m = re.search(r'max_concurrency=(\d+)', prev_section)
-                if isl_m and osl_m and con_m:
-                    config_match = type('Match', (), {
-                        'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
-                    })()
-            if config_match:
-                current_input_seq_len = int(config_match.group(1))
-                current_output_seq_len = int(config_match.group(2))
-                current_concurrency = int(config_match.group(3))
+        # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
+        # Take the LAST header in prev_section, not the first. A cell that
+        # stalls emits its [RUNNING] and then no result block, so prev_section
+        # can hold two headers; matching the first one labels this result with
+        # the *stalled* cell's concurrency. When a con=1 cell timed out and
+        # con=8's throughput was published as con=1 -- a wrong number, not just
+        # a missing row. The nearest preceding header is always the right one.
+        _running = re.findall(
+            r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
+            prev_section
+        )
+        config_match = None
+        if _running:
+            _isl, _osl, _con = _running[-1]
+            config_match = type('Match', (), {
+                'group': lambda self, n, _v=(None, _isl, _osl, _con): _v[n]
+            })()
+        # Fallback: extract from Namespace(...) in vllm bench serve output
+        if not config_match:
+            isl_m = re.search(r'random_input_len=(\d+)', prev_section)
+            osl_m = re.search(r'random_output_len=(\d+)', prev_section)
+            con_m = re.search(r'max_concurrency=(\d+)', prev_section)
+            if isl_m and osl_m and con_m:
+                config_match = type('Match', (), {
+                    'group': lambda self, n: [None, isl_m.group(1), osl_m.group(1), con_m.group(1)][n]
+                })()
+        if config_match:
+            current_input_seq_len = int(config_match.group(1))
+            current_output_seq_len = int(config_match.group(2))
+            current_concurrency = int(config_match.group(3))
 
         # Extract Total token throughput (tok/s) from benchmark result section
         throughput_match = re.search(r'Total token throughput \(tok/s\):\s+([\d.]+)', section)
@@ -146,16 +166,19 @@ def _get_run_metadata(pipeline: str = "vllm"):
 def parse_niah_log(log_file: str) -> Dict[int, Dict]:
     """Parse NIAH benchmark log file and extract retrieval results per context length.
 
-    Scans for summary lines emitted by benchmark_niah.py:
-      words=  2000  mean=9.7/10  min=9  max=10  (n=3)
+    Scans for summary lines emitted by benchmark_niah.py, which today carry
+    decoys + a verdict between max= and (n=):
+      words=  2000  mean=10.0/10  min=10  max=10  decoys=0.0  RETRIEVAL  (n=3)
     Returns {n_words: {'mean': float, 'min': int, 'max': int, 'n': int}}.
     """
     results = {}
     with open(log_file, 'r') as f:
         for line in f:
-            # Match:   words=  2000  mean=9.7/10  min=9  max=10  (n=3)
+            # Anything between max= and (n=) is tolerated: the scorer has grown
+            # decoys= and a verdict since this was written, and requiring (n=
+            # to sit directly after max= made the regex match nothing at all.
             m = re.search(
-                r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\s+\(n=(\d+)\)',
+                r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\b.*?\(n=(\d+)\)',
                 line
             )
             if m:
@@ -167,6 +190,28 @@ def parse_niah_log(log_file: str) -> Dict[int, Dict]:
                     'n': int(m.group(5)),
                 }
     return results
+
+
+def _open_perf_csv(output_file: str, fieldnames):
+    """Open perf.csv for writing, appending to an existing file of the same shape.
+
+    BENCH=validate runs NIAH and then the concurrency sweep in one allocation, and
+    both write this path. Truncating would leave only whichever ran last (
+    lost all six NIAH rows to the sweep that followed it). Append instead, writing
+    the header only when creating the file. A file with a different header is
+    replaced rather than corrupted.
+    """
+    exists = os.path.isfile(output_file) and os.path.getsize(output_file) > 0
+    if exists:
+        with open(output_file, newline='') as f:
+            first = f.readline().strip()
+        if first != ','.join(fieldnames):
+            exists = False
+    f = open(output_file, 'a' if exists else 'w', newline='')
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    if not exists:
+        writer.writeheader()
+    return f, writer
 
 
 def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
@@ -188,10 +233,8 @@ def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
         'additional_docker_run_options',
     ]
 
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
+    f, writer = _open_perf_csv(output_file, fieldnames)
+    with f:
         for n_words in sorted(results.keys()):
             data = results[n_words]
             row = {
@@ -225,10 +268,8 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
         'additional_docker_run_options',
     ]
 
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
+    f, writer = _open_perf_csv(output_file, fieldnames)
+    with f:
         for (input_tokens, output_tokens, concurrency), data in sorted(
             results.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])
         ):

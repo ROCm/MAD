@@ -18,8 +18,15 @@ filename (..._xP<P>_yD<D>_<MODEL>_CONCURRENCY.log).
 import os
 import re
 import sys
-import pandas as pd
+import csv
 import argparse
+
+# pandas is a nicety here (column formatting), not a requirement. This is the
+# only tool that reports ITL/TTFT/TPOT, so it has to run without it.
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = None
 
 # Columns produced by parse_benchmark_log(), in display order. Single source of
 # truth so format_dataframe()/--compact stay in sync with what's actually parsed.
@@ -124,6 +131,35 @@ def format_dataframe(df):
             df[col] = df[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else x)
     return df
 
+
+def _fmt_cell(col, val):
+    """Format one value the way format_dataframe() would, without pandas."""
+    if val is None:
+        return ''
+    if col in FLOAT_COLS:
+        return f"{val:.2f}"
+    if col in INT_COMMA_COLS:
+        return f"{int(val):,}"
+    return str(val)
+
+
+def render_table(results, columns):
+    """Plain-text table, column-aligned. Used when pandas is unavailable."""
+    rows = [[_fmt_cell(c, r.get(c)) for c in columns] for r in results]
+    widths = [max(len(c), *(len(r[i]) for r in rows)) if rows else len(c)
+              for i, c in enumerate(columns)]
+    out = [' '.join(c.rjust(w) for c, w in zip(columns, widths))]
+    out += [' '.join(v.rjust(w) for v, w in zip(row, widths)) for row in rows]
+    return '\n'.join(out)
+
+
+def write_csv(results, columns, path):
+    """Write the unformatted rows to CSV. Used when pandas is unavailable."""
+    with open(path, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=columns, extrasaction='ignore')
+        w.writeheader()
+        w.writerows(results)
+
 def main():
     parser = argparse.ArgumentParser(
         description='Parse vLLM disaggregated benchmark logs (vllm bench serve) and extract performance metrics.',
@@ -188,6 +224,25 @@ The tool extracts metrics including:
     if not results:
         print("No benchmark results found in the log file.", file=sys.stderr)
         sys.exit(1)
+
+    present = [c for c in COLUMNS if any(c in r for r in results)]
+    columns = [c for c in (COMPACT_COLS if args.compact else COLUMNS) if c in present]
+
+    if pd is None:
+        if not args.no_screen:
+            print("Benchmark Results Summary:")
+            print("=" * 120)
+            print(render_table(results, columns))
+            print(f"\nTotal runs parsed: {len(results)}")
+        if args.csv:
+            try:
+                write_csv(results, columns, args.csv)
+            except Exception as e:
+                print(f"Error saving CSV file: {e}", file=sys.stderr)
+                sys.exit(1)
+            if not args.no_screen:
+                print(f"\nResults saved to: {args.csv}")
+        return
 
     df = pd.DataFrame(results)
 

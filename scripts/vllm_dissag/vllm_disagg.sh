@@ -31,6 +31,79 @@
 SCRIPT_DIR="${NIXL_COOKBOOK_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)}"
 
 # =============================================================================
+# Initialization — container-side boot setup
+# =============================================================================
+# Runs first, before any axis or connector work. Everything here must be
+# idempotent (a node can re-enter this script) and NON-FATAL: nothing in this
+# section is worth losing a multi-hour serving cell over. Add future one-time
+# container setup here rather than inline further down.
+#
+# The image is a moving target -- pins change under us and a package present
+# today can be absent in the next nightly -- so these steps ask the environment
+# what it actually has instead of encoding a fact about any one tag.
+
+# Python deps this script and its tooling import. Entries are
+# `module[:pip-spec]`, space separated, for when the import name differs from
+# the pip name. `PY_BOOT_DEPS=off` (or `0`/`none`) skips the step. When nothing
+# is missing it prints one line and installs nothing -- the expected path.
+#
+#   yaml   CRITICAL. The models.yaml parse below does a bare `import yaml`,
+#          twice, with no fallback, and it resolves both the per-model env
+#          block and the per-role serve flags. Today's images ship PyYAML so
+#          this has never fired, but if one stops shipping it the serve path
+#          dies at the model catalog -- not somewhere obvious.
+#   pandas  Reporting only. `benchmark_parser.py` is the sole tool that reports
+#          ITL/TTFT/TPOT, and it falls back to a stdlib table without pandas.
+#          `parse_to_csv.py` -- the one the job calls to write CONCURRENCY.csv
+#          and perf.csv -- is stdlib-only.
+#
+# Non-fatal even for yaml: a compute node may have no route to PyPI, and if
+# yaml really is absent the existing bare import fails loudly a few lines
+# down. This step only gives it a chance to self-heal, and the WARN is the
+# diagnosis for that failure.
+_ensure_py_deps() {
+    local spec="${PY_BOOT_DEPS-yaml:PyYAML pandas}"
+    case "${spec}" in ""|off|OFF|0|none) return 0 ;; esac
+
+    local missing=() entry mod pkg
+    for entry in ${spec}; do
+        mod="${entry%%:*}"
+        pkg="${entry#*:}"; [[ "$pkg" == "$entry" ]] && pkg="$mod"
+        if ! python3 -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('${mod}') else 1)" 2>/dev/null; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        echo "[py-deps] present: ${spec}"
+        return 0
+    fi
+
+    echo "[py-deps] installing missing: ${missing[*]}"
+    # --break-system-packages first: newer base images ship a PEP 668 managed
+    # interpreter, where a plain install refuses with externally-managed-environment.
+    if pip install --quiet --break-system-packages "${missing[@]}" 2>/dev/null \
+       || pip install --quiet "${missing[@]}" 2>/dev/null; then
+        echo "[py-deps] installed: ${missing[*]}"
+    else
+        # Say which kind of failure this is. "serving is unaffected" is true for
+        # pandas and false for PyYAML, so do not print one blanket reassurance.
+        echo "[py-deps] WARN install failed: ${missing[*]}" >&2
+        case " ${missing[*]} " in *" PyYAML "*)
+            echo "[py-deps] WARN PyYAML absent — the models.yaml parse below will fail, so per-model env and serve flags will NOT be applied" >&2 ;;
+        esac
+        case " ${missing[*]} " in *" pandas "*)
+            echo "[py-deps] pandas absent is harmless — benchmark_parser.py falls back to a stdlib table, and parse_to_csv.py is stdlib-only" >&2 ;;
+        esac
+    fi
+}
+
+_init_container_env() {
+    _ensure_py_deps
+}
+_init_container_env
+
+# =============================================================================
 # Axis selection (+ legacy shim) and validation
 # =============================================================================
 # Legacy flags map to the new axes when CONNECTOR is not explicitly set.
@@ -114,13 +187,37 @@ _dryrun_emit() {
     echo "===END==="
 }
 
+# A worker that dies at boot never prints the ready signal, so without this the
+# wait runs to TIMEOUT_SECONDS (a decode segfault at 07:29, NODE0 waited
+# until 08:50). Every node's worker log is scanned, not just the masters'.
+_BOOT_FATAL_SIGNALS=(-e "Engine core initialization failed" -e "EngineCore failed to start" -e "Segfault encountered")
+
+# Only this node exits on a boot failure; the others would sit in their barriers
+# until the wall (one segfault at 3 min held 8 nodes for 4 h). The host
+# srun step sees this marker and exits nonzero, so --kill-on-bad-exit ends the step.
+_mark_boot_fatal() {
+    echo "$*" > "/run_logs/${SLURM_JOB_ID}/BOOT_FATAL" 2>/dev/null || true
+}
+
 _wait_log_signal_or_fail() {
     local LOG_FILE="$1" LABEL="$2" SEARCH_SIGNAL="$3" TIMEOUT_SECONDS="$4" SLEEP_SECONDS="$5"
-    local ELAPSED=0
+    local ELAPSED=0 _dead _out
+    local _log_dir="/run_logs/${SLURM_JOB_ID}"
     until grep -Fq "${SEARCH_SIGNAL}" "${LOG_FILE}" 2>/dev/null; do
+        _dead="$(grep -lF "${_BOOT_FATAL_SIGNALS[@]}" "${_log_dir}"/prefill_NODE*.log "${_log_dir}"/decode_NODE*.log 2>/dev/null | tr '\n' ' ')"
+        if [ -n "${_dead}" ]; then
+            _out=/run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
+            {
+                echo "Error: worker died during boot while waiting for ${LABEL} (${ELAPSED}s): ${_dead}"
+                grep -hnF "${_BOOT_FATAL_SIGNALS[@]}" ${_dead} 2>/dev/null | head -5
+            } | tee -a "${_out}"
+            _mark_boot_fatal "worker died during boot: ${_dead}"
+            exit 1
+        fi
         if [ "${ELAPSED}" -ge "${TIMEOUT_SECONDS}" ]; then
             echo "Timeout (${TIMEOUT_SECONDS}s): '${SEARCH_SIGNAL}' not found in ${LABEL}: ${LOG_FILE}" \
                 | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
+            _mark_boot_fatal "timeout waiting for ${LABEL}"
             exit 1
         fi
         sleep "${SLEEP_SECONDS}"; ELAPSED=$((ELAPSED + SLEEP_SECONDS))
@@ -221,24 +318,39 @@ echo "PREFILL_DP_SIZE=${PREFILL_DP_SIZE}  DECODE_DP_SIZE=${DECODE_DP_SIZE}"
 echo "PREFILL_MASTER_ADDR=${PREFILL_MASTER_ADDR}  DECODE_MASTER_ADDR=${DECODE_MASTER_ADDR}"
 
 # =============================================================================
-# Container barrier + runtime patches (skipped under DRY_RUN)
+# Container barrier + connector_runtime_patch (skipped under DRY_RUN)
 # =============================================================================
 if [[ "${DRY_RUN:-0}" != "1" ]]; then
     _BARRIER_PORT="${CONTAINER_BARRIER_PORT:-2222}"
-    for _pid in $(ss -tlnp sport = ${_BARRIER_PORT} 2>/dev/null | grep -oP "pid=\K\d+"); do
-        kill -9 "$_pid" 2>/dev/null
-    done
+    # Image has no ss/fuser (tcp_listen.sh). A leftover on this port makes
+    # socket_barrier's bind fail in a daemon thread while is_port_open() still
+    # sees the old listener as ready -- the barrier would pass without us
+    # owning the port. Kill what we can in this PID ns, then bind-or-die.
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/tcp_listen.sh"
+    tcp_listen_kill "${_BARRIER_PORT}" || true
     sleep 2
+    # Bounded: a node that never launches its container cannot open the port,
+    # and an unbounded barrier turns that into a silent hold on every node
+    # until walltime. Timing out names the missing peers and fails
+    # the job in minutes. Generous by default -- a cold node still has to load
+    # a ~50 GiB image before it reaches this line.
+    _BARRIER_TIMEOUT="${CONTAINER_BARRIER_TIMEOUT_SECONDS:-1800}"
     echo "Waiting at the container creation barrier on $host_name"
-    python $NIXL_COOKBOOK_PATH/socket_barrier.py \
+    if ! python $NIXL_COOKBOOK_PATH/socket_barrier.py \
         --local-ip ${host_ip} --local-port ${_BARRIER_PORT} --enable-port \
-        --node-ips ${IPADDRS} --node-ports ${_BARRIER_PORT}
+        --node-ips ${IPADDRS} --node-ports ${_BARRIER_PORT} \
+        --timeout "${_BARRIER_TIMEOUT}"; then
+        echo "Error: container creation barrier failed on $host_name after ${_BARRIER_TIMEOUT}s." >&2
+        exit 1
+    fi
     connector_runtime_patch
 fi
 
 # =============================================================================
 # Node Role Assignment and Server Launch
 # =============================================================================
+_BENCH_RC=0
 if [ "$NODE_RANK" -eq 0 ]; then
     print_node_info "Prefill master + Proxy node (co-located)"
     connector_launch_worker "master" "${PREFILL_DP_SIZE}" "${PREFILL_MASTER_ADDR}" "kv_producer" "prefill"
@@ -246,6 +358,17 @@ if [ "$NODE_RANK" -eq 0 ]; then
     [[ "${DRY_RUN:-0}" == "1" ]] && { echo "[dry-run] rank0 prefill master emitted; skipping proxy/benchmark."; exit 0; }
 
     connector_wait_workers_ready
+    # HOLD_AFTER_READY=1: keep P+D up, skip router/toy proxy and the bench.
+    # Children block on MASTER:PROXY_PORT until something listens, then until
+    # that port closes — so a later manual proxy on :10001 is the teardown gate.
+    if [[ "${HOLD_AFTER_READY:-0}" == "1" ]]; then
+        echo "[hold] P+D Application startup complete. Skipping proxy/router and bench."
+        echo "[hold] Launch proxy on NODE0 :${PROXY_PORT:-10001} (discovery :${MORI_PROXY_PING_PORT:-31367})."
+        echo "[hold] Engines stay until walltime, or until prefill master exits."
+        wait "$local_worker_pid" || true
+        echo "[hold] prefill master exited; sleeping until slurm walltime"
+        sleep infinity
+    fi
     connector_start_proxy
 
     # connector_start_proxy sets BENCHMARK_PORT (router->ROUTER_PORT, toy->PROXY_PORT).
@@ -279,7 +402,8 @@ if [ "$NODE_RANK" -eq 0 ]; then
         sleep 3
     fi
 
-    bash "$NIXL_COOKBOOK_PATH/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
+    _BENCH_RC=0
+    bash "$NIXL_COOKBOOK_PATH/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}" || _BENCH_RC=$?
 
     [[ -n "$_agentic_shim_pid" ]] && { kill "$_agentic_shim_pid" 2>/dev/null || true; }
 
@@ -307,5 +431,9 @@ else
     wait_for_proxy_and_cleanup $WORKER_PID "decode child"
 fi
 
-echo "Script completed successfully."
-exit 0
+if [ "${_BENCH_RC:-0}" -eq 0 ]; then
+    echo "Script completed successfully."
+else
+    echo "Script completed with benchmark rc=${_BENCH_RC}."
+fi
+exit "${_BENCH_RC:-0}"

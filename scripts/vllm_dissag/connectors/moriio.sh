@@ -18,7 +18,7 @@ connector_init() {
     SERVE_PORT="${MORI_SERVE_PORT:-20005}"
     KV_PORT="${MORI_KV_PORT:-9711}"
     PROXY_PORT="${MORI_PROXY_PORT:-10001}"
-    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-36367}"
+    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-31367}"
     LOCAL_PING_PORT="${MORI_LOCAL_PING_PORT:-61555}"
     HANDSHAKE_PORT="${MORI_HANDSHAKE_PORT:-8405}"
     NOTIFY_PORT="${MORI_NOTIFY_PORT:-61005}"
@@ -120,17 +120,160 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # DSV4: some image builds ignore VLLM_MORIIO_QP_PER_TRANSFER env; extra_config is the path.
+    # GLM / DSV3 stay on the original extra_config (their images still honor the env).
+    local extra='"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'
+    if [ "${MODEL_NAME:-}" = "DeepSeek-V4-Flash-FP8" ] || [ "${MODEL_NAME:-}" = "DeepSeek-V4-Pro-FP8" ]; then
+        extra="${extra},\"qp_per_transfer\":${VLLM_MORIIO_QP_PER_TRANSFER:-4},\"num_workers\":${VLLM_MORIIO_NUM_WORKERS:-4},\"post_batch_size\":${VLLM_MORIIO_POST_BATCH_SIZE:--1}"
+    fi
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${extra}"'}}'
+}
+
+# The DSV4 image bakes /usr/local/bin/vllm-router. ROUTER_BOOT_INSTALL is an
+# override for an image without it or a newer SHA. Unset = use the image binary.
+# Git+cargo still overlaps engine load when the override is set. pip lags main.
+_ROUTER_BOOT_PID=""
+_router_boot_log() {
+    echo "/run_logs/${SLURM_JOB_ID}/vllm_router_install_NODE${NODE_RANK}.log"
+}
+
+_kick_vllm_router_boot_install() {
+    [ "${NODE_RANK:-0}" = "0" ] || return 0
+    [ "${PROXY_TYPE:-}" = "vllm_router" ] || return 0
+    local method="${ROUTER_BOOT_INSTALL:-}"
+    [ -n "$method" ] && [ "$method" != "0" ] || return 0
+    [ "$method" = "1" ] && method=git
+    local log; log="$(_router_boot_log)"
+    mkdir -p "$(dirname "$log")"
+    echo "[router-boot] starting method=${method} repo=${ROUTER_REPO:-https://github.com/vllm-project/router.git} ref=${ROUTER_REF:-main}" | tee -a "$log"
+    _install_vllm_router_at_boot "$method" >>"$log" 2>&1 &
+    _ROUTER_BOOT_PID=$!
+    echo "[router-boot] pid=${_ROUTER_BOOT_PID} log=${log}"
+}
+
+_wait_vllm_router_boot_install() {
+    [ -n "${_ROUTER_BOOT_PID:-}" ] || return 0
+    echo "[router-boot] waiting for pid=${_ROUTER_BOOT_PID} (overlaps engine boot)"
+    if ! wait "${_ROUTER_BOOT_PID}"; then
+        echo "Error: vllm-router boot install failed. See $(_router_boot_log)" >&2
+        tail -n 80 "$(_router_boot_log)" >&2 || true
+        exit 1
+    fi
+    echo "[router-boot] install complete"
+}
+
+_install_vllm_router_at_boot() {
+    local method="$1"
+    local dest="/usr/local/bin/vllm-router"
+    case "$method" in
+        pip)
+            echo "[router-boot] pip install -U vllm-router"
+            pip install -U vllm-router
+            local pip_bin
+            pip_bin="$(command -v vllm-router 2>/dev/null || true)"
+            if [ -z "$pip_bin" ]; then
+                echo "Error: pip install vllm-router left no vllm-router on PATH" >&2
+                return 1
+            fi
+            if [ "$pip_bin" != "$dest" ]; then
+                install -m 755 "$pip_bin" "$dest"
+            fi
+            ;;
+        git)
+            local repo="${ROUTER_REPO:-https://github.com/vllm-project/router.git}"
+            local ref="${ROUTER_REF:-main}"
+            local rust="${RUST_TOOLCHAIN:-1.88.0}"
+            local src="/tmp/vllm-router-src"
+            echo "[router-boot] git ${repo} @ ${ref} (cargo release, rustc ${rust})"
+            if ! command -v git >/dev/null 2>&1 || ! command -v pkg-config >/dev/null 2>&1; then
+                apt-get update
+                apt-get install -y --no-install-recommends \
+                    git build-essential pkg-config libssl-dev curl ca-certificates
+            fi
+            if ! command -v cargo >/dev/null 2>&1; then
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+                    | sh -s -- -y --default-toolchain "${rust}"
+            fi
+            # shellcheck disable=SC1091
+            [ -f /root/.cargo/env ] && . /root/.cargo/env
+            rustup default "${rust}" >/dev/null 2>&1 || rustup toolchain install "${rust}"
+            rm -rf "$src"
+            git clone --filter=blob:none "$repo" "$src"
+            git -C "$src" checkout "$ref"
+            local sha
+            sha="$(git -C "$src" rev-parse HEAD)"
+            echo "[router-boot] SHA=${sha}"
+            ( cd "$src" && cargo build --release )
+            install -m 755 "$src/target/release/vllm-router" "$dest"
+            echo "VLLM_ROUTER_BOOT=${repo}@${ref}@${sha}" >> /app/versions.txt
+            echo "[router-boot] installed ${dest} (${sha})"
+            ;;
+        *)
+            echo "Error: ROUTER_BOOT_INSTALL=${method} (expected git|pip|1)" >&2
+            return 1
+            ;;
+    esac
+    if ! "$dest" --help 2>&1 | grep -q moriio; then
+        echo "Error: ${dest} has no --kv-connector moriio (wrong package or too old)" >&2
+        "$dest" --help 2>&1 | head -n 40 >&2 || true
+        return 1
+    fi
+    export ROUTER_BINARY="$dest"
+}
+
+# Patch roster: one line per patch named in the image's DSV4_PATCHES_BAKED
+# stamp. Status is also exported as DSV4_PATCH_<NAME>.
+_dsv4_patch_note() {
+    local name="$1" status="$2" path="$3"
+    echo "[dsv4-patch] name=${name} status=${status} path=${path}"
+    export "DSV4_PATCH_${name}=${status}"
+}
+
+_dsv4_patch_roster_dump() {
+    local _baked _p
+    _baked="$(sed -n 's/^DSV4_PATCHES_BAKED=//p' /app/versions.txt 2>/dev/null | tail -n 1)"
+    for _p in ${_baked//,/ }; do
+        _dsv4_patch_note "$(tr '[:lower:]' '[:upper:]' <<<"${_p}")" BAKED image
+    done
+    echo "[dsv4-patch-roster] baked=${_baked} n=$(wc -w <<<"${_baked//,/ }") eager=${DSV4_EAGER:-0} hma=${DSV4_ENABLE_HMA:-0}"
 }
 
 connector_runtime_patch() {
-    # No-op: the MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL
-    # split, DP-rank hash-failsafe) are committed in-source in the vLLM the image is
-    # built from (see the Dockerfile VLLM_REF). There is no runtime .py patcher — that
-    # would be a drifting duplicate of fixes that already live upstream in the fork.
-    # If you ever run an image WITHOUT these fixes baked, use an image that has them
-    # (rebuild from the pinned VLLM_REF) rather than patching a stock image at runtime.
-    return 0
+    # Overlap cargo with engine boot (NODE0 / vllm_router only).
+    _kick_vllm_router_boot_install
+    # GLM / DSV3 / dense: no-op (fixes are in-source on develop images).
+    # DSV4 Flash/Pro: patches are baked into the image at build.
+    if [ "${MODEL_NAME:-}" != "DeepSeek-V4-Flash-FP8" ] && [ "${MODEL_NAME:-}" != "DeepSeek-V4-Pro-FP8" ]; then
+        return 0
+    fi
+    if [ "${SKIP_RUNTIME_PATCH:-1}" != "1" ]; then
+        echo "Error: DSV4 patches are baked into the image; runtime apply_*.py is gone." >&2
+        echo "Error: unset SKIP_RUNTIME_PATCH or set it to 1." >&2
+        exit 1
+    fi
+    echo "[dsv4] patches=BAKED SKIP_RUNTIME_PATCH=${SKIP_RUNTIME_PATCH:-1}"
+    if [ "${MORI_JIT_SCRUB:-1}" = "1" ]; then
+        echo "[mori-scrub] removing stale MoRI JIT locks/state (/root/.mori, /tmp/mori_jit_*)"
+        find /root/.mori -name '*.lock' -delete 2>/dev/null || true
+        rm -rf /root/.mori /tmp/mori_jit_* 2>/dev/null || true
+    fi
+    if [ "${AITER_JIT_SCRUB:-1}" = "1" ]; then
+        echo "[aiter-scrub] removing stale AITER JIT cache (${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit})"
+        rm -rf "${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"/* 2>/dev/null || true
+    fi
+    # bake.sh verifies the patches at build and only then writes this stamp.
+    if ! grep -q '^DSV4_PATCHES_BAKED=' /app/versions.txt 2>/dev/null; then
+        echo "Error: [dsv4] /app/versions.txt has no DSV4_PATCHES_BAKED stamp; image is not DSV4-baked." >&2
+        echo "Error: rebuild from docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile." >&2
+        exit 1
+    fi
+    echo "[dsv4] $(grep -E '^DSV4_PATCHES_(BAKED|SRC)=' /app/versions.txt | tr '\n' ' ')"
+    # HMA is always off: the baked patch set is the HMA-off arm.
+    if [ "${DSV4_ENABLE_HMA:-0}" != "0" ]; then
+        echo "[dsv4-hma] WARN: DSV4_ENABLE_HMA=${DSV4_ENABLE_HMA} is not supported; forcing 0"
+    fi
+    export DSV4_ENABLE_HMA=0
+    _dsv4_patch_roster_dump
 }
 
 # connector_launch_worker <role> <dp_size> <dp_addr> <kv_role> <log_prefix> [dp_start_rank]
@@ -159,6 +302,10 @@ connector_launch_worker() {
     local _cudagraph_mode="${VLLM_CUDAGRAPH_MODE:-}"
     if [[ "$log_prefix" == "decode" ]]; then
         _cudagraph_mode="${DECODE_CUDAGRAPH_MODE:-$_cudagraph_mode}"
+        if [[ "${DSV4_EAGER:-0}" == "1" ]]; then
+            _cudagraph_mode=NONE
+            echo "[dsv4-cg] DSV4_EAGER=1 -> decode cudagraph_mode=NONE +quant_fp8 (never --enforce-eager)"
+        fi
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
@@ -313,7 +460,9 @@ connector_launch_worker() {
 connector_wait_workers_ready() {
     echo "Waiting for prefill & decode servers to be ready..."
     sleep 20
-    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-4000}"
+    # 4000s is too short for EP16 NFS load + MoRI JIT.
+    # Override still wins; wrapper forces 10800 so a leaked 4000 cannot.
+    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-10800}"
     local SLEEP_SECONDS=10
     local SEARCH_SIGNAL="Application startup complete."
     local PREFILL_LOG=/run_logs/${SLURM_JOB_ID}/prefill_NODE0.log
@@ -351,30 +500,41 @@ connector_start_proxy() {
         parallelism_is_wide_ep || _router_dp_local=1
         echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
         echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
+        _wait_vllm_router_boot_install
         [ -f /root/.cargo/env ] && source /root/.cargo/env
 
         local ROUTER_BIN="${ROUTER_BINARY:-$(command -v vllm-router 2>/dev/null || true)}"
+        [ -z "${ROUTER_BIN}" ] && [ -x /usr/local/bin/vllm-router ] && ROUTER_BIN=/usr/local/bin/vllm-router
         if [ -z "${ROUTER_BIN}" ] || [ ! -x "${ROUTER_BIN}" ]; then
-            echo "Error: vllm-router not found. Set ROUTER_BINARY=<path>, or PROXY_TYPE=moriio_toy to use the in-image toy proxy." \
+            echo "Error: vllm-router not found. Set ROUTER_BOOT_INSTALL=git (cargo from git), ROUTER_BINARY=<path>, or PROXY_TYPE=moriio_toy." \
                 | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
             exit 1
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
-        "${ROUTER_BIN}" \
-            --host 0.0.0.0 \
-            --port "${ROUTER_PORT}" \
-            --vllm-pd-disaggregation \
-            --kv-connector moriio \
-            --prefill "${PREFILL_URL}" \
-            --decode "${DECODE_URL}" \
-            --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
-            --intra-node-data-parallel-size "${_router_dp_local}" \
-            --policy round_robin \
-            --prefill-policy round_robin \
-            --decode-policy round_robin \
-            --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}" \
-            --prometheus-port "${_PROMETHEUS_PORT}" \
+        local -a _router_args=(
+            --host 0.0.0.0
+            --port "${ROUTER_PORT}"
+            --vllm-pd-disaggregation
+            --kv-connector moriio
+            --prefill "${PREFILL_URL}"
+            --decode "${DECODE_URL}"
+            --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}"
+            --intra-node-data-parallel-size "${_router_dp_local}"
+            --policy round_robin
+            --prefill-policy round_robin
+            --decode-policy round_robin
+            --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}"
+            --prometheus-port "${_PROMETHEUS_PORT}"
+        )
+        # Ravi 2P2D KV-notify: --moriio-dp-size = prefill DP world. Latest
+        # upstream may have folded this into discovery; pass it only if present.
+        if [[ "${ROUTER_SKIP_MORIIO_DP_SIZE:-1}" != "1" ]] && \
+           "${ROUTER_BIN}" --help 2>&1 | grep -q -- '--moriio-dp-size'; then
+            _router_args+=(--moriio-dp-size "${PREFILL_DP_SIZE}")
+            echo "  --moriio-dp-size ${PREFILL_DP_SIZE}"
+        fi
+        "${ROUTER_BIN}" "${_router_args[@]}" \
             > >(tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
         proxy_pid=$!
         BENCHMARK_PORT=${ROUTER_PORT}
@@ -415,18 +575,88 @@ connector_start_proxy() {
                grep -qa "Add Decode"  "${_ROUTER_LOG}" 2>/dev/null; then
                 echo "Router registration complete after ${_waited}s."; break
             fi
+            if grep -qa "Failed to bind ZMQ socket" "${_ROUTER_LOG}" 2>/dev/null; then
+                echo "ERROR: vllm-router could not bind discovery port ${PROXY_PING_PORT}; set MORI_PROXY_PING_PORT to a free port." >&2
+                grep -a "Failed to bind ZMQ socket" "${_ROUTER_LOG}" | head -1 >&2
+                source "${SCRIPT_DIR}/tcp_listen.sh"
+                tcp_listen_dump_port "${PROXY_PING_PORT}" >&2 || true
+                _mark_boot_fatal "router could not bind ${PROXY_PING_PORT}"
+                exit 1
+            fi
             sleep 5; _waited=$((_waited + 5))
         done
-        [ "${_waited}" -ge "${_REG_TIMEOUT}" ] && echo "WARNING: router registration not confirmed in ${_REG_TIMEOUT}s; proceeding."
+        if [ "${_waited}" -ge "${_REG_TIMEOUT}" ]; then
+            echo "ERROR: prefill+decode did not register with the router in ${_REG_TIMEOUT}s; see ${_ROUTER_LOG}." >&2
+            _mark_boot_fatal "router registration timeout"
+            exit 1
+        fi
     else
         sleep 20
     fi
 
-    curl -X POST http://127.0.0.1:${BENCHMARK_PORT}/v1/completions -H "Content-Type: application/json" -d '{
-        "prompt": "Who is AMD CEO?",
+    # Always run, including NIAH. Chat QA on /v1/chat/completions — a bare
+    # /v1/completions stem continues OpenAI JSON dumps. NIAH stays
+    # /v1/completions + product stem. Do not abort the bench if a reply
+    # fails. Non-stream smoke: one JSON body per probe, verdict + reply in
+    # curl_*.log (stream=true dumped ~200 SSE blobs/probe).
+    # Serve registers MODEL_PATH (the bare model name 404s).
+    local _CURL_LOG="/run_logs/${SLURM_JOB_ID}/curl_${SLURM_JOB_ID}_xP${xP}_yD${yD}_${MODEL_NAME}.log"
+    echo "===== smoke curl: 3 chat QA -> ${_CURL_LOG} ====="
+    python3 - "$BENCHMARK_PORT" "$_CURL_LOG" "${MODEL_PATH}" <<'PY'
+import json, sys, time, urllib.request
+port, log_path, model = sys.argv[1], sys.argv[2], sys.argv[3]
+url = f"http://127.0.0.1:{port}/v1/chat/completions"
+probes = (
+    ("amd", "Who is the CEO of AMD? Answer in one sentence.", "lisa"),
+    ("france", "What is the capital of France? Answer in one sentence.", "paris"),
+    ("uk", "What is the capital of the United Kingdom? Answer in one sentence.", "london"),
+)
+n_ok = 0
+lines = [f"===== smoke curl: 3 chat QA port={port} model={model} ====="]
+for tag, question, expect in probes:
+    payload = {
+        "model": model,
         "temperature": 0,
-        "max_tokens" : 10,
-        "top_k": 1
-    }'
+        "max_tokens": 200,
+        "top_k": 1,
+        "messages": [{"role": "user", "content": question}],
+    }
+    lines.append(f"===== curl[{tag}] =====")
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=240) as resp:
+            obj = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        rec = f"[curl] FAIL[{tag}] {exc}"
+        lines.append(rec)
+        print(rec, flush=True)
+        continue
+    elapsed = time.monotonic() - t0
+    ch = (obj.get("choices") or [{}])[0]
+    msg = ch.get("message") or {}
+    text = (msg.get("content") or ch.get("text") or "").strip()
+    finish = ch.get("finish_reason")
+    rec = f"[curl] [{tag}] wall={elapsed:.1f}s finish={finish} chars={len(text)}"
+    lines.append(rec)
+    print(rec, flush=True)
+    answered = expect in text.lower() and len(text) >= 8
+    verdict = "ANSWERED" if answered else "NO_ANSWER"
+    if answered:
+        n_ok += 1
+    rec = f"[curl] {verdict}[{tag}] expect={expect!r} reply={text[:400]!r}"
+    lines.append(rec)
+    print(rec, flush=True)
+summary = f"[curl] summary {n_ok}/3 ANSWERED"
+lines.append(summary)
+print(summary, flush=True)
+with open(log_path, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(lines) + "\n")
+print(f"[curl] log={log_path}", flush=True)
+PY
     sleep 20
 }
