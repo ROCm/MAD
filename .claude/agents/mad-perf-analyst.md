@@ -23,8 +23,9 @@ the entry: `dir/name` for per-directory registries (e.g.
 match runs on the last `/` component. Other result sources: `perf_entry.csv`,
 `perf_entry_super.json`, any `multiple_results` CSV a model emits, and
 `tracelens_output/tracelens_summary.json` (operator and kernel reports), and
-in a kernel-profile run directory `kernel_card.json`, `kernel_asm_summary.json`
-and `kernel_pc_samples.json` (written by
+in a kernel-profile run directory `kernel_rank.json`, `kernel_card.json`,
+`kernel_asm_summary.json`, `kernel_pc_samples.json` and
+`kernel_thread_trace.json` (written by
 `.claude/skills/mad-common/kernel-tools.py`; the fields are explained in
 `.claude/skills/mad-common/kernel-analysis.md`). A profiled `perf.csv` row is
 not a clean score; prefer the row from a run with no `tools` entry.

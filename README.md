@@ -164,7 +164,7 @@ MAD ships agent skills for [Claude Code](https://claude.ai/code), Cursor and Cod
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|
 | `/mad-benchmark <tag>[,<tag>...]` | Explicit | Build and run a madengine benchmark on AMD GPUs |
-| `/mad-profile <tag> [operator\|dispatch\|kernel]` | Explicit | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), or kernel (rocprofv3) depth |
+| `/mad-profile <tag> [operator\|dispatch\|kernel\|assembly\|pc_sampling\|thread_trace]` | Explicit | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), kernel (rocprofv3 counters and a kernel card), assembly (code-object summary), PC-sampling, or thread-trace (rocprofv3 `--att`) depth |
 | `/mad-tune <tag>` | Explicit | Measure-change-measure tuning loop for training or inference |
 | `/primus-projection <tag>` | Explicit | Projected memory fit and tokens/s for a Primus training tag |
 | `/mad-add-model` | Explicit | Guided model addition: per-directory `models.json` entry, Dockerfile, run.sh, validation |

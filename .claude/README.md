@@ -161,6 +161,8 @@ Checks (all GPU-free, all run in CI):
   frontmatter, `.agents/skills` links, and explicit-only consistency
 - `python3 tools/validation/model_config_validator.py` — every model registry
 - `node --test tools/tests/*.test.mjs` — the workflows, against a mock agent
+- `python3 -m unittest discover -s tools/tests -p 'test_*.py'` — `kernel-tools.py`
+  and `geak-run.sh`, on recorded rocprofv3 and Triton output
 - `python3 tools/agent_config/codex_agents.py --check` — the Codex agents match
   `.claude/agents/`
 

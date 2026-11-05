@@ -21,7 +21,7 @@ has a skill in `.claude/skills/`, linked into `.agents/skills/` for Codex
 | Skill | Invocation | What it does |
 |-------|-----------|--------------|
 | `mad-benchmark` | explicit only | Build and run a madengine benchmark |
-| `mad-profile` | explicit only | Profile at the operator, dispatch, or kernel depth |
+| `mad-profile` | explicit only | Profile at the operator, dispatch, kernel, assembly, PC-sampling, or thread-trace depth |
 | `mad-tune` | explicit only | Measure-change-measure tuning loop |
 | `primus-projection` | explicit only | Projected memory fit and tokens/s for a Primus training tag only |
 | `mad-add-model` | explicit only | Guided model addition and validation |
