@@ -67,7 +67,8 @@ def test_bridge_unenriched_computes_tps() -> None:
 
 
 def test_log_world_size_overrides_cli_fallback() -> None:
-    # Multi-node: run.sh passes the local GPU count (8); the log reports the global 16.
+    # Multi-node: run.sh passes its NNODES x local-GPUs estimate (8 here, a stale guess); the
+    # log reports the real world size, 16, and wins.
     with tempfile.TemporaryDirectory() as tmp:
         log = _write(Path(tmp), BRIDGE_UNENRICHED.replace("world_size ................................ 8", "world_size ................................ 16"))
         metrics = _mod.extract_metrics(str(log), num_gpus=8)

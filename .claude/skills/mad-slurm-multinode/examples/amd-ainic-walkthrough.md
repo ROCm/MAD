@@ -65,7 +65,7 @@ Edits applied to `run_manifest_primus_8b_ainic.json`:
 - `NCCL_SOCKET_IFNAME=eno0`, `GLOO_SOCKET_IFNAME=eno0`, `NCCL_IB_GID_INDEX=1`
 - `RDMAV_DRIVERS=ionic`, `IBV_DRIVERS=ionic`, `RCCL_AINIC_ROCE=1` in BOTH blocks
 - `slurm.network_interface=eno0`
-- `docker_image=rocm/primus:v26.2-rccl-<drop>-<sha7>`
+- `docker_image=rocm/primus:v26.8-rccl-<drop>-<sha7>`
 
 For a custom RCCL drop you can also set `context.docker_build_arg` with
 `BUILD_GPU_TARGETS=gfx950`, `RCCL_REPO`, `RCCL_COMMIT` — this rebuilds RCCL via

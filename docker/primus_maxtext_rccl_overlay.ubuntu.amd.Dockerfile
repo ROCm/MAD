@@ -22,7 +22,7 @@
 #
 # Primus JAX/MaxText training image with a candidate RCCL built from source.
 #
-#   base : rocm/jax-training:maxtext-v26.6
+#   base : rocm/jax-training:maxtext-v26.8
 #   +    : the Primus payload of docker/primus_maxtext.ubuntu.amd.Dockerfile
 #   +    : RCCL built from ${RCCL_REPO}@${RCCL_BRANCH}[/${RCCL_COMMIT}] for
 #          ${BUILD_GPU_TARGETS} (gfx942=MI300X/MI325X, gfx950=MI350X/MI355X)
@@ -65,7 +65,7 @@
 #   bash tools/fetch_primus.sh
 #   docker build -f docker/primus_maxtext_rccl_overlay.ubuntu.amd.Dockerfile .
 #
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.6
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.8
 
 # ---- shared base: apt mirror hygiene (so both stages resolve the same) ------
 FROM ${BASE_DOCKER} AS apt-base

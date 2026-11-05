@@ -1,0 +1,39 @@
+# vLLM-Omni diffusion benchmark configs.
+#
+# Run-shape lives here (hf_pipeline_tag / width / height / num_images / tp /
+# max_concurrency); perf tuning (extra_args / env / docker_base) lives in perf.yaml.
+# num_inference_steps unset -> bench default 50 (FLUX.1-dev native default is 28).
+
+## FLUX.1-dev text-to-image — issue #205
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  dtype: auto
+  num_images: 1
+  height: 1024
+  width: 1024
+  max_concurrency: 1
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  dtype: auto
+  num_images: 1
+  height: 2000
+  width: 2000
+  max_concurrency: 1
+
+## FLUX accuracy
+- benchmark: accuracy
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.1-dev
+  tp: 8
+  dtype: auto
+
+- benchmark: accuracy
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 8
+  dtype: auto

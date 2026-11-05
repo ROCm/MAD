@@ -14,7 +14,7 @@ This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X,
 accelerators. It includes:
 
 -   ✅ ROCm™ 7.2.3
--   ✅ vLLM 0.28.0
+-   ✅ vLLM 0.29.0
 -   ✅ PyTorch 2.12.0 (2.12.0+git6bbd260)
 -   ✅ hipBLASLt 1.0
 
@@ -51,14 +51,14 @@ cat /proc/sys/kernel/numa_balancing
 
 For the experimental features and known issues concerning ROCm optimization efforts on vLLM, see the developer's guide at [ROCm/vLLM](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
-To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [CSV configs](../../scripts/vllm/configs/)
+To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [YAML configs](../../scripts/vllm/configs/)
 
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.28.0
+docker pull vllm/vllm-openai-rocm:v0.29.0
 ```
 
 ### MAD-integrated benchmarking
@@ -71,14 +71,14 @@ cd MAD
 pip install -r requirements.txt
 ```
 
-Use this command to run a performance benchmark test of the Llama 3.1 8B model on one GPU with float16 data type in the host machine. 
+Use this command to run a performance benchmark test of the Llama 3.1 8B model with an FP8 KV cache (`amd/Llama-3.1-8B-Instruct-FP8-KV`) in the host machine.
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
 madengine run --tags pyt_vllm_llama-3.1-8b_fp8 --keep-model-dir --live-output
 ```
 
-ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b_fp8`. The benchmark results of the model are collected at `perf_Llama-3.1-8B-Instruct.csv`.
+ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b_fp8`. The benchmark results of the model are collected at `perf_Llama-3.1-8B-Instruct-FP8-KV.csv`.
 
 Although the following models are pre-configured to collect online serving performance data,
 users can also directly run the vLLm benchmark scripts and change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
@@ -94,6 +94,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_command-r7b                   | [CohereLabs/c4ai-command-r7b-12-2024](https://huggingface.co/CohereLabs/c4ai-command-r7b-12-2024) |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
 | pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4) |
+| pyt_vllm_deepseek-v3.2                 | [deepseek-ai/DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2) |
 | pyt_vllm_deepseek-v3.2_fp4             | [amd/DeepSeek-V3.2-MXFP4](https://huggingface.co/amd/DeepSeek-V3.2-MXFP4) |
 | pyt_vllm_deepseek-v4-flash             | [deepseek-ai/DeepSeek-V4-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash) |
 | pyt_vllm_deepseek-v4-pro               | [deepseek-ai/DeepSeek-V4-Pro](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro) |
@@ -103,7 +104,7 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_glm-5.2_fp4                   | [amd/GLM-5.2-MXFP4](https://huggingface.co/amd/GLM-5.2-MXFP4) |
 | pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
 | pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
-| pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss120b-w-mxfp4-a-fp8) |
+| pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss-120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss-120b-w-mxfp4-a-fp8) |
 | pyt_vllm_kimi-k2.6                     | [moonshotai/Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6) |
 | pyt_vllm_kimi-k2.6_fp4                 | [amd/Kimi-K2.6-MXFP4](https://huggingface.co/amd/Kimi-K2.6-MXFP4) |
 | pyt_vllm_kimi-k3                       | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
@@ -133,23 +134,15 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
 
 >[!NOTE]
->`pyt_vllm_kimi-k3` is the one exception to the shared Docker image above. It builds from
->the model-specific `vllm/vllm-openai-rocm:kimi-k3` image via
->[docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_vllm_kimi_k3.ubuntu.amd.Dockerfile).
->It needs an 8x MI350X/MI355X (gfx950) node — the ~1680 GB minimum footprint does not fit a
->single 8x MI300X node — and the checkpoint is ~1.56 TB, so make sure `HF_HUB_CACHE` has room.
->It is deliberately not tagged `vllm_default`; run it explicitly:
->
->```sh
->madengine run --tags pyt_vllm_kimi-k3 --keep-model-dir --live-output
->```
->
->The config tracks the [MI355X recipe profile](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x)
->for a text-only serving run, with two intentional deviations: MAD adds
->`--no-enable-prefix-caching` for benchmark hygiene (as it does for every model here), and the
->gsm8k accuracy stage is disabled because K3's always-on reasoning is returned inline over
->`/v1/completions` and exhausts the generation budget.
-
+>`pyt_vllm_kimi-k3` uses the shared Docker image above but needs an 8x MI350X/MI355X (gfx950)
+>node — the ~1680 GB minimum footprint does not fit a single 8x MI300X node, so the tag is
+>skipped on gfx942 — and the checkpoint is ~1.56 TB, so make sure `HF_HUB_CACHE` has room.
+>The sweep (concurrency 1–128, input 1024, output 1024) is the Kimi-K3 block in
+>[configs/default.yaml](../../scripts/vllm/configs/default.yaml). Server flags and env vars come
+>from the Kimi-K3 entry in [configs/perf.yaml](../../scripts/vllm/configs/perf.yaml), which follows the
+>[MI355X recipe profile](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x). The K3 row is
+>`benchmark: serving`, so it does not run GSM8K: over `/v1/completions` the always-on reasoning
+>exhausts the `max_gen_toks=2048` budget and the score is meaningless.
 
 ### Standalone benchmarking              
 -----------------------------
@@ -158,9 +151,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.28.0
+docker pull vllm/vllm-openai-rocm:v0.29.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.28.0
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.29.0
 ```
 
 >[!NOTE]
@@ -254,6 +247,8 @@ vllm bench serve --model $model \
 
 #### Accuracy Command
 
+The MAD accuracy runs (the `vllm-accuracy` tag) are driven by [configs/acc.yaml](../../scripts/vllm/configs/acc.yaml), which defines the lm_eval task, endpoint and generation settings per model. The steps below reproduce one of those runs by hand.
+
 1. Start the server
 ```
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
@@ -284,8 +279,8 @@ pip install lm-eval[api]
 # Run the benchmark
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
 lm_eval --model local-completions \
-    --model_args model=$model,max_gen_toks=2048,num_concurrent=256,max_retries=10,base_url=http://localhost:8000/v1/completions \
-    --tasks gsm8k --limit 250 --output_path ./tmp
+    --model_args model=$model,max_gen_toks=2048,num_concurrent=64,max_retries=3,base_url=http://localhost:8000/v1/completions,tokenized_requests=False \
+    --tasks gsm8k --num_fewshot 0 --output_path ./tmp
 ```
 
 >[!NOTE]
@@ -375,6 +370,9 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.29.0
+- Updated Kimi K3 to use upstream image
 
 v0.28.0
 - Added Cohere Command R7B and Command A+ to the extended benchmark suite

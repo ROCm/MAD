@@ -8,7 +8,7 @@ TCP connection using newline-delimited JSON messages.
 Used by all backends for inter-node coordination during benchmarks.
 
 The sync TCP port defaults to 9999. Override via the ``port`` argument or
-``--sync-port`` on benchmark CLIs (RIXL/Mori/Mooncake target/initiator scripts).
+``--sync-port`` on benchmark CLIs (NIXL/Mori/Mooncake target/initiator scripts).
 """
 
 import json

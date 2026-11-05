@@ -17,7 +17,7 @@ Below are blueprints of supported models along with their documentation.
 | [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Kimi-K3, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
 | [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B, Kimi-K3 |
 | [**PyTorch training**](benchmark/pytorch_train/README.md) | Train LLMs on AMD Instinct GPUs using AMD's Primus | Llama 2/3/3.1/3.2/3.3/4, GPT-OSS 20B/120B, Qwen2/2.5/3, Flux, SDXL, DLRM, and others |
-| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, Janus-Pro-7B, HunyuanVideo |
+| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, HunyuanVideo |
 | [**Megatron-LM training**](benchmark/megatron_lm/README.md) | Train LLMs on AMD Instinct GPUs using ROCm Megatron-LM | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.3 70B, DeepSeek-V2-lite, DeepSeek-V3, Mixtral 8x7B/8x22B, Qwen 2.5 7B/72B |
 | [**MPT-30B training (llm-foundry)**](benchmark/llm-foundry/mpt-30b/README.md) | LLM Training for Mosaic Pretrained Transformer (MPT) models using llm-foundry | MPT-30B |
 | [**PyTorch PEFT/FSDP fine-tuning**](scripts/pytorch_train/HF_PEFT_FSDP/README.md) | Finetuning a HF model with LoRA approach & FSDP strategy | Llama-2-70b-chat-hf |

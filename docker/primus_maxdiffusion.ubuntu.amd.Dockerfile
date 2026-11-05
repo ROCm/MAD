@@ -44,7 +44,7 @@
 
 # madengine passes the base via docker_build_arg, which is how the v26.6 sweep put both
 # maxtext and maxdiffusion on one unified CI image so their numbers share a toolchain.
-ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.7
+ARG BASE_DOCKER=rocm/jax-training:maxtext-v26.8
 FROM $BASE_DOCKER
 
 USER root
@@ -68,7 +68,7 @@ COPY scripts/Primus/ /workspace/Primus/
 
 RUN test -f /workspace/Primus/primus-cli
 RUN test -d /workspace/Primus/primus/backends/maxdiffusion \
-    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus v26.7.0." >&2 && exit 1)
+    || (echo "ERROR: Primus checkout lacks primus/backends/maxdiffusion; use Primus v26.8.0." >&2 && exit 1)
 
 # Prove the base's stack is really there, so a wrong base fails the build instead
 # of step 0 of a training run. The patch fixes a segfault on TE import order.

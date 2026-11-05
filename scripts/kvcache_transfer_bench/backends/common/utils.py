@@ -1,7 +1,7 @@
 """
 Shared utilities for KV cache benchmark backends.
 
-Provides common functions used across mooncake, rixl, and mori backends
+Provides common functions used across mooncake, nixl, and mori backends
 to avoid code duplication.
 """
 

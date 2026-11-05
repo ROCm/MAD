@@ -1,8 +1,9 @@
 """Primus / Megatron-LM pretraining launched by madengine.
 
-Layout: madengine gives each node a directory and one combined stdout, ``node_*/stdout.out``. MAD's
-run.sh loops over datatypes inside a single job, so one log covers BF16 then FP8 back to back and
-the phase is announced in the log when Megatron picks up the next experiment config.
+Layout: madengine gives each node a directory and one combined stdout, ``node_*/stdout.out``.
+scripts/primus_train runs one experiment config, so one precision, per job; jobs of the retired
+scripts/primus_megatron-lm looped over datatypes, so one log covers BF16 then FP8 back to back.
+Either way the phase is announced in the log when Megatron picks up an experiment config.
 
 Traces: Megatron writes them under the per-experiment tensorboard directory, whose name carries the
 datatype, so the phase of a trace is readable from its path.
@@ -17,7 +18,7 @@ from ..core.spec import (LOG_PER_RANK, NODE_FROM_PARENT, NODE_FROM_STEM, PHASE_F
                          PHASE_FROM_MARKER, EngineSpec, LogLayout, LogMetric, ReportNotes,
                          SanityLimits, TraceLayout)
 
-#: The Primus experiment config picked by MAD's dtype loop, read off the ``--config`` the launcher
+#: The Primus experiment config of the phase, read off the ``--config`` the launcher
 #: passes. The model part varies per workload (llama3.1_8B, llama3.1_70B, gpt_oss_120B, ...), so
 #: only the dtype and the suffix are anchored. The ``--config`` is load-bearing, not decoration: a
 #: config path is also printed by lines that name both datatypes at once -- the mount list and the
@@ -56,7 +57,7 @@ SPEC = EngineSpec(
         phase_marker=RE_PHASE,
         marker_guard="--config",
     ),
-    # `BF16.node_1.<host>.<pid>.log`, one per rank per datatype, written when MAD's dtype loop was
+    # `BF16.node_1.<host>.<pid>.log`, one per rank per datatype, written when MAD's run.sh is
     # given RCCL_LOG_DIR. The datatype has to be in the name: the markers that separate the phases
     # are printed to stdout, and these files hold nothing but RCCL. They also carry every rank
     # rather than the few `--local-ranks-filter` lets through, so this is the layout that sees all

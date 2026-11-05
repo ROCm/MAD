@@ -2,7 +2,8 @@
 #
 # Primus megatron-lm training image with a candidate RCCL built from source.
 #
-#   base : rocm/primus:v26.5
+#   base : rocm/primus:v26.8
+#   +    : Primus from the scripts/Primus submodule (replaces the base image's copy)
 #   +    : RCCL built from ${RCCL_REPO}@${RCCL_BRANCH}[/${RCCL_COMMIT}] for
 #          ${BUILD_GPU_TARGETS} (gfx942=MI300X/MI325X, gfx950=MI350X/MI355X)
 #   +    : candidate librccl installed over EVERY location torch resolves
@@ -28,7 +29,11 @@
 # keeps the full RCCL source/build tree AND the heavy build toolchain
 # (build-essential, cmake, ninja) out of the shipped image.
 #
-ARG BASE_DOCKER=rocm/primus:v26.5
+# BUILD CONTEXT is the repo root (COPY scripts/Primus/, docker/kimi_k2_configs/):
+#   docker build -f docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile .
+# madengine picks "." by itself for any dockerfile path containing "primus".
+#
+ARG BASE_DOCKER=rocm/primus:v26.8
 
 # ---- shared base: apt mirror hygiene (so both stages resolve the same) ------
 FROM ${BASE_DOCKER} AS apt-base
@@ -142,6 +147,7 @@ ARG BUILD_GPU_TARGETS=gfx942
 ARG RDMA_CORE_VERSION=
 
 ENV WORKSPACE_DIR=/workspace
+ENV PRIMUS_ROOT=/workspace/Primus
 ENV RCCL_HOME=${RCCL_INSTALL_DIR}
 # Prepend the candidate RCCL dir but KEEP the base image's paths (ROCm libs).
 # The candidate librccl is also installed over the system path + ldconfig, so
@@ -171,9 +177,16 @@ RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update && \
 # add_needed() adds librocm_smi64 to NEEDED idempotently (skips if already
 # present, so re-running never appends duplicates) and FAILS the build if
 # patchelf cannot apply it -- `import torch` depends on this resolving rsmi_init.
+# It is a no-op for a librccl with no undefined rsmi_* symbols: RCCL built
+# against amd-smi (rocm/primus:v26.8 ships libamd_smi.so.27 and no
+# librocm_smi64 at all) would otherwise gain a NEEDED entry nothing provides,
+# and `import torch` fails to dlopen it.
 RUN set -e && \
     add_needed() { \
       local lib="$1"; \
+      if [ "$(nm -D --undefined-only "$lib" | grep -cE '[[:space:]]rsmi_' || true)" -eq 0 ]; then \
+        echo "  add_needed: $lib does not use rocm_smi, skipped"; return 0; \
+      fi; \
       if objdump -p "$lib" | grep -qE "NEEDED[[:space:]]+librocm_smi64"; then \
         echo "  add_needed: already present in $lib"; return 0; \
       fi; \
@@ -286,20 +299,25 @@ RUN if [[ -n "${RDMA_CORE_VERSION}" ]]; then \
       echo "RDMA_CORE_VERSION empty — keeping base image rdma-core"; \
     fi
 
+# ---- Primus: the pinned submodule, same tree as docker/primus ---------------
+# The base image's /workspace/Primus is a full git clone (.git is a directory) and
+# COPY cannot replace it, so remove it first. Pinning to the submodule keeps the
+# A/B pair on one Primus commit whatever the base image happens to ship.
+RUN rm -rf ${WORKSPACE_DIR}/Primus
+COPY scripts/Primus/ ${WORKSPACE_DIR}/Primus/
+RUN test -f ${WORKSPACE_DIR}/Primus/primus-cli || test -f ${WORKSPACE_DIR}/Primus/runner/primus-cli
+LABEL mad.launcher=primus
+
 # ---- Kimi-K2-Thinking Primus configs ----------------------------------------
-# Primus ships model/experiment YAMLs inside the base image; Kimi-K2-Thinking is
-# not one of them, so the two configs are carried in this repo and injected here.
-# Harmless for every other model: two YAML files nobody reads unless
-# primus_pyt_megatron_lm_train_kimi-k2-thinking is the requested model repo.
-#
-# NOTE: these COPY lines make ./docker the required build context (which is what
-# the manifest templates already set via "dockercontext": "./docker").
-COPY kimi_k2_configs/kimi_k2_thinking.yaml \
+# Primus ships Kimi-K2 but not Kimi-K2-Thinking, so its two configs are carried in
+# this repo and injected here. Harmless for every other model: two YAML files
+# nobody reads unless a primus_train/megatron_*_kimi_k2_thinking-* model runs.
+COPY docker/kimi_k2_configs/kimi_k2_thinking.yaml \
      ${WORKSPACE_DIR}/Primus/primus/configs/models/megatron/kimi_k2_thinking.yaml
-COPY kimi_k2_configs/kimi_k2_thinking-BF16-pretrain.yaml \
+COPY docker/kimi_k2_configs/kimi_k2_thinking-BF16-pretrain.yaml \
      ${WORKSPACE_DIR}/Primus/examples/megatron/configs/MI355X/kimi_k2_thinking-BF16-pretrain.yaml
-# benchmark_report.sh resolves the config under $CONFIG_DEVICE, so mirror the
-# experiment YAML into every device dir the base image actually ships.
+# primus_train registers the model per GPU (scripts/primus_train/model_overrides.py),
+# so mirror the experiment YAML into every device dir Primus ships.
 RUN set -e; \
     for d in MI350X MI300X MI325X; do \
       tgt="${WORKSPACE_DIR}/Primus/examples/megatron/configs/${d}"; \
@@ -313,19 +331,16 @@ RUN set -e; \
 # outlasts 600s and drops the slower ranks out of the rendezvous with
 # DistStoreError. Applied unconditionally: a longer rendezvous timeout only
 # changes how long a genuinely stuck job takes to fail, and multi-node runs of
-# every other model benefit from the same headroom.
+# every other model benefit from the same headroom. Primus is the pinned submodule,
+# so a launcher that no longer matches the sed is a build error, not a silent skip.
 RUN set -e; \
-    for f in ${WORKSPACE_DIR}/Primus/examples/run_pretrain.sh \
-             ${WORKSPACE_DIR}/Primus/runner/primus-cli-direct.sh; do \
-      if [ -f "$f" ]; then \
-        if grep -q "rdzv.conf" "$f"; then \
-          sed -i 's/--rdzv-conf timeout=[0-9]*/--rdzv-conf timeout=7200/' "$f"; \
-        else \
-          sed -i 's/\(--master_port[^)]*\)$/\1\n        --rdzv-conf timeout=7200/' "$f"; \
-        fi; \
-        grep -n "rdzv" "$f" | head -3; \
-      fi; \
-    done
+    f=${WORKSPACE_DIR}/Primus/runner/primus-cli-direct.sh; \
+    if grep -q "rdzv.conf" "$f"; then \
+      sed -i 's/--rdzv-conf timeout=[0-9]*/--rdzv-conf timeout=7200/' "$f"; \
+    else \
+      sed -i 's/\(--master_port[^)]*\)$/\1\n        --rdzv-conf timeout=7200/' "$f"; \
+    fi; \
+    grep -n "rdzv-conf timeout=7200" "$f" || { echo "rdzv patch did not apply to $f"; exit 1; }
 
 # ---- final verification: import torch + every librccl == candidate ----------
 RUN set -e && \

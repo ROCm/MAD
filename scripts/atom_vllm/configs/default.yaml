@@ -1,0 +1,27 @@
+# ATOM vLLM Plugin - Default serving benchmarks
+# 1k 1k mc1 mc8 mc32 mc128
+
+## Llama 3.1 models with ATOM vLLM plugin
+- benchmark: serving
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-405B-Instruct meta-llama/Llama-3.1-405B-Instruct-FP8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  model: meta-llama/Llama-3.3-70B-Instruct
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128

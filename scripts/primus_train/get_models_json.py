@@ -5,10 +5,13 @@ Convention-based: globs examples/*/configs/**/*.yaml from the Primus submodule (
 so all launchers (megatron, megatron_bridge, torchtitan, maxtext, moe_package, etc.) are
 discovered. New launchers added under examples/<name>/configs/ are picked up automatically.
 All discovered models use the same dockerfile and run.sh; args pass --config_path <relpath>.
+model_overrides.py adds what the submodule cannot be globbed for: variant models (a
+"-proxy" suffix and --variant <name>) and configs only the RCCL overlay image carries.
 For SLURM/K8s, supply distributed (launcher, nnodes, primus.config_path) via additional_context.
 """
 import os
 import glob
+import sys
 
 try:
     from madengine.utils.discover_models import CustomModel  # madengine v2
@@ -18,6 +21,8 @@ except ImportError:
 # This file lives in scripts/primus_train; Primus submodule is scripts/Primus
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 PRIMUS_ROOT = os.path.normpath(os.path.join(THIS_DIR, "..", "Primus"))
+sys.path.insert(0, THIS_DIR)
+import model_overrides  # noqa: E402
 # One glob for all launchers: examples/<launcher>/configs/**/*.yaml
 CONFIGS_GLOB = os.path.join(PRIMUS_ROOT, "examples", "*", "configs", "**", "*.yaml")
 
@@ -67,6 +72,7 @@ def list_models():
     # recursive=True is required for ** to span directories; without it configs nested one
     # level deeper (examples/<launcher>/configs/<arch>/diffusion/*.yaml) are silently skipped,
     # which hides all of the nemo_automodel backend added in Primus v26.6.
+    configs = []
     for yaml_path in sorted(glob.glob(CONFIGS_GLOB, recursive=True)):
         rel_path = os.path.relpath(yaml_path, PRIMUS_ROOT)
         # Path shape: examples/<launcher>/configs/<arch>/<file>.yaml
@@ -76,25 +82,38 @@ def list_models():
         launcher = parts[1]   # megatron, torchtitan, megatron_bridge, etc.
         if launcher in JAX_BACKENDS:
             continue
-        arch = parts[3]       # MI300X, MI355X, etc.
-        short_name = os.path.splitext(os.path.basename(yaml_path))[0]
-        # discover_models prefixes with dirname (primus_train/), so no prefix here
-        name = f"{launcher}_{arch}_{short_name}"
-        tags = ["primus", launcher, arch, short_name]
-        models.append(
-            CustomModel(
-                name=name,
-                dockerfile="../../docker/primus",
-                dockercontext=".",
-                scripts="run.sh",
-                data="",
-                n_gpus="8",
-                owner="mad.support@amd.com",
-                timeout=86400,
-                training_precision=precision_from_config_name(short_name),
-                tags=tags,
-                args=f"--config_path {rel_path}",
-                multiple_results="primus_perf_output.csv",
-            )
-        )
+        configs.append((launcher, parts[3], rel_path, None))
+    configs.extend(model_overrides.EXTRA_MODELS)
+
+    seen = set()
+    for launcher, arch, rel_path, dockerfile in configs:
+        variants = [""]
+        if launcher == "megatron":
+            variants += model_overrides.variants_for(rel_path, arch)
+        for variant in variants:
+            model = _config_model(launcher, arch, rel_path, dockerfile, variant)
+            if model.name not in seen:
+                seen.add(model.name)
+                models.append(model)
     return models
+
+
+def _config_model(launcher, arch, rel_path, dockerfile=None, variant=""):
+    short_name = model_overrides.config_name(rel_path)
+    # discover_models prefixes with dirname (primus_train/), so no prefix here
+    name = f"{launcher}_{arch}_{short_name}" + (f"-{variant}" if variant else "")
+    tags = ["primus", launcher, arch, short_name] + ([variant] if variant else [])
+    return CustomModel(
+        name=name,
+        dockerfile=dockerfile or "../../docker/primus",
+        dockercontext=".",
+        scripts="run.sh",
+        data="",
+        n_gpus="8",
+        owner="mad.support@amd.com",
+        timeout=86400,
+        training_precision=precision_from_config_name(short_name),
+        tags=tags,
+        args=f"--config_path {rel_path}" + (f" --variant {variant}" if variant else ""),
+        multiple_results="primus_perf_output.csv",
+    )

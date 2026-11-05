@@ -4,8 +4,8 @@
 # measures steady-state tok/s and TFLOP/s on synthetic batches over 50 steps and
 # saves nothing (disable_last_saving). It uses the real 61-layer architecture, so
 # the numbers are representative of the shape, but no checkpoint is produced and
-# no dataset is read. Setting PRIMUS_SANITY_TRAIN_ITERS additionally cuts the run
-# to 3 layers for CI/build sanity — see references/gotchas.md.
+# no dataset is read. The primus_train "-proxy" model cuts the run to 3 layers for
+# CI/build sanity — see scripts/primus_train/model_overrides.py.
 work_group: ${PRIMUS_TEAM:amd}
 user_name: ${PRIMUS_USER:root}
 exp_name: ${PRIMUS_EXP_NAME:kimi_k2_thinking-pretrain}
