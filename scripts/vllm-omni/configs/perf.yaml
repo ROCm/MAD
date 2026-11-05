@@ -1,0 +1,11 @@
+# Perf-tuning sheet for vLLM-Omni diffusion models.
+#
+# Entries are keyed by a space-separated `model` list and carry only extra_args /
+# env / docker_base. Merge into configs/default.yaml is a gap-fill: the base
+# config always wins. docker_base is consumed by the CI/madengine build layer as
+# --build-arg BASE_DOCKER, not by run_vllm_omni.py.
+
+## FLUX diffusion: vLLM-Omni ROCm image ships the --omni server + diffusion bench.
+## aiter kernels are already default in this image, so no extra env/args needed.
+- model: black-forest-labs/FLUX.1-dev black-forest-labs/FLUX.2-dev
+  docker_base: vllm/vllm-omni-rocm:v0.22.0

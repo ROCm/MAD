@@ -8,6 +8,7 @@ START_SIZE="4096" # 4kb
 STOP_SIZE="1073741824" # 1GB
 IBDEVICES="mlx5_0"
 SYNC_PORT="9999"
+MODEL_NAME="pyt_kvcache_transfer_bench_all"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             SYNC_PORT="$2"
             shift 2
             ;;
+        --model-name)
+            MODEL_NAME="$2"
+            shift 2
+            ;;
         *)
             shift
             ;;
@@ -55,14 +60,14 @@ done
 
 BENCH_BACKENDS=$(echo "$BENCH_BACKENDS" | tr ',' ' ')
 if [ "$BENCH_BACKENDS" = "all" ]; then
-    BENCH_BACKENDS="mooncake mori rixl"
+    BENCH_BACKENDS="mooncake mori mori_cpp nixl"
 fi
 
 JOB_ID=${SLURM_JOB_ID:-${JOB_ID:-unknown}}
 SHARED_FOLDER_BASE="${SHARED_FOLDER:-${KV_CACHE_TEST_PATH}}"
 SHARED_FOLDER="${SHARED_FOLDER_BASE%/}/shared/results_${JOB_ID}"
 
-# UCX/GLOO env for RDMA/ROCm transfers (used by mori, rixl, mooncake)
+# UCX/GLOO env for RDMA/ROCm transfers (used by mori, nixl, mooncake)
 export GLOO_SOCKET_IFNAME=eth0
 export UCX_TLS=rc,sm,self,rocm_copy,rocm_ipc,tcp
 export UCX_NET_DEVICES="${IBDEVICES}:1"
@@ -84,7 +89,7 @@ missing=
 
 if [ -n "$missing" ]; then
     echo "ERROR: Required arguments not set: $missing" >&2
-    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV]" >&2
+    echo "Usage: $0 --node1 HOST --node2 HOST [--kv-cache-test-path PATH] [--shared-folder PATH] [--backends BACKENDS] [--start-size N] [--stop-size N] [--sync-port N] [--ibdevice DEV] [--model-name NAME]" >&2
     exit 1
 fi
 
@@ -125,6 +130,18 @@ if [ "$NODE1" != "$CURRENT_HOST" ]; then
         --input-dir "$SHARED_FOLDER" \
         --output "$SHARED_FOLDER/results_merged.json"
     echo "=== Merge complete (exit code $?) ==="
+
+    # Output path must match the glob in madengine's _collect_slurm_multi_results
+    echo "=== Generating perf.csv ==="
+    python3 $KV_CACHE_TEST_PATH/scripts/to_perf_csv.py \
+        --input-dir "$SHARED_FOLDER" \
+        --output "$KV_CACHE_TEST_PATH/slurm_output/perf_csv/results_${JOB_ID}.csv" \
+        --model-name "$MODEL_NAME" \
+        --backends "$(echo "$BENCH_BACKENDS" | tr ' ' ',')"
+    echo "=== perf.csv generation complete (exit code $?) ==="
+
+    chown -R "$(stat -c '%u:%g' "$KV_CACHE_TEST_PATH")" \
+        "$KV_CACHE_TEST_PATH/slurm_output" "$SHARED_FOLDER" 2>/dev/null || true
 
     # Copy SLURM output/error files into the shared results folder
     if [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -n "${JOB_ID:-}" ] && [ "$JOB_ID" != "unknown" ]; then
