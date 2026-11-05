@@ -169,6 +169,9 @@ class ModelConfigValidator:
         for field in self.REQUIRED_FIELDS:
             if field not in model_entry:
                 self.errors.append(f"Missing required field: {field}")
+            elif field == 'owner' and model_entry[field] == '':
+                # madengine accepts it, and registered runner entries leave it empty
+                self.warnings.append("Required field is empty: owner")
             elif not model_entry[field]:
                 self.errors.append(f"Required field is empty: {field}")
 
@@ -180,9 +183,10 @@ class ModelConfigValidator:
         if not isinstance(name, str):
             return  # reported by _check_field_types
 
-        # Check format
+        # A warning, not an error: registered shared-runner entries such as
+        # vllm-perf predate the convention and their names are user-facing tags.
         if not re.match(r'^[a-z]+_[a-z0-9_.\-]+$', name):
-            self.errors.append(
+            self.warnings.append(
                 f"Invalid name format: '{name}'. "
                 "Must match pattern: {framework}_{project}_{workload} "
                 "(lowercase, alphanumeric, underscores, hyphens only)"
