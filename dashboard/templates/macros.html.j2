@@ -1,0 +1,66 @@
+{# Shared pieces for the section pages. Import with: {% import "macros.html.j2" as ui with context %} #}
+
+{% macro mark(on, what) -%}
+{% if on %}<span class="yes" aria-hidden="true">✓</span><span class="sr">{{ what }}: yes</span>{% else %}<span class="no" aria-hidden="true">–</span><span class="sr">{{ what }}: no</span>{% endif %}
+{%- endmacro %}
+
+{# Model-level support: every variant (✓), some variants (◐, tooltip names them), none (–). #}
+{% macro support_cell(cell, sku, href) -%}
+{% if cell.state == "all" %}<a class="yes" href="{{ href }}" title="All variants run on {{ sku }}">✓<span class="sr"> {{ sku }}: all variants</span></a>
+{%- elif cell.state == "some" %}<a class="part" href="{{ href }}" title="{{ cell.labels | join(', ') }} only">◐<span class="sr"> {{ sku }}: {{ cell.labels | join(", ") }} only</span></a>
+{%- else %}<span class="no" aria-hidden="true">–</span><span class="sr">{{ sku }}: no</span>{% endif %}
+{%- endmacro %}
+
+{# Nodes and scheduler for a model family, plus its Kubernetes path and multi-node siblings. #}
+{% macro scale_chips(f, root) -%}
+<span class="chip">{{ f.scale_label }}</span>
+{%- if f.k8s %}<span class="chip">K8s: manual</span>{% endif %}
+{%- if f.opt_in %}<span class="chip" title="Discovered only with the registry's multi-node switch; experimental">opt-in</span>{% endif %}
+{%- if f.scale_out %}<a class="chip" href="{{ root }}/models/{{ f.scale_out[0].page }}/index.html" title="Also runs on more nodes: {% for o in f.scale_out %}{{ o.framework }} ({{ o.scale_label }}){% if not loop.last %}, {% endif %}{% endfor %}">↗ multi-node</a>{% endif %}
+{%- endmacro %}
+
+{% macro status_badge(value) -%}
+{% set kind = {"in review": "good", "in progress": "good", "in-progress": "good", "planned": "warning", "blocked": "critical"}.get(value, "") %}
+<span class="status {{ kind }}">{{ value }}</span>
+{%- endmacro %}
+
+{% macro page_header(title, lede, snap, glyph=none) -%}
+<header class="page">
+  <h1>{% if glyph %}{{ icons.glyph(glyph, 28) }}{% endif %}{{ title }}</h1>
+  {% if lede %}<p class="lede">{{ lede }}</p>{% endif %}
+  <div class="meta">{% if snap.state == "live" %}{{ snap.release }} in progress · develop{% else %}Release {{ snap.version }}{% endif %}{% if snap.commit %} @ <a href="{{ gh }}/tree/{{ snap.commit }}" class="mono">{{ snap.commit[:10] }}</a>{% endif %} · generated {{ snap.date }}</div>
+  {% if snap.internal %}
+  <div class="banner" role="alert"><strong>Internal build.</strong> This site includes the internal roadmap from <code>dashboard/roadmap.internal.yaml</code>. Do not publish or forward outside AMD.</div>
+  {% endif %}
+</header>
+{%- endmacro %}
+
+{% macro changes(diff, snap) -%}
+{% if not diff %}
+<p class="lede">{% if snap.state == "live" %}No release has been frozen yet, so there is nothing to compare with. Freeze one with <code>tools/dashboard/build.py --freeze {{ snap.release }}</code>.{% else %}This is the first frozen release; there is no earlier snapshot to compare with.{% endif %}</p>
+{% else %}
+<p class="lede">{{ diff.added | length }} added, {{ diff.removed | length }} removed, {{ diff.image_changes | length }} base image change{{ "s" if diff.image_changes | length != 1 }} since {{ diff.since }}.</p>
+<div class="split">
+  <div class="card">
+    <h3>Added ({{ diff.added | length }})</h3>
+    {% if diff.added %}<ul>{% for m in diff.added %}<li><div class="area">{{ m.model }}</div><div class="scope">{{ m.framework }} · <code>{{ m.name }}</code></div></li>{% endfor %}</ul>
+    {% else %}<div class="empty">None.</div>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Removed ({{ diff.removed | length }})</h3>
+    {% if diff.removed %}<ul>{% for m in diff.removed %}<li><div class="area">{{ m.model }}</div><div class="scope">{{ m.framework }} · <code>{{ m.name }}</code></div></li>{% endfor %}</ul>
+    {% else %}<div class="empty">None.</div>{% endif %}
+  </div>
+</div>
+{% if diff.image_changes %}
+<div class="card" style="margin-top:16px">
+  <table>
+    <thead><tr><th>Framework</th><th>Base image</th><th>ROCm</th></tr></thead>
+    <tbody>{% for c in diff.image_changes %}
+      <tr><td>{{ c.frameworks | join(", ") }}</td><td><code>{{ c.from_image }}</code> → <code>{{ c.to_image }}</code></td><td>{{ c.from_rocm }} → {{ c.to_rocm }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{%- endmacro %}

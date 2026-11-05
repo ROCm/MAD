@@ -1,0 +1,346 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% set methods = [("madengine", "madengine CLI", "one command; madengine builds, runs and records the result"), ("docker", "Docker", "plain docker build + docker run, no madengine")] %}
+{% set mn = f.variants[0].rows[0] %}
+{% block title %}{{ f.name }} on AMD Instinct — {{ f.framework }} | MAD Recipes{% endblock %}
+{% block style %}
+  .layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 32px; }
+  .side { position: sticky; top: 56px; align-self: start; height: calc(100vh - 56px); overflow-y: auto; padding: 16px 4px 32px 0; border-right: 1px solid var(--line); }
+  .side details { margin: 0 0 2px; }
+  .side summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 7px; font-size: 14px; color: var(--ink); }
+  .side summary::-webkit-details-marker { display: none; }
+  .side summary::after { content: "›"; color: var(--ink-3); transition: transform .1s; }
+  .side details[open] > summary::after { transform: rotate(90deg); }
+  .side summary:hover, .side .fw-link:hover { background: var(--subtle); text-decoration: none; }
+  .side .fw-link { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 7px; font-size: 14px; color: var(--ink); margin: 0 0 2px; }
+  .side .fw-link::after { content: "›"; color: var(--ink-3); }
+  .side ul { list-style: none; margin: 2px 0 8px 14px; padding: 0 0 0 10px; border-left: 1px solid var(--line); }
+  .side li a { display: block; font: 12.5px/1.4 var(--mono); color: var(--ink-2); padding: 4px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side li a:hover { background: var(--subtle); text-decoration: none; }
+  .side li a[aria-current="page"] { background: var(--sel-bg); color: var(--sel-ink); }
+  .content { padding: 28px 0 0; min-width: 0; }
+  .m-head h1 { font: 600 30px/1.2 var(--mono); letter-spacing: -0.02em; margin: 0 0 6px; word-break: break-word; }
+  .m-head h1 .org { color: var(--ink-3); font-weight: 400; }
+  .m-head p { margin: 0 0 4px; color: var(--ink-2); }
+  .m-head .links { font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 12px; }
+  .cmd { border: 1px solid var(--line); background: var(--subtle); border-radius: 12px; margin: 18px 0 16px; }
+  .cmd-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px 0; gap: 12px; }
+  .cmd-head .ok { color: var(--good-ink); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+  .cmd-head .ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+  .copy { font: 12.5px var(--sans); color: var(--ink-2); background: var(--code); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .step { padding: 6px 14px 4px; }
+  .step .label { display: block; margin: 8px 0 4px; }
+  .step pre { margin: 0; font: 13px/1.65 var(--mono); color: var(--ink); white-space: pre; overflow-x: auto; padding: 2px 0 6px; }
+  .step .note { color: var(--ink-2); font-size: 12.5px; margin: 0 0 6px; }
+  .cfg { border: 1px solid var(--line); border-radius: 12px; }
+  .row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .label { padding-top: 7px; }
+  .row .opts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .row .sub { display: flex; gap: 10px; align-items: center; }
+  .row .sub > .faint { font: 600 11px var(--sans); letter-spacing: .06em; width: 64px; }
+  .row .help { color: var(--ink-2); font-size: 12.5px; margin-top: 8px; }
+  .row a.pill { color: var(--ink); }
+  .row a.pill:hover { text-decoration: none; }
+  .row a.pill[aria-current="page"] { border-color: var(--sel-line); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; }
+  .crumbs { font-size: 13px; color: var(--ink-3); margin-bottom: 10px; }
+  .crumbs a { color: var(--ink-2); }
+  .support { margin: 16px 0 0; }
+  .support td.mark a { font: 11.5px var(--mono); }
+  .side .all { display: block; padding: 6px 10px; font-size: 13.5px; color: var(--ink-2); margin-bottom: 6px; }
+  .guide { border: 1px solid var(--line); border-radius: 12px; margin: 28px 0 0; padding: 4px 22px 18px; }
+  .guide h2 { font-size: 20px; margin: 22px 0 8px; }
+  .guide p, .guide li { color: var(--ink); }
+  .guide table { margin-top: 6px; font-size: 13.5px; }
+  .guide td:first-child { color: var(--ink-2); white-space: nowrap; width: 170px; }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
+{% endblock %}
+{% block body %}
+<div class="wrap layout">
+  <aside class="side" aria-label="Recipes">
+  <a class="all" href="{{ root }}/models/index.html">← All models</a>
+  {% for fw in frameworks %}
+    {% if fw.slug == f.fw_slug %}
+    <details open>
+      <summary><span class="with-ico" style="gap:8px">{{ icons.framework(fw.name, 16) }}{{ fw.name }}</span></summary>
+      <ul>{% for other in fw.families %}
+        <li><a href="{{ root }}/models/{{ other.page }}/index.html"{% if other.page == f.page %} aria-current="page"{% endif %} title="{{ other.name }}">{{ other.name }}</a></li>
+      {% endfor %}</ul>
+    </details>
+    {% else %}
+    <a class="fw-link" href="{{ root }}/models/index.html?fw={{ fw.slug }}"><span class="with-ico" style="gap:8px">{{ icons.framework(fw.name, 16) }}{{ fw.name }}</span></a>
+    {% endif %}
+  {% endfor %}
+  </aside>
+
+  <main class="content">
+    <div class="m-head">
+      <nav class="crumbs" aria-label="Breadcrumb"><a href="{{ root }}/models/index.html">Models</a> › <a href="{{ root }}/models/index.html?fw={{ f.fw_slug }}">{{ f.framework }}</a> › {{ f.name }}</nav>
+      <div class="with-ico" style="gap:14px;align-items:center;margin-bottom:6px">
+        {{ icons.logo(f.name, f.org, 52) }}
+        <h1 style="margin:0">{% if f.org %}<span class="org">{{ f.org }}/</span>{% endif %}{{ f.name }}</h1>
+      </div>
+      <p>{{ f.framework }} {{ f.workload }} benchmark on AMD Instinct GPUs{% if f.variants | length > 1 %}, {{ f.variants | length }} variants{% endif %}.</p>
+      <p class="faint" style="font-size:13px"><em>Base image <span class="mono">{{ mn.image }}</span> · ROCm {{ mn.rocm }}</em></p>
+      <div class="links">
+        {% if f.hf_repo %}<a href="https://huggingface.co/{{ f.hf_repo }}" class="with-ico" style="gap:6px">{{ icons.mark("huggingface", 15) }}View on Hugging Face ↗</a>{% endif %}
+        {% if f.readme %}<a href="{{ gh }}/blob/{{ gh_ref }}/{{ f.readme }}">{{ f.framework }} guide ↗</a>{% endif %}
+        <a href="{{ gh }}/tree/{{ gh_ref }}/scripts/{{ mn.registry }}">Model card and scripts ↗</a>
+      </div>
+      <div>
+        <span class="chip solid with-ico" style="gap:5px">{{ icons.framework(f.framework, 13) }}{{ f.framework }}</span>
+        <span class="chip">{{ f.workload }}</span>
+        {% for p in f.precisions %}<span class="chip">{{ p }}</span>{% endfor %}
+        <span class="chip">{{ f.gpus }}</span>
+        <span class="chip">{{ f.scale_label }}</span>
+        {% if f.k8s %}<span class="chip">Kubernetes: manual</span>{% endif %}
+        {% if f.opt_in %}<span class="chip">opt-in · experimental</span>{% endif %}
+        <span class="chip">ROCm {{ mn.rocm }}</span>
+      </div>
+      {% if f.opt_in %}
+      <p class="faint" style="font-size:13px;margin-top:8px">madengine discovers this config only with <code>{{ mn.deployment.switch }}=1</code>: it is sized for two or more nodes. The recipe uses madengine's <code>primus</code> launcher on SLURM, which MAD has not validated for this model.</p>
+      {% endif %}
+    </div>
+
+    {% for v in f.variants %}{% for sku, rec in recipes[v.index | int].items() %}{% for c, by_method in rec.items() %}{% for m, steps in by_method.items() %}
+    <div class="cmd" data-n="{{ v.nodes }}" data-v="{{ v.index }}" data-sku="{{ sku }}" data-c="{{ c }}" data-m="{{ m }}" hidden>
+      <div class="cmd-head">
+        <span class="ok">{{ "Opt-in config" if v.by_sku[sku].deployment.status == "opt-in" else "Registered" }} for {{ sku }} ({{ isa_of[sku] }}) · {{ v.by_sku[sku].name }}</span>
+        <button class="copy" type="button">Copy</button>
+      </div>
+      {% for step in steps %}
+      <div class="step">
+        <span class="label">{{ loop.index }}. {{ step.title }}</span>
+        <pre>{{ step.code }}</pre>
+        {% if step.note is defined %}<p class="note">{{ step.note }}</p>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}{% endfor %}{% endfor %}{% endfor %}
+
+    <div class="cfg">
+      {% if f.scale_links %}
+      <div class="row">
+        <span class="label">Scale</span>
+        <div>
+          <div class="opts" role="group" aria-label="Same model, other frameworks">
+          {% for l in f.scale_links %}
+            <a class="pill" href="{{ root }}/models/{{ l.page }}/index.html"{% if l.current %} aria-current="page"{% endif %}>{{ icons.framework(l.framework, 15) }}{{ l.framework }} <small>{{ l.label }}</small></a>
+          {% endfor %}
+          </div>
+          <div class="help">The same model under other frameworks, and the node count each runs on.</div>
+        </div>
+      </div>
+      {% endif %}
+      <div class="row">
+        <span class="label">Hardware</span>
+        <div>
+          <div class="sub"><span class="faint with-ico" style="gap:6px">{{ icons.mark("amd", 15) }}AMD</span>
+            <div class="opts" role="group" aria-label="GPU">
+            {% for sku in snap.skus %}
+              <button class="pill" type="button" data-pick="sku" data-value="{{ sku }}" aria-pressed="false">{{ sku }} <small>{{ isa_of[sku] }}</small></button>
+            {% endfor %}
+            </div>
+          </div>
+          <div class="help">Struck-through GPUs are excluded by the model card (<code>skip_gpu_arch</code> or a per-GPU config).</div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">Nodes</span>
+        <div>
+          <div class="opts" role="group" aria-label="Nodes">
+          {% if f.node_counts | length > 1 %}
+            {% for n in f.node_counts %}<button class="pill" type="button" data-pick="n" data-value="{{ n }}" aria-pressed="false">{{ n }} × 8 GPU</button>{% endfor %}
+          {% else %}
+            <button class="pill" type="button" aria-pressed="true" disabled style="text-decoration:none;color:var(--sel-ink)">{% if f.opt_in %}2+ nodes{% elif f.nodes > 1 %}{{ f.nodes }} nodes{% else %}Single node{% endif %} × 8 GPU</button>
+          {% endif %}
+          </div>
+          {% if f.node_counts | length > 1 %}<div class="help">A scaling sweep: each node count has its own model cards.</div>{% endif %}
+        </div>
+      </div>
+      {% if f.variants | length > 1 %}
+      <div class="row">
+        <span class="label">Variant</span>
+        <div>
+          <div class="opts" role="group" aria-label="Variant">
+          {% for v in f.variants %}
+            <button class="pill" type="button" data-pick="v" data-value="{{ v.index }}" aria-pressed="false">{{ v.label }}</button>
+          {% endfor %}
+          </div>
+          {% for v in f.variants %}
+          <div class="help" data-v-info="{{ v.index }}" hidden>
+            {% if v.hf_repo %}<a href="https://huggingface.co/{{ v.hf_repo }}" class="mono">{{ v.hf_repo }}</a> · {% endif %}{{ v.rows | length }} model card{{ "s" if v.rows | length > 1 }}{% if v.suites %} · {{ v.suites | join(", ") }}{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <div class="row">
+        <span class="label">Cluster</span>
+        <div>
+          <div class="opts" role="group" aria-label="Cluster">
+          {% for c, clabel, chelp in clusters %}
+            <button class="pill" type="button" data-pick="c" data-value="{{ c }}" aria-pressed="false">{{ clabel }}</button>
+          {% endfor %}
+          </div>
+          {% for c, clabel, chelp in clusters %}<div class="help" data-c-info="{{ c }}" hidden>{{ chelp }}</div>{% endfor %}
+          {% for v in f.variants %}{% if v.unavailable %}
+          <div class="help" data-v-unavailable="{{ v.index }}" hidden>Not available: {% for c, clabel, chelp in clusters if c in v.unavailable %}<strong>{{ clabel }}</strong> — {{ v.unavailable[c] }}{% if not loop.last %} {% endif %}{% endfor %}</div>
+          {% endif %}{% endfor %}
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">Method</span>
+        <div>
+          <div class="opts" role="group" aria-label="Method">
+          {% for m, mlabel, mhelp in methods %}
+            <button class="pill" type="button" data-pick="m" data-value="{{ m }}" aria-pressed="false">{% if m == "docker" %}{{ icons.mark("docker", 16) }}{% else %}{{ icons.glyph("terminal", 16) }}{% endif %}{{ mlabel }}</button>
+          {% endfor %}
+          </div>
+          {% for m, mlabel, mhelp in methods %}<div class="help" data-m-info="{{ m }}" hidden>{{ mhelp | capitalize }}.</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <section class="support">
+      <h2 style="font-size:17px">Support</h2>
+      <div class="card">
+        <table>
+          <thead><tr><th>Variant</th>{% for sku in snap.skus %}<th class="mark">{{ sku }}</th>{% endfor %}</tr></thead>
+          <tbody>
+          {% for v in f.variants %}
+            <tr>
+              <td>{{ v.label }}{% if f.node_counts | length > 1 %} · {{ v.nodes }} node{{ "s" if v.nodes != 1 }}{% endif %}{% if v.hf_repo %}<div class="faint mono" style="font-size:12px">{{ v.hf_repo }}</div>{% endif %}</td>
+              {% for sku in snap.skus %}<td class="mark">{% if sku in v.by_sku %}<a href="?v={{ v.index }}&amp;sku={{ sku }}" data-select-v="{{ v.index }}" data-select-sku="{{ sku }}" title="{{ v.by_sku[sku].name }}"><span class="yes">✓</span><span class="sr"> {{ sku }}: </span></a>{% else %}{{ ui.mark(false, sku) }}{% endif %}</td>{% endfor %}
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="guide">
+      {% for v in f.variants %}{% for row in v.rows %}
+      <div data-guide="{{ v.index }}" data-guide-skus="{{ row.skus | join(' ') }}" hidden>
+        <h2>Overview</h2>
+        <p>{% if row.hf_repo %}<a href="https://huggingface.co/{{ row.hf_repo }}">{{ row.hf_repo }}</a>{% else %}<strong>{{ row.model }}</strong>{% endif %}
+          {{ "inference" if row.workload == "inference" else row.workload }} benchmark with {{ row.framework }}.
+          The image is built from <a href="{{ gh }}/blob/{{ gh_ref }}/{{ row.run.dockerfile_path }}" class="mono">{{ row.run.dockerfile_path }}</a>
+          on <span class="mono">{{ row.image }}</span> (ROCm {{ row.rocm }}).
+          {% if row.run.launcher == "slurm_multi" %}The SLURM launcher <span class="mono">{{ row.run.scripts }}</span> runs on the host{% if row.run.args %} with <code>{{ row.run.args }}</code>{% endif %} and starts one container per node.
+          {% else %}<span class="mono">{{ row.run.scripts }}</span> is copied into the container and run{% if row.run.args %} with <code>{{ row.run.args }}</code>{% endif %}.{% endif %}
+          {% if row.deployment.status == "opt-in" %}Across nodes, madengine's <code>primus</code> launcher starts it on every node of the SLURM allocation.{% endif %}</p>
+        <h2>Prerequisites</h2>
+        <ul>
+          {% if row.deployment.scheduler == "slurm" %}
+          <li>{% if row.deployment.status == "opt-in" %}Two or more nodes{% else %}{{ row.nodes }} node{{ "s" if row.nodes != 1 }}{% endif %} with 8 GPUs each: {{ row.skus | join(", ") }}.</li>
+          <li>For SLURM: a partition you can submit to from a login node{% if row.nodes > 1 or row.deployment.status == "opt-in" %}, RDMA networking between the nodes{% endif %} and a registry every node can pull from.</li>
+          {% else %}
+          <li>One node with {{ "8" if row.n_gpus == "all" else row.n_gpus }} AMD Instinct GPU{{ "s" if row.n_gpus != "1" }}: {{ row.skus | join(", ") }}.</li>
+          {% endif %}
+          {% if row.deployment.k8s == "manual" %}<li>For Kubernetes or bare metal: InfiniBand between the two nodes, storage both mount for the MAD checkout and results, and privileged containers with host networking.</li>{% endif %}
+          <li>Docker and the ROCm kernel driver (amdgpu) on the host.</li>
+          <li>A Hugging Face token with access to gated models, if the model is gated.</li>
+          {% if "primus" in row.dockerfile %}<li>The <code>scripts/Primus</code> submodule checked out.</li>{% endif %}
+        </ul>
+        <h2>Model card</h2>
+        <div class="card"><table>
+          <tr><td>madengine tag</td><td><code>{{ row.name }}</code></td></tr>
+          <tr><td>Script</td><td><code>{{ row.run.scripts }}</code></td></tr>
+          <tr><td>Arguments</td><td>{% if row.run.args %}<code>{{ row.run.args }}</code>{% else %}<span class="faint">none</span>{% endif %}</td></tr>
+          <tr><td>GPUs</td><td>{{ row.n_gpus }}{% if row.deployment.status == "opt-in" %} per node × 2+ nodes{% elif row.nodes > 1 %} per node × {{ row.nodes }} nodes{% endif %}</td></tr>
+          <tr><td>Cluster</td><td>{% if row.deployment.status == "opt-in" %}SLURM, madengine <code>primus</code> launcher (opt-in: <code>{{ row.deployment.switch }}=1</code>){% elif row.run.launcher == "slurm_multi" %}SLURM, <code>slurm_multi</code> launcher{% else %}Single node{% endif %}{% if row.deployment.k8s == "manual" %}; Kubernetes / bare metal by hand{% endif %}</td></tr>
+          <tr><td>Precision</td><td>{{ row.precision or "model default" }}</td></tr>
+          {% if row.run.multiple_results %}<tr><td>Results file</td><td><code>{{ row.run.multiple_results }}</code></td></tr>{% endif %}
+          {% if row.run.env_vars %}<tr><td>Environment</td><td>{% for k, val in row.run.env_vars.items() %}<code>{{ k }}={{ val }}</code> {% endfor %}</td></tr>{% endif %}
+          {% if row.suites %}<tr><td>Suites</td><td>{% for s in row.suites %}<span class="chip" title="{{ snap.suite_tags[s] }}">{{ s }}</span>{% endfor %}</td></tr>{% endif %}
+        </table></div>
+      </div>
+      {% endfor %}{% endfor %}
+    </div>
+  </main>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Nodes × variant × hardware × cluster × method picker. Every combination that has a recipe is
+  // pre-rendered as a .cmd; each choice is resolved in that order against the ones before it.
+  (function () {
+    var ORDER = ["n", "v", "sku", "c", "m"];
+    var state = { n: "", v: "0", sku: {{ default_sku | tojson }}, c: "", m: "madengine" };
+    var params = new URLSearchParams(location.search);
+    ORDER.forEach(function (k) { if (params.get(k)) state[k] = params.get(k); });
+    var nodePicker = !!document.querySelector('[data-pick="n"]');
+    function find(sel) {
+      var css = ".cmd";
+      Object.keys(sel).forEach(function (k) { css += "[data-" + k + '="' + sel[k] + '"]'; });
+      return document.querySelector(css);
+    }
+    function resolve() {
+      var fixed = {};
+      ORDER.forEach(function (k) {
+        var probe = Object.assign({}, fixed);
+        probe[k] = state[k];
+        if (!state[k] || !find(probe)) state[k] = find(fixed).dataset[k];
+        fixed[k] = state[k];
+      });
+    }
+    function apply() {
+      resolve();
+      var fixed = {};
+      ORDER.forEach(function (k) {
+        document.querySelectorAll('[data-pick="' + k + '"]').forEach(function (b) {
+          var probe = Object.assign({}, fixed);
+          probe[k] = b.dataset.value;
+          var ok = !!find(probe);
+          b.setAttribute("aria-pressed", state[k] === b.dataset.value);
+          // Variants of another node count are not "unsupported", just elsewhere: hide them.
+          if (k === "v" && nodePicker) b.hidden = !ok; else b.disabled = !ok;
+        });
+        fixed[k] = state[k];
+      });
+      document.querySelectorAll(".cmd").forEach(function (c) {
+        c.hidden = !ORDER.every(function (k) { return c.dataset[k] === state[k]; });
+      });
+      document.querySelectorAll("[data-v-info]").forEach(function (e) { e.hidden = e.dataset.vInfo !== state.v; });
+      document.querySelectorAll("[data-v-unavailable]").forEach(function (e) { e.hidden = e.dataset.vUnavailable !== state.v; });
+      document.querySelectorAll("[data-c-info]").forEach(function (e) { e.hidden = e.dataset.cInfo !== state.c; });
+      document.querySelectorAll("[data-m-info]").forEach(function (e) { e.hidden = e.dataset.mInfo !== state.m; });
+      document.querySelectorAll("[data-guide]").forEach(function (e) {
+        e.hidden = !(e.dataset.guide === state.v && e.dataset.guideSkus.split(" ").indexOf(state.sku) >= 0);
+      });
+      var out = new URLSearchParams();
+      ORDER.forEach(function (k) { if (k !== "n" || nodePicker) out.set(k, state[k]); });
+      history.replaceState(null, "", "?" + out.toString());
+    }
+    // A variant carries its node count; picking one moves the node choice with it.
+    function pickVariant(v) { state.v = v; state.n = find({ v: v }).dataset.n; }
+    document.querySelectorAll("[data-pick]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (b.dataset.pick === "v") pickVariant(b.dataset.value); else state[b.dataset.pick] = b.dataset.value;
+        apply();
+      });
+    });
+    document.querySelectorAll("[data-select-v]").forEach(function (a) {
+      a.addEventListener("click", function (ev) {
+        ev.preventDefault(); pickVariant(a.dataset.selectV); state.sku = a.dataset.selectSku; apply();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+    // A ?sku= link without v (the catalog's GPU links): start on the first variant that supports that GPU.
+    if (params.get("sku") && !params.get("v")) {
+      var hit = (params.get("n") && find({ n: params.get("n"), sku: params.get("sku") })) || find({ sku: params.get("sku") });
+      if (hit) { state.v = hit.dataset.v; state.n = hit.dataset.n; }
+    }
+    // A shared ?v= link without n: take the variant's node count.
+    if (params.get("v") && !params.get("n") && find({ v: state.v })) pickVariant(state.v);
+    document.querySelectorAll(".copy").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var text = Array.prototype.map.call(b.closest(".cmd").querySelectorAll("pre"), function (p) { return p.textContent; }).join("\n\n");
+        navigator.clipboard.writeText(text).then(function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); });
+      });
+    });
+    apply();
+  })();
+</script>
+{% endblock %}

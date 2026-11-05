@@ -1,0 +1,70 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% set live = snap.state == "live" %}
+{% block title %}MAD {{ snap.release if live else snap.version }} — Overview{% endblock %}
+{% block style %}
+  /* Four tiles: 2 per row, then 1, so no row is left half-empty. */
+  .grid.overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 620px) { .grid.overview { grid-template-columns: 1fr; } }
+  .overview .tile .t-sub { color: var(--ink-3); font-size: 12.5px; }
+  .overview .tile ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+  .gpu-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
+  .gpu-row b { display: block; color: var(--ink); font-size: 15px; }
+{% endblock %}
+{% block body %}
+<main class="wrap">
+  {{ ui.page_header("MAD " ~ (snap.release ~ " status" if live else snap.version ~ " release"),
+       "Model support, ROCm support and the model roadmap for MAD on AMD Instinct GPUs. Every model links to a recipe with the madengine command and the plain Docker commands that run it.", snap) }}
+
+  {% set rocm_known = cat.rocm_versions %}
+  <div class="section-head"><span class="label">This release</span></div>
+  <div class="grid overview">
+    <a class="tile" href="{{ root }}/models/index.html">
+      <div class="t-name"><span class="with-ico">{{ icons.glyph("cube", 18) }}Model support</span><span class="faint">→</span></div>
+      <div class="t-value">{{ cat.families | length }}</div>
+      <div class="t-sub">models · {{ snap.models | length }} configurations · {{ cat.frameworks | length }} frameworks</div>
+      <div class="gpu-row">{% for sku in snap.skus %}<div><b>{{ cat.sku_families[sku] }}</b>{{ sku }}</div>{% endfor %}</div>
+    </a>
+    <a class="tile" href="{{ root }}/models/index.html?scale=multi">
+      <div class="t-name"><span class="with-ico">{{ icons.glyph("network", 18) }}Multi-node</span><span class="faint">→</span></div>
+      <div class="t-value">{{ cat.scale.multi - cat.scale["opt-in"] }}</div>
+      <div class="t-sub">models run across nodes, all on SLURM</div>
+      <ul>
+        <li>{{ cat.scale.both }} run on one node and on several</li>
+        <li>Kubernetes: {% if cat.scale.k8s %}{{ cat.scale.k8s }} by hand (per-node run){% else %}none{% endif %}</li>
+        {% if cat.scale["opt-in"] %}<li>{{ cat.scale["opt-in"] }} opt-in, experimental</li>{% endif %}
+      </ul>
+    </a>
+    <a class="tile" href="{{ root }}/rocm/index.html">
+      <div class="t-name"><span class="with-ico">{{ icons.glyph("layers", 18) }}ROCm support matrix</span><span class="faint">→</span></div>
+      <div class="t-value">{{ rocm_known | length }}</div>
+      <div class="t-sub">ROCm versions across {{ snap.images | length }} base images</div>
+      <ul>
+        <li>{{ rocm_known | join(", ") }}</li>
+        {% set unpinned = snap.images | selectattr("rocm", "equalto", "latest") | list | length %}
+        {% set unknown = snap.images | selectattr("rocm", "equalto", "unknown") | list | length %}
+        {% if unpinned %}<li>{{ unpinned }} image{{ "s" if unpinned != 1 }} on an unpinned <code>latest</code> tag</li>{% endif %}
+        {% if unknown %}<li>{{ unknown }} image{{ "s" if unknown != 1 }} with an unrecorded ROCm version</li>{% endif %}
+      </ul>
+    </a>
+    <a class="tile" href="{{ root }}/roadmap/index.html">
+      <div class="t-name"><span class="with-ico">{{ icons.glyph("flag", 18) }}Oncoming models</span><span class="faint">→</span></div>
+      <div class="t-value">{{ snap.roadmap | length }}</div>
+      <div class="t-sub">tracked in GitHub issues and pull requests</div>
+      <div class="gpu-row">{% for st in ["in review", "in progress", "planned", "blocked"] %}<div><b>{{ snap.roadmap | selectattr("status", "defined") | selectattr("status", "equalto", st) | list | length }}</b>{{ st }}</div>{% endfor %}</div>
+    </a>
+  </div>
+
+  <section>
+    <h2>Changes{% if diff %} since {{ diff.since }}{% endif %}</h2>
+    {{ ui.changes(diff, snap) }}
+  </section>
+
+  {% if live and snap.warnings %}
+  <details class="more">
+    <summary>Data gaps ({{ snap.warnings | length }}) — fix in <code>dashboard/status.yaml</code></summary>
+    <ul>{% for w in snap.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</main>
+{% endblock %}

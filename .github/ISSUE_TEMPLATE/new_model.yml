@@ -1,0 +1,58 @@
+name: Model onboarding
+description: Plan a new model (or a new variant of one) in MAD. Open issues with this form are listed as oncoming models on the MAD Recipes site.
+title: "[Model]: "
+labels: ["new-model"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public and appears on the MAD Recipes **Roadmap** page until it is closed.
+        Link the pull request that adds the model with `Closes #<this issue>`; merging it closes the issue and the model moves to **Models**.
+        Set a milestone (e.g. `v26.11`) for the target release, and add the `blocked` label if work is stuck.
+  - type: input
+    id: hf_model
+    attributes:
+      label: Hugging Face model id
+      description: The checkpoint MAD will benchmark, as `org/name`.
+      placeholder: meta-llama/Llama-3.3-70B-Instruct
+    validations:
+      required: true
+  - type: dropdown
+    id: framework
+    attributes:
+      label: Framework
+      options:
+        - vLLM
+        - vLLM disaggregated P/D
+        - SGLang
+        - SGLang disaggregated P/D
+        - ATOM
+        - xDiT diffusion
+        - Primus
+        - JAX MaxText
+        - JAX MaxDiffusion
+        - PyTorch inference
+        - PyTorch training
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: gpus
+    attributes:
+      label: Target GPUs
+      options:
+        - label: MI300X
+        - label: MI325X
+        - label: MI350X
+        - label: MI355X
+        - label: MI455X
+  - type: input
+    id: precision
+    attributes:
+      label: Precision(s)
+      placeholder: BF16, FP8, MXFP4
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Workload (serving, latency, training), node count, docker image, anything reviewers should know.

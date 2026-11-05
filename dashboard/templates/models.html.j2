@@ -1,0 +1,209 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% block title %}Model support — MAD Recipes{% endblock %}
+{% block style %}
+  .filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin: 18px 0 12px; position: sticky; top: 56px; z-index: 5; background: var(--bg); padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .filters .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .filters input[type=search], .filters select { font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .filters input[type=search] { min-width: 220px; }
+  .filters .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .count { color: var(--ink-3); font-size: 13px; }
+  table.catalog td { vertical-align: middle; }
+  table.catalog tr.group th { background: var(--bg); text-transform: none; letter-spacing: 0; font: 600 14px var(--sans); color: var(--ink); padding-top: 16px; }
+  table.catalog tr.group th span { font-weight: 400; color: var(--ink-3); font-size: 12.5px; margin-left: 8px; }
+  table.catalog .m-name { font-weight: 600; }
+  table.catalog .m-org { font: 12px var(--mono); color: var(--ink-3); }
+  table.catalog td.mark a { display: inline-block; min-width: 28px; padding: 2px 0; border-radius: 6px; }
+  table.catalog td.mark a:hover { background: var(--subtle); text-decoration: none; }
+  .fw-block h3 { font-size: 15px; margin: 22px 0 10px; display: flex; gap: 10px; align-items: baseline; }
+  .fw-block h3 .faint { font-weight: 400; font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--ink-2); font-size: 13px; margin: 8px 0 0; }
+{% endblock %}
+{% block body %}
+<main class="wrap">
+  {{ ui.page_header("Model support", "Every model MAD benchmarks on AMD Instinct GPUs. Each row opens its recipe: the madengine command and the plain Docker commands for the GPU you pick.", snap, glyph="cube") }}
+
+  <details class="more" id="summary" open>
+    <summary>Support summary by framework</summary>
+    <div class="card" style="margin-top:10px">
+      <table>
+        <thead><tr>
+          <th>Framework</th><th>Workload</th><th class="num">Models</th><th class="num">Configs</th>
+          {% for sku in snap.skus %}<th class="num">{{ sku }}</th>{% endfor %}
+          <th>ROCm</th>
+        </tr></thead>
+        <tbody>
+        {% for fw in cat.frameworks %}
+          <tr>
+            <td><span class="with-ico">{{ icons.framework(fw.name, 18) }}<a href="?fw={{ fw.slug }}" data-set-fw="{{ fw.slug }}">{{ fw.name }}</a></span></td>
+            <td>{{ fw.workload }}</td>
+            <td class="num">{{ fw.families | length }}</td>
+            <td class="num">{{ fw.models }}</td>
+            {% for sku in snap.skus %}<td class="num{% if not fw.sku_families[sku] %} muted{% endif %}">{{ fw.sku_families[sku] or "–" }}</td>{% endfor %}
+            <td>{{ fw.rocm | join(", ") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="faint" style="font-size:12.5px">GPU columns count models with at least one variant registered for that GPU (gfx942 = MI300X/MI325X, gfx950 = MI350X/MI355X, gfx1250 = MI455X, only for configs that name it; minus <code>skip_gpu_arch</code>).</p>
+  </details>
+
+  <div class="filters" role="search" aria-label="Filter models">
+    <input id="q" type="search" placeholder="Filter by name, tag, precision…" aria-label="Filter models">
+    <select id="fw" aria-label="Framework">
+      <option value="">All frameworks</option>
+      {% for fw in cat.frameworks %}<option value="{{ fw.slug }}">{{ fw.name }} ({{ fw.families | length }})</option>{% endfor %}
+    </select>
+    <div class="group" role="group" aria-label="GPU">
+      <button class="pill" type="button" data-key="gpu" data-value="" aria-pressed="true">Any GPU</button>
+      {% for sku in snap.skus %}<button class="pill" type="button" data-key="gpu" data-value="{{ sku }}" aria-pressed="false">{{ sku }}</button>{% endfor %}
+    </div>
+    <select id="workload" aria-label="Workload">
+      <option value="">All workloads</option>
+      {% for w in cat.frameworks | map(attribute="workload") | unique %}<option value="{{ w }}">{{ w }}</option>{% endfor %}
+    </select>
+    <select id="precision" aria-label="Precision">
+      <option value="">Any precision</option>
+      {% for p in cat.precisions %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+    </select>
+    <select id="scale" aria-label="Scale">
+      <option value="">Any scale</option>
+      <option value="single">Single node</option>
+      <option value="multi">Multi-node ({{ cat.scale.multi }})</option>
+      <option value="both">Single and multi-node ({{ cat.scale.both }})</option>
+      <option value="slurm">SLURM ({{ cat.scale.slurm }})</option>
+      <option value="k8s">Kubernetes ({{ cat.scale.k8s }})</option>
+    </select>
+    <div class="right">
+      <span class="count" id="count" aria-live="polite"></span>
+      <div class="group" role="group" aria-label="View">
+        <button class="pill" type="button" data-key="view" data-value="table" aria-pressed="true">Table</button>
+        <button class="pill" type="button" data-key="view" data-value="cards" aria-pressed="false">Cards</button>
+      </div>
+      <a href="{{ root }}/models.csv" download>CSV ↓</a>
+    </div>
+  </div>
+
+  <div id="view-table" class="card">
+    <table class="catalog">
+      <thead><tr>
+        <th>Model</th><th>Variants</th>
+        {% for sku in snap.skus %}<th class="mark">{{ sku }}</th>{% endfor %}
+        <th>GPUs</th><th>Scale</th><th>ROCm</th>
+      </tr></thead>
+      {% for fw in cat.frameworks %}
+      <tbody data-group="{{ fw.slug }}">
+        <tr class="group"><th colspan="{{ 5 + snap.skus | length }}"><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span><span>{{ fw.workload }}</span></th></tr>
+        {% for f in fw.families %}
+        {% set href = root ~ "/models/" ~ f.page ~ "/index.html" %}
+        <tr class="item" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-sp="{{ f.sku_precisions | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
+          <td><div class="with-ico" style="gap:10px">{{ icons.logo(f.name, f.org, 30) }}<div><a href="{{ href }}" class="m-name">{{ f.name }}</a>{% if f.org %}<div class="m-org">{{ f.org }}</div>{% endif %}</div></div></td>
+          <td>{% for v in f.variants %}<span class="chip">{{ v.label }}</span>{% endfor %}</td>
+          {% for sku in snap.skus %}<td class="mark">{{ ui.support_cell(f.support[sku], sku, href ~ "?sku=" ~ sku) }}</td>{% endfor %}
+          <td class="muted" style="white-space:nowrap">{{ f.gpus }}</td>
+          <td>{{ ui.scale_chips(f, root) }}</td>
+          <td class="muted">{{ f.rocm | join(", ") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div id="view-cards" hidden>
+  {% for fw in cat.frameworks %}
+    <div class="fw-block" data-group="{{ fw.slug }}">
+      <h3><span class="with-ico">{{ icons.framework(fw.name, 20) }}{{ fw.name }}</span> <span class="faint">{{ fw.workload }}</span></h3>
+      <div class="grid">
+      {% for f in fw.families %}
+        <a class="tile item" href="{{ root }}/models/{{ f.page }}/index.html" data-fw="{{ f.fw_slug }}" data-workload="{{ f.workload }}" data-skus="{{ f.skus | join(' ') }}" data-sp="{{ f.sku_precisions | join(' ') }}" data-prec="{{ f.precisions | join(' ') }}" data-scale="{{ f.scale | join(' ') }}" data-k="{{ f.search }}">
+          <div class="with-ico" style="gap:10px;align-items:flex-start;margin-bottom:8px">
+            {{ icons.logo(f.name, f.org, 38) }}
+            <div style="min-width:0"><div class="t-name">{{ f.name }}</div><div class="t-org" style="margin-bottom:0">{{ f.org or f.framework }}</div></div>
+          </div>
+          <div>
+            {% for p in f.precisions %}<span class="chip">{{ p }}</span>{% endfor %}
+            <span class="chip">{{ f.gpus }}</span>
+            <span class="chip">{{ f.scale_label }}</span>
+            {% if f.k8s %}<span class="chip">K8s: manual</span>{% endif %}
+            {% if f.opt_in %}<span class="chip">opt-in</span>{% endif %}
+            {% if f.scale_out %}<span class="chip" title="Also runs on more nodes: {{ f.scale_out | map(attribute='framework') | join(', ') }}">↗ multi-node</span>{% endif %}
+            {% if f.skus %}<span class="chip">{{ f.sku_label }}</span>{% endif %}
+          </div>
+          <div class="t-desc">{{ f.variants | length }} variant{{ "s" if f.variants | length != 1 }}{% if f.suites %} · {{ f.suites | join(", ") }}{% endif %}</div>
+        </a>
+      {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+  </div>
+
+  <div class="legend"><span><span class="yes">✓</span> every variant runs on this GPU</span><span><span class="part">◐</span> some variants (hover for which)</span><span><span class="no">–</span> not registered</span></div>
+  <div class="legend"><span><span class="chip">2 nodes · SLURM</span> nodes per run and the scheduler it needs</span><span><span class="chip">↗ multi-node</span> the same model runs on more nodes under another framework</span><span><span class="chip">K8s: manual</span> documented per-node run for Kubernetes or bare metal</span><span><span class="chip">opt-in</span> hidden from discovery by default; experimental</span></div>
+  {% set partial = snap.registries | selectattr("note") | list %}
+  {% if partial %}
+  <p class="muted">Incomplete registries: {% for r in partial %}<code>scripts/{{ r.dir }}</code> ({{ r.note }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>
+  {% endif %}
+  <details class="more">
+    <summary>Suite tag legend</summary>
+    <ul>{% for tag, label in snap.suite_tags.items() %}<li><span class="chip">{{ tag }}</span> {{ label }}</li>{% endfor %}</ul>
+  </details>
+</main>
+{% endblock %}
+{% block scripts %}
+<script>
+  // One filter row for both views; state lives in the query string so filtered views can be shared.
+  (function () {
+    var KEYS = ["q", "fw", "gpu", "workload", "precision", "scale", "view"];
+    var params = new URLSearchParams(location.search);
+    var state = {};
+    KEYS.forEach(function (k) { state[k] = params.get(k) || ""; });
+    if (params.get("multinode")) state.scale = "multi";   // links from before the Scale filter
+    if (!state.view) state.view = localStorage.getItem("mad-models-view") || "table";
+    // A shared, already-filtered link goes straight to the results.
+    if (KEYS.some(function (k) { return k !== "view" && state[k]; })) document.getElementById("summary").open = false;
+    var inputs = { q: document.getElementById("q"), fw: document.getElementById("fw"),
+                   workload: document.getElementById("workload"), precision: document.getElementById("precision"),
+                   scale: document.getElementById("scale") };
+    var count = document.getElementById("count");
+
+    function matches(el, words) {
+      var d = el.dataset;
+      return (!state.fw || d.fw === state.fw)
+        && (!state.gpu || d.skus.split(" ").indexOf(state.gpu) >= 0)
+        && (!state.workload || d.workload === state.workload)
+        && (!state.precision || d.prec.split(" ").indexOf(state.precision) >= 0)
+        && (!state.gpu || !state.precision || d.sp.split(" ").indexOf(state.gpu + ":" + state.precision) >= 0)
+        && (!state.scale || d.scale.split(" ").indexOf(state.scale) >= 0)
+        && words.every(function (w) { return d.k.indexOf(w) >= 0; });
+    }
+    function apply() {
+      var words = state.q.toLowerCase().split(/\s+/).filter(Boolean);
+      var view = document.getElementById("view-" + state.view) ? state.view : "table", shown = 0;
+      document.getElementById("view-table").hidden = view !== "table";
+      document.getElementById("view-cards").hidden = view !== "cards";
+      document.querySelectorAll("#view-" + view + " [data-group]").forEach(function (g) {
+        var n = 0;
+        g.querySelectorAll(".item").forEach(function (el) { var ok = matches(el, words); el.hidden = !ok; if (ok) n++; });
+        g.hidden = n === 0; shown += n;
+      });
+      count.textContent = shown + " model" + (shown === 1 ? "" : "s");
+      Object.keys(inputs).forEach(function (k) { if (inputs[k].value !== state[k]) inputs[k].value = state[k]; });
+      document.querySelectorAll("[data-key]").forEach(function (b) { b.setAttribute("aria-pressed", state[b.dataset.key] === b.dataset.value || (b.dataset.key === "view" && b.dataset.value === view)); });
+      localStorage.setItem("mad-models-view", view);
+      var out = new URLSearchParams();
+      KEYS.forEach(function (k) { if (state[k] && !(k === "view" && state[k] === "table")) out.set(k, state[k]); });
+      history.replaceState(null, "", out.toString() ? "?" + out : location.pathname);
+    }
+    Object.keys(inputs).forEach(function (k) { inputs[k].addEventListener("input", function () { state[k] = inputs[k].value; apply(); }); });
+    document.querySelectorAll("[data-key]").forEach(function (b) {
+      b.addEventListener("click", function () { state[b.dataset.key] = b.dataset.value; apply(); });
+    });
+    document.querySelectorAll("[data-set-fw]").forEach(function (a) {
+      a.addEventListener("click", function (ev) { ev.preventDefault(); state.fw = a.dataset.setFw; apply(); inputs.q.scrollIntoView({ block: "center" }); });
+    });
+    apply();
+  })();
+</script>
+{% endblock %}
