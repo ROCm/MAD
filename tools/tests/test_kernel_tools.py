@@ -37,7 +37,7 @@ class KernelToolsTest(unittest.TestCase):
         self.assertEqual(ctx["docker_mounts"]["/myworkspace/fam_cache"], "/w")
         self.assertEqual(ctx["docker_mounts"]["/mad_kernel"], str(self.tmp))
         self.assertEqual([t["name"] for t in ctx["tools"]], ["rocprofv3_compute"])
-        self.assertEqual(ctx["tools"][0]["cmd"], "env PATH=/mad_kernel/shim:$PATH")
+        self.assertEqual(ctx["tools"][0]["cmd"], "bash /mad_kernel/shim/enter.sh")
         shim = (self.tmp / "shim" / "python3").read_text()
         self.assertIn("--kernel-include-regex triton_mm", shim)
         self.assertIn("-i /mad_kernel/counters.txt", shim)
@@ -114,7 +114,7 @@ class KernelToolsTest(unittest.TestCase):
         self.assertEqual(warm["docker_env_vars"]["FAM_CACHE"], "/c")
         self.assertFalse((self.tmp / "shim").exists())
         dispatch = run("context", "--mode", "dispatch", "--run-dir", str(self.tmp), "--context", base)
-        self.assertEqual(dispatch["tools"], [{"name": "rocprofv3", "cmd": "env PATH=/mad_kernel/shim:$PATH"}])
+        self.assertEqual(dispatch["tools"], [{"name": "rocprofv3", "cmd": "bash /mad_kernel/shim/enter.sh"}])
         self.assertEqual(dispatch["docker_mounts"]["/mad_kernel"], str(self.tmp.resolve()))
         self.assertTrue((self.tmp / "context_dispatch.json").exists())
         shim = (self.tmp / "shim" / "python3").read_text()
@@ -129,6 +129,53 @@ class KernelToolsTest(unittest.TestCase):
         totals = [k["total_us"] for k in rank["kernels"]]
         self.assertEqual(totals, sorted(totals, reverse=True))
         self.assertLessEqual(sum(k["share_pct"] for k in rank["kernels"]), 100.1)
+
+    def test_enter_wraps_a_python_shebang_and_leaves_bash_alone(self) -> None:
+        run("context", "--mode", "dispatch", "--run-dir", str(self.tmp))
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir()
+        entry = bin_dir / "clip_benchmark"
+        entry.write_text("#!/usr/bin/python3\nprint('ran')\n")
+        entry.chmod(0o755)
+        profiler = bin_dir / "rocprofv3"
+        profiler.write_text("#!/usr/bin/python3\n")
+        profiler.chmod(0o755)
+        bash_tool = bin_dir / "helper"
+        bash_tool.write_text("#!/bin/bash\necho helper\n")
+        bash_tool.chmod(0o755)
+        script = self.tmp / "run.sh"
+        seen = self.tmp / "seen_pythonpath"
+        script.write_text(
+            "#!/bin/bash\n# clip_benchmark helper rocprofv3\n"
+            f"printf '%s\\n' \"$PYTHONPATH\" > {seen}\nexit 0\n")
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}:/bin"
+        env.pop("PYTHONPATH", None)
+        enter = str(self.tmp / "shim" / "enter.sh")
+        subprocess.run(["bash", enter, "bash", str(script)], env=env, check=True)
+        self.assertIn(str(self.tmp / "shim"), seen.read_text())
+        wrapped = (self.tmp / "shim" / "clip_benchmark").read_text()
+        self.assertIn(str(entry), wrapped)
+        self.assertIn(str(profiler), wrapped)
+        self.assertIn('exec "$real" "$@"', wrapped)
+        self.assertFalse((self.tmp / "shim" / "helper").exists())
+        self.assertFalse((self.tmp / "shim" / "rocprofv3").exists())
+        self.assertIn('command -v', (self.tmp / "shim" / "python3").read_text())
+        (self.tmp / "shim" / "profiler.cmd").write_text("rocprofv3 --kernel-trace NEW --\n")
+        subprocess.run(["bash", enter, "bash", str(script)], env=env, check=True)
+        refreshed = (self.tmp / "shim" / "clip_benchmark").read_text()
+        self.assertIn("rocprofv3 --kernel-trace NEW --", refreshed)
+        self.assertNotIn("rocprof/dispatch", refreshed)
+        site = (self.tmp / "shim" / "sitecustomize.py").read_text()
+        self.assertIn('set_start_method("spawn")', site)
+        py = os.environ.copy()
+        py["PYTHONPATH"] = str(self.tmp / "shim")
+        py.pop("PYTHONSAFEPATH", None)
+        out = subprocess.run(
+            [sys.executable, "-c",
+             "import multiprocessing as m; print(m.get_start_method())"],
+            env=py, capture_output=True, text=True, check=True)
+        self.assertEqual(out.stdout.strip(), "spawn")
 
     def test_context_serialize_is_opt_in(self) -> None:
         plain = run("context", "--mode", "counters", "--kernel", "k", "--run-dir", str(self.tmp))

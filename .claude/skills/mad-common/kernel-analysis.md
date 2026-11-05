@@ -114,10 +114,18 @@ repo. Copy the JSON results into the repo afterwards if you need them there.
 
    rocprofv3 does not wrap the model's bash script: with counters on, a forked
    bash subshell deadlocks (it waits on a lock forever at 0% CPU). The context
-   puts a `python3`/`python` shim first on `PATH` instead, so the first Python
-   process the script starts runs under rocprofv3 and its children inherit the
-   tool. A model whose script starts its workload some other way needs its own
-   launcher.
+   runs `shim/enter.sh`, which puts the shim first on `PATH`. That covers
+   `python3` and `python`, and any command the model script names whose
+   shebang names python (`clip_benchmark`, `torchrun`). Those entry points
+   name an absolute python, so a python-only shim never sees them. The
+   profiler itself is not wrapped. The first such process runs under
+   rocprofv3 and its children inherit the tool.
+
+   `enter.sh` also puts `sitecustomize.py` on `PYTHONPATH`. That module sets
+   the multiprocessing start method to `spawn` before the model imports
+   PyTorch. A DataLoader that forked its workers after the GPU runtime was
+   up left rocprofv3 with an empty kernel trace; spawn re-execs those
+   workers instead, and the parent keeps its dispatches.
 
    A second stall is in the model itself. A model that launches tens of
    thousands of tiny kernels before its first host wait (an eager PyTorch

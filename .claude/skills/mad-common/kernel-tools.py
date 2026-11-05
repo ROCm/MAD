@@ -122,6 +122,88 @@ exec {profiler} "$real" "$@"
 """
 
 
+# Imported at interpreter startup via PYTHONPATH. rocprofv3 records no kernel
+# dispatches from a process that forks after the tool has loaded, and PyTorch's
+# DataLoader forks its workers on Linux. spawn re-execs the interpreter instead.
+SITECUSTOMIZE = """\
+import multiprocessing
+
+try:
+    multiprocessing.set_start_method("spawn")
+except RuntimeError:
+    pass
+"""
+
+
+# enter.sh runs in the container before the model command. It wraps every PATH
+# command whose shebang names python, then execs the command. python and
+# python3 are written above and must not be replaced: their $0 is the bare
+# name, so they cannot find their own directory the way enter.sh can.
+ENTER = """#!/bin/bash
+# The bash launcher is not profiled: with counters on, a forked bash subshell
+# deadlocks. A MAD run script often starts a console entry point (clip_benchmark,
+# torchrun) whose shebang is an absolute python path, so the python shim never
+# sees it. Wrap the commands that script names, then exec it. Never wrap the
+# profiler itself: its own shebang is python, and a wrapper would profile it.
+self=$(CDPATH= cd "$(dirname "$0")" && pwd)
+profiler=$(cat "$self/profiler.cmd")
+[ -n "$profiler" ] || { echo "kernel-tools shim: $self/profiler.cmd is empty" >&2; exit 1; }
+for f in "$self"/*; do
+  name=${f##*/}
+  case "$name" in
+    python|python3|enter.sh|profiler.cmd|sitecustomize.py) continue ;;
+  esac
+  rm -f "$f"
+done
+# Call rocprofv3 by absolute path so a PATH shim can never intercept it.
+probe=${profiler%% *}
+saved=$PATH
+PATH=${PATH//$self:/}
+found=$(command -v "$probe" 2>/dev/null || true)
+PATH=$saved
+[ -n "$found" ] && profiler="$found${profiler#"$probe"}"
+target=""
+for arg in "$@"; do
+  case "$arg" in
+    *.sh|*.py) [ -f "$arg" ] && target=$arg ;;
+  esac
+done
+if [ -n "$target" ]; then
+  script_dir=$(CDPATH= cd "$(dirname "$target")" && pwd)
+  for name in $(grep -hoE '[A-Za-z_][A-Za-z0-9_.+-]*' "$target" "$script_dir"/*.sh "$script_dir"/*.py 2>/dev/null | sort -u); do
+    case "$name" in
+      python|python3|pip|pip3|rocprof|rocprofv2|rocprofv3|rocprofv3-avail) continue ;;
+    esac
+    cmd=$(command -v "$name" 2>/dev/null || true)
+    [ -n "$cmd" ] && [ -f "$cmd" ] && [ -x "$cmd" ] || continue
+    [ "$(head -c 2 "$cmd" 2>/dev/null || true)" = "#!" ] || continue
+    shebang=$(head -c 180 "$cmd" 2>/dev/null || true)
+    case "$shebang" in
+      '#!'*python*) ;;
+      *) continue ;;
+    esac
+    quoted=$(printf '%q' "$cmd")
+    cat > "$self/$name" << EOF
+#!/bin/bash
+real=$quoted
+[ -n "\\${MAD_ROCPROF_ACTIVE:-}" ] && exec "\\$real" "\\$@"
+export MAD_ROCPROF_ACTIVE=1
+exec $profiler "\\$real" "\\$@"
+EOF
+    chmod +x "$self/$name"
+  done
+fi
+export PATH="$self:$PATH"
+# sitecustomize.py lives next to this script. A fresh interpreter imports it
+# and switches multiprocessing to spawn before the model can fork.
+case ":${PYTHONPATH:-}:" in
+  *":$self:"*) ;;
+  *) export PYTHONPATH="$self${PYTHONPATH:+:$PYTHONPATH}" ;;
+esac
+exec "$@"
+"""
+
+
 def write_shim(run_dir: Path, profiler: str) -> None:
     shim = run_dir / "shim"
     shim.mkdir(exist_ok=True)
@@ -129,6 +211,11 @@ def write_shim(run_dir: Path, profiler: str) -> None:
         path = shim / name
         path.write_text(SHIM.format(inside=CONTAINER_DIR, profiler=profiler))
         path.chmod(0o755)
+    (shim / "profiler.cmd").write_text(profiler + "\n")
+    (shim / "sitecustomize.py").write_text(SITECUSTOMIZE)
+    enter = shim / "enter.sh"
+    enter.write_text(ENTER)
+    enter.chmod(0o755)
 
 
 def move_aside(path: Path) -> None:
@@ -184,7 +271,8 @@ def cmd_context(args: argparse.Namespace) -> None:
         # No -o: the default %hostname%/%pid% names keep child processes apart.
         profiler += ["--output-format", "csv", "-d", out, "--"]
         write_shim(run_dir, " ".join(shlex.quote(part) for part in profiler))
-        cmd = f"env PATH={inside}/shim:$PATH"
+        # enter.sh prepends the shim to PATH itself, then execs the model command.
+        cmd = f"bash {inside}/shim/enter.sh"
 
     ctx.setdefault("docker_mounts", {})[inside] = str(run_dir)
     env = ctx.setdefault("docker_env_vars", {})
