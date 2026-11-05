@@ -352,6 +352,21 @@ Run every madengine command through the run helper, never in the foreground (a t
   ${MAD_RUN} start <run-id> -- <madengine command>
 then repeat \`${MAD_RUN} wait <run-id>\` until its first line says MAD_RUN_STATUS=succeeded or failed. Use a fresh run-id per run (append -2, -3, ... if start says it exists).`
 
+// A counter run can stay "running" with the GPU idle: an eager model that
+// queues tens of thousands of tiny launches before its first host wait
+// (kernel-analysis.md, "A second stall"). --serialize is the cure that worked.
+// STALL_MINUTES is a judgment, not a measurement: longer than image start and
+// model load, which also read 0% GPU use, and short next to a counter run that
+// takes several times a clean one. The copy of stallHow() below must stay the
+// same as mad-optimize.js.
+const STALL_MINUTES = 10
+function stallHow(retrySteps, retryRunId) {
+  return `Stall rule. A counter run can hang with the GPU idle. Treat it as stalled only when its status line says running (not queued) and \`rocm-smi --showuse\` reports 0% GPU use at every check for ${STALL_MINUTES} minutes. Check by alternating \`${MAD_RUN} wait <run-id> 120\` with one \`rocm-smi --showuse\` call. A queued run, or a run that shows any GPU use, is not stalled: keep waiting.
+If it is stalled: run \`${MAD_RUN} stop <run-id>\`. Do not run the card command on the stopped run's output; its counter passes are incomplete. Then retry ONCE, with a fresh run id such as ${retryRunId}, using these commands. They differ from the first attempt only by --serialize, which sets AMD_SERIALIZE_KERNEL=3 so the host waits after every launch:
+${retrySteps}
+If the retry stalls too, stop it the same way and return status "error" with the reason. Never retry more than once. When the retry produced the card, return serialized true.`
+}
+
 // ── Phase 1: Baseline (resolve + classify, then CLEAN measurement) ─────────
 phase('Baseline')
 const BASELINE_SCHEMA = {
@@ -449,7 +464,8 @@ const RUNG_SCHEMA = {
   type: 'object',
   required: ['status', 'evidence'],
   properties: {
-    status: { type: 'string', enum: ['ran', 'planned', 'skipped'] },
+    status: { type: 'string', enum: ['ran', 'planned', 'skipped', 'error'] },
+    serialized: { type: 'boolean' },
     bottleneck: { type: 'string', enum: ['compute', 'memory', 'communication', 'launch', 'mixed', 'unknown'] },
     bound: { type: 'string' },
     evidence: { type: 'string' },
@@ -568,6 +584,7 @@ if (skipKernel) {
   kernel = skipped(why)
 } else {
   let kSteps
+  let kRetrySteps = ''
   if (usesCard) {
     const kernelArg = topKernel ? shellQuote(regexEscape(topKernel)) : "'<top dispatch kernel>'"
     const warmed = want('dispatch') && dispatch.status !== 'skipped'
@@ -577,13 +594,19 @@ if (skipKernel) {
       runCmd('perf_tune_kernel.csv', null, ctxFileFlag('counters')),
       `${KERNEL_TOOLS} card --run-dir ${KERNEL_RUN_DIR}`,
     ].join('\n')
+    kRetrySteps = [
+      `${KERNEL_TOOLS} context --mode counters --group ${kernelPreset} --kernel ${kernelArg} --serialize --run-dir ${KERNEL_RUN_DIR}${kernelCtxArg}`,
+      runCmd('perf_tune_kernel_serial.csv', null, ctxFileFlag('counters')),
+      `${KERNEL_TOOLS} card --run-dir ${KERNEL_RUN_DIR}`,
+    ].join('\n')
   } else {
     kSteps = runCmd('perf_tune_kernel.csv', toolsPayload([{ name: kernelPreset }]))
   }
   const kAction = execute
     ? `If AMD GPUs are present, run the madengine commands in order, once each (through the run helper). Each kernel-tools.py context line writes the context file the madengine line after it reads. ${RUN_HOW}
-${usesCard ? `Then run the card command and read ${KERNEL_RUN_DIR}/kernel_card.json.` : 'Then read rocprof_output/ from this run.'} If no GPUs, set status "skipped". Ignore the profiled perf number as a score. rocprofv3 runs the workload once per counter pass, so this run takes several times longer than a clean one.`
-    : `Do NOT run anything. ${usesCard ? `Read ${KERNEL_RUN_DIR}/kernel_card.json if it already exists.` : 'Read an existing rocprof_output/ if present.'} Print the commands and set status "planned" or "skipped".`
+${usesCard ? `Then run the card command and read ${KERNEL_RUN_DIR}/kernel_card.json.` : 'Then read rocprof_output/ from this run.'} If no GPUs, set status "skipped". Ignore the profiled perf number as a score. rocprofv3 runs the workload once per counter pass, so this run takes several times longer than a clean one.${usesCard ? `
+${stallHow(kRetrySteps, 'tune-kernel-serial')}` : ''}`
+    : `Do NOT run anything. ${usesCard ? `Read ${KERNEL_RUN_DIR}/kernel_card.json if it already exists.` : 'Read an existing rocprof_output/ if present.'} Print the commands${usesCard ? `, and the retry commands for a stalled counter run (${kRetrySteps.split('\n').join('; ')})` : ''}, and set status "planned" or "skipped".`
   kernel = await agent(
     `Kernel-level profile of "${baseline.model}"${usesCard ? `, kernel ${topKernel || '(the top kernel from dispatch)'}, counter group ${kernelPreset}` : ` using preset ${kernelPreset}`}.
 ${PREFLIGHT}
@@ -592,13 +615,17 @@ Dispatch said ${dispatch.bottleneck || 'unknown'}-bound. Evidence: ${dispatch.ev
 Commands (one rocprofv3 run — do not add rocm_trace_lite):
 ${kSteps}
 ${kAction}
-Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath${usesCard ? ', and card {kernel, bound, pctPeakBandwidth, pctPeakMfma, flopsPerByte, line} copied from kernel_card.json (bound exactly as the file states it; "unknown" when it is missing)' : ''}.`,
+Return status, preset "${kernelPreset}", bottleneck, evidence from the counters, hotspots [{name, pct}], tracePath${usesCard ? ', serialized, and card {kernel, bound, pctPeakBandwidth, pctPeakMfma, flopsPerByte, line} copied from kernel_card.json (bound exactly as the file states it; "unknown" when it is missing)' : ''}.`,
     { phase: 'Kernel', schema: RUNG_SCHEMA, agentType: 'mad-benchmark-runner' }
   ) || skipped('kernel agent returned no result')
   kernel.preset = kernel.preset || kernelPreset
+  // The agent reports whether the retry made the card; the note is added here so
+  // no agent can leave it out of the evidence the later phases read.
+  if (kernel.status === 'ran' && kernel.serialized)
+    kernel.evidence = `${kernel.evidence || ''} Counters came from the retry with AMD_SERIALIZE_KERNEL=3 after the first counter run stalled: read them as ratios, not as a latency score.`.trim()
 }
 const cardBound = (kernel.card && kernel.card.bound) || 'unknown'
-log(`Kernel: ${kernel.status} preset=${kernel.preset || kernelPreset || 'none'} bound=${cardBound}. ${kernel.evidence || kernel.reason || ''}`)
+log(`Kernel: ${kernel.status}${kernel.serialized ? ' (serialized retry)' : ''} preset=${kernel.preset || kernelPreset || 'none'} bound=${cardBound}. ${kernel.evidence || kernel.reason || ''}`)
 
 // ── Phase 5: Assembly (code-object summary, no GPU run) ────────────────────
 phase('Assembly')

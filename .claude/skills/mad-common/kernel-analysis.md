@@ -66,9 +66,18 @@ into a fresh temporary directory needs to honor `MAD_CODE_OBJECT_DIR` first.
 A counter run can still hang on a warm cache. The FastWAM eager arm (no
 `torch.compile`) did so twice, once filtered to a hipBLASLt GEMM and once to
 `attn_fwd`: GPU use stayed at 0% and `py-spy dump --native` showed the host in
-`rocr::core::BusyWaitSignal::WaitRelaxed`. If GPU use stays at 0% for more than
-a few minutes, stop the run (`mad-run.sh stop`) and fall back to PC sampling,
-which does not use counters. Choosing a different kernel did not help.
+`rocr::core::BusyWaitSignal::WaitRelaxed`. Choosing a different kernel did not
+help. Treat a run as stalled when its status is `running` (not `queued`) and
+`rocm-smi --showuse` reads 0% at every check for 10 minutes. That limit is a
+judgment: longer than image start and model load, which also read 0%. Then:
+
+1. Stop it with `mad-run.sh stop`, and do not run `card` on its output: the
+   counter passes are incomplete.
+2. Retry once with `--serialize` (see "A second stall" below). `mad-tune-search`
+   and `mad-optimize` do exactly this, and mark the card `serialized`.
+3. If the retry stalls too, stop it and fall back to PC sampling, which does not
+   use counters. The workflows return status `error` for the kernel rung and go
+   on without a bound.
 
 Each profiling mode writes to its own `rocprof/<mode>/`, and moves the
 previous one aside to `<mode>.prev-N`. `card`, `rank`, `pcsample` and
@@ -119,7 +128,8 @@ repo. Copy the JSON results into the repo afterwards if you need them there.
    `AMD_SERIALIZE_KERNEL=3` so the host waits after every launch. Only use it
    after a counter run stalls: it slows the host side of the run, not the
    kernel's own counters. On the FastWAM eager arm it changed the kernel's
-   duration under counters by about 4% from the kernel trace.
+   duration under counters by about 4% from the kernel trace, so read a
+   serialized card as ratios (bound, percent of peak), not as a latency score.
 
    The card averages counters over every dispatch. On a long run, check that
    the matrix-op count (`SQ_INSTS_VALU_MFMA_MOPS_*`) is identical across the

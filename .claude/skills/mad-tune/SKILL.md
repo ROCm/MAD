@@ -40,8 +40,10 @@ bash .claude/skills/mad-common/preflight.sh
    the top kernel, then one counter run of that kernel through
    `kernel-tools.py context`, then `kernel-tools.py card` and `asm`. The card's
    `bound` (compute, bandwidth, latency or unknown) is the evidence. If a
-   counter run stalls with the GPU idle (an eager model with tens of thousands
-   of tiny launches), rebuild the context with `--serialize`. Never
+   counter run stalls (status `running`, GPU use 0% at every check for 10
+   minutes), stop it with `mad-run.sh stop`, skip `card` on its output, and
+   rebuild the context with `--serialize` for one retry; if that stalls too,
+   say the bound is unknown (kernel-analysis.md). Never
    combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled perf
    number is not the baseline.
 3. Propose levers for that family, changing ONE at a time so deltas are

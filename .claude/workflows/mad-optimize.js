@@ -259,6 +259,21 @@ Run every madengine command through the run helper, never in the foreground (a t
   ${MAD_RUN} start <run-id> -- <madengine command>
 Later calls, one command each: \`${MAD_RUN} wait <run-id>\` until its first line says MAD_RUN_STATUS=succeeded or failed. Use a fresh run-id per run (append -2, -3, ... if start says it exists). GEAK's gpu_lock.sh and MAD's /tmp/mad-gpu.lock do not share a lock, so run one phase at a time.`
 
+// A counter run can stay "running" with the GPU idle: an eager model that
+// queues tens of thousands of tiny launches before its first host wait
+// (kernel-analysis.md, "A second stall"). --serialize is the cure that worked.
+// STALL_MINUTES is a judgment, not a measurement: longer than image start and
+// model load, which also read 0% GPU use, and short next to a counter run that
+// takes several times a clean one. The copy of stallHow() below must stay the
+// same as mad-tune-search.js.
+const STALL_MINUTES = 10
+function stallHow(retrySteps, retryRunId) {
+  return `Stall rule. A counter run can hang with the GPU idle. Treat it as stalled only when its status line says running (not queued) and \`rocm-smi --showuse\` reports 0% GPU use at every check for ${STALL_MINUTES} minutes. Check by alternating \`${MAD_RUN} wait <run-id> 120\` with one \`rocm-smi --showuse\` call. A queued run, or a run that shows any GPU use, is not stalled: keep waiting.
+If it is stalled: run \`${MAD_RUN} stop <run-id>\`. Do not run the card command on the stopped run's output; its counter passes are incomplete. Then retry ONCE, with a fresh run id such as ${retryRunId}, using these commands. They differ from the first attempt only by --serialize, which sets AMD_SERIALIZE_KERNEL=3 so the host waits after every launch:
+${retrySteps}
+If the retry stalls too, stop it the same way and return status "error" with the reason. Never retry more than once. When the retry produced the card, return serialized true.`
+}
+
 function withoutTools(extraMount) {
   const obj = { ...(ctxObj || {}) }
   delete obj.tools
@@ -345,12 +360,14 @@ const profileCommand = [
   ctxRun('perf_opt_profile.csv', 'dispatch'),
   `${KERNEL_TOOLS} rank --run-dir ${kernelRunDir}`,
 ].join('\n')
-function kernelCommands(kernelName) {
+// The retry for a stalled counter run is the same four commands plus
+// --serialize, writing its own CSV.
+function kernelCommands(kernelName, serialize = false) {
   const kernelArg = kernelName ? shellQuote(regexEscape(kernelName)) : "'<top dispatch kernel>'"
   const group = kernelName ? kernelGroupFor(kernelName) : "'<compute|memory>'"
   return [
-    `${KERNEL_TOOLS} context --mode counters --group ${group} --kernel ${kernelArg} --run-dir ${kernelRunDir}${kernelCtxArg}`,
-    ctxRun('perf_opt_kernel.csv', 'counters'),
+    `${KERNEL_TOOLS} context --mode counters --group ${group} --kernel ${kernelArg}${serialize ? ' --serialize' : ''} --run-dir ${kernelRunDir}${kernelCtxArg}`,
+    ctxRun(serialize ? 'perf_opt_kernel_serial.csv' : 'perf_opt_kernel.csv', 'counters'),
     `${KERNEL_TOOLS} card --run-dir ${kernelRunDir}`,
     `${KERNEL_TOOLS} asm --run-dir ${kernelRunDir}${kernelName ? ' --kernel ' + shellQuote(kernelName) : ''}`,
   ]
@@ -396,6 +413,7 @@ if (!execute) {
   for (const c of baseCommands) log(`Baseline (image tree, no source mount): ${c}`)
   log(`Profile: ${profileCommand}`)
   for (const c of kernelCommands(null)) log(`Kernel card (top kernel from the profile): ${c}`)
+  for (const c of kernelCommands(null, true)) log(`Kernel card retry, only if the counter run stalls: ${c}`)
   for (const c of patchedCommands) log(`Patched (source mounted): ${c}`)
   if (smokeTag) log(`Smoke, only if the gate passes: ${runCmd(smokeTag, 'perf_opt_smoke.csv', patchedPayload)}`)
   return {
@@ -408,6 +426,7 @@ if (!execute) {
     patchedCommands,
     profileCommand,
     kernelCommands: kernelCommands(null),
+    kernelRetryCommands: kernelCommands(null, true),
   }
 }
 
@@ -528,6 +547,7 @@ const KERNEL_SCHEMA = {
   required: ['status'],
   properties: {
     status: { type: 'string', enum: ['ran', 'skipped', 'error'] },
+    serialized: { type: 'boolean' },
     card: { type: ['object', 'null'], properties: {
       kernel: { type: 'string' },
       bound: { type: 'string', enum: ['compute', 'bandwidth', 'latency', 'unknown'] },
@@ -546,16 +566,21 @@ if (profile.kernelName) {
   kernelProfile = await agent(
     `Kernel card for "${profile.kernelName}" in "${model.name}". Read .claude/skills/mad-common/kernel-analysis.md first. One rocprofv3 counter run, no rocm_trace_lite, no source mount (the image tree, same as the baseline).
 ${kernelCommands(profile.kernelName).join('\n')}
-Run the context line, then the madengine line through the run helper (run id opt_kernel), then the card and asm commands (they read files, no GPU). If GPU use stays at 0% for more than a few minutes, the counter run has hung: stop it with the run helper and return status "error".
+Run the context line, then the madengine line through the run helper (run id opt_kernel), then the card and asm commands (they read files, no GPU).
 ${RUN_HOW}
+${stallHow(kernelCommands(profile.kernelName, true).join('\n'), 'opt_kernel_serial')}
 rocprofv3 runs the workload once per counter pass, so this takes several times longer than a clean run. Its performance number is not a sample.
-If the run fails but ${kernelRunDir}/kernel_card.json already names this kernel, return status "ran" and that card, and put the failure in notes. A killed counter run must not throw away a card from this run directory.
-Return status and card {kernel, bound exactly as ${kernelRunDir}/kernel_card.json states it, pctPeakBandwidth, pctPeakMfma, occupancy and occupancyLimiter from kernel_asm_summary.json, asmStatus (its "status"), line: the kernel card line from kernel-analysis.md, numbers from the JSON files only}.`,
+If a run fails for a reason other than a stall, and ${kernelRunDir}/kernel_card.json already names this kernel from an attempt in this session, return status "ran" and that card, and put the failure in notes. Never take a card from a stalled run you stopped.
+Return status, serialized, and card {kernel, bound exactly as ${kernelRunDir}/kernel_card.json states it, pctPeakBandwidth, pctPeakMfma, occupancy and occupancyLimiter from kernel_asm_summary.json, asmStatus (its "status"), line: the kernel card line from kernel-analysis.md, numbers from the JSON files only}.`,
     { label: 'kernel', phase: 'Profile', schema: KERNEL_SCHEMA, agentType: 'mad-benchmark-runner' }
   )
 }
-const card = kernelProfile && kernelProfile.status === 'ran' ? kernelProfile.card || null : null
-log(`Kernel card: ${card ? card.line || card.bound : `none (${(kernelProfile && kernelProfile.notes) || 'no kernel name from the profile'})`}`)
+let card = kernelProfile && kernelProfile.status === 'ran' ? kernelProfile.card || null : null
+// The note goes on the card here, so the GEAK task and the report carry it
+// whatever the agent wrote.
+if (card && kernelProfile.serialized)
+  card = { ...card, serialized: true, line: `${card.line || `${card.bound}-bound`} (counters from the retry with AMD_SERIALIZE_KERNEL=3 after a stall: ratios, not a latency score)` }
+log(`Kernel card: ${card ? card.line || card.bound : `none (${(kernelProfile && (kernelProfile.notes || (kernelProfile.status === 'error' ? 'the counter run stalled twice or failed' : ''))) || 'no kernel name from the profile'})`}`)
 
 phase('GEAK')
 const geakTask = geakTaskFor(profile, card)

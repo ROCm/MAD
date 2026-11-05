@@ -35,8 +35,11 @@ Conventions (madengine v2.3.0 Typer CLI, pinned in requirements.txt):
     --mode counters --group compute|memory --kernel <name> --run-dir
     /var/tmp/mad-kernel/<run-id> --context '<other keys>'`, then run
     `kernel-tools.py card --run-dir /var/tmp/mad-kernel/<run-id>`. If a counter
-    run stalls with the GPU idle (an eager model with tens of thousands of tiny
-    launches), add `--serialize` to `context`. The run
+    run stalls (status `running`, GPU use 0% at every check for 10 minutes; an
+    eager model with tens of thousands of tiny launches), stop it with
+    `mad-run.sh stop`, skip `card` on its output, and retry once with
+    `--serialize` added to `context`. If the retry stalls too, stop and use PC
+    sampling. The run
     directory is on local disk, outside the repo. The madengine presets
     `rocprofv3_compute`, `rocprofv3_memory`, `rocprofv3_communication` remain
     for when the user names them.

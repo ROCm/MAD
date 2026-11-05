@@ -49,10 +49,11 @@ any `rocprofv3_*` tool in the same `tools` array.
    either, run `dispatch` first. Pick the counter group from what the kernel
    does (`compute` for GEMM, attention or convolution; `memory` otherwise),
    build the context with `kernel-tools.py context --mode counters`, run, then
-   `kernel-tools.py card`. If the counter run stalls with the GPU idle and the
-   host waiting at a copy or `synchronize()` (an eager model that queues tens of
-   thousands of tiny launches), rebuild the context with `--serialize`; see
-   kernel-analysis.md. Only when the user names `rocprofv3_compute`,
+   `kernel-tools.py card`. If the counter run stalls (status `running`, GPU use
+   0% at every check for 10 minutes; an eager model that queues tens of
+   thousands of tiny launches), stop it with `mad-run.sh stop`, skip `card` on
+   its output, and rebuild the context with `--serialize` for one retry. If the
+   retry stalls too, stop and use PC sampling; see kernel-analysis.md. Only when the user names `rocprofv3_compute`,
    `rocprofv3_memory` or `rocprofv3_communication`, run that madengine preset
    instead and read `rocprof_output/`.
 4. `assembly` — no GPU run. `kernel-tools.py asm --run-dir <kernel run dir>`

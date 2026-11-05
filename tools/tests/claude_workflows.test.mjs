@@ -352,6 +352,69 @@ test('tune-search: the kernel regex escapes the dispatch name', async () => {
   assert.equal(regexEscape('void at::native::f<4>(int)'), 'void at::native::f<4>\\(int\\)')
 })
 
+// The rule a counter run is held to, up to where its retry commands start.
+const STALL_RULE = /Stall rule\.[\s\S]*?using these commands/
+
+test('tune-search: a stalled counter run is stopped and retried once with --serialize', async () => {
+  const { calls } = await run(TUNE, '--tag dummy_multi --candidates 1 --execute', tuneAgent())
+  const kernel = calls.find(c => c.opts.phase === 'Kernel').prompt
+  assert.match(kernel, STALL_RULE)
+  assert.match(kernel, /status line says running \(not queued\) and `rocm-smi --showuse` reports 0% GPU use at every check for 10 minutes/)
+  assert.match(kernel, /mad-run\.sh stop <run-id>/)
+  assert.match(kernel, /Do not run the card command on the stopped run's output/)
+  assert.match(kernel, /retry ONCE/)
+  assert.match(kernel, /Never retry more than once/)
+  assert.match(kernel, /return status "error"/)
+  assert.match(kernel, /context --mode counters --group compute --kernel 'triton_mm' --serialize --run-dir \/var\/tmp\/mad-kernel\/tune_dummy_multi_kernel/)
+  assert.match(kernel, /-o perf_tune_kernel_serial\.csv --additional-context-file \/var\/tmp\/mad-kernel\/tune_dummy_multi_kernel\/context\.json/)
+  assert.doesNotMatch(kernel, /\$\(/)
+  const [firstAttempt] = kernel.split('Stall rule.')
+  assert.doesNotMatch(firstAttempt, /--serialize/, 'the first attempt is not serialized')
+})
+
+test('tune-search: plan mode prints the retry commands and runs no stall check', async () => {
+  const { calls } = await run(TUNE, '--tag dummy_multi --candidates 1', tuneAgent())
+  const kernel = calls.find(c => c.opts.phase === 'Kernel').prompt
+  assert.match(kernel, /retry commands for a stalled counter run \(.*--serialize/)
+  assert.doesNotMatch(kernel, /Stall rule\./)
+})
+
+test('tune-search: a preset run without a kernel card has no stall retry', async () => {
+  const respond = tuneAgent()
+  const { calls } = await run(TUNE, '--tag dummy_multi --candidates 1 --execute',
+    (p, o) => o.phase === 'Dispatch' ? { status: 'ran', evidence: 'rccl', bottleneck: 'communication', hotspots: [] } : respond(p, o))
+  const kernel = calls.find(c => c.opts.phase === 'Kernel').prompt
+  assert.doesNotMatch(kernel, /Stall rule\./)
+  assert.doesNotMatch(kernel, /--serialize/)
+})
+
+test('tune-search: a card from the serialized retry says so in the evidence', async () => {
+  const card = { kernel: 'triton_mm', bound: 'latency', line: 'triton_mm: latency' }
+  const respond = tuneAgent({ card })
+  const kernelResult = serialized => ({ status: 'ran', evidence: 'ev', bottleneck: 'compute', card, ...(serialized ? { serialized } : {}) })
+  const serial = await run(TUNE, '--tag dummy_multi --candidates 1 --execute',
+    (p, o) => o.phase === 'Kernel' ? kernelResult(true) : respond(p, o))
+  assert.equal(serial.result.kernel.serialized, true)
+  assert.match(serial.result.kernel.evidence, /AMD_SERIALIZE_KERNEL=3 after the first counter run stalled: read them as ratios, not as a latency score/)
+  assert.ok(serial.logs.some(m => /Kernel: ran \(serialized retry\)/.test(m)))
+  assert.match(serial.calls.find(c => c.opts.phase === 'Propose').prompt, /AMD_SERIALIZE_KERNEL=3/)
+
+  const plain = await run(TUNE, '--tag dummy_multi --candidates 1 --execute',
+    (p, o) => o.phase === 'Kernel' ? kernelResult(false) : respond(p, o))
+  assert.doesNotMatch(plain.result.kernel.evidence, /SERIALIZE/)
+  assert.ok(plain.logs.every(m => !/serialized retry/.test(m)))
+})
+
+test('tune-search: a counter run that stalls twice leaves the search going without a bound', async () => {
+  const respond = tuneAgent()
+  const { result, calls } = await run(TUNE, '--tag dummy_multi --candidates 1 --execute',
+    (p, o) => o.phase === 'Kernel' ? { status: 'error', evidence: 'stalled twice, stopped both', reason: 'GPU idle for 10 minutes on the retry' } : respond(p, o))
+  assert.equal(result.kernel.status, 'error')
+  assert.ok(calls.some(c => c.opts.phase === 'Assembly'), 'the code objects from the warm-up are still summarized')
+  assert.match(calls.find(c => c.opts.phase === 'Propose').prompt, /bound is "unknown"/)
+  assert.ok(result.candidates.length > 0)
+})
+
 // ── mad-optimize ──────────────────────────────────────────────────────────
 
 const OPT = 'mad-optimize.js'
@@ -494,4 +557,67 @@ test('optimize: plan mode gives GEAK a fixed eval_dir', async () => {
   const { result } = await run(OPT, '--tag pyt_fam_fastwam_geak', optAgent())
   assert.equal(result.status, 'planned')
   assert.match(result.geakInvocation.args.eval_dir, /geak_eval$/)
+})
+
+const OPT_PROFILE = { status: 'ran', topKernel: 'triton_mm 66%', kernelName: 'triton_mm', inSourceTree: false, performance: 25, metric: 'ms' }
+const OPT_CARD = { kernel: 'triton_mm', bound: 'latency', line: 'triton_mm: latency' }
+
+function optKernelAgent(kernelResult, over = {}) {
+  const base = optAgent({ profile: OPT_PROFILE, geak: { status: 'error', expDir: null, reason: 'x' }, ...over })
+  return (prompt, opts) => opts.label === 'kernel' ? kernelResult : base(prompt, opts)
+}
+
+test('optimize: plan mode prints the serialize retry beside the counter commands', async () => {
+  const { result, logs } = await run(OPT, '--tag pyt_fam_fastwam_geak', optAgent())
+  assert.equal(result.kernelCommands.length, 4)
+  assert.doesNotMatch(result.kernelCommands.join('\n'), /--serialize/)
+  assert.equal(result.kernelRetryCommands.length, 4)
+  assert.match(result.kernelRetryCommands[0], /kernel-tools\.py context --mode counters --group '<compute\|memory>' --kernel '<top dispatch kernel>' --serialize --run-dir/)
+  assert.match(result.kernelRetryCommands[1], /-o perf_opt_kernel_serial\.csv --additional-context-file \/var\/tmp\/mad-kernel\/opt_\S+_kernel\/context\.json/)
+  assert.match(result.kernelRetryCommands[2], /kernel-tools\.py card/)
+  assert.ok(logs.some(m => /Kernel card retry, only if the counter run stalls: .*--serialize/.test(m)))
+})
+
+test('optimize: a stalled counter run is stopped and retried once with --serialize', async () => {
+  const { calls } = await run(OPT, '--tag pyt_fam_fastwam_geak --execute', optKernelAgent('report'))
+  const kernel = calls.find(c => c.opts.label === 'kernel').prompt
+  assert.match(kernel, STALL_RULE)
+  assert.match(kernel, /status line says running \(not queued\) and `rocm-smi --showuse` reports 0% GPU use at every check for 10 minutes/)
+  assert.match(kernel, /mad-run\.sh stop <run-id>/)
+  assert.match(kernel, /retry ONCE/)
+  assert.match(kernel, /fresh run id such as opt_kernel_serial/)
+  assert.match(kernel, /--group compute --kernel 'triton_mm' --serialize --run-dir/)
+  assert.match(kernel, /-o perf_opt_kernel_serial\.csv/)
+  assert.match(kernel, /Never take a card from a stalled run you stopped/)
+  assert.doesNotMatch(kernel, /\$\(/)
+  const [firstAttempt] = kernel.split('Stall rule.')
+  assert.doesNotMatch(firstAttempt, /--serialize/, 'the first attempt is not serialized')
+})
+
+test('optimize: a card from the serialized retry carries the note into the GEAK task', async () => {
+  const { calls, logs } = await run(OPT, '--tag pyt_fam_fastwam_geak --execute',
+    optKernelAgent({ status: 'ran', serialized: true, card: OPT_CARD }))
+  const geak = calls.find(c => c.opts.label === 'geak').prompt
+  assert.match(geak, /Kernel card: triton_mm: latency \(counters from the retry with AMD_SERIALIZE_KERNEL=3 after a stall: ratios, not a latency score\)/)
+  assert.ok(logs.some(m => /Kernel card: triton_mm: latency \(counters from the retry/.test(m)))
+
+  const plain = await run(OPT, '--tag pyt_fam_fastwam_geak --execute',
+    optKernelAgent({ status: 'ran', card: OPT_CARD }))
+  assert.doesNotMatch(plain.calls.find(c => c.opts.label === 'geak').prompt, /SERIALIZE/)
+})
+
+test('optimize: a counter run that stalls twice leaves GEAK without a kernel card', async () => {
+  const { calls, logs } = await run(OPT, '--tag pyt_fam_fastwam_geak --execute',
+    optKernelAgent({ status: 'error', notes: 'stalled on both attempts' }))
+  assert.ok(logs.some(m => /Kernel card: none \(stalled on both attempts\)/.test(m)))
+  assert.doesNotMatch(calls.find(c => c.opts.label === 'geak').prompt, /Kernel card:/)
+})
+
+test('both workflows hold a counter run to the same stall rule', async () => {
+  const [tune, opt] = await Promise.all([
+    run(TUNE, '--tag dummy_multi --candidates 1 --execute', tuneAgent()),
+    run(OPT, '--tag pyt_fam_fastwam_geak --execute', optKernelAgent('report')),
+  ])
+  const rule = r => r.calls.find(c => c.opts.phase === 'Kernel' || c.opts.label === 'kernel').prompt.match(STALL_RULE)[0]
+  assert.equal(rule(tune).replace(/such as \S+,/, ''), rule(opt).replace(/such as \S+,/, ''))
 })

@@ -29,9 +29,10 @@ Method:
   capture sets `TORCH_PROFILE_ITERATIONS=0`. Kernel and assembly follow
   `.claude/skills/mad-common/kernel-analysis.md`: one counter run of the top
   dispatch kernel through `kernel-tools.py context`, then `kernel-tools.py
-  card` and `asm`. If a counter run stalls with the GPU idle (an eager model
-  with tens of thousands of tiny launches), add `--serialize` to `context`.
-  Never combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled number is evidence, not the baseline.
+  card` and `asm`. If a counter run stalls (status `running`, GPU use 0% at
+  every check for 10 minutes), stop it, skip `card` on its output, and retry
+  once with `--serialize` added to `context`; if that stalls too, the bound is
+  unknown. Never combine `rocm_trace_lite` and `rocprofv3_*` in one run. A profiled number is evidence, not the baseline.
 - Match kernel levers to the card's `bound` with the "Levers by bound" table:
   a latency-bound kernel does not get a bandwidth lever. When `bound` is
   `unknown`, say so and use the family levers.
