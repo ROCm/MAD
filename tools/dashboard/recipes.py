@@ -18,7 +18,8 @@ import re
 import shlex
 
 DEFAULT_REPO = "ROCm/MAD"
-ISA_OF = {"MI300X": "gfx942", "MI325X": "gfx942", "MI350X": "gfx950", "MI355X": "gfx950"}
+ISA_OF = {"MI300X": "gfx942", "MI325X": "gfx942", "MI350X": "gfx950", "MI355X": "gfx950",
+          "MI455X": "gfx1250"}
 GPUS_PER_NODE = 8
 
 # madengine's AMD `docker run` options (ContainerRunner.run_container) plus the GPU devices.

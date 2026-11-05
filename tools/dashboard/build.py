@@ -68,8 +68,10 @@ def _variant_label(row, family_rows):
 
 
 def sku_label(skus, all_skus):
-    if list(skus) == list(all_skus):
-        return f"{all_skus[0]}–{all_skus[-1]}"
+    skus, all_skus = list(skus), list(all_skus)
+    # A run of three or more neighbouring products reads as a range: MI300X–MI355X.
+    if len(skus) > 2 and skus == all_skus[all_skus.index(skus[0]):][:len(skus)]:
+        return f"{skus[0]}–{skus[-1]}"
     return " · ".join(skus)
 
 
@@ -243,8 +245,7 @@ SECTION_PAGES = [
     ("roadmap.html.j2", "roadmap/index.html", "roadmap"),
 ]
 RELEASES_PAGE = "releases/index.html"
-CSV_COLUMNS = ["madengine_tag", "framework", "workload", "model", "hf_repo", "precision", "MI300X", "MI325X", "MI350X",
-               "MI355X", "n_gpus", "nodes", "scheduler", "k8s", "discovery", "suites", "base_image", "rocm", "recipe"]
+CSV_COLUMNS = ["madengine_tag", "framework", "workload", "model", "hf_repo", "precision", *collect.SKUS, "n_gpus", "nodes", "scheduler", "k8s", "discovery", "suites", "base_image", "rocm", "recipe"]
 
 
 def up(path):

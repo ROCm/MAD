@@ -38,8 +38,12 @@ MULTINODE_SWITCHES = {
 ISA_SKUS = {
     "gfx942": ("MI300X", "MI325X"),
     "gfx950": ("MI350X", "MI355X"),
+    "gfx1250": ("MI455X",),
 }
 SKUS = tuple(sku for skus in ISA_SKUS.values() for sku in skus)
+# A model with no product tag runs on every ISA except skip_gpu_arch and these: the products
+# behind them are claimed only by configs that name them (Primus's MI455X directory).
+TAGGED_ONLY_ISAS = {"gfx1250"}
 
 # Longest token first, so MXFP4 is not reported as FP4.
 _PRECISION_TOKENS = ("mxfp8", "mxfp4", "nanoo_fp8", "bf16", "fp16", "fp32", "fp8", "fp4")
@@ -277,11 +281,11 @@ def skus_for(model):
     if tagged:
         return tagged
     skipped = set(re.split(r"[\s,]+", model.get("skip_gpu_arch", "") or "")) - {""}
-    return [sku for isa, skus in ISA_SKUS.items() if isa not in skipped for sku in skus]
+    return [sku for isa, skus in ISA_SKUS.items() if isa not in skipped | TAGGED_ONLY_ISAS for sku in skus]
 
 
 def untracked_product(model):
-    """True when a config names an Instinct product the dashboard does not track (e.g. MI455X).
+    """True when a config names an Instinct product the dashboard does not track (e.g. MI430X).
 
     skus_for() would otherwise fall back to "every product" for such a config, which says the
     model runs on GPUs it was never registered for.

@@ -345,3 +345,17 @@ def test_site_renders_every_page_with_no_broken_links(tmp_path):
         assert 'src="../logos/providers/meta-llama.png"' in f.read()
     with open(os.path.join(out, "v26.9/models/vllm/llama/index.html")) as f:
         assert 'src="../../../../logos/providers/meta-llama.png"' in f.read()   # frozen trees share the root logos
+
+
+def test_sku_label_ranges():
+    five = ["MI300X", "MI325X", "MI350X", "MI355X", "MI455X"]
+    assert build.sku_label(five[:4], five) == "MI300X–MI355X"
+    assert build.sku_label(five, five) == "MI300X–MI455X"
+    assert build.sku_label(["MI355X", "MI455X"], five) == "MI355X · MI455X"
+    assert build.sku_label(["MI300X", "MI355X"], five) == "MI300X · MI355X"
+    assert build.sku_label(["MI455X"], five) == "MI455X"
+
+
+def test_mi455x_recipe_uses_gfx1250():
+    assert recipes.ISA_OF["MI455X"] == "gfx1250"
+    assert "MAD_SYSTEM_GPU_ARCHITECTURE=gfx1250" in code(recipes.docker_steps(make_row(skus=("MI455X",)), "MI455X"))

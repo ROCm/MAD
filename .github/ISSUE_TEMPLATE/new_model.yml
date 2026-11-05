@@ -45,6 +45,7 @@ body:
         - label: MI325X
         - label: MI350X
         - label: MI355X
+        - label: MI455X
   - type: input
     id: precision
     attributes:

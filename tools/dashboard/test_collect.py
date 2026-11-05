@@ -117,11 +117,19 @@ def test_skus_for():
 
 
 def test_untracked_product():
-    # A config for a product the dashboard does not track (MI455X) is not shown; without the
-    # filter skus_for() would claim it runs on every tracked product.
-    assert collect.untracked_product({"tags": ["primus", "megatron", "MI455X", "x"]})
+    # A config for a product the dashboard does not track is not shown; without the filter
+    # skus_for() would claim it runs on every tracked product.
+    assert collect.untracked_product({"tags": ["primus", "megatron", "MI430X", "x"]})
+    assert not collect.untracked_product({"tags": ["primus", "megatron", "MI455X", "x"]})
     assert not collect.untracked_product({"tags": ["primus", "megatron", "MI355X", "x"]})
     assert not collect.untracked_product({"tags": ["vllm", "vllm_default"]})
+
+
+def test_mi455x_only_for_configs_that_name_it():
+    assert collect.skus_for({"tags": ["primus", "megatron", "MI455X", "x"]}) == ["MI455X"]
+    # Untagged models keep claiming the four older products, not gfx1250.
+    assert "MI455X" not in collect.skus_for({"tags": []})
+    assert collect.skus_for({"tags": [], "skip_gpu_arch": "gfx942"}) == ["MI350X", "MI355X"]
 
 
 def test_worldmirror_label_prefix():

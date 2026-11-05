@@ -8,7 +8,7 @@
   @media (max-width: 620px) { .grid.overview { grid-template-columns: 1fr; } }
   .overview .tile .t-sub { color: var(--ink-3); font-size: 12.5px; }
   .overview .tile ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
-  .gpu-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
+  .gpu-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--ink-2); }
   .gpu-row b { display: block; color: var(--ink); font-size: 15px; }
 {% endblock %}
 {% block body %}
