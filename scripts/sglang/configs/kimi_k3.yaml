@@ -38,17 +38,27 @@
 # 8 * 9216 / 31.297 s = 2355.8 vs 2356.21 reported). MAD's usual 1024/1024 would
 # produce numbers that cannot be compared against the tracking issue.
 #
+# random_range_ratio: 1.0 keeps every request at exactly inp/out tokens, as in
+# the issue. Without it the runner uses its default of 0.8, which samples
+# lengths from [0.8 * len, len] and shifts throughput and latency.
+#
 # max_concurrency is the shared K3 sweep used for vLLM/SGLang/ATOM as well
 # (1/4/8/16/32/64/128/256). It is a superset of the issue's rows except for
 # concurrency 2, so 4/8/16/32 remain directly comparable to the tables.
 #
-# --disable-radix-cache comes from the recipe itself, not from MAD benchmark
-# hygiene, and so is spelled out in extra_args rather than forced by the runner.
+# --disable-radix-cache comes from the recipe itself, so it is spelled out in
+# extra_args. The runner also passes it for every SGLang serving run; the
+# duplicate flag is harmless.
 #
-# The runner emits --tp-size, not the --tp shown in the issue: ServerArgs
-# declares tp_size with a single alias, --tensor-parallel-size, and there is no
-# --tp option. "--tp 8" only parses through argparse prefix matching, which any
-# future --tp* option would silently break.
+# --trust-remote-code is not set here: the runner does not add it, and it comes
+# from the moonshotai/Kimi-K3 entry in perf.yaml, which fills it into both
+# variants.
+#
+# The runner emits --tensor-parallel-size, not the --tp shown in the issue:
+# ServerArgs declares tp_size as --tp-size with the single alias
+# --tensor-parallel-size, and there is no --tp option. "--tp 8" only parses
+# through argparse prefix matching, which any future --tp* option would
+# silently break.
 
 - benchmark: serving
   variant: nospec
@@ -56,6 +66,7 @@
   tp: 8
   inp: 8192
   out: 1024
+  random_range_ratio: 1.0
   dtype: bfloat16
   max_concurrency: 1 4 8 16 32 64 128 256
   env: &k3_env
@@ -82,6 +93,7 @@
   tp: 8
   inp: 8192
   out: 1024
+  random_range_ratio: 1.0
   dtype: bfloat16
   max_concurrency: 1 4 8 16 32 64 128 256
   env: *k3_env

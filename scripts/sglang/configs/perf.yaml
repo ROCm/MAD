@@ -1,0 +1,75 @@
+- model: xai-org/grok-2
+  docker_base: lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712
+  env:
+    SGLANG_USE_AITER: 1
+  extra_args:
+    --chat-template: chat_templates/grok2.jinja
+    --trust-remote-code: true
+    --attention-backend: aiter
+
+- model: deepseek-ai/DeepSeek-V3.1 amd/DeepSeek-R1-MXFP4 amd/DeepSeek-R1-0528-MXFP4
+  env:
+    SGLANG_USE_AITER: 1
+  extra_args:
+    --attention-backend: aiter
+
+- model: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+  extra_args:
+    --attention-backend: aiter
+    --performance-mode: speed
+    --enable-torch-compile: "false"
+  env:
+    SGLANG_USE_AITER_ROPE: 1
+
+- model: deepseek-ai/DeepSeek-V4-Flash deepseek-ai/DeepSeek-V4-Pro
+  docker_base: lmsysorg/sglang-rocm:v0.5.13-rocm720-mi35x-20260612
+  env:
+    SGLANG_DEFAULT_THINKING: 1
+    SGLANG_DSV4_REASONING_EFFORT: max
+    SGLANG_OPT_DEEPGEMM_HC_PRENORM: "false"
+    SGLANG_USE_AITER: 1
+    SGLANG_USE_ROCM700A: 0
+    SGLANG_OPT_USE_FUSED_COMPRESS: "true"
+    SGLANG_HACK_FLASHMLA_BACKEND: unified_kv_triton
+    SGLANG_OPT_FP8_WO_A_GEMM: "false"
+    SGLANG_OPT_USE_JIT_INDEXER_METADATA: "false"
+    SGLANG_OPT_USE_TOPK_V2: "false"
+    SGLANG_OPT_USE_AITER_INDEXER: "true"
+    SGLANG_OPT_USE_TILELANG_INDEXER: "false"
+    SGLANG_OPT_USE_TILELANG_MHC_PRE: "false"
+    SGLANG_OPT_USE_TILELANG_MHC_POST: "false"
+    SGLANG_FP8_PAGED_MQA_LOGITS_TORCH: 1
+    SGLANG_OPT_USE_FUSED_COMPRESS_TRITON: "true"
+    AITER_BF16_FP8_MOE_BOUND: 0
+    SGLANG_EAGER_INPUT_NO_COPY: "true"
+    SGLANG_OPT_USE_MULTI_STREAM_OVERLAP: "false"
+    SGLANG_ROCM_USE_MULTI_STREAM: "false"
+  extra_args:
+    --trust-remote-code: true
+    --attention-backend: dsv4
+    --mem-fraction-static: 0.90
+    --swa-full-tokens-ratio: 0.15
+    --page-size: 256
+    --chunked-prefill-size: 8192
+    --disable-shared-experts-fusion: true
+    --watchdog-timeout: 1800
+
+- model: black-forest-labs/FLUX.2-dev black-forest-labs/FLUX.1-dev
+  docker_base: lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712
+  extra_args:
+    --attention-backend: aiter
+    --performance-mode: speed
+    --enable-torch-compile: "false"
+
+- model: moonshotai/Kimi-K3
+  env:
+    SGLANG_AITER_K3_OPT: 1
+    AITER_FLYDSL_FORCE: 1
+    AITER_SITUV2_A8W4: 1
+  extra_args:
+    --trust-remote-code: true
+    --attention-backend: triton
+    --mem-fraction-static: 0.85
+    --cuda-graph-max-bs-decode: 256
+    --reasoning-parser: kimi_k3
+    --tool-call-parser: kimi_k3

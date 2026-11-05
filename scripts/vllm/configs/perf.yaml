@@ -1,0 +1,191 @@
+## gpt-oss-120b
+- model: openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8
+  extra_args:
+    --kv-cache-dtype: fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_QUICK_REDUCE_MAX_SIZE_BYTES_MB: 1280
+
+## DeepSeek-R1-0528 (AITER only); must precede the R1 group below
+- model: deepseek-ai/DeepSeek-R1-0528
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+- model: deepseek-ai/DeepSeek-R1
+    deepseek-ai/DeepSeek-V3.1-Base
+    amd/DeepSeek-R1-MXFP4
+    amd/DeepSeek-R1-0528-MXFP4
+    moonshotai/Kimi-K2.5
+    amd/Kimi-K2.5-MXFP4
+    moonshotai/Kimi-K2-Thinking
+    amd/Kimi-K2-Thinking-MXFP4
+  extra_args:
+    --kv-cache-dtype: fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+
+- model: deepseek-ai/DeepSeek-V3.2
+  extra_args:
+    --max-model-len: 101372
+    --kv-cache-dtype: fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: INT4
+    VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: 1
+
+- model: stepfun-ai/Step-3.5-Flash
+  extra_args:
+    --attention-backend: ROCM_AITER_UNIFIED_ATTN
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_USE_AITER_MOE: 0
+
+- model: zai-org/GLM-5.1-FP8
+      amd/GLM-5.1-MXFP4
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --max-model-len: 101372
+    --kv-cache-dtype: fp8
+
+- model: zai-org/GLM-5-FP8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --kv-cache-dtype: fp8
+
+- model: zai-org/GLM-4.7-FP8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --attention-backend: ROCM_AITER_FA
+    --kv-cache-dtype: fp8
+    
+- model: CohereLabs/c4ai-command-r7b-12-2024
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --attention-backend: ROCM_AITER_FA
+    --kv-cache-dtype: fp8
+    --trust-remote-code: true
+
+- model: CohereLabs/command-a-plus-05-2026-fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  extra_args:
+    --kv-cache-dtype: fp8
+    --trust-remote-code: true
+    --enable-auto-tool-choice: true
+    --tool-call-parser: cohere_command4
+    --reasoning-parser: cohere_command4
+
+- model:
+    MiniMaxAI/MiniMax-M2.7
+    amd/MiniMax-M2.7-MXFP4
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT: 1
+  extra_args:
+    --attention-backend: ROCM_AITER_FA
+
+- model: deepseek-ai/DeepSeek-V4-Pro deepseek-ai/DeepSeek-V4-Flash
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+  extra_args:
+    --kv-cache-dtype: fp8
+    --max-num-batched-tokens: 8192
+
+- model: Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+  extra_args:
+    --kv-cache-dtype: fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+- model: moonshotai/Kimi-K3
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    SAFETENSORS_FAST_GPU: 1
+    VLLM_ROCM_USE_AITER_MOE_SITUV2_A8W4: 1
+    AITER_BF16_FP8_MOE_BOUND: 0
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+  extra_args:
+    --trust-remote-code: true
+    --load-format: "auto"
+    --gpu-memory-utilization: 0.95
+    --language-model-only: true
+    --max-num-seqs: 128
+    --max-num-batched-tokens: 4096
+    --compilation-config: '{"cudagraph_mode":"FULL_DECODE_ONLY","custom_ops":["+fused_rms_norm_gated"]}'
+    --enable-auto-tool-choice: true
+    --tool-call-parser: kimi_k3
+    --reasoning-parser: kimi_k3
+  bench_args:
+    --trust-remote-code: true
+
+## Standard AITER models
+- model:
+    openai/gpt-oss-20b
+    meta-llama/Llama-3.1-405B-Instruct
+    amd/Llama-3.1-405B-Instruct-FP8-KV
+    meta-llama/Llama-3.3-70B-Instruct
+    amd/Llama-3.3-70B-Instruct-FP8-KV
+    amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+    amd/Llama-3.3-70B-Instruct-MXFP4-Preview
+    meta-llama/Llama-3.1-8B-Instruct
+    amd/Llama-3.1-8B-Instruct-FP8-KV
+    mistralai/Mixtral-8x22B-Instruct-v0.1
+    amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV
+    mistralai/Mixtral-8x7B-Instruct-v0.1
+    amd/Mixtral-8x7B-Instruct-v0.1-FP8-KV
+    Qwen/Qwen3-8B
+    Qwen/Qwen3-32B
+    Qwen/Qwen3-30B-A3B-Thinking-2507
+    Qwen/Qwen3-30B-A3B-Thinking-2507-FP8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## Qwen3-235B / Qwen3.5-397B (AITER + expert-parallel)
+- model:
+    Qwen/Qwen3-235B-A22B-Thinking-2507
+    Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+    Qwen/Qwen3.5-397B-A17B
+    Qwen/Qwen3.5-397B-A17B-FP8
+  extra_args:
+    --enable-expert-parallel: True
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## Kimi K2.6 (AITER)
+- model: moonshotai/Kimi-K2.6 amd/Kimi-K2.6-MXFP4
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## DeepSeek-V3.2-MXFP4 / GLM-5.2 (AITER + fp8 KV cache + max-model-len for GLM 5.2 1M context)
+- model:
+    amd/DeepSeek-V3.2-MXFP4
+    zai-org/GLM-5.2-FP8
+    amd/GLM-5.2-MXFP4
+  extra_args:
+    --max-model-len: 101372
+    --kv-cache-dtype: fp8
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+## MiniMax-M3 (AITER + TRITON_ATTN + fp8 KV cache)
+- model: MiniMaxAI/MiniMax-M3-MXFP8 amd/MiniMax-M3-MXFP4
+  extra_args:
+    --block-size: 128
+    --kv-cache-dtype: fp8
+    --attention-backend: TRITON_ATTN
+  env:
+    VLLM_ROCM_USE_AITER: 1
+    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
+    VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT: 1
+
+## Cohere Command A+ bf16 (AITER)
+- model: CohereLabs/command-a-plus-05-2026-bf16
+  env:
+    VLLM_ROCM_USE_AITER: 1

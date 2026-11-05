@@ -69,14 +69,18 @@ docker build -f docker/large_ep_benchmark.ubuntu.amd.Dockerfile -t ep-benchmarki
 |----------------|--------------------------------------|----------------------|
 | `DOCKER_IMAGE` | Docker image to run on the cluster   | `ep-benchmarking:latest` |
 | `IBDEVICES`    | InfiniBand device(s) for rocSHMEM   | `mlx5_0` (default)   |
+| `SKIP_DEEPEP`  | Set to `1` to skip the DeepEP tests and run MoRI-EP only | `0` (default) |
 
 Optional:
 
-- `LOG_PATH`: Directory for benchmark logs (default: `./logs` in the current working directory).
+- `LOG_PATH`: Root directory for benchmark logs (default: `/shared_inference/${USER}/model_blog_logs`). Each job writes to `$LOG_PATH/$SLURM_JOB_ID/`, so `LOG_PATH` must be on storage shared by all nodes.
+
+>[!NOTE]
+>`run_benchmark.sbatch` also bind-mounts `/shared_inference/models` into the container. If your cluster has no such path, edit the `docker run` command in the script.
 
 ### 3. Submit the Slurm job
 
-Navigate to the scripts directory and submit the job. The script supports **1 to N nodes**; Slurm allocates the nodes and the job runs both intranode and internode tests when multiple nodes are requested.
+Navigate to the scripts directory and submit the job (the current directory is mounted into the container as the script location). The script supports **1 to N nodes**: with one node it runs the intranode tests, and with more than one node it runs **only** the internode tests.
 
 ```bash
 cd scripts/large-ep-benchmark
@@ -94,7 +98,7 @@ sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch
   sbatch -p <partition> -N 1 run_benchmark.sbatch
   ```
 
-- Multi-node (intranode and internode):
+- Multi-node (internode only):
   ```bash
   sbatch -p <partition> -N 4 run_benchmark.sbatch
   ```
@@ -105,10 +109,21 @@ sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch
 ## Output and logs
 
 - Slurm stdout/stderr: `ep_bench_slurm_job.out` and `ep_bench_slurm_job.err` in the directory where `sbatch` was run.
-- Benchmark logs are written under `LOG_PATH` (default: `./logs`), including:
+- Benchmark logs are written under `$LOG_PATH/$SLURM_JOB_ID/`, including:
   - `ep_bench_results.log` — main run log
-  - `intranode_results.log` / `mori_intranode_results.log` — intranode DeepEP and MoRI
-  - `internode_<rank>.txt`, `low-latency-<rank>.log` — internode and low-latency results
+  - Single node:
+    - `intranode_results.log` / `low_latency_1N_results.log` — DeepEP normal and low latency
+    - `mori_intranode_results.log` / `mori_1N_ll_results.log` — MoRI-EP normal and low latency (FP8)
+  - Multi-node (per rank):
+    - `internode_<rank>.txt` / `low-latency-<rank>.log` — DeepEP normal and low latency
+    - `mori_internode_<rank>.txt` / `mori_ll_internode_<rank>.txt` — MoRI-EP normal and low latency
+  - `perf.csv` — all results parsed by `parse_ep_to_csv.py`, for madengine
+- DeepEP logs are absent when `SKIP_DEEPEP=1`.
+
+### Running through MAD
+
+`models.json` defines `pyt_large_ep_bench_{1n,2n}` (DeepEP and MoRI-EP) and `pyt_large_ep_bench_{1n,2n,4n}_mori_only`
+(`SKIP_DEEPEP=1`, tag `large_ep_scaling`). They use the `slurm_multi` launcher and pass the node count as `-N <n> -n <n>`.
 
 
 ## Summary
@@ -116,7 +131,7 @@ sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch
 | Step | Action |
 |------|--------|
 | 1    | Build image from MAD root: `docker build -f docker/large_ep_benchmark.ubuntu.amd.Dockerfile -t ep-benchmarking:latest .` |
-| 2    | Set `DOCKER_IMAGE` and `IBDEVICES` (and optionally `LOG_PATH`) |
+| 2    | Set `DOCKER_IMAGE` and `IBDEVICES` (and optionally `SKIP_DEEPEP`, `LOG_PATH`) |
 | 3    | From `scripts/large-ep-benchmark`, run: `sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch` |
 
 For different GPU architectures or NICs, update the Dockerfile and rebuild before submitting jobs.
