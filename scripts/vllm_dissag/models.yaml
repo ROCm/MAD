@@ -543,3 +543,41 @@ Kimi-K3.1-Pro-gfx942:
   decode:
     tp: "--tensor-parallel-size 8 --max-num-seqs 256 --no-enable-prefix-caching"
     dp: ""
+
+Kimi-K3.1-Pro-gfx942-dspark:
+  # DSpark speculative decoding variant of Kimi-K3.1-Pro-gfx942: the 5-layer K3.1 DSpark draft
+  # (Inferact/Kimi-K3.1-Pro-DSpark-preview, placed next to the checkpoint) on BOTH legs so the KV groups match.
+  # Draft KV must stay bf16 ("kv_cache_dtype":"auto"): gfx942 AITER MLA decode rejects OCP fp8. Measured 1P1D:
+  # ~158 tok/s/stream at c1 on reasoning text (AL 4.7), ~90 on mixed text (AL 2.7) vs ~49 without the draft.
+  # Kimi-K3.1-Pro (93 layers = 69 KDA + 24 gated DSA/MLA, 896 MXFP4 experts top-16, 1M ctx) on gfx942
+  # (MI325X 256 GB). 1P/1D over MoRIIO, TP8 attention + TP-sharded experts on both legs, DCP8 on both legs
+  # (KV sharded across the 8 GPUs: ~6.6M tokens/leg). Experts requantized MXFP4 -> int4 per-group-32 at load
+  # (FlyDSL wint4 SiTUv2 a16w4; gfx942 has no FP4 MMA). Run with WIDE_EP=0 (moriio + TP path).
+  # Validated (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K (750K in 118 s), distinct-needle con gate, AgentX.
+  # --prefix-cache-retention-interval keeps a KDA state every 16384 tokens so a session's next turn can resume.
+  # Run 2P1D (xP=2 yD=1) for agentic traffic: one prefill node is the TTFT bottleneck.
+  # One node does not fit wideEP for this model: TP4xDP2 + MoRI-EP leaves ~0.6 GiB KV/GPU.
+  env:
+    VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
+    VLLM_ROCM_USE_AITER: "1"
+    SAFETENSORS_FAST_GPU: "1"
+    VLLM_USE_BREAKABLE_CUDAGRAPH: "1"       # K3.1 has no torch.compile submodule; breakable graphs only
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"     # 1.5 TB load + first AITER/MoRI JIT
+    VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
+    VLLM_SSM_CONV_STATE_LAYOUT: "DS"        # MoRIIO KDA conv-state transfer requires the dim-first layout
+    MORIIO_READ_MODE: "1"
+    GPU_MEMORY_UTILIZATION: "0.88"          # prefill KDA chunk workspace is not fully profiled; 0.9 OOMs at c32
+    PREFILL_CUDAGRAPH_MODE: "NONE"          # prefill also gets --enforce-eager below
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 24 32 48 64"  # ~0.25 GiB/size breakable graph pool on the upstream tip
+    ROUTER_PREFILL_POLICY: "consistent_hash"
+    ROUTER_DECODE_POLICY: "consistent_hash"
+    AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: "true"
+  base_flags: "--trust-remote-code --language-model-only --kv-cache-dtype fp8_ds_mla --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}' --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice --max-model-len 800000 --max-num-batched-tokens 16384 --block-size 1024 --decode-context-parallel-size 8 --dcp-comm-backend a2a --speculative-config '{\"method\":\"dspark\",\"model\":\"/models/Kimi-K3.1-Pro-DSpark-preview\",\"num_speculative_tokens\":7,\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"block\",\"kv_cache_dtype\":\"auto\"}'"
+  tp_flags: ""
+  prefill:
+    tp: "--tensor-parallel-size 8 --enforce-eager --max-num-seqs 16 --prefix-match-unit 64 --prefix-cache-retention-interval 16384"
+    dp: ""
+  decode:
+    tp: "--tensor-parallel-size 8 --max-num-seqs 128 --no-enable-prefix-caching"
+    dp: ""

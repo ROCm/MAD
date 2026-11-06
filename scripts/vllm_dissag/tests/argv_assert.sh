@@ -116,7 +116,7 @@ optin = [m for m, c in y.items()
 print("[" + ",".join(sorted(optin)) + "]")
 PY
 )"
-_has "$_OPTIN_RM" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-FP8-gfx942-hyb,GLM-5.3-Flash-MXFP4-gfx942,GLM-5.3-Flash-MXFP4-gfx942-hyb,Kimi-K3.1-Pro-gfx942]" "models.yaml: the GLM-5.3-Flash and Kimi-K3.1 gfx942 cards are the ONLY read_mode opt-ins"
+_has "$_OPTIN_RM" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-FP8-gfx942-hyb,GLM-5.3-Flash-MXFP4-gfx942,GLM-5.3-Flash-MXFP4-gfx942-hyb,Kimi-K3.1-Pro-gfx942,Kimi-K3.1-Pro-gfx942-dspark]" "models.yaml: the GLM-5.3-Flash and Kimi-K3.1 gfx942 cards are the ONLY read_mode opt-ins"
 _has "$(cat "$SLURM")" '${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=' "slurm forwards MORIIO_READ_MODE override"
 
 # GLM-5.3-Flash runs MTP on BOTH legs (the transferred KV cache groups must match) with a
@@ -145,7 +145,7 @@ print("[" + ",".join(sorted(m for m, c in y.items()
       if isinstance(c, dict) and (c.get("env") or {}).get("ROUTER_PREFILL_POLICY"))) + "]")
 PY
 )"
-_has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-FP8-gfx942-hyb,GLM-5.3-Flash-MXFP4-gfx942,GLM-5.3-Flash-MXFP4-gfx942-hyb,Kimi-K3.1-Pro-gfx942]" "models.yaml: the GLM-5.3-Flash and Kimi-K3.1 gfx942 cards are the ONLY router-policy opt-ins"
+_has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-FP8-gfx942-hyb,GLM-5.3-Flash-MXFP4-gfx942,GLM-5.3-Flash-MXFP4-gfx942-hyb,Kimi-K3.1-Pro-gfx942,Kimi-K3.1-Pro-gfx942-dspark]" "models.yaml: the GLM-5.3-Flash and Kimi-K3.1 gfx942 cards are the ONLY router-policy opt-ins"
 
 # The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
 # with srun stubbed to "find" only the directory FOUND on every node.

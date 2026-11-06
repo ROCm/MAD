@@ -47,6 +47,12 @@ sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
 
 One prefill node is the bottleneck for agentic traffic; run `xP=2 yD=1` (`sbatch -N 3`) when three nodes are available.
 
+## DSpark speculative decoding (card Kimi-K3.1-Pro-gfx942-dspark)
+Place `Inferact/Kimi-K3.1-Pro-DSpark-preview` (5.4 GB) next to the checkpoint. The draft runs on both legs, its KV stays
+bf16 (`"kv_cache_dtype":"auto"`; OCP fp8 crashes gfx942 AITER MLA decode), and decode drops to `--max-num-seqs 128`
+(the draft reduces KDA state blocks). Measured 1P1D, per-stream decode: 158 tok/s at c1 on reasoning text (acceptance
+length 4.7), 90 on mixed text (2.7), 81 / 48 at c32, versus ~49 without the draft. GSM8K and NIAH to 750K unchanged.
+
 ## Verify
 - Load log: `Requantizing Kimi-K3 MXFP4 experts to groupwise int4 for gfx942`, `flydsl_moe1_abf16_wint4`, `GPU KV cache size: ~6.6M tokens`.
 - Prefill with prefix caching logs `Mamba cache mode is set to 'align'`.
