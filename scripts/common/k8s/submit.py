@@ -38,6 +38,7 @@ import hashlib
 import io
 import json
 import re
+import secrets
 import subprocess
 import sys
 import tarfile
@@ -145,6 +146,8 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
         "MAD_K8S_NNODES": str(nnodes), "MAD_K8S_NODE_PREFIX": name, "MAD_K8S_JOB_ID": run_id,
         "MAD_K8S_IMAGE": image, "MAD_K8S_SCRIPT": script, "MAD_K8S_ARGS": card.get("args") or "",
         "MAD_K8S_AGENT_PORT": str(AGENT_PORT),
+        # The agents run any command sent to them: only this run's pods hold the token.
+        "MAD_K8S_AGENT_TOKEN": secrets.token_hex(32),
     })
     if card.get("multiple_results"):
         env["MAD_K8S_MULTIPLE_RESULTS"] = card["multiple_results"]

@@ -49,6 +49,11 @@ class TestSubmitDryRun(unittest.TestCase):
         self.assertEqual(pod["subdomain"], out["name"])
         self.assertEqual(objs["Service"]["spec"]["clusterIP"], "None")
 
+    def test_every_run_has_its_own_agent_token(self):
+        tokens = {dry_run()[3]["MAD_K8S_AGENT_TOKEN"] for _ in range(2)}
+        self.assertEqual(len(tokens), 2)
+        self.assertTrue(all(len(t) == 64 for t in tokens))
+
     def test_config_and_env_override_the_card(self):
         _, objs, pod, env = dry_run("--env", "MODEL_NAME=Llama-3.1-8B-Instruct", config={
             "k8s": {"namespace": "lab", "gpu_count": 2, "cpu": "16", "memory": "64Gi",
