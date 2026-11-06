@@ -1,0 +1,29 @@
+# cluster.yaml — the SCALE LEVER. Edit `nodes` to scale 1 -> N.
+# Each node is self-contained: it runs (gpus_per_node // TP) replicas, all node-local.
+# Scaling is linear: total_replicas = len(nodes) * (gpus_per_node // TP). No inter-node TP.
+
+# Slurm allocation flag prepended to every srun. Set ONE of:
+#   - "--reservation=<name>"  if you hold a reservation
+#   - "--jobid=<id>"          to run inside an existing (e.g. salloc/interactive) allocation
+#   - ""                      to srun with no allocation (nodes must be free)
+srun_alloc: "--reservation=<your_slurm_reservation>"
+reservation: <your_slurm_reservation>   # legacy fallback if srun_alloc is empty
+gpus_per_node: 8                 # gfx950, 8 GPUs/node
+hardware: MI350
+
+# Local model staging root (same path on every node; local NVMe recommended).
+# Cache weights here first (NFS cold-load adds ~7 min/boot). If local scratch is not
+# provisioned, point this at your shared model path instead.
+models_root: /path/to/models
+
+# Where result JSON / logs land (shared filesystem, visible from all nodes).
+results_root: ./results
+
+# Port base: replica i on a node binds (port_base + i).
+port_base: 8000
+
+# The node pool. START SMALL (1 node) to settle single-node configs, then add nodes.
+# 35B-A3B fits ONE GPU: a single node runs the full TP1 x8 sweep.
+nodes:
+  - <node-01>
+#  - <node-02>

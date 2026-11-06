@@ -1,0 +1,28 @@
+# cluster.yaml — DSv4 disagg cluster definition. SCALE LEVER for multi-node PD.
+# Unlike Qwen (1 node, independent replicas), DSv4 disagg spans MULTIPLE nodes per
+# serving instance: xP prefill nodes + yD decode nodes + 1 router (on prefill node 0).
+
+reservation: <your_slurm_reservation>
+gpus_per_node: 8                 # gfx950
+hardware: MI350
+
+# Model staging root (same path on every node; local NVMe recommended).
+models_root: /path/to/models
+
+results_root: ./results
+
+# Disagg ports (match InferenceX server_atom.sh defaults)
+router_port: 8000
+prefill_port: 8010
+decode_port: 8020
+handshake_port: 6301
+
+# Node pool. The launcher picks the first
+# (xP*pf_nodes_per_worker + yD*dec_nodes_per_worker) nodes for a given topology.
+nodes:
+  - <node-01>
+  - <node-02>
+  - <node-03>
+  - <node-04>
+  - <node-05>
+  - <node-06>

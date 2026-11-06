@@ -1,0 +1,72 @@
+# model.yaml — DSv4-Pro model def + per-engine disagg images/flags/router.
+#
+# DeepSeek-V4-Pro: deepseek_v4, 61 layers, 384 routed experts (6 active), hidden 7168,
+#   moe_intermediate_size 3072. FP8 block-quant (128x128, ue8m0) + FP4 MoE experts.
+#   TP8 VALID (3072/8=384 >= 128) — InferenceX runs TP8 throughout. PD-disaggregated.
+
+defaults:
+  gpu_memory_util: 0.85      # ATOM --gpu-memory-utilization / SGLang --mem-fraction-static
+  max_num_seqs: 256
+  kv_cache_dtype: fp8
+  block_size: 16
+  tp: 8                      # per prefill/decode worker
+
+models:
+  dsv4-pro:
+    dir: DeepSeek-V4-Pro     # under cluster.models_root (staged to scratch)
+    arch: deepseek_v4
+    status: WEIGHTS_VALID    # 64/64 shards integrity-checked on NFS; staging to scratch
+    # DSv4-specific env applied by the launcher (from InferenceX env_atom.sh):
+    #   ATOM_MOE_GU_ITLV=1, AITER_BF16_FP8_MOE_BOUND=0; TBO path adds GPU_MAX_HW_QUEUES=5,
+    #   ATOM_CPU_AFFINITY=1.
+
+# ---- engines: disagg image + router + KV-transfer backend ----------------------------------
+engines:
+  atom-disagg:
+    # The InferenceX-VALIDATED DSv4 disagg path. atomesh router + mooncake RDMA KV.
+    image: rocm/atom-dev:nightly_202606101403
+    # bench client runs from a clean vLLM image (ATOM's own image crashes the bench client)
+    bench_image: vllm/vllm-openai-rocm:nightly-9037498c22891e55b594f567fb91d9b4efbf3e99
+    router: atomesh                # /usr/local/bin/atomesh launch --pd-disaggregation
+    kv_connector: mooncake         # --kv-transfer-config '{"kv_connector":"mooncake",...}'
+    entrypoint: "python3 -m atom.entrypoints.openai_server"
+    env:
+      ATOM_MOE_GU_ITLV: "1"
+      AITER_BF16_FP8_MOE_BOUND: "0"
+      SAFETENSORS_FAST_GPU: "1"
+    # engine-unique server flags (shared knobs come from defaults{})
+    prefill_flags: "--trust-remote-code --no-enable_prefix_caching"
+    decode_flags: "--trust-remote-code --no-enable_prefix_caching"
+    router_flags: "--policy random --backend atom --disable-health-check --disable-circuit-breaker"
+    status: PRIMARY                # validated DSv4 atom-disagg config
+
+  sglang-disagg:
+    # Adapted from DeepSeek-R1 sglang-disagg (NO DSv4-sglang-disagg config exists upstream yet).
+    # MoRI-IO KV transfer + sglang_router. Needs an sglang image carrying DSv4 model support.
+    image: rocm/sgl-dev:rocm720-mi35x-0363e6c-20260509-DSv4   # DSv4-capable; disagg support TBC
+    router: sglang_router
+    kv_connector: mori             # MoRI-IO (env: MORI_IO_*, MORI_RDMA_TC/SL)
+    entrypoint: "python3 -m sglang.launch_server"
+    env:
+      SGLANG_USE_AITER: "1"
+      SGLANG_USE_AITER_UNIFIED_ATTN: "1"
+    prefill_flags: "--trust-remote-code --disaggregation-mode prefill --disable-radix-cache"
+    decode_flags: "--trust-remote-code --disaggregation-mode decode --disable-radix-cache --enable-dp-attention --ep-size 8"
+    status: EXPERIMENTAL           # R1 template; DSv4 disagg must be validated
+
+# ---- disagg topologies (from dsv4-fp4-mi355x-atom-disagg search-space) ----------------------
+topologies:
+  1p1d:                  # 2 nodes: 1 prefill (TP8) + 1 decode (TP8)
+    xP: 1
+    yD: 1
+    prefill: { tp: 8, ep: 1, dp_attn: false }
+    decode:  { tp: 8, ep: 1, dp_attn: false }
+    shapes:  ["1024,1024", "8192,1024"]
+    conc:    [4, 8, 16, 32, 64, 128]
+  2p1d_dpa:              # 3 nodes: 2 prefill (TP8, DP-attn) + 1 decode (TP8, DP-attn)
+    xP: 2
+    yD: 1
+    prefill: { tp: 8, ep: 1, dp_attn: true }
+    decode:  { tp: 8, ep: 1, dp_attn: true }
+    shapes:  ["8192,1024"]
+    conc:    [256, 512, 768, 1024, 2048]
