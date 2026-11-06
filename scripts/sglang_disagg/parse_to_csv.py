@@ -6,6 +6,7 @@ For each configuration, takes the MAX Total Token throughput across all iteratio
 """
 
 import re
+import sys
 import csv
 from pathlib import Path
 from typing import List, Dict, Tuple
@@ -228,10 +229,18 @@ def agentic_perf_rows(json_path: str):
     rm = d.get('request_metrics') or {}
     lat = rm.get('latency') or {}
     tput = rm.get('throughput') or {}
+    # Counted as validate_agentic_result.sh counts them: with request_accounting, the
+    # error rate is over measured requests only (profiled + error-dropped); warmup
+    # records are dropped on purpose and records_total includes them.
     acct = d.get('request_accounting') or {}
-    total = acct.get('records_total') or d.get('num_requests_total') or 0
-    ok = d.get('num_requests_successful') or 0
-    errors = acct.get('records_error_dropped') or 0
+    if acct:
+        ok = acct.get('records_profiled') or 0
+        errors = acct.get('records_error_dropped') or 0
+        total = ok + errors
+    else:
+        total = d.get('num_requests_total') or 0
+        ok = d.get('num_requests_successful') or 0
+        errors = max(total - ok, 0)
     max_err = float(os.environ.get('AGENTIC_MAX_ERROR_RATE', '0.10'))
     invalid = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(json_path)), 'RUN_INVALID.json'))
     failed = ok == 0 or invalid or (total and errors / total > max_err)
@@ -270,6 +279,12 @@ def save_agentic_perf_csv(json_paths, output_file: str, model_name: str = "",
                 writer.writerow(row)
                 n += 1
     print(f"Saved {n} agentic rows to perf.csv: {output_file}")
+    if n == 0:
+        # A header-only perf.csv is no result; the job verdict fails on it
+        # (cluster_job_verdict), and this says why.
+        print(f"ERROR: no metric rows in {', '.join(json_paths) or '(no aggregate JSON)'}: "
+              "the aggregate has none of the throughput / latency / cache fields read here",
+              file=sys.stderr)
 
 
 def main():
