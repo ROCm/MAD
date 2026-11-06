@@ -29,12 +29,14 @@ connector_init() {
         # rixl/TP ports
         SERVER_PORT=2584; SERVE_PORT="${SERVER_PORT}"
         KV_PORT=14600
-        # Container-creation barrier port. Env-overridable (BARRIER_PORT) so it can
-        # be moved off the collision-prone default 5000: the launcher's `fuser -k`
-        # cleanup targets this port on the host (host networking), so a stale host
-        # service on 5000 would otherwise be killed. Residual risk: the host-side
-        # fuser still kills whatever holds this port for the launching user.
-        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-5000}"
+        # Container-creation barrier port. Env-overridable (BARRIER_PORT). The default
+        # was 5000, which this comment already called collision-prone: on the OCI hosts
+        # something the job cannot kill holds 5000, and the barrier "passed" on both
+        # nodes by connecting to it. 15000 is the port this connector's
+        # wideEP branch already uses for the same barrier, and the launcher's cleanup
+        # already frees it (run_xPyD_models.slurm: fuser -k 15000/tcp). The two
+        # branches never run in the same job.
+        CONTAINER_BARRIER_PORT="${BARRIER_PORT:-15000}"
     fi
 
     PROXY_TYPE="${PROXY_TYPE:-vllm_router}"
@@ -143,12 +145,19 @@ _rixl_setup_env_deepep() {
     export VLLM_USE_V1=1
     export VLLM_LOGGING_LEVEL=INFO
     export VLLM_ALL2ALL_BACKEND="${backend}"
-    export VLLM_ROCM_USE_AITER=1
-    export VLLM_ROCM_USE_AITER_MLA=1
-    export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
-    export VLLM_ROCM_USE_AITER_RMSNORM=1
+    # AITER knobs from the model's models.yaml env:, as the moriio connector applies them.
+    # These were hardcoded, so DeepSeek-V3 -- whose recipe sets VLLM_ROCM_USE_AITER_MLA=0
+    # because "the block=1 + AITER-MLA fp8 decode kernel GPU-faults" -- still ran the
+    # ROCM_AITER_MLA backend here, and decode logged "Memory access fault by GPU" on
+    # every GPU once it loaded the AITER MLA kernel, even with block 16 (after 52ab5e1).
+    # moriio honours the recipe, runs TRITON_MLA and passes. The defaults are what was
+    # hardcoded, so recipes that set none of these are unchanged.
+    export VLLM_ROCM_USE_AITER="${VLLM_ROCM_USE_AITER:-1}"
+    export VLLM_ROCM_USE_AITER_MLA="${VLLM_ROCM_USE_AITER_MLA:-1}"
+    export VLLM_ROCM_USE_AITER_PAGED_ATTN="${VLLM_ROCM_USE_AITER_PAGED_ATTN:-0}"
+    export VLLM_ROCM_USE_AITER_RMSNORM="${VLLM_ROCM_USE_AITER_RMSNORM:-1}"
     export VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS=0
-    export VLLM_USE_AITER_TRITON_SILU_MUL=0
+    export VLLM_USE_AITER_TRITON_SILU_MUL="${VLLM_USE_AITER_TRITON_SILU_MUL:-0}"
     export VLLM_SERVER_DEV_MODE=0
     export VLLM_ROCM_USE_AITER_MOE=0
     export VLLM_ENGINE_READY_TIMEOUT_S=3600
@@ -252,14 +261,23 @@ _rixl_launch_tp() {
                 --port "${SERVER_PORT}" \
                 --trust-remote-code \
                 --kv-transfer-config "${kv_config}" \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
                 "${cfg_args[@]}"
         WORKER_PID=0; return 0
     fi
 
+    # GPU_MEMORY_UTILIZATION is resolved by vllm_disagg.sh (submit-time, then models.yaml,
+    # then the launcher's topology-aware fallback) and the moriio connector passes it; this
+    # one did not, so TP ran at vLLM's built-in default. That default is 0.92 in this image:
+    # 164.6 GiB of KV cache per GPU on llama-3.3-70B, and the first RCCL all-reduce then
+    # failed with "unhandled cuda error" at 178-179 of 191 GiB used, or
+    # start-up refused outright when a GPU was not almost empty. Placed before the
+    # model's own flags, so a models.yaml tp: flag still wins.
     vllm serve "${MODEL_PATH}" \
         --port "${SERVER_PORT}" \
         --trust-remote-code \
         --kv-transfer-config "${kv_config}" \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
         "${cfg_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
     WORKER_PID=$!
@@ -295,10 +313,15 @@ _rixl_launch_deepep() {
         extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
     fi
 
+    # Decode cudagraph mode and capture sizes from the recipe (DECODE_CUDAGRAPH_MODE, then
+    # VLLM_CUDAGRAPH_MODE), as moriio reads them. FULL_DECODE_ONLY, the old hardcoded mode,
+    # stays the default; DeepSeek-V3's recipe asks for PIECEWISE, the mode it passes in
+    # with TRITON_MLA on moriio.
     local compile_args=()
     if [[ "$log_prefix" == "decode" ]]; then
-        compile_args+=(--compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY","custom_ops":["+quant_fp8"]}')
-        compile_args+=(--cudagraph-capture-sizes 1 2 4 8 16 32 64 128 256)
+        local _cg_mode="${DECODE_CUDAGRAPH_MODE:-${VLLM_CUDAGRAPH_MODE:-FULL_DECODE_ONLY}}"
+        compile_args+=(--compilation-config '{"cudagraph_mode":"'"${_cg_mode}"'","custom_ops":["+quant_fp8"]}')
+        compile_args+=(--cudagraph-capture-sizes ${CUDAGRAPH_CAPTURE_SIZES:-1 2 4 8 16 32 64 128 256})
     else
         compile_args+=(--enforce-eager)
     fi
@@ -312,6 +335,17 @@ _rixl_launch_deepep() {
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
 
+    # KV knobs from the model's models.yaml env:, as the moriio connector applies them.
+    # This path hardcoded --block-size 1 and --kv-cache-dtype fp8 and dropped
+    # KV_CACHE_MEMORY_BYTES, so DeepSeek-V3 -- whose recipe sets KV_BLOCK_SIZE=16 and
+    # KV_CACHE_MEMORY_BYTES because "the block=1 + AITER-MLA fp8 decode kernel GPU-faults"
+    # (moriio.sh) -- ran in exactly that combination: a run logged "Memory
+    # access fault by GPU" on all eight decode GPUs after loading the AITER MLA kernel.
+    # The defaults are what was hardcoded, so recipes that set none of these are unchanged.
+    local _block="${KV_BLOCK_SIZE:-1}" _kvdtype="${KV_CACHE_DTYPE:-fp8}"
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         _dryrun_emit "deepep" "${log_prefix}" "${role}" \
             vllm serve "${MODEL_PATH}" \
@@ -324,9 +358,10 @@ _rixl_launch_deepep() {
                 --data-parallel-rpc-port "${RPC_PORT}" \
                 --master-addr "${dp_addr}" \
                 "${compile_args[@]}" \
-                ${_prefix_cache_flag} --block-size 1 \
-                --gpu-memory-utilization 0.8 \
-                --kv-cache-dtype fp8 \
+                ${_prefix_cache_flag} --block-size "${_block}" \
+                --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
+                "${mem_args[@]}" \
+                --kv-cache-dtype "${_kvdtype}" \
                 --enable-expert-parallel \
                 --all2all-backend "${backend}" \
                 ${DBO_ARGS} \
@@ -346,9 +381,10 @@ _rixl_launch_deepep() {
         --data-parallel-rpc-port "${RPC_PORT}" \
         --master-addr "${dp_addr}" \
         "${compile_args[@]}" \
-        ${_prefix_cache_flag} --block-size 1 \
-        --gpu-memory-utilization 0.8 \
-        --kv-cache-dtype fp8 \
+        ${_prefix_cache_flag} --block-size "${_block}" \
+        --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.8}" \
+        "${mem_args[@]}" \
+        --kv-cache-dtype "${_kvdtype}" \
         --enable-expert-parallel \
         --all2all-backend "${backend}" \
         ${DBO_ARGS} \
@@ -360,14 +396,28 @@ _rixl_launch_deepep() {
 }
 
 connector_wait_workers_ready() {
+    # Same knob and default as the moriio connector.
+    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-4000}" SLEEP_SECONDS=10 SEARCH_SIGNAL="Application startup complete."
     if parallelism_is_wide_ep; then
         echo "Waiting for prefill & decode master servers to start..."
-        local TIMEOUT_SECONDS=4000 SLEEP_SECONDS=10 SEARCH_SIGNAL="Application startup complete."
         _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/prefill_NODE0.log" "prefill master" "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
         _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/decode_NODE${xP}.log" "decode master" "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
     else
         echo "Waiting for all prefill and decode servers to be up . . ."
-        python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${IPADDRS} --node-ports $SERVER_PORT
+        # Every TP node serves on its own and logs to <role>_NODE<rank>.log. Wait on the
+        # logs first: the port check alone had no timeout and could not tell a server
+        # that is still loading from one that died (both servers once failed engine
+        # init and this loop waited until the job was cancelled). The port check below
+        # then confirms each server is reachable from here, as it always did.
+        local _n _role
+        for (( _n = 0; _n < xP + yD; _n++ )); do
+            if (( _n < xP )); then _role=prefill; else _role=decode; fi
+            _wait_log_signal_or_fail "/run_logs/${SLURM_JOB_ID}/${_role}_NODE${_n}.log" "${_role} server on NODE${_n}" \
+                "${SEARCH_SIGNAL}" "${TIMEOUT_SECONDS}" "${SLEEP_SECONDS}"
+        done
+        python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${IPADDRS} --node-ports $SERVER_PORT \
+            --abort-file "${JOB_ABORT_FILE}" --timeout 300 \
+            || _job_fail "a server logged start-up but its port ${SERVER_PORT} is not reachable from ${host_name}"
     fi
 }
 
@@ -428,7 +478,10 @@ connector_start_proxy() {
     fi
 
     echo "Waiting for proxy server to be up . . ."
-    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${host_ip} --node-ports $PROXY_PORT
+    python $NIXL_COOKBOOK_PATH/socket_barrier.py --node-ips ${host_ip} --node-ports $PROXY_PORT \
+        --abort-file "${JOB_ABORT_FILE}" --timeout "${LOG_WAIT_TIMEOUT_SECONDS:-4000}" \
+        || { _print_log_tail "/run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log" "proxy"; \
+             _job_fail "the proxy never opened ${host_ip}:${PROXY_PORT}"; }
     echo "Proxy Server ($PROXY_TYPE) Ready for benchmarking on ${host_name}:${host_ip}:${PROXY_PORT}"
     sleep 10
 }

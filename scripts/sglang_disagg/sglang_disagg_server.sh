@@ -19,8 +19,16 @@ IPADDRS="${IPADDRS:-localhost}"
 # Dependencies and Environment Setup
 # =============================================================================
 
-pip install py-spy
-pip install --ignore-installed --force-reinstall flask
+# These are expected to be baked into the image
+# (docker/sglang_disagg_inference.ubuntu.amd.Dockerfile). Install only what is
+# genuinely missing, so a MAD-built image does no work here while an image supplied
+# through DOCKER_IMAGE_NAME still self-heals. The unconditional
+# "--ignore-installed --force-reinstall flask" this replaces mutated the image on
+# every node of every run, downgraded click 8.5.0 -> 8.4.1, and surfaced unrelated
+# dependency conflicts in the log.
+# py-spy ships a binary rather than an importable module, so check for the command.
+command -v py-spy >/dev/null 2>&1 || pip install py-spy
+python3 -c "import flask" >/dev/null 2>&1 || pip install flask
 
 source $MOONCAKE_COOKBOOK_PATH/set_env_vars.sh
 #trap 'echo "Error occurred. Cleaning up..."; exit 0' ERR
