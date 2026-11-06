@@ -9,11 +9,12 @@
 # No cluster, no GPUs, no docker.
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-pass=0; fail=0
 # A stand-in "long" run: 30 s, with a fraction unique to this test run so its
-# leftovers can be found and killed without touching anything else.
+# leftovers can be found and killed without touching anything else. A cancelled
+# run's other ranks may start theirs after the cancel, so they are killed on exit.
 _LONG_SLEEP="30.$$"
+TMP="$(mktemp -d)"; trap 'pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null; rm -rf "$TMP"' EXIT
+pass=0; fail=0
 _ok()  { printf "  PASS  %s\n" "$1"; pass=$((pass+1)); }
 _bad() { printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); }
 _is()  { [ "$1" = "$2" ] && _ok "$3" || { _bad "$3"; printf "        got:  %s\n        want: %s\n" "$1" "$2"; }; }
