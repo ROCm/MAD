@@ -28,6 +28,35 @@ for _i in $(seq 1 60); do
 done
 [ "$_ready" = 1 ] || echo "[niah] WARN: router readiness not confirmed in 300s; proceeding (warmup will absorb)"
 
+# NIAH_MODE=corpus | multiturn: token-exact needle tests on corpus text (benchmark_niah_corpus.py)
+# instead of the word-list test. corpus: NIAH_LENGTHS (tokens, default 65536,262144,524288) x
+# NIAH_DEPTHS (0,0.5,1.0) x NIAH_NEEDLES (2) requests. multiturn: NIAH_MT_START, a comma list of
+# turn-1 context sizes in tokens (default 246000,490000).
+if [[ "${NIAH_MODE:-single}" == "corpus" || "${NIAH_MODE:-single}" == "multiturn" ]]; then
+    CORPUS="${MT_CORPUS:-/tmp/pg1184.txt}"
+    [[ -s "$CORPUS" ]] || curl -fsSL --retry 3 https://www.gutenberg.org/ebooks/1184.txt.utf-8 -o "$CORPUS"
+    echo "99245b8f3f6b637a3670d37305bb1ba52003f05797b6638571562999fd623f9c  $CORPUS" | sha256sum -c - \
+        || { echo "[niah] corpus SHA256 mismatch: $CORPUS" >&2; exit 1; }
+    _common=(--url "http://127.0.0.1:${BENCHMARK_PORT}" --model "${MODEL_PATH}"
+             --tokenizer "${TOKENIZER:-${MODEL_PATH}}" --corpus "$CORPUS")
+    if [[ "${NIAH_MODE}" == "corpus" ]]; then
+        python3 "${DIR}/benchmark_niah_corpus.py" single "${_common[@]}" --out "${LOG%.log}_single" \
+            --lengths "${NIAH_LENGTHS:-65536,262144,524288}" --depths "${NIAH_DEPTHS:-0,0.5,1.0}" \
+            --needles "${NIAH_NEEDLES:-2}" --concurrency "${NIAH_CONCURRENCY:-6}" 2>&1 | tee -a "${LOG}"
+    else
+        IFS=',' read -ra _starts <<< "${NIAH_MT_START:-246000,490000}"
+        for _s in "${_starts[@]}"; do
+            python3 "${DIR}/benchmark_niah_corpus.py" multi "${_common[@]}" --out "${LOG%.log}_mt${_s}" \
+                --start "${_s}" --turns "${NIAH_MT_TURNS:-3}" --new-tokens "${NIAH_MT_NEW_TOKENS:-10000}" \
+                --k "${NIAH_MT_K:-3}" --sessions "${NIAH_MT_SESSIONS:-4}" --tag "mt${_s}" 2>&1 | tee -a "${LOG}"
+        done
+    fi
+    python3 "$NIXL_COOKBOOK_PATH/parse_to_csv.py" "${LOG}" --niah-mt \
+        --perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv --model-name "${MODEL_NAME}" 2>&1 | tee -a "${LOG}"
+    echo "NIAH (${NIAH_MODE}) results -> ${LOG}"
+    exit 0
+fi
+
 # The server registers the model under its path (served_model_name = MODEL_PATH).
 # NIAH_WARMUP=1 (harness default): first-hit JIT compiles off the scored path so a cold
 # boot does not produce false 0/10 or timeouts on the first scored request.

@@ -55,6 +55,7 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `GLM-5.3-Quark-MXFP4-AttnFP8` | MoE + DSA, MXFP4 | 3 (moriio wideEP only) | MI355X only; own image (`glmv5.3_quark_mxfp4_attnfp8` Dockerfile); recipe validated on llm-d 1P1D, not yet through this launcher (see [glm-5.3-quark-mxfp4-attnfp8.md](glm-5.3-quark-mxfp4-attnfp8.md)) |
 
 ## Prerequisites
 
@@ -94,6 +95,20 @@ its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime 
 so every GLM DSA fix has to be in-source in that image. Add a
 `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
 own pins rather than repinning the shared one.
+
+`GLM-5.3-Quark-MXFP4-AttnFP8` (MI355X only) needs its own image too: it runs on a ROCm 10 /
+gfx950 stack with its own vLLM, MoRI and AITER pins (see
+[glm-5.3-quark-mxfp4-attnfp8.md](glm-5.3-quark-mxfp4-attnfp8.md)):
+
+```bash
+docker build -t <your-registry>/vllm-disagg:glmv5.3_quark_mxfp4_attnfp8 \
+  -f docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile .
+```
+
+It builds the MoRI transport only (no UCX/RIXL/DeepEP), because the recipe uses MoRI-IO for
+the KV transfer and MoRI-EP for expert parallel; it serves `CONNECTOR=moriio WIDE_EP=1` only.
+Its vLLM fixes are applied at build time from
+`docker/patches/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8/`, not by a runtime patcher.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -262,6 +277,66 @@ export NIAH_WORDS="2000,8000,20000,35000"     # context sizes (words); optional
 
 Or run `benchmark_niah.py` standalone against any live OpenAI-compatible endpoint
 (`NIAH_URL`, `NIAH_MODEL`).
+
+`NIAH_MODE=corpus` and `NIAH_MODE=multiturn` run `benchmark_niah_corpus.py` instead, with a
+numeric needle in token-exact corpus text. `corpus` sends `NIAH_LENGTHS` (tokens, default
+`65536,262144,524288`) x `NIAH_DEPTHS` (`0,0.5,1.0`) x `NIAH_NEEDLES` (2) single requests.
+`multiturn` holds `NIAH_MT_START` tokens (default `246000,490000`) with `NIAH_MT_K` (3) needles in
+turn 1, and each later turn adds `NIAH_MT_NEW_TOKENS` (10000) and asks for one needle, so the
+answer depends on KV carried by the prefix cache and the KV connector. perf.csv gets the percent
+found per size.
+
+`BENCHMARK_SCRIPT=gates` (`benchmark_gates.sh`) runs, in order, the every-rank KV-transfer
+probe (`benchmark_read_probe.py`), GSM8K 5-shot (lm-eval `local-completions`), the corpus NIAH
+and the multi-turn needle, with one perf.csv row per gate.
+
+### Warm multi-turn (retained context)
+
+`benchmark_multiturn_retained.sh` (`BENCHMARK_SCRIPT=multiturn_retained`) measures decode
+under sustained long-context ingestion: every session keeps an exact retained context and
+adds exactly `MT_NEW_TOKENS` per turn, every answer is exactly `MT_OSL` (1000) tokens, and
+sessions are balanced over the sticky router's ranks. Sessions come from
+`benchmark_multiturn_retained.py`; the client is vLLM's `benchmarks/multi_turn` script from
+the image with `multiturn/benchmark_serving_multi_turn.diff` applied to a private copy
+(per-chunk gaps, reasoning tokens counted, `min_tokens` sent). The text is Project Gutenberg
+#1184, downloaded at run time and checked against a pinned SHA256; it is not vendored.
+
+| `MT_PRESET` | retained | new / turn | sessions (`BENCHMARK_CON`) |
+|---|---:|---:|---:|
+| `R128-10` | 128,000 | 10,000 | 32 |
+| `R128-30` | 128,000 | 30,000 | 32 |
+| `R128-70` | 128,000 | 70,000 | 16 |
+| `H256-30` (default) | 256,000 | 30,000 | 16 |
+| `H256-70` | 256,000 | 70,000 | 16 |
+| `M512-30` | 512,000 | 30,000 | 8 |
+
+`MT_RETAINED_TOKENS` / `MT_NEW_TOKENS` / `BENCHMARK_CON` override a preset; `MT_T_MEAS` (2)
+measured turns per session, `MT_ROUNDS` (6), `MT_STICKY_MOD` (8). `DRY_RUN=1` prints the plan.
+Standalone, e.g. against an llm-d gateway:
+
+```bash
+MT_BASE_URL=http://<gateway> SERVED_MODEL_NAME=amd/GLM-5.3-Quark-MXFP4-AttnFP8 \
+TOKENIZER=/models/GLM-5.3-Quark-MXFP4-AttnFP8 MT_GPUS=16 MT_PRESET=H256-30 \
+METRICS_ENDPOINTS="prefill=<p-pod>:8000 decode=<d-pod>:8200" \
+MT_RUN_DIR=/tmp/h256-30 bash benchmark_multiturn_retained.sh
+```
+
+Cold exact-length points use `benchmark_long_context.sh` with `NUM_PROMPTS` and
+`LC_DETAILED=1`, e.g. `BENCHMARK_COMBINATIONS=256000/1000 BENCHMARK_CON=4 NUM_PROMPTS=12
+WARMUPS=0 LC_DETAILED=1`.
+
+**Metrics** (`multiturn_metrics.py`, both modes): client TTFT / E2E / chunk-gap ITL
+percentiles from per-request data; engine decode-step ITL percentiles from the
+`vllm:inter_token_latency_seconds` histogram, scraped from each engine's `/metrics` before
+and after every round (`scrape_engine_metrics.sh`; endpoints from `METRICS_ENDPOINTS`, or from
+the connector when `ENABLE_SERVER_METRICS=1`); output tok/s per GPU over the steady window
+divided by every GPU of every role (`MT_GPUS`, default `(xP + yD) * GPUS_PER_NODE`); and
+goodput at ITL p99 <= 100 / 150 / 250 / 500 ms with TTFT p90 <= max(10 s, retained context /
+10k tokens/s) (`MT_TTFT_SLO_MS`; cold prompts use the prompt length), tok/s/GPU when both hold,
+else 0. Round 1 (cold prefill of turn 1) is excluded from server counters.
+Also: prefix-cache hit rate, prompt-token source split, MTP acceptance, preemptions,
+`osl_exact_frac` (reject the run unless it is 1.0). `parse_to_csv.py <result.json>
+--result-json --perf-csv ...` writes the madengine perf.csv rows.
 
 ## Agentic Replay Benchmark
 
@@ -434,15 +509,23 @@ The suite roll-up (`suite_summary.json`) has a `workloads[]` array; each entry c
 
 Thresholds: `AGENTIC_MAX_ERROR_RATE` (default `0.10`, gates PASS/WARN) and `AGENTIC_MIN_CACHE_HIT` (default `0.30`, warn-only). A low cache hit rate on `xP>1` usually indicates the router is not keeping a conversation's turns on the worker holding its prefix (session-affinity).
 
+## GLM-5.3 MXFP4 (MI355X)
+
+The complete recipe for `GLM-5.3-Quark-MXFP4-AttnFP8` (image and patches, every tested layout,
+llm-d routing, benchmarks, accuracy gates, reference results and caveats) is in
+[glm-5.3-quark-mxfp4-attnfp8.md](glm-5.3-quark-mxfp4-attnfp8.md).
+
 ## Testing the launcher (no GPUs)
 
 Offline suites validate the launcher without a cluster — run after any change to the
 launcher/connectors/yaml:
 
 ```bash
-bash tests/run_all.sh             # gate_check + argv_assert; expect ALL OFFLINE SUITES PASSED
+bash tests/run_all.sh             # gate_check + argv_assert + multiturn_assert; expect ALL OFFLINE SUITES PASSED
 ```
 
+- `tests/multiturn_assert.sh` — GLM-5.3 MXFP4 argv per role, READ mode opt-in, the warm
+  multi-turn plan and session shapes, and the metrics reducer on a synthetic run.
 - `tests/gate_check.sh` — connector × WIDE_EP combo validation (valid/invalid pairings, back-compat shims).
 - `tests/argv_assert.sh` — asserts expected `vllm serve` flags/env are present/absent per cell, from
   the launcher's `DRY_RUN=1` output (no GPUs, no container).

@@ -281,3 +281,74 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+
+# GLM-5.3 MXFP4 (amd/GLM-5.3-Quark-MXFP4-AttnFP8 rev bcd1ec31dc1fd474b9997dd2476c92687790b83d,
+# arch GlmMoeDsaForCausalLM, base zai-org/GLM-5.3, 744B total / 40B active + one MTP layer).
+# MI355X (gfx950) only. Build from docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile;
+# its vLLM patches are the contract (0004 requires VLLM_MORI_RECV_ROW_ALIGN=4096 below).
+#
+# These values are the role config of the tested llm-d P/D deployment: 1P1D, each role
+# DP8/EP8/TP1 on one 8x MI355X node, MoRI-IO READ, MoRI-EP intra-node, MTP-3, block 16,
+# BF16 MLA latent + FP8 indexer KV (--kv-cache-dtype auto), 80e9 KV bytes per GPU,
+# max-num-batched-tokens prefill 16384 / decode 256, max-num-seqs 64, prefix caching on.
+# Validated there (deployment that passed): GSM8K 5-shot 91.28%, NIAH 18/18, multi-turn
+# needle 7/8 (~246k) and 8/8 (~490k). Through THIS launcher (slurm + vllm-router / toy proxy) the recipe has not
+# been run yet; glm-5.3-quark-mxfp4-attnfp8.md has the full recipe, the differences and the
+# submit-time env.
+#
+# Differences forced by the launcher: prefill runs cudagraph_mode NONE + quant_fp8 (the
+# connector never emits bare --enforce-eager); the tested prefill used --enforce-eager.
+GLM-5.3-Quark-MXFP4-AttnFP8:
+  env:
+    KV_BLOCK_SIZE: "16"
+    KV_CACHE_DTYPE: "auto"
+    # Explicit KV budget: also skips the boot profiling forward. 80e9 leaves the >= 20 GiB
+    # free accounting headroom after the first MoRI-IO READ registration that the tested
+    # deployment required per rank.
+    KV_CACHE_MEMORY_BYTES: "80000000000"
+    GPU_MEMORY_UTILIZATION: "0.6"
+    ENABLE_PREFIX_CACHE: "1"
+    MORIIO_READ_MODE: "1"
+    MORIIO_EXTRA_CONFIG: '"defer_timeout":"1800","recv_abort_timeout":"600","qp_per_transfer":"2","num_workers":"4"'
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    CUDAGRAPH_CAPTURE_SIZES: "4 8 16 32 48 64 96 128 160 192 224 256"
+    PREFILL_MORI_BACKEND: "mori_high_throughput"
+    DECODE_MORI_BACKEND: "mori_low_latency"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_MOE: "1"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_ROCM_USE_AITER_FP8BMM: "0"
+    VLLM_ROCM_USE_AITER_LINEAR: "0"
+    VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "4096"
+    VLLM_USE_BREAKABLE_CUDAGRAPH: "1"
+    TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER: "0"
+    # MoRI-EP V1 IntraNode kernel (patch 0004 bounds its receive rows). With the default
+    # 32-row alignment the small-M AITER fused quant+sort path faulted on DEP8 P/D; 4096
+    # keeps the split path. A configuration workaround, not a root-cause fix.
+    VLLM_MORI_EP_V2: "0"
+    VLLM_MORI_RECV_ROW_ALIGN: "4096"
+    MORI_EP_DISABLE_RDMA_ATOMICS: "1"
+    MORI_SHMEM_HEAP_SIZE: "17179869184"
+    MORI_DISABLE_TOPO: "1"
+    MORI_IO_CP_TIMEOUT_MS: "60000"
+    # AMD Pensando (ionic) RDMA NICs: proxy-driven posting, one rail per GPU, dma-buf
+    # registration of GPU memory, MoRI-IO peers on the same rail.
+    MORI_ENABLE_HOST_PROXY: "1"
+    MORI_ENABLE_RAIL_ONLY: "1"
+    MORI_ENABLE_DMABUF_REG: "1"
+    MORI_IO_RAIL_AFFINITY: "1"
+    # As tested (one node per role): NCCL carries only in-node control traffic, over sockets.
+    NCCL_IB_DISABLE: "1"
+    ROCPROFILER_QUEUE_INTERPOSITION: "1"
+    # /reset_prefix_cache and other dev endpoints used by the benchmarks.
+    VLLM_SERVER_DEV_MODE: "1"
+    VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
+    VLLM_ENGINE_READY_TIMEOUT_S: "7200"
+    VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "3600"
+  dp_flags: "--max-model-len 560000 --max-num-seqs 64 --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":3}' --tool-call-parser glm47 --reasoning-parser glm45 --enable-auto-tool-choice --chat-template-content-format string --skip-mm-profiling"
+  prefill:
+    dp: "--max-num-batched-tokens 16384"
+  decode:
+    dp: "--max-num-batched-tokens 256"

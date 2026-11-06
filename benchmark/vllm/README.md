@@ -292,6 +292,15 @@ lm_eval --model local-completions \
 >export HF_TOKEN=$your_personal_hf_token
 >```
 
+## Disaggregated prefill/decode serving
+
+Prefill/decode disaggregation (MoRI-IO / NIXL KV transfer, MoRI-EP / DeepEP expert parallel)
+is covered by [scripts/vllm_dissag](../../scripts/vllm_dissag/README.MD). The
+GLM-5.3-Quark-MXFP4-AttnFP8 recipe for MI355X (own image
+`docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile`, serving layouts,
+llm-d routing, long-context benchmarks and accuracy gates) is in
+[glm-5.3-quark-mxfp4-attnfp8.md](../../scripts/vllm_dissag/glm-5.3-quark-mxfp4-attnfp8.md).
+
 ## References 🔎
 ----------
 

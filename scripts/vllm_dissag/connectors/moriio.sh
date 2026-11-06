@@ -120,7 +120,13 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # MORIIO_READ_MODE=1: decode pulls the KV (MoRI-IO READ; prefill and decode run
+    # serially). MORIIO_EXTRA_CONFIG: extra kv_connector_extra_config members, written as
+    # a JSON fragment ('"key":"value",...'). Both unset leave the emitted config unchanged.
+    local _read=""
+    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read=',"read_mode":"true"'
+    [[ -n "${MORIIO_EXTRA_CONFIG:-}" ]] && _read="${_read},${MORIIO_EXTRA_CONFIG}"
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_read}"'}}'
 }
 
 connector_runtime_patch() {
