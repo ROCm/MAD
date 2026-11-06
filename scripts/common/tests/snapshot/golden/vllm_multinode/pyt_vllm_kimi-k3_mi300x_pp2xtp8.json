@@ -89,7 +89,7 @@
      "JIT_CACHE_HOST=<WORK>/jit"
     ],
     "env_file": [
-     "/tmp/colocated_fwd_env.4242.0"
+     "/tmp/colocated_fwd_env.4242.0.<TMP>"
     ],
     "image": "img:snapshot",
     "command": [
@@ -215,7 +215,7 @@
      "JIT_CACHE_HOST=<WORK>/jit"
     ],
     "env_file": [
-     "/tmp/colocated_fwd_env.4242.1"
+     "/tmp/colocated_fwd_env.4242.1.<TMP>"
     ],
     "image": "img:snapshot",
     "command": [

@@ -149,6 +149,8 @@ def engine_dry_run(catalog, docker, work):
 
 
 SHELL_LINE = re.compile(r"(\.(?:sh|slurm): line )\d+:")
+# A mktemp name: its random suffix (template .XXXXXX) differs on every run.
+MKTEMP = re.compile(r"(/tmp/[^\"/]+)\.[A-Za-z0-9]{6}(?=\")")
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[^\"]*?(?=\"|$)")
 
 
@@ -157,6 +159,7 @@ def normalize(obj, work):
     text = json.dumps(obj)
     for path, mark in ((str(work), "<WORK>"), (str(STUBS), "<STUBS>")):
         text = text.replace(path, mark)
+    text = MKTEMP.sub(r"\1.<TMP>", text)
     # A shell error names the script line it failed on; any edit above it moves it.
     return json.loads(SHELL_LINE.sub(r"\1<N>:", TIMESTAMP.sub("<TIME>", text)))
 
