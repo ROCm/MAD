@@ -1,0 +1,141 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: MoRIIO non-hybrid READ skips the blocks of the decode-side local prefix hit,
+#   so a warm multi-turn request reads only the uncached tail instead of the whole
+#   prompt KV (full GLM-5.3: MLA + DSA indexer). Cold requests, partial boundary
+#   blocks, windowed groups and MTP state are unchanged.
+# Upstream: local, not upstream yet (no PR opened).
+# Remove when: an equivalent upstream fix is merged and VLLM_REF contains it.
+# Note: the commit-message preamble below was reworded for publication; the diff
+#   hunks are byte-identical to the tested patch (tested file sha256 7c65a49e...).
+# ---- end of MAD header; the patch follows (diff hunks as tested) ----
+From: local
+Subject: [PATCH] MoRIIO READ: skip blocks of the decode-side local prefix hit (non-hybrid)
+
+Local patch (GLM-5.3 full, MLA + DSA indexer). Applies on 8673602b8b with
+patches 0001-0004 and 0006. Not upstream.
+
+diff --git a/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py b/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
+index be0af16a1d..2039cf0795 100644
+--- a/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
++++ b/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
+@@ -71,6 +71,7 @@ class _FakeScheduler(moriio_connector.MoRIIOConnectorScheduler):  # type: ignore
+         self._attn_group_is_state: list[bool] = [False]
+         self._num_ssm_scratch_blocks = 0
+         self._is_hma_required = False
++        self._prefix_hit_block_sizes: list[int | None] = [128]
+         self.kv_cache_config = SimpleNamespace(
+             kv_cache_groups=[None, None],
+             select_transfer_block_ids=lambda block_ids: tuple(block_ids),
+@@ -396,6 +397,56 @@ def test_glm5_next_mtp_read_pairs_every_group(external_tokens, cached_pages):
+     assert output.new_block_ids_to_zero == [100, 101][:cached_pages] + [102]
+ 
+ 
++@pytest.mark.usefixtures("restore_moriio_role")
++@pytest.mark.parametrize(
++    "local_hit,external,first_block",
++    # 96 prompt tokens; READ imports [0, 95). (64, 16): load trimmed below a block.
++    [(0, 95, 0), (64, 31, 4), (80, 15, 5), (64, 16, 4)],
++)
++def test_glm5_mtp3_read_skips_blocks_of_the_local_prefix_hit(
++    local_hit, external, first_block
++):
++    """Non-hybrid MLA + indexer READ: D reads only blocks past its prefix hit."""
++    specs: dict[str, KVCacheSpec] = {}
++    for i in range(3):
++        specs[f"layers.{i}.attn"] = MLAAttentionSpec(
++            block_size=16, num_kv_heads=1, head_size=576, dtype=torch.bfloat16
++        )
++        specs[f"layers.{i}.indexer"] = MLAAttentionSpec(
++            block_size=16, num_kv_heads=1, head_size=132, dtype=torch.uint8
++        )
++    layout_config = SimpleNamespace(
++        scheduler_config=SimpleNamespace(disable_hybrid_kv_cache_manager=False),
++        parallel_config=SimpleNamespace(pipeline_parallel_size=1),
++        speculative_config=None,
++        cache_config=SimpleNamespace(
++            get_resolved_kv_cache_layout=lambda: KVCacheLayout.BLHNC
++        ),
++    )
++    config = KVCacheConfig(
++        num_blocks=64,
++        kv_cache_tensors=[],
++        kv_cache_groups=get_kv_cache_groups(layout_config, specs),
++    )
++    vllm_config = _gate_vllm_config(
++        speculative_config=_spec_config("mtp"),
++        num_lookahead_tokens=3,
++        num_speculative_tokens=3,
++    )
++    sched = moriio_connector.MoRIIOConnectorScheduler(vllm_config, "engine", config)
++    request = _make_read_request([list(range(10, 16))], num_prompt_tokens=96)
++    assert sched.get_num_new_matched_tokens(request, local_hit)[0] >= external
++
++    # D's table ends in one MTP lookahead block that has no remote source.
++    sched.update_state_after_alloc(
++        request, _FakeBlocks((list(range(100, 107)),)), external
++    )
++
++    meta = sched.build_connector_meta(SchedulerOutput.make_empty()).reqs_to_recv
++    assert meta["req"].local_block_ids == [list(range(100 + first_block, 106))]
++    assert meta["req"].remote_block_ids == [list(range(10 + first_block, 16))]
++
++
+ def test_read_blocks_routes_each_hybrid_layer_to_its_group():
+     offsets: dict[str, tuple[list[int], list[int]]] = {}
+     worker = _FakeWorker(
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+index 41556c69c6..4dc6b67f83 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+@@ -630,6 +630,17 @@ class MoRIIOConnectorScheduler:
+             # allocate_slots reserves drafter lookahead in addition to those.
+             max_decode_tail_tokens += vllm_config.num_speculative_tokens
+         self._max_decode_tail_blocks = cdiv(max_decode_tail_tokens, attn_block_size)
++        # Per transfer group: tokens per block if the decode table starts at
++        # token 0 (full attention), so a local prefix hit maps to leading
++        # blocks; None for window-clipped groups.
++        dcp_size = vllm_config.parallel_config.decode_context_parallel_size
++        self._prefix_hit_block_sizes: list[int | None] = [
++            g.kv_cache_spec.block_size
++            * (dcp_size if g.kv_cache_spec.dcp_sharded else 1)
++            if is_full_attention_spec(g.kv_cache_spec)
++            else None
++            for g in kv_cache_config.transfer_groups
++        ]
+         self.engine_id: EngineId = engine_id
+ 
+         self._is_hma_required = (
+@@ -1164,11 +1175,17 @@ class MoRIIOConnectorScheduler:
+                                 local_block_ids = self.get_exchange_clipped_blocks(
+                                     blocks.get_block_ids()
+                                 )
++                                # The scheduler trims E by less than a block,
++                                # so this rounds down to the hit's blocks.
++                                num_hit_tokens = (
++                                    request.num_prompt_tokens - 1 - num_external_tokens
++                                )
+                                 adjusted_remote_block_ids = []
+                                 aligned_local_block_ids: list[list[int]] = []
+-                                for local_group, remote_group in zip(
++                                for local_group, remote_group, hit_block_size in zip(
+                                     local_block_ids,
+                                     remote_block_ids,
++                                    self._prefix_hit_block_sizes,
+                                     strict=True,
+                                 ):
+                                     aligned_local, aligned_remote = (
+@@ -1178,6 +1195,14 @@ class MoRIIOConnectorScheduler:
+                                             self._max_decode_tail_blocks,
+                                         )
+                                     )
++                                    if hit_block_size is not None:
++                                        # The local prefix hit already holds
++                                        # the KV of these leading blocks.
++                                        num_hit_blocks = (
++                                            num_hit_tokens // hit_block_size
++                                        )
++                                        aligned_local = aligned_local[num_hit_blocks:]
++                                        aligned_remote = aligned_remote[num_hit_blocks:]
+                                     aligned_local_block_ids.append(aligned_local)
+                                     adjusted_remote_block_ids.append(aligned_remote)
+                                 local_block_ids = aligned_local_block_ids

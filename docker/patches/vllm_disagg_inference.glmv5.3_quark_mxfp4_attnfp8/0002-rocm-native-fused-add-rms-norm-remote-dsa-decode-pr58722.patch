@@ -1,0 +1,131 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: on ROCm, select the native fused_add_rms_norm for DSA kv_consumer decode under
+#   CUDA graphs. Without it, remote-prefilled decode can return garbage (vllm#57064).
+# Upstream: vllm-project/vllm#58722 (open, draft), ported to 8673602b.
+#   https://github.com/vllm-project/vllm/pull/58722
+# Remove when: #58722 (or an equivalent fix for #57064) is merged and VLLM_REF
+#   contains it.
+# ---- end of MAD header; the tested patch bytes follow unchanged ----
+From c9a023ce2d18c4d60e476fa056773086de7e6d57 Mon Sep 17 00:00:00 2001
+From: avininjamay8 <avpaul@amd.com>
+Date: Tue, 3 Nov 2026 04:34:22 +0000
+Subject: [PATCH 2/2] [Bugfix][ROCm] Use native fused_add_rms_norm for remote
+ DSA decode
+
+AITER fused_add_rms_norm corrupts CUDA-graph replay for DSA kv_consumer
+decode (#57064). Keep FULL graphs and AITER rms_norm; force the native
+fused add RMSNorm only for remote DeepSeek-V3.2 / GLM DSA decode.
+
+Ported from vllm-project/vllm#58722 (open) at 5cd581c6c5 onto 8673602b8b:
+same logic; the test monkeypatches on_gfx90a, which is the gate at this
+base, instead of on_rdna4.
+---
+ tests/test_config.py   | 36 ++++++++++++++++++++++++++++++++++++
+ vllm/platforms/rocm.py | 27 ++++++++++++++++++++++++++-
+ 2 files changed, 62 insertions(+), 1 deletion(-)
+
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 55edb15a19..33224b7540 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -4493,6 +4493,42 @@ def test_ir_op_platform_defaults_support_sparse_gelu(mode, backend):
+         assert ir.ops.gelu_and_mul_sparse.get_priority() == expected
+ 
+ 
++@pytest.mark.skipif(not current_platform.is_rocm(), reason="ROCm-specific priority")
++@pytest.mark.parametrize(
++    ("architecture", "is_kv_consumer", "expected_fused"),
++    [
++        ("GlmMoeDsaForCausalLM", True, ["native"]),
++        ("DeepseekV32ForCausalLM", True, ["native"]),
++        ("GlmMoeDsaForCausalLM", False, ["aiter", "native"]),
++        ("LlamaForCausalLM", True, ["aiter", "native"]),
++    ],
++)
++def test_rocm_remote_dsa_decode_uses_native_fused_add_rms_norm(
++    monkeypatch, architecture, is_kv_consumer, expected_fused
++):
++    """Remote DSA decode keeps graphs but avoids capture-unsafe fused AITER RMSNorm."""
++    import vllm.platforms.rocm as rocm_platform
++
++    monkeypatch.setattr(envs, "VLLM_ROCM_USE_AITER", True)
++    monkeypatch.setattr(envs, "VLLM_ROCM_USE_AITER_RMSNORM", True)
++    monkeypatch.setattr(rocm_platform, "on_gfx90a", lambda: False)
++
++    config = SimpleNamespace(
++        compilation_config=CompilationConfig(
++            mode=CompilationMode.VLLM_COMPILE,
++            backend="inductor",
++            cudagraph_mode=CUDAGraphMode.FULL_AND_PIECEWISE,
++        ),
++        kv_transfer_config=SimpleNamespace(is_kv_consumer=is_kv_consumer),
++        model_config=SimpleNamespace(architectures=[architecture]),
++    )
++
++    priority = current_platform.get_default_ir_op_priority(config)
++    assert priority.rms_norm == ["aiter", "native"]
++    assert priority.fused_add_rms_norm == expected_fused
++    assert config.compilation_config.cudagraph_mode == CUDAGraphMode.FULL_AND_PIECEWISE
++
++
+ def test_ir_op_priority_str():
+     """Test that passing a comma-delimited string works."""
+     from vllm.config.kernel import IrOpPriorityConfig
+diff --git a/vllm/platforms/rocm.py b/vllm/platforms/rocm.py
+index 000ac9cc18..1b8e1984e0 100644
+--- a/vllm/platforms/rocm.py
++++ b/vllm/platforms/rocm.py
+@@ -74,6 +74,12 @@ _ROCM_UNSUPPORTED_MODELS: list[str] = []
+ # Models partially supported by ROCm.
+ # Architecture -> Reason.
+ _ROCM_PARTIALLY_SUPPORTED_MODELS: dict[str, str] = {}
++_ROCM_DSA_MODELS = frozenset(
++    {
++        "DeepseekV32ForCausalLM",
++        "GlmMoeDsaForCausalLM",
++    }
++)
+ _ROCM_DEVICE_ID_NAME_MAP: dict[str, str] = {
+     "0x74a0": "AMD_Instinct_MI300A",
+     "0x74a1": "AMD_Instinct_MI300X",
+@@ -1430,6 +1436,23 @@ class RocmPlatform(Platform):
+         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
+         default = ["native"] if using_inductor else ["vllm_c", "native"]
+ 
++        # AITER fused add RMSNorm corrupts CUDA-graph replay for remotely-prefilled
++        # DeepSeek-V3.2/GLM DSA decode (https://github.com/vllm-project/vllm/issues/57064).
++        # Keep CUDA graphs and the other AITER kernels enabled, but use the native
++        # fused implementation for the KV consumer.
++        kv_transfer_config = getattr(vllm_config, "kv_transfer_config", None)
++        model_config = getattr(vllm_config, "model_config", None)
++        is_remote_dsa_decode = (
++            kv_transfer_config is not None
++            and model_config is not None
++            and kv_transfer_config.is_kv_consumer
++            and bool(
++                _ROCM_DSA_MODELS.intersection(
++                    getattr(model_config, "architectures", None) or []
++                )
++            )
++        )
++
+         #  Aiter rms norm perform best when CUDA Graph capture is enabled.
+         # TODO(Rohan138/dllehr-amd/rasmith) Change this to be an inclusive
+         # check instead of exclusive check in the future.
+@@ -1443,10 +1466,12 @@ class RocmPlatform(Platform):
+         else:
+             rms_norm = default
+ 
++        fused_add_rms_norm = default if is_remote_dsa_decode else rms_norm
++
+         return IrOpPriorityConfig.with_default(
+             default,
+             rms_norm=rms_norm,
+-            fused_add_rms_norm=rms_norm,
++            fused_add_rms_norm=fused_add_rms_norm,
+             gelu_and_mul_sparse=["native"],
+         )
+ 
+-- 
+2.43.0
+

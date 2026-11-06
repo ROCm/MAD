@@ -1,0 +1,7 @@
+f683bb4b375f6e9c01209c9f7849b954ace5f6cc7998cbcc009063292039660c  0000-moriio-wait-for-decode-handshake-before-write-8673602b.patch
+f931a881789ce034640728040185930f21c0312cbe6234ae938d66fdfdf1e3bf  0001-moriio-accept-kernel-block-split-mla-indexer-views-pr60783.patch
+cd35e0c90bc55b6aae5c0a6a50df0a1c805f5bc23843449b0a107de601c56574  0002-rocm-native-fused-add-rms-norm-remote-dsa-decode-pr58722.patch
+57ce766735b98f4ea37b1f71f60c43f6b447672e715587134ad717e3b75c78f0  0003-vllm-62190-moriio-hybrid-read-skip-cached-prefix.patch
+52c5f12d3a4b7c224bc1ca18bbaad2ba9e00bb6ec758311706db3eeb8d213a76  0004-mori-ep-v1-intranode-recv-rows-bound.patch
+5d8a9e78643da67d1ffe7426b3acac2ae9d6990b02356ca076d1b40396038f86  0006-diag-mori-recv-bound-check-align.patch
+185d3a96d780f714519cfb1d911353d92f8f8598bd5f0677d3e0c36b9053b443  0007-moriio-read-skip-local-prefix-hit-blocks.patch

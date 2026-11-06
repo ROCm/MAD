@@ -1,0 +1,289 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: MoRI EPv1 prepare() slices the dispatch outputs to a host-side receive-row
+#   bound (the bound EPv2 already uses), on the IntraNode kernel only. AITER then
+#   sees M = world x padded batch instead of world x max_num_batched_tokens.
+#   Must be run with VLLM_MORI_RECV_ROW_ALIGN=4096 (added by 0006): with the
+#   default 32-row alignment the small-M AITER fused quant+sort path faulted on
+#   DEP8 P/D. 4096 is a configuration workaround, not a root-cause fix.
+# Upstream: local, not upstream. Overlaps vllm-project/vllm#63412 (open; same slice,
+#   different bound, not gated to IntraNode).
+#   https://github.com/vllm-project/vllm/pull/63412
+# Remove when: #63412 (or an equivalent bound) is merged and VLLM_REF contains it,
+#   and the AITER small-M fault is fixed or ruled out at the default alignment.
+# Note: the commit-message preamble below was reworded for publication; the diff
+#   hunks are byte-identical to the tested patch (tested file sha256 df6384b3...).
+# ---- end of MAD header; the patch follows (diff hunks as tested) ----
+From 8a72cd321bb5f874ae8c0d28d4c3c15461d4cad2 Mon Sep 17 00:00:00 2001
+From: Shiksha Patel <shiksha.patel@amd.com>
+Date: Thu, 5 Nov 2026 04:59:08 +0000
+Subject: [PATCH] [ROCm][Perf][MoE] MoRI EPv1: bound IntraNode receive rows by
+ DP token counts
+
+MoriPrepareAndFinalize.prepare() returns MoRI's receive buffers unchanged.
+They hold max_num_tokens_to_recv() = world_size * max_num_tokens rows, and
+the modular kernel takes the expert M from them, so AITER fused_moe looks up
+its tuned config and sizes its sorted buffers and GEMM grids from
+world_size * max_num_batched_tokens rows on every decode step. Only the
+first expert_num_tokens rows are real; AITER already limits sorting to them
+via num_local_tokens, but not the config lookup or the grid.
+
+EPv2 already slices its receive buffers to a host-side bound derived from
+DPMetadata.num_tokens_across_dp_cpu (#61361). Move that bound to a module
+function and apply it in EPv1 as well. Only for the IntraNode kernel,
+which packs received rows into [0, total_recv); InterNode keeps the full
+buffer. The bound needs no device sync, and under CUDA graphs all DP ranks
+are padded to the captured size, so it is fixed per graph.
+
+Local patch, not upstream. Overlaps the open
+vllm#63412 (same EPv1 slice with a different bound, InterNode included).
+Base: 8673602b8b + patches 0001-0003; also applies to cd1effa2e7.
+---
+ .../kernels/moe/test_mori_prepare_finalize.py | 67 +++++++++++++++++
+ .../layers/fused_moe/all2all_utils.py         |  1 +
+ .../layers/fused_moe/prepare_finalize/mori.py | 14 ++++
+ .../fused_moe/prepare_finalize/mori_epv2.py   | 75 +++++++++----------
+ 4 files changed, 119 insertions(+), 38 deletions(-)
+
+diff --git a/tests/kernels/moe/test_mori_prepare_finalize.py b/tests/kernels/moe/test_mori_prepare_finalize.py
+index c5deffe725..36c55ae04a 100644
+--- a/tests/kernels/moe/test_mori_prepare_finalize.py
++++ b/tests/kernels/moe/test_mori_prepare_finalize.py
+@@ -6,6 +6,7 @@ import sys
+ import types
+ from types import SimpleNamespace
+ 
++import pytest
+ import torch
+ 
+ 
+@@ -126,3 +127,69 @@ def test_mori_combine_uses_original_per_rank_topk_ids(monkeypatch):
+         "instead of this rank's pre-dispatch routing, which silently corrupts "
+         "the reduction (ROCm/mori#475)"
+     )
++
++
++class _CapacityMoriOp:
++    """Dispatch returns MoRI's capacity-sized receive buffers."""
++
++    def __init__(self, capacity):
++        self.recv_a1 = torch.zeros(capacity, 4, dtype=torch.uint8)
++        self.recv_scale = torch.zeros(capacity, 2, dtype=torch.uint8)
++        self.recv_weights = torch.zeros(capacity, 2)
++        self.recv_ids = torch.zeros(capacity, 2, dtype=torch.int32)
++
++    def dispatch(self, a1, weights, scale, indices):
++        recv = (self.recv_a1, self.recv_weights, self.recv_scale, self.recv_ids)
++        return (*recv, torch.tensor([3], dtype=torch.int32))
++
++
++@pytest.mark.parametrize(
++    "bound_recv_rows,num_tokens_across_dp,rows",
++    [
++        # IntraNode: 4 dispatchers over 4 DP ranks send 6 tokens, rounded to 32.
++        (True, [2, 3, 1, 0], 32),
++        (True, [100, 0, 0, 0], 128),
++        (True, None, 256),
++        # InterNode keeps the full receive buffer.
++        (False, [2, 3, 1, 0], 256),
++    ],
++)
++def test_mori_receive_rows_are_bounded_on_intranode(
++    monkeypatch, bound_recv_rows, num_tokens_across_dp, rows
++):
++    from vllm.model_executor.layers.fused_moe.prepare_finalize import mori_epv2
++
++    mori_module = _import_mori_prepare_finalize(monkeypatch)
++    dp_metadata = None
++    if num_tokens_across_dp is not None:
++        counts = torch.tensor(num_tokens_across_dp)
++        dp_metadata = SimpleNamespace(num_tokens_across_dp_cpu=counts)
++    ctx = SimpleNamespace(dp_metadata=dp_metadata)
++    monkeypatch.setattr(mori_epv2, "is_forward_context_available", lambda: True)
++    monkeypatch.setattr(mori_epv2, "get_forward_context", lambda: ctx)
++    monkeypatch.setattr(
++        mori_epv2, "get_dp_group", lambda: SimpleNamespace(rank_in_group=0)
++    )
++    op = _CapacityMoriOp(capacity=256)
++    adapter = mori_module.MoriPrepareAndFinalize(
++        op, 64, num_dispatchers=4, bound_recv_rows=bound_recv_rows
++    )
++    a1, scale, meta, ids, weights = adapter.prepare(
++        torch.zeros(2, 4),
++        torch.ones(2, 2),
++        torch.zeros(2, 2, dtype=torch.int32),
++        num_experts=8,
++        expert_map=None,
++        apply_router_weight_on_input=False,
++        quant_config=SimpleNamespace(),
++    )
++    pairs = [
++        (a1, op.recv_a1),
++        (scale, op.recv_scale),
++        (ids, op.recv_ids),
++        (weights, op.recv_weights),
++    ]
++    for t, buf in pairs:
++        assert t.shape[0] == rows
++        assert t.data_ptr() == buf.data_ptr()
++    assert int(meta.expert_num_tokens) == 3
+diff --git a/vllm/model_executor/layers/fused_moe/all2all_utils.py b/vllm/model_executor/layers/fused_moe/all2all_utils.py
+index 2c99cdff4f..031ad46e5b 100644
+--- a/vllm/model_executor/layers/fused_moe/all2all_utils.py
++++ b/vllm/model_executor/layers/fused_moe/all2all_utils.py
+@@ -416,6 +416,7 @@ def maybe_make_prepare_finalize(
+             num_dispatchers=all2all_manager.world_size,
+             use_fp8_dispatch=use_fp8_dispatch,
+             use_fp4_dispatch=use_fp4_dispatch,
++            bound_recv_rows=not all2all_manager.internode,
+         )
+ 
+     elif moe.use_fi_nvl_two_sided_kernels:
+diff --git a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+index 53427f2deb..49b1432b2c 100644
+--- a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
++++ b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+@@ -7,6 +7,9 @@ import torch
+ import vllm.model_executor.layers.fused_moe.modular_kernel as mk
+ from vllm.logger import init_logger
+ from vllm.model_executor.layers.fused_moe.config import FusedMoEQuantConfig
++from vllm.model_executor.layers.fused_moe.prepare_finalize.mori_epv2 import (
++    mori_recv_rows_bound,
++)
+ from vllm.platforms import current_platform
+ 
+ logger = init_logger(__name__)
+@@ -22,6 +25,7 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         num_dispatchers: int,
+         use_fp8_dispatch: bool = False,
+         use_fp4_dispatch: bool = False,
++        bound_recv_rows: bool = False,
+     ):
+         super().__init__()
+         assert not (use_fp8_dispatch and use_fp4_dispatch)
+@@ -30,6 +34,9 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         self.max_tokens_per_rank = max_tokens_per_rank
+         self.use_fp8_dispatch = use_fp8_dispatch
+         self.use_fp4_dispatch = use_fp4_dispatch
++        # Only the IntraNode kernel packs received rows into [0, total_recv),
++        # so only there can the tail past the bound be dropped.
++        self.bound_recv_rows = bound_recv_rows
+         self._dispatch_topk_ids: torch.Tensor | None = None
+ 
+     @property
+@@ -117,6 +124,13 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+             dispatch_ids,
+             dispatch_recv_token_num,
+         ) = self.mori_op.dispatch(a1, topk_weights, scale, topk_ids)
++        if self.bound_recv_rows:
++            rows = mori_recv_rows_bound(a1, dispatch_a1.shape[0], self.num_dispatchers_)
++            dispatch_a1 = dispatch_a1[:rows]
++            dispatch_weights = dispatch_weights[:rows]
++            dispatch_ids = dispatch_ids[:rows]
++            if dispatch_scale is not None:
++                dispatch_scale = dispatch_scale[:rows]
+ 
+         expert_tokens_meta = mk.ExpertTokensMetadata(
+             expert_num_tokens=dispatch_recv_token_num, expert_num_tokens_cpu=None
+diff --git a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
+index d19b608567..17fa7d9bb6 100644
+--- a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
++++ b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
+@@ -20,6 +20,42 @@ logger = init_logger(__name__)
+ _RECV_ROW_ALIGN = 32
+ 
+ 
++def mori_recv_rows_bound(a1: torch.Tensor, capacity: int, num_dispatchers: int) -> int:
++    """Host-side upper bound on the rows this rank can receive this step.
++
++    MORI receives each source token at most once per rank, so the receive
++    count is at most the tokens all dispatchers send: the sum of the DP
++    batches, times the dispatchers per DP rank (each TP rank may send the
++    same batch). Slicing the capacity-sized buffers (world_size *
++    max_num_tokens rows) to this bound keeps the experts, and EPv2's row
++    masking and combine copy-in, off the unused tail. The bound is rounded up
++    to a multiple of _RECV_ROW_ALIGN to limit the distinct expert shapes.
++    """
++    dp_meta = (
++        get_forward_context().dp_metadata if is_forward_context_available() else None
++    )
++    if dp_meta is None:
++        return capacity
++    tokens = dp_meta.num_tokens_across_dp_cpu
++    n_dp = tokens.numel()
++    dp_rank = get_dp_group().rank_in_group
++    if dp_rank >= n_dp or a1.shape[0] > int(tokens[dp_rank]):
++        # Metadata that does not cover this rank's own batch is stale; a
++        # bound derived from it could cut off received rows.
++        logger.debug_once(
++            "MORI: DP token counts do not cover this rank's batch; "
++            "using the full receive buffer."
++        )
++        return capacity
++    if n_dp > 0 and num_dispatchers % n_dp == 0:
++        bound = num_dispatchers // n_dp * int(tokens.sum())
++    else:
++        bound = num_dispatchers * int(tokens.max())
++    bound = max(bound, 1)
++    bound = -(-bound // _RECV_ROW_ALIGN) * _RECV_ROW_ALIGN
++    return min(capacity, bound)
++
++
+ class MoriEPv2PrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+     def __init__(
+         self,
+@@ -123,43 +159,6 @@ class MoriEPv2PrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+             ).to(topk_ids.dtype)
+         return torch.where(topk_ids < 0, self._padding_expert_ids, topk_ids)
+ 
+-    def _recv_rows_bound(self, a1: torch.Tensor, capacity: int) -> int:
+-        """Host-side upper bound on the rows this rank can receive this step.
+-
+-        MORI receives each source token at most once per rank, so the receive
+-        count is at most the tokens all dispatchers send: the sum of the DP
+-        batches, times the dispatchers per DP rank (each TP rank may send the
+-        same batch). Slicing the capacity-sized buffers (world_size *
+-        max_num_tokens rows) to this bound keeps the row masking, the experts
+-        and combine's copy-in off the unused tail. The bound is rounded up to a
+-        multiple of _RECV_ROW_ALIGN to limit the distinct expert shapes.
+-        """
+-        dp_meta = (
+-            get_forward_context().dp_metadata
+-            if is_forward_context_available()
+-            else None
+-        )
+-        if dp_meta is None:
+-            return capacity
+-        tokens = dp_meta.num_tokens_across_dp_cpu
+-        n_dp = tokens.numel()
+-        dp_rank = get_dp_group().rank_in_group
+-        if dp_rank >= n_dp or a1.shape[0] > int(tokens[dp_rank]):
+-            # Metadata that does not cover this rank's own batch is stale; a
+-            # bound derived from it could cut off received rows.
+-            logger.debug_once(
+-                "MORI EPv2: DP token counts do not cover this rank's batch; "
+-                "using the full receive buffer."
+-            )
+-            return capacity
+-        if n_dp > 0 and self.num_dispatchers_ % n_dp == 0:
+-            bound = self.num_dispatchers_ // n_dp * int(tokens.sum())
+-        else:
+-            bound = self.num_dispatchers_ * int(tokens.max())
+-        bound = max(bound, 1)
+-        bound = -(-bound // _RECV_ROW_ALIGN) * _RECV_ROW_ALIGN
+-        return min(capacity, bound)
+-
+     def prepare(
+         self,
+         a1: torch.Tensor,
+@@ -192,7 +191,7 @@ class MoriEPv2PrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+             self._route_padding_locally(topk_ids.to(torch.int32)),
+             return_routing=True,
+         )
+-        rows = self._recv_rows_bound(a1, dispatch_a1.shape[0])
++        rows = mori_recv_rows_bound(a1, dispatch_a1.shape[0], self.num_dispatchers_)
+         if rows < dispatch_a1.shape[0]:
+             dispatch_a1 = dispatch_a1[:rows]
+             dispatch_weights = dispatch_weights[:rows]
+-- 
+2.43.0
+

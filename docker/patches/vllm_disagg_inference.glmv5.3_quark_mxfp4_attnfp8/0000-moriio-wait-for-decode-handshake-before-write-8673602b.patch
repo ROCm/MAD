@@ -1,0 +1,348 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: vLLM commit 8673602b8b0a715e0ea026f8f0f1c51e164fe03b, the tested vLLM source.
+#   MoRIIO WRITE mode waits for the decode rank's handshake before starting a write,
+#   so parallel dispatch no longer KeyErrors and drops the transfer.
+#   8673602b = public main cd1effa2e7 + this one commit. It is not reachable from any
+#   public ref, so it is carried here to make the built tree identical to the tested one.
+#   The tested recipe uses MoRI-IO READ, which never runs MoRIIOWriter; this patch
+#   does not change the READ path.
+# Upstream: vllm-project/vllm#62552 (open, draft). This file is an earlier revision of
+#   that PR rebased on cd1effa2e7; the PR head has since changed.
+#   https://github.com/vllm-project/vllm/pull/62552
+# Remove when: VLLM_REF moves to a commit that contains #62552 (or the READ-only
+#   recipe is revalidated without it).
+# ---- end of MAD header; the tested patch bytes follow unchanged ----
+From 8673602b8b0a715e0ea026f8f0f1c51e164fe03b Mon Sep 17 00:00:00 2001
+From: Shiksha Patel <shiksha.patel@amd.com>
+Date: Mon, 19 Oct 2026 19:44:16 +0000
+Subject: [PATCH] [Bugfix][KV Connector] MoRIIO: wait for the decode-rank
+ handshake before WRITE
+
+Parallel dispatch can deliver the block allocation before that rank's
+handshake metadata exists. Starting the write then KeyErrors and drops
+the transfer without write_failed, so decode stays in WAITING_FOR_REMOTE_KVS.
+
+Signed-off-by: Shiksha Patel <shiksha.patel@amd.com>
+---
+ .../unit/test_moriio_write_done_routing.py    | 154 +++++++++++++++++-
+ .../kv_connector/v1/moriio/moriio_engine.py   | 100 ++++++++++--
+ 2 files changed, 236 insertions(+), 18 deletions(-)
+
+diff --git a/tests/v1/kv_connector/unit/test_moriio_write_done_routing.py b/tests/v1/kv_connector/unit/test_moriio_write_done_routing.py
+index afd1d8ce79..07d226102e 100644
+--- a/tests/v1/kv_connector/unit/test_moriio_write_done_routing.py
++++ b/tests/v1/kv_connector/unit/test_moriio_write_done_routing.py
+@@ -41,6 +41,11 @@ from .utils import make_moriio_writer
+ pytestmark = pytest.mark.cpu_test
+ 
+ 
++class _HandshakeDone(dict):
++    def __contains__(self, key: object) -> bool:
++        return True
++
++
+ def _fake_worker(
+     alloc: dict[str, Any],
+     *,
+@@ -70,7 +75,15 @@ def _fake_worker(
+     )
+     wrapper._mark_transfer_terminal_locked = lambda transfer_id: None
+     wrapper._is_transfer_terminal_locked = lambda transfer_id: False
+-    worker = SimpleNamespace(moriio_wrapper=wrapper, tp_rank=tp_rank)
++    worker = SimpleNamespace(
++        moriio_wrapper=wrapper,
++        tp_rank=tp_rank,
++        get_engine_name_with_dp=lambda engine_name, dp_rank: (
++            f"{engine_name}_dp{dp_rank}"
++        ),
++        # These tests start after the decode-rank handshake has finished.
++        remote_moriio_metadata=_HandshakeDone(),
++    )
+     if set_remote_dp_size_local is not None:
+         worker.remote_dp_size_local = set_remote_dp_size_local
+     return worker
+@@ -539,6 +552,145 @@ def test_release_reaches_every_prefill_rank_and_no_other(params, expected_tp_ran
+     ]
+ 
+ 
++def test_write_stays_deferred_until_target_decode_rank_handshake():
++    info = RemoteAllocInfo(block_ids=None, decode_dp_rank=9)
++    worker = SimpleNamespace(
++        moriio_wrapper=SimpleNamespace(
++            done_remote_allocate_req_dict={"tA": info},
++            lock=threading.Lock(),
++            waiting_for_transfer_complete=lambda statuses: None,
++            _is_transfer_terminal_locked=lambda transfer_id: False,
++        ),
++        tp_rank=0,
++        get_engine_name_with_dp=lambda engine_name, dp_rank: (
++            f"{engine_name}_dp{dp_rank}"
++        ),
++        remote_moriio_metadata={"remote-engine_dp0": object()},
++    )
++    writer = make_moriio_writer(worker)
++    task = _write_task(
++        "tA",
++        "10.0.0.1",
++        multi_pod_hosts=["10.0.0.1", "10.0.0.2"],
++        remote_dp_size_local=8,
++    )
++    writer._deferred_tasks.append(task)
++
++    writer._process_deferred_tasks()
++
++    assert info.completion_remote_ip is None
++    assert writer._deferred_tasks == [task]
++
++    worker.remote_moriio_metadata["remote-engine_dp9"] = object()
++    writer._process_deferred_tasks()
++
++    assert info.completion_remote_ip == "10.0.0.2"
++    assert writer._deferred_tasks == []
++
++
++def test_allocated_handshake_timeout_notifies_owning_decode_rank():
++    wrapper = _real_wrapper()
++    info = RemoteAllocInfo(block_ids=[[4]], decode_dp_rank=9)
++    info.transfer_statuses.append("posted")
++    waited: list[list] = []
++    wrapper.waiting_for_transfer_complete = lambda statuses: waited.append(
++        list(statuses)
++    )
++    sent: list[tuple] = []
++    wrapper.send_notify = lambda tid, ip, port, message_type: sent.append(
++        (tid, ip, port, message_type)
++    )
++    wrapper.done_remote_allocate_req_dict["tA"] = info
++    worker = SimpleNamespace(
++        moriio_wrapper=wrapper,
++        tp_rank=0,
++        get_engine_name_with_dp=lambda engine_name, dp_rank: (
++            f"{engine_name}_dp{dp_rank}"
++        ),
++        remote_moriio_metadata={},
++    )
++    writer = make_moriio_writer(worker)
++    task = _write_task(
++        "tA",
++        "10.0.0.1",
++        multi_pod_hosts=["10.0.0.1", "10.0.0.2"],
++        remote_dp_size_local=8,
++    )
++    task.enqueue_time = time.perf_counter() - 2 * writer._defer_timeout
++    writer._deferred_tasks.append(task)
++
++    writer._process_deferred_tasks()
++
++    assert writer._deferred_tasks == []
++    assert waited == [["posted"]]
++    assert [ack.transfer_id for ack in wrapper.done_req_ids] == ["tA"]
++    assert wrapper._is_transfer_terminal_locked("tA")
++    assert sent == [
++        ("tA", "10.0.0.2", 20000 + get_port_offset(9 % 8, 0), "write_failed")
++    ]
++
++
++def test_fanout_write_waits_for_every_target_tp_session():
++    info = RemoteAllocInfo(block_ids=None, decode_dp_rank=0)
++    worker = _fake_worker({"tA": info})
++    worker.get_engine_name_with_dp_tp = (
++        lambda engine_id, dp_rank, tp_rank: f"{engine_id}_dp{dp_rank}_tp{tp_rank}"
++    )
++    worker._is_mamba_layer = lambda layer_name: False
++    worker.remote_moriio_metadata = {"remote-engine_dp0_tp2": object()}
++    writer = make_moriio_writer(worker)
++    task = _write_task("tA", "10.0.0.1", tp_mapping=MLA_FANOUT)
++    writer._deferred_tasks.append(task)
++
++    writer._process_deferred_tasks()
++
++    assert writer._deferred_tasks == [task]
++    assert not info.completion_notify_targets
++
++    worker.remote_moriio_metadata["remote-engine_dp0_tp3"] = object()
++    writer._process_deferred_tasks()
++
++    assert writer._deferred_tasks == []
++    assert len(info.completion_notify_targets) == 2
++
++
++def test_write_exception_notifies_owning_decode_rank():
++    wrapper = _real_wrapper()
++    sent: list[tuple] = []
++    wrapper.waiting_for_transfer_complete = lambda statuses: None
++    wrapper.send_notify = lambda tid, ip, port, message_type: sent.append(
++        (tid, ip, port, message_type)
++    )
++    wrapper.done_remote_allocate_req_dict["tA"] = RemoteAllocInfo(
++        block_ids=[[4]], decode_dp_rank=3
++    )
++    worker = SimpleNamespace(
++        moriio_wrapper=wrapper,
++        tp_rank=2,
++        get_engine_name_with_dp=lambda engine_name, dp_rank: (
++            f"{engine_name}_dp{dp_rank}"
++        ),
++        remote_moriio_metadata={"remote-engine_dp3": object()},
++        # No layer map for this rank: the real session lookup raises KeyError.
++        layer_name_to_remote_kv_cache_metadata={},
++        built_write_session={},
++        _is_mamba_layer=lambda layer_name: False,
++    )
++    worker._get_built_session = lambda engine_id: (
++        MoRIIOConnectorWorker._get_built_session(worker, engine_id)
++    )
++    writer = make_moriio_writer(worker)
++    task = _write_task("tA", "10.0.0.1")
++    task.event = SimpleNamespace(synchronize=lambda: None)
++    writer._deferred_tasks.append(task)
++
++    writer._process_deferred_tasks()
++
++    assert writer._deferred_tasks == []
++    assert [ack.transfer_id for ack in wrapper.done_req_ids] == ["tA"]
++    assert sent == [("tA", "10.0.0.1", 20000 + get_port_offset(3, 2), "write_failed")]
++
++
+ def test_deferred_write_timeout_fails_transfer_on_every_decode_rank():
+     wrapper = _real_wrapper()
+     sent: list[tuple[str, int, str]] = []
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
+index 61e2c8d38b..f3ebdbb466 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
+@@ -220,10 +220,10 @@ class MoRIIOWriter:
+                 self._execute_write_task(task)
+             except Exception:
+                 logger.exception(
+-                    "Write task failed for request %s, marking done",
++                    "Write task failed for request %s",
+                     task.request_id,
+                 )
+-                self._mark_request_done(task.transfer_id)
++                self._fail_allocated_write(task)
+ 
+     def _process_deferred_tasks(self) -> None:
+         """Process tasks that were previously deferred."""
+@@ -242,17 +242,24 @@ class MoRIIOWriter:
+                     self._execute_write_task(task)
+                 except Exception:
+                     logger.exception(
+-                        "Deferred write task failed for request %s, marking done",
++                        "Deferred write task failed for request %s",
+                         task.request_id,
+                     )
+-                    self._mark_request_done(task.transfer_id)
+-            elif (
+-                now - task.enqueue_time > defer_timeout
+-                and self.worker.moriio_wrapper.fail_unallocated_write(task.transfer_id)
+-            ):
++                    self._fail_allocated_write(task)
++            elif now - task.enqueue_time <= defer_timeout:
++                still_deferred.append(task)
++            elif self.worker.moriio_wrapper.fail_unallocated_write(task.transfer_id):
+                 self._notify_write_failed(task, now - task.enqueue_time)
+             else:
+-                still_deferred.append(task)
++                # Decode already allocated blocks, so its rank is known, but
++                # the handshake that _get_built_session needs never finished.
++                logger.error(
++                    "Deferred write task for request %s timed out after %.1fs "
++                    "waiting for the handshake with its decode rank",
++                    task.request_id,
++                    now - task.enqueue_time,
++                )
++                self._fail_allocated_write(task)
+ 
+         self._deferred_tasks = still_deferred
+ 
+@@ -304,19 +311,78 @@ class MoRIIOWriter:
+             wrapper._mark_transfer_terminal_locked(transfer_id)
+         self._clear_transfer_state(transfer_id)
+ 
+-    def _is_remote_ready(self, task: WriteTask) -> bool:
+-        """Check if remote blocks are allocated for this task.
++    def _fail_allocated_write(self, task: WriteTask) -> None:
++        """Fail a WRITE whose decode blocks are already allocated.
+ 
+-        Args:
+-            task: The write task
++        Free the producer blocks and tell the owning decode rank. Decode is
++        waiting for write_done; dropping the transfer locally leaves it there.
++        """
++        wrapper = self.worker.moriio_wrapper
++        with wrapper.lock:
++            if wrapper._is_transfer_terminal_locked(task.transfer_id):
++                return
++            request_info = wrapper.done_remote_allocate_req_dict.get(task.transfer_id)
++
++        posted: list[Any] = []
++        if request_info is not None:
++            with self._write_state_lock:
++                posted = list(request_info.transfer_statuses)
++                request_info.transfer_statuses.clear()
++        # Decode may reuse its blocks when it sees write_failed. Writes already
++        # posted for earlier layers have to land first.
++        try:
++            wrapper.waiting_for_transfer_complete(posted)
++        except Exception:
++            logger.exception(
++                "Posted writes for failed transfer %s did not complete",
++                task.transfer_id,
++            )
++        self._mark_request_done(task.transfer_id)
++        if request_info is None:
++            return
++        for remote_ip, remote_port in self._resolve_notify_endpoints(
++            task, request_info.decode_dp_rank
++        ):
++            try:
++                wrapper.send_notify(
++                    task.transfer_id,
++                    remote_ip,
++                    remote_port,
++                    message_type="write_failed",
++                )
++            except Exception:
++                logger.exception(
++                    "Failed to notify decode DP rank %d that transfer %s failed",
++                    request_info.decode_dp_rank,
++                    task.transfer_id,
++                )
+ 
+-        Returns:
+-            True if remote blocks are ready
++    def _is_remote_ready(self, task: WriteTask) -> bool:
++        """Return whether this write can run now.
+ 
++        Decode's block list and the handshake with the rank that owns those
++        blocks are independent. ``remote_moriio_metadata`` is stored after the
++        layer metadata, so its presence is what ``_get_built_session`` requires.
+         """
+-        return (
+-            task.transfer_id in self.worker.moriio_wrapper.done_remote_allocate_req_dict
++        request_info = self.worker.moriio_wrapper.done_remote_allocate_req_dict.get(
++            task.transfer_id
++        )
++        if request_info is None:
++            return False
++        # Same ids _execute_write_task passes to _get_built_session. A fan-out
++        # has one session per target TP rank; a single target keeps the DP key.
++        is_mamba = task.tp_mapping is not None and self.worker._is_mamba_layer(
++            task.layer_name
+         )
++        for target in self._write_targets(task):
++            if target is not None and not is_mamba and not target.num_heads:
++                continue
++            engine_id = self._target_engine_id(
++                task, request_info.decode_dp_rank, target
++            )
++            if engine_id not in self.worker.remote_moriio_metadata:
++                return False
++        return True
+ 
+     def _get_remote_alloc_info(self, transfer_id: str) -> RemoteAllocInfo:
+         """Get remote allocation info for a request.
+-- 
+2.43.0
+
