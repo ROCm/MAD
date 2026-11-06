@@ -342,6 +342,384 @@
         "args": "-N 2 -n 2"
     },
     {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-r128-10",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "R128-10"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-r128-30",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "R128-30"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-r128-70",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "R128-70"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-h256-30",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "H256-30"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-h256-70",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "H256-70"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-m512-30",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "M512-30"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-m512-30-c4",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "M512-30",
+            "BENCHMARK_CON": "4",
+            "MT_ROUNDS": "8"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_mt-m512-30-c2",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "multiturn"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "multiturn_retained",
+            "MT_PRESET": "M512-30",
+            "BENCHMARK_CON": "2",
+            "MT_ROUNDS": "12"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_cold-512k",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "long_context"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "long_context",
+            "BENCHMARK_COMBINATIONS": "512000/1000",
+            "BENCHMARK_CON": "4",
+            "NUM_PROMPTS": "12",
+            "WARMUPS": "8",
+            "LC_DETAILED": "1"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_glm-5.3-quark-mxfp4-attnfp8_gates",
+        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "glm-5.3",
+            "accuracy",
+            "niah"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "GLM-5.3-Quark-MXFP4-AttnFP8",
+            "xP": "1",
+            "yD": "1",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "GPUS_PER_NODE": "8",
+            "MORI_GPU_ARCHS": "gfx950",
+            "ENABLE_SERVER_METRICS": "1",
+            "BENCHMARK_SCRIPT": "gates"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3",
         "dockerfile": "../../docker/vllm_disagg_inference",
         "scripts": "run_xPyD_models.slurm",

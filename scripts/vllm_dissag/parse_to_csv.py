@@ -139,7 +139,7 @@ def _get_run_metadata(pipeline: str = "vllm"):
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': 'gfx942',
+        'gpu_architecture': os.environ.get('MAD_SYSTEM_GPU_ARCHITECTURE', 'gfx942'),
     }
 
 
@@ -206,6 +206,84 @@ def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
     print(f"Saved {len(results)} NIAH rows to perf.csv: {output_file}")
 
 
+PERF_CSV_FIELDS = [
+    'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
+    'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
+    'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
+    'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
+    'build_duration', 'test_duration', 'dataname', 'data_provider_type',
+    'data_size', 'data_download_duration', 'build_number',
+    'additional_docker_run_options',
+]
+
+
+def result_json_rows(rec: Dict, workload: str) -> list:
+    """perf.csv rows from one multiturn_metrics.py result.json: (value, metric) pairs."""
+    tag = f"{workload} isl={rec.get('isl_target')} osl={rec.get('osl')} gpus={rec.get('gpus')}"
+    rows = [(rec.get('out_tok_s_per_gpu'), f"output tok/s/GPU ({tag})"),
+            (rec.get('p90_ttft_ms'), f"TTFT p90 ms ({tag})"),
+            (rec.get('step_itl_p99_ms'), f"engine step ITL p99 ms ({tag})")]
+    for k in sorted(k for k in rec if k.startswith('slo') and k.endswith('_goodput_tok_s_per_gpu')
+                    and '_req_' not in k):
+        th = k[3:].split('_', 1)[0]
+        rows.append((rec[k], f"goodput tok/s/GPU at ITL p99<={th}ms, TTFT p90<={rec.get('slo_ttft_ms'):.0f}ms ({tag})"))
+    if rec.get('p99_itl_ms') is not None:
+        rows.append((rec['p99_itl_ms'], f"client ITL p99 ms ({tag})"))
+    return rows
+
+
+def save_result_json_perf_csv(rec: Dict, output_file: str, model_name: str = "",
+                              workload: str = "", pipeline: str = "vllm", append: bool = False):
+    """Save a multiturn_metrics.py result in madengine perf.csv format."""
+    meta = _get_run_metadata(pipeline)
+    ok = rec.get('completed', 0) > 0 and rec.get('failed', 0) == 0
+    new = not (append and Path(output_file).exists() and Path(output_file).stat().st_size > 0)
+    with open(output_file, 'w' if new else 'a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDS)
+        if new:
+            writer.writeheader()
+        n = 0
+        for value, metric in result_json_rows(rec, workload or rec.get('mode', '')):
+            if value is None:
+                continue
+            row = {'model': model_name, 'performance': f"{value:.2f}", 'metric': metric,
+                   'status': 'SUCCESS' if ok else 'FAILURE'}
+            row.update(meta)
+            writer.writerow(row)
+            n += 1
+    print(f"Saved {n} result rows to perf.csv: {output_file}")
+
+
+def parse_niah_mt_log(log_file: str) -> Dict[str, Dict]:
+    """Summary lines of benchmark_niah_corpus.py, e.g.
+    'niah_mt start=246000 found=7/8 errors=0' or 'niah_single lengths=65536,262144 found=18/18 errors=0'."""
+    results = {}
+    with open(log_file, 'r') as f:
+        for line in f:
+            m = re.search(r'(niah_mt\s+start=\d+|niah_single\s+lengths=[\d,]+)\s+found=(\d+)/(\d+)\s+errors=(\d+)', line)
+            if m:
+                results[m.group(1).replace('niah_mt ', 'multi-turn ').replace('niah_single ', 'single ')] = {
+                    'found': int(m.group(2)), 'asked': int(m.group(3)), 'errors': int(m.group(4))}
+    return results
+
+
+def save_niah_mt_perf_csv(results: Dict[int, Dict], output_file: str, model_name: str = "",
+                          pipeline: str = "vllm"):
+    meta = _get_run_metadata(pipeline)
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDS)
+        writer.writeheader()
+        for key in sorted(results):
+            r = results[key]
+            row = {'model': model_name,
+                   'performance': f"{100.0 * r['found'] / r['asked']:.1f}" if r['asked'] else "0.0",
+                   'metric': f"percent found (niah {key} asked={r['asked']})",
+                   'status': 'SUCCESS' if r['errors'] == 0 else 'FAILURE'}
+            row.update(meta)
+            writer.writerow(row)
+    print(f"Saved {len(results)} multi-turn NIAH rows to perf.csv: {output_file}")
+
+
 def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
                   model_name: str = "", pipeline: str = "vllm"):
     """Save results in madengine perf.csv format."""
@@ -255,6 +333,12 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
+    parser.add_argument('--niah-mt', action='store_true',
+                        help='Parse a benchmark_niah_corpus.py log (requires --perf-csv)')
+    parser.add_argument('--result-json', action='store_true',
+                        help='log_file is a multiturn_metrics.py result.json (requires --perf-csv)')
+    parser.add_argument('--workload', type=str, default='', help='Workload label for --result-json rows')
+    parser.add_argument('--append', action='store_true', help='Append --result-json rows to an existing perf.csv')
 
     args = parser.parse_args()
 
@@ -265,6 +349,22 @@ def main():
         sys.exit(1)
 
     print(f"Parsing log file: {log_file}")
+
+    if args.result_json or args.niah_mt:
+        if not args.perf_csv:
+            print("Error: --result-json / --niah-mt require --perf-csv")
+            sys.exit(1)
+        if args.result_json:
+            import json
+            save_result_json_perf_csv(json.load(open(log_file)), args.perf_csv, args.model_name,
+                                      args.workload, append=args.append)
+        else:
+            res = parse_niah_mt_log(log_file)
+            if not res:
+                print("No multi-turn NIAH results found in log file.")
+                return
+            save_niah_mt_perf_csv(res, args.perf_csv, args.model_name)
+        return
 
     # NIAH mode: parse retrieval scores, write perf.csv only
     if args.niah:

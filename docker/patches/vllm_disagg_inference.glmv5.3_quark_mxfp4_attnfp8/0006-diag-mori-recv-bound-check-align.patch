@@ -1,0 +1,72 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: two opt-in knobs on top of 0004, both off unless set:
+#   VLLM_MORI_RECV_ROW_ALIGN  receive-row bound rounding (default 32, unchanged);
+#                             the recipe sets 4096.
+#   VLLM_MORI_RECV_BOUND_CHECK=1  diagnostic: logs and falls back to the full buffer
+#                             if a rank receives more rows than the bound (outside
+#                             CUDA-graph capture only). Not used by the recipe.
+# Upstream: local, not upstream (configuration for 0004).
+# Remove when: 0004 is removed.
+# ---- end of MAD header; the tested patch bytes follow unchanged ----
+diff --git a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+index 49b1432b2c..ef9026e9f6 100644
+--- a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
++++ b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori.py
+@@ -2,6 +2,8 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
+ import mori
++import os
++
+ import torch
+ 
+ import vllm.model_executor.layers.fused_moe.modular_kernel as mk
+@@ -126,6 +128,27 @@ class MoriPrepareAndFinalize(mk.FusedMoEPrepareAndFinalizeModular):
+         ) = self.mori_op.dispatch(a1, topk_weights, scale, topk_ids)
+         if self.bound_recv_rows:
+             rows = mori_recv_rows_bound(a1, dispatch_a1.shape[0], self.num_dispatchers_)
++            if os.environ.get("VLLM_MORI_RECV_BOUND_CHECK") == "1" and (
++                not torch.cuda.is_current_stream_capturing()
++            ):
++                recv = int(dispatch_recv_token_num.max())
++                if recv > rows:
++                    from vllm.forward_context import (
++                        get_forward_context,
++                        is_forward_context_available,
++                    )
++
++                    ctx = get_forward_context() if is_forward_context_available() else None
++                    dpm = getattr(ctx, "dp_metadata", None)
++                    logger.warning(
++                        "MORI recv bound violated: recv=%d rows=%d capacity=%d "
++                        "a1=%s dispatchers=%d tokens_across_dp=%s num_tokens=%s",
++                        recv, rows, dispatch_a1.shape[0], tuple(a1.shape),
++                        self.num_dispatchers_,
++                        None if dpm is None else dpm.num_tokens_across_dp_cpu.tolist(),
++                        getattr(ctx, "batch_descriptor", None),
++                    )
++                    rows = dispatch_a1.shape[0]
+             dispatch_a1 = dispatch_a1[:rows]
+             dispatch_weights = dispatch_weights[:rows]
+             dispatch_ids = dispatch_ids[:rows]
+diff --git a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
+index 17fa7d9bb6..7587b9a825 100644
+--- a/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
++++ b/vllm/model_executor/layers/fused_moe/prepare_finalize/mori_epv2.py
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
++import os
+ from typing import Any
+ 
+ import torch
+@@ -17,7 +18,7 @@ from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
+ logger = init_logger(__name__)
+ 
+ # Receive-row bounds are rounded up to this many rows (as SGLang's MORI path does).
+-_RECV_ROW_ALIGN = 32
++_RECV_ROW_ALIGN = int(os.environ.get("VLLM_MORI_RECV_ROW_ALIGN", "32"))
+ 
+ 
+ def mori_recv_rows_bound(a1: torch.Tensor, capacity: int, num_dispatchers: int) -> int:

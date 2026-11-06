@@ -88,6 +88,7 @@ VALID_MODELS=( \
     "Qwen3-32B" \
     "Qwen3-30B-A3B" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Quark-MXFP4-AttnFP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -96,6 +97,7 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-V3-5layer" \
     "DeepSeek-R1" \
     "GLM-5.1-FP8" \
+    "GLM-5.3-Quark-MXFP4-AttnFP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -182,7 +184,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "GLM-5.3-Quark-MXFP4-AttnFP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -434,13 +436,18 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # The launcher/connectors auto-enable prefix caching + server /metrics when
 # BENCHMARK_SCRIPT=agentic.
 #   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
+#   multiturn_retained     -> benchmark_multiturn_retained.sh (warm multi-turn: retained
+#                             context + new tokens per turn, exact OSL; MT_PRESET)
+#   gates                  -> benchmark_gates.sh        (KV-transfer probe, GSM8K, NIAH, multi-turn needle)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah)" >&2; exit 1 ;;
+    multiturn_retained) BENCHMARK_SCRIPT_FILE="benchmark_multiturn_retained.sh" ;;
+    gates)        BENCHMARK_SCRIPT_FILE="benchmark_gates.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, multiturn_retained, gates)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -646,6 +653,30 @@ docker run --rm \
     ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
     ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
+    ${VLLM_MORI_RECV_ROW_ALIGN:+-e VLLM_MORI_RECV_ROW_ALIGN=$VLLM_MORI_RECV_ROW_ALIGN} \
+    ${MT_PRESET:+-e MT_PRESET=$MT_PRESET} \
+    ${MT_RETAINED_TOKENS:+-e MT_RETAINED_TOKENS=$MT_RETAINED_TOKENS} \
+    ${MT_NEW_TOKENS:+-e MT_NEW_TOKENS=$MT_NEW_TOKENS} \
+    ${MT_OSL:+-e MT_OSL=$MT_OSL} \
+    ${MT_T_MEAS:+-e MT_T_MEAS=$MT_T_MEAS} \
+    ${MT_ROUNDS:+-e MT_ROUNDS=$MT_ROUNDS} \
+    ${MT_STICKY_MOD:+-e MT_STICKY_MOD=$MT_STICKY_MOD} \
+    ${MT_CORPUS:+-e MT_CORPUS=$MT_CORPUS} \
+    ${NUM_PROMPTS:+-e NUM_PROMPTS=$NUM_PROMPTS} \
+    ${NIAH_MODE:+-e NIAH_MODE=$NIAH_MODE} \
+    ${NIAH_MT_START:+-e NIAH_MT_START=$NIAH_MT_START} \
+    ${NIAH_MT_TURNS:+-e NIAH_MT_TURNS=$NIAH_MT_TURNS} \
+    ${NIAH_MT_NEW_TOKENS:+-e NIAH_MT_NEW_TOKENS=$NIAH_MT_NEW_TOKENS} \
+    ${NIAH_MT_SESSIONS:+-e NIAH_MT_SESSIONS=$NIAH_MT_SESSIONS} \
+    ${NIAH_MT_K:+-e NIAH_MT_K=$NIAH_MT_K} \
+    ${MT_TTFT_SLO_MS:+-e MT_TTFT_SLO_MS=$MT_TTFT_SLO_MS} \
+    ${NIAH_LENGTHS:+-e NIAH_LENGTHS=$NIAH_LENGTHS} \
+    ${NIAH_DEPTHS:+-e NIAH_DEPTHS=$NIAH_DEPTHS} \
+    ${NIAH_NEEDLES:+-e NIAH_NEEDLES=$NIAH_NEEDLES} \
+    ${GATES:+-e GATES="$GATES"} \
+    ${GSM8K_LIMIT:+-e GSM8K_LIMIT=$GSM8K_LIMIT} \
+    ${MORIIO_EXTRA_CONFIG:+-e MORIIO_EXTRA_CONFIG="$MORIIO_EXTRA_CONFIG"} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \

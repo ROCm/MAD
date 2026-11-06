@@ -1,0 +1,111 @@
+diff --git a/benchmark_serving_multi_turn.py b/benchmark_serving_multi_turn.py
+--- a/benchmark_serving_multi_turn.py
++++ b/benchmark_serving_multi_turn.py
+@@ -111,6 +111,8 @@ class ServerResponse(NamedTuple):
+     first_chunk: str  # first chunk of the content
+     content: str  # includes the first_chunk
+     num_chunks: int
++    reasoning: str = ""
++    chunk_delays_ms: tuple = ()
+ 
+     def __str__(self) -> str:
+         return f"ttft_ms {self.ttft_ms:.2f}, tpot_ms {self.tpot_ms:.2f}, latency_ms {self.latency_ms:.2f}"  # noqa: E501
+@@ -261,8 +263,8 @@ async def send_request(
+         payload["stream"] = True
+         payload["stream_options"] = {"include_usage": False}
+ 
+-    # if min_tokens is not None:
+-    #     payload["min_tokens"] = min_tokens
++    if min_tokens is not None:
++        payload["min_tokens"] = min_tokens
+ 
+     if max_tokens is not None:
+         payload["max_tokens"] = max_tokens
+@@ -292,6 +294,7 @@ async def send_request(
+     latency: float | None = None
+     first_chunk = ""
+     generated_text = ""
++    reasoning_text = ""
+ 
+     start_time: int = time.perf_counter_ns()
+     most_recent_timestamp: int = start_time
+@@ -314,24 +317,34 @@ async def send_request(
+                     data = json.loads(chunk)
+                     message = data["choices"][0]["message"]
+                     assert message["role"] == "assistant"
+-                    generated_text += message["content"]
++                    generated_text += message.get("content") or ""
++                    reasoning_text += (
++                        message.get("reasoning_content") or message.get("reasoning") or ""
++                    )
+                 else:
+                     timestamp: int = time.perf_counter_ns()
+                     data = json.loads(chunk)
+ 
+                     # Delta is the new content/text/data
++                    if not data.get("choices"):
++                        continue
+                     delta = data["choices"][0]["delta"]
+-                    if delta.get("content", None):
++                    # Reasoning parsers stream thinking as reasoning_content (or
++                    # reasoning); those are generated tokens too.
++                    text = delta.get("content") or ""
++                    rtext = delta.get("reasoning_content") or delta.get("reasoning") or ""
++                    if text or rtext:
+                         if ttft is None:
+                             # First token
+                             first_token_time = time.perf_counter_ns()
+                             ttft = first_token_time - start_time
+-                            first_chunk = delta["content"]
++                            first_chunk = rtext + text
+                         else:
+                             # Decoding phase
+                             chunk_delay.append(timestamp - most_recent_timestamp)
+ 
+-                        generated_text += delta["content"]
++                        generated_text += text
++                        reasoning_text += rtext
+ 
+                     most_recent_timestamp = timestamp
+         else:
+@@ -367,6 +380,8 @@ async def send_request(
+         first_chunk=first_chunk,
+         content=generated_text,
+         num_chunks=num_chunks,
++        reasoning=reasoning_text,
++        chunk_delays_ms=tuple(nanosec_to_millisec(d) for d in chunk_delay),
+     )
+     return sr
+ 
+@@ -479,7 +494,9 @@ async def send_turn(
+     first_chunk_tokens = get_token_count(tokenizer, response.first_chunk)
+ 
+     output_content = response.content
+-    output_num_tokens = get_token_count(tokenizer, output_content)
++    output_num_tokens = get_token_count(tokenizer, output_content) + (
++        get_token_count(tokenizer, response.reasoning) if response.reasoning else 0
++    )
+ 
+     # Prefix caching approximated cached percent
+     approx_cached_percent = (
+@@ -522,6 +539,20 @@ async def send_turn(
+         client_id=client_id,
+     )
+ 
++    itl_path = os.environ.get("MT_ITL_JSONL")
++    if itl_path:
++        with open(itl_path, "a") as f:
++            f.write(json.dumps({
++                "conversation_id": conv_id, "client_id": client_id,
++                "start_time_ms": response.start_time_ms, "ttft_ms": ttft_ms,
++                "latency_ms": response.latency_ms, "input_num_tokens": input_num_tokens,
++                "output_num_tokens": output_num_tokens,
++                "content_tokens": output_num_tokens - (
++                    get_token_count(tokenizer, response.reasoning) if response.reasoning else 0),
++                "itl_ms": list(response.chunk_delays_ms),
++                "text": (response.reasoning + "\n</think>\n" + output_content)[-3000:],
++            }) + "\n")
++
+     if verbose:
+         print(
+             f"\n{Color.YELLOW}Response ({output_num_tokens} tokens):{Color.RESET}",

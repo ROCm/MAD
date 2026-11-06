@@ -1,0 +1,312 @@
+# MAD vLLM patch for docker/vllm_disagg_inference.glmv5.3_quark_mxfp4_attnfp8.ubuntu.amd.Dockerfile
+# What: MoRIIO hybrid (KDA) READ moves only the full-attention pages the decode side
+#   does not already hold in its prefix cache. Active for hybrid models
+#   (GLM-5.3-Flash); a no-op for the full GLM-5.3 model, which takes the non-hybrid
+#   branch (see 0007).
+# Upstream: vllm-project/vllm#62190 (open), at cdb4bbf184, unchanged.
+#   https://github.com/vllm-project/vllm/pull/62190
+# Remove when: #62190 is merged and VLLM_REF contains it. 0007 applies on top of
+#   this patch, so rebase 0007 at the same time.
+# Note: the commit-message preamble below was reworded for publication; the diff
+#   hunks are byte-identical to the tested patch (tested file sha256 4690a21b...).
+# ---- end of MAD header; the patch follows (diff hunks as tested) ----
+From cdb4bbf184e49cbc619fe5efb52772f315f4e89e Mon Sep 17 00:00:00 2001
+From: whx-sjtu <xiaowang990929@gmail.com>
+Date: Sat, 17 Oct 2026 14:05:08 +0000
+Subject: [PATCH] [Bugfix][KV Connector][ROCm] MoRIIO hybrid READ: skip locally
+ cached prefix pages
+
+Hybrid (KDA/Mamba) READ paired the complete decoder attention table with
+the prefill table by length and tail alignment, so a decoder prefix-cache
+hit still re-read every cached page. For each full-attention group, select
+the pages covering the final external token range [N-1-E, N-1) from both
+complete tables instead, and raise if the tables do not cover it.
+Window-clipped and state attention groups keep tail alignment.
+
+Local patch, not yet merged upstream.
+Upstream: https://github.com/vllm-project/vllm/pull/62190 (open, draft)
+Head: cdb4bbf184e49cbc619fe5efb52772f315f4e89e
+  (whx-sjtu:whx/moriio-hybrid-read-skip-cached-prefix), taken unchanged.
+PR base 5689c2790c is an ancestor of cd1effa2e7; its dependency vllm#60867
+(merge 1353e1926f) is already in cd1effa2e7 and 8673602b8b. Applies with
+no offsets on 8673602b8b + 0001 + 0002.
+Exported: 2026-11-04.
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
+Signed-off-by: whx-sjtu <xiaowang990929@gmail.com>
+---
+ .../unit/test_moriio_hma_scheduler.py         | 80 ++++++++++++++-----
+ .../v1/moriio/moriio_connector.py             | 71 +++++++++++++---
+ 2 files changed, 122 insertions(+), 29 deletions(-)
+
+diff --git a/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py b/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
+index 850e005deb..be0af16a1d 100644
+--- a/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
++++ b/tests/v1/kv_connector/unit/test_moriio_hma_scheduler.py
+@@ -344,6 +344,7 @@ def test_scheduler_accepts_glm5_next_groups_with_mtp():
+     assert scheduler._attn_group_ids == [1, 2]
+     assert scheduler._mamba_group_ids == [0]
+     assert scheduler._attn_group_is_state == [False, True]
++    assert scheduler._attn_read_block_sizes == [1024, None]
+     assert scheduler.blocks_per_sw == [0, 0, 0]
+     assert scheduler._num_ssm_scratch_blocks == 1
+     # 1 recomputed token + 1 padded spec row + 1 drafter lookahead slot.
+@@ -351,8 +352,8 @@ def test_scheduler_accepts_glm5_next_groups_with_mtp():
+ 
+ 
+ @pytest.mark.usefixtures("restore_moriio_role")
+-@pytest.mark.parametrize("external_tokens", [0, 1500])
+-def test_glm5_next_mtp_read_pairs_every_group(external_tokens):
++@pytest.mark.parametrize("external_tokens,cached_pages", [(0, 2), (476, 1), (1500, 0)])
++def test_glm5_next_mtp_read_pairs_every_group(external_tokens, cached_pages):
+     """P payload -> D alignment -> zeroing filter across all transfer groups."""
+     producer = _glm5_next_mtp_scheduler("kv_producer")
+     p_request = SimpleNamespace(
+@@ -369,7 +370,7 @@ def test_glm5_next_mtp_read_pairs_every_group(external_tokens):
+     assert p_params["remote_block_ids"] == [[10, 11], [50], [90]]
+ 
+     consumer = _glm5_next_mtp_scheduler()
+-    d_request = _make_read_request(p_params["remote_block_ids"])
++    d_request = _make_read_request(p_params["remote_block_ids"], 1501)
+     # The decode's MLA group holds one extra local block for the spec tail.
+     d_blocks = _FakeBlocks(([200, 201], [100, 101, 102], [300]))
+     consumer.update_state_after_alloc(
+@@ -378,9 +379,10 @@ def test_glm5_next_mtp_read_pairs_every_group(external_tokens):
+ 
+     local = consumer._reqs_need_recv["req"][1]
+     if external_tokens:
+-        assert local == [[100, 101], [300], [200]]
++        # Locally cached MLA pages are skipped; the tail ring is always read.
++        assert local == [[100, 101][cached_pages:], [300], [200]]
+         assert consumer._req_kv_params["req"]["remote_block_ids"] == [
+-            [10, 11],
++            [10, 11][cached_pages:],
+             [50],
+             [90],
+         ]
+@@ -391,8 +393,7 @@ def test_glm5_next_mtp_read_pairs_every_group(external_tokens):
+     output = SchedulerOutput.make_empty()
+     output.new_block_ids_to_zero = [100, 101, 102, 300]
+     consumer.build_connector_meta(output)
+-    expected_zero = [102] if external_tokens else [100, 101, 102]
+-    assert output.new_block_ids_to_zero == expected_zero
++    assert output.new_block_ids_to_zero == [100, 101][:cached_pages] + [102]
+ 
+ 
+ def test_read_blocks_routes_each_hybrid_layer_to_its_group():
+@@ -577,6 +578,11 @@ def test_scheduler_accepts_dspark_with_wrapped_full_attention(
+         dcp_world_size=dcp_size,
+     )
+     imported_tokens = manager.block_size
++    assert scheduler._attn_read_block_sizes == [manager.block_size]
++    request = _make_read_request([[10, 11], [90]], 2 * manager.block_size + 1)
++    assert scheduler._select_read_attention(
++        request, manager.block_size, [100, 101, 102], [10, 11], manager.block_size
++    ) == ([101], [11])
+     target_tokens = 1 + vllm_config.num_speculative_tokens
+     manager.allocate_new_blocks(
+         "decode",
+@@ -995,12 +1001,18 @@ def _make_read_scheduler():
+         _reqs_need_send={},
+         _req_kv_params={},
+         _max_decode_tail_blocks=1,
++        _attn_read_block_sizes=[128],
+     )
+ 
+ 
+-def _make_read_request(remote_block_ids):
++def _make_read_request(remote_block_ids, num_prompt_tokens=None):
+     return SimpleNamespace(
+         request_id="req",
++        num_prompt_tokens=(
++            len(remote_block_ids[0]) * 128 + 1
++            if num_prompt_tokens is None
++            else num_prompt_tokens
++        ),
+         kv_transfer_params={
+             "do_remote_prefill": True,
+             "transfer_id": "tx",
+@@ -1054,17 +1066,48 @@ def test_update_state_drops_decode_recompute_tail_block(
+     assert output.new_block_ids_to_zero == [100, 101, 102]
+ 
+ 
+-def test_update_state_pairs_shorter_local_blocks_with_remote_suffix():
++@pytest.mark.parametrize("local,remote", [([100], [10, 11]), ([100, 101], [10])])
++def test_update_state_rejects_incomplete_attention_tables(local, remote):
++    # Admission supplies complete tables, not an unhashed receive suffix.
+     sched = _make_read_scheduler()
+-    request = _make_read_request([[10, 11, 12], [92]])
+-    blocks = _FakeBlocks(
+-        all_groups=([102], [202]),
+-    )
++    request = _make_read_request([remote, [92]], num_prompt_tokens=257)
++    with pytest.raises(moriio_common.MoRIIOError, match="do not cover"):
++        sched.update_state_after_alloc(
++            request, _FakeBlocks((local, [202])), num_external_tokens=128
++        )
+ 
+-    sched.update_state_after_alloc(request, blocks, num_external_tokens=64)
+ 
+-    assert sched._reqs_need_recv["req"][1] == [[102], [202]]
+-    assert sched._req_kv_params["req"]["remote_block_ids"] == [[12], [92]]
++@pytest.mark.parametrize("local_tokens", [0, 64, 128, 192, 256])
++def test_update_state_selects_missing_attention_pages(local_tokens):
++    sched = _make_read_scheduler()
++    request = _make_read_request([[10, 11], [90]], num_prompt_tokens=257)
++    blocks = _FakeBlocks(([100, 101, 102], [200]))
++    external, asynchronous = sched.get_num_new_matched_tokens(request, local_tokens)
++    assert (external, asynchronous) == (256 - local_tokens, False)
++    sched.update_state_after_alloc(request, blocks, external)
++    output = SchedulerOutput.make_empty()
++    output.new_block_ids_to_zero = [100, 101, 102, 999]
++    meta = sched.build_connector_meta(output).reqs_to_recv["req"]
++    expected = [100, 101][local_tokens // 128 :]
++    assert meta.local_block_ids == [expected, [200]]
++    if external:
++        assert meta.remote_block_ids == [[10, 11][local_tokens // 128 :], [90]]
++    assert output.new_block_ids_to_zero == [
++        block for block in [100, 101, 102, 999] if block not in expected
++    ]
++
++
++@pytest.mark.parametrize("external", [128, 256])
++def test_update_state_uses_final_external_token_count(external):
++    sched = _make_read_scheduler()
++    request = _make_read_request([[10, 11], [90]], num_prompt_tokens=257)
++    assert sched.get_num_new_matched_tokens(request, 128) == (128, False)
++    sched.update_state_after_alloc(
++        request, _FakeBlocks(([100, 101, 102], [200])), external
++    )
++    assert sched._reqs_need_recv["req"][1][0] == (
++        [101] if external == 128 else [100, 101]
++    )
+ 
+ 
+ def test_update_state_pairs_trimmed_mamba_state_with_remote_state():
+@@ -1453,11 +1496,10 @@ def test_read_rematch_after_alloc_keeps_queued_transfer():
+     """Clearing the flag blocks another external hit, not the queued READ."""
+     sched = _make_read_scheduler()
+     request = _make_read_request([[10, 11], [91]])
+-    request.num_prompt_tokens = 32
+-    assert sched.get_num_new_matched_tokens(request, 0) == (31, False)
++    assert sched.get_num_new_matched_tokens(request, 0) == (256, False)
+ 
+     sched.update_state_after_alloc(
+-        request, _FakeBlocks(all_groups=([100, 101], [200])), num_external_tokens=31
++        request, _FakeBlocks(all_groups=([100, 101], [200])), num_external_tokens=256
+     )
+ 
+     assert sched._reqs_need_recv["req"][1] == [[100, 101], [200]]
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+index 4bd75ace0d..41556c69c6 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+@@ -604,6 +604,9 @@ class MoRIIOConnectorScheduler:
+         max_decode_tail_tokens = 1 + vllm_config.num_lookahead_tokens
+         # Per attention group: not prefix-cacheable, so read even on a full hit.
+         self._attn_group_is_state: list[bool] = []
++        # Per attention group: tokens per page if READ can select by token
++        # range, i.e. full attention with a complete table; else None.
++        self._attn_read_block_sizes: list[int | None] = []
+         if self._has_mamba:
+             attn_specs = [
+                 kv_cache_config.transfer_groups[group_id].kv_cache_spec
+@@ -613,11 +616,16 @@ class MoRIIOConnectorScheduler:
+                 not spec.prefix_cacheable for spec in attn_specs
+             ]
+             dcp_size = vllm_config.parallel_config.decode_context_parallel_size
+-            # The smallest attention block bounds every group's local tail.
+-            attn_block_size = min(
++            attn_block_sizes = [
+                 spec.block_size * (dcp_size if spec.dcp_sharded else 1)
+                 for spec in attn_specs
+-            )
++            ]
++            self._attn_read_block_sizes = [
++                block_size if is_full_attention_spec(spec) else None
++                for spec, block_size in zip(attn_specs, attn_block_sizes, strict=True)
++            ]
++            # The smallest attention block bounds every group's local tail.
++            attn_block_size = min(attn_block_sizes)
+             # Admission can pad the final prompt token to 1 + num_spec rows;
+             # allocate_slots reserves drafter lookahead in addition to those.
+             max_decode_tail_tokens += vllm_config.num_speculative_tokens
+@@ -1096,18 +1104,30 @@ class MoRIIOConnectorScheduler:
+                                 ]
+                                 aligned_local_attn: list[list[int]] = []
+                                 aligned_remote_attn: list[list[int]] = []
+-                                for local_group, remote_group in zip(
++                                for local_group, remote_group, read_block_size in zip(
+                                     attn_block_groups,
+                                     remote_block_ids[:num_attn],
++                                    self._attn_read_block_sizes,
+                                     strict=True,
+                                 ):
+-                                    aligned_local, aligned_remote = (
+-                                        self._align_read_blocks(
+-                                            local_group,
+-                                            list(remote_group),
+-                                            self._max_decode_tail_blocks,
++                                    if read_block_size is None:
++                                        aligned_local, aligned_remote = (
++                                            self._align_read_blocks(
++                                                local_group,
++                                                list(remote_group),
++                                                self._max_decode_tail_blocks,
++                                            )
++                                        )
++                                    else:
++                                        aligned_local, aligned_remote = (
++                                            self._select_read_attention(
++                                                request,
++                                                num_external_tokens,
++                                                local_group,
++                                                list(remote_group),
++                                                read_block_size,
++                                            )
+                                         )
+-                                    )
+                                     aligned_local_attn.append(aligned_local)
+                                     aligned_remote_attn.append(aligned_remote)
+                                 aligned_local_mamba: list[list[int]] = []
+@@ -1542,6 +1562,37 @@ class MoRIIOConnectorScheduler:
+         ]
+         return attn, mamba_groups
+ 
++    @staticmethod
++    def _select_read_attention(
++        request: "Request",
++        num_external_tokens: int,
++        local_block_ids: list[int],
++        remote_block_ids: list[int],
++        block_size: int,
++    ) -> tuple[list[int], list[int]]:
++        """Select missing pages from complete P/D attention block tables."""
++        # READ imports through N-1; D computes the final prompt token. Use the
++        # final allocation count, not a prior lookup or receive-page hashes.
++        remote_end = request.num_prompt_tokens - 1
++        local_end = remote_end - num_external_tokens
++        first_block = local_end // block_size
++        end_block = cdiv(remote_end, block_size)
++        if not (
++            0 <= local_end < remote_end
++            and end_block <= len(local_block_ids)
++            and end_block <= len(remote_block_ids)
++        ):
++            raise MoRIIOError(
++                "MoRIIO hybrid READ attention tables do not cover "
++                f"token range [{local_end}, {remote_end}): "
++                f"local={len(local_block_ids)}, remote={len(remote_block_ids)}, "
++                f"block_size={block_size}"
++            )
++        return (
++            local_block_ids[first_block:end_block],
++            remote_block_ids[first_block:end_block],
++        )
++
+     @staticmethod
+     def _align_read_blocks(
+         local_block_ids: list[int],
+-- 
+2.43.0
+

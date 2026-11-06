@@ -19,14 +19,26 @@
 #   WARMUPS                  --num-warmups per cell      (default 2)
 #   NUM_PROMPTS_FACTOR       measured prompts = factor*con (default 4, min 16)
 #   STEP_TIMEOUT             base timeout (s), scaled by tokens (default 2400)
+#   NUM_PROMPTS              measured prompts per cell, overrides NUM_PROMPTS_FACTOR
+#   LC_DETAILED=1            per-request results (--save-detailed, percentiles 50/90/99/99.9),
+#                            engine /metrics snapshots (METRICS_ENDPOINTS, see
+#                            benchmark_multiturn_retained.sh) and multiturn_metrics.py rows
+#                            in perf.csv (tok/s/GPU over (xP + yD) * GPUS_PER_NODE, goodput)
+#   Cold exact-length preset used for GLM-5.3 MXFP4 (llm-d P/D):
+#     BENCHMARK_COMBINATIONS=256000/1000 BENCHMARK_CON=4 NUM_PROMPTS=12 WARMUPS=0 LC_DETAILED=1
 # =============================================================================
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCHMARK_PORT="${BENCHMARK_PORT:-2584}"
 GPUS_TOTAL="${GPUS_TOTAL:-$(( (${xP:-1} > ${yD:-1} ? ${xP:-1} : ${yD:-1}) * ${GPUS_PER_NODE:-8} ))}"
 LOG="/run_logs/${SLURM_JOB_ID}/benchmark_long_context_${SLURM_JOB_ID}_${timestamp}_xP${xP}_yD${yD}_${MODEL_NAME}"
 
 CON="${BENCHMARK_CON:-1 4 8}"
+if [[ -z "${METRICS_ENDPOINTS:-}" && -n "${AGENTIC_SERVER_METRICS:-}" ]]; then
+    read -r _p _d _ <<< "${AGENTIC_SERVER_METRICS}"
+    export METRICS_ENDPOINTS="prefill=${_p}${_d:+ decode=${_d}}"
+fi
 IFS=' ' read -ra COMBINATIONS <<< "${BENCHMARK_COMBINATIONS:-1024/1024}"
 WARMUPS="${WARMUPS:-2}"
 NUM_PROMPTS_FACTOR="${NUM_PROMPTS_FACTOR:-4}"
@@ -47,6 +59,15 @@ for combo in "${COMBINATIONS[@]}"; do
     for con in $CON; do
         n_prompts=$(( con * NUM_PROMPTS_FACTOR ))
         [ "$n_prompts" -lt 16 ] && n_prompts=16
+        [ -n "${NUM_PROMPTS:-}" ] && n_prompts=$NUM_PROMPTS
+        detail=()
+        if [ "${LC_DETAILED:-0}" = "1" ]; then
+            cell="${LOG}_cells/isl${isl}_osl${osl}_con${con}"
+            mkdir -p "$cell"
+            detail=(--percentile-metrics ttft,tpot,itl,e2el --metric-percentiles 50,90,99,99.9
+                    --save-result --save-detailed --result-dir "$cell" --result-filename bench_serve.json)
+            bash "$DIR/scrape_engine_metrics.sh" snapshot "$cell" before
+        fi
         _base_timeout="${STEP_TIMEOUT:-2400}"
         _total_tok=$(( isl + osl ))
         _scaled_timeout=$(( _base_timeout * _total_tok / 2048 ))
@@ -68,8 +89,19 @@ for combo in "${COMBINATIONS[@]}"; do
             --request-rate inf \
             --ignore-eos \
             --max-concurrency "$con" \
+            "${detail[@]}" \
             2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
         rc=${PIPESTATUS[0]}
+        if [ "${LC_DETAILED:-0}" = "1" ]; then
+            date -u +%s.%N > "$cell/t_end"
+            bash "$DIR/scrape_engine_metrics.sh" snapshot "$cell" after
+            python3 "$DIR/multiturn_metrics.py" "$cell" --mode bench_serve --isl "$isl" --osl "$osl" \
+                --gpus "${MT_GPUS:-$(( (${xP:-1} + ${yD:-1}) * ${GPUS_PER_NODE:-8} ))}" --layout "${MT_LAYOUT:-pd}" \
+                2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
+            python3 "$DIR/parse_to_csv.py" "$cell/result.json" --result-json --append \
+                --perf-csv "/run_logs/${SLURM_JOB_ID}/perf.csv" --model-name "${MODEL_NAME}" \
+                --workload "cold con=${con}" 2>&1 | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
+        fi
         if [ "$rc" -eq 124 ]; then
             echo "[STALL] isl=$isl osl=$osl con=$con timed out after ${_scaled_timeout}s" \
                 | tee -a "${LOG}_CONCURRENCY.log" "${LOG}_STALLS.log" >/dev/null
