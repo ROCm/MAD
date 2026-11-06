@@ -165,8 +165,11 @@ if [[ -f "${SHARED_DIR}/socket_barrier.py" ]]; then
         --node-ips "${IPADDRS}" --node-ports "${_BARRIER_PORT}"
 fi
 
-mkdir -p "/run_logs/${SLURM_JOB_ID:-0}"
-LOG="/run_logs/${SLURM_JOB_ID:-0}/colocated_NODE${NODE_RANK}.log"
+# The per-job log directory: /run_logs in the container ($LOG_PATH on the host, shared
+# by every node). _RUN_LOGS overrides it, as in vllm_dissag/vllm_disagg.sh (tests).
+RUN_LOGS="${_RUN_LOGS:-/run_logs}"
+mkdir -p "${RUN_LOGS}/${SLURM_JOB_ID:-0}"
+LOG="${RUN_LOGS}/${SLURM_JOB_ID:-0}/colocated_NODE${NODE_RANK}.log"
 
 # Redirect through process substitution rather than a pipeline: after `a | b &`
 # the shell reports b's PID, so WORKER_PID used to be tee's. Every `kill` below
@@ -190,7 +193,7 @@ _alive() {
 # its own server and exits, while each worker sits in `wait` on a headless vLLM
 # that nothing ever stops. srun then waits on those tasks until the wall clock --
 # observed as 4.5 hours of two idle exclusive nodes after results were written.
-SHUTDOWN_FLAG="/run_logs/${SLURM_JOB_ID:-0}/.shutdown"
+SHUTDOWN_FLAG="${RUN_LOGS}/${SLURM_JOB_ID:-0}/.shutdown"
 
 if [[ "${NODE_RANK}" -ne 0 ]]; then
     # Workers have no API server: hold until the head tears the job down.
@@ -204,6 +207,17 @@ if [[ "${NODE_RANK}" -ne 0 ]]; then
         fi
         sleep 5
     done
+    if [ ! -f "${SHUTDOWN_FLAG}" ]; then
+        # vLLM ended before the head said so: this node failed. Say so where the head
+        # looks (its readiness wait checks for these markers) instead of exiting 0 and
+        # leaving the head to wait out its timeout on a group that lost a member.
+        wait "${WORKER_PID}" 2>/dev/null; _rc=$?
+        echo "[colocated] worker ${NODE_RANK}: vllm serve exited (status ${_rc}) before the shutdown signal. Tail:" >&2
+        tail -80 "${LOG}" >&2
+        echo "worker ${NODE_RANK} ($(hostname -s)): vllm serve exited with status ${_rc}; log ${LOG}" \
+            > "${RUN_LOGS}/${SLURM_JOB_ID:-0}/.worker_failed_NODE${NODE_RANK}"
+        exit 1
+    fi
     wait "${WORKER_PID}" 2>/dev/null || true
     exit 0
 fi
@@ -224,6 +238,14 @@ until grep -Fq "Application startup complete." "${LOG}" 2>/dev/null; do
         tail -80 "${LOG}" >&2
         exit 1
     fi
+    # A worker whose vllm serve died leaves a marker (see the worker branch above): the
+    # head's own server then never becomes ready, so stop now, with the worker's reason.
+    for _wf in "${RUN_LOGS}/${SLURM_JOB_ID:-0}"/.worker_failed_NODE*; do
+        [ -f "${_wf}" ] || continue
+        echo "[colocated] $(cat "${_wf}"); stopping the head after ${_elapsed}s." >&2
+        kill "${WORKER_PID}" 2>/dev/null
+        exit 1
+    done
     if [ "${_elapsed}" -ge "${_TIMEOUT}" ]; then
         echo "[colocated] TIMEOUT (${_TIMEOUT}s): server never became ready. Tail:" >&2
         tail -40 "${LOG}" >&2
