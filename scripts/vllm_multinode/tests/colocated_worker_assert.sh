@@ -12,12 +12,14 @@ _is()  { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } ||
 _has() { case "$1" in *"$2"*) printf "  PASS  %s\n" "$3"; pass=$((pass+1)) ;; *) printf "  FAIL  %s\n        missing: %s\n" "$3" "$2"; fail=$((fail+1)) ;; esac; }
 
 B="$TMP/bin"; mkdir -p "$B" "$TMP/model" "$TMP/shared"
-# vllm: VLLM_BEHAVIOUR=die exits 3 after a moment; =serve runs until killed.
+# vllm: VLLM_BEHAVIOUR=die exits 3 after a moment; =serve runs until killed; =ready
+# says it is ready, then runs until killed.
 cat > "$B/vllm" <<'EOF'
 #!/bin/bash
 echo "stand-in vllm $*"
 case "${VLLM_BEHAVIOUR:-serve}" in
   die) sleep 1; echo "RuntimeError: worker lost its group"; exit 3 ;;
+  ready) echo "Application startup complete."; exec sleep 300 ;;
   *)   exec sleep 300 ;;
 esac
 EOF
@@ -56,6 +58,28 @@ wait
 _is "$rc" "0" "exits 0"
 _has "$out" "got shutdown signal" "after the head's signal"
 _is "$(ls "$TMP/logs/5"/.worker_failed_NODE* 2>/dev/null | wc -l | tr -d ' ')" "0" "and leaves no failure marker"
+
+echo ""
+echo "=== the head's status is its benchmark's ==="
+mkdir -p "$TMP/bench"
+printf '#!/bin/bash\necho "stand-in benchmark"; exit "${BENCH_RC:-0}"\n' > "$TMP/bench/bench.sh"
+rm -rf "$TMP/logs"; mkdir -p "$TMP/logs/5"
+out="$(_run 0 VLLM_BEHAVIOUR=ready SHARED_DIR="$TMP/bench" BENCHMARK_SCRIPT_FILE=bench.sh BENCH_RC=7 2>&1)"; rc=$?
+_is "$rc" "7" "a benchmark that fails: the head exits with its status"
+_has "$out" "benchmark exited 7" "...and says so"
+rm -rf "$TMP/logs"; mkdir -p "$TMP/logs/5"
+out="$(_run 0 VLLM_BEHAVIOUR=ready SHARED_DIR="$TMP/bench" BENCHMARK_SCRIPT_FILE=bench.sh BENCH_RC=0 2>&1)"; rc=$?
+_is "$rc" "0" "a benchmark that succeeds: the head exits 0"
+
+echo ""
+echo "=== a container barrier that fails ==="
+mkdir -p "$TMP/barrier"
+printf 'import sys\nprint("stand-in barrier: peer unreachable")\nsys.exit(2)\n' > "$TMP/barrier/socket_barrier.py"
+rm -rf "$TMP/logs"; mkdir -p "$TMP/logs/5"
+out="$(_run 1 SHARED_DIR="$TMP/barrier" 2>&1)"; rc=$?
+_is "$rc" "1" "fails the node instead of starting its server"
+_has "$out" "container barrier failed" "...and says so"
+_is "$(grep -c 'stand-in vllm' <<<"$out")" "0" "...no server was started"
 
 echo ""
 echo "======================================================"

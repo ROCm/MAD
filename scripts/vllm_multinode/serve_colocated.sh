@@ -162,7 +162,10 @@ if [[ -f "${SHARED_DIR}/socket_barrier.py" ]]; then
     echo "[colocated] waiting at container barrier on $(hostname -s)"
     python3 "${SHARED_DIR}/socket_barrier.py" \
         --local-ip "${host_ip}" --local-port "${_BARRIER_PORT}" --enable-port \
-        --node-ips "${IPADDRS}" --node-ports "${_BARRIER_PORT}"
+        --node-ips "${IPADDRS}" --node-ports "${_BARRIER_PORT}" || {
+        echo "[colocated] ERROR: container barrier failed on $(hostname -s) (status $?); not every node's container came up" >&2
+        exit 1
+    }
 fi
 
 # The per-job log directory: /run_logs in the container ($LOG_PATH on the host, shared
@@ -282,7 +285,9 @@ export PERF_DEPLOYMENT_TYPE="${PERF_DEPLOYMENT_TYPE:-colocated_pp${PP_SIZE}xtp${
 export PERF_TAGS="${PERF_TAGS:-vllm_multinode,colocated,${_ep_tag}}"
 
 bash "${SHARED_DIR}/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
+_bench_rc=$?
 
-echo "[colocated] benchmark complete; stopping server"
+echo "[colocated] benchmark exited ${_bench_rc}; stopping server"
 pkill -P "${WORKER_PID}" 2>/dev/null; kill "${WORKER_PID}" 2>/dev/null || true
-exit 0
+# The benchmark's status is the head's: a failed benchmark fails the job.
+exit "${_bench_rc}"
