@@ -25,6 +25,11 @@ Only the forms the launchers use are implemented. Anything else fails with a
 message naming the unsupported form instead of being guessed at, so a launcher
 change that needs more shows up as a clear error, not a wrong run.
 
+The agent runs any command it is sent, so it serves only requests carrying the
+run's token (MAD_K8S_AGENT_TOKEN: random per run, set by the submitter in every
+pod's environment) and refuses to start without one. Anyone who can reach the
+agent's port on the pod network but cannot read the Job's spec cannot use it.
+
 Host-level docker options (--device, --network host, --ipc host, --privileged,
 --ulimit, --shm-size, ...) are ignored: they are the pod spec's job (devices via
 device plugins, shared memory via an emptyDir), configured in madengine's k8s
@@ -32,6 +37,7 @@ config, not by the card.
 """
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -48,6 +54,11 @@ import time
 STATE_DIR = os.environ.get("MAD_K8S_STATE", "/tmp/mad-k8s")
 PORT = int(os.environ.get("MAD_K8S_AGENT_PORT", "29711"))
 CONNECT_TIMEOUT = float(os.environ.get("MAD_K8S_CONNECT_TIMEOUT", "600"))
+TOKEN_VAR = "MAD_K8S_AGENT_TOKEN"
+
+
+def _token():
+    return os.environ.get(TOKEN_VAR, "")
 
 
 def _die(tool, msg, rc=2):
@@ -114,7 +125,7 @@ def _request(host, req, out=None, err=None):
     sock = _connect(host)
     sock.settimeout(None)
     try:
-        sock.sendall((json.dumps(req) + "\n").encode())
+        sock.sendall((json.dumps({**req, "token": _token()}) + "\n").encode())
         while True:
             kind = _read_exact(sock, 1)
             (n,) = struct.unpack(">I", _read_exact(sock, 4))
@@ -137,8 +148,16 @@ class _Handler(socketserver.StreamRequestHandler):
         line = self.rfile.readline()
         if not line:
             return
-        req = json.loads(line)
         sock = self.request
+        try:
+            req = json.loads(line)
+            given = str(req.get("token") or "")
+        except (ValueError, AttributeError):
+            req, given = {}, ""
+        if not hmac.compare_digest(given.encode(), _token().encode()):
+            _frame(sock, b"e", b"[mad-k8s agent] refused: not this run's token\n")
+            _frame(sock, b"x", b"2")
+            return
         op = req.get("op")
         if op == "ping":
             _frame(sock, b"x", b"0")
@@ -205,6 +224,8 @@ class _Server(socketserver.ThreadingTCPServer):
 
 
 def agent_main(_args):
+    if not _token():
+        _die("agent", f"{TOKEN_VAR} is not set; refusing to serve commands without it")
     os.makedirs(STATE_DIR, exist_ok=True)
     # All interfaces in a pod; tests run several agents on loopback addresses.
     with _Server((os.environ.get("MAD_K8S_AGENT_BIND", "0.0.0.0"), PORT), _Handler) as srv:

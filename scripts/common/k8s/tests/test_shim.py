@@ -42,7 +42,8 @@ class Cluster(unittest.TestCase):
         env = dict(os.environ)
         env.update({"PATH": f"{bin_dir}:{os.environ['PATH']}", "MAD_K8S_AGENT_PORT": str(_free_port()),
                     "MAD_K8S_STATE": str(state), "MAD_K8S_IMAGE": IMAGE,
-                    "SLURM_JOB_NODELIST": ",".join(NODES), "MAD_K8S_CONNECT_TIMEOUT": "20"})
+                    "SLURM_JOB_NODELIST": ",".join(NODES), "MAD_K8S_CONNECT_TIMEOUT": "20",
+                    "MAD_K8S_AGENT_TOKEN": "run-token"})
         self.env = env
         self.agents = [subprocess.Popen([sys.executable, str(SHIM), "agent"], env={**env, "MAD_K8S_AGENT_BIND": n})
                        for n in NODES]
@@ -56,6 +57,22 @@ class Cluster(unittest.TestCase):
 
     def run_(self, cmd, env=None):
         return subprocess.run(cmd, env=env or self.env, capture_output=True, text=True, timeout=60)
+
+    def test_agent_refuses_a_request_without_the_runs_token(self):
+        marker = self.tmp / "ran"
+        for token in ("", "another-runs-token"):
+            r = self.run_(["srun", "-N", "1", "-w", NODES[0], "touch", str(marker)],
+                          env={**self.env, "MAD_K8S_AGENT_TOKEN": token})
+            self.assertEqual(r.returncode, 2, r.stderr)
+            self.assertIn("refused: not this run's token", r.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_agent_will_not_start_without_a_token(self):
+        env = {k: v for k, v in self.env.items() if k != "MAD_K8S_AGENT_TOKEN"}
+        r = subprocess.run([sys.executable, str(SHIM), "agent"], env={**env, "MAD_K8S_AGENT_BIND": "127.0.0.9"},
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("MAD_K8S_AGENT_TOKEN is not set", r.stderr)
 
     def test_srun_one_task_per_node_in_allocation_order(self):
         r = self.run_(["srun", "--nodelist=127.0.0.2,127.0.0.1", "bash", "-c",
