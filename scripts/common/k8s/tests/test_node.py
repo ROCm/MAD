@@ -86,9 +86,46 @@ class PerPod(unittest.TestCase):
         self.assertEqual((res / "run-1" / "exit_code").read_text().strip(), "0")
 
     def test_a_failing_node_fails_the_run(self):
+        """Pod 0 carries the run's status. A failing nonleader records its own and exits
+        0: exiting nonzero would fail the Job (backoffLimit 0), and Kubernetes would
+        stop pod 0 before it published the results and its verdict."""
         rcs, outs = self.run_pods({"FAKE_RC_RANK1": "5"})
-        self.assertEqual(rcs, [5, 5], outs)
+        self.assertEqual(rcs, [5, 0], outs)
         self.assertEqual((self.tmp / "results" / "run-0" / "exit_code").read_text().strip(), "5")
+        self.assertEqual((self.tmp / "results" / "run-1" / "exit_code").read_text().strip(), "5")
+        self.assertIn("status 5 recorded for pod 0's verdict", outs[1])
+
+    def test_term_reaches_the_launcher_at_once(self):
+        """Kubernetes stops a pod with TERM to its main process: the launcher gets it at
+        once (its teardown runs), not after it finishes on its own."""
+        import signal
+        import time
+        card = self.ws / "scripts" / "card" / "run.slurm"
+        card.write_text('#!/bin/bash\n'
+                        'trap \'kill "$s"; echo "launcher got TERM" >> "$LOG_PATH/term"; exit 143\' TERM\n'
+                        'sleep 60 & s=$!\n'
+                        'echo started >> "$LOG_PATH/started"\n'
+                        'wait "$s"\n')
+        (self.tmp / "logs").mkdir()
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.tmp),
+               "MAD_K8S_WORKSPACE": str(self.ws), "MAD_K8S_STATE": str(self.tmp / "state0"),
+               "MAD_K8S_RESULTS": str(self.tmp / "results"), "LOG_PATH": str(self.tmp / "logs"),
+               "MAD_K8S_NNODES": "1", "MAD_K8S_NODE_PREFIX": "run", "MAD_K8S_JOB_ID": "55",
+               "MAD_K8S_IMAGE": "img", "MAD_K8S_SCRIPT": "scripts/card/run.slurm",
+               "JOB_COMPLETION_INDEX": "0"}
+        p = subprocess.Popen(["bash", str(self.ws / ".mad-k8s" / "mad_k8s_node.sh")], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for _ in range(100):
+            if (self.tmp / "logs" / "started").exists():
+                break
+            time.sleep(0.1)
+        t0 = time.time()
+        p.send_signal(signal.SIGTERM)
+        out = p.communicate(timeout=30)[0]
+        self.assertLess(time.time() - t0, 10, out)
+        self.assertEqual(p.returncode, 143, out)
+        self.assertIn("launcher got TERM", (self.tmp / "logs" / "term").read_text())
+        self.assertEqual((self.tmp / "results" / "run-0" / "exit_code").read_text().strip(), "143")
 
 
     def test_a_card_without_per_pod_dispatch_is_refused(self):

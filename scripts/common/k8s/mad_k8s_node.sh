@@ -87,10 +87,26 @@ publish_results() {
 export MAD_DISPATCH=k8s-indexed
 cd "$(dirname "$script")"
 echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF}): running $(basename "$script") ${MAD_K8S_ARGS:-} as its own node of ${SLURM_JOB_NODELIST}"
+# Kubernetes stops a pod with TERM to this process. Bash runs a trap only once a
+# foreground child has returned, so the launcher runs in the background and the TERM
+# is passed on to it at once: its own teardown (stopping its containers, the
+# verdict) runs as it does on scancel.
 # shellcheck disable=SC2086
-bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
-rc=$?
+bash "$(basename "$script")" ${MAD_K8S_ARGS:-} &
+launcher=$!
+trap 'kill -TERM "$launcher" 2>/dev/null' TERM INT
+while :; do
+    wait "$launcher"; rc=$?
+    kill -0 "$launcher" 2>/dev/null || break   # a trap ended the wait, not the launcher
+done
+trap - TERM INT
 echo "[mad-k8s] $(basename "$script") exited ${rc} on node ${idx}"
 [ "$idx" = "0" ] && publish_results
 mkdir -p "${RESULTS}/${MAD_K8S_SELF}" && echo "$rc" > "${RESULTS}/${MAD_K8S_SELF}/exit_code"
-exit "$rc"
+[ "$idx" = "0" ] && exit "$rc"
+# Pod 0's status is the run's: dispatch.sh's rank 0 waits for every rank's status and
+# makes the verdict, so this node's failure is already in it (and in exit_code above).
+# A nonleader exiting nonzero would fail the Job itself (backoffLimit 0), and
+# Kubernetes would then stop pod 0 before it published the results and its verdict.
+[ "$rc" = 0 ] || echo "[mad-k8s] node ${idx}: status ${rc} recorded for pod 0's verdict; this pod exits 0"
+exit 0
