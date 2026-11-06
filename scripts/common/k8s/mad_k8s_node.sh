@@ -9,6 +9,7 @@
 #   MAD_K8S_SCRIPT      the card's script, relative to /workspace
 #   MAD_K8S_ARGS        the card's args
 #   MAD_K8S_MULTIPLE_RESULTS  the card's multiple_results file name, if any
+#   MAD_K8S_AGENT_TOKEN the run's random token; the agents serve only requests with it
 #   JOB_COMPLETION_INDEX      set by Kubernetes for an Indexed Job
 set -u
 
@@ -68,9 +69,17 @@ python3 "$SHIM/mad_k8s.py" wait-peers || { echo "[mad-k8s] not every node came u
 script="${WORKSPACE}/${MAD_K8S_SCRIPT}"
 cd "$(dirname "$script")"
 echo "[mad-k8s] running $(basename "$script") ${MAD_K8S_ARGS:-} on ${SLURM_JOB_NODELIST}"
+# Kubernetes stops a pod with TERM to this process. Bash runs a trap only once a
+# foreground child has returned, so the script runs in the background and the TERM
+# is passed on to it at once: its own teardown (stopping its containers) runs as it
+# does on scancel, then the peers are released.
 # shellcheck disable=SC2086
-bash "$(basename "$script")" ${MAD_K8S_ARGS:-}
+bash "$(basename "$script")" ${MAD_K8S_ARGS:-} &
+launcher=$!
+trap 'kill -TERM "$launcher" 2>/dev/null; wait "$launcher"; release; exit 143' TERM INT
+wait "$launcher"
 rc=$?
+trap 'release; exit 143' TERM INT
 echo "[mad-k8s] $(basename "$script") exited ${rc}"
 
 # Publish the run's results where madengine's collector reads them: what the card
