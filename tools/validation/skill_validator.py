@@ -44,6 +44,8 @@ AGENT_FIELDS = {
     'name', 'description', 'tools', 'disallowedTools', 'model', 'permissionMode',
     'maxTurns', 'skills', 'mcpServers', 'hooks', 'memory', 'background',
     'effort', 'isolation', 'color', 'initialPrompt',
+    # Cursor reads this and keeps the agent from editing. Claude Code ignores it.
+    'readonly',
 }
 BUILTIN_AGENTS = {'general-purpose', 'Explore', 'Plan'}
 # Directories under .claude/skills/ that hold shared helpers, not a skill.
