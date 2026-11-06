@@ -138,6 +138,15 @@ import parse_to_csv as p
 p.save_agentic_perf_csv(['$TMP/agentic/wl/agg.json'], '$TMP/agentic/perf.csv', 'M')" 2>&1 >/dev/null)"
 _t "$(echo "$err" | grep -c 'ERROR: no metric rows')" "1" "...and says so"
 _t "$(wc -l < "$TMP/agentic/perf.csv" | tr -d ' ')" "1" "...leaving a header-only perf.csv (cluster_job_verdict fails on it)"
+# A concurrency sweep writes <workload>/conc<N>/: each row names the workload and N.
+_agg 70 2 8 1
+mkdir -p "$TMP/agentic/wl/conc16"; cp "$TMP/agentic/wl/agg.json" "$TMP/agentic/wl/conc16/agg.json"
+_t "$(python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import parse_to_csv as p
+print(p.agentic_perf_rows('$TMP/agentic/wl/conc16/agg.json')[0][1])")" \
+   "tok/s total (agentic wl conc16, 70/72 requests)" "a sweep cell's rows name the workload and its concurrency"
+_t "$(_rows | cut -d' ' -f3- | grep -o 'agentic wl,')" "agentic wl," "...a single-concurrency run's, the workload alone"
 
 echo "======================================================"
 echo "  parse_to_csv_assert: ${pass} passed, ${fail} failed"
