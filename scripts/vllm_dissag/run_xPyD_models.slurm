@@ -92,6 +92,7 @@ VALID_MODELS=( \
     "GLM-5.3-Flash-MXFP4-gfx942" \
     "GLM-5.3-Flash-FP8-gfx942-hyb" \
     "GLM-5.3-Flash-MXFP4-gfx942-hyb" \
+    "Kimi-K3.1-Pro-gfx942" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
