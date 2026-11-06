@@ -33,6 +33,9 @@ _is "$(_verdict 0 "$CSV_FAIL" | tr '\n' ' ')" "rc=1 published "   "a FAILURE row
 _is "$(_verdict 137 "$CSV_OK" | tr '\n' ' ')" "rc=137 published " "a node's exit status fails the job, CSV still published"
 _is "$(_verdict 0 "" | tr '\n' ' ')"          "rc=1 unpublished " "no results fails the job"
 _is "$(_verdict 0 "" 0 | tr '\n' ' ')"        "rc=0 unpublished " "no results passes when none were required"
+CSV_HEADER='model,performance,metric,status\n'
+_is "$(_verdict 0 "$CSV_HEADER" | tr '\n' ' ')"   "rc=1 published "   "a header and no rows is no result: fails the job"
+_is "$(_verdict 0 "$CSV_HEADER" 0 | tr '\n' ' ')" "rc=0 published "   "...unless no results were required"
 
 echo ""
 echo "=== cluster.sh leaves PP_SIZE to the colocated launcher ==="
