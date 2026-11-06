@@ -153,6 +153,55 @@ python3 "$DIR/parse_to_csv.py" "$TMP/lat_CONCURRENCY.log" -o "$TMP/lat.csv" \
   --perf-csv "$TMP/latperf3.csv" --model-name M --kv-logs "$TMP"/decode_NODE*.log >/dev/null 2>&1
 _has "$(python3 -c "import csv; print(sum(1 for _ in csv.DictReader(open('$TMP/latperf3.csv'))))")" "1" \
      "without PERF_LATENCY_METRICS the perf.csv keeps one row per cell"
+echo "=== agentic aggregate JSON (InferenceX process_agentic_result, pinned in agentic_lib.sh) ==="
+# The aggregate's own shape: request_accounting counts warmup records in records_total
+# and drops them from records_profiled; throughput is request_metrics.throughput.
+mkdir -p "$TMP/agentic/wl"
+_agg() { # profiled error_dropped warmup with_metrics
+  python3 - "$TMP/agentic/wl/agg.json" "$@" <<'PY'
+import json, sys
+path, prof, err, warm, metrics = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), sys.argv[5] == "1"
+total = prof + err + warm
+d = {"num_requests_total": total, "num_requests_successful": prof,
+     "request_accounting": {"records_total": total, "records_profiled": prof,
+                            "records_dropped_total": total - prof, "records_warmup_dropped": warm,
+                            "records_error_dropped": err, "error_categories": {}}}
+if metrics:
+    d["request_metrics"] = {"throughput": {"total": {"tokens_per_second": 5000.0},
+                                           "output": {"tokens_per_second": 800.0},
+                                           "input": {"tokens_per_second": 4200.0},
+                                           "per_gpu": {"total_tput_tps": 625.0}},
+                            "latency": {"ttft": {"p50": 0.25}, "tpot": {"p50": 0.02}, "e2el": {"p50": 3.0}}}
+    d["server_metrics"] = {"cache": {"gpu_cache_hit_rate": 0.42}}
+json.dump(d, open(path, "w"))
+PY
+}
+_rows() { # -> "n status-set" and the error output
+  python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import parse_to_csv as p
+rows = p.agentic_perf_rows('$TMP/agentic/wl/agg.json')
+print(len(rows), ','.join(sorted({r[2] for r in rows})), rows[0][1] if rows else '')"
+}
+_t() { [ "$1" = "$2" ] && { echo "  PASS  $3"; pass=$((pass+1)); } || { echo "  FAIL  $3 (got: $1, want: $2)"; fail=$((fail+1)); }; }
+
+# 70 measured, 2 errors, 8 warmup: error rate 2/72 = 2.8% as the validator computes it.
+_agg 70 2 8 1
+r="$(_rows)"
+_t "$(echo "$r" | cut -d' ' -f1-2)" "6 SUCCESS" "a normal aggregate: every metric row, SUCCESS"
+_t "$(echo "$r" | grep -o '70/72 requests')" "70/72 requests" "requests counted as the validator counts them (warmup excluded)"
+# 85 measured, 15 errors: 15% > 10%. Over records_total (with 50 warmup) it would read 10%.
+_agg 85 15 50 1
+_t "$(_rows | cut -d' ' -f2)" "FAILURE" "error rate over measured requests, not records_total"
+# No metric fields at all: no rows, a reason, and a header-only CSV the verdict rejects.
+_agg 10 0 0 0
+_t "$(_rows | cut -d' ' -f1)" "0" "an aggregate without metrics yields no rows"
+err="$(cd "$TMP" && python3 -c "
+import sys; sys.path.insert(0, '$DIR')
+import parse_to_csv as p
+p.save_agentic_perf_csv(['$TMP/agentic/wl/agg.json'], '$TMP/agentic/perf.csv', 'M')" 2>&1 >/dev/null)"
+_t "$(echo "$err" | grep -c 'ERROR: no metric rows')" "1" "...and says so"
+_t "$(wc -l < "$TMP/agentic/perf.csv" | tr -d ' ')" "1" "...leaving a header-only perf.csv (cluster_job_verdict fails on it)"
 
 echo "======================================================"
 echo "  parse_to_csv_assert: ${pass} passed, ${fail} failed"
