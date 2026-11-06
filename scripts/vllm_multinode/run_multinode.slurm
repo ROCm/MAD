@@ -407,13 +407,15 @@ fi
 
 # --- Forwarded env (see COLOCATED_FORWARD_ENV above) ---
 # Written to a file rather than built into -e flags so values containing spaces
-# survive; docker takes the whole line after = verbatim. Node-local /tmp, mode
-# 600, and never archived -- unlike the wrapper scripts, which are build
-# artifacts and must stay free of secrets.
-_ENV_FILE=/tmp/colocated_fwd_env.${SLURM_JOB_ID}.${SLURM_PROCID}
-rm -f "$_ENV_FILE"
-: > "$_ENV_FILE"
-chmod 600 "$_ENV_FILE"
+# survive; docker takes the whole line after = verbatim. Node-local /tmp, and
+# never archived -- unlike the wrapper scripts, which are build artifacts and must
+# stay free of secrets. mktemp creates it new (never through an existing name or
+# link another user placed there) and mode 600 before anything is written to it.
+_ENV_FILE="$(mktemp "/tmp/colocated_fwd_env.${SLURM_JOB_ID}.${SLURM_PROCID}.XXXXXX")" || {
+    echo "[fwd-env] ERROR: cannot create the forwarded-env file in /tmp" >&2; exit 1; }
+# Removed however this node leaves, a cancelled run included.
+trap "rm -f $_ENV_FILE" EXIT
+trap "exit 143" TERM INT
 for _v in ${COLOCATED_FORWARD_ENV//,/ }; do
     [ -n "${!_v:-}" ] && printf "%s=%s\n" "$_v" "${!_v}" >> "$_ENV_FILE"
 done
