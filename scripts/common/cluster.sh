@@ -153,6 +153,12 @@ cluster_job_verdict() {
         echo "ERROR: no perf CSV at ${src}; the benchmark produced no parseable results." >&2
         return 1
     fi
+    # A header and no rows is no result either: a collector that found no metrics
+    # still writes the header, and madengine would record "0 successful, 0 failed".
+    if [ "$require" = 1 ] && [ "$(awk 'NR > 1 && NF' "$src" | wc -l)" -eq 0 ]; then
+        echo "ERROR: ${src} has no result rows; the benchmark produced no parseable results." >&2
+        return 1
+    fi
     failed="$(cluster_perf_failures "$src" || true)"
     if [ "${failed:-0}" -gt 0 ] 2>/dev/null; then
         echo "ERROR: ${failed} row(s) of ${src} are FAILURE; see the per-node logs under ${logs}." >&2
