@@ -11,6 +11,9 @@ set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
+# A stand-in "long" run: 30 s, with a fraction unique to this test run so its
+# leftovers can be found and killed without touching anything else.
+_LONG_SLEEP="30.$$"
 _ok()  { printf "  PASS  %s\n" "$1"; pass=$((pass+1)); }
 _bad() { printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); }
 _is()  { [ "$1" = "$2" ] && _ok "$3" || { _bad "$3"; printf "        got:  %s\n        want: %s\n" "$1" "$2"; }; }
@@ -109,14 +112,16 @@ rm -rf "$TMP/run"; mkdir -p "$TMP/run/logs"
 ( cd "$TMP/run" && exec env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
     LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \
     DOCKER_IMAGE_NAME=img MODEL_NAME=M MODEL_PATH="$TMP/model" MAD_GPU_ARCH=gfx950 \
-    CLUSTER_SYSFS_IB="$TMP/none" STUB_SLEEP=30 \
+    CLUSTER_SYSFS_IB="$TMP/none" STUB_SLEEP="$_LONG_SLEEP" \
     bash "$DIR/vllm_multinode/run_multinode.slurm" > "$TMP/run/out.txt" 2>&1 ) &
 _lp=$!
 for _i in $(seq 1 50); do grep -q "docker run" "$TMP/run/stub.log" 2>/dev/null && break; sleep 0.2; done
 kill -TERM "$_lp"; wait "$_lp"; _rc=$?
 _is "$_rc" "143" "TERM during the run ends the job with 143"
 _has "$(_stub)" "docker stop colocated_M_4242" "TERM during the run stops the containers"
-pkill -f "sleep 30" 2>/dev/null
+# Only this test's own stand-in sleeps (the TERM leaves them orphaned), never
+# another process on the machine that happens to run `sleep 30`.
+pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null
 
 echo ""
 echo "=== the NIAH wrapper leaves max_tokens to benchmark_niah.py ==="
