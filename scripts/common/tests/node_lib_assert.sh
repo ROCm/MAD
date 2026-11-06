@@ -6,6 +6,9 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB="$DIR/common/node/node_lib.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
+# A stand-in "long" container: 30 s, with a fraction unique to this test run so its
+# leftover can be found and killed without touching anything else.
+_LONG_SLEEP="30.$$"
 _is()  { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s\n        got:  %s\n        want: %s\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
 _has() { case "$1" in *"$2"*) printf "  PASS  %s\n" "$3"; pass=$((pass+1)) ;; *) printf "  FAIL  %s\n        missing: %s\n" "$3" "$2"; fail=$((fail+1)) ;; esac; }
 
@@ -65,11 +68,13 @@ _run() { # status sleep_s [signal_after_s]
 _is "$(_run 0 0)" "rc=0" "a container that exits 0: the node exits 0"
 _is "$(_run 3 0)" "rc=3" "a container that exits 3: the node exits 3"
 _is "$(grep -c hook "$TMP/hook.log")" "1" "the hook runs once when the container ends"
-_is "$(_run 0 30 1)" "rc=143" "TERM while the container runs: the node exits 143"
+_is "$(_run 0 "$_LONG_SLEEP" 1)" "rc=143" "TERM while the container runs: the node exits 143"
 _has "$(cat "$TMP/docker.log" 2>/dev/null)" "docker stop -t 10 c1" "...the container is stopped"
 _has "$(cat "$TMP/docker.log" 2>/dev/null)" "docker rm -f c1" "...and removed"
 _has "$(cat "$TMP/hook.log" 2>/dev/null)" "hook" "...and the hook runs"
-pkill -f "sleep 30" 2>/dev/null
+# Only this test's own stand-in sleep (the TERM leaves it orphaned), never another
+# process on the machine that happens to run `sleep 30`.
+pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null
 
 echo "======================================================"
 echo "  node_lib_assert: ${pass} passed, ${fail} failed"
