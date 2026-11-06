@@ -38,6 +38,15 @@ sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
 | decode `--max-num-seqs 256` | the default 1024 exceeds the KDA state blocks and graph capture refuses |
 | `MORIIO_READ_MODE=1`, router `consistent_hash` | READ mode is the validated transfer; sessions stay on one prefill for prefix reuse |
 
+## Measured (MI325X, Thor2, AgentX conformance_256k, 900 s)
+| Topology | conc | TTFT median | E2E median | tok/s/GPU |
+|---|---|---|---|---|
+| 1P1D, DCP8 + retention | 8 | 29.9 s | 55.4 s | 8259 |
+| 2P1D, DCP8 + retention | 4 | 11.6 s | 18.4 s | 6254 |
+| 2P1D, DCP8 + retention | 8 | 17.6 s | 28.6 s | 12935 |
+
+One prefill node is the bottleneck for agentic traffic; run `xP=2 yD=1` (`sbatch -N 3`) when three nodes are available.
+
 ## Verify
 - Load log: `Requantizing Kimi-K3 MXFP4 experts to groupwise int4 for gfx942`, `flydsl_moe1_abf16_wint4`, `GPU KV cache size: ~6.6M tokens`.
 - Prefill with prefix caching logs `Mamba cache mode is set to 'align'`.

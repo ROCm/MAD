@@ -516,6 +516,8 @@ Kimi-K3.1-Pro-gfx942:
   # (KV sharded across the 8 GPUs: ~6.6M tokens/leg). Experts requantized MXFP4 -> int4 per-group-32 at load
   # (FlyDSL wint4 SiTUv2 a16w4; gfx942 has no FP4 MMA). Run with WIDE_EP=0 (moriio + TP path).
   # Validated (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K (750K in 118 s), distinct-needle con gate, AgentX.
+  # --prefix-cache-retention-interval keeps a KDA state every 16384 tokens so a session's next turn can resume.
+  # Run 2P1D (xP=2 yD=1) for agentic traffic: one prefill node is the TTFT bottleneck.
   # One node does not fit wideEP for this model: TP4xDP2 + MoRI-EP leaves ~0.6 GiB KV/GPU.
   env:
     VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
@@ -536,7 +538,7 @@ Kimi-K3.1-Pro-gfx942:
   base_flags: "--trust-remote-code --language-model-only --kv-cache-dtype fp8_ds_mla --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}' --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice --max-model-len 800000 --max-num-batched-tokens 16384 --block-size 1024 --decode-context-parallel-size 8 --dcp-comm-backend a2a"
   tp_flags: ""
   prefill:
-    tp: "--tensor-parallel-size 8 --enforce-eager --max-num-seqs 16 --prefix-match-unit 64"
+    tp: "--tensor-parallel-size 8 --enforce-eager --max-num-seqs 16 --prefix-match-unit 64 --prefix-cache-retention-interval 16384"
     dp: ""
   decode:
     tp: "--tensor-parallel-size 8 --max-num-seqs 256 --no-enable-prefix-caching"
