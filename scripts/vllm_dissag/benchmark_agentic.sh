@@ -20,7 +20,7 @@ for _cand in \
         # run that measured throughput, latency and cache hit reported "0 perf files".
         # One set of rows per workload; see parse_to_csv.py.
         if [ -n "${SLURM_JOB_ID:-}" ] && [ "${DRY_RUN:-0}" != "1" ]; then
-            mapfile -t _agg < <(find "/run_logs/${SLURM_JOB_ID}" -maxdepth 2 -type f \
+            mapfile -t _agg < <(find "/run_logs/${SLURM_JOB_ID}" -maxdepth 3 -type f \
                 -name "agentic_${SLURM_JOB_ID}_*.json" 2>/dev/null | sort)
             if [ "${#_agg[@]}" -gt 0 ]; then
                 python3 "${_here}/parse_to_csv.py" - --agentic-json "${_agg[@]}" \

@@ -209,7 +209,12 @@ def agentic_perf_rows(json_path: str):
     import os
     with open(json_path) as f:
         d = json.load(f)
-    workload = os.path.basename(os.path.dirname(os.path.abspath(json_path)))
+    # <workload>/agentic_*.json, or <workload>/conc<N>/agentic_*.json for a
+    # concurrency sweep (benchmark_agentic_suite.sh): name the row by both.
+    result_dir = os.path.dirname(os.path.abspath(json_path))
+    workload = os.path.basename(result_dir)
+    if re.fullmatch(r'conc\d+', workload):
+        workload = f"{os.path.basename(os.path.dirname(result_dir))} {workload}"
     rm = d.get('request_metrics') or {}
     lat = rm.get('latency') or {}
     tput = rm.get('throughput') or {}
