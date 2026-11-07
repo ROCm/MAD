@@ -6,7 +6,7 @@
 #           split changes no csrc vs the nightly commit, so the nightly's compiled extensions are kept
 #   AITER   the gfx942 K3.1 build's AITER (fnuz fp8_dsv32_mla sparse_mla_fwd; public AITER lacks it)
 #   patch   rocm_aiter_mla_sparse: allow kv_cache_dtype=fp8_ds_mla on gfx942 when AITER supports it
-#   router  vllm-router (MoRIIO PD service discovery), raviguptaamd/router glm53-flash-gfx942-hybrid
+#   router  vllm-project/router main (MoRIIO PD discovery; sticky_least_loaded session pinning for prefill reuse)
 # Self-contained (no COPY):
 #   docker build --ulimit nofile=1048576:1048576 -f vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile -t <image> .
 # Serving: models.yaml entry Kimi-K3.1-Pro-gfx942 (CONNECTOR=moriio WIDE_EP=0).
@@ -17,9 +17,9 @@ ARG K31_AITER_IMAGE=amdsiloai/vllm:vllm-openai-rocm-kimi-k31-gfx942
 FROM ${K31_AITER_IMAGE} AS k31aiter
 
 FROM ubuntu:22.04 AS router
-ARG ROUTER_REPO=https://github.com/raviguptaamd/router.git
-ARG ROUTER_REF=076800bf43304281818a5353e1037e788ef24249
-ARG RUST_TOOLCHAIN=1.91.0
+ARG ROUTER_REPO=https://github.com/vllm-project/router.git
+ARG ROUTER_REF=ea20a532485c6f4635cee0dff6dab788b87d1365
+ARG RUST_TOOLCHAIN=1.95.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl git ca-certificates build-essential pkg-config libssl-dev protobuf-compiler python3 python3-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -28,7 +28,7 @@ RUN set -eu; \
     export PATH="/root/.cargo/bin:${PATH}"; \
     git clone --filter=blob:none "${ROUTER_REPO}" /src && cd /src && \
     git -c advice.detachedHead=false checkout "${ROUTER_REF}" && cargo build --release && \
-    install -m 755 target/release/vllm-router /vllm-router && /vllm-router --help | grep -q -- --moriio-dp-size && \
+    install -m 755 target/release/vllm-router /vllm-router && /vllm-router --help | grep -q -- sticky_least_loaded && \
     echo "VLLM_ROUTER=${ROUTER_REPO}@$(git rev-parse HEAD) rustc ${RUST_TOOLCHAIN}" > /router_version.txt
 
 FROM ${BASE_IMAGE}
