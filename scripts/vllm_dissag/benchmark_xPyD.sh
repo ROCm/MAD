@@ -7,6 +7,7 @@ LOG="/run_logs/${SLURM_JOB_ID}/benchmark_${SLURM_JOB_ID}_${timestamp}_xP${xP}_yD
 
 echo "==== Benchmark Serving Concurrency Sweep Test ${LOG} ===== "
 echo "Benchmark Port: ${BENCHMARK_PORT}"
+sweep_rc=0
 echo "UTC Time: $(TZ=UTC date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 echo "PST Time: $(TZ=America/Los_Angeles date '+%Y-%m-%d %H:%M:%S %Z')" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 
@@ -30,6 +31,13 @@ vllm bench serve \
     --ignore-eos \
     --max-concurrency $WARMUP_CON \
     2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
+    echo "[FAIL] warmup rc=$rc" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+    if [ "${sweep_rc:-0}" -eq 0 ]; then
+        sweep_rc=$rc
+    fi
+fi
 echo ""
 
 CON="${BENCHMARK_CON:-8 16 32 64 128 256 512}"
@@ -66,6 +74,14 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                --ignore-eos \
                --max-concurrency ${_w_con} \
                2>&1 | tee -a ${LOG}_SHAPEWARMUP.log >/dev/null
+           rc=${PIPESTATUS[0]}
+           if [ "$rc" -ne 0 ]; then
+               echo "[FAIL] shape warmup isl=$isl osl=$osl rc=$rc" \
+                   | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+               if [ "${sweep_rc:-0}" -eq 0 ]; then
+                   sweep_rc=$rc
+               fi
+           fi
        fi
        for con in $CON; do
            p_con=$(($con * 2))
@@ -98,6 +114,15 @@ for i in $(seq 1 $BENCHMARK_ITR); do
            if [ $rc -eq 124 ]; then
                echo "[STALL] isl=$isl osl=$osl con=$con timed out after ${_scaled_timeout}s" \
                    | tee -a ${LOG}_CONCURRENCY.log ${LOG}_STALLS.log >/dev/null
+               if [ "${sweep_rc:-0}" -eq 0 ]; then
+                   sweep_rc=$rc
+               fi
+           elif [ "$rc" -ne 0 ]; then
+               echo "[FAIL] isl=$isl osl=$osl con=$con rc=$rc" \
+                   | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+               if [ "${sweep_rc:-0}" -eq 0 ]; then
+                   sweep_rc=$rc
+               fi
            fi
 
        sleep 10
@@ -108,3 +133,8 @@ python3 $NIXL_COOKBOOK_PATH/parse_to_csv.py ${LOG}_CONCURRENCY.log -o ${LOG}_CON
 	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
 	--model-name "${MODEL_NAME}" \
 	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null
+parse_rc=${PIPESTATUS[0]}
+if [ "${sweep_rc:-0}" -ne 0 ]; then
+    exit "$sweep_rc"
+fi
+exit "$parse_rc"
