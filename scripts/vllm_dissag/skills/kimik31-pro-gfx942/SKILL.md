@@ -53,6 +53,12 @@ bf16 (`"kv_cache_dtype":"auto"`; OCP fp8 crashes gfx942 AITER MLA decode), and d
 (the draft reduces KDA state blocks). Measured 1P1D, per-stream decode: 158 tok/s at c1 on reasoning text (acceptance
 length 4.7), 90 on mixed text (2.7), 81 / 48 at c32, versus ~49 without the draft. GSM8K and NIAH to 750K unchanged.
 
+## Routing for agentic traffic
+Both cards route with `sticky_least_loaded` (a session's turns return to the prefill holding its KDA checkpoints). With very
+long sessions (conformance_512k), strict pinning can stack several 512K sessions on one prefill; a router with bounded overflow
+(`VLLM_ROUTER_SLL_OVERFLOW_DELTA=2`: re-bind a session when its prefill has 2+ more in-flight requests than the idlest one)
+measured 512k c4 TTFT 20.8 s -> 13.1 s and +25% sessions. The stock upstream router ignores the variable (strict pinning).
+
 ## Verify
 - Load log: `Requantizing Kimi-K3 MXFP4 experts to groupwise int4 for gfx942`, `flydsl_moe1_abf16_wint4`, `GPU KV cache size: ~6.6M tokens`.
 - Prefill with prefix caching logs `Mamba cache mode is set to 'align'`.
