@@ -512,10 +512,9 @@ GLM-5.3-Flash-MXFP4-gfx942-hyb:
 
 Kimi-K3.1-Pro-gfx942:
   # Kimi-K3.1-Pro (93 layers = 69 KDA + 24 gated DSA/MLA, 896 MXFP4 experts top-16, 1M ctx) on gfx942
-  # (MI325X 256 GB). 1P/1D over MoRIIO, TP8 attention + TP-sharded experts on both legs, DCP8 on both legs
-  # (KV sharded across the 8 GPUs: ~6.6M tokens/leg). Experts requantized MXFP4 -> int4 per-group-32 at load
-  # (FlyDSL wint4 SiTUv2 a16w4; gfx942 has no FP4 MMA). Run with WIDE_EP=0 (moriio + TP path).
-  # Validated (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K (750K in 118 s), distinct-needle con gate, AgentX.
+  # (MI325X 256 GB). MoRIIO PD, TP8 attention + TP-sharded experts and DCP8 on every leg (KV sharded across
+  # the 8 GPUs: ~6.6M tokens/leg; DCP must match across legs). Experts requantized MXFP4 -> int4 per-group-32
+  # at load (FlyDSL wint4 SiTUv2 a16w4; gfx942 has no FP4 MMA). Run with WIDE_EP=0 (moriio + TP path).
   # --prefix-cache-retention-interval keeps a KDA state every 16384 tokens so a session's next turn can resume.
   # Run 2P1D (xP=2 yD=1) for agentic traffic: one prefill node is the TTFT bottleneck.
   # One node does not fit wideEP for this model: TP4xDP2 + MoRI-EP leaves ~0.6 GiB KV/GPU.
@@ -534,7 +533,7 @@ Kimi-K3.1-Pro-gfx942:
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 24 32 48 64"  # ~0.25 GiB/size breakable graph pool on the upstream tip
     ROUTER_PREFILL_POLICY: "sticky_least_loaded"  # strict session pinning: a turn returns to the prefill holding its KDA checkpoints
     ROUTER_DECODE_POLICY: "sticky_least_loaded"
-    VLLM_ROUTER_SLL_OVERFLOW_DELTA: "2"          # bounded overflow off a busy pinned prefill (router patch; ignored by stock router)
+    VLLM_ROUTER_SLL_OVERFLOW_DELTA: "2"          # bounded overflow off a busy pinned prefill (vllm-project/router PR #540; built into the image)
     AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: "true"
   base_flags: "--trust-remote-code --language-model-only --kv-cache-dtype fp8_ds_mla --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}' --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice --max-model-len 800000 --max-num-batched-tokens 16384 --block-size 1024 --decode-context-parallel-size 8 --dcp-comm-backend a2a"
   tp_flags: ""
@@ -548,16 +547,10 @@ Kimi-K3.1-Pro-gfx942:
 Kimi-K3.1-Pro-gfx942-dspark:
   # DSpark speculative decoding variant of Kimi-K3.1-Pro-gfx942: the 5-layer K3.1 DSpark draft
   # (Inferact/Kimi-K3.1-Pro-DSpark-preview, placed next to the checkpoint) on BOTH legs so the KV groups match.
-  # Draft KV must stay bf16 ("kv_cache_dtype":"auto"): gfx942 AITER MLA decode rejects OCP fp8. Measured 1P1D:
-  # ~158 tok/s/stream at c1 on reasoning text (AL 4.7), ~90 on mixed text (AL 2.7) vs ~49 without the draft.
-  # Kimi-K3.1-Pro (93 layers = 69 KDA + 24 gated DSA/MLA, 896 MXFP4 experts top-16, 1M ctx) on gfx942
-  # (MI325X 256 GB). 1P/1D over MoRIIO, TP8 attention + TP-sharded experts on both legs, DCP8 on both legs
-  # (KV sharded across the 8 GPUs: ~6.6M tokens/leg). Experts requantized MXFP4 -> int4 per-group-32 at load
-  # (FlyDSL wint4 SiTUv2 a16w4; gfx942 has no FP4 MMA). Run with WIDE_EP=0 (moriio + TP path).
-  # Validated (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K (750K in 118 s), distinct-needle con gate, AgentX.
-  # --prefix-cache-retention-interval keeps a KDA state every 16384 tokens so a session's next turn can resume.
-  # Run 2P1D (xP=2 yD=1) for agentic traffic: one prefill node is the TTFT bottleneck.
-  # One node does not fit wideEP for this model: TP4xDP2 + MoRI-EP leaves ~0.6 GiB KV/GPU.
+  # Draft KV must stay bf16 ("kv_cache_dtype":"auto"): gfx942 AITER MLA decode rejects OCP fp8.
+  # Everything else as Kimi-K3.1-Pro-gfx942. Validated 2P1D (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K PASS
+  # (750K cold 89.6 s), distinct-needle con gate; decode 86.8 tok/s/stream at c1 on mixed text (48.6 without
+  # the draft); AgentX conformance 13/13 in band, TTFT p50 256K c4/c8 10.6/19.7 s, 512K c4/c8 11.7/36.3 s.
   env:
     VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
     VLLM_ROCM_USE_AITER: "1"
@@ -573,7 +566,7 @@ Kimi-K3.1-Pro-gfx942-dspark:
     CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 24 32 48 64"  # ~0.25 GiB/size breakable graph pool on the upstream tip
     ROUTER_PREFILL_POLICY: "sticky_least_loaded"  # strict session pinning: a turn returns to the prefill holding its KDA checkpoints
     ROUTER_DECODE_POLICY: "sticky_least_loaded"
-    VLLM_ROUTER_SLL_OVERFLOW_DELTA: "2"          # bounded overflow off a busy pinned prefill (router patch; ignored by stock router)
+    VLLM_ROUTER_SLL_OVERFLOW_DELTA: "2"          # bounded overflow off a busy pinned prefill (vllm-project/router PR #540; built into the image)
     AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID: "true"
   base_flags: "--trust-remote-code --language-model-only --kv-cache-dtype fp8_ds_mla --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}' --reasoning-parser kimi_k3 --tool-call-parser kimi_k3 --enable-auto-tool-choice --max-model-len 800000 --max-num-batched-tokens 16384 --block-size 1024 --decode-context-parallel-size 8 --dcp-comm-backend a2a --speculative-config '{\"method\":\"dspark\",\"model\":\"/models/Kimi-K3.1-Pro-DSpark-preview\",\"num_speculative_tokens\":7,\"draft_sample_method\":\"probabilistic\",\"rejection_sample_method\":\"block\",\"kv_cache_dtype\":\"auto\"}'"
   tp_flags: ""
