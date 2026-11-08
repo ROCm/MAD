@@ -6,6 +6,7 @@
 #           split changes no csrc vs the nightly commit, so the nightly's compiled extensions are kept
 #   AITER   the gfx942 K3.1 build's AITER (fnuz fp8_dsv32_mla sparse_mla_fwd; public AITER lacks it)
 #   patch   rocm_aiter_mla_sparse: allow kv_cache_dtype=fp8_ds_mla on gfx942 when AITER supports it
+#   patch   gpu model_runner: reserve the draft's verify workspace on the draft lane (DSpark + DCP warm-up crash)
 #   router  vllm-project/router main + PR #540 (sticky_least_loaded bounded overflow, VLLM_ROUTER_SLL_OVERFLOW_DELTA)
 # Self-contained (no COPY):
 #   docker build --ulimit nofile=1048576:1048576 -f vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile -t <image> .
@@ -63,6 +64,18 @@ RUN set -eu; mkdir -p /app; \
       'assert s.count(old) == 1, "gate block not found"' \
       'p.write_text(s.replace(old, new))' > /tmp/gate.py; \
     python3 /tmp/gate.py $DP/vllm && rm /tmp/gate.py; \
+    printf '%s\n' \
+      'import pathlib, sys' \
+      'p = pathlib.Path(sys.argv[1]) / "v1/worker/gpu/model_runner.py"' \
+      's = p.read_text()' \
+      'call = "self.speculator.set_attn(\n    self.model_state,\n    self.kv_cache_config,\n    self.block_tables,\n    self.input_buffers,\n    self.attn_groups,\n)\n"' \
+      'ind = lambda t, n: "".join(" " * n + l if l.strip() else l for l in t.splitlines(True))' \
+      'old = "            # HACK(woosuk)\n" + ind(call, 12)' \
+      'new = "            # HACK(woosuk)\n            # K31_DRAFT_LANE: draft builders reserve workspace at construction; reserve on the draft lane.\n            with use_workspace_lane(self._draft_workspace_lane):\n" + ind(call, 16)' \
+      'assert s.count(old) == 1, "set_attn block not found"' \
+      'p.write_text(s.replace(old, new))' > /tmp/lane.py; \
+    python3 /tmp/lane.py $DP/vllm && rm /tmp/lane.py; \
+    grep -q K31_DRAFT_LANE $DP/vllm/v1/worker/gpu/model_runner.py; \
     grep -q "FNUZ_DSV32_ARCHS" $DP/aiter/ops/triton/attention/sparse_mla.py; \
     grep -q K31_GFX942_FP8DSMLA_GATE $DP/vllm/v1/attention/backends/mla/rocm_aiter_mla_sparse.py; \
     grep -q KimiK31ForConditionalGeneration $DP/vllm/model_executor/models/registry.py; \

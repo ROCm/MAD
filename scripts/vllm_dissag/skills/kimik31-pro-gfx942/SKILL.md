@@ -20,6 +20,12 @@ docker build --ulimit nofile=1048576:1048576 -t <registry>/vllm-disagg:kimik31pr
 ```
 
 ## Run (MI325X with Broadcom NICs: export the `moriio-nics-thor2` settings first)
+On Thor2 also `export MORI_IB_GID_INDEX=3 NCCL_IB_GID_INDEX=3` before `sbatch`: `connectors/moriio.env` defaults to GID 1,
+which times out the MoRIIO KV transfer on this fabric.
+Warm the page cache on every node first (1.5 TB, ~30 s from local NVMe RAID): the loader reads the safetensors through
+mmap page faults, and from a cold cache weight loading takes ~55 min instead of ~2 min.
+`ls $MODEL_DIR/Kimi-K3.1-Pro*/*.safetensors | xargs -P 16 -n 1 sh -c 'cat "$0" > /dev/null'`
+
 ```bash
 cd MAD/scripts/vllm_dissag
 export DOCKER_IMAGE_NAME=<registry>/vllm-disagg:kimik31pro-gfx942 CONNECTOR=moriio WIDE_EP=0 xP=1 yD=1
@@ -36,14 +42,17 @@ sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
 | `--block-size 1024` | the upstream tip picks 992; the gfx942 DSA indexer then falls back to an uncapturable torch path |
 | `CUDAGRAPH_CAPTURE_SIZES=1..64` (9 sizes) | breakable graphs cost ~0.25 GiB per size on the tip |
 | decode `--max-num-seqs 256` | the default 1024 exceeds the KDA state blocks and graph capture refuses |
-| `MORIIO_READ_MODE=1`, router `consistent_hash` | READ mode is the validated transfer; sessions stay on one prefill for prefix reuse |
+| `MORIIO_READ_MODE=1`, router `sticky_least_loaded` | READ mode is the validated transfer; sessions stay on one prefill for prefix reuse |
 
-## Measured (MI325X, Thor2, AgentX conformance_256k, 900 s)
-| Topology | conc | TTFT median | E2E median | tok/s/GPU |
+## Measured (MI325X, Thor2, this image through run_xPyD_models.slurm, card Kimi-K3.1-Pro-gfx942, 2P1D)
+NIAH 10/10 needles at 128K / 256K / 512K / 748K (3 seeds each); GSM8K 0.996. AgentX conformance, 13/13 axes in band:
+
+| Profile | conc | TTFT median | E2E median | tok/s/GPU |
 |---|---|---|---|---|
-| 1P1D, DCP8 + retention | 8 | 29.9 s | 55.4 s | 8259 |
-| 2P1D, DCP8 + retention | 4 | 11.6 s | 18.4 s | 6254 |
-| 2P1D, DCP8 + retention | 8 | 17.6 s | 28.6 s | 12935 |
+| conformance_256k | 4 | 11.9 s | 20.0 s | 6303 |
+| conformance_256k | 8 | 16.6 s | 26.3 s | 12893 |
+| conformance_512k | 4 | 16.1 s | 25.5 s | 9839 |
+| conformance_512k | 8 | 32.7 s | 41.5 s | 15208 |
 
 One prefill node is the bottleneck for agentic traffic; run `xP=2 yD=1` (`sbatch -N 3`) when three nodes are available.
 
@@ -57,7 +66,7 @@ length 4.7), 90 on mixed text (2.7), 81 / 48 at c32, versus ~49 without the draf
 Both cards route with `sticky_least_loaded` (a session's turns return to the prefill holding its KDA checkpoints). With very
 long sessions (conformance_512k), strict pinning can stack several 512K sessions on one prefill; a router with bounded overflow
 (`VLLM_ROUTER_SLL_OVERFLOW_DELTA=2`: re-bind a session when its prefill has 2+ more in-flight requests than the idlest one)
-measured 512k c4 TTFT 20.8 s -> 13.1 s and +25% sessions. The stock upstream router ignores the variable (strict pinning).
+measured 512k c4 TTFT 20.8 s -> 13.1 s and +25% sessions. This image builds the router with vllm-project/router PR #540, which adds the variable; a stock router ignores it (strict pinning).
 
 ## Verify
 - Load log: `Requantizing Kimi-K3 MXFP4 experts to groupwise int4 for gfx942`, `flydsl_moe1_abf16_wint4`, `GPU KV cache size: ~6.6M tokens`.
