@@ -205,6 +205,21 @@ PY
 fi
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
 
+# Prefill tensor parallelism (models.yaml env PREFILL_TP, wideEP only; default 1 = one DP rank per GPU).
+# PREFILL_TP=4 on an 8-GPU node runs TP4 x DP2 prefill engines with experts still EP over all GPUs;
+# decode keeps one DP rank per GPU.
+PREFILL_TP="${PREFILL_TP:-1}"
+if [[ "$PREFILL_TP" != "1" ]]; then
+    if [[ "$WIDE_EP" != "1" ]] || (( _GPUS_PER_NODE % PREFILL_TP != 0 )); then
+        echo "Error: PREFILL_TP=${PREFILL_TP} needs WIDE_EP=1 and must divide GPUS_PER_NODE=${_GPUS_PER_NODE}" >&2
+        exit 1
+    fi
+    PREFILL_DP_SIZE=$(( xP * _GPUS_PER_NODE / PREFILL_TP ))
+    PREFILL_DP_START_RANK=$(( NODE_RANK * _GPUS_PER_NODE / PREFILL_TP ))
+fi
+PREFILL_DP_LOCAL=$(( _GPUS_PER_NODE / PREFILL_TP ))
+export PREFILL_TP PREFILL_DP_LOCAL
+
 # =============================================================================
 # Load parallelism + connector, then initialize
 # =============================================================================

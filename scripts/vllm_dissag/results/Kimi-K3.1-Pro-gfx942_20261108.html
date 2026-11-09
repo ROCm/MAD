@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kimi-K3.1-Pro on AMD Instinct gfx942 (MI325X) &mdash; 2P1D MoRIIO + DCP8 + DSpark</title>
+<style>
+  :root { --ink:#1d2330; --mute:#5b6475; --line:#dde2ea; --bg:#f6f8fb; --ok:#1f8a4c; --warn:#b26b00; --new:#d6242b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:#fff; }
+  header { background:#111723; color:#fff; padding:36px 48px 30px; }
+  header h1 { margin:0 0 6px; font-size:26px; font-weight:650; }
+  header p { margin:0; color:#c7cedb; }
+  main { max-width:1120px; margin:0 auto; padding:28px 48px 60px; }
+  h2 { font-size:20px; margin:38px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+  h3 { font-size:16px; margin:22px 0 8px; }
+  p { margin:8px 0; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0 6px; }
+  .kpi { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .kpi .v { font-size:26px; font-weight:700; }
+  .kpi .l { color:var(--mute); font-size:13px; }
+  .kpi .d { color:var(--ok); font-size:13px; font-weight:600; }
+  table { border-collapse:collapse; width:100%; margin:8px 0 14px; font-size:14px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--bg); font-weight:600; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .pass { color:var(--ok); font-weight:650; }
+  .warn { color:var(--warn); font-weight:650; }
+  .note { color:var(--mute); font-size:13px; }
+  .box { background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--new); border-radius:6px; padding:12px 16px; margin:12px 0; }
+  footer { color:var(--mute); font-size:12px; border-top:1px solid var(--line); margin-top:40px; padding-top:12px; }
+</style>
+</head>
+<body>
+<header><h1>Kimi-K3.1-Pro on AMD Instinct MI325X (gfx942): 2P1D MoRIIO, DCP8, DSpark</h1>
+<p>vllm_dissag cards <code>Kimi-K3.1-Pro-gfx942</code> and <code>Kimi-K3.1-Pro-gfx942-dspark</code> &middot; 3 nodes &times; 8 MI325X (256 GB HBM3E), Broadcom Thor2 400G RoCE &middot; measured 2026-11-06 to 2026-11-09</p></header>
+<main>
+<div class="kpis">
+<div class="kpi"><div class="v">0.992</div><div class="l">GSM8K (250, 8-shot), DSpark card; base card 0.996</div></div>
+<div class="kpi"><div class="v">10/10</div><div class="l">NIAH needles at 128K / 256K / 512K / 748K tokens, 3 seeds, both cards</div></div>
+<div class="kpi"><div class="v">94 tok/s</div><div class="l">per-stream decode at c1 with DSpark (mixed text)</div><div class="d">~1.9&times; vs ~49 without the draft</div></div>
+<div class="kpi"><div class="v">13/13</div><div class="l">AgentX conformance axes in band, 256K and 512K, both cards</div></div>
+</div>
+
+<h2>What these cards are</h2>
+<p>Kimi-K3.1-Pro is a hybrid model: 69 KDA (gated delta) layers and 24 Gated DSA (sparse MLA with an indexer, top-k 2048) layers,
+896 MXFP4 routed experts with top-16 routing, about 1.5 TB of weights and a 1M-token context. The cards serve it disaggregated over
+MoRIIO with two prefill nodes and one decode node (<code>xP=2 yD=1</code>, <code>WIDE_EP=0</code>).
+<code>Kimi-K3.1-Pro-gfx942-dspark</code> adds DSpark speculative decoding (the 5-layer K3.1 DSpark draft) on both legs.</p>
+<table><thead><tr><th>Piece</th><th>Setting</th><th>Why</th></tr></thead><tbody><tr><td>Topology</td><td>2P1D, TP8 attention + TP-sharded experts on every leg</td><td>one prefill node is the TTFT bottleneck for agentic traffic</td></tr><tr><td>Context parallel</td><td>DCP8 on every leg (<code>--decode-context-parallel-size 8 --dcp-comm-backend a2a</code>)</td><td>KV sharded across the 8 GPUs along the sequence; DCP must match across legs</td></tr><tr><td>Experts</td><td>MXFP4 &rarr; int4 per-group-32 at load (<code>--quantization-config '{{"moe":{{"weight":"int4_per_group_32"}}}}'</code>), FlyDSL wint4 SiTUv2 a16w4</td><td>gfx942 has no FP4 MMA; lossy, accuracy-gated</td></tr><tr><td>KV cache</td><td><code>fp8_ds_mla</code>; DSpark draft KV bf16 (<code>"kv_cache_dtype":"auto"</code>)</td><td>gfx942 AITER MLA decode rejects OCP fp8 for the draft</td></tr><tr><td>Transfer</td><td>MoRIIO READ mode, <code>VLLM_SSM_CONV_STATE_LAYOUT=DS</code></td><td>KDA conv-state transfer needs the dim-first layout</td></tr><tr><td>Prefix reuse</td><td>prefill <code>--prefix-match-unit 64 --prefix-cache-retention-interval 16384</code></td><td>keeps a KDA state every 16K tokens so a session's next turn resumes</td></tr><tr><td>Routing</td><td><code>sticky_least_loaded</code> on both legs + <code>VLLM_ROUTER_SLL_OVERFLOW_DELTA=2</code></td><td>session pinning for reuse; a session leaves a prefill that is 2+ requests busier than the idlest (router #540)</td></tr><tr><td>Prefill leg</td><td><code>--enforce-eager --max-num-seqs 16</code>, util 0.88</td><td>KDA chunk-prefill workspace is not fully profiled; 0.9 runs out of memory at c32</td></tr><tr><td>Decode leg</td><td><code>--max-num-seqs 256</code> (128 with DSpark), FULL_AND_PIECEWISE graphs, <code>--block-size 1024</code></td><td>the upstream tip picks block 992, which sends the gfx942 DSA indexer to an uncapturable path</td></tr><tr><td>DSpark</td><td>7 tokens, probabilistic drafting, block rejection; decode graphs up to 1024 tokens</td><td>model runner V2 sizes decode graphs in whole requests of 1 + 7 = 8 tokens</td></tr></tbody></table>
+
+<h2>Pinned stack</h2>
+<table><thead><tr><th>Component</th><th>Pin</th><th>Notes</th></tr></thead><tbody><tr><td>Base</td><td><code>vllm/vllm-openai-rocm:nightly-a2bcb5657a881a002e79d0adab3c6b5e39436121</code></td><td>ROCm 10.0, torch 2.13.0, MoRI v1.2.3.post1, FlyDSL 0.4.0, Triton 3.8.0</td></tr><tr><td>vLLM</td><td>vllm-project/vllm #66027 @ <code>ed04ad1e</code>, Python overlay</td><td>the Kimi K3.1 split; no csrc change vs the nightly, so the compiled extensions are kept</td></tr><tr><td>AITER</td><td>from <code>amdsiloai/vllm:vllm-openai-rocm-kimi-k31-gfx942</code></td><td>carries the fnuz <code>fp8_dsv32_mla</code> sparse MLA for gfx942 (public AITER lacks it)</td></tr><tr><td>Patch</td><td><code>K31_GFX942_FP8DSMLA_GATE</code> in <code>rocm_aiter_mla_sparse.py</code></td><td>allow <code>fp8_ds_mla</code> on gfx942 when AITER reads it in fnuz</td></tr><tr><td>Patch</td><td><code>K31_DRAFT_LANE</code> in <code>v1/worker/gpu/model_runner.py</code></td><td>reserve the DSpark verify workspace on the draft lane; also present in upstream main</td></tr><tr><td>vllm-router</td><td>vllm-project/router main + #540 @ <code>0349cc26</code>, rustc 1.95.0</td><td>opt-in bounded overflow for <code>sticky_least_loaded</code></td></tr></tbody></table>
+
+<h2>Image</h2>
+<pre>docker build --ulimit nofile=1048576:1048576 \
+  -f docker/vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile -t &lt;registry&gt;/vllm-disagg:kimik31pro-gfx942 .</pre>
+<p>The build fails if a patch anchor or a marker is missing, and it appends the pins to <code>/app/versions.txt</code>:</p>
+<pre>BASE=vllm/vllm-openai-rocm:nightly-a2bcb5657a881a002e79d0adab3c6b5e39436121
+VLLM=https://github.com/vllm-project/vllm.git PR#66027 @ ed04ad1e79d2b000606e518d9d9b31750629dde5 (python overlay)
+AITER=from amdsiloai/vllm:vllm-openai-rocm-kimi-k31-gfx942
+VLLM_ROUTER=https://github.com/vllm-project/router.git#540@0349cc260a6633084c44ff08b41895b83ba1301a rustc 1.95.0</pre>
+
+<h2>Memory per node</h2>
+<table><thead><tr><th>Item</th><th>Value</th><th>Notes</th></tr></thead><tbody><tr><td>Weights per GPU</td><td>200 GiB</td><td>int4 experts + bf16 attention and KDA</td></tr><tr><td>Prefill KV</td><td>3.19M tokens per node (3.98&times; an 800K request)</td><td>with DCP8; the v1 development image held ~6.6M</td></tr><tr><td>Decode CUDA graphs (DSpark card)</td><td>~9 GiB per GPU, 56 s capture</td><td>17 sizes up to 1024 tokens</td></tr><tr><td>Weight load</td><td>~2 min warm, ~55 min cold page cache</td><td>safetensors load through mmap page faults; warm the cache first</td></tr></tbody></table>
+
+<h2>Accuracy</h2>
+<table><thead><tr><th>Test</th><th>Kimi-K3.1-Pro-gfx942</th><th>Kimi-K3.1-Pro-gfx942-dspark</th></tr></thead><tbody><tr><td>GSM8K, 250 questions, 8-shot, thinking off</td><td class="pass">0.996</td><td class="pass">0.992</td></tr><tr><td>NIAH warm-up, 8K + 16K at 3 depths</td><td class="pass">6/6</td><td class="pass">6/6</td></tr><tr><td>Single needle at 128K / 512K (through the router)</td><td>&mdash;</td><td class="pass">pass, 21.9 s / 82.1 s</td></tr><tr><td>Distinct-needle concurrency gate, 50K, c1 + c8</td><td>&mdash;</td><td class="pass">9/9</td></tr></tbody></table>
+<h3>NIAH (MAD harness, 10 needles per prompt, seeds 0&ndash;2, warm-up on)</h3>
+<table><thead><tr><th>Words</th><th>~Tokens</th><th>Kimi-K3.1-Pro-gfx942</th><th>Kimi-K3.1-Pro-gfx942-dspark</th></tr></thead><tbody><tr><td>118,000</td><td>128K</td><td class="pass">10/10, 10/10, 10/10</td><td class="pass">10/10, 10/10, 10/10</td></tr><tr><td>236,000</td><td>256K</td><td class="pass">10/10, 10/10, 10/10</td><td class="pass">10/10, 10/10, 10/10</td></tr><tr><td>472,000</td><td>512K</td><td class="pass">10/10, 10/10, 10/10</td><td class="pass">10/10, 10/10, 10/10</td></tr><tr><td>690,000</td><td>748K</td><td class="pass">10/10, 10/10, 10/10</td><td class="pass">10/10, 10/10, 10/10</td></tr></tbody></table>
+
+<h2>AgentX (conformance_256k / 512k, 900 s per step)</h2>
+<h3>MAD harness, <code>run_xPyD_models.slurm</code>, MI325X 2P1D</h3>
+<table><thead><tr><th>Card</th><th>Profile</th><th class="n">conc</th><th class="n">TTFT p50</th><th class="n">E2E p50</th><th class="n">tok/s/GPU</th><th class="n">GPU cache hit</th><th>Axes</th></tr></thead><tbody><tr><td>dspark</td><td>256k</td><td class="n">4</td><td class="n">9.2 s</td><td class="n">19.2 s</td><td class="n">7951</td><td class="n">17.2%</td><td class="pass">13/13</td></tr><tr><td>dspark</td><td>256k</td><td class="n">8</td><td class="n">20.5 s</td><td class="n">29.9 s</td><td class="n">14014</td><td class="n">14.4%</td><td></td></tr><tr><td>dspark</td><td>512k</td><td class="n">4</td><td class="n">12.1 s</td><td class="n">23.6 s</td><td class="n">11581</td><td class="n">9.3%</td><td class="pass">13/13</td></tr><tr><td>dspark</td><td>512k</td><td class="n">8</td><td class="n">38.2 s</td><td class="n">42.4 s</td><td class="n">14558</td><td class="n">2.7%</td><td></td></tr><tr><td>base</td><td>256k</td><td class="n">4</td><td class="n">11.9 s</td><td class="n">20.0 s</td><td class="n">6303</td><td class="n">8&ndash;14%</td><td class="pass">13/13</td></tr><tr><td>base</td><td>256k</td><td class="n">8</td><td class="n">16.6 s</td><td class="n">26.3 s</td><td class="n">12893</td><td class="n"></td><td></td></tr><tr><td>base</td><td>512k</td><td class="n">4</td><td class="n">16.1 s</td><td class="n">25.5 s</td><td class="n">9839</td><td class="n"></td><td class="pass">13/13</td></tr><tr><td>base</td><td>512k</td><td class="n">8</td><td class="n">32.7 s</td><td class="n">41.5 s</td><td class="n">15208</td><td class="n"></td><td></td></tr></tbody></table>
+<h3>Same image, DSpark card's final flags, recipe launcher (true prefill hit from /metrics deltas)</h3>
+<table><thead><tr><th>Profile</th><th class="n">conc</th><th class="n">TTFT p50</th><th class="n">E2E p50</th><th class="n">tok/s/GPU</th><th>Prefill hit (true / theoretical)</th></tr></thead><tbody><tr><td>256k</td><td class="n">4</td><td class="n">9.6 s</td><td class="n">17.7 s</td><td class="n">7480</td><td>30.7% / 55&ndash;59%</td></tr><tr><td>256k</td><td class="n">8</td><td class="n">24.0 s</td><td class="n">33.5 s</td><td class="n">13791</td><td></td></tr><tr><td>512k</td><td class="n">4</td><td class="n">15.4 s</td><td class="n">21.8 s</td><td class="n">11178</td><td>17.7% / 36&ndash;38%</td></tr><tr><td>512k</td><td class="n">8</td><td class="n">31.6 s</td><td class="n">36.3 s</td><td class="n">14280</td><td></td></tr></tbody></table>
+<p class="note">Medians include warm-up requests. Run-to-run spread is about &plusmn;15% at c4 and &plusmn;10% at c8.
+AgentX TTFT is dominated by the cold first turn of each session. A two-turn probe reuses 99&ndash;99.9% of the
+prefix and starts the second turn in 0.7&ndash;1.2 s.</p>
+
+<h2>Prefill</h2>
+<table><thead><tr><th>Prompt</th><th>Single node, TP8 + DCP8, cold</th><th>Through the 2P1D router (prefill + transfer + first token)</th></tr></thead><tbody><tr><td>128K</td><td>12.0 s (~10.7K tok/s)</td><td>20&ndash;22 s</td></tr><tr><td>512K</td><td>74.8 s (~6.8K tok/s)</td><td>75&ndash;82 s</td></tr><tr><td>750K</td><td>&mdash;</td><td>89.6 s</td></tr></tbody></table>
+<p>Cold prefill speed is bound by the KDA and DSA attention kernels: raising <code>--max-num-batched-tokens</code> to 24K or 32K gained about 2%.</p>
+
+<h2>Decode (DSpark card, mixed text, per stream)</h2>
+<table><thead><tr><th>conc</th><th class="n">This card</th><th class="n">TPOT p50</th><th class="n">Graphs only to 64 tokens</th><th class="n">v1 development image</th></tr></thead><tbody><tr><td>1</td><td class="n">94.0 tok/s</td><td class="n">10.6 ms</td><td class="n">104.4</td><td class="n">90.8</td></tr><tr><td>8</td><td class="n">60.8 tok/s</td><td class="n">16.4 ms</td><td class="n">59.6</td><td class="n">61.4</td></tr><tr><td>32</td><td class="n">48.3 tok/s</td><td class="n">20.7 ms</td><td class="n warn">22.4</td><td class="n">47.8</td></tr></tbody></table>
+<p>Model runner V2 reads <code>CUDAGRAPH_CAPTURE_SIZES</code> (tokens) as the decode limit too, rounded to whole requests of
+1 + 7 drafts = 8 tokens. With sizes up to 64 tokens only batches of 8 requests are graphed and c32 decode halves; the card
+captures up to 1024 tokens (128 requests). DSpark acceptance length is ~2.8&ndash;3.3 on mixed text and ~4.7 on reasoning text
+(~158 tok/s at c1). Without the draft, c1 decode is ~49 tok/s.</p>
+
+<h2>MAD harness validation</h2>
+<pre>export DOCKER_IMAGE_NAME=&lt;image&gt; CONNECTOR=moriio WIDE_EP=0 xP=2 yD=1
+export MODEL_NAME=Kimi-K3.1-Pro-gfx942-dspark MODEL_WEIGHTS_NAME=Kimi-K3.1-Pro
+export MORI_RDMA_DEVICES=rdma0,...,rdma7 NCCL_IB_HCA=rdma0,...,rdma7 MORI_SOCKET_IFNAME=eno0
+export MORI_IB_GID_INDEX=3 NCCL_IB_GID_INDEX=3          # Thor2
+# warm the page cache on every node first
+ls $MODEL_DIR/Kimi-K3.1-Pro*/*.safetensors | xargs -P 16 -n 1 sh -c 'cat "$0" &gt; /dev/null'
+BENCHMARK_SCRIPT=niah NIAH_WORDS=118000,236000,472000,690000 sbatch -N 3 -n 3 run_xPyD_models.slurm
+BENCHMARK_SCRIPT=agentic sbatch -N 3 -n 3 run_xPyD_models.slurm</pre>
+<table><thead><tr><th>Job</th><th>Card</th><th>Benchmark</th><th>Result</th></tr></thead><tbody><tr><td>2927</td><td>Kimi-K3.1-Pro-gfx942</td><td>niah</td><td class="pass">12/12 at 10/10</td></tr><tr><td>2928</td><td>Kimi-K3.1-Pro-gfx942</td><td>agentic</td><td class="pass">13/13 + 13/13</td></tr><tr><td>2935</td><td>Kimi-K3.1-Pro-gfx942-dspark</td><td>niah</td><td class="pass">12/12 at 10/10</td></tr><tr><td>2940</td><td>Kimi-K3.1-Pro-gfx942-dspark</td><td>agentic</td><td class="pass">13/13 + 13/13</td></tr></tbody></table>
+<p>Offline: <code>tests/argv_assert.sh</code> 77/77, <code>tests/gate_check.sh</code> 37/37.</p>
+
+<h2>Tried and ruled out</h2>
+<table><thead><tr><th>Lever</th><th>Outcome</th></tr></thead><tbody><tr><td>EP8, or TP4&times;DP2 + MoRI-EP</td><td>~0.6 GiB KV per GPU; wide EP needs two nodes per pool for this model</td></tr><tr><td>a8w4 experts</td><td>not plumbed on gfx942</td></tr><tr><td>Prefill DCP2 with decode DCP8</td><td>silent corruption (GSM8K 0.364); DCP must match</td></tr><tr><td>Router kv_aware (#493 hybrid layout)</td><td>25.8% prefill hit vs 33.2% sticky</td></tr><tr><td>CPU KV offload</td><td>&lt;2% CPU hits</td></tr><tr><td>Retention interval 0</td><td>loses KDA checkpoints; next turns re-prefill</td></tr><tr><td>Batch-token budget 24K / 32K</td><td>~2% faster cold prefill</td></tr><tr><td>FP8 KDA projections with int4 experts</td><td>rejected by <code>--quantization-config</code> (targets exclude int4); needs a vLLM change</td></tr><tr><td>DSpark on the decode leg only</td><td><code>MoRIIO hybrid READ Mamba group count mismatch</code>; the draft must run on both legs</td></tr></tbody></table>
+
+<h2>Failure signatures</h2>
+<table><thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead><tbody><tr><td><code>KDA conv transfer requires DS layout</code></td><td>MoRIIO with the default conv-state layout</td><td><code>VLLM_SSM_CONV_STATE_LAYOUT=DS</code> (in the cards)</td></tr><tr><td>Decode dies at warm-up: <code>Workspace is locked</code> in <code>_forward_triton_dcp_verify</code></td><td>image without the <code>K31_DRAFT_LANE</code> patch</td><td>build from this Dockerfile</td></tr><tr><td>KV transfer times out on Thor2</td><td><code>MORI_IB_GID_INDEX=1</code> default</td><td>export GID index 3</td></tr><tr><td>Weight loading ~35 s per shard, prefill master misses the 4000 s wait</td><td>cold page cache</td><td>warm the cache; optionally raise <code>LOG_WAIT_TIMEOUT_SECONDS</code></td></tr><tr><td>Every rank waits on <code>waiting for baton release ... aiter_jit</code> forever</td><td>stale AITER JIT lock from a killed container</td><td>clear <code>aiter_jit/build</code> and <code>lock_*</code> in the JIT cache</td></tr><tr><td>Graph capture fails with <code>hipErrorStreamCaptureUnsupported</code></td><td>block size 992 on the upstream tip</td><td><code>--block-size 1024</code> (in the cards)</td></tr><tr><td>Prefill OOM in KDA chunk prefill at c32</td><td>util 0.9</td><td>util 0.88, prefill <code>--max-num-seqs 16</code> (in the cards)</td></tr><tr><td>DSpark draft crashes in AITER MLA decode (e4m3fn)</td><td>draft KV in fp8</td><td><code>"kv_cache_dtype":"auto"</code> for the draft (in the card)</td></tr></tbody></table>
+
+<h2>Known limitations</h2>
+<ul>
+<li>Validated on MI325X only; MI300X (192 GB) is untested and has less KV headroom.</li>
+<li>The base card graphs decode up to 64 requests; above that decode runs without graphs.</li>
+<li>Cold first-turn prefill dominates AgentX TTFT; the 2P1D topology and prefix retention address reuse, not cold prefill speed.</li>
+<li>Experts run as int4 per-group-32 requantized from MXFP4 (lossy); accuracy is gated by GSM8K and NIAH above.</li>
+</ul>
+</main>
+</body>
+</html>

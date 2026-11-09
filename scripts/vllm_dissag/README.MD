@@ -40,9 +40,9 @@ neither → combo 1.
 
 Use these exact `MODEL_NAME` values (defined in `models.yaml` + the slurm allowlists).
 The **Combos** column lists which of the 4 valid combos above each model may run in; the
-slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family and
-`GLM-5.1-FP8` are **wideEP-only** (TP is rejected — their recipes need the wideEP serve
-path).
+slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family,
+`GLM-5.1-FP8` and the four GLM-5.3-Flash gfx942 cards (`GLM-5.3-Flash-{FP8,MXFP4}-gfx942[-hyb]`) are **wideEP-only** (TP is rejected — their
+recipes need the wideEP serve path).
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
@@ -55,6 +55,19 @@ path).
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `GLM-5.3-Flash-FP8-gfx942` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942 (MI300X / MI325X); own image (`glmv53flash.gfx942` Dockerfile); 1P/1D EP8, MTP on both legs, FULL_AND_PIECEWISE decode; NIAH 256K / 512K / 750K |
+| `GLM-5.3-Flash-MXFP4-gfx942` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; same image and recipe as the FP8 card, MXFP4 checkpoint (173 GB): prefill experts as exact FP8 blocks, decode experts 4-bit (+15-17% KV per GPU on MI325X) |
+| `GLM-5.3-Flash-FP8-gfx942-hyb` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; FP8 card with hybrid TP4 x DP2 prefill and prefill prefix-cache retention: lower long-prompt TTFT, fewer concurrent cold prefills |
+| `GLM-5.3-Flash-MXFP4-gfx942-hyb` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; MXFP4 card with the same hybrid prefill and retention |
+| `Kimi-K3.1-Pro-gfx942` | MoE + DSA + KDA | 3 (moriio, `WIDE_EP=0`) | gfx942 (MI325X); own image (`kimik31pro.gfx942` Dockerfile); TP8 + DCP8 every leg, MXFP4 experts as int4 per-group-32, prefill prefix-cache retention, sticky routing; run 2P1D. See `skills/kimik31-pro-gfx942` and `results/Kimi-K3.1-Pro-gfx942_20261108.html` |
+| `Kimi-K3.1-Pro-gfx942-dspark` | MoE + DSA + KDA | 3 (moriio, `WIDE_EP=0`) | gfx942; the K3.1 card plus DSpark speculative decoding on both legs (draft next to the checkpoint) |
+
+> **GLM-5.3-Flash expert all-to-all:** the four GLM-5.3-Flash-gfx942 cards use **MoRIIO** for the
+> prefill→decode KV transfer and vLLM **`allgather_reducescatter`** for the expert all-to-all (the
+> cards set `VLLM_ALL2ALL_BACKEND` / `DECODE_MORI_BACKEND` = `allgather_reducescatter`, overriding
+> the `mori` wideEP default of combo 3). This is the validated, SLO-meeting recipe. MoRI-EP
+> (`mori_high_throughput` / `mori_low_latency`) is a tested, accurate opt-in but not the default;
+> to enable it see `skills/glm53-flash-gfx942/Recipe_enable_MoriEP.md`.
 
 ## Prerequisites
 
@@ -94,6 +107,108 @@ its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime 
 so every GLM DSA fix has to be in-source in that image. Add a
 `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
 own pins rather than repinning the shared one.
+
+`Kimi-K3.1-Pro-gfx942[-dspark]` use `vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile`: the vLLM nightly
+with the Kimi K3.1 split (vllm-project/vllm #66027) as a Python overlay, the gfx942 K3.1 AITER, two inline vLLM patches
+(fp8_ds_mla on gfx942, DSpark draft-lane workspace) and vllm-router with PR #540 (bounded sticky overflow).
+
+`GLM-5.3-Flash-FP8-gfx942` and `GLM-5.3-Flash-MXFP4-gfx942` (MI300X / MI325X, gfx942) share their own image. Its vLLM, AITER and
+vllm-router come from `glm53-flash-gfx942` fork branches that carry every GLM-5.3 fix in-source; the
+build fails if one is missing:
+
+```bash
+docker build --ulimit nofile=1048576:1048576 -t <your-registry>/vllm-disagg:glmv53flash-gfx942 \
+  -f docker/vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile .
+```
+
+Its `models.yaml` entry runs MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-in in
+`connectors/moriio.sh`), MTP on both legs, and routes both legs with `consistent_hash`
+(`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; every other model keeps
+`round_robin`) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
+sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID`.
+`..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. The checkpoint
+directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards set
+`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
+`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0`. The per-NIC steps (detect the devices, what to
+export, how to verify) are in [`skills/moriio-nics-thor2`](skills/moriio-nics-thor2/SKILL.md) (Broadcom Thor2) and
+[`skills/moriio-nics-cx7`](skills/moriio-nics-cx7/SKILL.md) (ConnectX-7). Build, launch and per-leg verification of both GLM-5.3-Flash cards:
+[`skills/glm53-flash-gfx942`](skills/glm53-flash-gfx942/SKILL.md).
+`GLM-5.3-Flash-MXFP4-gfx942` serves the AMD Quark MXFP4 checkpoint (`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-MXFP4`) with
+the FP8 card's flags. gfx942 has no FP4 matrix math, and every MXFP4 expert of this checkpoint converts exactly to FP8
+128x128 blocks with a power-of-two block scale, so the card sets `VLLM_ROCM_MXFP4_WEIGHT_ONLY=1`,
+`AITER_FLYDSL_W4_FP4=1` (exact e2m1 decode in the FlyDSL W4A16 MoE kernel) and `VLLM_ROCM_MXFP4_DENSE_FP8BLOCK=1`
+(shared experts as FP8 blocks) on both legs, plus `VLLM_ROCM_MXFP4_MOE_FP8BLOCK=1` on the prefill leg only through
+`PREFILL_EXTRA_ENV` (`connectors/moriio.sh` exports `PREFILL_EXTRA_ENV` / `DECODE_EXTRA_ENV` on that leg; unset for
+every other model). Expected load-log lines: prefill "MXFP4 MoE experts converted exactly to FP8 128x128 blocks",
+decode "MXFP4 MoE experts on AITER FlyDSL W4A16 with exact e2m1 decode". Validation results (harness, MI325X and MI300X):
+[`results/GLM-5.3-Flash-MXFP4-gfx942_20261023.html`](results/GLM-5.3-Flash-MXFP4-gfx942_20261023.html).
+Validation results on MI325X and MI300X (accuracy, perf, AgentX):
+[`results/GLM-5.3-Flash-FP8-gfx942_20260927.html`](results/GLM-5.3-Flash-FP8-gfx942_20260927.html).
+#### GLM-5.3-Flash on gfx942: EP8 or hybrid prefill, and how to run each card
+
+Four cards share one image and one decode leg (EP8, MTP, FULL_AND_PIECEWISE CUDA graphs); they differ in the
+checkpoint and in how the prefill node runs.
+
+| Card | Checkpoint (`MODEL_WEIGHTS_NAME`) | Prefill node | Pick it for |
+|---|---|---|---|
+| `GLM-5.3-Flash-FP8-gfx942` | `GLM-5.3-Flash-FP8` (306 GB) | EP8: 8 data-parallel engines, one per GPU | many concurrent cold long prompts (most prefill throughput) |
+| `GLM-5.3-Flash-MXFP4-gfx942` | `GLM-5.3-Flash-MXFP4` (173 GB) | EP8 | the same, with more decode KV per GPU (+17% MI325X, +31% MI300X) |
+| `GLM-5.3-Flash-FP8-gfx942-hyb` | `GLM-5.3-Flash-FP8` | hybrid: TP4 x DP2 (2 engines, attention over 4 GPUs, experts still EP over all 8) | lowest time to first token on long prompts with session reuse (agentic traffic) |
+| `GLM-5.3-Flash-MXFP4-gfx942-hyb` | `GLM-5.3-Flash-MXFP4` | hybrid | the same, with the MXFP4 decode KV gain |
+
+The MXFP4 cards give the same answers as the FP8 cards: every MXFP4 expert converts exactly to FP8 128x128 blocks on
+prefill, and decode decodes the 4-bit codes exactly in registers. With the hybrid prefill each long prompt prefills
+about twice as fast, but only two prompts prefill at once instead of eight.
+
+The `-hyb` cards add these `models.yaml` env settings to their EP8 card (all opt-in; unset for every other card):
+
+| Setting | Effect |
+|---|---|
+| `PREFILL_TP=4` | prefill `-tp 4 --data-parallel-size 2 --data-parallel-size-local 2 --api-server-count=2`; the router expands each prefill node to 2 ranks |
+| `PREFILL_KV_BLOCK_SIZE=4352` | prefill `--block-size 4352` (decode keeps 4) |
+| `GLM53_HETERO_TP_FANIN=1` | MoRIIO hands the KDA state of a TP4 prefill engine to the TP1 decode ranks |
+| `ROUTER_DECODE_DP_PIN=0` | the router does not pin a decode DP rank to the prefill rank |
+| `PREFILL_PREFIX_CACHE_RETENTION=17408` | with prefix caching on, prefill `--prefix-cache-retention-interval 17408`: keep a KDA (linear-attention) state every 17408 tokens, so the second request of a session resumes from the shared prefix instead of re-prefilling it |
+
+All four GLM-5.3-Flash-gfx942 cards also set `VLLM_HTTP_TIMEOUT_KEEP_ALIVE=120`: server keep-alive above the
+router's 50 s idle-pool timeout, so the router never reuses a connection the server is closing.
+
+Run a card (one prefill node and one decode node; MI325X with Broadcom NICs also needs the NIC exports from
+[`skills/moriio-nics-thor2`](skills/moriio-nics-thor2/SKILL.md)):
+
+```bash
+cd MAD/scripts/vllm_dissag
+export DOCKER_IMAGE_NAME=<registry>/vllm-disagg:glmv53flash-gfx942 CONNECTOR=moriio WIDE_EP=1 xP=1 yD=1
+# pick one pair
+export MODEL_NAME=GLM-5.3-Flash-FP8-gfx942       MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8
+export MODEL_NAME=GLM-5.3-Flash-MXFP4-gfx942     MODEL_WEIGHTS_NAME=GLM-5.3-Flash-MXFP4
+export MODEL_NAME=GLM-5.3-Flash-FP8-gfx942-hyb   MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8
+export MODEL_NAME=GLM-5.3-Flash-MXFP4-gfx942-hyb MODEL_WEIGHTS_NAME=GLM-5.3-Flash-MXFP4
+export BENCHMARK_SCRIPT=agentic   # agentic (prefix caching on), niah, long_context or sweep (prefix caching off)
+sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
+```
+
+The same cards run through `madengine` with the `models.json` names, for example
+`pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942_hyb` (AgentX conformance_256k) and `..._hyb_512k`.
+
+Check each leg after start-up (`L=$LOG_PATH/<job_id>`):
+
+```bash
+grep -h "converted exactly to FP8 128x128" $L/prefill_NODE0.log | head -1   # MXFP4 cards: prefill experts as FP8 blocks
+grep -h "FlyDSL W4A16 with exact e2m1"     $L/decode_NODE*.log  | head -1   # MXFP4 cards: decode experts 4-bit
+grep -ho "'tensor_parallel_size': [0-9]*"  $L/prefill_NODE0.log | head -1   # -hyb: 4 (EP8 cards log no tensor_parallel_size)
+grep -ho "'prefix_cache_retention_interval': [0-9]*" $L/prefill_NODE0.log | head -1   # -hyb with agentic: 17408
+```
+
+Image pins (`docker/vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile`, no other build input): base
+`rocm/vllm-dev:ci_base-build-01a0d6a8...@sha256:bd7f0c9b...`, MoRI `78b7a5f3`, AITER `11a6be6e`
+(raviguptaamd/aiter `glm53-flash-gfx942-fp4lut`), FlyDSL 0.2.2, vLLM `439eabe5` (raviguptaamd/vllm
+`glm53-flash-gfx942-mxfp4-mad`), vllm-router `076800bf` (raviguptaamd/router `glm53-flash-gfx942-hybrid`). The build
+checks 29 GLM-5.3 fix markers and the router's `ROUTER_DECODE_DP_PIN`; the `-hyb` cards need nothing beyond them.
+
+Short prompts (under ~2K tokens) need vLLM `6a0cb9395797` or later on the fork branch: earlier pins zeroed the decode
+leg's freshly allocated KV blocks after the MoRIIO READ had already filled them, so short requests looped or
+answered wrongly (GSM8K 6.4%; 96.4% with the fix). Long-context results are unchanged.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -273,7 +388,7 @@ It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep
 
 > **Breaking change:** the legacy `AGENTIC` env shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
 
-The four validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
+The validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
 
 ```bash
 madengine run --tags agentic
@@ -287,6 +402,14 @@ madengine run --tags agentic
 | sglang | DeepSeek-V3 | mori_dp | `pyt_sglang_disagg_mori_dp_agentic_deepseek-v3` |
 | vllm | DeepSeek-V3 | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3` |
 | vllm | DeepSeek-V3-5layer | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` |
+| vllm | GLM-5.3-Flash-FP8-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942` (conformance_256k) |
+| vllm | GLM-5.3-Flash-FP8-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942_512k` (conformance_512k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942` (conformance_256k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942_512k` (conformance_512k) |
+| vllm | GLM-5.3-Flash-FP8-gfx942-hyb | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942_hyb` (conformance_256k) |
+| vllm | GLM-5.3-Flash-FP8-gfx942-hyb | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942_hyb_512k` (conformance_512k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942-hyb | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942_hyb` (conformance_256k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942-hyb | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942_hyb_512k` (conformance_512k) |
 
 **vLLM specifics.** aiperf targets `AGENTIC_PORT`, which the launcher auto-resolves to the proxy/router port `BENCHMARK_PORT` (set by `connector_start_proxy`: `ROUTER_PORT` for `vllm_router`, `PROXY_PORT` for the toy proxy). Because the vLLM PD router 503s on `GET /v1/models` under MoRIIO service discovery (empty HTTP worker registry) while the shared harness gates readiness/served-model on `/v1/models`, the launcher starts a tiny stdlib shim (`agentic_models_shim.py`) on `BENCHMARK_PORT+1` that answers `/v1/models` (gated on the router's `/health`) and stream-proxies everything else; `AGENTIC_PORT` is then pointed at the shim. Both are byte-for-byte no-ops for the default sweep (guarded by `BENCHMARK_SCRIPT=agentic`).
 
