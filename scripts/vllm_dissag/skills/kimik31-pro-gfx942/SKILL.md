@@ -41,6 +41,7 @@ sbatch -N 2 -n 2 --nodelist=<prefill_node,decode_node> run_xPyD_models.slurm
 | `GPU_MEMORY_UTILIZATION=0.88`, prefill `--max-num-seqs 16` | KDA chunked prefill allocates per-sequence workspace that startup profiling misses; 0.9 OOMs at 32 concurrent prompts |
 | `--block-size 1024` | the upstream tip picks 992; the gfx942 DSA indexer then falls back to an uncapturable torch path |
 | `CUDAGRAPH_CAPTURE_SIZES=1..64` (9 sizes) | breakable graphs cost ~0.25 GiB per size on the tip |
+| DSpark card: `CUDAGRAPH_CAPTURE_SIZES` up to 1024 | model runner V2 reads these token counts as the decode limit too, in whole requests of 1 + 7 drafts = 8 tokens: up to 64 tokens only graphs 8 requests and c32 decode drops to 22 tok/s/stream; up to 1024 covers 128 requests (~9 GiB) |
 | decode `--max-num-seqs 256` | the default 1024 exceeds the KDA state blocks and graph capture refuses |
 | `MORIIO_READ_MODE=1`, router `sticky_least_loaded` | READ mode is the validated transfer; sessions stay on one prefill for prefix reuse |
 
@@ -59,8 +60,19 @@ One prefill node is the bottleneck for agentic traffic; run `xP=2 yD=1` (`sbatch
 ## DSpark speculative decoding (card Kimi-K3.1-Pro-gfx942-dspark)
 Place `Inferact/Kimi-K3.1-Pro-DSpark-preview` (5.4 GB) next to the checkpoint. The draft runs on both legs, its KV stays
 bf16 (`"kv_cache_dtype":"auto"`; OCP fp8 crashes gfx942 AITER MLA decode), and decode drops to `--max-num-seqs 128`
-(the draft reduces KDA state blocks). Measured 1P1D, per-stream decode: 158 tok/s at c1 on reasoning text (acceptance
-length 4.7), 90 on mixed text (2.7), 81 / 48 at c32, versus ~49 without the draft. GSM8K and NIAH to 750K unchanged.
+(the draft reduces KDA state blocks). The image reserves the draft's verify workspace on the draft lane
+(`K31_DRAFT_LANE` in model_runner.py); without it decode dies at warm-up with `Workspace is locked`.
+
+Measured 2P1D on this image (MI325X, Thor2): GSM8K 0.992; NIAH 10/10 needles at 128K / 256K / 512K / 748K (3 seeds);
+per-stream decode on mixed text 94 / 61 / 48 tok/s at c1 / c8 / c32 (~49 at c1 without the draft; ~158 at c1 on
+reasoning text). AgentX conformance through `run_xPyD_models.slurm`, 13/13 axes in band:
+
+| Profile | conc | TTFT median | E2E median | tok/s/GPU |
+|---|---|---|---|---|
+| conformance_256k | 4 | 9.2 s | 19.2 s | 7951 |
+| conformance_256k | 8 | 20.5 s | 29.9 s | 14014 |
+| conformance_512k | 4 | 12.1 s | 23.6 s | 11581 |
+| conformance_512k | 8 | 38.2 s | 42.4 s | 14558 |
 
 ## Routing for agentic traffic
 Both cards route with `sticky_least_loaded` (a session's turns return to the prefill holding its KDA checkpoints). With very

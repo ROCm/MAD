@@ -59,6 +59,8 @@ recipes need the wideEP serve path).
 | `GLM-5.3-Flash-MXFP4-gfx942` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; same image and recipe as the FP8 card, MXFP4 checkpoint (173 GB): prefill experts as exact FP8 blocks, decode experts 4-bit (+15-17% KV per GPU on MI325X) |
 | `GLM-5.3-Flash-FP8-gfx942-hyb` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; FP8 card with hybrid TP4 x DP2 prefill and prefill prefix-cache retention: lower long-prompt TTFT, fewer concurrent cold prefills |
 | `GLM-5.3-Flash-MXFP4-gfx942-hyb` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942; MXFP4 card with the same hybrid prefill and retention |
+| `Kimi-K3.1-Pro-gfx942` | MoE + DSA + KDA | 3 (moriio, `WIDE_EP=0`) | gfx942 (MI325X); own image (`kimik31pro.gfx942` Dockerfile); TP8 + DCP8 every leg, MXFP4 experts as int4 per-group-32, prefill prefix-cache retention, sticky routing; run 2P1D. See `skills/kimik31-pro-gfx942` and `results/Kimi-K3.1-Pro-gfx942_20261108.html` |
+| `Kimi-K3.1-Pro-gfx942-dspark` | MoE + DSA + KDA | 3 (moriio, `WIDE_EP=0`) | gfx942; the K3.1 card plus DSpark speculative decoding on both legs (draft next to the checkpoint) |
 
 > **GLM-5.3-Flash expert all-to-all:** the four GLM-5.3-Flash-gfx942 cards use **MoRIIO** for the
 > prefill→decode KV transfer and vLLM **`allgather_reducescatter`** for the expert all-to-all (the
@@ -105,6 +107,10 @@ its `VLLM_REF` is a hard requirement, not a preference — MAD ships no runtime 
 so every GLM DSA fix has to be in-source in that image. Add a
 `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
 own pins rather than repinning the shared one.
+
+`Kimi-K3.1-Pro-gfx942[-dspark]` use `vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile`: the vLLM nightly
+with the Kimi K3.1 split (vllm-project/vllm #66027) as a Python overlay, the gfx942 K3.1 AITER, two inline vLLM patches
+(fp8_ds_mla on gfx942, DSpark draft-lane workspace) and vllm-router with PR #540 (bounded sticky overflow).
 
 `GLM-5.3-Flash-FP8-gfx942` and `GLM-5.3-Flash-MXFP4-gfx942` (MI300X / MI325X, gfx942) share their own image. Its vLLM, AITER and
 vllm-router come from `glm53-flash-gfx942` fork branches that carry every GLM-5.3 fix in-source; the

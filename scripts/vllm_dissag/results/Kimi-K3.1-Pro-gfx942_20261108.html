@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kimi-K3.1-Pro on AMD Instinct gfx942 (MI325X) — 2P1D MoRIIO + DCP8 + DSpark</title>
+<style>
+  :root { --ink:#1d2330; --mute:#5b6475; --line:#dde2ea; --bg:#f6f8fb; --ok:#1f8a4c; --warn:#b26b00; --new:#d6242b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); background:#fff; }
+  header { background:#111723; color:#fff; padding:36px 48px 30px; }
+  header h1 { margin:0 0 6px; font-size:26px; font-weight:650; }
+  header p { margin:0; color:#c7cedb; }
+  main { max-width:1120px; margin:0 auto; padding:28px 48px 60px; }
+  h2 { font-size:20px; margin:38px 0 10px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+  h3 { font-size:16px; margin:22px 0 8px; }
+  p { margin:8px 0; }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:22px 0 6px; }
+  .kpi { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+  .kpi .v { font-size:26px; font-weight:700; }
+  .kpi .l { color:var(--mute); font-size:13px; }
+  .kpi .d { color:var(--ok); font-size:13px; font-weight:600; }
+  table { border-collapse:collapse; width:100%; margin:8px 0 14px; font-size:14px; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--bg); font-weight:600; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .pass { color:var(--ok); font-weight:650; }
+  .warn { color:var(--warn); font-weight:650; }
+  .note { color:var(--mute); font-size:13px; }
+  .box { background:var(--bg); border:1px solid var(--line); border-left:4px solid var(--new); border-radius:6px; padding:12px 16px; margin:12px 0; }
+  footer { color:var(--mute); font-size:12px; border-top:1px solid var(--line); margin-top:40px; padding-top:12px; }
+</style>
+</head>
+<body>
+<header><h1>Kimi-K3.1-Pro on AMD Instinct MI325X (gfx942): 2P1D MoRIIO, DCP8, DSpark</h1>
+<p>vllm_dissag cards Kimi-K3.1-Pro-gfx942 and Kimi-K3.1-Pro-gfx942-dspark &middot; 3 nodes &times; 8 MI325X (256 GB), Broadcom Thor2 400G RoCE &middot; measured 2026-11-08</p></header>
+<main>
+<div class="kpis">
+<div class="kpi"><div class="v">0.992</div><div class="l">GSM8K (250, 8-shot), both cards</div></div>
+<div class="kpi"><div class="v">10/10</div><div class="l">NIAH needles at 128K / 256K / 512K / 748K, 3 seeds</div></div>
+<div class="kpi"><div class="v">94 tok/s</div><div class="l">per-stream decode at c1 with DSpark (mixed text)</div><div class="d">~1.9&times; vs no draft</div></div>
+<div class="kpi"><div class="v">13/13</div><div class="l">AgentX conformance axes in band, 256K and 512K</div></div>
+</div>
+<h2>Recipe</h2>
+<table><thead><tr><th>Piece</th><th>Setting</th><th>Why</th></tr></thead><tbody><tr><td>Topology</td><td>2P1D (xP=2 yD=1), TP8 attention + TP-sharded experts on every leg</td><td>one prefill node is the TTFT bottleneck for agentic traffic; EP8 / TP4&times;DP2 + MoRI-EP leave &lt;1 GiB KV per GPU</td></tr><tr><td>Context parallel</td><td>DCP8 on every leg (<code>--dcp-comm-backend a2a</code>)</td><td>KV sharded across 8 GPUs; DCP must match across legs</td></tr><tr><td>Experts</td><td>MXFP4 &rarr; int4 per-group-32 at load, FlyDSL wint4 SiTUv2</td><td>gfx942 has no FP4 MMA</td></tr><tr><td>KV</td><td><code>fp8_ds_mla</code>; draft KV bf16</td><td>gfx942 AITER MLA decode rejects OCP fp8 for the draft</td></tr><tr><td>Transfer</td><td>MoRIIO READ mode, <code>VLLM_SSM_CONV_STATE_LAYOUT=DS</code></td><td>KDA conv-state transfer needs the dim-first layout</td></tr><tr><td>Prefix reuse</td><td>prefill <code>--prefix-match-unit 64 --prefix-cache-retention-interval 16384</code></td><td>keeps a KDA state every 16K tokens so a session's next turn resumes</td></tr><tr><td>Routing</td><td><code>sticky_least_loaded</code> + <code>VLLM_ROUTER_SLL_OVERFLOW_DELTA=2</code> (vllm-project/router #540)</td><td>session pinning for reuse, bounded overflow off a busy prefill</td></tr><tr><td>Speculative</td><td>DSpark, 7 tokens, block rejection, on both legs</td><td>decode graphs to 1024 tokens (128 requests at q=8)</td></tr></tbody></table>
+<h2>AgentX conformance (run_xPyD_models.slurm, 900 s per point)</h2>
+<h3>Kimi-K3.1-Pro-gfx942-dspark</h3>
+<table><thead><tr><th>Profile</th><th>conc</th><th>TTFT p50</th><th>E2E p50</th><th>tok/s/GPU</th></tr></thead><tbody><tr><td>conformance_256k</td><td>4</td><td>9.2 s</td><td>19.2 s</td><td>7951</td></tr><tr><td>conformance_256k</td><td>8</td><td>20.5 s</td><td>29.9 s</td><td>14014</td></tr><tr><td>conformance_512k</td><td>4</td><td>12.1 s</td><td>23.6 s</td><td>11581</td></tr><tr><td>conformance_512k</td><td>8</td><td>38.2 s</td><td>42.4 s</td><td>14558</td></tr></tbody></table>
+<h3>Kimi-K3.1-Pro-gfx942 (no draft)</h3>
+<table><thead><tr><th>Profile</th><th>conc</th><th>TTFT p50</th><th>E2E p50</th><th>tok/s/GPU</th></tr></thead><tbody><tr><td>conformance_256k</td><td>4</td><td>11.9 s</td><td>20.0 s</td><td>6303</td></tr><tr><td>conformance_256k</td><td>8</td><td>16.6 s</td><td>26.3 s</td><td>12893</td></tr><tr><td>conformance_512k</td><td>4</td><td>16.1 s</td><td>25.5 s</td><td>9839</td></tr><tr><td>conformance_512k</td><td>8</td><td>32.7 s</td><td>41.5 s</td><td>15208</td></tr></tbody></table>
+<p>Medians include warm-up requests. AgentX TTFT is dominated by the cold first turn of each session: a follow-up turn reuses 99&ndash;99.9% of its prefix and starts in ~1 s; cold prefill runs ~10.7K tok/s at 128K and ~6.8K tok/s at 512K.</p>
+<h2>Decode (DSpark card, mixed text, per stream)</h2>
+<table><thead><tr><th>conc</th><th>tok/s per stream</th><th>TPOT p50</th></tr></thead><tbody><tr><td>1</td><td>94.0</td><td>10.6 ms</td></tr><tr><td>8</td><td>60.8</td><td>16.4 ms</td></tr><tr><td>32</td><td>48.3</td><td>20.7 ms</td></tr></tbody></table>
+<h2>Accuracy</h2>
+<table><thead><tr><th>Test</th><th>Result</th></tr></thead><tbody><tr><td>GSM8K, 250 questions, 8-shot</td><td>0.992 (base card 0.996)</td></tr><tr><td>NIAH, 10 needles, 3 seeds</td><td>10/10 at 118K / 236K / 472K / 690K words (~128K&ndash;748K tokens)</td></tr><tr><td>Distinct-needle concurrency gate, 50K</td><td>9/9</td></tr></tbody></table>
+<h2>Notes</h2>
+<ul>
+<li>Warm the page cache before submitting: weights load through mmap page faults, ~2 min warm vs ~55 min cold.</li>
+<li>On Thor2 export <code>MORI_IB_GID_INDEX=3 NCCL_IB_GID_INDEX=3</code>.</li>
+<li>The image reserves the DSpark verify workspace on the draft lane; without it decode dies at warm-up (<code>Workspace is locked</code>).</li>
+</ul>
+</main>
+</body>
+</html>

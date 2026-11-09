@@ -548,9 +548,10 @@ Kimi-K3.1-Pro-gfx942-dspark:
   # DSpark speculative decoding variant of Kimi-K3.1-Pro-gfx942: the 5-layer K3.1 DSpark draft
   # (Inferact/Kimi-K3.1-Pro-DSpark-preview, placed next to the checkpoint) on BOTH legs so the KV groups match.
   # Draft KV must stay bf16 ("kv_cache_dtype":"auto"): gfx942 AITER MLA decode rejects OCP fp8.
-  # Everything else as Kimi-K3.1-Pro-gfx942. Validated 2P1D (MI325X, Thor2): GSM8K 0.992, NIAH 8K-750K PASS
-  # (750K cold 89.6 s), distinct-needle con gate; decode 86.8 tok/s/stream at c1 on mixed text (48.6 without
-  # the draft); AgentX conformance 13/13 in band, TTFT p50 256K c4/c8 10.6/19.7 s, 512K c4/c8 11.7/36.3 s.
+  # Everything else as Kimi-K3.1-Pro-gfx942. Validated 2P1D on this image (MI325X, Thor2): GSM8K 0.992, NIAH
+  # 10/10 needles at 128K-748K (3 seeds), distinct-needle con gate; decode 94 / 61 / 48 tok/s/stream at c1/c8/c32
+  # on mixed text (~49 at c1 without the draft); AgentX conformance 13/13 in band, TTFT p50 256K c4/c8 9.2/20.5 s,
+  # 512K c4/c8 12.1/38.2 s (run_xPyD_models.slurm).
   env:
     VLLM_HTTP_TIMEOUT_KEEP_ALIVE: "120"
     VLLM_ROCM_USE_AITER: "1"
@@ -563,7 +564,7 @@ Kimi-K3.1-Pro-gfx942-dspark:
     GPU_MEMORY_UTILIZATION: "0.88"          # prefill KDA chunk workspace is not fully profiled; 0.9 OOMs at c32
     PREFILL_CUDAGRAPH_MODE: "NONE"          # prefill also gets --enforce-eager below
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
-    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 24 32 48 64"  # ~0.25 GiB/size breakable graph pool on the upstream tip
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4 8 16 24 32 48 64 96 128 192 256 384 512 768 1024"  # tokens; DSpark decode q=8 -> graphs up to 128 requests (= decode --max-num-seqs); ~9 GiB
     ROUTER_PREFILL_POLICY: "sticky_least_loaded"  # strict session pinning: a turn returns to the prefill holding its KDA checkpoints
     ROUTER_DECODE_POLICY: "sticky_least_loaded"
     VLLM_ROUTER_SLL_OVERFLOW_DELTA: "2"          # bounded overflow off a busy pinned prefill (vllm-project/router PR #540; built into the image)
