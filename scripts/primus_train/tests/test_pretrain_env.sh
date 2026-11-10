@@ -151,6 +151,42 @@ check_fla_pretrain_hook() {
   assert_file_contains "$hook" 'hylo_\*|kda_\*|gdn_\*'
 }
 
+# Run run.sh against a stub primus-cli whose log has no throughput line, as on a
+# node that does not hold the last global rank. Prints run.sh's exit code.
+run_without_tps() (
+  local nnodes="$1"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  # run.sh resolves $script_dir/../Primus first, so the stub sits beside a copy.
+  mkdir -p "$tmp/primus_train" "$tmp/Primus/runner" "$tmp/run" \
+    "$tmp/Primus/examples/megatron/configs"
+  cp "$RUN_SH" "$tmp/primus_train/run.sh"
+  cp "$SCRIPT_DIR/../extract_primus_perf.py" "$tmp/primus_train/"
+  printf 'modules:\n  pre_trainer:\n    framework: megatron\n' \
+    > "$tmp/Primus/examples/megatron/configs/stub.yaml"
+  cat > "$tmp/Primus/runner/primus-cli" <<'EOF'
+while [[ $# -gt 0 && "$1" != "--log_file" ]]; do shift; done
+mkdir -p "$(dirname "$2")"
+echo "iteration 1/ 10 | no throughput on this rank" > "$2"
+EOF
+  cd "$tmp/run"
+  set +e
+  NNODES="$nnodes" NODE_RANK=0 GPUS_PER_NODE=8 \
+    PRIMUS_CONFIG_PATH=examples/megatron/configs/stub.yaml \
+    bash "$tmp/primus_train/run.sh" >/dev/null 2>&1
+  echo "$?"
+)
+
+check_non_reporting_node() {
+  assert_eq 0 "$(run_without_tps 2)" "multi-node exit code"
+  if [[ "$(run_without_tps 1)" -eq 0 ]]; then
+    echo "single-node run without TPS must still fail" >&2
+    return 1
+  fi
+}
+
+check_non_reporting_node
 check_run_sh_does_not_copy_env
 check_run_sh_always_primus_cli
 check_run_sh_extracts_bridge_pretrain

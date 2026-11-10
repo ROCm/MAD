@@ -203,6 +203,12 @@ print("" if sl is None or sl == "" else sl)
   else
     num_gpus=8
   fi
+  # The extractor wants the world size; this is only its fallback when the log
+  # does not state world_size.
+  nnodes="${NNODES:-1}"
+  if [[ "$nnodes" -gt 1 ]]; then
+    num_gpus=$((nnodes * ${GPUS_PER_NODE:-$num_gpus}))
+  fi
   [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
   extract_args+=(--num-gpus "$num_gpus")
   set +e
@@ -210,8 +216,14 @@ print("" if sl is None or sl == "" else sl)
   extractcode=$?
   set -e
   if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    echo "[primus_train] training log present but TPS extraction failed" >&2
-    exitcode="$extractcode"
+    if [[ "$nnodes" -gt 1 ]]; then
+      # Only the node holding the last global rank prints throughput; madengine
+      # picks the reporting node's CSV when it collects results.
+      echo "[primus_train] no TPS in this node's log (node ${NODE_RANK:-?} of $nnodes); not the reporting node" >&2
+    else
+      echo "[primus_train] training log present but TPS extraction failed" >&2
+      exitcode="$extractcode"
+    fi
   fi
 fi
 exit "$exitcode"
