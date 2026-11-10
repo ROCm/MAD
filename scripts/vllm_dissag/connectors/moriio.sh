@@ -79,8 +79,9 @@ connector_setup_env() {
     export MORI_RDMA_SL="${MORI_RDMA_SL:-0}"
 
     export MORI_NUM_QP_PER_PE="${MORI_NUM_QP_PER_PE:-4}"
-    export VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
-    export VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+    # VLLM_MORIIO_QP_PER_TRANSFER / _NUM_WORKERS / _POST_BATCH_SIZE are not read from the
+    # environment by the MoRIIO connector ("deprecated and ignored"); they go into
+    # kv_connector_extra_config (_moriio_build_kv_transfer_config), and only when set.
 
     export VLLM_MORIIO_TRANSFER_TIMEOUT_S="${VLLM_MORIIO_TRANSFER_TIMEOUT_S:-600}"
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
@@ -120,7 +121,27 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # Peer-pool node list. A kv_producer (prefill) handshakes the DECODE pool, a
+    # kv_consumer (decode) notifies the PREFILL pool. The driver fills them only
+    # when EP_TP_SIZE>1 (see vllm_disagg.sh); otherwise the key is omitted and the
+    # emitted config is byte-identical to the historical one.
+    local _peer=""
+    if [[ "${kv_role}" == "kv_producer" ]]; then _peer="${DECODE_POD_HOSTS:-}"; else _peer="${PREFILL_POD_HOSTS:-}"; fi
+    local _pod_hosts=""
+    [[ -n "${_peer}" ]] && _pod_hosts=',"moriio_pod_hosts":"'"${_peer}"'"'
+    # Transfer tuning. The connector reads these keys only from this config: the
+    # VLLM_MORIIO_* environment variables of the same names are "deprecated and
+    # ignored" by it, so for a long time the 2 QPs / 4 workers set in moriio.env and in
+    # recipes never took effect, and every run used its defaults (1 / 1 / -1). Each key
+    # is emitted only when its variable is set, so the default config is unchanged.
+    local _tune="" _k _v
+    for _k in QP_PER_TRANSFER:qp_per_transfer NUM_WORKERS:num_workers POST_BATCH_SIZE:post_batch_size; do
+        _v="VLLM_MORIIO_${_k%%:*}"; _v="${!_v:-}"
+        [[ -z "${_v}" ]] && continue
+        [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
+        _tune+=',"'"${_k#*:}"'":'"${_v}"
+    done
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
 }
 
 connector_runtime_patch() {
@@ -179,7 +200,7 @@ connector_launch_worker() {
     # Per-model flags from models.yaml (driver-exported; empty if none).
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
-    [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+    _model_config_to_array "$_mc" model_args
 
     # Agentic gating: the default sweep keeps prefix caching OFF (clean, cache-free
     # throughput) via the hardcoded --no-enable-prefix-caching below. The agentic
@@ -195,16 +216,35 @@ connector_launch_worker() {
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
+        # TP-within-EP models (EP_TP_SIZE>1) run TP inside each EP pool (not -tp 1).
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
+        # TP-within-EP: EP_TP_SIZE>1 runs TP inside each EP pool (e.g. TP2xDP8->EP16);
+        # unset/1 keeps the historical -tp 1 wideEP layout. dp_size and
+        # DP_PARALLEL_SIZE_LOCAL arrive already sized for it (vllm_disagg.sh
+        # topology math), so nothing here divides them again.
+        local _ep_tp="${EP_TP_SIZE:-1}"
+        local _tp_flag=(-tp 1)
+        (( _ep_tp > 1 )) && _tp_flag=(--tensor-parallel-size "${_ep_tp}")
+
         local extra_args=() kv_args=()
+        local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
         if [[ "$role" == "master" ]]; then
-            extra_args+=(--api-server-count=${_GPUS_PER_NODE})
-            local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
+            # api-server-count MUST be <= data-parallel-size: the frontend DP
+            # load-balancer round-robins over data_parallel_rank [0, count), so a
+            # count above dp_size sends requests to ranks that do not exist. At
+            # TP1 dp_size >= GPUS_PER_NODE and this resolves to GPUS_PER_NODE
+            # exactly as before; at TP>1 (dp_size = GPUS_PER_NODE/TP per node) it
+            # correctly clamps down.
+            local _api_servers="${_GPUS_PER_NODE}"
+            [ "${dp_size}" -lt "${_api_servers}" ] && _api_servers="${dp_size}"
+            extra_args+=(--api-server-count=${_api_servers})
             kv_args+=(--kv-transfer-config "${kv_config}")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
+            # TP-within-EP headless workers host real DP ranks; they MUST carry kv-transfer-config.
+            (( _ep_tp > 1 )) && kv_args+=(--kv-transfer-config "${kv_config}")
         fi
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
@@ -216,11 +256,13 @@ connector_launch_worker() {
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+        local _max_batched=()
+        [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]] && _max_batched=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
                 vllm serve "${MODEL_PATH}" \
-                    -tp 1 \
+                    "${_tp_flag[@]}" \
                     --data-parallel-size "${dp_size}" \
                     --data-parallel-size-local "${DP_PARALLEL_SIZE_LOCAL}" \
                     --data-parallel-address "${dp_addr}" \
@@ -235,12 +277,13 @@ connector_launch_worker() {
                     --all2all-backend "${_all2all}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
+                    "${_max_batched[@]}" \
                     "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}" "${model_args[@]}"
             WORKER_PID=0; return 0
         fi
 
         vllm serve ${MODEL_PATH} \
-            -tp 1 \
+            "${_tp_flag[@]}" \
             --data-parallel-size "${dp_size}" \
             --data-parallel-size-local ${DP_PARALLEL_SIZE_LOCAL} \
             --data-parallel-address "${dp_addr}" \
@@ -255,6 +298,7 @@ connector_launch_worker() {
             --all2all-backend "${_all2all}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+            "${_max_batched[@]}" \
             "${exec_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
@@ -348,7 +392,13 @@ connector_start_proxy() {
         # to DP ranks 0..7 while the TP server only has rank 0 -> every non-rank-0
         # request fails "data_parallel_rank N out of range [0,1)" (7/8 -> 500).
         local _router_dp_local="${DP_PARALLEL_SIZE_LOCAL}"
+        local _router_moriio_dp=""
         parallelism_is_wide_ep || _router_dp_local=1
+        # TP-within-EP: DP_PARALLEL_SIZE_LOCAL is already GPUS_PER_NODE/EP_TP_SIZE, and
+        # the router must be told the prefill pool's DP width explicitly, since it can
+        # no longer infer it as nodes x GPUS_PER_NODE. Taken from the driver's
+        # PREFILL_DP_SIZE rather than recomputed, so it follows xP and EP_TP_SIZE.
+        (( ${EP_TP_SIZE:-1} > 1 )) && _router_moriio_dp="${PREFILL_DP_SIZE}"
         echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
         echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
         [ -f /root/.cargo/env ] && source /root/.cargo/env
@@ -361,6 +411,8 @@ connector_start_proxy() {
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
+        local _router_extra=()
+        [[ -n "$_router_moriio_dp" ]] && _router_extra+=(--moriio-dp-size "${_router_moriio_dp}")
         "${ROUTER_BIN}" \
             --host 0.0.0.0 \
             --port "${ROUTER_PORT}" \
@@ -370,6 +422,7 @@ connector_start_proxy() {
             --decode "${DECODE_URL}" \
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
+            "${_router_extra[@]}" \
             --policy round_robin \
             --prefill-policy round_robin \
             --decode-policy round_robin \

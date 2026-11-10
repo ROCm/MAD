@@ -34,6 +34,7 @@ _run_gate() {
     MORI_EP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
     DEEPEP_VALID_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
     WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" )
+    MORIIO_TP_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" )
     MODEL_NAME="${MODEL_NAME:-None}"
     _in(){ local n="$1"; shift; for x in "$@"; do [[ "$n" == "$x" ]] && return 0; done; return 1; }
     _in "$MODEL_NAME" "${VALID_MODELS[@]}" || { echo REJECT; exit 0; }
@@ -52,7 +53,9 @@ _run_gate() {
     fi
     # model x combo allowlist gate
     if [[ "$WIDE_EP" == "0" ]]; then
-      _in "$MODEL_NAME" "${WIDE_EP_ONLY_MODELS[@]}" && { echo REJECT; exit 0; }
+      if ! { [[ "$CONNECTOR" == "moriio" ]] && _in "$MODEL_NAME" "${MORIIO_TP_MODELS[@]}"; }; then
+        _in "$MODEL_NAME" "${WIDE_EP_ONLY_MODELS[@]}" && { echo REJECT; exit 0; }
+      fi
     elif [[ "$WIDE_EP" == "1" && "$CONNECTOR" == "moriio" ]]; then
       _in "$MODEL_NAME" "${MORI_EP_VALID_MODELS[@]}" || { echo REJECT; exit 0; }
     elif [[ "$WIDE_EP" == "1" && "$CONNECTOR" == "rixl" ]]; then
@@ -83,11 +86,12 @@ _case ALLOW  "gpt-oss-120b rixl TP"     gpt-oss-120b                      rixl  
 # dense must NOT run wideEP
 _case REJECT "Llama-70B moriio wideEP"  amd-Llama-3.3-70B-Instruct-FP8-KV moriio 1
 _case REJECT "Qwen3-32B rixl wideEP"    Qwen3-32B                         rixl   1
-# DeepSeek family — wideEP only
+# DeepSeek family — wideEP, plus TP on moriio only (the TP baseline)
 _case ALLOW  "DSV3 moriio wideEP(mori)" DeepSeek-V3                       moriio 1
 _case ALLOW  "DSV3 rixl wideEP(deepep)" DeepSeek-V3                       rixl   1
 _case ALLOW  "R1 moriio wideEP"         DeepSeek-R1                       moriio 1
-_case REJECT "DSV3 moriio TP"           DeepSeek-V3                       moriio 0
+_case ALLOW  "DSV3 moriio TP"           DeepSeek-V3                       moriio 0
+_case ALLOW  "R1 moriio TP"             DeepSeek-R1                       moriio 0
 _case REJECT "DSV3 rixl TP"             DeepSeek-V3                       rixl   0
 # GLM-5.1-FP8 — moriio wideEP only (no TP, no DeepEP)
 _case ALLOW  "GLM moriio wideEP(mori)"  GLM-5.1-FP8                       moriio 1
@@ -106,6 +110,8 @@ _case REJECT "bad wide_ep"              Qwen3-32B                         rixl  
 echo ""
 echo "=== legacy shim tests (RUN_MORI / RUN_DEEPEP) ==="
 RUN_MORI=1   _case ALLOW  "RUN_MORI=1 DSV3 (->moriio wideEP)"   DeepSeek-V3 "" ""
+RUN_MORI=1   _case ALLOW  "RUN_MORI=1 WIDE_EP=0 DSV3 (->moriio TP)" DeepSeek-V3 "" 0
+RUN_DEEPEP=0 _case REJECT "WIDE_EP=0 DSV3 no connector (->rixl TP)" DeepSeek-V3 "" 0
 RUN_DEEPEP=1 _case ALLOW  "RUN_DEEPEP=1 DSV3 (->rixl wideEP)"   DeepSeek-V3 "" ""
 RUN_MORI=1   _case REJECT "RUN_MORI=1 Llama (dense no wideEP)"  amd-Llama-3.3-70B-Instruct-FP8-KV "" ""
 
