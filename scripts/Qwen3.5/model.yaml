@@ -1,0 +1,79 @@
+# model.yaml — model defs, shared runtime defaults, and per-engine images + UNIQUE flags.
+#
+# CONFIG LAYERING (so a knob is set ONCE and applied identically to all engines):
+#   defaults:        logical knobs shared by all engines (max_model_len, gpu_memory_util, max_num_seqs)
+#                    -> replica_entry.sh translates each to the engine's specific flag name.
+#   models{}:        per-model identity (dir/arch/valid_tp) + optional per-model overrides.
+#   engines{}.serve_flags: ONLY engine-UNIQUE flags (attention backend, radix-cache, etc.).
+#                    Shared knobs are NO LONGER here — they come from `defaults` to avoid drift.
+
+# ---- shared logical knobs (identical intent across vLLM / SGLang / ATOM) -------------------
+defaults:
+  max_model_len: 17408       # covers 16384+1024 sweep shape. (Was 8192 -> rejected all 8192/16384
+                             #   ISL requests as over-context -> 0 throughput. Fixed 2026-07-08.)
+                             #   Context cap; same for all engines. Override per-run via MAX_MODEL_LEN
+                             #   or per-model below (e.g. long-context sweeps need up to 262144).
+  gpu_memory_util: 0.8       # fraction of VRAM per replica. vLLM/ATOM: --gpu-memory-utilization,
+                             #   SGLang: --mem-fraction-static (translated in replica_entry.sh).
+  max_num_seqs: 256          # max concurrent sequences per replica.
+
+models:
+  # ACTIVE small model: Qwen3.5-35B-A3B (arch qwen3_5_moe) — a 3B-active hybrid-GDN MoE that
+  # fits ONE MI350 GPU. Replaces the prior Qwen3-Next-80B. Deploy = single-GPU instance x8 per
+  # node (TP1 multi-replica), NOT tensor-parallel: a 3B-active model gains nothing from TP and
+  # pays cross-GPU comm cost. Full-node aggregate = per-replica x8. (Proven on the 80B: TP1 >
+  # TP2 > TP4 in every cell.) valid_tp lists 1,2,4 so the sweep confirms TP1 wins.
+  qwen35-moe-mxfp4:                              # ⭐ RECOMMENDED DEFAULT — run on SGLang, TP1, 8/node
+    dir: Qwen3.5-35B-A3B-MXFP4                    # amd/Qwen3.5-35B-A3B-MXFP4 (AMD Quark v0.12)
+    arch: qwen3_5_moe                             # hybrid GDN + MoE (gated-delta-rule kernels)
+    valid_tp: [1, 2, 4]                           # TP1 is best (see REPORT_qwen35.md); fill node w/ 8 replicas
+    status: WORKING  # BEST config: SGLang+MXFP4+TP1 = ~96k tok/s/node @1024/256. MXFP4 > FP8 ~12-15%,
+    #   ~half the HBM, native MI355X FP4. Serves correctly on SGLang+vLLM (no garbling). 1024 validated;
+    #   long-context (8192/16384) re-run pending after max_model_len fix.
+
+  qwen35-moe-fp8:                                 # baseline for comparison (MXFP4 beats it)
+    dir: Qwen3.5-35B-A3B-FP8                      # Qwen/Qwen3.5-35B-A3B-FP8 (official FP8)
+    arch: qwen3_5_moe
+    valid_tp: [1, 2, 4]
+    status: WORKING  # ~12-15% slower than MXFP4, 2x the HBM. Use only if MXFP4 unavailable.
+
+# ---- engines: image + env + ONLY engine-unique serve flags --------------------------------
+engines:
+  vllm:
+    # vLLM ROCm — Jun22 nightly (per user choice). Multi-arch build incl. gfx950.
+    image: vllm/vllm-openai-rocm:nightly
+    entrypoint_override: bash                      # image ENTRYPOINT is `vllm`; override to run scripts
+    env:
+      VLLM_ROCM_USE_AITER: "1"
+      SAFETENSORS_FAST_GPU: "1"
+    # unique only: attention backend, fp8 kv, prefix-caching off. (mem-util/max-seqs/ctx from defaults)
+    serve_flags: >-
+      --attention-backend ROCM_AITER_UNIFIED_ATTN --kv-cache-dtype fp8 --no-enable-prefix-caching
+      --enable-expert-parallel --reasoning-parser qwen3
+    # TP1 -> --no-async-scheduling ; TP>1 -> --async-scheduling  (handled in replica_entry.sh)
+
+  sglang:
+    image: lmsysorg/sglang:v0.5.14-rocm720-mi35x
+    env:
+      SGLANG_USE_AITER_UNIFIED_ATTN: "1"
+      SGLANG_USE_AITER: "1"
+    # unique only: aiter attn, trust-remote-code, the qwen3_next radix-cache FIX, chunked prefill.
+    # FIX: --disable-radix-cache REQUIRED for qwen3_next (hybrid GDN/mamba) — else crashes
+    #   AssertionError: extra_buffer needs CUDA/MUSA/NPU (FLA) in _validate_mamba_extra_buffer.
+    serve_flags: >-
+      --attention-backend aiter --trust-remote-code --disable-radix-cache
+      --enable-aiter-allreduce-fusion --page-size 16 --chunked-prefill-size 32768
+
+  atom:
+    image: rocm/atom-dev:vllm-v0.22.0-nightly_20260617
+    entrypoint_override: bash
+    # ATOM works out of the box in a CLEAN env on a CLEAN GPU. Launch server before sourcing any
+    # helper lib (replica_entry handles this). Shared mem-util/max-seqs/max-model-len now come from
+    # `defaults` (previously ATOM was missing --max-model-len -> fell back to native 262k -> OOM).
+    env: {}
+    serve_flags: "--no-enable_prefix_caching"
+    # ATOM image's Python env crashes the vendored bench client (importlib cache_from_source
+    # IndexError). Run the perf benchmark from a CLEAN container (bench_image) against ATOM's port.
+    bench_external: true
+    bench_image: vllm/vllm-openai-rocm:nightly
+    status: WORKING                               # serves + accuracy verified; perf via external bench

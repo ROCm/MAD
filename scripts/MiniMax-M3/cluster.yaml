@@ -1,0 +1,25 @@
+# cluster.yaml — MiniMax-M3 MXFP4 ATOM disagg cluster definition (MAD wrapper input).
+# Read by run.sh. The verbatim InferenceX code (benchmarks/multi_node/amd_utils/) is unchanged;
+# this file + run.sh only supply the environment/paths that InferenceX's job.slurm normally would.
+
+reservation: <your_slurm_reservation>   # SLURM reservation name (or "" to omit --reservation)
+gpus_per_node: 8                          # gfx950 (MI355X), 8 GPUs/node
+
+# Model staging root: same absolute path on every node (local NVMe recommended).
+# Stage amd/MiniMax-M3-MXFP4 to <models_root>/MiniMax-M3-MXFP4 (MODEL_NAME must match the dir
+# name AND the models_atom.yaml key: MiniMax-M3-MXFP4).
+models_root: /path/to/models
+
+results_root: ./results
+
+# Ports (match InferenceX server_atom.sh defaults)
+router_port: 8000
+prefill_port: 8010
+decode_port: 8020
+handshake_port: 6301
+
+# Node pool: list at least 3 (2p1d_dpa needs 3; 1p1d needs 2). All-TP4 => 1 node/worker.
+nodes:
+  - <node-01>
+  - <node-02>
+  - <node-03>
