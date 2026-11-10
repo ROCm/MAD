@@ -79,7 +79,7 @@ export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,NET,GRAPH}"
 export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_DEFAULT_IB}}"
 
 # Match NCCL GID index for consistency
-export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-3}"
+export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-${NCCL_IB_GID_INDEX}}"
 
 # QPs per connection for MoRI (similar reasoning as NCCL)
 export MORI_QPS_PER_CONNECTION="${MORI_QPS_PER_CONNECTION:-4}"

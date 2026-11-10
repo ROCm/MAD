@@ -19,8 +19,16 @@ IPADDRS="${IPADDRS:-localhost}"
 # Dependencies and Environment Setup
 # =============================================================================
 
-pip install py-spy
-pip install --ignore-installed --force-reinstall flask
+# These are expected to be baked into the image
+# (docker/sglang_disagg_inference.ubuntu.amd.Dockerfile). Install only what is
+# genuinely missing, so a MAD-built image does no work here while an image supplied
+# through DOCKER_IMAGE_NAME still self-heals. The unconditional
+# "--ignore-installed --force-reinstall flask" this replaces mutated the image on
+# every node of every run, downgraded click 8.5.0 -> 8.4.1, and surfaced unrelated
+# dependency conflicts in the log.
+# py-spy ships a binary rather than an importable module, so check for the command.
+command -v py-spy >/dev/null 2>&1 || pip install py-spy
+python3 -c "import flask" >/dev/null 2>&1 || pip install flask
 
 source $MOONCAKE_COOKBOOK_PATH/set_env_vars.sh
 #trap 'echo "Error occurred. Cleaning up..."; exit 0' ERR
@@ -80,6 +88,11 @@ if [[ -z "$MODEL_NAME" ]]; then
 else
     PREFILL_MODEL_CONFIG=$(get_model_config "prefill" "$MODEL_NAME")
     DECODE_MODEL_CONFIG=$(get_model_config "decode" "$MODEL_NAME")
+    # Recipe flags adapted to the installed sglang (renamed options); see sglang_compat.sh.
+    # shellcheck source=/dev/null
+    source "$(dirname "${BASH_SOURCE[0]}")/sglang_compat.sh"
+    PREFILL_MODEL_CONFIG="$(sgl_compat_flags "${PREFILL_MODEL_CONFIG}")"
+    DECODE_MODEL_CONFIG="$(sgl_compat_flags "${DECODE_MODEL_CONFIG}")"
     echo "Using model-specific configuration for: $MODEL_NAME"
 fi
 
