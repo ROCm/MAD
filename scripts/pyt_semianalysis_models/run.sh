@@ -2,6 +2,9 @@
 
 set -ex
 
+# strip '<script_dir>/' prefix (per-directory models.json migration) so filenames match multiple_results
+MAD_MODEL_NAME="${MAD_MODEL_NAME##*/}"
+
 #Output csv file path
 OUTPUT_FILE=$(pwd)/../perf_${MAD_MODEL_NAME}.csv
 

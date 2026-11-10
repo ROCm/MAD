@@ -1,0 +1,58 @@
+# ATOM vLLM Plugin - Unit testing configurations
+
+- benchmark: latency
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 512
+  out: 128
+  dtype: auto
+  bs: 1 16
+  extra_args:
+    --load-format: dummy
+    --async-scheduling: True
+    --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
+    --kv-cache-dtype: fp8
+    --no-enable-prefix-caching: True
+
+- benchmark: throughput
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: auto
+  num_prompts: 10
+  extra_args:
+    --load-format: dummy
+    --async-scheduling: True
+    --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
+    --kv-cache-dtype: fp8
+    --no-enable-prefix-caching: True
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  inp: 128
+  out: 128
+  dtype: auto
+  num_prompts: 252
+  max_concurrency: 128
+  extra_args:
+    --load-format: dummy
+    --async-scheduling: True
+    --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
+    --kv-cache-dtype: fp8
+    --no-enable-prefix-caching: True
+  bench_args:
+    --random-range-ratio: 0.8
+
+- benchmark: accuracy
+  model: meta-llama/Llama-3.1-8B-Instruct
+  tp: 1
+  dtype: auto
+  extra_args:
+    --async-scheduling: True
+    --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
+    --kv-cache-dtype: fp8
+    --no-enable-prefix-caching: True
+  bench_args:
+    --apply_chat_template: True
