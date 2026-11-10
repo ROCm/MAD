@@ -38,7 +38,7 @@ import argparse
 import itertools
 import subprocess
 import shlex
-from typing import List, Dict
+from typing import Dict, List, Optional, Tuple
 
 # Import vllm-specific accuracy runner
 from accuracy_runner_vllm import run_accuracy_vllm
@@ -572,7 +572,65 @@ def _build_bench_serve_cmd(model, config, bench_args=None, extra_flags=""):
     return cmd.strip()
 
 
+def _positive_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text.isdigit() and int(text) >= 1:
+        return int(text)
+    return None
+
+
+def _env_assignment(env_prefix: str, name: str) -> Optional[str]:
+    """Return the value of ``name`` from a ``KEY=VALUE`` command prefix."""
+    for token in str(env_prefix or "").split():
+        key, sep, value = token.partition("=")
+        if sep and key == name:
+            return value
+    return None
+
+
+def resolve_serving_parallel(
+    config_tp: int, environ: Optional[Dict[str, str]] = None
+) -> Tuple[int, int]:
+    """Return ``(tensor_parallel, pipeline_parallel)`` for one ``vllm serve``.
+
+    A single node keeps the tensor parallel size from the model config and
+    uses pipeline parallel 1. Multi-node distributed inference runs one
+    replica per node: tensor parallel is the GPU count on that node, data
+    parallel is the node count, and pipeline parallel is 1.
+    ``VLLM_TENSOR_PARALLEL_SIZE`` and ``VLLM_PIPELINE_PARALLEL_SIZE`` replace
+    those multi-node defaults.
+    """
+    env = os.environ if environ is None else environ
+    nnodes = _positive_int(env.get("NNODES")) or 1
+    if nnodes <= 1:
+        return int(config_tp), 1
+    tensor_parallel = (
+        _positive_int(env.get("VLLM_TENSOR_PARALLEL_SIZE"))
+        or _positive_int(env.get("NPROC_PER_NODE"))
+        or int(config_tp)
+    )
+    pipeline_parallel = _positive_int(env.get("VLLM_PIPELINE_PARALLEL_SIZE")) or 1
+    return tensor_parallel, pipeline_parallel
+
+
 def run_serving(model, config):
+    # Model env is a command prefix by this point. On a multi-node run it
+    # overrides the launcher defaults. A single node still uses config tp.
+    environ = dict(os.environ)
+    if isinstance(config.get("env"), str):
+        for name in ("VLLM_TENSOR_PARALLEL_SIZE", "VLLM_PIPELINE_PARALLEL_SIZE"):
+            value = _env_assignment(config["env"], name)
+            if value is not None:
+                environ[name] = value
+    tp, pipeline_parallel = resolve_serving_parallel(int(config["tp"]), environ)
+    nnodes = _positive_int(environ.get("NNODES")) or 1
+    if nnodes > 1:
+        config["tp"] = str(tp)
+        print(
+            f"Distributed inference: DP={nnodes} TP={tp} PP={pipeline_parallel}"
+        )
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
         config["num_prompts"] = str(10 * int(config["max_concurrency"]))
@@ -582,7 +640,8 @@ def run_serving(model, config):
     # pop env and extra args from config
     env = config.pop('env', "")
     extra_args = config.pop('extra_args', "")
-    server_cmd = _build_server_cmd(model, config, env, extra_args)
+    pp_flags = f"--pipeline-parallel-size {pipeline_parallel}" if pipeline_parallel > 1 else ""
+    server_cmd = _build_server_cmd(model, config, env, extra_args, extra_flags=pp_flags)
     config["cmd"] = server_cmd
 
     # start server
