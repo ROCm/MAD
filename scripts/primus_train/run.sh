@@ -216,10 +216,11 @@ print("" if sl is None or sl == "" else sl)
   extractcode=$?
   set -e
   if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    if [[ "$nnodes" -gt 1 ]]; then
-      # Only the node holding the last global rank prints throughput; madengine
-      # picks the reporting node's CSV when it collects results.
-      echo "[primus_train] no TPS in this node's log (node ${NODE_RANK:-?} of $nnodes); not the reporting node" >&2
+    node_rank="${NODE_RANK:-0}"
+    # The last global rank, which prints throughput, lands on the last node.
+    # Earlier nodes have no TPS line; the last node must.
+    if [[ "$nnodes" -gt 1 && "$node_rank" -lt $((nnodes - 1)) ]]; then
+      echo "[primus_train] no TPS in this node's log (node $node_rank of $nnodes); not the reporting node" >&2
     else
       echo "[primus_train] training log present but TPS extraction failed" >&2
       exitcode="$extractcode"

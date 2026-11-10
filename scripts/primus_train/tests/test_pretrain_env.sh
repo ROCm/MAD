@@ -151,10 +151,11 @@ check_fla_pretrain_hook() {
   assert_file_contains "$hook" 'hylo_\*|kda_\*|gdn_\*'
 }
 
-# Run run.sh against a stub primus-cli whose log has no throughput line, as on a
-# node that does not hold the last global rank. Prints run.sh's exit code.
+# Run run.sh against a stub primus-cli whose log has no throughput line.
+# Prints run.sh's exit code for the given node count and rank.
 run_without_tps() (
   local nnodes="$1"
+  local node_rank="$2"
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -172,15 +173,21 @@ echo "iteration 1/ 10 | no throughput on this rank" > "$2"
 EOF
   cd "$tmp/run"
   set +e
-  NNODES="$nnodes" NODE_RANK=0 GPUS_PER_NODE=8 \
+  NNODES="$nnodes" NODE_RANK="$node_rank" GPUS_PER_NODE=8 \
     PRIMUS_CONFIG_PATH=examples/megatron/configs/stub.yaml \
     bash "$tmp/primus_train/run.sh" >/dev/null 2>&1
   echo "$?"
 )
 
 check_non_reporting_node() {
-  assert_eq 0 "$(run_without_tps 2)" "multi-node exit code"
-  if [[ "$(run_without_tps 1)" -eq 0 ]]; then
+  # Throughput is printed on the last node only, so only earlier nodes may
+  # exit 0 when the log has no TPS line.
+  assert_eq 0 "$(run_without_tps 2 0)" "non-last node exit code"
+  if [[ "$(run_without_tps 2 1)" -eq 0 ]]; then
+    echo "last node of a multi-node run without TPS must fail" >&2
+    return 1
+  fi
+  if [[ "$(run_without_tps 1 0)" -eq 0 ]]; then
     echo "single-node run without TPS must still fail" >&2
     return 1
   fi
