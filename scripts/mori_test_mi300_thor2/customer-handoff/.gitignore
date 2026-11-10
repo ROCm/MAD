@@ -1,0 +1,10 @@
+# Host RDMA libraries are collected per-site by collect_host_libs.sh — do NOT commit them.
+libs/*
+!libs/.gitkeep
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Patch backups created by apply_async_ll_patch.py
+*.orig
