@@ -197,33 +197,38 @@ if isinstance(sl, str):
         sl = os.environ.get(m.group(1), m.group(2) or "")
 print("" if sl is None or sl == "" else sl)
 ' "$EXP" 2>/dev/null || true)"
+  # --num-gpus stands in for the world size when the log carries none (Megatron-Bridge
+  # derives TPS from it, and the CSV reports it), so it counts every GPU of the run: the
+  # GPUs this node sees times the number of nodes.
   vis="${HIP_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES:-}}"
   if [[ -n "$vis" ]]; then
-    num_gpus="$(awk -F',' '{print NF}' <<< "$vis")"
+    local_gpus="$(awk -F',' '{print NF}' <<< "$vis")"
   else
-    num_gpus=8
+    local_gpus="${GPUS_PER_NODE:-${NPROC_PER_NODE:-8}}"
   fi
-  # The extractor wants the world size; this is only its fallback when the log
-  # does not state world_size.
-  nnodes="${NNODES:-1}"
-  if [[ "$nnodes" -gt 1 ]]; then
-    num_gpus=$((nnodes * ${GPUS_PER_NODE:-$num_gpus}))
-  fi
+  num_gpus=$(( ${NNODES:-1} * local_gpus ))
   [[ -n "$seq_length" ]] && extract_args+=(--seq-length "$seq_length")
   extract_args+=(--num-gpus "$num_gpus")
   set +e
   python3 "$extract_script" "$LOG_PATH" "$RUN_DIR/primus_perf_output.csv" "${extract_args[@]}"
   extractcode=$?
   set -e
+  # One rank prints the throughput, so on a multi-node run only one node's log carries it
+  # and the others have nothing to extract. Megatron prints on the last global rank, i.e.
+  # the last node. The Megatron-Bridge training_log patch routes the line through
+  # log_rank_0 (primus/core/utils/module_utils.py), which logs on global rank 0 only: node
+  # 0. Other frameworks are assumed to report like Megatron.
+  if [[ "$framework" == "megatron_bridge" ]]; then
+    reporting_node=0
+  else
+    reporting_node=$(( ${NNODES:-1} - 1 ))
+  fi
   if [[ "$extractcode" -ne 0 && "$exitcode" -eq 0 ]]; then
-    node_rank="${NODE_RANK:-0}"
-    # The last global rank, which prints throughput, lands on the last node.
-    # Earlier nodes have no TPS line; the last node must.
-    if [[ "$nnodes" -gt 1 && "$node_rank" -lt $((nnodes - 1)) ]]; then
-      echo "[primus_train] no TPS in this node's log (node $node_rank of $nnodes); not the reporting node" >&2
-    else
+    if (( ${NODE_RANK:-0} == reporting_node )); then
       echo "[primus_train] training log present but TPS extraction failed" >&2
       exitcode="$extractcode"
+    else
+      echo "[primus_train] no TPS on node ${NODE_RANK:-0} of ${NNODES:-1}; node $reporting_node reports it"
     fi
   fi
 fi

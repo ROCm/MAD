@@ -33,7 +33,8 @@ LABEL mad.launcher=primus
 
 # rocm/primus base often has /workspace/Primus as a full git clone (.git is a directory).
 # A submodule checkout uses .git as a file (gitlink). COPY cannot replace that tree — remove first.
-RUN rm -rf /workspace/Primus
+# v26.8/v26.9 have no /opt/primus; remove it too so a later base image cannot merge with the COPY.
+RUN rm -rf /workspace/Primus /opt/primus
 
 # Bake Primus from the build context (submodule). No git clone — matches CI and local builds.
 COPY scripts/Primus/ /opt/primus/

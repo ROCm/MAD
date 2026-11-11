@@ -156,6 +156,7 @@ check_fla_pretrain_hook() {
 run_without_tps() (
   local nnodes="$1"
   local node_rank="$2"
+  local framework="${3:-megatron}"
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -164,7 +165,7 @@ run_without_tps() (
     "$tmp/Primus/examples/megatron/configs"
   cp "$RUN_SH" "$tmp/primus_train/run.sh"
   cp "$SCRIPT_DIR/../extract_primus_perf.py" "$tmp/primus_train/"
-  printf 'modules:\n  pre_trainer:\n    framework: megatron\n' \
+  printf 'modules:\n  pre_trainer:\n    framework: %s\n' "$framework" \
     > "$tmp/Primus/examples/megatron/configs/stub.yaml"
   cat > "$tmp/Primus/runner/primus-cli" <<'EOF'
 while [[ $# -gt 0 && "$1" != "--log_file" ]]; do shift; done
@@ -180,11 +181,11 @@ EOF
 )
 
 check_non_reporting_node() {
-  # Throughput is printed on the last node only, so only earlier nodes may
+  # Megatron prints throughput on the last node, so only earlier nodes may
   # exit 0 when the log has no TPS line.
   assert_eq 0 "$(run_without_tps 2 0)" "non-last node exit code"
   if [[ "$(run_without_tps 2 1)" -eq 0 ]]; then
-    echo "last node of a multi-node run without TPS must fail" >&2
+    echo "last node of a multi-node Megatron run without TPS must fail" >&2
     return 1
   fi
   if [[ "$(run_without_tps 1 0)" -eq 0 ]]; then
@@ -193,7 +194,17 @@ check_non_reporting_node() {
   fi
 }
 
+check_bridge_reports_on_rank_0() {
+  # Megatron-Bridge logs TPS on rank 0 (node 0). The last node has no line.
+  if [[ "$(run_without_tps 2 0 megatron_bridge)" -eq 0 ]]; then
+    echo "bridge node 0 without TPS must fail" >&2
+    return 1
+  fi
+  assert_eq 0 "$(run_without_tps 2 1 megatron_bridge)" "bridge last node exit code"
+}
+
 check_non_reporting_node
+check_bridge_reports_on_rank_0
 check_run_sh_does_not_copy_env
 check_run_sh_always_primus_cli
 check_run_sh_extracts_bridge_pretrain
