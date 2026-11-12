@@ -70,12 +70,14 @@ suite_tags:
   t2av: Text-to-audio+video
   lora: LoRA fine-tuning
 
-# Registered entries that are smoke tests, not supported models.
+# Registered entries that are smoke tests or suite runners, not supported models.
 exclude:
   - dummy/dummy_multi
   - primus_train/default
   - jax-maxtext/default
   - jax-maxdiffusion/default
+  - vllm/vllm-perf
+  - vllm/vllm-accuracy
 
 # ROCm version for images whose tag does not encode one and whose registry metadata does
 # not state one either (labels, ROCM_VERSION-style build args, +rocm wheel versions; see
