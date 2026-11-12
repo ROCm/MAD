@@ -70,6 +70,8 @@ venv.bak/
 *.csv
 *.json
 !models.json
+# rocprofv3 and Triton output the kernel-tools test reads.
+!tools/tests/fixtures/kernel/**
 *.log
 *.out
 *.html
@@ -106,3 +108,9 @@ slurm_output/
 scripts/kvcache_transfer_bench/shared/
 madengine_build_*
 .madengine_session_start
+
+# madengine runs started by .claude/skills/mad-common/mad-run.sh
+.mad-runs/
+
+# Kernel-profile run directories (kernel-tools.py --run-dir)
+runs/
