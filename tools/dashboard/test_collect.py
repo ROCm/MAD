@@ -279,3 +279,58 @@ def test_status_yaml_is_valid():
     status = collect.load_status()
     for entry in status["frameworks"].values():
         assert entry["name"] and entry["workload"] in ("inference", "training", "microbenchmark")
+
+
+def _page_rows(*pages):
+    return [{"page": p, "model": p.split("/", 1)[1], "name": p} for p in pages]
+
+
+def test_load_priority(tmp_path):
+    f = tmp_path / "priority.yaml"
+    assert collect.load_priority(str(tmp_path / "missing.yaml")) == {}
+    f.write_text("# nothing yet\n")
+    assert collect.load_priority(str(f)) == {}
+    f.write_text("vllm:\n  - a\nsglang:\n")
+    assert collect.load_priority(str(f)) == {"vllm": ["a"], "sglang": []}
+    f.write_text("vllm: a\n")
+    with pytest.raises(ValueError, match="list of page slugs"):
+        collect.load_priority(str(f))
+
+
+def test_load_status_reads_sibling_priority(tmp_path):
+    (tmp_path / "status.yaml").write_text("release: v26.10\n")
+    assert collect.load_status(str(tmp_path / "status.yaml"))["priority"] == {}
+    (tmp_path / "priority.yaml").write_text("vllm:\n  - a\n")
+    assert collect.load_status(str(tmp_path / "status.yaml"))["priority"] == {"vllm": ["a"]}
+
+
+def test_priority_ranks_order_globs_and_unlisted():
+    rows = _page_rows("vllm/a", "vllm/deepseek-v4-flash", "vllm/deepseek-v4-pro", "vllm/z", "sglang/a")
+    warnings = []
+    ranks = collect.priority_ranks(rows, {"vllm": ["z", "deepseek-v4-*"]}, warnings)
+    rank = {r["page"]: ranks[collect._page_key(r)] for r in rows}
+    assert rank["vllm/z"] == 0
+    assert rank["vllm/deepseek-v4-flash"] == rank["vllm/deepseek-v4-pro"] == 1
+    assert rank["vllm/a"] == 2                    # unlisted: after every listed page
+    assert rank["sglang/a"] == 0                  # a framework without a list is unaffected
+    assert warnings == []
+
+
+def test_priority_ranks_page_shares_one_rank_across_punctuation_variants():
+    rows = _page_rows("vllm/gpt-oss-120b", "vllm/gpt-oss120b", "vllm/x")
+    ranks = collect.priority_ranks(rows, {"vllm": ["gpt-oss-120b"]}, [])
+    assert ranks[collect._page_key(rows[0])] == ranks[collect._page_key(rows[1])] == 0
+    assert ranks[collect._page_key(rows[2])] == 1
+
+
+def test_priority_ranks_flags_stale_and_unknown(capsys):
+    rows = _page_rows("vllm/a", "vllm/b")
+    warnings = []
+    collect.priority_ranks(rows, {"vllm": ["a", "gone", "a"]}, warnings)
+    assert len(warnings) == 2 and "'gone'" in warnings[0] and "shadowed" in warnings[1]
+    with pytest.raises(ValueError, match="unknown framework slug"):
+        collect.priority_ranks(rows, {"vlmm": ["a"]}, [])
+
+
+def test_committed_priority_yaml_is_valid():
+    assert isinstance(collect.load_priority(collect.PRIORITY_PATH), dict)

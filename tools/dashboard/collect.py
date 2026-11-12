@@ -11,6 +11,7 @@ into dashboard/releases/<version>.json and re-rendered later without the repo st
 import argparse
 import ast
 import datetime
+import fnmatch
 import glob
 import os
 import re
@@ -23,6 +24,7 @@ import image_registry
 
 REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 STATUS_PATH = os.path.join(REPO_ROOT, "dashboard", "status.yaml")
+PRIORITY_PATH = os.path.join(REPO_ROOT, "dashboard", "priority.yaml")
 INTERNAL_ROADMAP_PATH = os.path.join(REPO_ROOT, "dashboard", "roadmap.internal.yaml")
 PRIMUS_ROOT = os.path.join(REPO_ROOT, "scripts", "Primus")
 
@@ -67,8 +69,64 @@ def warn(message, warnings):
 # --------------------------------------------------------------------------- status.yaml
 
 
-def load_status(path=STATUS_PATH, internal_roadmap_path=None):
-    """Load and validate the curated status file; optionally merge the internal roadmap."""
+def load_priority(path):
+    """Read dashboard/priority.yaml: framework slug -> page-slug patterns, highest priority first.
+
+    A missing or empty file means no ranking (everything stays alphabetical).
+    """
+    if not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        priority = yaml.safe_load(f) or {}
+    if not isinstance(priority, dict):
+        raise ValueError(f"{path}: expected a mapping of framework slug -> list of page slugs")
+    for fw, patterns in priority.items():
+        patterns = [] if patterns is None else patterns
+        if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+            raise ValueError(f"{path}: '{fw}' must be a list of page slugs")
+        priority[fw] = patterns
+    return priority
+
+
+def _page_key(row):
+    """(framework slug, family key). build.catalog() merges 'gpt-oss-120b' and 'gpt-oss120b-w-mxfp4-a-fp8'
+    into one page by ignoring punctuation, so a rank is shared the same way."""
+    fw, family = row["page"].split("/", 1)
+    return fw, re.sub(r"[^a-z0-9]", "", family)
+
+
+def priority_ranks(rows, priority, warnings):
+    """{page key: rank} for every page; lower ranks first, unlisted pages rank after the listed ones.
+
+    The first pattern that matches a page's slug (shell globs allowed) sets its rank; a page whose
+    variants match different entries takes the best. Raises for a framework slug that does not exist;
+    warns for entries that match no page, so a renamed or removed model cannot linger unnoticed.
+    """
+    known = {r["page"].split("/", 1)[0] for r in rows}
+    unknown = sorted(set(priority) - known)
+    if unknown:
+        raise ValueError(f"priority.yaml: unknown framework slug(s) {unknown}; known: {sorted(known)}")
+    ranks, matched = {}, set()
+    for row in rows:
+        fw, family = row["page"].split("/", 1)
+        patterns = priority.get(fw, [])
+        hit = next((i for i, p in enumerate(patterns) if fnmatch.fnmatchcase(family, p)), None)
+        if hit is not None:
+            matched.add((fw, hit))
+        key = _page_key(row)
+        ranks[key] = min(ranks.get(key, len(patterns)), len(patterns) if hit is None else hit)
+    for fw, patterns in priority.items():
+        for i, p in enumerate(patterns):
+            if (fw, i) not in matched:
+                warn(f"priority.yaml: {fw}: '{p}' matches no page (renamed, removed, or shadowed by an earlier entry)",
+                     warnings)
+    return ranks
+
+
+def load_status(path=STATUS_PATH, internal_roadmap_path=None, priority_path=None):
+    """Load and validate the curated status file; optionally merge the internal roadmap.
+
+    The page ranking comes from priority.yaml next to the status file (or `priority_path`)."""
     with open(path) as f:
         status = yaml.safe_load(f) or {}
     unknown = set(status) - set(STATUS_KEYS)
@@ -82,6 +140,7 @@ def load_status(path=STATUS_PATH, internal_roadmap_path=None):
         raise ValueError(f"{path}: 'release' is required (e.g. v26.10)")
     version_key(status["release"])
     status["internal"] = False
+    status["priority"] = load_priority(priority_path or os.path.join(os.path.dirname(os.path.abspath(path)), "priority.yaml"))
     if internal_roadmap_path:
         with open(internal_roadmap_path) as f:
             items = yaml.safe_load(f) or []
@@ -532,7 +591,9 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
     rows = [describe_model(m, status["frameworks"], status["suite_tags"], images, is_opt_in(m, hidden)) for m in models]
     merge_one_page(rows, status["frameworks"])
     order = {name: i for i, name in enumerate(status["frameworks"])}
-    rows.sort(key=lambda r: (order.get(r["registry"], len(order)), r["framework"], r["model"].lower(), r["name"]))
+    ranks = priority_ranks(rows, status.get("priority") or {}, warnings)
+    rows.sort(key=lambda r: (order.get(r["registry"], len(order)), r["framework"], ranks[_page_key(r)],
+                             r["model"].lower(), r["name"]))
 
     image_rows = []
     for dockerfile, image in images.items():

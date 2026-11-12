@@ -419,6 +419,19 @@ def roadmap_report(status, repo_root):
         print(f"  #{pr['number']:<5} {'draft ' if pr['isDraft'] else ''}{what}: {pr['title'][:70]}")
 
 
+def list_pages(snapshot, priority):
+    """Print each framework's model pages in display order, to copy slugs into dashboard/priority.yaml."""
+    ranks = collect.priority_ranks(snapshot["models"], priority, [])
+    pages, frameworks = catalog(upgrade(snapshot))
+    print("# rank  page slug (a '-' marks pages not in priority.yaml; they follow the ranked ones)")
+    for fw in frameworks:
+        listed = len(priority.get(fw["slug"], []))
+        print(f"\n{fw['slug']}:   # {fw['name']}, {len(fw['families'])} pages")
+        for family in fw["families"]:
+            rank = ranks[collect._page_key({"page": family["page"]})]
+            print(f"  {rank + 1 if rank < listed else '-':>4}  {family['page'].split('/', 1)[1]}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", default="_site", help="output directory for the site (default: _site)")
@@ -434,6 +447,8 @@ def main():
                         help="brand logos or neutral monograms/glyphs (default: `logos:` in dashboard/icons.yaml)")
     parser.add_argument("--roadmap-report", action="store_true",
                         help="print open model PRs missing the roadmap label and landed-but-open items, then exit")
+    parser.add_argument("--list-pages", action="store_true",
+                        help="print every framework's model pages in display order (for dashboard/priority.yaml), then exit")
     args = parser.parse_args()
 
     if args.freeze and args.internal:
@@ -448,6 +463,11 @@ def main():
 
     if args.roadmap_report:
         roadmap_report(status, repo_root)
+        return
+
+    if args.list_pages:
+        list_pages(collect.build_snapshot(status, **snapshot_args | {"github": False, "inspect_images": False}),
+                   status["priority"])
         return
 
     if args.freeze:
