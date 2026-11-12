@@ -23,6 +23,7 @@ has a skill in `.claude/skills/`, linked into `.agents/skills/` for Codex
 | `mad-benchmark` | explicit only | Build and run a madengine benchmark |
 | `mad-profile` | explicit only | Profile at the operator, dispatch, kernel, assembly, PC-sampling, or thread-trace depth |
 | `mad-tune` | explicit only | Measure-change-measure tuning loop |
+| `mad-debug-nan` | explicit only | Capture, replay and package a NaN in a PyTorch model with nan-doctor |
 | `primus-projection` | explicit only | Projected memory fit and tokens/s for a Primus training tag only |
 | `mad-add-model` | explicit only | Guided model addition and validation |
 | `mad-generate-dockerfile` | explicit only | Render a Dockerfile from a framework template |
@@ -51,13 +52,14 @@ that you are at the repo root. It never installs anything.
 ### Claude Code, Cursor and Codex
 
 - **Workflows are Claude Code only.** `mad-benchmark-sweep`,
-  `mad-tune-search`, and `mad-optimize` (`.claude/workflows/`) need Claude
-  Code's workflow runtime. `mad-optimize` profiles one model and runs GEAK
-  `kernel_workflow`; see `docs/mad-optimize.md`.
+  `mad-tune-search`, `mad-optimize` and `mad-nan-hunt` (`.claude/workflows/`)
+  need Claude Code's workflow runtime. `mad-optimize` profiles one model and
+  runs GEAK `kernel_workflow`; see `docs/mad-optimize.md`. `mad-nan-hunt`
+  captures and replays a NaN with nan-doctor; see `docs/mad-nan-hunt.md`.
   In Cursor and Codex, use `mad-benchmark` with several tags
   (`/mad-benchmark bert,pyt_vllm_qwen3-8b` runs them in one `madengine run`)
   and `mad-tune`.
-- **Subagents.** The skills hand work to `mad-benchmark-runner`, `mad-tuner` and
+- **Subagents.** The skills hand work to `mad-benchmark-runner`, `mad-tuner`, `mad-nan-doctor` and
   `mad-perf-analyst`. Claude Code and Cursor read them from `.claude/agents/`.
   Codex reads `.codex/agents/*.toml` (`mad_benchmark_runner`, `mad_tuner`,
   `mad_perf_analyst`), generated from the Markdown files: edit

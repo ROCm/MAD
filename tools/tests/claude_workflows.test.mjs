@@ -23,6 +23,7 @@ const HELPERS = {
   'mad-benchmark-sweep.js': ['tokenize', 'parseCli', 'pyLiteralToJson', 'normalizeContext'],
   'mad-tune-search.js': ['tokenize', 'parseCli', 'pyLiteralToJson', 'normalizeContext', 'stats', 'gate', 'leverFits', 'regexEscape'],
   'mad-optimize.js': ['tokenize', 'parseCli', 'pyLiteralToJson', 'normalizeContext', 'stats', 'gate', 'geakTaskFor', 'kernelGroupFor'],
+  'mad-nan-hunt.js': ['tokenize', 'parseCli', 'pyLiteralToJson', 'normalizeContext', 'deployTargetOf', 'nanDetected', 'reproducingGroups', 'verifierAgrees'],
 }
 
 function load(name) {
@@ -620,4 +621,149 @@ test('both workflows hold a counter run to the same stall rule', async () => {
   ])
   const rule = r => r.calls.find(c => c.opts.phase === 'Kernel' || c.opts.label === 'kernel').prompt.match(STALL_RULE)[0]
   assert.equal(rule(tune).replace(/such as \S+,/, ''), rule(opt).replace(/such as \S+,/, ''))
+})
+
+// ── mad-nan-hunt ──────────────────────────────────────────────────────────
+
+const NAN = 'mad-nan-hunt.js'
+
+function nanAgent(over = {}) {
+  return (prompt, opts) => {
+    const label = opts.label || ''
+    if (label === 'resolve') return over.resolve || { preflightOk: true, resolvedModels: ['dummy/dummy_nan'], model: 'dummy/dummy_nan', nGpus: '1', hostGpus: 8 }
+    if (label === 'setup') return over.setup || { status: 'ok', head: 'x', intakeValid: true, intakeOutput: 'RUN_SCRIPT=...' }
+    if (label.startsWith('detect-')) return over.detect || { runId: label, status: 'failed', signalLines: 2, firstMatch: 'step 20 loss: nan' }
+    if (label.startsWith('capture-')) {
+      const k = Number(label.split('-')[1])
+      if (over.capture) return typeof over.capture === 'function' ? over.capture(k) : over.capture
+      return { runId: `nan_capture_${k}`, status: 'failed', capsules: 1, manifest: false, capsuleDir: '/a/capsules/nan_capture_1', image: 'ci-dummy_nan' }
+    }
+    if (label === 'replay') return over.replay || { groups: [{ group: 'G1', capsules: 1, verdict: 'FP32_OVERFLOW?', hits: 10, runs: 10, concurrency: 2, logDir: '/a/5b/G1' }] }
+    if (label === 'package') return over.package || { status: 'ok', tarball: '/a/repro-G1.tar.gz', sha256: 'abc', reproduced: '10/10' }
+    if (label === 'rootcause') return { status: 'ok', rootCauseFile: '/a/rootcause/ROOT_CAUSE.md', summary: 's' }
+    if (label === 'verify') return over.verify || { checks: [{ group: 'G1', hitsAgree: true, verdictAgree: true }] }
+    if (label === 'report') return { reportPath: '/a/report.md', copied: [] }
+    return null
+  }
+}
+
+test('nan-hunt: decisions are made in code', async () => {
+  const { nanDetected, reproducingGroups, verifierAgrees, deployTargetOf } = await helpersOf(NAN)
+  assert.equal(nanDetected([{ signalLines: 0 }, { signalLines: 3 }, null]), 1)
+  assert.deepEqual(reproducingGroups([{ group: 'G1', hits: 0 }, { group: 'G2', hits: 4 }]).map(g => g.group), ['G2'])
+  const groups = [{ group: 'G1' }, { group: 'G2' }]
+  assert.equal(verifierAgrees(groups, [{ group: 'G1', hitsAgree: true, verdictAgree: true }]), false, 'a group the verifier skipped is not verified')
+  assert.equal(verifierAgrees(groups, groups.map(g => ({ ...g, hitsAgree: true, verdictAgree: true }))), true)
+  assert.equal(deployTargetOf({ slurm: { nodes: 2 } }), 'slurm')
+  assert.equal(deployTargetOf({ k8s: {} }), 'k8s')
+  assert.equal(deployTargetOf(null), 'local')
+})
+
+test('nan-hunt: parseCli defaults to plan mode and reads its options', async () => {
+  const { parseCli } = await helpersOf(NAN)
+  const cfg = parseCli(`--tag dummy_nan --nan-doctor-home /x/nd --repeats 3 --capture-data values --groups all --rootcause --budget-minutes 30 -c '{"a": 1}'`)
+  assert.equal(cfg.execute, false)
+  assert.equal(cfg.tag, 'dummy_nan')
+  assert.equal(cfg.nanDoctorHome, '/x/nd')
+  assert.equal(cfg.repeats, 3)
+  assert.equal(cfg.captureData, 'values')
+  assert.equal(cfg.groups, 'all')
+  assert.equal(cfg.rootcause, true)
+  assert.equal(cfg.budgetMinutes, 30)
+  assert.equal(parseCli('--tag x --execute').execute, true)
+})
+
+test('nan-hunt: a tag is required, one model only, no tools, no k8s', async () => {
+  assert.match((await run(NAN, '--execute')).error.message, /needs one model tag/)
+  assert.match((await run(NAN, '--tag a,b')).error.message, /exactly one tag/)
+  assert.match((await run(NAN, `--tag x -c '{"tools": [{"name": "rpd"}]}'`)).error.message, /must not carry "tools"/)
+  assert.match((await run(NAN, `--tag x -c '{"k8s": {}}'`)).error.message, /K8s is not supported/)
+  const { error } = await run(NAN, '--tag dummies', nanAgent({ resolve: { preflightOk: true, resolvedModels: ['a', 'b'], model: '' } }))
+  assert.match(error.message, /resolves to 2/)
+})
+
+test('nan-hunt: plan mode prints the clone, the intake and the runs, and runs nothing', async () => {
+  const { result, calls, logs } = await run(NAN, '--tag dummy_nan --repeats 2', nanAgent())
+  assert.equal(result.status, 'planned')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].opts.label, 'resolve')
+  assert.equal(calls[0].opts.agentType, 'mad-nan-doctor')
+  const printed = logs.join('\n')
+  assert.match(printed, /git clone https:\/\/github.com\/\S+\/nan-doctor\.git "\$HOME\/nan-doctor" && git -C "\$HOME\/nan-doctor" checkout [0-9a-f]{40}/)
+  assert.equal(result.detectCommands.length, 2)
+  assert.doesNotMatch(result.detectCommands[0], /nan_doctor/, 'clean runs carry no tool')
+  assert.match(result.captureCommand, /"tools":\[\{"name":"nan_doctor"\}\]/)
+  assert.match(result.artifactDir, /^\$HOME\/nan-doctor\/artifacts\/mad-\d{4}-\d{2}-\d{2}-dummy_dummy_nan$/)
+  assert.equal(result.intake.env, 'madengine')
+  assert.equal(result.intake.world_size, 1)
+  assert.equal(result.intake.preferences.fix, false)
+  assert.match(result.intake.run, /^madengine run --tags dummy\/dummy_nan --live-output$/)
+})
+
+test('nan-hunt: capture data mode and the user context reach the capture run', async () => {
+  const { result } = await run(NAN, `--tag dummy_nan --capture-data values -c "{'docker_env_vars': {'A': '1'}}"`, nanAgent())
+  const ctx = JSON.parse(result.captureCommand.match(/--additional-context '(.*)'$/)[1])
+  assert.deepEqual(ctx.docker_env_vars, { A: '1', NAN_CAPTURE_DATA: '1' })
+  assert.deepEqual(ctx.tools, [{ name: 'nan_doctor' }])
+  assert.match(result.detectCommands[0], /"docker_env_vars":\{"A":"1"\}/)
+})
+
+test('nan-hunt: a full execute run ends with a verified reproducer', async () => {
+  const { result, calls } = await run(NAN, '--tag dummy_nan --execute', nanAgent())
+  assert.equal(result.status, 'reproducer')
+  assert.equal(result.verified, true)
+  assert.deepEqual(calls.map(c => c.opts.label), ['resolve', 'setup', 'detect-1', 'capture-1', 'replay', 'package', 'verify', 'report'])
+  assert.equal(calls.find(c => c.opts.label === 'verify').opts.agentType, 'general-purpose')
+  for (const c of calls.filter(c => /^(detect|capture)/.test(c.opts.label))) assert.match(c.prompt, /mad-run\.sh start/)
+  assert.match(calls.find(c => c.opts.label === 'replay').prompt, /nan-doctor-run\.sh start <run-id> \S+ replay\|node5b/)
+  assert.equal(calls.some(c => c.opts.label === 'rootcause'), false)
+})
+
+test('nan-hunt: no NaN in the clean runs stops before capture', async () => {
+  const { result, calls } = await run(NAN, '--tag dummy_nan --execute --repeats 2', nanAgent({ detect: { runId: 'r', status: 'succeeded', signalLines: 0 } }))
+  assert.equal(result.status, 'no-nan')
+  assert.equal(calls.filter(c => c.opts.label.startsWith('detect-')).length, 2)
+  assert.equal(calls.some(c => c.opts.label.startsWith('capture-')), false)
+})
+
+test('nan-hunt: --skip-detect goes straight to capture', async () => {
+  const { calls } = await run(NAN, '--tag dummy_nan --execute --skip-detect', nanAgent())
+  assert.equal(calls.some(c => c.opts.label.startsWith('detect-')), false)
+  assert.equal(calls.some(c => c.opts.label === 'capture-1'), true)
+})
+
+test('nan-hunt: an empty capture is retried once, then stops', async () => {
+  const empty = { runId: 'c', status: 'failed', capsules: 0, capsuleDir: '' }
+  let r = await run(NAN, '--tag dummy_nan --execute', nanAgent({ capture: () => empty }))
+  assert.equal(r.result.status, 'no-capsule')
+  assert.equal(r.calls.filter(c => c.opts.label.startsWith('capture-')).length, 2)
+  assert.equal(r.calls.some(c => c.opts.label === 'replay'), false)
+  r = await run(NAN, '--tag dummy_nan --execute', nanAgent({
+    capture: k => (k === 1 ? empty : { runId: 'c2', status: 'failed', capsules: 3, capsuleDir: '/a/c2', image: 'i' }),
+  }))
+  assert.equal(r.result.status, 'reproducer')
+})
+
+test('nan-hunt: zero hits means not reproduced, whatever the agent called it', async () => {
+  const { result, calls } = await run(NAN, '--tag dummy_nan --execute', nanAgent({
+    replay: { groups: [{ group: 'G1', verdict: 'KERNEL_BUG', hits: 0, runs: 5000 }] },
+  }))
+  assert.equal(result.status, 'not-reproduced')
+  assert.equal(calls.some(c => c.opts.label === 'package'), false)
+})
+
+test('nan-hunt: a disagreeing verifier marks the reproducer unverified', async () => {
+  const { result } = await run(NAN, '--tag dummy_nan --execute', nanAgent({
+    verify: { checks: [{ group: 'G1', hitsAgree: false, verdictAgree: true, note: 'summary says 3/10' }] },
+  }))
+  assert.equal(result.status, 'reproducer-unverified')
+  assert.equal(result.verified, false)
+})
+
+test('nan-hunt: --rootcause runs step 7 within the budget and never step 8', async () => {
+  const { calls } = await run(NAN, '--tag dummy_nan --execute --rootcause --budget-minutes 45', nanAgent())
+  const rc = calls.find(c => c.opts.label === 'rootcause')
+  assert.ok(rc)
+  assert.match(rc.prompt, /45 minutes/)
+  assert.match(rc.prompt, /no step 8/)
 })

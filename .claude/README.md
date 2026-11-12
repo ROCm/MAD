@@ -43,10 +43,11 @@ delegate to them. Codex gets generated copies in `.codex/agents/` (see
 host-wide GPU lock.
 
 ### Claude Code-only workflows
-The `mad-benchmark-sweep`, `mad-tune-search`, and `mad-optimize` workflows in
+The `mad-benchmark-sweep`, `mad-tune-search`, `mad-optimize`, and `mad-nan-hunt` workflows in
 `.claude/workflows/` need Claude Code's workflow runtime. They plan by default
 and run only with `--execute`; `CLAUDE.md` describes the first two,
-`docs/mad-optimize.md` describes the GEAK handoff, and
+`docs/mad-optimize.md` describes the GEAK handoff, `docs/mad-nan-hunt.md` the
+nan-doctor one, and
 `node --test tools/tests/*.test.mjs` tests them against a mock agent.
 
 ## Quick Start
@@ -71,7 +72,7 @@ and run only with `--execute`; `CLAUDE.md` describes the first two,
 ├── settings.json                       # Shared permissions + models.json hook
 ├── agents/                             # Subagents the skills fork into (Claude Code, Cursor)
 ├── hooks/validate-models-json.sh       # Validates models.json edits
-├── workflows/                          # mad-benchmark-sweep, mad-tune-search, mad-optimize (Claude Code)
+├── workflows/                          # mad-benchmark-sweep, mad-tune-search, mad-optimize, mad-nan-hunt (Claude Code)
 ├── skills/
 │   ├── mad-add-model/                  # Model addition wizard
 │   │   ├── SKILL.md
@@ -80,8 +81,8 @@ and run only with `--execute`; `CLAUDE.md` describes the first two,
 │   ├── mad-generate-dockerfile/        # Dockerfile generator
 │   │   ├── scripts/render_dockerfile.py  # Template renderer
 │   │   └── framework_templates/        # Jinja2 templates
-│   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-report/, primus-projection/
-│   └── mad-common/                     # preflight.sh, mad-run.sh, geak-run.sh, kernel-tools.py, kernel-analysis.md (shared helpers)
+│   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-debug-nan/, mad-report/, primus-projection/
+│   └── mad-common/                     # preflight.sh, mad-run.sh, geak-run.sh, nan-doctor-run.sh, kernel-tools.py, kernel-analysis.md (shared helpers)
 └── prompts/
     └── model_addition_guide.md         # Detailed guide
 

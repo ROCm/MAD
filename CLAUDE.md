@@ -8,7 +8,7 @@ Everything above is shared with Cursor and Codex. This section covers what only
 Claude Code does.
 
 - **Skills fork to subagents.** `/mad-benchmark` and `/mad-profile` run in
-  `mad-benchmark-runner`, `/mad-tune` in `mad-tuner`, and `/mad-report` in
+  `mad-benchmark-runner`, `/mad-tune` in `mad-tuner`, `/mad-debug-nan` in `mad-nan-doctor`, and `/mad-report` in
   `mad-perf-analyst` (`.claude/agents/`), via `context: fork`. `/mad-report`
   sets `background: false`, so its answer arrives in the same turn.
 - **Pre-flight is injected.** The GPU skills run
@@ -36,7 +36,13 @@ Claude Code does.
     as its own phase with a task that names the card's bound, and keeps the
     patched tree only when the same latency gate passes. It retries a stalled
     counter run the same way. See `docs/mad-optimize.md`.
-  - The tests in `tools/tests/` run all three against a mock agent:
+  - `mad-nan-hunt --tag <one-model> [--repeats 1] [--capture-data values] [--groups all] [--rootcause --budget-minutes 60] [--execute]`
+    — runs nan-doctor on one PyTorch model: clean runs to see the NaN, one
+    run with madengine's `nan_doctor` tool to capture the op that made it,
+    replays through `nan-doctor-run.sh`, and a packaged reproducer. Whether a
+    run NaN'd, captured, or reproduced is decided in code; an adversarial
+    verifier must agree with the replay verdicts. See `docs/mad-nan-hunt.md`.
+  - The tests in `tools/tests/` run all four against a mock agent:
     `node --test tools/tests/*.test.mjs`. `kernel-tools.py` has its own
     GPU-free test on recorded rocprofv3 and Triton output:
     `python3 -m unittest discover -s tools/tests -p 'test_*.py'`.
