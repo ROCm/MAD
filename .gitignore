@@ -104,5 +104,10 @@ madengine_build_*
 # madengine runs started by .claude/skills/mad-common/mad-run.sh
 .mad-runs/
 
+# NaN hunts: nan-doctor reports, ledgers and reproducers (mad-nan-hunt, /mad-debug-nan),
+# and the nan_doctor tool's capsules from the last capture run
+nan_hunts/
+nan_doctor_output/
+
 # Kernel-profile run directories (kernel-tools.py --run-dir)
 runs/
