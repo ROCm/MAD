@@ -11,5 +11,18 @@
         ],
         "args": "",
         "multiple_results": "perf_dummy.csv"
+    },
+    {
+        "name": "dummy_nan",
+        "dockerfile": "../../docker/dummy",
+        "scripts": "run_nan.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "fp32",
+        "tags": [
+            "dummies",
+            "nan_debug"
+        ],
+        "args": "--plant_step 20"
     }
 ]
