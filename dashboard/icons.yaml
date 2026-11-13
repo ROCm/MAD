@@ -1,0 +1,88 @@
+# Logos and icons for the MAD Recipes site.
+#
+# Brand marks are trademarks of their owners and are used only to identify the model provider,
+# framework or hardware. The AMD logo in the header (dashboard/logos/amd/, not listed here) is the
+# publisher's. Set `logos: neutral` to replace every brand mark, the AMD logo included, with a
+# neutral generated monogram, glyph or plain text without touching any code.
+#
+# Assets are vendored under dashboard/logos/ by `python3 tools/dashboard/fetch_logos.py`
+# (provider avatars: recipes.vllm.ai/providers, falling back to the Hugging Face org avatar;
+# marks: Simple Icons, CC0). See dashboard/logos/NOTICE.md.
+logos: official   # official | neutral
+
+# Hugging Face org -> display name. A logo is fetched for each org listed here.
+providers:
+  amd: AMD
+  baidu: Baidu
+  black-forest-labs: Black Forest Labs
+  CohereLabs: Cohere Labs
+  deepseek-ai: DeepSeek
+  genmo: Genmo
+  google: Google
+  Lightricks: Lightricks
+  LiquidAI: Liquid AI
+  meta-llama: Meta Llama
+  microsoft: Microsoft
+  MiniMaxAI: MiniMax
+  mistralai: Mistral AI
+  moonshotai: Moonshot AI
+  nvidia: NVIDIA
+  openai: OpenAI
+  Qwen: Qwen
+  stabilityai: Stability AI
+  state-spaces: state-spaces
+  tencent: Tencent
+  Wan-AI: Wan-AI
+  xai-org: xAI
+  XiaomiMiMo: Xiaomi MiMo
+  zai-org: Z.ai
+  Zyphra: Zyphra
+
+# Models without a Hugging Face id (Primus/JAX configs, PyTorch recipes) are matched to a
+# provider by the start of their lowercased name; first match wins.
+name_patterns:
+  - ["^llama", meta-llama]
+  - ["^qwen", Qwen]
+  - ["^deepseek", deepseek-ai]
+  - ["^janus", deepseek-ai]
+  - ["^flux", black-forest-labs]
+  - ["^wan", Wan-AI]
+  - ["^gpt[-_]?oss", openai]
+  - ["^clip", openai]
+  - ["^mixtral", mistralai]
+  - ["^minimax", MiniMaxAI]
+  - ["^kimi", moonshotai]
+  - ["^glm", zai-org]
+  - ["^hunyuan", tencent]
+  - ["^grok", xai-org]
+  - ["^gemma", google]
+  - ["^phi", microsoft]
+  - ["^lfm", LiquidAI]
+  - ["^stablediffusion|^stable[-_]diffusion", stabilityai]
+  - ["^ltx", Lightricks]
+  - ["^mamba", state-spaces]
+  - ["^zebra", amd]
+  - ["^zaya", Zyphra]
+  - ["^mochi", genmo]
+  - ["^mimo", XiaomiMiMo]
+
+# Frameworks, by the start of their lowercased display name; first match wins.
+#   simple:<slug>      a Simple Icons mark (dashboard/logos/simple-icons/<slug>.svg)
+#   mono:<text>:<hue>  generated monogram badge (no official mark exists, or logos: neutral)
+#   glyph:<name>       one of the neutral line glyphs
+frameworks:
+  - ["vllm", "simple:vllm"]
+  - ["sglang", "mono:SG:265"]
+  - ["atom", "mono:At:12"]
+  - ["xdit", "mono:xD:160"]
+  - ["pytorch", "simple:pytorch"]
+  - ["primus", "mono:Pr:350"]
+  - ["jax", "mono:JX:200"]
+  - ["large ep", "glyph:network"]
+  - ["kv cache", "glyph:swap"]
+
+# Marks used outside the lists above (the AMD mark is the `amd` provider avatar).
+marks:
+  docker: simple:docker
+  huggingface: simple:huggingface
+  pytorch: simple:pytorch

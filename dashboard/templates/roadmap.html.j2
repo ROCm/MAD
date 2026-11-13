@@ -1,0 +1,65 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% set source = snap.roadmap_source | default({}) %}
+{% block title %}Oncoming models — MAD Recipes{% endblock %}
+{% block body %}
+<main class="wrap">
+  {{ ui.page_header("Oncoming models",
+       "Models being onboarded to MAD. Each row is an open GitHub issue or pull request; when the work merges it leaves this list and appears under Models." ~ (" Rows marked internal come from the internal roadmap." if snap.internal else ""), snap, glyph="flag") }}
+  <section>
+    <div class="card">
+    {% if snap.roadmap %}
+      <table>
+        <thead><tr><th>Model</th><th>Framework</th><th>Target GPUs</th><th>New madengine tags</th><th>Target</th><th>Status</th><th>Tracking</th><th>Updated</th></tr></thead>
+        <tbody>
+        {% for r in snap.roadmap %}
+          <tr>
+            <td>
+              <div class="with-ico" style="gap:10px;align-items:flex-start">
+                {{ icons.logo(r.model, (r.hf_repo | default("", true)).split("/")[0] or none, 28) }}
+                <div>
+                  {% if r.hf_repo | default(none) %}<a href="https://huggingface.co/{{ r.hf_repo }}" class="mono">{{ r.hf_repo }}</a>{% else %}{{ r.model }}{% endif %}
+                  {% if r.internal | default(false) %} <span class="chip">internal</span>{% endif %}
+                  {% if r.title is defined and r.title != r.model %}<div class="faint" style="font-size:12.5px">{{ r.title }}</div>{% endif %}
+                </div>
+              </div>
+            </td>
+            <td>{% if r.framework | default("") and r.framework != "–" %}<span class="with-ico" style="gap:6px">{{ icons.framework(r.framework.split(", ")[0], 16) }}{{ r.framework }}</span>{% else %}–{% endif %}</td>
+            {% set skus = r.skus | default([]) %}
+            <td style="white-space:nowrap">{{ (snap.skus[0] ~ "–" ~ snap.skus[-1]) if skus | list == snap.skus | list else (skus | join(", ") or "–") }}</td>
+            <td>
+              {% set tags = r.tags | default([]) %}
+              {% if not tags %}<span class="faint">–</span>
+              {% elif tags | length <= 2 %}{% for t in tags %}<code>{{ t.rsplit("/", 1)[-1] }}</code><br>{% endfor %}
+              {% else %}<details><summary>{{ tags | length }} model cards</summary>{% for t in tags %}<code>{{ t.rsplit("/", 1)[-1] }}</code><br>{% endfor %}</details>{% endif %}
+            </td>
+            <td>{{ r.target | default("") or "–" }}</td>
+            <td>{{ ui.status_badge(r.status | default("planned")) }}</td>
+            <td style="white-space:nowrap">
+              {% if r.source | default("") == "issue" %}<a href="{{ r.url }}">Issue #{{ r.number }}</a><br>{% endif %}
+              {% for p in r.prs | default([]) %}<a href="{{ p.url }}">PR #{{ p.number }}</a>{% if p.draft %} <span class="faint">draft</span>{% endif %}<br>{% endfor %}
+              {% if r.source | default("status.yaml") == "status.yaml" %}<span class="faint">status.yaml</span>{% endif %}
+            </td>
+            <td class="muted" style="white-space:nowrap">{{ r.updated | default("") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">No oncoming models are tracked yet.</div>
+    {% endif %}
+    </div>
+    {% if source.repo is defined %}
+    <p class="faint" style="font-size:12.5px">Read from open issues and pull requests in
+      <a href="{{ 'https://github.com/' ~ source.repo }}/issues?q=is%3Aopen+label%3A{{ source.label | default('new-model') }}">{{ source.repo }}</a>
+      labeled <code>{{ source.label | default("new-model") }}</code>. To add a model, open a “Model onboarding” issue; link the PR that implements it with <code>Closes #&lt;issue&gt;</code>.</p>
+    {% endif %}
+    {% if snap.roadmap_landed | default([]) %}
+    <details class="more">
+      <summary>Landed but still open ({{ snap.roadmap_landed | length }}) — already under Models; close these or relabel if more work remains</summary>
+      <ul>{% for r in snap.roadmap_landed %}<li><a href="{{ r.url }}">#{{ r.number }}</a> {{ r.model }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

@@ -27,6 +27,26 @@ Below are blueprints of supported models along with their documentation.
 | [**SGLang disaggregated P/D inference with WideEP/LargeEP**](scripts/sglang_disagg/README.MD) | Distributed Inference P/D disaggregation with SGLang with WideEP/LargeEP | DeepSeek-V3, DeepSeek-R1 |
 | [**KVCache Transfer Bench**](scripts/kvcache_transfer_bench/README.md) | Inter-node Transfer Benchmark | no specific models |
 
+## Recipes and status dashboard
+
+[MAD Recipes](https://rocm.github.io/MAD/) is a site generated from this repository by `.github/workflows/dashboard.yml` on every push to `develop`. The top navigation has one page per question:
+
+- **Overview** (home): this release at a glance, and what changed since the last one.
+- **Models**: every supported model with its GPU support (MI300X, MI325X, MI350X, MI355X, and MI455X where a config names it) and scale (nodes per run, and whether it needs SLURM), filterable and exportable as CSV. Each model opens a recipe with the commands to run it, either `madengine run` or plain `docker build` / `docker run` (`sbatch` for multi-node models) with no madengine, for each cluster type the model supports: single node, SLURM, or Kubernetes where a manual per-node run is documented. A model that also runs on more nodes under another framework (e.g. vLLM and vLLM disaggregated P/D) links to it. Multi-node-only JAX MaxText configs, which madengine hides unless `JAX_MAXTEXT_INCLUDE_MULTINODE=1`, are listed as opt-in with an experimental recipe.
+- **ROCm**, **Roadmap**: the ROCm support matrix and the oncoming models.
+- **Releases**: every frozen release keeps the whole site under `/<version>/`, with recipes pinned to that release's commit.
+
+How it is maintained:
+
+- Models, recipes, base images and ROCm versions are read from `scripts/*/models.json`, `scripts/*/get_models_json.py` and `docker/`, so adding a model adds its recipe page.
+- **Oncoming models** come from GitHub: open issues labeled `new-model` (use the "Model onboarding" issue form) are the plan, and the PRs that close them (`Closes #<issue>`) or carry the label themselves set the status. Merged work leaves the Roadmap and appears under Models. `python3 tools/dashboard/build.py --roadmap-report` lists model PRs missing the label and issues whose model already landed.
+- Everything else (each registry's display name and guide, entries to leave out, ROCm versions that are not in an image tag, roadmap items with no issue yet, which registries get one recipe page (`one_page`) or a manual Kubernetes recipe (`k8s: manual`)) lives in [`dashboard/status.yaml`](dashboard/status.yaml). A new `scripts/<dir>` registry needs an entry there, or its models are listed under the bare directory name. The order of model pages within each framework is set in [`dashboard/priority.yaml`](dashboard/priority.yaml) (`build.py --list-pages` prints the slugs). Both files are public: only add what is cleared for disclosure.
+- Hosting: set the repository variable `DASHBOARD_PAGES=true` and Settings > Pages > Source to GitHub Actions. The site rebuilds on pushes to `develop` and every 3 hours; if GitHub issues cannot be read, the run fails and the live site is left as it was, and build warnings appear in the run's job summary. A fork can publish upstream's state by also setting `DASHBOARD_SOURCE_REPO=ROCm/MAD`.
+- To cut a release, run `python3 tools/dashboard/build.py --freeze v26.10` on a clean checkout of a commit that is on `ROCm/MAD` `develop` (fetched into one of your remotes), with `scripts/Primus` checked out, and commit `dashboard/releases/v26.10.json`. The frozen recipes check out that commit, so the build refuses a dirty tree or an unpublished commit.
+- **Logos and icons**: the header carries the AMD logo (from AMD's ROCm documentation theme, linked to amd.com) and the footer AMD's copyright, legal links and trademark attribution, as on rocm.docs.amd.com. Model-provider logos are Hugging Face organization avatars (the same ones recipes.vllm.ai shows) and framework marks come from Simple Icons (CC0); both are vendored in `dashboard/logos/` (see its `NOTICE.md`), so the site loads no third-party images. Edit `dashboard/icons.yaml` and run `python3 tools/dashboard/fetch_logos.py` to add one. Set `logos: neutral` there (or build with `--logos neutral`) to replace every brand mark with a neutral monogram.
+- To preview locally: `pip install -r requirements.txt pyyaml jinja2`, then `python3 tools/dashboard/build.py --out _site` and open `_site/index.html`. Add `--offline` to skip the GitHub and image-registry lookups. The build replaces the `--out` directory and refuses one it did not create. Tests: `python3 -m pytest tools/dashboard`.
+- More detail for contributors and coding agents: [AGENTS.md](AGENTS.md#mad-recipes-site-dashboard).
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
@@ -36,6 +56,7 @@ Below are blueprints of supported models along with their documentation.
   - [Tag Functionality](#tag-functionality)
   - [Timeout Configuration](#timeout-configuration)
   - [Debugging Options](#debugging-options)
+- [Recipes and status dashboard](#recipes-and-status-dashboard)
 - [Claude Code Integration](#claude-code-integration)
 - [Contributing](#contributing)
   - [Adding New Models](#adding-new-models)
@@ -342,6 +363,15 @@ python3 tools/validation/model_config_validator.py --model <name>
 madengine discover --tags <name>          # must list <dir>/<name>
 madengine run --tags <name> --live-output
 ```
+
+#### Step 6: Recipes site
+
+The model appears on [MAD Recipes](#recipes-and-status-dashboard) once it
+merges. If you created a new `scripts/<dir>/` registry, add it under
+`frameworks:` in [`dashboard/status.yaml`](dashboard/status.yaml) (display
+name, `workload`, `readme`); otherwise the site lists its models under the
+bare directory name. If a "Model onboarding" issue tracks the model, put
+`Closes #<issue>` in the PR description so the Roadmap shows its progress.
 
 ## Environment Variables
 

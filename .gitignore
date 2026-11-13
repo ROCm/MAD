@@ -82,6 +82,14 @@ venv.bak/
 # See benchmark/jax_maxtext/README.md for details.
 scripts/Primus/
 
+# Status dashboard: frozen release snapshots and templates are source, the built site is not.
+# roadmap.internal.yaml holds unreleased plans and must never be committed (the repo is public).
+!dashboard/releases/*.json
+!dashboard/logos/sources.json
+_site/
+_site_internal/
+dashboard/roadmap.internal.yaml
+
 # Local agent planning artifacts
 docs/superpowers/
 

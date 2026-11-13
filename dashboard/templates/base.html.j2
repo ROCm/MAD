@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}MAD Recipes{% endblock %}</title>
+{% if icons.favicon %}<link rel="icon" href="{{ site }}/favicon.svg" type="image/svg+xml">{% endif %}
+<style>
+  /* Neutral, hairline-bordered look after recipes.vllm.ai; light and dark selected separately. */
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --subtle: #f9fafb;
+    --code: #f3f4f6;
+    --ink: #0a0a0a;
+    --ink-2: #4b5563;
+    --ink-3: #9ca3af;
+    --line: #e5e7eb;
+    --line-2: #d1d5db;
+    --accent: #2563eb;
+    --sel-bg: #eff6ff;
+    --sel-line: #3b82f6;
+    --sel-ink: #1e3a8a;
+    --brand: #ed1c24;
+    --good-ink: #15803d;
+    --good: #16a34a;
+    --warning: #f59e0b;
+    --critical: #dc2626;
+    --mg-bg: 91%;
+    --mg-fg: 30%;
+    --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #0a0a0a; --subtle: #111113; --code: #18181b; --ink: #fafafa; --ink-2: #a1a1aa; --ink-3: #71717a;
+      --line: #27272a; --line-2: #3f3f46; --accent: #60a5fa; --sel-bg: #172554; --sel-line: #3b82f6; --sel-ink: #dbeafe;
+      --good-ink: #4ade80; --mg-bg: 24%; --mg-fg: 82%;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0a0a0a; --subtle: #111113; --code: #18181b; --ink: #fafafa; --ink-2: #a1a1aa; --ink-3: #71717a;
+    --line: #27272a; --line-2: #3f3f46; --accent: #60a5fa; --sel-bg: #172554; --sel-line: #3b82f6; --sel-ink: #dbeafe;
+    --good-ink: #4ade80; --mg-bg: 24%; --mg-fg: 82%;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font: 0.86em var(--mono); background: var(--code); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
+  .mono { font-family: var(--mono); }
+  .wrap { max-width: 1440px; margin: 0 auto; padding: 0 24px; }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
+  .label { font: 600 11px var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); }
+  [hidden] { display: none !important; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ---- logos and icons ---- */
+  .plogo, .mg { width: var(--s, 24px); height: var(--s, 24px); border-radius: 22%; flex: none; vertical-align: middle; }
+  .plogo { display: inline-block; object-fit: cover; background: #fff; border: 1px solid var(--line); }
+  .mg { display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: calc(var(--s, 24px) * .42); line-height: 1; letter-spacing: -.02em;
+        background: hsl(var(--h) 55% var(--mg-bg)); color: hsl(var(--h) 55% var(--mg-fg)); }
+  .ico { width: var(--s, 18px); height: var(--s, 18px); color: var(--ink-2); flex: none; vertical-align: middle; }
+  .with-ico { display: inline-flex; align-items: center; gap: 8px; }
+  .with-ico > .ico, .with-ico > .plogo, .with-ico > .mg { margin-top: 1px; }
+
+  /* ---- top bar ---- */
+  .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .topbar .wrap { display: flex; align-items: center; gap: 22px; height: 56px; }
+  /* AMD logo first, as on AMD's ROCm documentation: unaltered artwork in the text color (black or
+     white), linked to amd.com, with clear space and a divider before the site name. */
+  .brand { display: flex; align-items: center; gap: 16px; flex: none; }
+  .amd-link { display: flex; align-items: center; color: var(--ink); padding: 6px 0; }
+  .amd-link:hover { text-decoration: none; opacity: .8; }
+  .amd-logo { display: block; height: auto; }
+  .amd-text { font-weight: 800; font-size: 18px; letter-spacing: .02em; }
+  .brand .divider { width: 1px; height: 24px; background: var(--line-2); }
+  .logo { display: flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 650; font-size: 15px; white-space: nowrap; }
+  .logo:hover { text-decoration: none; }
+  .logo .mark { font-size: 22px; font-weight: 750; letter-spacing: -0.02em; }
+  .sections { display: flex; gap: 4px; }
+  .sections a { color: var(--ink-2); font-size: 14px; padding: 6px 10px; border-radius: 7px; white-space: nowrap; }
+  .sections a:hover { background: var(--subtle); text-decoration: none; color: var(--ink); }
+  .sections a[aria-current="page"] { color: var(--ink); font-weight: 600; background: var(--subtle); }
+  .search { position: relative; flex: 1; max-width: 360px; margin-left: auto; }
+  .search input { width: 100%; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px 7px 34px; }
+  .search::before { content: "⌕"; position: absolute; left: 12px; top: 5px; color: var(--ink-3); font-size: 17px; }
+  .search kbd { position: absolute; right: 10px; top: 8px; font: 11px var(--mono); color: var(--ink-3); }
+  .results { position: absolute; left: 0; right: 0; top: 40px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.12); max-height: 420px; overflow-y: auto; display: none; }
+  .results.open { display: block; }
+  .results a { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; color: var(--ink); font-size: 14px; border-bottom: 1px solid var(--line); }
+  .results a:last-child { border-bottom: 0; }
+  .results div.faint { padding: 8px 12px; font-size: 14px; }
+  .results a:hover, .results a.active { background: var(--subtle); text-decoration: none; }
+  .results .fw { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
+  .tools { display: flex; align-items: center; gap: 14px; }
+  .tools a { color: var(--ink-2); font-size: 14px; }
+  .tools button, .menu-btn { background: none; border: 0; color: var(--ink-2); cursor: pointer; font-size: 16px; padding: 4px; }
+  .version select { font: 12.5px var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 4px 6px; }
+  .menu-btn { display: none; }
+  .frozen { background: var(--sel-bg); color: var(--sel-ink); border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .frozen .wrap { padding-top: 7px; padding-bottom: 7px; }
+  .frozen a { color: var(--sel-ink); font-weight: 600; text-decoration: underline; }
+
+  /* ---- page scaffolding ---- */
+  header.page { padding: 36px 0 4px; }
+  header.page h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 12px; }
+  header.page h1 .ico { --s: 28px; color: var(--ink-3); }
+  header.page .lede { color: var(--ink-2); margin: 0; max-width: 900px; }
+  header.page .meta { color: var(--ink-3); font-size: 13px; margin-top: 6px; }
+  section { margin: 32px 0; }
+  section > h2 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  section > .lede { color: var(--ink-2); margin: 0 0 14px; max-width: 900px; }
+  .banner { margin: 16px 0 0; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--critical); }
+  .banner strong { color: var(--critical); }
+  .empty { padding: 18px 14px; color: var(--ink-2); }
+  details.more { margin-top: 16px; font-size: 13.5px; color: var(--ink-2); }
+  details.more summary { cursor: pointer; }
+  details.more li { margin: 3px 0; }
+
+  /* ---- chips & pills ---- */
+  .chip { display: inline-flex; align-items: center; gap: 4px; font: 11.5px/1.7 var(--mono); padding: 0 7px; margin: 0 4px 4px 0; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-2); white-space: nowrap; }
+  .chip.solid { border-color: var(--ink); color: var(--ink); }
+  .pill { font: 13px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 11px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .pill small { font: 11.5px var(--mono); color: var(--ink-3); }
+  .pill:hover { border-color: var(--line-2); }
+  .pill[aria-pressed="true"] { border-color: var(--sel-line); background: var(--sel-bg); color: var(--sel-ink); font-weight: 600; }
+  .pill[disabled] { color: var(--ink-3); text-decoration: line-through; cursor: not-allowed; background: var(--bg); border-color: var(--line); font-weight: 400; }
+
+  /* ---- cards ---- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .tile { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; color: var(--ink); background: var(--bg); transition: border-color .1s; }
+  a.tile:hover { border-color: var(--line-2); text-decoration: none; box-shadow: 0 1px 6px rgba(0,0,0,.05); }
+  .tile .t-name { font-weight: 650; font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
+  .tile .t-org { font: 12px var(--mono); color: var(--ink-3); margin-bottom: 8px; }
+  .tile .t-desc { color: var(--ink-2); font-size: 13px; margin-top: 6px; }
+  .tile .t-foot { display: flex; justify-content: space-between; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+  .tile .t-value { font-size: 28px; font-weight: 650; line-height: 1.2; margin: 6px 0 2px; }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin: 32px 0 14px; }
+
+  /* ---- tables ---- */
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font: 600 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; background: var(--subtle); }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mark, th.mark { text-align: center; width: 84px; }
+  td.muted { color: var(--ink-3); }
+  .yes { color: var(--good-ink); font-weight: 700; }
+  .part { color: var(--warning); font-weight: 700; }
+  .no { color: var(--ink-3); }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+  .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .status.good { color: var(--good-ink); }
+  .status.good::before { background: var(--good); }
+  .status.warning::before { background: var(--warning); }
+  .status.critical::before { background: var(--critical); }
+
+  .split { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; }
+  .split h3 { font-size: 15px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .split ul { list-style: none; margin: 0; padding: 0; }
+  .split li { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .split li:last-child { border-bottom: 0; }
+  .split .area { font-weight: 600; }
+  .split .scope { color: var(--ink-2); font-size: 13.5px; }
+  .split .note { color: var(--ink-3); font-size: 13px; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 18px 0 36px; color: var(--ink-3); font-size: 13px; }
+  footer a { color: var(--ink-2); margin-right: 18px; }
+  footer .tm { margin: 10px 0 0; max-width: 900px; }
+  footer .legal { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  footer .legal a { margin-right: 0; }
+  @media (max-width: 1200px) {
+    .menu-btn { display: block; }
+    .sections { display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column; background: var(--bg); border-bottom: 1px solid var(--line); padding: 8px 16px; }
+    .topbar.open .sections { display: flex; }
+  }
+  @media (max-width: 760px) { .search { display: none; } .tools a { display: none; } }
+  @media print { .topbar, .frozen, .filters { display: none; } }
+  {% block style %}{% endblock %}
+</style>
+<script>
+  // Site storage can be blocked (it then throws); every page works without it.
+  window.madStore = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  (function () { var t = madStore.get("mad-theme"); if (t) document.documentElement.dataset.theme = t; })();
+</script>
+</head>
+<body>
+{% set nav = [("models", "models/index.html", "Models"), ("rocm", "rocm/index.html", "ROCm"), ("roadmap", "roadmap/index.html", "Roadmap")] %}
+<div class="topbar" id="topbar"><div class="wrap">
+  <button class="menu-btn" type="button" aria-label="Menu" aria-controls="sections" aria-expanded="false" onclick="this.setAttribute('aria-expanded', document.getElementById('topbar').classList.toggle('open'))">☰</button>
+  <div class="brand">
+    <a class="amd-link" href="https://www.amd.com/" title="AMD">{{ icons.amd_logo(72) }}</a>
+    <span class="divider" aria-hidden="true"></span>
+    <a class="logo" href="{{ root }}/index.html"{% if active == "overview" %} aria-current="page"{% endif %}><span class="mark">MAD</span></a>
+  </div>
+  <nav class="sections" id="sections" aria-label="Sections">
+    {% for key, path, label in nav %}<a href="{{ root }}/{{ path }}"{% if active == key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    <a href="{{ site }}/releases/index.html"{% if active == "releases" %} aria-current="page"{% endif %}>Releases</a>
+  </nav>
+  <div class="search">
+    <input id="search" type="search" placeholder="Search models…" aria-label="Search models" autocomplete="off"
+           role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="false">
+    <kbd>/</kbd>
+    <div class="results" id="search-results" role="listbox" aria-label="Matching models"></div>
+  </div>
+  <div class="tools">
+    <label class="version"><span class="sr">Version</span>
+      <select id="version">
+        {% for v in versions %}<option value="{{ v.href }}"{% if v.current %} selected{% endif %}>{{ v.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <a href="{{ gh }}">GitHub</a>
+    <button type="button" id="theme" aria-label="Toggle light or dark theme">◐</button>
+  </div>
+</div></div>
+{% if snap.state == "frozen" %}
+<div class="frozen"><div class="wrap">You are viewing the frozen <strong>{{ snap.version }}</strong> release. Commands check out commit <span class="mono">{{ snap.commit[:10] }}</span>. <a href="{{ versions[0].href }}">Go to the latest (develop)</a></div></div>
+{% endif %}
+{% block body %}{% endblock %}
+<footer><div class="wrap">
+  <a href="{{ gh }}">GitHub</a>
+  <a href="https://github.com/ROCm/madengine">madengine</a>
+  <a href="{{ site }}/releases/index.html">Releases</a>
+  <span>Generated from {% if snap.commit %}<a href="{{ gh }}/commit/{{ snap.commit }}" class="mono">{{ snap.commit[:10] }}</a>{% else %}a local tree{% endif %} on {{ snap.date }}. Curated data: <code>dashboard/status.yaml</code>.</span>
+  <p class="tm">AMD, the AMD Arrow logo, AMD Instinct, ROCm and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names and logos are used only to identify models, frameworks and hardware, and may be trademarks of their respective owners.{% if icons.official %} See <a href="{{ gh }}/blob/develop/dashboard/logos/NOTICE.md">logo sources</a>.{% endif %}</p>
+  <div class="legal">
+    <span>© {{ snap.date[:4] }} Advanced Micro Devices, Inc.</span>
+    <a href="https://www.amd.com/en/corporate/copyright">Terms and Conditions</a>
+    <a href="https://www.amd.com/en/corporate/privacy">Privacy</a>
+    <a href="https://www.amd.com/en/corporate/trademarks">Trademarks</a>
+    <a href="{{ gh }}/blob/develop/LICENSE.txt">License</a>
+  </div>
+</div></footer>
+{{ icons.sprite() }}
+<script src="{{ root }}/search.js"></script>
+<script>
+  document.getElementById("theme").addEventListener("click", function () {
+    var root = document.documentElement;
+    var dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    madStore.set("mad-theme", root.dataset.theme);
+  });
+  // Version switcher: follow a choice made with the mouse or confirmed with Enter, not every
+  // arrow key (Chrome and Edge on Windows fire "change" while a closed select is arrowed through).
+  (function () {
+    var select = document.getElementById("version"), keyed = false;
+    function go() { if (!select.options[select.selectedIndex].defaultSelected) location.href = select.value; }
+    select.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); go(); } else if (ev.key !== "Tab") { keyed = true; }
+    });
+    select.addEventListener("change", function () { if (!keyed) go(); });
+    select.addEventListener("blur", function () { keyed = false; });
+    select.addEventListener("mousedown", function () { keyed = false; });
+  })();
+  // Top-bar search over search.js (window.MAD_INDEX); every word must match; "/" focuses it.
+  (function () {
+    var input = document.getElementById("search"), box = document.getElementById("search-results");
+    var root = {{ root | tojson }}, index = window.MAD_INDEX || [], active = -1;
+    function open(on) { box.classList.toggle("open", on); input.setAttribute("aria-expanded", on); }
+    function render() {
+      var words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      active = -1; input.removeAttribute("aria-activedescendant");
+      // Clear old hits too, so Enter cannot follow a result that is no longer shown.
+      if (!words.length) { box.innerHTML = ""; open(false); return; }
+      var hits = index.filter(function (e) { return words.every(function (w) { return e.k.indexOf(w) >= 0; }); }).slice(0, 12);
+      box.innerHTML = hits.length ? "" : '<div class="faint" role="option" aria-disabled="true">No matching models</div>';
+      hits.forEach(function (e, i) {
+        var a = document.createElement("a");
+        a.id = "search-hit-" + i; a.setAttribute("role", "option");
+        a.href = root + "/models/" + e.p + "/index.html";
+        a.innerHTML = "<span></span><span class=fw></span>";
+        a.firstChild.textContent = e.n; a.lastChild.textContent = e.f;
+        box.appendChild(a);
+      });
+      open(true);
+    }
+    input.addEventListener("input", render);
+    input.addEventListener("keydown", function (ev) {
+      var links = box.classList.contains("open") ? box.querySelectorAll("a") : [];
+      if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && links.length) {
+        ev.preventDefault();
+        active = Math.max(0, Math.min(links.length - 1, active + (ev.key === "ArrowDown" ? 1 : -1)));
+        links.forEach(function (l, i) { l.classList.toggle("active", i === active); l.setAttribute("aria-selected", i === active); });
+        input.setAttribute("aria-activedescendant", links[active].id);
+      } else if (ev.key === "Enter" && links.length) {
+        location.href = links[Math.max(active, 0)].href;
+      } else if (ev.key === "Escape") { open(false); input.blur(); }
+    });
+    document.addEventListener("click", function (ev) { if (!ev.target.closest(".search")) open(false); });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "/" && ["INPUT", "SELECT"].indexOf(document.activeElement.tagName) < 0) { ev.preventDefault(); input.focus(); }
+    });
+  })();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

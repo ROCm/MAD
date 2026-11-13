@@ -160,10 +160,18 @@ Verify GPU-free: `madengine discover --tags <name>` lists it and
 `python3 tools/validation/model_config_validator.py --model <name>` passes.
 Then on a GPU host: `madengine run --tags <name> --live-output`.
 
+The model then appears on the MAD Recipes site with no further edits, with one
+exception: a **new registry directory** also needs an entry under `frameworks:`
+in `dashboard/status.yaml` (display name, `workload`, `readme`). Without one the
+build warns and lists the model under its bare directory name. A smoke test or
+suite runner that is not a supported model goes under `exclude:` instead. If
+the model was planned in a "Model onboarding" issue, put `Closes #<issue>` in
+the PR so the Roadmap tracks it. See [MAD Recipes site](#mad-recipes-site-dashboard).
+
 ## madengine commands
 
-`requirements.txt` pins madengine to `v2.3.0` (Typer CLI); install it with
-`pip install -r requirements.txt`. It exposes five commands: `build`, `run`,
+`requirements.txt` installs madengine (Typer CLI) from its `main` branch;
+install it with `pip install -r requirements.txt`. It exposes five commands: `build`, `run`,
 `discover`, `report`, `database`. Verify exact flags with `madengine <cmd> --help`.
 
 - `madengine discover --tags <tag> [--json]` — list matching models (read-only, no GPU); `--json` prints the resolved model cards.
@@ -235,6 +243,57 @@ Pre-built profiling context files live in the madengine package's
 
 - `perf.csv` — one row per run (model, n_gpus, precision, performance, metric, status, durations, git_commit, gpu_architecture, ...).
 - `perf_entry_super.json` — enriched record incl. a `configs` block; this is what gets pushed to MongoDB.
+
+## MAD Recipes site (`dashboard/`)
+
+`tools/dashboard/build.py` generates a static site from this repository:
+a Models catalog with per-GPU support, one recipe page per model (the
+`madengine` command and the plain `docker build`/`docker run` or `sbatch`
+equivalent), and ROCm, Roadmap and Releases pages.
+`.github/workflows/dashboard.yml` builds it on every PR that touches
+models, `docker/` or the dashboard, and publishes it to GitHub Pages from
+`develop` when the repository variable `DASHBOARD_PAGES` is `true`.
+
+| Path | What it holds |
+|------|---------------|
+| `tools/dashboard/collect.py` | Snapshot: models via madengine's `DiscoverModels`, GPU products from `skip_gpu_arch` or product tags, base images and ROCm versions from `docker/` |
+| `tools/dashboard/recipes.py` | The run commands on each recipe page |
+| `tools/dashboard/github_roadmap.py` | Roadmap from open issues labeled `new-model` and the PRs that close them |
+| `dashboard/status.yaml` | What the repo cannot derive: framework names and READMEs per registry, `exclude`, `rocm_overrides`, extra roadmap items. **Public.** |
+| `dashboard/priority.yaml` | Order of model pages inside each framework. **Public.** |
+| `dashboard/icons.yaml`, `dashboard/logos/` | Vendored logos (`fetch_logos.py`); `logos: neutral` drops brand marks |
+| `dashboard/templates/*.html.j2` | Jinja2 templates (`.j2`, because `.gitignore` excludes `*.html`) |
+| `dashboard/releases/<version>.json` | Frozen release snapshots; committed, never edited |
+
+```bash
+pip install -r requirements.txt pyyaml jinja2 pytest
+python3 -m pytest -q tools/dashboard                  # unit tests, no network
+python3 tools/dashboard/build.py --out _site --offline   # no GitHub or registry calls
+python3 tools/dashboard/build.py --list-pages         # page slugs for priority.yaml
+python3 tools/dashboard/build.py --roadmap-report     # labeled issues already landed, unlabeled model PRs
+python3 tools/dashboard/build.py --freeze v26.10      # write dashboard/releases/v26.10.json
+```
+
+- `build.py` deletes `--out` before writing. It refuses the repo, your home
+  directory, their parents, and any non-empty directory an earlier build did
+  not write (no `.nojekyll`).
+- `--freeze` needs a clean tree whose `HEAD` is on `ROCm/MAD` `develop` as one
+  of your git remotes knows it (fetch it first), because the frozen recipes
+  `git checkout` that commit. Check out `scripts/Primus` too, or the Primus and
+  JAX configs are missing from the release.
+- Deploys build with `--require-roadmap`: if GitHub cannot be read, the run
+  fails and the published site stays as it was. Other warnings (such as an
+  unknown ROCm version) go to the Actions job summary; `--strict` fails on them.
+- `status.yaml` is validated on load: every framework needs a `name`,
+  `k8s: manual` needs a recipe in `recipes.MANUAL_STEPS`, and a roadmap
+  `status` is `planned`, `in progress`, `in review` or `blocked`.
+- The "Model onboarding" issue form's Framework options must match the `name`s
+  in `status.yaml`; a test checks this.
+- Never put unreleased plans in `status.yaml` or `priority.yaml`. They go in
+  the gitignored `dashboard/roadmap.internal.yaml`, read only by
+  `build.py --internal`, whose output must not be published.
+- A new Instinct product needs `ISA_SKUS` in `collect.py` and `ISA_OF` in
+  `recipes.py`.
 
 ## Environment variables
 
