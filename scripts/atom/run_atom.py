@@ -32,6 +32,7 @@ import json
 import yaml
 import psutil
 import shutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -316,19 +317,36 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+def _arg_value(value):
+    """Render a config value the way the engine's parser expects it.
+
+    A recipe may give a list or mapping -- ATOM's extra-kv-connectors is a list
+    of mappings -- and str() on those yields Python syntax with single quotes,
+    which these arguments do not accept. Serialize them as JSON; scalars pass
+    through unchanged. The result is shell-quoted by the caller: values reach
+    the engine through a shell string.
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
+
+
 def dict_to_args(args_dict: Dict) -> str:
     """Convert argument dictionary to command-line string"""
     args_list = []
     for key, value in args_dict.items():
         if value is True:
             args_list.append(key)
+        elif isinstance(value, list) and all(not isinstance(x, (dict, list)) for x in value):
+            # A list of scalars is a variadic option: one token each.
+            args_list.append(f"{key} " + " ".join(shlex.quote(str(x)) for x in value))
         elif value is not False and value is not None:
-            args_list.append(f"{key} {value}")
+            args_list.append(f"{key} {shlex.quote(_arg_value(value))}")
     return " ".join(args_list)
 
 def dict_to_env(env_dict: Dict) -> str:
     """Convert environment dictionary to env var string"""
-    return " ".join(f"{k}={v}" for k, v in env_dict.items())
+    return " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_dict.items())
 
 def expand_configs(args, configs: List[Dict]):
     # Apply architecture specific overrides to config
@@ -398,11 +416,18 @@ def adjust_glm_batched_tokens(config):
     if 'GLM-5' not in config.get('model', ''):
         return
 
-    inp = config.get('inp')
-    if not inp:
+    # An agentic replay has no fixed input length -- its blocks carry inp=0 as
+    # a placeholder, which expand_configs turns into the truthy string '0' --
+    # so the fixed-length sizing does not apply; and log2 of a non-positive
+    # length would raise before the server starts.
+    if config.get('benchmark') == 'agentic':
         return
-
-    inp = int(inp)
+    try:
+        inp = int(config.get('inp') or 0)
+    except (TypeError, ValueError):
+        return
+    if inp <= 0:
+        return
     default_max_batched = 16384
 
     import math
@@ -449,6 +474,51 @@ def _wait_for_server(server, port=8000, timeout=5400, poll_interval=30):
         time.sleep(poll_interval)
     print("Timed out waiting for server to start", flush=True)
     return False
+
+def _load_infx_agentic():
+    """Import the shared agentic body from scripts/common/.
+
+    Imported lazily, not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines."""
+    infx_agentic = _load_infx_agentic()
+    server_cmd = (
+        "python -m atom.entrypoints.openai_server "
+        f"--model {model} "
+        f"-tp {config['tp']} "
+    )
+    if config.get("kv_cache_dtype"):
+        server_cmd += f"--kv_cache_dtype {config['kv_cache_dtype']} "
+    env_dict = config.pop("env", {})
+    extra_args_dict = config.pop("extra_args", {})
+    # The agentic replay drives its own prompt corpus, so the serving-only
+    # length-distribution knob is dropped rather than forwarded.
+    config.pop("random_range_ratio", None)
+    config.pop("bench_serving", None)
+    env_str = dict_to_env(env_dict) if env_dict else ""
+    extra_args_str = dict_to_args(extra_args_dict) if extra_args_dict else ""
+    server_cmd = f"{env_str} {server_cmd} {extra_args_str}".strip()
+    # ATOM serves on the OpenAI-compatible endpoint; agentic_lib.sh only knows
+    # the sglang and vllm backends, and vllm is the one whose port and
+    # ctx-window resolver match this endpoint.
+    return infx_agentic.run_agentic(
+        model, config, "vllm", server_cmd, "localhost", 8000, 5400
+    )
+
 
 def run_serving(model, config):
     # num_prompts = multiplier * max_concurrency; multiplier from perf.yaml bench_serving (default 10), popped so it stays out of the CSV row
@@ -502,7 +572,12 @@ def run_serving(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--max-concurrency {config['max_concurrency']} "
+            # A recipe that jitters input length (InferenceX sets
+            # RANDOM_RANGE_RATIO) has to be able to say so; absent, the
+            # client's own default applies.
+            + (f"--random-range-ratio {config['random_range_ratio']} "
+               if config.get('random_range_ratio') is not None else "")
+            + f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
@@ -646,7 +721,12 @@ def run_serving_profile(model, config):
             f"--dataset-name random "
             f"--ignore-eos "
             f"--request-rate inf "
-            f"--max-concurrency {config['max_concurrency']} "
+            # A recipe that jitters input length (InferenceX sets
+            # RANDOM_RANGE_RATIO) has to be able to say so; absent, the
+            # client's own default applies.
+            + (f"--random-range-ratio {config['random_range_ratio']} "
+               if config.get('random_range_ratio') is not None else "")
+            + f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
             f"--random-output-len {config['out']} "
@@ -1046,6 +1126,8 @@ def main():
                 results = run_accuracy(model, acc_config)
             elif benchmark == "serving":
                 results = run_serving_profile(model, config) if profile else run_serving(model, config)
+            elif benchmark == "agentic":
+                results = run_agentic_point(model, config)
             elif benchmark == "accuracy":
                 results = run_accuracy(model, config)
             else:
