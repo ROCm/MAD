@@ -90,6 +90,8 @@ VALID_MODELS=( \
     "GLM-5.1-FP8" \
     "DeepSeek-V4-Flash-FP8" \
     "DeepSeek-V4-Pro-FP8" \
+    "Kimi-K3.1-Pro-gfx942" \
+    "Kimi-K3.1-Pro-gfx942-dspark" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -261,12 +263,15 @@ xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 
 MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Checkpoint directory name, when it differs from the models.yaml key MODEL_NAME
+# (e.g. an arch-suffixed recipe over a shared checkpoint). Unset keeps MODEL_NAME.
+MODEL_WEIGHTS_NAME="${MODEL_WEIGHTS_NAME:-$MODEL_NAME}"
 
 
 # ------------------------
 # Model path validation and selection across all nodes
 # ------------------------
-echo "Looking for model: $MODEL_NAME"
+echo "Looking for model: $MODEL_NAME (weights dir: $MODEL_WEIGHTS_NAME)"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
@@ -306,25 +311,25 @@ check_model_path() {
 }
 
 # Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
+MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
 if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
     MODEL_PATH="$MODEL_PATH_1"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 # Check /shared-inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
+elif check_model_path "/shared_inference/models_blog/$MODEL_WEIGHTS_NAME" "/shared_inference/models_blog"; then
+    MODEL_PATH="/shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
+elif check_model_path "$MODEL_DIR/$MODEL_WEIGHTS_NAME" "$MODEL_DIR"; then
+    MODEL_PATH="$MODEL_DIR/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
 else
     echo ""
     echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
+    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_WEIGHTS_NAME"
+    echo "  - /shared_inference/models_blog/$MODEL_WEIGHTS_NAME"
     echo ""
     echo "Model must be accessible from all nodes for distributed execution."
     echo "Please ensure the model is available on all allocated nodes."
@@ -668,7 +673,6 @@ docker run --rm \
     ${LMCACHE_MAX_LOCAL_DISK_SIZE:+-e LMCACHE_MAX_LOCAL_DISK_SIZE=$LMCACHE_MAX_LOCAL_DISK_SIZE} \
     ${PYTHONHASHSEED:+-e PYTHONHASHSEED=$PYTHONHASHSEED} \
     ${PROMETHEUS_MULTIPROC_DIR:+-e PROMETHEUS_MULTIPROC_DIR=$PROMETHEUS_MULTIPROC_DIR} \
-    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
     ${ROUTER_POLICY:+-e ROUTER_POLICY=$ROUTER_POLICY} \
     ${ROUTER_PREFILL_POLICY:+-e ROUTER_PREFILL_POLICY=$ROUTER_PREFILL_POLICY} \
     ${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=$ROUTER_DECODE_POLICY} \
@@ -732,6 +736,7 @@ docker run --rm \
     ${STEP_SEC_PER_TOK:+-e STEP_SEC_PER_TOK=$STEP_SEC_PER_TOK} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
     ${DECODE_CUDAGRAPH_MODE:+-e DECODE_CUDAGRAPH_MODE=$DECODE_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \

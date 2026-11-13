@@ -499,5 +499,161 @@
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
         "args": "-N 2 -n 2"
+    },
+    {
+        "name": "pyt_vllm_disagg_moriio_kimi-k3.1-pro_gfx942_niah",
+        "dockerfile": "../../docker/vllm_disagg_inference.kimik31pro.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "moriio",
+            "inference",
+            "gfx942",
+            "mi325x",
+            "niah"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 3
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3.1-Pro-gfx942",
+            "MODEL_WEIGHTS_NAME": "Kimi-K3.1-Pro",
+            "CONNECTOR": "moriio",
+            "WIDE_EP": "0",
+            "xP": "2",
+            "yD": "1",
+            "RUN_MORI": "0",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "118000,236000,472000,690000"
+        },
+        "args": "-N 3 -n 3"
+    },
+    {
+        "name": "pyt_vllm_disagg_moriio_kimi-k3.1-pro_gfx942_agentic",
+        "dockerfile": "../../docker/vllm_disagg_inference.kimik31pro.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "moriio",
+            "inference",
+            "gfx942",
+            "mi325x",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 3
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3.1-Pro-gfx942",
+            "MODEL_WEIGHTS_NAME": "Kimi-K3.1-Pro",
+            "CONNECTOR": "moriio",
+            "WIDE_EP": "0",
+            "xP": "2",
+            "yD": "1",
+            "RUN_MORI": "0",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_256k"
+        },
+        "args": "-N 3 -n 3"
+    },
+    {
+        "name": "pyt_vllm_disagg_moriio_kimi-k3.1-pro_gfx942_dspark_niah",
+        "dockerfile": "../../docker/vllm_disagg_inference.kimik31pro.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "moriio",
+            "inference",
+            "gfx942",
+            "mi325x",
+            "niah"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 3
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3.1-Pro-gfx942-dspark",
+            "MODEL_WEIGHTS_NAME": "Kimi-K3.1-Pro",
+            "CONNECTOR": "moriio",
+            "WIDE_EP": "0",
+            "xP": "2",
+            "yD": "1",
+            "RUN_MORI": "0",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "118000,236000,472000,690000"
+        },
+        "args": "-N 3 -n 3"
+    },
+    {
+        "name": "pyt_vllm_disagg_moriio_kimi-k3.1-pro_gfx942_dspark_agentic",
+        "dockerfile": "../../docker/vllm_disagg_inference.kimik31pro.gfx942",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "moriio",
+            "inference",
+            "gfx942",
+            "mi325x",
+            "agentic"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 3
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3.1-Pro-gfx942-dspark",
+            "MODEL_WEIGHTS_NAME": "Kimi-K3.1-Pro",
+            "CONNECTOR": "moriio",
+            "WIDE_EP": "0",
+            "xP": "2",
+            "yD": "1",
+            "RUN_MORI": "0",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_SCRIPT": "agentic",
+            "AGENTIC_WORKLOAD": "conformance_256k"
+        },
+        "args": "-N 3 -n 3"
     }
 ]

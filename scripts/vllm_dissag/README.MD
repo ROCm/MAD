@@ -57,6 +57,8 @@ path).
 | `DeepSeek-V4-Flash-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `DeepSeek-V4-Pro-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `Kimi-K3.1-Pro-gfx942` | MoE + DSA + KDA | 2 (moriio TP only) | gfx942 (MI325X); own image (`kimik31pro.gfx942` Dockerfile); TP8 + DCP8 on every leg, MXFP4 experts as int4 per-group-32, prefill prefix-cache retention, sticky routing; run 2P/1D |
+| `Kimi-K3.1-Pro-gfx942-dspark` | MoE + DSA + KDA | 2 (moriio TP only) | the K3.1 card plus DSpark speculative decoding on both legs (draft next to the checkpoint) |
 
 ## Prerequisites
 
@@ -79,8 +81,8 @@ docker build -t <your-registry>/vllm-disagg:local \
 ```
 
 That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and benchmarks
-on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
+`GLM-5.1-FP8`, `Kimi-K3.1-Pro-gfx942[-dspark]`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and
+benchmarks on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
 builds every transport (moriio TP/wideEP + rixl NIXL TP + DeepEP wideEP); add
 `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio + deepep-from-base,
 faster build).
@@ -151,6 +153,22 @@ settings come from the environment: `PARTITION`, `ACCOUNT`, `QOS`.
 Prompt defaults are handled per model and should not be set by hand — the Flash
 NIAH branch primes the answer stem (`NIAH_LIST_PRIME=1.`) and the Pro branch runs
 unprimed. The MoRI dispatch trim and `DSV4_ENABLE_HMA=0` are hardcoded and cannot be overridden.
+
+`Kimi-K3.1-Pro-gfx942[-dspark]` (gfx942) use their own image too:
+
+```bash
+docker build --ulimit nofile=1048576:1048576 -t <your-registry>/vllm-disagg:kimik31pro-gfx942 \
+  -f docker/vllm_disagg_inference.kimik31pro.gfx942.ubuntu.amd.Dockerfile .
+```
+
+It is the vLLM ROCm nightly with the Kimi K3.1 model split (vllm-project/vllm#66027) as a Python overlay, the gfx942
+K3.1 AITER build (fnuz `fp8_dsv32_mla` sparse MLA), two inline vLLM patches (`fp8_ds_mla` on gfx942; DSpark draft
+workspace lane) and vllm-router with vllm-project/router#540 (`VLLM_ROUTER_SLL_OVERFLOW_DELTA`). The build fails if a
+patch anchor or marker is missing. The checkpoint is `moonshotai/Kimi-K3.1-Pro`; the cards set
+`MODEL_WEIGHTS_NAME=Kimi-K3.1-Pro`, and the DSpark card expects `Inferact/Kimi-K3.1-Pro-DSpark-preview` at
+`<checkpoint>-DSpark-preview`. Weights load through mmap page faults, so warm the page cache on every node first
+(`cat <checkpoint>/*.safetensors > /dev/null`): from a cold cache loading exceeds `LOG_WAIT_TIMEOUT_SECONDS`.
+On Broadcom Thor2 NICs also export `MORI_IB_GID_INDEX=3 NCCL_IB_GID_INDEX=3`.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
