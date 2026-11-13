@@ -211,7 +211,7 @@
           {% for v in f.variants %}
             <tr>
               <td>{{ v.label }}{% if f.node_counts | length > 1 %} · {{ v.nodes }} node{{ "s" if v.nodes != 1 }}{% endif %}{% if v.hf_repo %}<div class="faint mono" style="font-size:12px">{{ v.hf_repo }}</div>{% endif %}</td>
-              {% for sku in snap.skus %}<td class="mark">{% if sku in v.by_sku %}<a href="?v={{ v.index }}&amp;sku={{ sku }}" data-select-v="{{ v.index }}" data-select-sku="{{ sku }}" title="{{ v.by_sku[sku].name }}"><span class="yes">✓</span><span class="sr"> {{ sku }}: </span></a>{% else %}{{ ui.mark(false, sku) }}{% endif %}</td>{% endfor %}
+              {% for sku in snap.skus %}<td class="mark">{% if sku in v.by_sku %}<a href="?v={{ v.index }}&amp;sku={{ sku }}" data-select-v="{{ v.index }}" data-select-sku="{{ sku }}" title="{{ v.by_sku[sku].name }}"><span class="yes" aria-hidden="true">✓</span><span class="sr">{{ sku }}: supported, show the recipe</span></a>{% else %}{{ ui.mark(false, sku) }}{% endif %}</td>{% endfor %}
             </tr>
           {% endfor %}
           </tbody>
@@ -271,10 +271,12 @@
     var params = new URLSearchParams(location.search);
     ORDER.forEach(function (k) { if (params.get(k)) state[k] = params.get(k); });
     var nodePicker = !!document.querySelector('[data-pick="n"]');
+    // Compare datasets rather than build a CSS selector: URL values are untrusted (?sku=a"b
+    // would make querySelector throw and leave every command hidden).
+    var CMDS = Array.prototype.slice.call(document.querySelectorAll(".cmd"));
     function find(sel) {
-      var css = ".cmd";
-      Object.keys(sel).forEach(function (k) { css += "[data-" + k + '="' + sel[k] + '"]'; });
-      return document.querySelector(css);
+      var keys = Object.keys(sel);
+      return CMDS.find(function (c) { return keys.every(function (k) { return c.dataset[k] === String(sel[k]); }); }) || null;
     }
     function resolve() {
       var fixed = {};
@@ -337,7 +339,9 @@
     document.querySelectorAll(".copy").forEach(function (b) {
       b.addEventListener("click", function () {
         var text = Array.prototype.map.call(b.closest(".cmd").querySelectorAll("pre"), function (p) { return p.textContent; }).join("\n\n");
-        navigator.clipboard.writeText(text).then(function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); });
+        function show(label) { b.textContent = label; setTimeout(function () { b.textContent = "Copy"; }, 1500); }
+        if (!navigator.clipboard) { show("Select and copy"); return; }
+        navigator.clipboard.writeText(text).then(function () { show("Copied"); }, function () { show("Copy failed"); });
       });
     });
     apply();

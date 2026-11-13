@@ -98,7 +98,7 @@ roadmap_source:
   label: new-model
 
 # Extra roadmap items that have no issue yet. PUBLIC-SAFE ITEMS ONLY (see header).
-# status: planned | in-progress | blocked
+# status: planned | in progress | in review | blocked   (in-progress also accepted; default planned)
 roadmap: []
 #  - model: Example-Model-70B
 #    framework: vLLM

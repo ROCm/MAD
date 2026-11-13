@@ -139,6 +139,18 @@ def load_status(path=STATUS_PATH, internal_roadmap_path=None, priority_path=None
     if not status["release"]:
         raise ValueError(f"{path}: 'release' is required (e.g. v26.10)")
     version_key(status["release"])
+    import recipes  # the manual per-node recipes live there
+    for registry, entry in status["frameworks"].items():
+        if not isinstance(entry, dict) or not entry.get("name"):
+            raise ValueError(f"{path}: frameworks.{registry} needs a 'name'")
+        if entry.get("k8s") and (entry["k8s"] != "manual" or registry not in recipes.MANUAL_STEPS):
+            raise ValueError(f"{path}: frameworks.{registry}: k8s: manual needs a recipe in "
+                             f"recipes.MANUAL_STEPS (have: {sorted(recipes.MANUAL_STEPS)})")
+    for item in status["roadmap"]:
+        status_value = normalize_status(item.get("status"))
+        if status_value not in ROADMAP_STATUSES:
+            raise ValueError(f"{path}: roadmap item {item.get('model')!r}: status must be one of "
+                             f"{', '.join(ROADMAP_STATUSES)}, got {item.get('status')!r}")
     status["internal"] = False
     status["priority"] = load_priority(priority_path or os.path.join(os.path.dirname(os.path.abspath(path)), "priority.yaml"))
     if internal_roadmap_path:
@@ -149,6 +161,14 @@ def load_status(path=STATUS_PATH, internal_roadmap_path=None, priority_path=None
         status["roadmap"] = status["roadmap"] + [dict(item, internal=True) for item in items]
         status["internal"] = True
     return status
+
+
+ROADMAP_STATUSES = ("in review", "in progress", "planned", "blocked")
+
+
+def normalize_status(value):
+    """'in-progress' / 'In Progress' / missing -> 'in progress' / 'planned', as the pages count them."""
+    return re.sub(r"[-_\s]+", " ", str(value or "planned")).strip().lower()
 
 
 def version_key(version):
@@ -440,14 +460,26 @@ def docker_context(model):
     return "." if "primus" in model["dockerfile"].lower() else "./docker"
 
 
+def launcher_of(model):
+    """Primus launcher of a config: the <launcher> in --config_path examples/<launcher>/configs/...,
+    else the second tag (get_models_json.py writes ["primus", launcher, arch, name])."""
+    config = arg_value(model.get("args", ""), "--config_path") or ""
+    parts = config.split("/")
+    if len(parts) > 2 and parts[0] == "examples":
+        return parts[1]
+    tags = model.get("tags", [])
+    return tags[1] if len(tags) > 1 else ""
+
+
 def framework_of(model, frameworks):
-    """(framework display name, workload) from status.yaml; Primus splits by launcher tag."""
+    """(framework display name, workload) from status.yaml; Primus splits by launcher."""
     entry = frameworks.get(model["registry"])
     if entry is None:
         return model["registry"], "other"
     name = entry["name"]
-    if entry.get("by_launcher") and len(model.get("tags", [])) > 1:
-        name = f"{name} {model['tags'][1].replace('_', ' ').title()}"
+    launcher = launcher_of(model) if entry.get("by_launcher") else ""
+    if launcher:
+        name = f"{name} {launcher.replace('_', ' ').title()}"
     return name, entry.get("workload", "other")
 
 
@@ -456,8 +488,7 @@ def describe_model(model, frameworks, suite_tags, images, opt_in=False):
     framework, workload = framework_of(model, frameworks)
     # Configs named after a stage or a recipe ("stage1-posttrain") say nothing about the model;
     # status.yaml gives their launcher a name to put in front.
-    prefix = (frameworks.get(model["registry"], {}).get("label_prefix") or {}).get(
-        model["tags"][1] if len(model.get("tags", [])) > 1 else "")
+    prefix = (frameworks.get(model["registry"], {}).get("label_prefix") or {}).get(launcher_of(model))
     if prefix and not hf_repo:
         label = f"{prefix}-{label}"
     image = images[model["dockerfile"]]
@@ -548,21 +579,25 @@ def source_repo_of(repo_root):
     return m.group(1) if m else "ROCm/MAD"
 
 
-def roadmap_items(status, rows, warnings, github=True):
+def roadmap_items(status, rows, warnings, github=True, required=False):
     """Hand-written roadmap items plus, when configured, the ones read from GitHub issues and PRs."""
-    manual = [dict(item, source=item.get("source", "status.yaml")) for item in status["roadmap"]]
+    manual = [dict(item, source=item.get("source", "status.yaml"), status=normalize_status(item.get("status")))
+              for item in status["roadmap"]]
     if not github or not status["roadmap_source"].get("repo"):
         return manual, []
     import github_roadmap  # imports this module; only needed when a GitHub source is configured
-    oncoming, landed = github_roadmap.collect_roadmap(status["roadmap_source"], rows, status["frameworks"], warnings)
+    oncoming, landed = github_roadmap.collect_roadmap(status["roadmap_source"], rows, status["frameworks"], warnings,
+                                                      required=required)
     return manual + oncoming, landed
 
 
 def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, source_repo=None, github=True,
-                   inspect_images=True):
+                   inspect_images=True, require_roadmap=False):
     """Everything the site shows. `repo_root` is the MAD tree to describe (models, docker/, Primus);
     `status` (the curated data) can come from a different checkout. `inspect_images` reads base
-    images' ROCm versions from their registries where the tag does not encode one."""
+    images' ROCm versions from their registries where the tag does not encode one.
+    `require_roadmap` raises instead of warning when the GitHub roadmap cannot be read, so a
+    deploy does not replace the published Roadmap with an empty one."""
     warnings = []
     excluded = set(status["exclude"])
     models = [m for m in discover_models(repo_root) if m["name"] not in excluded and not untracked_product(m)]
@@ -589,6 +624,10 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
 
     hidden = multinode_only(repo_root)
     rows = [describe_model(m, status["frameworks"], status["suite_tags"], images, is_opt_in(m, hidden)) for m in models]
+    # A config whose skip_gpu_arch rules out every tracked product has no recipe to show.
+    for r in [r for r in rows if not r["skus"]]:
+        warn(f"{r['name']}: runs on none of {', '.join(SKUS)}; left out", warnings)
+    rows = [r for r in rows if r["skus"]]
     merge_one_page(rows, status["frameworks"])
     order = {name: i for i, name in enumerate(status["frameworks"])}
     ranks = priority_ranks(rows, status.get("priority") or {}, warnings)
@@ -609,7 +648,7 @@ def build_snapshot(status, version=None, state="live", repo_root=REPO_ROOT, sour
         first_use.setdefault(r["dockerfile"], i)
     image_rows.sort(key=lambda i: first_use[i["dockerfile"]])
 
-    roadmap, landed = roadmap_items(status, rows, warnings, github)
+    roadmap, landed = roadmap_items(status, rows, warnings, github, require_roadmap)
     return {
         "schema": SCHEMA,
         "version": version or status["release"],

@@ -1,7 +1,10 @@
 """Unit tests for recipe generation and recipe-page grouping (no madengine, Docker or GPU needed)."""
 import copy
+import json
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
@@ -41,6 +44,8 @@ def test_docker_single_node_mirrors_madengine():
     assert "--device=/dev/kfd --device=/dev/dri" in text
     assert '-v "$PWD":/myworkspace -w /myworkspace' in text
     assert "-e MAD_RUNTIME_NGPUS=8" in text and "HIP_VISIBLE_DEVICES" not in text
+    # madengine's AMD options; SYS_ADMIN and /dev/fuse only come with profiling tools or pre-scripts.
+    assert "-u root" in text and "SYS_ADMIN" not in text and "/dev/fuse" not in text
     assert "-e MAD_OUTPUT_CSV=perf_X.csv" in text
     assert "cp -vLR scripts/vllm/. run_directory/" in text
     assert "cd run_directory && bash run.sh --model_repo org/X --config c.yaml" in text
@@ -49,6 +54,7 @@ def test_docker_single_node_mirrors_madengine():
 def test_docker_restricts_gpus_and_selects_isa():
     text = code(recipes.docker_steps(make_row(n_gpus="2"), "MI300X"))
     assert "-e HIP_VISIBLE_DEVICES=0,1" in text and "-e MAD_RUNTIME_NGPUS=2" in text
+    assert "-e RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=" in text
     assert "MAD_SYSTEM_GPU_ARCHITECTURE=gfx942" in text
     assert "'AMD Instinct MI300X'" in text
 
@@ -165,6 +171,13 @@ def test_opt_in_recipe_uses_primus_launcher():
     assert "--additional-context-file multinode.json" in text
     assert "git submodule update --init scripts/Primus" in text
     assert recipes.unavailable(row)["local"] == "the config is sized for two or more nodes."
+
+
+def test_opt_in_recipe_reads_config_path_with_equals():
+    row = make_row(name="jax-maxtext/x", registry="jax-maxtext", dockerfile="docker/primus_maxtext",
+                   scripts="scripts/jax-maxtext/run.sh", nodes=2, args="--config_path=examples/maxtext/x.yaml",
+                   status="opt-in", switch="JAX_MAXTEXT_INCLUDE_MULTINODE")
+    assert '"config_path": "examples/maxtext/x.yaml"' in code(recipes.recipe(row, "MI355X")["slurm"]["madengine"])
 
 
 def test_multi_node_script_in_subdirectory_submits_from_registry_dir():
@@ -359,3 +372,66 @@ def test_sku_label_ranges():
 def test_mi455x_recipe_uses_gfx1250():
     assert recipes.ISA_OF["MI455X"] == "gfx1250"
     assert "MAD_SYSTEM_GPU_ARCHITECTURE=gfx1250" in code(recipes.docker_steps(make_row(skus=("MI455X",)), "MI455X"))
+
+
+# --------------------------------------------------------------------------- build.py safety
+
+
+def test_check_out_dir_refuses_what_it_did_not_write(tmp_path):
+    with pytest.raises(SystemExit, match="is or contains"):
+        build.check_out_dir(build.collect.REPO_ROOT)
+    with pytest.raises(SystemExit, match="is or contains"):
+        build.check_out_dir(os.path.dirname(build.collect.REPO_ROOT))
+    mine = tmp_path / "notes"
+    mine.mkdir()
+    (mine / "todo.txt").write_text("keep me")
+    with pytest.raises(SystemExit, match="not a previous build"):
+        build.check_out_dir(str(mine))
+    build.check_out_dir(str(tmp_path / "new"))  # missing: fine
+    (tmp_path / "old").mkdir()
+    (tmp_path / "old" / build.SITE_MARKER).write_text("")
+    (tmp_path / "old" / "index.html").write_text("")
+    build.check_out_dir(str(tmp_path / "old"))  # a previous build: fine
+
+
+def _repo(tmp_path):
+    import subprocess
+    repo = str(tmp_path / "mad")
+    run = lambda *a: subprocess.run(["git", "-C", repo, *a], check=True, capture_output=True, text=True).stdout.strip()
+    os.makedirs(repo)
+    run("init", "-q")
+    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one")
+    run("remote", "add", "upstream", "https://github.com/ROCm/MAD.git")
+    return repo, run
+
+
+def test_check_freezable_needs_a_clean_published_head(tmp_path):
+    repo, run = _repo(tmp_path)
+    with pytest.raises(SystemExit, match="not on ROCm/MAD develop"):
+        build.check_freezable(repo, "ROCm/MAD")
+    run("update-ref", "refs/remotes/upstream/develop", "HEAD")
+    build.check_freezable(repo, "ROCm/MAD")
+    with pytest.raises(SystemExit, match="no git remote points at other/MAD"):
+        build.check_freezable(repo, "other/MAD")
+    build.check_freezable(repo, "other/MAD", allow_unpublished=True)
+    with open(os.path.join(repo, "f.txt"), "w") as f:
+        f.write("x")
+    run("add", "f.txt")
+    with pytest.raises(SystemExit, match="clean tree"):
+        build.check_freezable(repo, "ROCm/MAD", allow_unpublished=True)
+
+
+def test_load_releases_rejects_a_newer_schema(tmp_path):
+    (tmp_path / "v26.10.json").write_text(json.dumps({"version": "v26.10", "schema": build.collect.SCHEMA + 1}))
+    with pytest.raises(SystemExit, match="newer than this build.py"):
+        build.load_releases(str(tmp_path))
+    (tmp_path / "v26.10.json").write_text(json.dumps({"version": "v26.10", "schema": build.collect.SCHEMA}))
+    assert [r["version"] for r in build.load_releases(str(tmp_path))] == ["v26.10"]
+
+
+def test_write_step_summary(tmp_path):
+    path = tmp_path / "summary.md"
+    build.write_step_summary({"warnings": []}, str(path))
+    assert not path.exists()
+    build.write_step_summary({"warnings": ["docker/x: ROCm unknown"]}, str(path))
+    assert "1 warning(s)" in path.read_text() and "- docker/x: ROCm unknown" in path.read_text()

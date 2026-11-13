@@ -146,6 +146,67 @@ def test_landed_needs_the_requested_precision_and_framework():
     assert [i["number"] for i in landed(CATALOG + [FP8_ROW], body=sglang.replace("SGLang", "vLLM"))] == [11]
 
 
+def form(hf, framework="vLLM", precisions="_No response_"):
+    return (FORM_BODY.replace("zai-org/GLM-5.3-Flash", hf).replace("\nvLLM\n", f"\n{framework}\n")
+            .replace("### Precision(s)\n\n_No response_", f"### Precision(s)\n\n{precisions}"))
+
+
+def test_form_precisions():
+    assert gr.form_precisions({"Precision(s)": "BF16, FP8"}) == ["bf16", "fp8"]
+    assert gr.form_precisions({"Precision(s)": "MXFP4 and FP8"}) == ["mxfp4", "fp8"]
+    assert gr.form_precisions({"Precision(s)": "nanoo_fp8"}) == ["nanoo_fp8"]
+    assert gr.form_precisions({"Precision(s)": None}) == []
+
+
+def test_landed_honors_the_form_precision():
+    """The base checkpoint plus 'Precision(s): FP8' is not landed by a BF16 card."""
+    rows = [{"name": "vllm/llama", "registry": "vllm", "hf_repo": "meta-llama/Llama-3.1-8B", "model": "Llama-3.1-8B",
+             "precision": "bf16", "framework": "vLLM"}]
+    landed = lambda rows, body: gr.build_roadmap({"issues": [issue(12, body=body)], "prs": []}, rows, FRAMEWORKS,
+                                                 "new-model", FakeFiles())[1]
+    assert landed(rows, form("meta-llama/Llama-3.1-8B", precisions="FP8")) == []
+    assert len(landed(rows, form("meta-llama/Llama-3.1-8B", precisions="BF16"))) == 1
+    # Every requested precision must be there.
+    assert landed(rows, form("meta-llama/Llama-3.1-8B", precisions="BF16, FP8")) == []
+    fp8 = dict(rows[0], precision="fp8")
+    assert len(landed(rows + [fp8], form("meta-llama/Llama-3.1-8B", precisions="BF16, FP8"))) == 1
+
+
+def test_landed_matches_the_registry_framework_name():
+    """The form offers 'Primus'; the catalog shows the launcher ('Primus Megatron')."""
+    frameworks = dict(FRAMEWORKS, primus_train={"name": "Primus", "by_launcher": True})
+    rows = [{"name": "primus_train/megatron_MI355X_llama3.1_8B-pretrain", "registry": "primus_train", "hf_repo": None,
+             "model": "llama3.1_8B-pretrain", "precision": "", "framework": "Primus Megatron"}]
+    item = {"hf_repo": "meta-llama/llama3.1_8B-pretrain", "framework": "Primus", "precisions": []}
+    assert gr.is_landed(item, rows, frameworks)
+    assert not gr.is_landed(dict(item, framework="JAX MaxText"), rows, frameworks)
+
+
+def test_issue_form_frameworks_match_status_yaml():
+    """Every framework the onboarding form offers is a name the catalog uses (or 'Other')."""
+    import yaml
+    root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    with open(os.path.join(root, ".github", "ISSUE_TEMPLATE", "new_model.yml")) as f:
+        template = yaml.safe_load(f)
+    options = next(b["attributes"]["options"] for b in template["body"] if b.get("id") == "framework")
+    frameworks = collect.load_status()["frameworks"].values()
+    assert set(options) - {"Other"} <= {entry["name"] for entry in frameworks}
+    models = {entry["name"] for entry in frameworks if entry.get("workload") != "microbenchmark"}
+    assert models - set(options) == set(), "add the missing frameworks to the issue form"
+
+
+def test_collect_roadmap_required_raises(monkeypatch):
+    def boom(*args, **kwargs):
+        raise urllib.error.URLError("network down")
+    monkeypatch.setattr(gr, "fetch", boom)
+    import pytest
+    with pytest.raises(RuntimeError, match="failed"):
+        gr.collect_roadmap({"repo": "ROCm/MAD"}, [], FRAMEWORKS, [], token="t", required=True)
+    monkeypatch.setattr(gr, "github_token", lambda: None)
+    with pytest.raises(RuntimeError, match="no GitHub token"):
+        gr.collect_roadmap({"repo": "ROCm/MAD"}, [], FRAMEWORKS, [], required=True)
+
+
 def test_unlabeled_model_prs():
     raw = {"issues": [issue(10)],
            "prs": [pr(20, closes=[10]), pr(21, labels=("new-model",)), pr(22), pr(23, files=("README.md",))]}
@@ -171,4 +232,4 @@ def test_collect_roadmap_without_token(monkeypatch):
 def test_roadmap_items_merges_manual_items():
     status = {"roadmap": [{"model": "Hand-written"}], "roadmap_source": {}, "frameworks": {}}
     items, landed = collect.roadmap_items(status, [], [])
-    assert items == [{"model": "Hand-written", "source": "status.yaml"}] and landed == []
+    assert items == [{"model": "Hand-written", "source": "status.yaml", "status": "planned"}] and landed == []

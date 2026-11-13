@@ -220,23 +220,51 @@ def family_key(text):
 # --------------------------------------------------------------------------- roadmap
 
 
-def is_landed(item, catalog_rows):
-    """True when one catalog card already is what the item asks for: same model family, the
-    requested precision (when the checkpoint names one) and a requested framework (when known)."""
+def form_precisions(form):
+    """Precisions named in the issue form's 'Precision(s)' field ('BF16, FP8' -> ['bf16', 'fp8'])."""
+    text = (form.get("Precision(s)") or "").lower()
+    found = []
+    for token in collect._PRECISION_TOKENS:  # longest first; a match is blanked so NANOO_FP8 is not also FP8
+        pattern = rf"(?<![a-z0-9]){token}(?![a-z0-9])"
+        if re.search(pattern, text):
+            found.append(token)
+            text = re.sub(pattern, " ", text)
+    return found
+
+
+def requested_precisions(item):
+    """The form's precisions, else the one the checkpoint name carries, else none (any precision)."""
+    if item.get("precisions"):
+        return item["precisions"]
+    precision = collect.precision_of({"name": item["hf_repo"], "args": f"--model_repo {item['hf_repo']}"})
+    return [precision] if precision else []
+
+
+def row_frameworks(row, frameworks):
+    """Names a catalog row answers to: its own ('Primus Megatron') and its registry's ('Primus'),
+    which is what the issue form offers."""
+    names = {row["framework"].lower()}
+    base = (frameworks or {}).get(row.get("registry"), {}).get("name")
+    if base:
+        names.add(base.lower())
+    return names
+
+
+def is_landed(item, catalog_rows, frameworks=None):
+    """True when the catalog already has what the item asks for: for every requested precision
+    (the form's, else the checkpoint's), a card of the same model family in a requested framework
+    (when the item names one) with that precision."""
     if not item["hf_repo"]:
         return False
     family = family_key(item["hf_repo"])
-    precision = collect.precision_of({"name": item["hf_repo"], "args": f"--model_repo {item['hf_repo']}"})
-    frameworks = {f.strip().lower() for f in item["framework"].split(",")} - {"", "–"}
-    for row in catalog_rows:
-        if family not in {family_key(row["model"]), family_key(row["hf_repo"] or row["model"])}:
-            continue
-        if precision and row["precision"] != precision:
-            continue
-        if frameworks and row["framework"].lower() not in frameworks:
-            continue
-        return True
-    return False
+    wanted = {f.strip().lower() for f in item["framework"].split(",")} - {"", "–"}
+    matches = [row for row in catalog_rows
+               if family in {family_key(row["model"]), family_key(row["hf_repo"] or row["model"])}
+               and (not wanted or row_frameworks(row, frameworks) & wanted)]
+    precisions = requested_precisions(item)
+    if not precisions:
+        return bool(matches)
+    return all(any(row["precision"] == p for row in matches) for p in precisions)
 
 
 def short_list(names, limit=4):
@@ -279,7 +307,7 @@ def build_roadmap(raw, catalog_rows, frameworks, label, files):
         repo_id = hf_id(issue)
         items.append({
             "source": "issue", "number": issue["number"], "url": issue["url"], "title": issue["title"],
-            "model": repo_id or issue["title"], "hf_repo": repo_id,
+            "model": repo_id or issue["title"], "hf_repo": repo_id, "precisions": form_precisions(form),
             "framework": form.get("Framework") or ", ".join(frameworks_of([f["path"] for p in prs for f in p["files"]["nodes"]], frameworks)) or "–",
             "skus": form_gpus(form) or sorted({s for e in new for s in e["skus"]}, key=collect.SKUS.index),
             "tags": [e["name"] for e in new],
@@ -306,7 +334,7 @@ def build_roadmap(raw, catalog_rows, frameworks, label, files):
 
     oncoming, landed = [], []
     for item in items:
-        (landed if is_landed(item, catalog_rows) else oncoming).append(item)
+        (landed if is_landed(item, catalog_rows, frameworks) else oncoming).append(item)
     # By status, most recently updated first within each.
     order = {"in review": 0, "in progress": 1, "planned": 2, "blocked": 3}
     oncoming.sort(key=lambda i: i["updated"], reverse=True)
@@ -322,15 +350,24 @@ def unlabeled_model_prs(raw, label):
             and not {r["number"] for r in pr["closingIssuesReferences"]["nodes"]} & labeled_issues]
 
 
-def collect_roadmap(source, catalog_rows, frameworks, warnings, token=None):
-    """Roadmap items for a snapshot; on any GitHub failure, warn and return nothing."""
+def collect_roadmap(source, catalog_rows, frameworks, warnings, token=None, required=False):
+    """Roadmap items for a snapshot; on any GitHub failure, warn and return nothing.
+
+    With `required`, a failure raises RuntimeError instead: a deploy keeps the published site
+    rather than replace its Roadmap with an empty one."""
     repo, label = source["repo"], source.get("label", "new-model")
     token = token or github_token()
     if not token:
-        collect.warn(f"no GitHub token (GH_TOKEN/GITHUB_TOKEN or gh auth); roadmap from {repo} skipped", warnings)
+        message = f"no GitHub token (GH_TOKEN/GITHUB_TOKEN or gh auth); roadmap from {repo} skipped"
+        if required:
+            raise RuntimeError(message)
+        collect.warn(message, warnings)
         return [], []
     try:
         return build_roadmap(fetch(repo, label, token), catalog_rows, frameworks, label, Files(token))
     except (OSError, RuntimeError, KeyError, ValueError) as e:
-        collect.warn(f"reading the roadmap from {repo} failed ({e}); using dashboard/status.yaml only", warnings)
+        message = f"reading the roadmap from {repo} failed ({e})"
+        if required:
+            raise RuntimeError(message) from e
+        collect.warn(message + "; using dashboard/status.yaml only", warnings)
         return [], []

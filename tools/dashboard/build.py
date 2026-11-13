@@ -17,7 +17,11 @@ Usage (from anywhere; needs madengine, pyyaml, jinja2):
     python3 tools/dashboard/build.py --freeze v26.10                   # writes dashboard/releases/v26.10.json
 
 Options:
-    --strict    fail when the snapshot has warnings (unknown ROCm version, missing Primus checkout, ...)
+    --strict             fail when the snapshot has warnings (unknown ROCm version, missing Primus checkout, ...)
+    --require-roadmap    fail when the GitHub roadmap cannot be read (the deploy uses it)
+
+--out is deleted and rewritten; the build refuses a directory that is not empty and was not
+written by an earlier build. --freeze needs a clean tree whose HEAD is on the source repo's develop.
 """
 import argparse
 import csv
@@ -26,6 +30,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 
 import jinja2
@@ -40,13 +45,70 @@ RELEASES_DIR = os.path.join(DASHBOARD_DIR, "releases")
 TEMPLATES_DIR = os.path.join(DASHBOARD_DIR, "templates")
 
 
-def load_releases():
-    """Frozen snapshots, oldest first."""
+def load_releases(releases_dir=RELEASES_DIR):
+    """Frozen snapshots, oldest first. A snapshot from a newer schema than this code is an error:
+    upgrade() can only fill in fields older snapshots lack."""
     releases = []
-    for path in glob.glob(os.path.join(RELEASES_DIR, "v*.json")):
+    for path in glob.glob(os.path.join(releases_dir, "v*.json")):
         with open(path) as f:
-            releases.append(json.load(f))
+            snapshot = json.load(f)
+        if snapshot.get("schema", 1) > collect.SCHEMA:
+            raise SystemExit(f"ERROR: {path} has schema {snapshot['schema']}, newer than this build.py "
+                             f"(schema {collect.SCHEMA}); update tools/dashboard")
+        releases.append(snapshot)
     return sorted(releases, key=lambda s: collect.version_key(s["version"]))
+
+
+# Written into every site; its presence is what lets a later build delete the directory.
+SITE_MARKER = ".nojekyll"
+
+
+def check_out_dir(out_dir, repo_root=collect.REPO_ROOT):
+    """Refuse to delete anything but a previous build: build_site() starts with rmtree(out_dir)."""
+    out = os.path.realpath(out_dir)
+    for keep in {os.path.realpath(repo_root), os.path.realpath(collect.REPO_ROOT), os.path.realpath(os.path.expanduser("~"))}:
+        if out == keep or keep.startswith(out.rstrip(os.sep) + os.sep):
+            raise SystemExit(f"ERROR: --out {out_dir} is or contains {keep}; use a dedicated directory such as _site")
+    if os.path.isdir(out) and os.listdir(out) and not os.path.exists(os.path.join(out, SITE_MARKER)):
+        raise SystemExit(f"ERROR: --out {out_dir} is not empty and is not a previous build (no {SITE_MARKER}); "
+                         "it would be deleted. Use a dedicated directory such as _site")
+
+
+def _git(repo_root, *args):
+    return subprocess.run(["git", "-C", repo_root, *args], capture_output=True, text=True)
+
+
+def check_freezable(repo_root, source_repo, allow_unpublished=False):
+    """A frozen release pins HEAD and its recipes `git checkout` it, so HEAD must be clean and on
+    <source_repo>'s develop (as one of this checkout's remotes knows it)."""
+    dirty = _git(repo_root, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=dirty").stdout
+    if dirty.strip():
+        raise SystemExit("ERROR: --freeze needs a clean tree; the snapshot would not match the commit it pins:\n"
+                         + dirty.rstrip())
+    if allow_unpublished:
+        return
+    remotes = [r for r in _git(repo_root, "remote").stdout.split()
+               if re.search(rf"github\.com[:/]{re.escape(source_repo)}(?:\.git)?/?$",
+                            _git(repo_root, "remote", "get-url", r).stdout.strip(), re.I)]
+    if not remotes:
+        raise SystemExit(f"ERROR: no git remote points at {source_repo}; add one and fetch it "
+                         f"(git remote add upstream https://github.com/{source_repo}.git && git fetch upstream), "
+                         "or pass --allow-unpublished")
+    if not any(_git(repo_root, "merge-base", "--is-ancestor", "HEAD", f"{r}/develop").returncode == 0 for r in remotes):
+        raise SystemExit(f"ERROR: HEAD is not on {source_repo} develop ({', '.join(r + '/develop' for r in remotes)}); "
+                         "the frozen recipes would check out a commit users cannot fetch. Fetch the remote and check "
+                         "out a develop commit, or pass --allow-unpublished")
+
+
+def write_step_summary(snapshot, path=None):
+    """Snapshot warnings in the GitHub Actions job summary, so a green run still shows them."""
+    path = path or os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path or not snapshot["warnings"]:
+        return
+    with open(path, "a") as f:
+        f.write(f"### MAD Recipes: {len(snapshot['warnings'])} warning(s)\n\n")
+        f.writelines(f"- {w}\n" for w in snapshot["warnings"])
+        f.write("\n")
 
 
 def upgrade(snapshot):
@@ -370,6 +432,7 @@ def build_site(out_dir, snapshot, releases, logos=None):
     )
     icon_set = icons.IconSet(mode=logos)
     env.globals["icon_set"] = icon_set
+    check_out_dir(out_dir)
     if os.path.isdir(out_dir):
         shutil.rmtree(out_dir)
     os.makedirs(out_dir)
@@ -379,7 +442,7 @@ def build_site(out_dir, snapshot, releases, logos=None):
     if icon_set.amd_file("favicon.svg"):
         shutil.copy(icon_set.amd_file("favicon.svg"), os.path.join(out_dir, "favicon.svg"))
     # Pages runs Jekyll otherwise, which is slow and skips underscore paths.
-    open(os.path.join(out_dir, ".nojekyll"), "w").close()
+    open(os.path.join(out_dir, SITE_MARKER), "w").close()
 
     trees = [make_tree(snapshot, "", "develop")] + [make_tree(r, r["version"], r["version"]) for r in releases]
     render_site(env, out_dir, trees[0], trees, releases[-1] if releases else None)
@@ -447,6 +510,10 @@ def main():
                         help="brand logos or neutral monograms/glyphs (default: `logos:` in dashboard/icons.yaml)")
     parser.add_argument("--roadmap-report", action="store_true",
                         help="print open model PRs missing the roadmap label and landed-but-open items, then exit")
+    parser.add_argument("--require-roadmap", action="store_true",
+                        help="fail instead of warning when the GitHub roadmap cannot be read (for deploys)")
+    parser.add_argument("--allow-unpublished", action="store_true",
+                        help="--freeze a commit that is not on the source repo's develop (testing only)")
     parser.add_argument("--list-pages", action="store_true",
                         help="print every framework's model pages in display order (for dashboard/priority.yaml), then exit")
     args = parser.parse_args()
@@ -458,15 +525,18 @@ def main():
 
     status = collect.load_status(internal_roadmap_path=collect.INTERNAL_ROADMAP_PATH if args.internal else None)
     repo_root = os.path.abspath(args.repo_root)
+    if args.require_roadmap and args.offline:
+        parser.error("--require-roadmap reads the roadmap from GitHub; it cannot be combined with --offline")
     snapshot_args = {"repo_root": repo_root, "source_repo": args.source_repo, "github": not args.offline,
-                     "inspect_images": not args.offline}
+                     "inspect_images": not args.offline, "require_roadmap": args.require_roadmap}
 
     if args.roadmap_report:
         roadmap_report(status, repo_root)
         return
 
     if args.list_pages:
-        list_pages(collect.build_snapshot(status, **snapshot_args | {"github": False, "inspect_images": False}),
+        list_pages(collect.build_snapshot(status, **snapshot_args | {"github": False, "inspect_images": False,
+                                                                     "require_roadmap": False}),
                    status["priority"])
         return
 
@@ -475,11 +545,19 @@ def main():
         path = os.path.join(RELEASES_DIR, f"{args.freeze}.json")
         if os.path.exists(path):
             sys.exit(f"ERROR: {path} already exists; frozen releases are immutable")
+        check_freezable(repo_root, args.source_repo or collect.source_repo_of(repo_root), args.allow_unpublished)
         if args.freeze != status["release"]:
             print(f"WARNING: freezing {args.freeze} but status.yaml release is {status['release']}", file=sys.stderr)
-        snapshot = collect.build_snapshot(status, version=args.freeze, state="frozen", **snapshot_args)
     else:
-        snapshot = collect.build_snapshot(status, **snapshot_args)
+        check_out_dir(args.out, repo_root)
+    try:
+        if args.freeze:
+            snapshot = collect.build_snapshot(status, version=args.freeze, state="frozen", **snapshot_args)
+        else:
+            snapshot = collect.build_snapshot(status, **snapshot_args)
+    except RuntimeError as e:  # --require-roadmap and GitHub could not be read
+        sys.exit(f"ERROR: {e}")
+    write_step_summary(snapshot)
 
     if args.strict and snapshot["warnings"]:
         sys.exit(f"ERROR: --strict and {len(snapshot['warnings'])} warning(s); see above")

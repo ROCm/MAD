@@ -94,6 +94,7 @@
   .results.open { display: block; }
   .results a { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; color: var(--ink); font-size: 14px; border-bottom: 1px solid var(--line); }
   .results a:last-child { border-bottom: 0; }
+  .results div.faint { padding: 8px 12px; font-size: 14px; }
   .results a:hover, .results a.active { background: var(--subtle); text-decoration: none; }
   .results .fw { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
   .tools { display: flex; align-items: center; gap: 14px; }
@@ -185,13 +186,18 @@
   {% block style %}{% endblock %}
 </style>
 <script>
-  (function () { var t = localStorage.getItem("mad-theme"); if (t) document.documentElement.dataset.theme = t; })();
+  // Site storage can be blocked (it then throws); every page works without it.
+  window.madStore = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  (function () { var t = madStore.get("mad-theme"); if (t) document.documentElement.dataset.theme = t; })();
 </script>
 </head>
 <body>
 {% set nav = [("models", "models/index.html", "Models"), ("rocm", "rocm/index.html", "ROCm"), ("roadmap", "roadmap/index.html", "Roadmap")] %}
 <div class="topbar" id="topbar"><div class="wrap">
-  <button class="menu-btn" type="button" aria-label="Menu" aria-controls="sections" onclick="document.getElementById('topbar').classList.toggle('open')">☰</button>
+  <button class="menu-btn" type="button" aria-label="Menu" aria-controls="sections" aria-expanded="false" onclick="this.setAttribute('aria-expanded', document.getElementById('topbar').classList.toggle('open'))">☰</button>
   <div class="brand">
     <a class="amd-link" href="https://www.amd.com/" title="AMD">{{ icons.amd_logo(72) }}</a>
     <span class="divider" aria-hidden="true"></span>
@@ -202,13 +208,14 @@
     <a href="{{ site }}/releases/index.html"{% if active == "releases" %} aria-current="page"{% endif %}>Releases</a>
   </nav>
   <div class="search">
-    <input id="search" type="search" placeholder="Search models…" aria-label="Search models" autocomplete="off">
+    <input id="search" type="search" placeholder="Search models…" aria-label="Search models" autocomplete="off"
+           role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="false">
     <kbd>/</kbd>
-    <div class="results" id="search-results" role="listbox"></div>
+    <div class="results" id="search-results" role="listbox" aria-label="Matching models"></div>
   </div>
   <div class="tools">
     <label class="version"><span class="sr">Version</span>
-      <select onchange="location.href = this.value">
+      <select id="version">
         {% for v in versions %}<option value="{{ v.href }}"{% if v.current %} selected{% endif %}>{{ v.label }}</option>{% endfor %}
       </select>
     </label>
@@ -241,38 +248,55 @@
     var root = document.documentElement;
     var dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     root.dataset.theme = dark ? "light" : "dark";
-    localStorage.setItem("mad-theme", root.dataset.theme);
+    madStore.set("mad-theme", root.dataset.theme);
   });
+  // Version switcher: follow a choice made with the mouse or confirmed with Enter, not every
+  // arrow key (Chrome and Edge on Windows fire "change" while a closed select is arrowed through).
+  (function () {
+    var select = document.getElementById("version"), keyed = false;
+    function go() { if (!select.options[select.selectedIndex].defaultSelected) location.href = select.value; }
+    select.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); go(); } else if (ev.key !== "Tab") { keyed = true; }
+    });
+    select.addEventListener("change", function () { if (!keyed) go(); });
+    select.addEventListener("blur", function () { keyed = false; });
+    select.addEventListener("mousedown", function () { keyed = false; });
+  })();
   // Top-bar search over search.js (window.MAD_INDEX); every word must match; "/" focuses it.
   (function () {
     var input = document.getElementById("search"), box = document.getElementById("search-results");
     var root = {{ root | tojson }}, index = window.MAD_INDEX || [], active = -1;
+    function open(on) { box.classList.toggle("open", on); input.setAttribute("aria-expanded", on); }
     function render() {
       var words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-      if (!words.length) { box.classList.remove("open"); return; }
+      active = -1; input.removeAttribute("aria-activedescendant");
+      // Clear old hits too, so Enter cannot follow a result that is no longer shown.
+      if (!words.length) { box.innerHTML = ""; open(false); return; }
       var hits = index.filter(function (e) { return words.every(function (w) { return e.k.indexOf(w) >= 0; }); }).slice(0, 12);
-      box.innerHTML = hits.length ? "" : '<a href="#" class="faint">No matching models</a>';
-      hits.forEach(function (e) {
+      box.innerHTML = hits.length ? "" : '<div class="faint" role="option" aria-disabled="true">No matching models</div>';
+      hits.forEach(function (e, i) {
         var a = document.createElement("a");
+        a.id = "search-hit-" + i; a.setAttribute("role", "option");
         a.href = root + "/models/" + e.p + "/index.html";
         a.innerHTML = "<span></span><span class=fw></span>";
         a.firstChild.textContent = e.n; a.lastChild.textContent = e.f;
         box.appendChild(a);
       });
-      active = -1; box.classList.add("open");
+      open(true);
     }
     input.addEventListener("input", render);
     input.addEventListener("keydown", function (ev) {
-      var links = box.querySelectorAll("a");
-      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      var links = box.classList.contains("open") ? box.querySelectorAll("a") : [];
+      if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && links.length) {
         ev.preventDefault();
         active = Math.max(0, Math.min(links.length - 1, active + (ev.key === "ArrowDown" ? 1 : -1)));
-        links.forEach(function (l, i) { l.classList.toggle("active", i === active); });
+        links.forEach(function (l, i) { l.classList.toggle("active", i === active); l.setAttribute("aria-selected", i === active); });
+        input.setAttribute("aria-activedescendant", links[active].id);
       } else if (ev.key === "Enter" && links.length) {
         location.href = links[Math.max(active, 0)].href;
-      } else if (ev.key === "Escape") { box.classList.remove("open"); input.blur(); }
+      } else if (ev.key === "Escape") { open(false); input.blur(); }
     });
-    document.addEventListener("click", function (ev) { if (!ev.target.closest(".search")) box.classList.remove("open"); });
+    document.addEventListener("click", function (ev) { if (!ev.target.closest(".search")) open(false); });
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "/" && ["INPUT", "SELECT"].indexOf(document.activeElement.tagName) < 0) { ev.preventDefault(); input.focus(); }
     });

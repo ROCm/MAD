@@ -39,9 +39,10 @@ permissions:
   issues: read
   pull-requests: read
 
+# A newer push supersedes a PR build; on develop, runs queue so a deploy is never cut off.
 concurrency:
   group: dashboard-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -73,14 +74,19 @@ jobs:
       - name: Unit tests
         run: python3 -m pytest -q tools/dashboard
 
+      # Warnings (unknown ROCm versions, a roadmap that could not be read, ...) go to the job
+      # summary. A run that can deploy fails instead of publishing an empty Roadmap, so the
+      # site already live stays up.
       - name: Build site
         env:
           # Read-only use: open issues and PRs for the Roadmap page.
           GH_TOKEN: ${{ github.token }}
+          REPO_ROOT: ${{ vars.DASHBOARD_SOURCE_REPO != '' && 'source' || '.' }}
+          SOURCE_REPO: ${{ vars.DASHBOARD_SOURCE_REPO || github.repository }}
+          REQUIRE_ROADMAP: ${{ github.event_name != 'pull_request' && vars.DASHBOARD_PAGES == 'true' && '--require-roadmap' || '' }}
         run: >
           python3 tools/dashboard/build.py --out _site
-          --repo-root "${{ vars.DASHBOARD_SOURCE_REPO != '' && 'source' || '.' }}"
-          --source-repo "${{ vars.DASHBOARD_SOURCE_REPO || github.repository }}"
+          --repo-root "$REPO_ROOT" --source-repo "$SOURCE_REPO" $REQUIRE_ROADMAP
 
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -93,6 +99,10 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    # One Pages deployment at a time, never cancelled midway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

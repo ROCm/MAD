@@ -160,7 +160,7 @@
     var state = {};
     KEYS.forEach(function (k) { state[k] = params.get(k) || ""; });
     if (params.get("multinode")) state.scale = "multi";   // links from before the Scale filter
-    if (!state.view) state.view = localStorage.getItem("mad-models-view") || "table";
+    if (!state.view) state.view = madStore.get("mad-models-view") || "table";
     // A shared, already-filtered link goes straight to the results.
     if (KEYS.some(function (k) { return k !== "view" && state[k]; })) document.getElementById("summary").open = false;
     var inputs = { q: document.getElementById("q"), fw: document.getElementById("fw"),
@@ -191,7 +191,7 @@
       count.textContent = shown + " model" + (shown === 1 ? "" : "s");
       Object.keys(inputs).forEach(function (k) { if (inputs[k].value !== state[k]) inputs[k].value = state[k]; });
       document.querySelectorAll("[data-key]").forEach(function (b) { b.setAttribute("aria-pressed", state[b.dataset.key] === b.dataset.value || (b.dataset.key === "view" && b.dataset.value === view)); });
-      localStorage.setItem("mad-models-view", view);
+      madStore.set("mad-models-view", view);
       var out = new URLSearchParams();
       KEYS.forEach(function (k) { if (state[k] && !(k === "view" && state[k] === "table")) out.set(k, state[k]); });
       history.replaceState(null, "", out.toString() ? "?" + out : location.pathname);

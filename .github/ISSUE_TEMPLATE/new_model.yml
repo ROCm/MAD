@@ -21,12 +21,15 @@ body:
     id: framework
     attributes:
       label: Framework
+      description: As named on the MAD Recipes Models page (`frameworks` in dashboard/status.yaml).
       options:
         - vLLM
         - vLLM disaggregated P/D
         - SGLang
         - SGLang disaggregated P/D
         - ATOM
+        - ATOM vLLM plugin
+        - vLLM-Omni diffusion
         - xDiT diffusion
         - Primus
         - JAX MaxText

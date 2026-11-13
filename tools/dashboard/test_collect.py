@@ -237,6 +237,10 @@ def test_framework_of_by_launcher():
         ("Primus Megatron Bridge", "training")
     assert collect.framework_of({"registry": "vllm", "tags": ["pyt"]}, frameworks) == ("vLLM", "inference")
     assert collect.framework_of({"registry": "new_dir", "tags": []}, frameworks) == ("new_dir", "other")
+    # The launcher comes from the config path, whatever the tag order.
+    model = {"registry": "primus_train", "tags": ["MI355X", "primus", "torchtitan"],
+             "args": "--config_path examples/megatron/configs/MI355X/llama3.1_8B-pretrain.yaml"}
+    assert collect.framework_of(model, frameworks) == ("Primus Megatron", "training")
 
 
 def test_version_key():
@@ -258,6 +262,26 @@ def test_load_status(tmp_path):
     status.write_text("release: v26.10\nroadmapp: []\n")
     with pytest.raises(ValueError, match="unknown keys"):
         collect.load_status(str(status))
+
+
+def test_load_status_validates_frameworks_and_roadmap(tmp_path):
+    status = tmp_path / "status.yaml"
+    status.write_text("release: v26.10\nframeworks:\n  vllm: {name: vLLM, k8s: manual}\n")
+    with pytest.raises(ValueError, match="MANUAL_STEPS"):
+        collect.load_status(str(status))
+    status.write_text("release: v26.10\nframeworks:\n  vllm: {workload: inference}\n")
+    with pytest.raises(ValueError, match="needs a 'name'"):
+        collect.load_status(str(status))
+    status.write_text("release: v26.10\nroadmap:\n  - {model: A, status: someday}\n")
+    with pytest.raises(ValueError, match="status must be one of"):
+        collect.load_status(str(status))
+
+
+def test_roadmap_status_is_normalized():
+    status = {"roadmap": [{"model": "A", "status": "in-progress"}, {"model": "B"}], "roadmap_source": {},
+              "frameworks": {}}
+    items, _ = collect.roadmap_items(status, [], [], github=False)
+    assert [i["status"] for i in items] == ["in progress", "planned"]
 
 
 def test_diff_snapshots():

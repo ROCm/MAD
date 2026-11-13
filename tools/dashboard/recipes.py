@@ -2,10 +2,13 @@
 Run recipes for one registered model, per cluster type: the madengine command, and the
 plain Docker (or sbatch) commands that reproduce what madengine does without it.
 
-The Docker path mirrors madengine's ContainerRunner: build with the model's Dockerfile and
-build context, run with the same device/security options and MAD_* environment, mount
-the MAD checkout at /myworkspace, copy the model's script directory into the run
-directory and invoke the script with the card's args. SLURM multi-node cards
+The Docker path follows madengine's ContainerRunner: build with the model's Dockerfile and
+build context, run with its AMD security options and MAD_* environment, mount the MAD
+checkout at /myworkspace, copy the model's script directory into the run directory and
+invoke the script with the card's args. Two differences: madengine passes only the
+requested GPUs' render nodes, which are host-specific, so the recipe passes /dev/dri and
+limits a smaller run with HIP_VISIBLE_DEVICES; and it leaves out what madengine adds only
+for profiling tools, pre-scripts and data providers (SYS_ADMIN, /dev/fuse, data mounts). SLURM multi-node cards
 (distributed.launcher = slurm_multi) run their own launcher script, so their plain
 recipe builds and pushes the image and submits that script with sbatch, as the
 framework READMEs document. Opt-in multi-node configs (hidden from discovery by default)
@@ -23,9 +26,11 @@ ISA_OF = {"MI300X": "gfx942", "MI325X": "gfx942", "MI350X": "gfx950", "MI355X": 
 GPUS_PER_NODE = 8
 
 # madengine's AMD `docker run` options (ContainerRunner.run_container) plus the GPU devices.
+# SYS_ADMIN and /dev/fuse are not here: madengine adds them only for profiling tools,
+# pre-scripts and FUSE data mounts, none of which a plain run uses.
 DOCKER_RUN_OPTS = [
-    "--network host --ipc=host --group-add video",
-    "--cap-add=SYS_PTRACE --cap-add SYS_ADMIN --device /dev/fuse",
+    "--network host --ipc=host -u root --group-add video",
+    "--cap-add=SYS_PTRACE",
     "--security-opt seccomp=unconfined --security-opt apparmor=unconfined",
     "--device=/dev/kfd --device=/dev/dri",
 ]
@@ -220,6 +225,8 @@ def docker_steps(row, sku, ref=None, repo=DEFAULT_REPO):
     ]
     if n < GPUS_PER_NODE:
         env.append("-e HIP_VISIBLE_DEVICES=" + ",".join(str(i) for i in range(n)))
+        # As madengine does: Ray in the vLLM images ignores HIP_VISIBLE_DEVICES unless this is cleared.
+        env.append("-e RAY_EXPERIMENTAL_NOSET_HIP_VISIBLE_DEVICES=")
     if run["multiple_results"]:
         env.append(f"-e MAD_OUTPUT_CSV={shlex.quote(run['multiple_results'])}")
     env.append('-e MAD_SECRETS_HFTOKEN="$HF_TOKEN"')
@@ -285,8 +292,8 @@ def slurm_steps(row, sku, ref=None, repo=DEFAULT_REPO):
 
 def opt_in_steps(row, sku, ref=None, repo=DEFAULT_REPO):
     """madengine's primus launcher on SLURM for a config discovery hides unless its switch is set."""
-    args = shlex.split(row["run"]["args"])
-    config = args[args.index("--config_path") + 1]
+    # --config_path x or --config_path=x, as collect.arg_value reads it.
+    config = re.search(r"(?:^|\s)--config_path[\s=]+(\S+)", row["run"]["args"]).group(1)
     context = {
         "slurm": {"partition": "<partition>", "nodes": "<nodes>", "gpus_per_node": GPUS_PER_NODE},
         "distributed": {"launcher": "primus", "nnodes": "<nodes>", "nproc_per_node": GPUS_PER_NODE,
