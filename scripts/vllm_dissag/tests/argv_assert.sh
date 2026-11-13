@@ -26,6 +26,7 @@ _argv() { # connector wide_ep ep_backend model model_path
 _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _count() { local n; n="$(grep -cF -- "$2" <<<"$1")"; [[ "$n" == "$3" ]] && { printf "  PASS  %s (=%s)\n" "$4" "$n"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s want %s)\n" "$4" "$n" "$3"; fail=$((fail+1)); }; }
+_eq() { [[ "$1" == "$2" ]] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (got '%s' want '%s')\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
 
 echo "=== moriio + TP (Llama-70B) ==="
 A="$(_argv moriio 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)"
@@ -98,6 +99,101 @@ PY
 _has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
 _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+
+# MoRIIO READ mode must stay opt-in: the kv-transfer-config is built for every moriio model,
+# so the default JSON has to be unchanged. The Kimi-K3.1 cards opt in via their models.yaml env:.
+echo ""
+echo "=== MoRIIO read_mode is opt-in, not default-on ==="
+C="$(cat "$DIR/connectors/moriio.sh")"
+_has "$C" '${MORIIO_READ_MODE:-0}' "moriio.sh: read_mode gate defaults OFF"
+_kv() { env "$@" bash -c 'source "$1"; KV_PORT=1 MASTER_ADDR=h PROXY_PORT=1 PROXY_PING_PORT=1 SERVE_PORT=1 LOCAL_PING_PORT=1 HANDSHAKE_PORT=1 NOTIFY_PORT=1 _moriio_build_kv_transfer_config kv_producer' _ "$DIR/connectors/moriio.sh"; }
+_hasnot "$(_kv)" 'read_mode' "moriio.sh: default kv-transfer-config has no read_mode"
+_has "$(_kv MORIIO_READ_MODE=1)" '"read_mode":"true"' "moriio.sh: MORIIO_READ_MODE=1 adds read_mode"
+_OPTIN_RM="$(python3 - "$DIR/models.yaml" <<'PY'
+import sys, yaml
+y = yaml.safe_load(open(sys.argv[1])) or {}
+optin = [m for m, c in y.items()
+         if isinstance(c, dict) and (c.get("env") or {}).get("MORIIO_READ_MODE") == "1"]
+print("[" + ",".join(sorted(optin)) + "]")
+PY
+)"
+_has "$_OPTIN_RM" "[Kimi-K3.1-Pro-gfx942,Kimi-K3.1-Pro-gfx942-dspark]" "models.yaml: the Kimi-K3.1 gfx942 cards are the ONLY read_mode opt-ins"
+_has "$(cat "$SLURM")" '${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=' "slurm forwards MORIIO_READ_MODE override"
+_has "$C" '--prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}"' "moriio.sh: router prefill policy defaults to round_robin"
+_has "$C" '--decode-policy "${ROUTER_DECODE_POLICY:-round_robin}"' "moriio.sh: router decode policy defaults to round_robin"
+_OPTIN_RP="$(python3 - "$DIR/models.yaml" <<'PY'
+import sys, yaml
+y = yaml.safe_load(open(sys.argv[1])) or {}
+print("[" + ",".join(sorted(m for m, c in y.items()
+      if isinstance(c, dict) and (c.get("env") or {}).get("ROUTER_PREFILL_POLICY"))) + "]")
+PY
+)"
+_has "$_OPTIN_RP" "[Kimi-K3.1-Pro-gfx942,Kimi-K3.1-Pro-gfx942-dspark]" "models.yaml: the Kimi-K3.1 gfx942 cards are the ONLY router-policy opt-ins"
+
+# Kimi-K3.1 runs moriio + TP8 with DCP8 on BOTH legs (DCP must match across legs) and, on the
+# DSpark card, the same draft on both legs; JSON flags must survive as ONE argv element.
+echo ""
+echo "=== Kimi-K3.1-Pro (gfx942): TP8 + DCP8 both legs, DSpark draft both legs ==="
+_argv_k31() { # model role(0=prefill,1=decode) -> one argv element per line
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" DRY_RUN=1 NODE_RANK="$2" xP=1 yD=1 \
+    CONNECTOR=moriio WIDE_EP=0 MODEL_NAME="$1" MODEL_PATH=/m/Kimi-K3.1-Pro \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT \
+    PROXY_TYPE=vllm_router ROUTER_PORT=30000 bash "$DIR/vllm_disagg.sh" 2>/dev/null \
+    | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f' | tr ' ' '\n'
+}
+_DSPARK='{"method":"dspark","model":"/m/Kimi-K3.1-Pro-DSpark-preview","num_speculative_tokens":7,"draft_sample_method":"probabilistic","rejection_sample_method":"block","kv_cache_dtype":"auto"}'
+for _m in Kimi-K3.1-Pro-gfx942 Kimi-K3.1-Pro-gfx942-dspark; do
+  for _r in 0 1; do
+    _l=prefill; [[ $_r == 1 ]] && _l=decode
+    K="$(_argv_k31 "$_m" "$_r")"
+    _eq "$(grep -A1 -x -- '--tensor-parallel-size' <<<"$K" | tail -1)" 8 "$_m $_l: TP8"
+    _eq "$(grep -A1 -x -- '--decode-context-parallel-size' <<<"$K" | tail -1)" 8 "$_m $_l: DCP8"
+    _count "$K" "--tensor-parallel-size" 1 "$_m $_l: exactly one --tensor-parallel-size"
+    _count "$K" "--compilation-config" 1 "$_m $_l: exactly one --compilation-config"
+    _has "$(grep -A1 -x -- '--quantization-config' <<<"$K")" '{"moe":{"weight":"int4_per_group_32"}}' "$_m $_l: --quantization-config as one argv element"
+    _has "$K" '"read_mode":"true"' "$_m $_l: MoRIIO read_mode"
+    if [[ $_m == *-dspark ]]; then
+      _has "$(grep -A1 -x -- '--speculative-config' <<<"$K")" "$_DSPARK" "$_m $_l: DSpark draft at \${MODEL_PATH}-DSpark-preview"
+    else
+      _hasnot "$K" '--speculative-config' "$_m $_l: no speculative decoding"
+    fi
+  done
+done
+
+# The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
+# with srun stubbed to "find" only the directory FOUND on every node.
+echo ""
+echo "=== slurm MODEL_PATH probe: MODEL_WEIGHTS_NAME (default MODEL_NAME) ==="
+_PROBE_SH="$(mktemp)"; trap 'rm -f "$_PROBE_SH"' EXIT
+cat > "$_PROBE_SH" <<'SH'
+scontrol() { printf 'n1\nn2\n'; }
+srun() { [[ "$*" == *"[ -d '${FOUND}' ]"* ]]; }
+SH
+awk '/^MODEL_WEIGHTS_NAME=/{f=1} f; /^echo "Final MODEL_PATH/{exit}' "$SLURM" >> "$_PROBE_SH"
+echo 'echo "RESOLVED=$MODEL_PATH"' >> "$_PROBE_SH"
+_probe() { # found_dir model_name [weights_name] -> resolved MODEL_PATH ("" if fatal)
+  env -i PATH="$PATH" SLURM_NNODES=2 FOUND="$1" MODEL_NAME="$2" ${3:+MODEL_WEIGHTS_NAME="$3"} \
+    bash "$_PROBE_SH" 2>/dev/null | sed -n 's/^RESOLVED=//p'
+}
+_NV=/mnt/m2m_nobackup/models_blog; _SH=/shared_inference/models_blog
+_eq "$(_probe "$_NV/GLM-5.1-FP8" GLM-5.1-FP8)" "$_NV/GLM-5.1-FP8" "probe: unset MODEL_WEIGHTS_NAME resolves MODEL_NAME (NVMe)"
+_eq "$(_probe "$_NV/Kimi-K3.1-Pro" Kimi-K3.1-Pro-gfx942-dspark Kimi-K3.1-Pro)" "$_NV/Kimi-K3.1-Pro" "probe: Kimi-K3.1 dspark card resolves the Kimi-K3.1-Pro dir on NVMe"
+_eq "$(_probe "$_SH/Kimi-K3.1-Pro" Kimi-K3.1-Pro-gfx942 Kimi-K3.1-Pro)" "$_SH/Kimi-K3.1-Pro" "probe: Kimi-K3.1 card falls back to the shared-FS dir"
+_eq "$(_probe "$_NV/Kimi-K3.1-Pro" Kimi-K3.1-Pro-gfx942)" "" "probe: without MODEL_WEIGHTS_NAME the gfx942 key finds no weights"
+_CARDS_WN="$(python3 - "$DIR/models.json" <<'PY'
+import json, sys
+print(sorted({(c["env_vars"]["MODEL_NAME"], c["env_vars"]["MODEL_WEIGHTS_NAME"])
+              for c in json.load(open(sys.argv[1])) if "MODEL_WEIGHTS_NAME" in c.get("env_vars", {})}))
+PY
+)"
+_eq "$_CARDS_WN" "[('Kimi-K3.1-Pro-gfx942', 'Kimi-K3.1-Pro'), ('Kimi-K3.1-Pro-gfx942-dspark', 'Kimi-K3.1-Pro')]" "models.json: only the Kimi-K3.1 cards set MODEL_WEIGHTS_NAME (=Kimi-K3.1-Pro)"
+_CARDS_MISS="$(python3 - "$DIR/models.json" <<'PY'
+import json, sys
+print(len([c for c in json.load(open(sys.argv[1]))
+           if c["env_vars"]["MODEL_NAME"].startswith("Kimi-K3.1-Pro-gfx942") and "MODEL_WEIGHTS_NAME" not in c["env_vars"]]))
+PY
+)"
+_eq "$_CARDS_MISS" "0" "models.json: every Kimi-K3.1 card sets MODEL_WEIGHTS_NAME"
 
 echo ""
 echo "======================================================"

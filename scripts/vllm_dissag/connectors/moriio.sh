@@ -120,7 +120,10 @@ connector_setup_env() {
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # MORIIO_READ_MODE=1 selects MoRIIO READ mode (decode pulls the KV); unset keeps WRITE mode.
+    local _read_mode=""
+    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read_mode=',"read_mode":"true"'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_read_mode}"'}}'
 }
 
 connector_runtime_patch() {
@@ -361,6 +364,8 @@ connector_start_proxy() {
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
+        # ROUTER_PREFILL_POLICY / ROUTER_DECODE_POLICY: per-model opt-in via models.yaml env:
+        # (round_robin for every model that does not set them).
         "${ROUTER_BIN}" \
             --host 0.0.0.0 \
             --port "${ROUTER_PORT}" \
@@ -371,8 +376,8 @@ connector_start_proxy() {
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
             --policy round_robin \
-            --prefill-policy round_robin \
-            --decode-policy round_robin \
+            --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}" \
+            --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
             --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}" \
             --prometheus-port "${_PROMETHEUS_PORT}" \
             > >(tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
