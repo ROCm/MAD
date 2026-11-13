@@ -33,6 +33,7 @@ import time
 import yaml
 import psutil
 import shutil
+import shlex
 import signal
 import argparse
 import itertools
@@ -296,6 +297,25 @@ def load_acc_entries(acc_path):
     return task_defaults, model_entries
 
 
+def resolve_bench_module() -> str:
+    """Name of the serving-benchmark module in whichever SGLang is installed.
+
+    SGLang moved sglang.bench_serving to sglang.benchmark.serving. A config
+    generated from an InferenceX scenario pins the image that scenario was
+    measured against, and the images in use carry one name or the other.
+    Resolving it here lets one runner drive both instead of forking per image.
+    """
+    import importlib.util
+
+    for name in ("sglang.bench_serving", "sglang.benchmark.serving"):
+        try:
+            if importlib.util.find_spec(name) is not None:
+                return name
+        except (ImportError, ValueError):
+            continue
+    raise RuntimeError("no SGLang serving-benchmark module found")
+
+
 def resolve_tokenizer_arg(model):
     """Return a `--tokenizer-path <file> ` fragment for models that ship only a
     tekken `tokenizer.tok.json` (no HF `tokenizer.json`); '' otherwise.
@@ -369,6 +389,60 @@ def apply_perf_overrides(configs, perf_entries):
             'env_skipped':        sorted(k for k in matched['env'] if k in base_env),
         })
     return summary
+
+
+# The agentic replay talks to its own server instance; kept off the serving
+# path's 8000 so a leftover serving server cannot be mistaken for it.
+AGENTIC_HOST = "127.0.0.1"
+AGENTIC_PORT = 30000
+
+
+def _load_infx_agentic():
+    """Import the shared agentic body, which lives in scripts/common/.
+
+    Imported lazily and not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines.
+
+    Same server as run_serving except --disable-radix-cache: an agentic replay
+    measures multi-turn sessions whose throughput comes from prefix reuse, so
+    turning the radix cache off would measure a different system.
+    """
+    infx_agentic = _load_infx_agentic()
+    env = config.pop("env", "")
+    extra_args = config.pop("extra_args", "")
+    config.pop("random_range_ratio", None)
+    server_cmd = (
+        "python -m sglang.launch_server "
+        f"--model-path {model} "
+        + resolve_tokenizer_arg(model)
+        + f"--dtype {config['dtype']} "
+        # Same as run_serving: the CSV row reports these, so the server has to
+        # run with them.
+        + (f"--quantization {config['quantization']} " if config.get('quantization') else "")
+        + (f"--kv-cache-dtype {config['kv_cache_dtype']} " if config.get('kv_cache_dtype') else "")
+        + f"--tensor-parallel-size {config['tp']} "
+        f"--host {AGENTIC_HOST} "
+        f"--port {AGENTIC_PORT} "
+    )
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    return infx_agentic.run_agentic(
+        model, config, "sglang", server_cmd, AGENTIC_HOST, AGENTIC_PORT,
+        SERVER_START_TIMEOUT)
 
 
 def parse_args():
@@ -709,7 +783,7 @@ def run_serving(model, config):
 
         # run benchmark
         bench_cmd = (
-            "python -m sglang.bench_serving "
+            f"python -m {resolve_bench_module()} "
             f"--backend sglang "
             f"--base-url http://localhost:8000 "
             f"--model {model} "
@@ -825,7 +899,7 @@ def run_serving_profile(model, config):
         print(f"Server at {server.pid} ready for profiling", flush=True)
 
         bench_cmd = (
-            "python -m sglang.bench_serving "
+            f"python -m {resolve_bench_module()} "
             f"--backend sglang "
             f"--base-url http://localhost:8000 "
             f"--model {model} "
@@ -1851,15 +1925,29 @@ def main():
             profile = config.pop('profile', False) or args.profile
             if profile:
                 env_vars["SGLANG_DIFFUSION_TORCH_PROFILER_DIR"] = "./profile_output/"
-            env_vars_str = " ".join(FIXED_ENV_VARS + [f"{k}={v}" for k, v in env_vars.items()])
+            # Values come from a config file and reach the engine through a
+            # shell string, so anything with spaces or quotes -- a JSON
+            # attention-config, compilation-config or speculative-config -- must
+            # be quoted or the shell eats its structure and the server refuses
+            # to start. Flags stay bare.
+            env_vars_str = " ".join(FIXED_ENV_VARS + [f"{k}={shlex.quote(str(v))}"
+                                                      for k, v in env_vars.items()])
             benchmark = config["benchmark"]
             hf_pipeline_tag = config.get("hf_pipeline_tag", "text-generation")
             extra_args_str = ""
             for k, v in extra_args.items():
                 if isinstance(v, bool):
                     extra_args_str += f" {k}"
+                elif isinstance(v, list) and all(not isinstance(x, (dict, list)) for x in v):
+                    # A list of scalars is a variadic option
+                    # (--cuda-graph-bs-prefill 256 512 ...): one token each.
+                    # One quoted JSON token would be rejected by the parser.
+                    extra_args_str += f" {k} " + " ".join(shlex.quote(str(x)) for x in v)
                 else:
-                    extra_args_str += f" {k} {v}"
+                    # Mappings, and lists of them, must be JSON, not Python
+                    # repr: str() would single-quote their keys.
+                    rendered = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                    extra_args_str += f" {k} {shlex.quote(rendered)}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             
@@ -1932,6 +2020,8 @@ def main():
                     results = run_throughput(model, config)
                 elif benchmark == "serving":
                     results = run_serving(model, config)
+                elif benchmark == "agentic":
+                    results = run_agentic_point(model, config)
                 elif benchmark == "accuracy":
                     # Note: acc.yaml merge already happened at line 1705 for benchmark:all mode
                     # Config already has merged evaluations from task defaults + model overrides

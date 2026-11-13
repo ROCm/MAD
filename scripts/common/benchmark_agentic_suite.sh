@@ -189,7 +189,7 @@ for name in $SUITE_WORKLOAD_NAMES; do
   trace source           : ${TRACE_SOURCE_FLAG}
   result dir             : ${_rdir}
   command:
-${REPLAY_CMD}
+$(replay_cmd_display)
 EOF
         else
             if ! run_agentic_replay_and_write_outputs "$_rdir"; then
