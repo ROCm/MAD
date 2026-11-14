@@ -18,6 +18,22 @@ else
 fi
 
 # =============================================================
+# BNXT_RE PROVIDER
+# =============================================================
+# The base image loads Broadcom's bnxt-rocelib (kernel ABI 7-8, Broadcom's out-of-tree
+# driver) and keeps rdma-core's provider (ABI 1, the in-kernel driver) only as "-inbox".
+# On an in-kernel-driver host every bnxt_re device is skipped and MoRI finds none.
+_IBV_PROVIDER_DIR=/usr/lib/x86_64-linux-gnu/libibverbs
+if [[ -f "${_IBV_PROVIDER_DIR}/libbnxt_re-rdmav34.so-inbox" && ! -e "${_IBV_PROVIDER_DIR}/libbnxt_re-rdmav34.so" ]]; then
+    _ibv_out="$(ibv_devices 2>&1 || true)"
+    if [[ "$_ibv_out" == *"bnxt_re does not support the kernel ABI"* ]]; then
+        cp "${_IBV_PROVIDER_DIR}/libbnxt_re-rdmav34.so-inbox" "${_IBV_PROVIDER_DIR}/libbnxt_re-rdmav34.so"
+        echo "[mori_ep_env] bnxt_re: host runs the in-kernel driver; restored the image's inbox provider"
+    fi
+    unset _ibv_out
+fi
+
+# =============================================================
 # CORE DEVICE LIST
 # =============================================================
 export IB_DEVICES="${IB_DEVICES:-${_DEFAULT_IB}}"
