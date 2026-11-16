@@ -660,7 +660,8 @@ refers to it (it was once the fourth of several numbered configuration methods).
 
 Where it is found: a sibling `mad-config.yaml` in the card's script directory, or an explicit path
 in the card's `env_vars.MAD_CONFIG`. No file means nothing changes. It is only available on the
-madengine path; plain `sbatch` does not read it.
+madengine path; plain `sbatch` does not read it, and `run_multinode.slurm` stops with a
+message saying so when a card sets `MAD_CONFIG` without `MODEL_NAME`.
 
 A file named `mad-config.yaml` is picked up by every card in that directory. A file meant for one
 card must use another name and be named by `MAD_CONFIG`. That is why the Kimi-K3 file is
