@@ -171,6 +171,9 @@ def submit_environment(card, env_overrides, distributed):
         env[k], sources[k] = str(v), "card"
     for k, v in env_overrides.items():
         env[k], sources[k] = str(v), "additional-context"
+    pins = (card.get("docker_build_arg") or {}).get("PINS")   # as madengine's pin_set_of
+    if pins and "MAD_PIN_SET" not in env:
+        env["MAD_PIN_SET"], sources["MAD_PIN_SET"] = str(pins), "madengine"
     return env, sources
 
 

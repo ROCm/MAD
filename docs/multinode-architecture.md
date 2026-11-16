@@ -152,9 +152,11 @@ python3 scripts/common/recipe/recipe.py validate      # the catalog's own refere
 ```
 
 The launchers run the same check right after the GPU-architecture gate
-(`cluster_check_recipe` in `cluster.sh`), against the detected GPU and, when
-`MAD_ENGINE_BUILD=ENGINE@PINSET` names it, the image's engine build. Without it, the first
-catalog build for that GPU that resolves the recipe is used, and named. The resolution is
+(`cluster_check_recipe` in `cluster.sh`), against the detected GPU and the image's engine
+build: `MAD_ENGINE_BUILD=ENGINE@PINSET` when set, else `MAD_PIN_SET`, which madengine (every
+path) and the pipeline export from the card's `PINS` build argument. A pin set with no catalog
+entry is refused for a recipe that declares roles. With neither (a plain `sbatch` of an image
+built by hand), the first catalog build for that GPU that resolves the recipe is used, and named. The resolution is
 recorded in `config.resolved.json` as `MAD_RECIPE_ROLES`. `RECIPE_CHECK=0` skips the check;
 a recipe without `roles:` passes as before.
 

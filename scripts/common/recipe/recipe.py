@@ -26,7 +26,8 @@ names every need nothing meets. Nothing is guessed: a capability the catalog doe
 is not assumed.
 
 CLI (from the MAD root):
-  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--build ENGINE@BUILD] [--roles R,..]
+  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--build ENGINE@BUILD | --pin-set NAME]
+                    [--roles R,..]
   recipe.py explain ... (same arguments): the resolution of every role, as JSON
   recipe.py validate                      : the catalog's own references
 """
@@ -162,6 +163,12 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm"):
     return out
 
 
+def build_of_pin_set(catalog, pin_set):
+    """The catalog build (<engine>@<pin set>) of a pin set, or None if it has no entry."""
+    found = [b for b in (catalog.get("kernels") or {}) if b.split("@", 1)[-1] == pin_set]
+    return found[0] if len(found) == 1 else None
+
+
 def builds_for(catalog, arch, engine):
     """The engine builds the catalog lists for an accelerator."""
     return [b for b, per in (catalog.get("kernels") or {}).items()
@@ -258,6 +265,7 @@ def main(argv=None):
         p.add_argument("--model", required=True)
         p.add_argument("--arch", required=True)
         p.add_argument("--build", help="ENGINE@BUILD, e.g. vllm@vllm-kimi-k3")
+        p.add_argument("--pin-set", help="the image's pin set (docker/pins/<name>.json): its catalog build")
         p.add_argument("--roles", help="comma-separated (default: the roles the recipe declares)")
         p.add_argument("--catalog", default=CATALOG)
     v = sub.add_parser("validate")
@@ -279,6 +287,12 @@ def main(argv=None):
     if not recipe.get("roles"):
         print(f"{a.model}: declares no roles; nothing to resolve")
         return 0
+    if a.pin_set and not a.build:
+        a.build = build_of_pin_set(catalog, a.pin_set)
+        if a.build is None:
+            print(f"ERROR: {a.model}: the image's pin set {a.pin_set!r} has no entry in the capability "
+                  f"catalog (compat/rocm.yaml kernels), so what it can run is unknown", file=sys.stderr)
+            return 1
     engine = (a.build or "vllm@").split("@", 1)[0] or "vllm"
     res, problems = check(catalog, recipe, a.arch, a.build, a.roles.split(",") if a.roles else None, engine)
     if a.cmd == "explain":

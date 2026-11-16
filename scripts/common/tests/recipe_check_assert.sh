@@ -29,8 +29,14 @@ _has "$out" "resolves with vllm@vllm-kimi-k3" "no build named: the catalog build
 out="$(gate Kimi-K3 server MAD_GPU_ARCH=gfx942)"
 _has "$out" "server weights=int4_g32" "the colocated launcher's server role"
 
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=vllm-kimi-k3)"
+_has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_PIN_SET names the image's build (as madengine sets it)"
+
 echo ""
 echo "=== refuses ==="
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=no-such-pins)"
+_has "$out" "rc=1" "a pin set the catalog has no entry for"
+_has "$out" "has no entry in the capability catalog" "...saying so"
 out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx950 MAD_ENGINE_BUILD=vllm@vllm-kimi-k3)"
 _has "$out" "rc=1" "the MI300X recipe on gfx950"
 _has "$out" "which gfx950 does not need" "naming the conversion its flags make"
