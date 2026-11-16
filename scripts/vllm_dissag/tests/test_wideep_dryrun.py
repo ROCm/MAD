@@ -97,6 +97,8 @@ def main():
     print("bench shapes")
     o = plan("niah", "dsv4fls", "2p2d").stdout
     check("niah runs the full ladder", field(o, "NIAH_METHOD", "HALT") == "0")
+    o = plan("niah", "dsv4pro", "2p2d", NIAH_HALT_ON_FAIL="1").stdout
+    check("NIAH_HALT_ON_FAIL=1 is honoured", field(o, "NIAH_METHOD", "HALT") == "1")
     check("niah has no sweep line", not any(l.startswith("SMOKE") for l in o.splitlines()))
     o = plan("accuracy", "dsv4fls", "2p2d").stdout
     check("accuracy has no NIAH line", not any(l.startswith("NIAH_METHOD") for l in o.splitlines()))

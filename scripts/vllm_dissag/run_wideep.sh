@@ -325,12 +325,6 @@ if [[ "$MODEL_NAME" == "DeepSeek-V4-Flash-FP8" ]]; then
         fi
         NIAH_WARMUP=0
         NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}"
-        # validate must finish the ladder so smoke still has a full NIAH log.
-        if [[ "$BENCH" == "validate" ]]; then
-            NIAH_HALT_ON_FAIL="${NIAH_HALT_ON_FAIL:-0}"
-        else
-            NIAH_HALT_ON_FAIL="${NIAH_HALT_ON_FAIL:-1}"
-        fi
         EXTRA_ENV+=(NIAH_METHOD="$NIAH_METHOD")
         EXTRA_ENV+=(NIAH_DS_WRAP=0)
         EXTRA_ENV+=(NIAH_TERSE="${NIAH_TERSE:-0}")
@@ -389,12 +383,6 @@ if [[ "$MODEL_NAME" == "DeepSeek-V4-Pro-FP8" ]]; then
         fi
         NIAH_WARMUP=0
         NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}"
-        # validate must finish the ladder so smoke still has a full NIAH log.
-        if [[ "$BENCH" == "validate" ]]; then
-            NIAH_HALT_ON_FAIL="${NIAH_HALT_ON_FAIL:-0}"
-        else
-            NIAH_HALT_ON_FAIL="${NIAH_HALT_ON_FAIL:-1}"
-        fi
         EXTRA_ENV+=(NIAH_METHOD="$NIAH_METHOD")
         EXTRA_ENV+=(NIAH_DS_WRAP=0)
         EXTRA_ENV+=(NIAH_TERSE="${NIAH_TERSE:-0}")
