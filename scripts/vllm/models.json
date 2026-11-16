@@ -821,5 +821,199 @@
         ],
         "timeout": -1,
         "args": "--model_repo Qwen/Qwen3.5-397B-A17B-FP8 --config configs/extended.yaml"
+    },
+    {
+        "name": "pyt_vllm_kimi-k2.5",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K2.5.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo moonshotai/Kimi-K2.5 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_kimi-k2.5_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K2.5-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Kimi-K2.5-MXFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_kimi-k2-thinking_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K2-Thinking-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Kimi-K2-Thinking-MXFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_step-3.5-flash",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Step-3.5-Flash.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo stepfun-ai/Step-3.5-Flash --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_glm-5_fp8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_GLM-5-FP8.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo zai-org/GLM-5-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_glm-4.7_fp8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_GLM-4.7-FP8.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo zai-org/GLM-4.7-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_command-a-plus_fp8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_command-a-plus-05-2026-fp8.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_extended",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo CohereLabs/command-a-plus-05-2026-fp8 --config configs/extended.yaml"
+    },
+    {
+        "name": "pyt_vllm_qwen3-next-80b-a3b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3-Next-80B-A3B-Instruct-FP8.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_extended",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo Qwen/Qwen3-Next-80B-A3B-Instruct-FP8 --config configs/extended.yaml"
+    },
+    {
+        "name": "pyt_vllm_mimo-v2.6-pro-mopd",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_MiMo-V2.6-Pro-MOPD.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo XiaomiMiMo/MiMo-V2.6-Pro-MOPD --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_vllm_mimo-v2.6-pro-rl",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_MiMo-V2.6-Pro-RL.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo XiaomiMiMo/MiMo-V2.6-Pro-RL --config configs/default.yaml"
     }
 ]
