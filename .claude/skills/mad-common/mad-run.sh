@@ -8,7 +8,7 @@
 # sharing GPUs and clobbering each other's working files.
 #
 # Usage (from the MAD repo root):
-#   mad-run.sh start <run-id> -- madengine run|build [args...]
+#   mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...]
 #   mad-run.sh wait <run-id> [max-seconds]    # blocks up to 540s (the default)
 #   mad-run.sh status <run-id>
 #   mad-run.sh stop <run-id>
@@ -54,7 +54,7 @@ report() {
   fi
   echo "MAD_RUN_STATUS=$state exit=$code dir=$dir"
   if [ "$state" = queued ]; then
-    echo "Waiting for the GPU lock $LOCK (another madengine run on this host holds it)."
+    echo "Waiting for the GPU lock $LOCK (another GPU run on this host holds it)."
   fi
   grep -a 'performance:' "$dir/log" 2>/dev/null | tail -n 20 || true
   echo "--- log tail ($dir/log) ---"
@@ -63,12 +63,18 @@ report() {
 
 cmd_start() {
   local id="${1:-}"
-  [ $# -ge 2 ] && [ "$2" = "--" ] || die "usage: mad-run.sh start <run-id> -- madengine run|build [args...]"
+  [ $# -ge 2 ] && [ "$2" = "--" ] || die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...]"
   shift 2
   [ "${1:-}" = madengine ] || die "only madengine commands can be started (got '${1:-}')"
   case "${2:-}" in
     run|build) ;;
-    *) die "only 'madengine run' and 'madengine build' can be started (got 'madengine ${2:-}')" ;;
+    nan)
+      # The GPU-using steps of a NaN investigation: replay and package run containers.
+      case "${3:-}" in
+        exec|group|replay|package) ;;
+        *) die "only 'madengine nan exec|group|replay|package' can be started (got 'madengine nan ${3:-}')" ;;
+      esac ;;
+    *) die "only 'madengine run', 'madengine build' and 'madengine nan exec|group|replay|package' can be started (got 'madengine ${2:-}')" ;;
   esac
   [ -f models.json ] || die "run from the MAD repo root (models.json not found in $(pwd))"
   command -v flock >/dev/null && command -v setsid >/dev/null || die "flock and setsid (util-linux) are required"
@@ -128,5 +134,5 @@ case "${1:-}" in
   wait)   shift; cmd_wait "$@" ;;
   status) shift; report "$(existing_run_dir "${1:-}")" ;;
   stop)   shift; cmd_stop "$@" ;;
-  *) die "usage: mad-run.sh start <run-id> -- madengine run|build [args...] | wait <run-id> [secs] | status <run-id> | stop <run-id>" ;;
+  *) die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...] | wait <run-id> [secs] | status <run-id> | stop <run-id>" ;;
 esac
