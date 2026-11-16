@@ -53,7 +53,9 @@ _NEG_CUE = re.compile(
     r"rather than|instead of)\b",
     re.I,
 )
-_CLAUSE_BREAK = re.compile(r"[.!?;\n]")
+# ")" closes a parenthetical like "(not found)", which negates the name before
+# it (_NEG_AFTER), not the names that follow.
+_CLAUSE_BREAK = re.compile(r"[.!?;\n)]")
 _NEG_LOOKBACK = 80
 _NEG_AFTER = re.compile(
     r"^[\s*_`:,\-]*\((?:[^)]{0,40}?)\b(?:not|isn't|no)\b", re.I
