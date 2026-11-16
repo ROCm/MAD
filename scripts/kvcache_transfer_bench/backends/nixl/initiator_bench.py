@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RIXL Benchmark - Initiator Node (Simplified)
+NIXL Benchmark - Initiator Node (Simplified)
 Simplified initiator benchmark with hardcoded values
 """
 
@@ -35,7 +35,7 @@ SHARED_DIR = None
 def main():
     global SHARED_DIR
 
-    parser = argparse.ArgumentParser(description='RIXL Benchmark Initiator (Simplified)')
+    parser = argparse.ArgumentParser(description='NIXL Benchmark Initiator (Simplified)')
     add_common_bench_args(parser, default_shared="/shared", include_append=True)
     args = parser.parse_args()
 
@@ -62,7 +62,7 @@ def main():
     hostname = sock.gethostname()
 
     print(f"{'='*60}")
-    print(f"RIXL Benchmark - INITIATOR (Simplified)")
+    print(f"NIXL Benchmark - INITIATOR (Simplified)")
     print(f"{'='*60}")
     print(f"Hostname: {hostname}")
     print(f"Node ID: {hostname}")
@@ -87,18 +87,16 @@ def main():
 
     # Collect version info for metadata
     metadata = collect_version_info(
-        "rixl",
+        "nixl",
         [
-            lambda: __import__("importlib.metadata", fromlist=["version"]).version("rixl"),
             lambda: __import__("importlib.metadata", fromlist=["version"]).version("nixl"),
-            lambda: __import__("rixl").__version__,
             lambda: __import__("nixl").__version__,
-            lambda: os.environ.get("RIXL_VERSION"),
+            lambda: os.environ.get("NIXL_VERSION"),
         ],
         pytorch_version=torch.__version__,
     )
 
-    results_path = SHARED_DIR / "results_rixl.json"
+    results_path = SHARED_DIR / "results_nixl.json"
 
     # Generate test sizes
     test_sizes = generate_test_sizes(args.start_size, args.end_size)
@@ -139,7 +137,7 @@ def main():
         config = nixl_agent_config(True, True, initiator_port)
 
         # Initialize agent in initiator mode
-        logger.info("Initializing RIXL agent in initiator mode...")
+        logger.info("Initializing NIXL agent in initiator mode...")
         agent = nixl_agent("initiator", config)
 
         # Fetch remote metadata and send local metadata
@@ -187,8 +185,8 @@ def main():
         logger.info(f"Allocating {current_size} bytes in VRAM on GPU {GPU_ID}...")
         tensor = torch.zeros(current_size, dtype=torch.uint8, device=device)
 
-        # Register GPU memory with RIXL
-        logger.info("Registering GPU memory with RIXL agent...")
+        # Register GPU memory with NIXL
+        logger.info("Registering GPU memory with NIXL agent...")
         reg_descs = agent.register_memory([tensor])
 
         if not reg_descs:
@@ -250,7 +248,7 @@ def main():
 
         print(f"Starting benchmark ({NUM_ITERS} iterations)...\n")
 
-        # Benchmark: one iteration, wait for completion, next (sync like RIXL)
+        # Benchmark: one iteration, wait for completion, next
         durations = []
         transfer_count = 0
 
@@ -295,7 +293,7 @@ def main():
         print(f"{'='*60}\n")
 
         result_entry = {
-            "backend": "rixl",
+            "backend": "nixl",
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "test_parameters": {
                 "size_bytes": current_size,

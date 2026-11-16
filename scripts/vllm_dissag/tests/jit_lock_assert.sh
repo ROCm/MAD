@@ -54,6 +54,11 @@ for B in "$DIR/run_xPyD_models.slurm" "$DIR/../vllm_multinode/run_multinode.slur
     _hasnot "$(grep -v '^ *#' "$B")" "rm -rf \"\$_l\"" "$(basename "$B"): no host-side removal (it cannot delete root's files)"
     _has "$(grep -c 'JIT_CACHE_HOST:+-e JIT_CACHE_HOST' "$B")" "1" "$(basename "$B"): passes JIT_CACHE_HOST into the container"
 done
+# The interactive launcher mounts a caller-set JIT_CACHE_HOST too; without it in the
+# container, the cleanup takes the cache for its own and removes fresh locks of other jobs.
+R="$DIR/tests/run_interactive.sh"
+_has "$(grep -c 'JIT_CACHE_HOST:+-e JIT_CACHE_HOST=' "$R")" "1" "run_interactive.sh: passes JIT_CACHE_HOST into the container"
+_has "$(grep -c 'JIT_LOCK_STALE_MIN:+-e JIT_LOCK_STALE_MIN=' "$R")" "1" "run_interactive.sh: passes JIT_LOCK_STALE_MIN into the container"
 
 echo "======================================================"
 echo "  jit_lock_assert: ${pass} passed, ${fail} failed"

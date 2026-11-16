@@ -360,6 +360,12 @@ def main(argv=None):
             cfg = json.load(f)
     k8s = cfg.get("k8s") or {}
     card = find_card(a.card)
+    # A card with a layered config (env_vars.MAD_CONFIG, or a mad-config.yaml next to its
+    # script, e.g. the _way4 twin) keeps values such as MODEL_NAME in that file. madengine
+    # resolves it; this submitter reads only env_vars, so the pods would start without them.
+    if (card.get("env_vars") or {}).get("MAD_CONFIG") or (Path(card["scripts"]).parent / "mad-config.yaml").is_file():
+        die(f"{card['name']} has a layered config (mad-config.yaml); resolving it needs madengine: "
+            "submit this card with madengine")
     env = {k: str(v) for k, v in (cfg.get("env_vars") or {}).items()}
     for kv in a.env:
         if "=" not in kv:

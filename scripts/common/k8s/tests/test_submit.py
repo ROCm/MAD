@@ -49,6 +49,13 @@ class TestSubmitDryRun(unittest.TestCase):
         self.assertEqual(pod["subdomain"], out["name"])
         self.assertEqual(objs["Service"]["spec"]["clusterIP"], "None")
 
+    def test_layered_config_card_is_refused(self):
+        # The _way4 twin keeps MODEL_NAME and the rest in MAD_CONFIG, which only madengine reads.
+        r = subprocess.run([sys.executable, str(SUBMIT), "--card", CARD + "_way4", "--image", "img:t",
+                            "--dry-run"], cwd=ROOT, capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("layered config", r.stderr)
+
     def test_every_run_has_its_own_agent_token(self):
         tokens = {dry_run()[3]["MAD_K8S_AGENT_TOKEN"] for _ in range(2)}
         self.assertEqual(len(tokens), 2)
