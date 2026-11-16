@@ -28,9 +28,45 @@ ARG BASE_DOCKER=rocm/pytorch:latest
 FROM $BASE_DOCKER
 
 USER root
+
+# Additional step for base images that ship setup_pytorch_env.
+# Guard on the setup command itself rather than on the workspace directory, so this
+# same Dockerfile still builds against a plain upstream base, which does not ship it.
+# The --mad flag installs into the image's existing environment instead of creating a
+# venv. There is no /opt/venv-py<X.Y> to link, so this block has no symlink step and --
+# importantly -- no "ENV PATH=/opt/venv/bin:${PATH}" line after it. Adding one would not
+# fail the build (ENV never touches the filesystem, and the shell silently skips PATH
+# entries that do not exist), it would just be dead PATH that hides which interpreter is
+# actually in use. Leave it out.
+RUN if command -v setup_pytorch_env >/dev/null 2>&1; then \
+        echo "setup_pytorch_env found. Running env setup..."; \
+        setup_pytorch_env --mad || { \
+            echo "Setup failed."; \
+            exit 1; \
+        }; \
+        echo "Setup successful."; \
+        for pair in python:python3 pip:pip3; do \
+            name="${pair%%:*}"; target="${pair#*:}"; \
+            if ! command -v "$name" >/dev/null 2>&1; then \
+                ln -s "$(command -v "$target")" "/usr/local/bin/$name" || { \
+                    echo "Failed to link $name -> $target."; \
+                    exit 1; \
+                }; \
+                echo "Linked $name -> $(command -v "$target")"; \
+            fi; \
+        done; \
+    else \
+        echo "setup_pytorch_env is not on PATH."; \
+        echo "Nothing to set up."; \
+    fi
+
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
+
+# git for the source clones below (not present in slim base images)
+RUN apt update && \
+    apt install -y git
 
 # Install huggingface transformers
 RUN cd /workspace && git clone https://github.com/ROCm/transformers transformers &&\
@@ -47,10 +83,13 @@ RUN pip3 install --no-cache-dir GPUtil azureml azureml-core tokenizers ninja cer
 # setting datasets==1.9.0 due to Roberta SQUAD change, https://github.com/huggingface/transformers/issues/12880
 #RUN pip3 install --no-cache-dir datasets==1.9.0
 # https://github.com/huggingface/datasets/issues/3099
-RUN pip3 install -U huggingface_hub
+# transformers requires huggingface_hub<2.0.
+RUN pip3 install -U "huggingface_hub<2"
 
-# ROCm gpg key
-RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+# ROCm apt key. apt-key needs gpg-agent, which slim base images do not
+# ship; gpg --dearmor works without it and needs no sudo.
+RUN mkdir -p /etc/apt/trusted.gpg.d && \
+    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/rocm.gpg
 RUN apt update && apt install -y \
     unzip \
     jq

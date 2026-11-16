@@ -1,5 +1,40 @@
 [
     {
+        "name": "atom-perf",
+        "url": "",
+        "dockerfile": "../../docker/pyt_atom",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "atom-perf",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "atom-accuracy",
+        "url": "",
+        "dockerfile": "../../docker/pyt_atom",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "atom-accuracy",
+            "accuracy",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
         "name": "pyt_atom_kimi-k3",
         "dockerfile": "../../docker/pyt_atom",
         "scripts": "run.sh",
@@ -17,5 +52,44 @@
         "timeout": -1,
         "skip_gpu_arch": "gfx942",
         "args": "--model_repo moonshotai/Kimi-K3 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_llama-3.3-70b_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_atom",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.3-70B-Instruct-MXFP4-Preview.csv",
+        "tags": [
+            "pyt",
+            "atom",
+            "atom_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942, gfx906, gfx908, gfx90a, A100, H100, V100",
+        "args": "--model_repo amd/Llama-3.3-70B-Instruct-MXFP4-Preview --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_llama-3.3-70b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_atom",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.3-70B-Instruct-FP8-KV.csv",
+        "tags": [
+            "pyt",
+            "atom",
+            "atom_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo amd/Llama-3.3-70B-Instruct-FP8-KV --config configs/default.yaml"
     }
 ]

@@ -1,0 +1,15 @@
+- benchmark: serving
+  model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  inp: 128
+  out: 128
+  kv_cache_dtype: fp8
+  num_prompts: 252
+  max_concurrency: 128
+  extra_args:
+    --load_dummy: True
+
+- benchmark: accuracy
+  model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  kv_cache_dtype: fp8
