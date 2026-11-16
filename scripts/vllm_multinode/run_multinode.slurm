@@ -148,7 +148,8 @@ case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah)" >&2; exit 1 ;;
+    accuracy)     BENCHMARK_SCRIPT_FILE="benchmark_accuracy.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah, accuracy)" >&2; exit 1 ;;
 esac
 
 echo "=========================== colocated multi-node ==========================="

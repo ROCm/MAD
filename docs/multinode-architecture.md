@@ -298,6 +298,15 @@ speculative (draft role), multi-tenant (CPX replicas), multimodal (encoder role)
 heterogeneous pools. Not yet expressed: multi-LoRA, RL rollout. A test holds the file to the
 truth: the named launcher accepts the example and every other launcher refuses one marked none.
 
+### Accuracy
+
+`BENCHMARK_SCRIPT=accuracy` (vLLM disaggregated and colocated launchers) runs
+`benchmark_accuracy.py` against the served endpoint over task sets given as JSONL
+(`{"id", "prompt", "answer", "match": exact|contains|regex}`, files in `ACC_TASKS`; a 20-item
+arithmetic smoke set is the default) and writes one perf.csv row per set: the score, FAILURE only
+when requests failed. Scores go into a registry record's `accuracy`, which `best` and `promote`
+use as a floor -- a faster configuration is only best within an accuracy bound.
+
 ## Performance: model, search, registry
 
 `scripts/common/perf/model.py` ranks layouts before GPU hours are spent: a first-order roofline

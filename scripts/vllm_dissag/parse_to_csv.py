@@ -326,6 +326,42 @@ def parse_niah_log(log_file: str) -> Dict[int, Dict]:
     return results
 
 
+def parse_accuracy_log(log_file: str) -> Dict[str, Dict]:
+    """Per-task-set summaries of benchmark_accuracy.py:
+      ACCURACY task=<set> score=<s> correct=<c> n=<n> errors=<e>
+    Returns {set: {'score', 'correct', 'n', 'errors'}}."""
+    out = {}
+    with open(log_file) as f:
+        for line in f:
+            m = re.search(r'ACCURACY task=(\S+) score=([\d.]+) correct=(\d+) n=(\d+) errors=(\d+)', line)
+            if m:
+                out[m.group(1)] = {'score': float(m.group(2)), 'correct': int(m.group(3)),
+                                   'n': int(m.group(4)), 'errors': int(m.group(5))}
+    return out
+
+
+def save_accuracy_perf_csv(results: Dict[str, Dict], output_file: str, model_name: str = "",
+                           pipeline: str = "vllm"):
+    """One perf.csv row per task set: the score (0..1). A set whose requests failed, or that had
+    no items, is FAILURE -- a low score is a measurement, not a failure."""
+    if not results:
+        print("No accuracy results to save to perf.csv.")
+        return
+    meta = _get_run_metadata(pipeline)
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDNAMES)
+        writer.writeheader()
+        for name in sorted(results):
+            d = results[name]
+            row = {f: '' for f in PERF_CSV_FIELDNAMES}
+            row.update(meta)
+            row.update({'model': model_name, 'performance': f"{d['score']:.4f}",
+                        'metric': f"accuracy (task={name} n={d['n']})",
+                        'status': 'FAILURE' if d['errors'] or not d['n'] else 'SUCCESS'})
+            writer.writerow({k: row.get(k, '') for k in PERF_CSV_FIELDNAMES})
+    print(f"Saved {len(results)} accuracy rows to perf.csv: {output_file}")
+
+
 def niah_length_failed(data: Dict) -> bool:
     """A context length failed if any of its requests timed out or errored. A low retrieval
     score is a measurement, not a failure."""
@@ -560,6 +596,8 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
+    parser.add_argument('--accuracy', action='store_true',
+                        help='Parse benchmark_accuracy.py summaries (requires --perf-csv)')
     parser.add_argument('--narrow', action='store_true',
                         help='Emit a narrow results CSV (model/performance/metric[/status]) for a model card '
                              'declaring multiple_results, letting madengine supply the run metadata. '
@@ -586,6 +624,13 @@ def main():
         sys.exit(1)
 
     print(f"Parsing log file: {log_file}")
+
+    if args.accuracy:
+        if not args.perf_csv:
+            print("Error: --accuracy requires --perf-csv")
+            sys.exit(1)
+        save_accuracy_perf_csv(parse_accuracy_log(log_file), args.perf_csv, args.model_name)
+        return
 
     # NIAH mode: parse retrieval scores, write perf.csv only
     if args.niah:
