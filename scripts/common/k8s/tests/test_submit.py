@@ -72,6 +72,23 @@ class TestSubmitDryRun(unittest.TestCase):
                      "scripts/common/cluster.sh", ".mad-k8s/mad_k8s.py", ".mad-k8s/mad_k8s_node.sh"):
             self.assertIn(want, names)
 
+    def test_default_bundle_carries_common_and_the_capability_catalog(self):
+        _, objs, _, _ = dry_run()
+        names = tarfile.open(fileobj=io.BytesIO(base64.b64decode(objs["ConfigMap"]["binaryData"]["scripts.tgz"]))).getnames()
+        self.assertIn("scripts/common/cluster.sh", names)
+        self.assertIn("compat/rocm.yaml", names)   # cluster_check_recipe reads it, as on SLURM
+
+    def test_job_deadline_resolves_as_madengine(self):
+        sys.path.insert(0, str(SUBMIT.parent))
+        import submit
+        self.assertEqual(submit.run_timeout({}), 7200)                      # madengine's default
+        self.assertIsNone(submit.run_timeout({"timeout": -1}))              # the card asks for none
+        self.assertEqual(submit.run_timeout({"timeout": 600}), 600)
+        self.assertEqual(submit.run_timeout({"timeout": -1}, 900), 900)     # --timeout wins
+        self.assertIsNone(submit.run_timeout({"timeout": 600}, 0))          # --timeout 0: none
+        _, objs, _, _ = dry_run("--timeout", "1234")
+        self.assertEqual(objs["Job"]["spec"]["activeDeadlineSeconds"], 1234)
+
     def test_pod_hostnames_are_dns_labels(self):
         out, _, _, _ = dry_run()
         self.assertRegex(out["name"], r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")

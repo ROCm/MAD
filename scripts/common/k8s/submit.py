@@ -86,6 +86,25 @@ def run_name(card_name, nnodes):
     return name
 
 
+# madengine's default run timeout (madengine.core.timeout.DEFAULT_RUN_TIMEOUT), so a card
+# that sets none gets the same Job deadline on both paths.
+DEFAULT_RUN_TIMEOUT = 7200
+
+
+def run_timeout(card, cli_timeout=None):
+    """As madengine's resolve_run_timeout: default < the card's `timeout` < --timeout. A
+    non-positive result (e.g. the card's -1) means no deadline, and is returned as None."""
+    timeout = DEFAULT_RUN_TIMEOUT
+    if card.get("timeout") is not None:
+        timeout = card["timeout"]
+    if cli_timeout is not None and cli_timeout >= 0:
+        timeout = cli_timeout
+    try:
+        return int(timeout) if int(timeout) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def first_positive(*values):
     for v in values:
         try:
@@ -167,8 +186,10 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     script = card["scripts"]
     include = k8s.get("include_script_dirs")
     if include is None:
-        common = Path(script).parent.parent / "common"
-        include = [str(common)] if common.is_dir() else []
+        # As madengine's default_include_dirs: the shared helpers, and the capability
+        # catalog the launchers check a recipe's roles against (cluster_check_recipe).
+        scripts = Path(script).parent.parent
+        include = [str(d) for d in (scripts / "common", scripts.parent / "compat") if d.is_dir()]
     bundle, members = scripts_bundle(script, include)
 
     run_id = str(int(time.time()) % 100000000)
@@ -386,7 +407,7 @@ def main(argv=None):
     ap.add_argument("--config", help="JSON with a 'k8s' block (madengine's keys), 'env_vars', 'distributed'")
     ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help="override a card env var")
     ap.add_argument("--nodes", type=int, help="pods (nodes) for the run (default: the card's)")
-    ap.add_argument("--timeout", type=int, help="seconds before the Job is stopped (default: the card's)")
+    ap.add_argument("--timeout", type=int, help="seconds before the Job is stopped (default: the card's, else 7200 as madengine)")
     ap.add_argument("--output-dir", help="where perf.csv and logs go (default ./k8s_runs/<run>)")
     ap.add_argument("--dry-run", action="store_true", help="print the manifests as JSON and exit")
     a = ap.parse_args(argv)
@@ -407,7 +428,7 @@ def main(argv=None):
     if not image or image.startswith("<"):
         die("no image: pass --image (the card has no usable DOCKER_IMAGE_NAME)")
     nodes = a.nodes or (cfg.get("distributed") or {}).get("nnodes")
-    timeout = a.timeout if a.timeout is not None else first_positive(card.get("timeout"))
+    timeout = run_timeout(card, a.timeout)
     built = build(card, k8s, env, image, nodes, timeout)
 
     if a.dry_run:
