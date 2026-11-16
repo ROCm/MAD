@@ -49,6 +49,13 @@ _is "$(cat "$TMP/u0.out")" "rc=7" "rank 0 gets the worst status of the run (node
 _is "$(cat "$TMP/u1.out")" "rc=7" "the failing node's task ends with its own status"
 _is "$(cat "$TMP/u2.out")" "rc=0" "a passing node's task ends with its own status"
 
+R="$TMP/r2b"
+for k in 0 1 2; do _task $k 3 "$R" 'dispatch_run node node1,node2,node3 bash -c "exit \$(( SLURM_PROCID == 1 ? 7 : 0 ))" 2>&1; echo "rc=$?"' > "$TMP/w$k.out" & done; wait
+_is "$(grep -c 'rank 1 exited 7' "$TMP/w0.out")" "1" "the leader names the failing rank"
+_is "$(env -i PATH="$PATH" MAD_TOPOLOGY="$DIR/common/topology/specs/v2/helios_wide_ep72.json" \
+        bash -c '. "$0"; _dispatch_domain_of 20' "$LIB")" " (scale-up domain 1)" \
+    "...and, with a topology in scale-up domains, the domain a retry should avoid"
+
 # Run size from a wrapper's SLURM_NNODES (madengine), with no MAD_NNODES or array size.
 R="$TMP/r4"
 for k in 0 1; do env -i PATH="$B:$PATH" SLURMD_NODENAME="node$((k + 1))" SLURM_ARRAY_JOB_ID=78 SLURM_ARRAY_TASK_ID=$k \

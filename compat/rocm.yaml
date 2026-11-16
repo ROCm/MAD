@@ -208,7 +208,8 @@ accelerators:
     products: {MI300X: {hbm_gb: 192, hbm_tbps: 5.3}, MI325X: {hbm_gb: 256, hbm_tbps: 6.0}}
     wave_size: 64
     matmul: [bf16, fp16, fp8_e4m3fnuz, fp8_e5m2, int8]
-    partitions: [SPX, DPX, QPX, CPX]
+    # logical GPUs per package in each compute-partition mode (8 XCDs)
+    partitions: {SPX: 1, DPX: 2, QPX: 4, CPX: 8}
     evidence: >-
       scripts/vllm_dissag/models.yaml (Kimi-K3 on MI300X): "gfx942 has no scaled-MXFP4 MFMA",
       FP8 KV cache in every MI300X disagg recipe.
@@ -217,7 +218,8 @@ accelerators:
     products: {MI350X: {hbm_gb: 288, hbm_tbps: 8.0}, MI355X: {hbm_gb: 288, hbm_tbps: 8.0}}
     wave_size: 64
     matmul: [bf16, fp16, fp8_e4m3, fp8_e5m2, mxfp8, mxfp6, mxfp4, int8]
-    partitions: [SPX, DPX, QPX, CPX]
+    # logical GPUs per package in each compute-partition mode (8 XCDs)
+    partitions: {SPX: 1, DPX: 2, QPX: 4, CPX: 8}
     evidence: >-
       scripts/vllm_dissag/models.yaml (Kimi-K3-MXFP4-MI355X): "gfx950 has scaled-MXFP4 MFMA";
       AMD CDNA 5 white paper (MI355X memory 288 GB HBM3E, 8 TB/s).
@@ -229,7 +231,8 @@ accelerators:
     matmul: [bf16, fp16, fp8_e4m3, mxfp8, mxfp6, mxfp4]
     mx_block_sizes: [16, 32]
     mx_fractional_scale: true
-    partitions: [SPX, DPX, QPX, CPX]
+    # modes named in the white paper; logical GPUs per mode not stated, so not assumed
+    partitions: {SPX: 1, DPX: null, QPX: null, CPX: null}
     coherent_host_link_gbps: 256
     scale_up: {fabric: UALoE, gpus_per_domain: 72, tbps_per_gpu: 3.6}
     evidence: AMD CDNA 5 white paper (2026). NVFP4 is not listed as native; it is not assumed.

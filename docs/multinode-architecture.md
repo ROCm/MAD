@@ -13,6 +13,7 @@ the concepts (prefill and decode, launchers, connectors).
 - [How an image is built](#how-an-image-is-built)
 - [What a recipe needs from the hardware](#what-a-recipe-needs-from-the-hardware)
 - [Platforms and fabrics as data](#platforms-and-fabrics-as-data)
+- [Topology v2: GPUs, domains and placement](#topology-v2-gpus-domains-and-placement)
 - [Offline checks per layer](#offline-checks-per-layer)
 
 ## One run, in order
@@ -242,6 +243,30 @@ The node and the network are described in `compat/rocm.yaml` too, so code does n
 
 `recipe.py validate` checks these references with the rest of the catalog.
 
+## Topology v2: GPUs, domains and placement
+
+A topology spec (`MAD_TOPOLOGY`) may also say what it runs on and how it is placed; a spec using
+none of this resolves exactly as before. Examples: `scripts/common/topology/specs/v2/`.
+
+| Field | Meaning |
+|---|---|
+| `platform` | GPUs per node and the scale-up domain from `compat/rocm.yaml platforms` |
+| `partition` | logical GPUs: the platform's GPUs x the mode's size (sizes not stated for a GPU are refused) |
+| role `gpus` | a role sized in GPUs; must fill whole nodes |
+| role `platform` | a role on another node type (heterogeneous pools; resolved, not yet run by a launcher) |
+| role `kind` | `prefill`, `decode`, `router`, `server`, `draft`, `encoder`, `embedding`, `kv_cache` |
+| role `kv_format` | the KV cache a role hands over or takes; prefill and decode must agree |
+| `placement` | `same_domain` (roles inside one scale-up domain), `spread_domains` (in different ones) |
+| `strict` | refuse a TP group larger than the domain, or an EP group that would fit one domain but straddles two |
+| parallel `replicas` | independent TP-k copies over a role's GPUs (multi-tenant) |
+
+`topology.py check` prints the placement and fabric-tier notes (an EP all-to-all that crosses
+scale-out, for example); `topology.py scheduler-hints --scheduler slurm|kubernetes` says what to
+ask the scheduler for (`--segment=<nodes per domain>` with SLURM's block topology; pod affinity on
+the site's domain label). Each node gets `MAD_TOPO_DOMAIN`, and in the per-task dispatch modes a
+failing rank is reported with its domain. Launchers refuse what they cannot yet run (mixed node
+types, roles other than prefill/decode/router/server, replicas).
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in
@@ -251,7 +276,7 @@ None of these need GPUs; run them from the MAD root. The full list is in
 |---|---|
 | Whole run, per card | `python3 scripts/common/tests/snapshot/snapshot.py`: each node's `docker run` and engine command against the goldens. `--spooled` runs each launcher from a spool copy as `sbatch` does; `--equivalence spur-array` and `--equivalence k8s-indexed` require the same per node under those dispatchers; `--spec-file` runs every card from a topology spec; `--update` rewrites the goldens. |
 | Configuration layers | `bash scripts/common/tests/config_layers_assert.sh`; `python3 -m unittest discover -s scripts/common/config/tests` |
-| Topology | `python3 -m unittest discover -s scripts/common/topology/tests` |
+| Topology (v1 and v2) | `python3 -m unittest discover -s scripts/common/topology/tests` |
 | Node selection, verdict | `bash scripts/common/tests/launcher_lib_assert.sh`, `bash scripts/common/tests/launcher_verdict_assert.sh` |
 | Dispatcher | `bash scripts/common/tests/dispatch_assert.sh` |
 | Node program | `bash scripts/common/tests/node_lib_assert.sh` |

@@ -119,11 +119,24 @@ dispatch_run() {  # STEP NODELIST CMD...
             for r in $(seq 0 $((n - 1))); do
                 rc="$(cat "$_DISPATCH_DIR/run_${step}_rank$r")"
                 [ "$rc" -gt "$worst" ] 2>/dev/null && worst="$rc"
+                [ "$rc" != 0 ] && echo "[dispatch] ${step}: rank ${r} exited ${rc}$(_dispatch_domain_of "$r")" >&2
             done
             return "$worst"
             ;;
         *) srun --nodelist="$nodelist" "$@" ;;
     esac
+}
+
+# " (scale-up domain D)" for a rank, when the run's topology spec places nodes in scale-up
+# domains (MAD_TOPOLOGY with a multi-node domain platform), so a failure names the domain a
+# retry should avoid; else nothing.
+_dispatch_domain_of() {
+    [ -n "${MAD_TOPOLOGY:-}" ] || return 0
+    local d
+    d="$(python3 "$(dirname "${BASH_SOURCE[0]}")/../topology/topology.py" node --launcher "${MAD_TOPOLOGY_LAUNCHER:-vllm_dissag}" \
+         --rank "$1" 2>/dev/null | sed -n 's/^MAD_TOPO_DOMAIN=//p')"
+    [ -n "$d" ] && printf ' (scale-up domain %s)' "$d"
+    return 0
 }
 
 # --- per-task internals (spur-array, k8s-indexed) ----------------------------
