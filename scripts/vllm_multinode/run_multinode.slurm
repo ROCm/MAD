@@ -164,7 +164,13 @@ if [ -n "${MAD_TOPOLOGY_NNODES:-}" ] && [ "$MAD_TOPOLOGY_NNODES" != "$NUM_NODES"
     echo "Error: MAD_TOPOLOGY describes ${MAD_TOPOLOGY_NNODES} nodes but the allocation has ${NUM_NODES}." >&2
     exit 1
 fi
-if [ $(( TP_SIZE * PP_SIZE )) -ne $(( NUM_NODES * GPUS_PER_NODE )) ]; then
+if [ "${REPLICAS:-0}" = "1" ]; then
+    # Independent TP_SIZE-GPU servers: TP_SIZE must divide a node.
+    if [ $(( GPUS_PER_NODE % TP_SIZE )) -ne 0 ]; then
+        echo "Error: REPLICAS=1 needs TP_SIZE (${TP_SIZE}) to divide GPUS_PER_NODE (${GPUS_PER_NODE})." >&2
+        exit 1
+    fi
+elif [ $(( TP_SIZE * PP_SIZE )) -ne $(( NUM_NODES * GPUS_PER_NODE )) ]; then
     echo "Error: TP_SIZE*PP_SIZE (${TP_SIZE}x${PP_SIZE}=$((TP_SIZE*PP_SIZE))) != total GPUs (${NUM_NODES}x${GPUS_PER_NODE}=$((NUM_NODES*GPUS_PER_NODE)))." >&2
     exit 1
 fi

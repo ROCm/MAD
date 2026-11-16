@@ -48,11 +48,11 @@ speculative_draft_pool:                 # the draft model on GPUs of its own (a 
   launcher: none
   benchmark: none
   accuracy: none
-multi_tenant:
+multi_tenant:                           # REPLICAS=1: GPUS_PER_NODE / TP independent servers behind a router
   spec: v2/mi355x_cpx_multitenant.json
-  launcher: none
-  benchmark: none
-  accuracy: none
+  launcher: vllm_multinode
+  benchmark: benchmark_xPyD.sh
+  accuracy: benchmark_accuracy.sh
 multimodal:
   spec: v2/multimodal_encoder.json
   launcher: none

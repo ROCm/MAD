@@ -286,7 +286,7 @@ scale-out, for example); `topology.py scheduler-hints --scheduler slurm|kubernet
 ask the scheduler for (`--segment=<nodes per domain>` with SLURM's block topology; pod affinity on
 the site's domain label). Each node gets `MAD_TOPO_DOMAIN`, and in the per-task dispatch modes a
 failing rank is reported with its domain. Launchers refuse what they cannot yet run (mixed node
-types, roles other than prefill/decode/router/server, replicas).
+types, roles other than prefill/decode/router/server).
 
 ### Serving types
 
@@ -297,6 +297,14 @@ MoE, colocated, long context (NIAH accuracy), agentic. Expressible, not yet runn
 speculative (draft role), multi-tenant (CPX replicas), multimodal (encoder role), embeddings,
 heterogeneous pools. Not yet expressed: multi-LoRA, RL rollout. A test holds the file to the
 truth: the named launcher accepts the example and every other launcher refuses one marked none.
+
+### Replicas (multi-tenant, high throughput)
+
+`REPLICAS=1` on the colocated launcher (or a topology spec with `parallel: {"mode": "replicas",
+"tp": k}`) runs GPUS_PER_NODE / TP_SIZE independent servers on every node, each on its own GPUs
+(`HIP_VISIBLE_DEVICES`) and port, behind `replica_router.py` (round robin, standard library) on
+`SERVE_PORT` on the head node -- so the sweep, NIAH and accuracy benchmarks measure the fleet
+unchanged. With a partition mode (CPX), the logical GPUs are what is divided.
 
 ### Accuracy
 

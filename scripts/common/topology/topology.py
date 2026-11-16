@@ -388,8 +388,11 @@ def legacy_env(spec, launcher, env=None):
                                 '{"layout": "colocated", "roles": [{"name": ..., "nodes": N, "parallel": '
                                 '{"mode": "tp_pp", "tp": T, "pp": P}}]}')
         p = roles[0].get("parallel") or {}
-        if p.get("mode", "tp_pp") != "tp_pp":
-            raise TopologyError(f"vllm_multinode: parallel mode {p.get('mode')!r} (tp_pp)")
+        if p.get("mode", "tp_pp") not in ("tp_pp", "replicas"):
+            raise TopologyError(f"vllm_multinode: parallel mode {p.get('mode')!r} (tp_pp or replicas)")
+        if p.get("mode") == "replicas":
+            return _agree({"GPUS_PER_NODE": gpus, "TP_SIZE": p.get("tp", 1), "PP_SIZE": 1, "REPLICAS": 1,
+                           "MAD_TOPOLOGY_NNODES": roles[0]["nodes"]}, env)
         out = {"GPUS_PER_NODE": gpus, "TP_SIZE": p.get("tp", gpus), "PP_SIZE": p.get("pp", roles[0]["nodes"]),
                "MAD_TOPOLOGY_NNODES": roles[0]["nodes"]}
         if p.get("ep"):
@@ -430,6 +433,11 @@ def legacy_env(spec, launcher, env=None):
                 raise TopologyError(f"sglang_disagg: parallel mode {mode!r} (dp_ep or tp)")
     else:
         raise TopologyError(f"unknown launcher {launcher!r}")
+    return _agree(out, env)
+
+
+def _agree(out, env):
+    """The launcher settings, refusing any the caller also gave differently."""
     for k, v in out.items():
         given = (env or {}).get(k, "")
         if given != "" and given != str(v):

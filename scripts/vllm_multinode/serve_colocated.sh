@@ -143,6 +143,66 @@ if [[ -n "${COLOCATED_EXTRA_ARGS:-}" ]]; then
     eval "extra_args=(${COLOCATED_EXTRA_ARGS})"
     serve_args+=("${extra_args[@]}")
 fi
+# Replicas (REPLICAS=1; topology parallel mode "replicas"): GPUS_PER_NODE / TP_SIZE independent
+# servers on every node, each on its own GPUs and port, behind a round-robin router on SERVE_PORT
+# on the head node -- multi-tenant / high-throughput serving of a model that fits TP_SIZE GPUs.
+if [[ "${REPLICAS:-0}" == "1" ]]; then
+    _per_node=$(( GPUS_PER_NODE / TP_SIZE ))
+    _rep_args=(--served-model-name "${MODEL_NAME:-model}" --tensor-parallel-size "${TP_SIZE}"
+               --trust-remote-code --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}")
+    [[ -n "${KV_CACHE_DTYPE:-}" ]]        && _rep_args+=(--kv-cache-dtype "${KV_CACHE_DTYPE}")
+    [[ -n "${KV_BLOCK_SIZE:-}" ]]         && _rep_args+=(--block-size "${KV_BLOCK_SIZE}")
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && _rep_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+    [[ -n "${COLOCATED_EXTRA_ARGS:-}" ]] && { eval "extra_args=(${COLOCATED_EXTRA_ARGS})"; _rep_args+=("${extra_args[@]}"); }
+    [[ -n "${MAD_ROLE_ENGINE_ARGS_SERVER:-}" ]] && { eval "role_args=(${MAD_ROLE_ENGINE_ARGS_SERVER})"; _rep_args+=("${role_args[@]}"); }
+    _rep_port() { echo $(( SERVE_PORT + 1 + $1 )); }
+    _rep_devs() { seq -s, $(( $1 * TP_SIZE )) $(( ($1 + 1) * TP_SIZE - 1 )); }
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        for i in $(seq 0 $(( _per_node - 1 ))); do
+            echo "===DRYRUN replica ${i} node=${NODE_RANK} devices=$(_rep_devs "$i")"
+            printf '%s\n' vllm serve "${MODEL_PATH}" "${_rep_args[@]}" --port "$(_rep_port "$i")"
+            echo "===END"
+        done
+        exit 0
+    fi
+    RUN_LOGS="${_RUN_LOGS:-/run_logs}"; mkdir -p "${RUN_LOGS}/${SLURM_JOB_ID:-0}"
+    _pids=()
+    for i in $(seq 0 $(( _per_node - 1 ))); do
+        HIP_VISIBLE_DEVICES="$(_rep_devs "$i")" vllm serve "${MODEL_PATH}" "${_rep_args[@]}" --port "$(_rep_port "$i")" \
+            > "${RUN_LOGS}/${SLURM_JOB_ID:-0}/replica_NODE${NODE_RANK}_${i}.log" 2>&1 &
+        _pids+=($!)
+    done
+    _SHUTDOWN="${RUN_LOGS}/${SLURM_JOB_ID:-0}/.shutdown"
+    if [[ "$_HEAD" != 1 ]]; then
+        until [ -f "${_SHUTDOWN}" ]; do
+            for p in "${_pids[@]}"; do kill -0 "$p" 2>/dev/null || { echo "[replicas] a replica on node ${NODE_RANK} exited" >&2; exit 1; }; done
+            sleep 5
+        done
+        kill "${_pids[@]}" 2>/dev/null; exit 0
+    fi
+    trap 'touch "${_SHUTDOWN}" 2>/dev/null; kill "${_pids[@]}" "${_router_pid:-}" 2>/dev/null' EXIT
+    _backends=""
+    for ip in ${IPADDRS//,/ }; do
+        for i in $(seq 0 $(( _per_node - 1 ))); do _backends="${_backends:+$_backends,}http://${ip}:$(_rep_port "$i")"; done
+    done
+    _ready=0
+    for _t in $(seq 1 $(( ${LOG_WAIT_TIMEOUT_SECONDS:-4000} / 10 ))); do
+        _n=0
+        for b in ${_backends//,/ }; do curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$b/health" | grep -q '^200$' && _n=$((_n+1)); done
+        [ "$_n" -eq "$(tr ',' '\n' <<<"$_backends" | grep -c .)" ] && { _ready=1; break; }
+        sleep 10
+    done
+    [ "$_ready" = 1 ] || { echo "[replicas] not every replica became ready" >&2; exit 1; }
+    python3 "${SHARED_DIR}/replica_router.py" --port "${SERVE_PORT}" --backends "${_backends}" &
+    _router_pid=$!
+    echo "[replicas] ${_per_node} per node x $(tr ',' '\n' <<<"${IPADDRS}" | grep -c .) nodes behind :${SERVE_PORT}"
+    export BENCHMARK_PORT="${SERVE_PORT}" SERVED_MODEL_NAME="${MODEL_NAME:-model}" NIAH_MODEL="${MODEL_NAME:-model}"
+    export PERF_DEPLOYMENT_TYPE="${PERF_DEPLOYMENT_TYPE:-replicas_tp${TP_SIZE}x${_per_node}}"
+    export PERF_TAGS="${PERF_TAGS:-vllm_multinode,replicas}"
+    bash "${SHARED_DIR}/${BENCHMARK_SCRIPT_FILE:-benchmark_xPyD.sh}"
+    exit $?
+fi
+
 # Engine arguments the recipe's server role resolves to that the card's flags lack
 # (scripts/common/recipe), as shell-quoted words.
 if [[ -n "${MAD_ROLE_ENGINE_ARGS_SERVER:-}" ]]; then
