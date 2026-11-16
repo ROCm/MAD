@@ -114,6 +114,17 @@ node_topology() {
     echo "[topology] node ${SLURM_PROCID:-0}:${_TOPO_ENV//-e / }"
 }
 
+# The recipe's per-role values for the container, as `-e NAME` words (docker reads each value
+# from this environment, so engine arguments with quotes or JSON pass intact): every exported
+# MAD_ROLE_MODEL_PATH_<ROLE> and MAD_ROLE_ENGINE_ARGS_<ROLE> (cluster_check_recipe,
+# cluster_resolve_role_artifacts). Empty when the recipe gives none.
+node_role_env_args() {
+    local v
+    for v in $(compgen -e); do
+        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*) printf -- '-e %s ' "$v" ;; esac
+    done
+}
+
 # Run this node's container and exit with its status:  node_run_container RUN_FN [STOP_HOOK]
 # RUN_FN runs `docker run --name $DOCKER_CONT_NAME ...` in the foreground; STOP_HOOK, if
 # given, runs when the container ends or the task is signalled (e.g. stop a sampler).

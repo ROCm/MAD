@@ -103,20 +103,25 @@ def parse_docker_run(argv):
     return out
 
 
-def container_env(docker):
-    """The environment the container gets from -e: the last value of a name wins."""
+def container_env(docker, client_env=None):
+    """The environment the container gets from -e: the last value of a name wins. A bare
+    `-e NAME` takes NAME's value from the docker client's environment, and is absent when
+    the client has none, as docker does."""
     env = {}
     for e in docker["env"]:
-        k, _, v = e.partition("=")
-        env[k] = v
+        k, eq, v = e.partition("=")
+        if eq:
+            env[k] = v
+        elif k in (client_env or {}):
+            env[k] = client_env[k]
     return env
 
 
-def engine_dry_run(catalog, docker, work):
+def engine_dry_run(catalog, docker, work, client_env=None):
     """The engine command(s) this rank's role script would run, from DRY_RUN."""
     scripts = work / "scripts"
     env = {}
-    for k, v in container_env(docker).items():
+    for k, v in container_env(docker, client_env).items():
         for cdir, sub in CONTAINER_SCRIPT_DIRS.items():
             v = v.replace(cdir, str(scripts / sub) if sub else str(scripts))
         env[k] = v
@@ -245,8 +250,11 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
         ranks = []
         for f in sorted((work / "stub").glob("run_rank*.json"), key=lambda f: f.name):
             docker = parse_docker_run(json.loads(f.read_text()))
-            ranks.append({"rank": f.stem.replace("run_rank", ""), "docker": docker,
-                          "engine": engine_dry_run(catalog, docker, work)})
+            rank = f.stem.replace("run_rank", "")
+            cenv = work / "stub" / f"client_env_rank{rank}.json"
+            client_env = json.loads(cenv.read_text()) if cenv.exists() else {}
+            ranks.append({"rank": rank, "docker": docker,
+                          "engine": engine_dry_run(catalog, docker, work, client_env)})
         snap = {
             "card": card["name"],
             "catalog": catalog,

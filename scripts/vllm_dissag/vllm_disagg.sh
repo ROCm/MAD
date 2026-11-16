@@ -502,6 +502,12 @@ PY
 )"
     echo "[vllm_disagg] model flags (${PARALLEL_MODE}): prefill='${MODEL_CONFIG_PREFILL}' decode='${MODEL_CONFIG_DECODE}'"
 fi
+# Engine arguments the recipe's roles resolve to that its flags lack (scripts/common/recipe:
+# e.g. a weight conversion one accelerator needs), as shell-quoted words.
+MODEL_CONFIG_PREFILL="${MODEL_CONFIG_PREFILL:-}${MAD_ROLE_ENGINE_ARGS_PREFILL:+ ${MAD_ROLE_ENGINE_ARGS_PREFILL}}"
+MODEL_CONFIG_DECODE="${MODEL_CONFIG_DECODE:-}${MAD_ROLE_ENGINE_ARGS_DECODE:+ ${MAD_ROLE_ENGINE_ARGS_DECODE}}"
+[ -n "${MAD_ROLE_ENGINE_ARGS_PREFILL:-}${MAD_ROLE_ENGINE_ARGS_DECODE:-}" ] && \
+    echo "[vllm_disagg] resolved by the recipe's roles: prefill +'${MAD_ROLE_ENGINE_ARGS_PREFILL:-}' decode +'${MAD_ROLE_ENGINE_ARGS_DECODE:-}'"
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
 
 # The name clients must request is the one the servers register: the recipe's
@@ -523,6 +529,21 @@ for i, x in enumerate(a):
 PY
 )"
 export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_PATH}}"
+
+# A role with its own artifact (the recipe's roles: <role>: artifact, found on the nodes by
+# cluster_resolve_role_artifacts) serves that path, under the name every role registers --
+# else the router would find prefill and decode serving different models.
+_role_model_var="MAD_ROLE_MODEL_PATH_${_ROLE^^}"
+if [[ "$_ROLE" =~ ^(prefill|decode)$ && -n "${!_role_model_var:-}" ]]; then
+    _cfg_var="MODEL_CONFIG_${_ROLE^^}"
+    case " ${!_cfg_var} " in
+        *" --served-model-name "*|*" --served-model-name="*) : ;;
+        *) printf -v "$_cfg_var" '%s --served-model-name %q' "${!_cfg_var}" "$SERVED_MODEL_NAME" ;;
+    esac
+    export "${_cfg_var?}"
+    echo "[vllm_disagg] ${_ROLE} serves its own artifact ${!_role_model_var} (as ${SERVED_MODEL_NAME})"
+    MODEL_PATH="${!_role_model_var}"
+fi
 
 # Tokenize models.yaml flag strings without bash eval (JSON in --quantization-config breaks eval).
 _model_config_to_array() {

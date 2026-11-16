@@ -202,17 +202,21 @@ def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
 
 
 def disagreements(recipe, resolved, catalog=None, engine="vllm", flags=None):
-    """Where the recipe's own flags and env say something other than its roles resolve to.
+    """Where the recipe's own flags contradict what its roles resolve to; fills each role's
+    `inject` with the resolved engine arguments its flags do not already carry.
 
-    While roles are declared alongside hand-written flags (before they generate them), this
-    keeps the two from drifting: a conversion's engine argument must be in the role's flags,
-    and the KV-cache format must be set (variable or argument) to the resolved value. `flags`
-    are the engine flags of roles whose flags are not in the recipe (colocated serving takes
-    them from the card); without them such roles are not compared."""
+    Flags and roles must not disagree: flags that convert weights to a format the target does
+    not need are refused (the recipe is for another accelerator). A resolved argument the flags
+    lack -- a conversion, or the KV-cache format when neither the variable nor the argument sets
+    it -- is added for that role (MAD_ROLE_ENGINE_ARGS_<ROLE>), so a recipe can leave what the
+    roles decide out of its flags and one recipe serves several accelerators. `flags` are the
+    engine flags of roles whose flags are not in the recipe (colocated serving takes them from
+    the card); without them such roles are neither compared nor given arguments."""
     out = []
     env = (recipe or {}).get("env") or {}
     shared = " ".join(str(v) for k, v in (recipe or {}).items() if k.endswith("_flags") and isinstance(v, str))
     for r in resolved:
+        r.setdefault("inject", [])
         block = (recipe or {}).get(r["role"]) or {}
         if block:
             role_flags = " ".join(str(v) for v in block.values()) if isinstance(block, dict) else str(block)
@@ -226,13 +230,12 @@ def disagreements(recipe, resolved, catalog=None, engine="vllm", flags=None):
             by_env = kv["env"] and str(env.get(kv["env"])) == kv["value"]
             by_arg = kv["arg"] and f"{kv['arg']} {kv['value']}" in role_flags
             if not (by_env or by_arg):
-                how = " or ".join(x for x in (kv["env"] and f"{kv['env']}={kv['value']}",
-                                              kv["arg"] and f"{kv['arg']} {kv['value']}") if x)
-                out.append(f"{r['role']}: resolves to a {r['kv_cache']['used']} KV cache, but the recipe "
-                           f"sets neither {how}")
-        for arg in r["engine_args"]:
-            if arg not in role_flags:
-                out.append(f"{r['role']}: resolves to engine argument {arg!r}, which its flags lack")
+                if kv["arg"]:
+                    r["inject"].append(f"{kv['arg']} {kv['value']}")
+                else:
+                    out.append(f"{r['role']}: resolves to a {r['kv_cache']['used']} KV cache, but the recipe "
+                               f"does not set {kv['env']}={kv['value']}")
+        r["inject"] += [arg for arg in r["engine_args"] if arg not in role_flags]
         convs = ((catalog or {}).get("engines") or {}).get(engine, {}).get("convert_args") or {}
         for fmt, arg in convs.items():
             if arg in role_flags and arg not in r["engine_args"]:
@@ -241,12 +244,35 @@ def disagreements(recipe, resolved, catalog=None, engine="vllm", flags=None):
     return out
 
 
+def supported_archs(recipe):
+    """The accelerators a recipe declares it is written for (GPU_ARCHS); empty: any."""
+    return str(((recipe or {}).get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
+
+
 def check(catalog, recipe, arch, build=None, roles=None, engine="vllm", flags=None):
     """(resolution, problems): the roles' resolution and everything that stops the recipe
-    running on `arch` -- unmet needs first, else disagreements with its own flags."""
+    running on `arch` -- its declared accelerators, unmet needs, contradicting flags."""
+    only = supported_archs(recipe)
+    if only and arch not in only:
+        return [], [f"the recipe is written for {', '.join(only)} (GPU_ARCHS), not {arch}"]
     res = resolve(catalog, recipe, arch, build, roles, engine)
     problems = list(dict.fromkeys(p for r in res for p in r["problems"]))
     return res, problems or disagreements(recipe, res, catalog, engine, flags)
+
+
+def shell_exports(resolved):
+    """export lines for the launcher: each role's artifact and the engine arguments to add.
+    The arguments are shell-quoted words (shlex), safe for shlex.split and for eval."""
+    import shlex
+    lines = []
+    for r in resolved:
+        role = r["role"].upper()
+        if r.get("artifact"):
+            lines.append(f"export MAD_ROLE_ARTIFACT_{role}={shlex.quote(str(r['artifact']))}")
+        if r.get("inject"):
+            words = shlex.join(w for a in r["inject"] for w in shlex.split(a))
+            lines.append(f"export MAD_ROLE_ENGINE_ARGS_{role}={shlex.quote(words)}")
+    return "".join(x + "\n" for x in lines)
 
 
 def validate(catalog):
@@ -284,6 +310,8 @@ def main(argv=None):
         p.add_argument("--flags", help="engine flags of roles whose flags are not in the recipe "
                                        "(colocated serving: the card's COLOCATED_EXTRA_ARGS)")
         p.add_argument("--catalog", default=CATALOG)
+        p.add_argument("--exports", help="write the launcher's export lines (role artifacts and the "
+                                         "engine arguments to add) to this file when it resolves")
     v = sub.add_parser("validate")
     v.add_argument("--catalog", default=CATALOG)
     a = ap.parse_args(argv)
@@ -315,11 +343,19 @@ def main(argv=None):
         return 1
     res, problems = check(catalog, recipe, a.arch, a.build, a.roles.split(",") if a.roles else None, engine,
                           a.flags)
+    if a.exports and not problems:
+        with open(a.exports, "w") as f:
+            f.write(shell_exports(res))
     if a.cmd == "explain":
         print(json.dumps(res, indent=1))
     else:
         for n in dict.fromkeys(n for r in res for n in r["notes"]):
             print(f"[recipe] {a.model} {n}")
+        for r in res:
+            if r.get("inject"):
+                print(f"[recipe] {a.model} {r['role']}: adds {' '.join(r['inject'])} (resolved; not in its flags)")
+            if r.get("artifact"):
+                print(f"[recipe] {a.model} {r['role']}: serves its own artifact {r['artifact']}")
         for p in problems:
             print(f"ERROR: {a.model} on {a.arch}{' with ' + a.build if a.build else ''}: {p}", file=sys.stderr)
         if not problems:

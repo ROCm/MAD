@@ -140,9 +140,21 @@ format). Nothing absent from the catalog is assumed.
 conversion (MXFP4 weights become packed int4 on gfx942, which has no MXFP4 matrix
 instruction) with the engine argument that makes it, and the KV-cache format both sides
 of a prefill-to-decode handoff must agree on. A refusal names every need nothing meets.
-While roles sit beside hand-written flags, the check also refuses a recipe whose flags
-disagree with them, so the gfx942 recipe is refused on gfx950 for the conversion it
-forces, matching its `GPU_ARCHS`.
+`GPU_ARCHS`, when a recipe sets it, is its declared support set. Flags that contradict the
+roles are refused: the gfx942 recipe's int4 conversion is refused on gfx950. What the roles
+resolve to and the flags lack -- a conversion, the KV-cache format -- is added for that role,
+so a recipe can leave those out of its flags and serve several accelerators.
+
+What reaches each node:
+- `MAD_ROLE_ENGINE_ARGS_<ROLE>`: the added engine arguments, as shell-quoted words, appended
+  by `vllm_disagg.sh`, `sglang_disagg_mori_io_ep.sh` and `serve_colocated.sh`.
+- `MAD_ROLE_MODEL_PATH_<ROLE>`: a role's own checkpoint when its `artifact` names one (an
+  absolute path, or a name found like the model, on every node, by
+  `cluster_resolve_role_artifacts`). The role serves it under the model's served name, so the
+  router and the clients see one model.
+
+Both reach the container by name (`docker run -e NAME`, `node_role_env_args`), are recorded in
+`config.resolved.json`, and are absent for a recipe that gives none.
 
 ```
 python3 scripts/common/recipe/recipe.py check   --recipes scripts/vllm_dissag/models.yaml \

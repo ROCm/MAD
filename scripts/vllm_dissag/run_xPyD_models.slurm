@@ -328,6 +328,7 @@ fi
 # explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
 # load from one path, so a partial hit fails the run deep into bring-up.
 cluster_resolve_model_path || exit 1
+cluster_resolve_role_artifacts || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""

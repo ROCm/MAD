@@ -634,32 +634,72 @@ cluster_detect_gpu_arch() {
 # flags for (colocated serving: the card's COLOCATED_EXTRA_ARGS). RECIPE_CHECK=0 skips it. The resolution is recorded
 # in config.resolved.json as MAD_RECIPE_ROLES.
 cluster_check_recipe() {
-    local yaml="$1" model="$2" engine="$3" roles="${4:-}" flags="${5-}" out rc
+    local yaml="$1" model="$2" engine="$3" roles="${4:-}" flags="${5-}" out rc exports
     local tool="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/recipe.py"
     local catalog="${MAD_CATALOG:-$(dirname "$tool")/../../../compat/rocm.yaml}"
     if [ "${RECIPE_CHECK:-1}" = "0" ]; then
-        echo "RECIPE_CHECK=0: not resolving ${model}'s roles"; return 0
+        echo "RECIPE_CHECK=0: not resolving ${model}'s roles (nor adding the engine arguments or"
+        echo "  per-role artifacts they would give)"; return 0
     fi
-    [ -n "${MAD_GPU_ARCH:-}" ] || return 0
+    if [ -z "${MAD_GPU_ARCH:-}" ]; then
+        echo "WARN: GPU arch unknown: ${model}'s roles are NOT resolved (no added engine arguments)" >&2
+        return 0
+    fi
     if [ ! -f "$tool" ] || [ ! -f "$catalog" ]; then
         echo "WARN: no capability catalog (${catalog}); ${model}'s roles are NOT being checked" >&2
         return 0
     fi
-    out="$(python3 "$tool" check --catalog "$catalog" --recipes "$yaml" --model "$model" \
+    exports="$(mktemp)"
+    out="$(python3 "$tool" check --catalog "$catalog" --recipes "$yaml" --model "$model" --exports "$exports" \
            --arch "$MAD_GPU_ARCH" ${MAD_ENGINE_BUILD:+--build "$MAD_ENGINE_BUILD"} \
            ${MAD_PIN_SET:+--pin-set "$MAD_PIN_SET"} ${roles:+--roles "$roles"} \
            ${5+--flags "$flags"} --engine "$engine" 2>&1)"; rc=$?
     [ -n "$out" ] && printf '%s\n' "$out"
     # 2: no such recipe -- whether the model needs one is the launcher's check, not this one.
-    [ "$rc" -eq 2 ] && return 0
+    [ "$rc" -eq 2 ] && { rm -f "$exports"; return 0; }
     if [ "$rc" -eq 0 ]; then
+        # Each role's artifact (MAD_ROLE_ARTIFACT_<ROLE>, found on the nodes by
+        # cluster_resolve_role_artifacts) and the resolved engine arguments its flags lack
+        # (MAD_ROLE_ENGINE_ARGS_<ROLE>, which the role scripts append).
+        # shellcheck source=/dev/null
+        . "$exports"
+        local v
+        while read -r v; do
+            [ -n "$v" ] && declare -F config_note >/dev/null && config_note "$v" "${!v}" recipe-check
+        done < <(sed -n 's/^export \([A-Z0-9_]*\)=.*/\1/p' "$exports")
+        rm -f "$exports"
         out="$(sed -n 's/^\[recipe\] .* resolves on /resolves on /p' <<<"$out")"
         if [ -n "$out" ] && declare -F config_note >/dev/null; then config_note MAD_RECIPE_ROLES "$out" recipe-check; fi
         return 0
     fi
+    rm -f "$exports"
     echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}}${MAD_PIN_SET:+ (pin set ${MAD_PIN_SET})} (above)." >&2
     echo "  Use the model's recipe for this GPU, or RECIPE_CHECK=0 to run it anyway." >&2
     return 1
+}
+
+# cluster_resolve_role_artifacts: for every role whose recipe names its own artifact
+# (MAD_ROLE_ARTIFACT_<ROLE>, from cluster_check_recipe), the path the role loads, found the way
+# cluster_resolve_model_path finds the model (an absolute path is checked as given): exported
+# as MAD_ROLE_MODEL_PATH_<ROLE> for the role scripts. A role without one serves MODEL_PATH.
+cluster_resolve_role_artifacts() {
+    local var role name path
+    for var in $(compgen -v MAD_ROLE_ARTIFACT_); do
+        role="${var#MAD_ROLE_ARTIFACT_}"; name="${!var}"
+        [ -n "$name" ] || continue
+        echo "Role ${role,,}: the recipe names its own artifact, ${name}"
+        if [[ "$name" == /* ]]; then
+            cluster_check_model_path "$name" "$(dirname "$name")" || { echo "x FATAL: ${name} (${role,,}) is not usable on all nodes"; return 1; }
+            path="$name"
+        else
+            # In a subshell: the probe sets MODEL_PATH / MODEL_DIR, which stay the model's.
+            path="$(MODEL_PATH=""; MODEL_WEIGHTS_NAME="$name"; MODEL_NAME="$name"
+                    cluster_resolve_model_path >&2 && printf %s "$MODEL_PATH")" || return 1
+        fi
+        export "MAD_ROLE_MODEL_PATH_${role}=${path}"
+        declare -F config_note >/dev/null && config_note "MAD_ROLE_MODEL_PATH_${role}" "$path" recipe-check
+    done
+    return 0
 }
 
 cluster_require_gpu_arch() {

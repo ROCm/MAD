@@ -331,6 +331,9 @@ if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_RADIX_CACHE:-0}" == "1" 
     echo "[radix] radix prefix cache ENABLED (stripped --disable-radix-cache) for agentic/ENABLE_RADIX_CACHE"
 fi
 
+# Engine arguments the recipe's roles resolve to that its flags lack (scripts/common/recipe).
+PREFILL_MODEL_CONFIG+="${MAD_ROLE_ENGINE_ARGS_PREFILL:+ ${MAD_ROLE_ENGINE_ARGS_PREFILL}}"
+DECODE_MODEL_CONFIG+="${MAD_ROLE_ENGINE_ARGS_DECODE:+ ${MAD_ROLE_ENGINE_ARGS_DECODE}}"
 export PREFILL_MODEL_CONFIG DECODE_MODEL_CONFIG MODEL_EXPERIMENTAL_FLAGS SERVER_METRICS_FLAGS
 
 # shellcheck disable=SC1091
@@ -508,6 +511,21 @@ elif [[ "$NODE_RANK" -eq $((xP + yD)) && "$ROUTER_ADDR" != "$MASTER_ADDR" ]]; th
 else
     _ROLE=""; _ROLE_INDEX=""
 fi
+# The checkpoint this node's server loads: the recipe's artifact for its role when it names
+# one (found on the nodes by cluster_resolve_role_artifacts), served under the model's own
+# name so the router and the clients see one model; else MODEL_PATH.
+ROLE_MODEL_PATH="$MODEL_PATH"
+_role_model_var="MAD_ROLE_MODEL_PATH_${_ROLE^^}"
+if [[ "$_ROLE" =~ ^(prefill|decode)$ && -n "${!_role_model_var:-}" ]]; then
+    ROLE_MODEL_PATH="${!_role_model_var}"
+    _cfg_var="${_ROLE^^}_MODEL_CONFIG"
+    case " ${!_cfg_var} " in
+        *" --served-model-name "*) : ;;
+        *) printf -v "$_cfg_var" '%s --served-model-name %s' "${!_cfg_var}" "$MODEL_PATH" ;;
+    esac
+    export "${_cfg_var?}"
+    echo "[sglang] ${_ROLE} serves its own artifact ${ROLE_MODEL_PATH} (as ${MODEL_PATH})"
+fi
 # Whether this node runs the router and the benchmark client.
 if [[ -n "${MAD_TOPO_ROUTER:-}" ]]; then
     _HOSTS_ROUTER="$MAD_TOPO_ROUTER"
@@ -540,7 +558,7 @@ if [[ "$_HOSTS_ROUTER" == 1 ]]; then
         [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
         _prefill_cmd="python3 -m sglang.launch_server \
-            --model-path ${MODEL_PATH} \
+            --model-path ${ROLE_MODEL_PATH} \
             --disaggregation-mode prefill \
             --load-balance-method ${_prefill_lb_method} \
             ${_SGL_PRR_FLAG} \
@@ -815,7 +833,7 @@ elif [[ "$_ROLE" == prefill ]]; then
     [[ "$DP_MODE" == "1" ]] && _prefill_lb_method="follow_bootstrap_room"
 
     PREFILL_CMD="python3 -m sglang.launch_server \
-        --model-path ${MODEL_PATH} \
+        --model-path ${ROLE_MODEL_PATH} \
         --disaggregation-mode prefill \
         --load-balance-method ${_prefill_lb_method} \
         ${_SGL_PRR_FLAG} \
@@ -910,7 +928,7 @@ elif [[ "$_ROLE" == decode ]]; then
     [[ "$DP_MODE" == "1" ]] && _decode_lb_method="follow_bootstrap_room"
 
     DECODE_CMD="python3 -m sglang.launch_server \
-        --model-path ${MODEL_PATH} \
+        --model-path ${ROLE_MODEL_PATH} \
         --disaggregation-mode decode \
         --load-balance-method ${_decode_lb_method} \
         ${_SGL_PRR_FLAG} \

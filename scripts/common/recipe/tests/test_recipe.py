@@ -7,6 +7,7 @@ import copy
 import glob
 import io
 import json
+import shlex
 import os
 import sys
 import unittest
@@ -38,6 +39,13 @@ DQ = {
         "decode": {"artifact": "org/model-w4a16", "quantization": {"weights": "mxfp4", "activations": "bf16"}},
     }
 }
+
+
+def without_archs(recipe):
+    """The recipe without its GPU_ARCHS: what its roles and flags alone resolve to."""
+    r = copy.deepcopy(recipe)
+    r.get("env", {}).pop("GPU_ARCHS", None)
+    return r
 
 
 def used(res, role, need):
@@ -110,18 +118,42 @@ class KimiRecipes(unittest.TestCase):
         self.assertEqual(used(res, "decode", "kv_cache"), "fp8_e4m3")
         self.assertEqual(res[0]["engine_args"], [])
 
-    def test_mi300x_recipe_on_gfx950_is_refused_for_its_conversion(self):
+    def test_gpu_archs_is_the_declared_support_set(self):
         _, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4"], "gfx950", KIMI_BUILD)
+        self.assertEqual(problems, ["the recipe is written for gfx942 (GPU_ARCHS), not gfx950"])
+
+    def test_mi300x_flags_on_gfx950_are_refused_for_their_conversion(self):
+        _, problems = R.check(CAT, without_archs(RECIPES["Kimi-K3-MXFP4"]), "gfx950", KIMI_BUILD)
         self.assertTrue(problems and all("does not need" in p for p in problems), problems)
 
-    def test_mi355x_recipe_on_gfx942_is_refused_for_the_missing_conversion(self):
-        _, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4-MI355X"], "gfx942", KIMI_BUILD)
-        self.assertTrue(problems and all("its flags lack" in p for p in problems), problems)
+    def test_mi355x_flags_on_gfx942_get_the_conversion_added(self):
+        res, problems = R.check(CAT, without_archs(RECIPES["Kimi-K3-MXFP4-MI355X"]), "gfx942", KIMI_BUILD)
+        self.assertEqual(problems, [])
+        self.assertEqual([r["inject"] for r in res], [[INT4_ARG], [INT4_ARG]])
+        exports = R.shell_exports(res)
+        self.assertIn("export MAD_ROLE_ENGINE_ARGS_PREFILL=", exports)
+        line = next(x for x in exports.splitlines() if "PREFILL" in x)
+        words = shlex.split(shlex.split(line.split("=", 1)[1])[0])
+        self.assertEqual(words, ["--quantization-config", '{"moe":{"weight":"int4_per_group_32"}}'])
+
+    def test_a_kv_format_the_flags_do_not_set_is_added(self):
+        recipe = copy.deepcopy(RECIPES["Qwen3-32B"])
+        recipe["roles"]["default"]["kv_cache"] = "fp8"
+        res, problems = R.check(CAT, recipe, "gfx942", "vllm@vllm-mori121")
+        self.assertEqual(problems, [])
+        self.assertEqual(res[0]["inject"], ["--kv-cache-dtype fp8"])
+
+    def test_artifacts_are_exported_per_role(self):
+        res, problems = R.check(CAT, DQ, "gfx950", KIMI_BUILD)
+        self.assertEqual(problems, [])
+        exports = R.shell_exports(res)
+        self.assertIn("export MAD_ROLE_ARTIFACT_PREFILL=org/model-w4a4-mxfp4", exports)
+        self.assertIn("export MAD_ROLE_ARTIFACT_DECODE=org/model-w4a16", exports)
 
     def test_colocated_flags_from_the_card_are_compared(self):
         int4 = "--max-num-seqs 8 " + INT4_ARG
         self.assertEqual(R.check(CAT, RECIPES["Kimi-K3"], "gfx942", KIMI_BUILD, ["server"], flags=int4)[1], [])
-        _, problems = R.check(CAT, RECIPES["Kimi-K3"], "gfx950", KIMI_BUILD, ["server"], flags=int4)
+        _, problems = R.check(CAT, without_archs(RECIPES["Kimi-K3"]), "gfx950", KIMI_BUILD, ["server"], flags=int4)
         self.assertTrue(problems and "does not need" in problems[0], problems)
 
     def test_colocated_server_role_checks_needs_not_flags(self):

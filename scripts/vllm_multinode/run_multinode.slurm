@@ -185,6 +185,7 @@ cluster_check_recipe "${SHARED_DIR}/models.yaml" "${MODEL_NAME}" vllm server "${
 cluster_report_rdma_rails
 
 cluster_resolve_model_path || exit 1
+cluster_resolve_role_artifacts || exit 1
 echo "  weights    : ${MODEL_PATH}"
 
 mkdir -p "$LOG_PATH"

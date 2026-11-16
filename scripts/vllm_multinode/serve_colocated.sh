@@ -27,6 +27,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SHARED_DIR="${SHARED_DIR:-${SCRIPT_DIR}/../vllm_dissag}"
 
 : "${MODEL_PATH:?MODEL_PATH must be set (path to the model dir)}"
+# The recipe's server artifact, when it names one (cluster_resolve_role_artifacts).
+if [[ -n "${MAD_ROLE_MODEL_PATH_SERVER:-}" ]]; then
+    echo "[colocated] serving the recipe's server artifact ${MAD_ROLE_MODEL_PATH_SERVER}"  >&2
+    MODEL_PATH="$MAD_ROLE_MODEL_PATH_SERVER"
+fi
 MODEL_NAME="${MODEL_NAME:-}"
 NODE_RANK="${NODE_RANK:-0}"
 # The head serves the API and benchmarks; the other nodes serve headless. From the
@@ -118,6 +123,13 @@ fi
 if [[ -n "${COLOCATED_EXTRA_ARGS:-}" ]]; then
     eval "extra_args=(${COLOCATED_EXTRA_ARGS})"
     serve_args+=("${extra_args[@]}")
+fi
+# Engine arguments the recipe's server role resolves to that the card's flags lack
+# (scripts/common/recipe), as shell-quoted words.
+if [[ -n "${MAD_ROLE_ENGINE_ARGS_SERVER:-}" ]]; then
+    eval "role_args=(${MAD_ROLE_ENGINE_ARGS_SERVER})"
+    serve_args+=("${role_args[@]}")
+    echo "[colocated] resolved by the recipe's roles: +${MAD_ROLE_ENGINE_ARGS_SERVER}" >&2
 fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
