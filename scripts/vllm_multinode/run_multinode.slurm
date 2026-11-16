@@ -66,7 +66,21 @@
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# This launcher's directory. Under sbatch the scheduler runs a copy of this script
+# from its spool directory (SLURM's slurmd, Spur's /var/spool/spur), so the script's
+# own path is not the repo: then the submit directory names it, as
+# `cd <MAD>/scripts/vllm_multinode && sbatch ...` or `sbatch scripts/vllm_multinode/...` from the root.
+_resolve_launcher_dir() {
+    local _d
+    for _d in "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" \
+              "${SLURM_SUBMIT_DIR:+$SLURM_SUBMIT_DIR/scripts/vllm_multinode}" "${SLURM_SUBMIT_DIR:-}" "$PWD"; do
+        [[ -n "$_d" && -f "$_d/serve_colocated.sh" ]] && { (cd "$_d" && pwd); return 0; }
+    done
+    echo "Error: cannot find scripts/vllm_multinode (looked next to this script, in SLURM_SUBMIT_DIR and in $PWD);" \
+         "run sbatch from MAD/scripts/vllm_multinode or from the MAD root" >&2
+    return 1
+}
+SCRIPT_DIR="$(_resolve_launcher_dir)" || exit 1
 MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SHARED_DIR="${MAD_SCRIPTS_DIR}/vllm_dissag"
 
@@ -82,6 +96,14 @@ for f in "${REQUIRED_FILES[@]}"; do
     [[ -f "$f" ]] || { echo "Error: required file missing: $f" >&2; exit 1; }
 done
 
+# A card whose values are in a layered config (env_vars.MAD_CONFIG, e.g. the _way4
+# twin) is resolved by madengine; this launcher does not read the file. Say that,
+# rather than failing on the MODEL_NAME the file would have supplied.
+if [ -n "${MAD_CONFIG:-}" ] && [ -z "${MODEL_NAME:-}" ]; then
+    echo "Error: MAD_CONFIG=${MAD_CONFIG} is a madengine layered config, which plain sbatch does not read." >&2
+    echo "       Run this card through madengine, or set MODEL_NAME and the file's other values yourself (docs/configuration.md)." >&2
+    exit 1
+fi
 : "${DOCKER_IMAGE_NAME:?set DOCKER_IMAGE_NAME to the vLLM image to run}"
 MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)}"
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
@@ -393,13 +415,15 @@ fi
 
 # --- Forwarded env (see COLOCATED_FORWARD_ENV above) ---
 # Written to a file rather than built into -e flags so values containing spaces
-# survive; docker takes the whole line after = verbatim. Node-local /tmp, mode
-# 600, and never archived -- unlike the wrapper scripts, which are build
-# artifacts and must stay free of secrets.
-_ENV_FILE=/tmp/colocated_fwd_env.${SLURM_JOB_ID}.${SLURM_PROCID}
-rm -f "$_ENV_FILE"
-: > "$_ENV_FILE"
-chmod 600 "$_ENV_FILE"
+# survive; docker takes the whole line after = verbatim. Node-local /tmp, and
+# never archived -- unlike the wrapper scripts, which are build artifacts and must
+# stay free of secrets. mktemp creates it new (never through an existing name or
+# link another user placed there) and mode 600 before anything is written to it.
+_ENV_FILE="$(mktemp "/tmp/colocated_fwd_env.${SLURM_JOB_ID}.${SLURM_PROCID}.XXXXXX")" || {
+    echo "[fwd-env] ERROR: cannot create the forwarded-env file in /tmp" >&2; exit 1; }
+# Removed however this node leaves, a cancelled run included.
+trap "rm -f $_ENV_FILE" EXIT
+trap "exit 143" TERM INT
 for _v in ${COLOCATED_FORWARD_ENV//,/ }; do
     [ -n "${!_v:-}" ] && printf "%s=%s\n" "$_v" "${!_v}" >> "$_ENV_FILE"
 done

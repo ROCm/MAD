@@ -4,12 +4,16 @@
 #     on a node's non-zero exit, on missing results, or on any FAILURE row.
 #   - run_multinode.slurm, run against stand-in srun / docker / hostname / fuser: the
 #     container's exit status reaches the job, the teardown runs on a cancel during the
-#     run, the barrier port is per job, the PP default is the node count, and the MoRI
-#     and fabric env reach the container.
+#     run, the barrier port is per job, the PP default is the node count, the MoRI
+#     and fabric env reach the container, and a MAD_CONFIG-only card is refused.
 # No cluster, no GPUs, no docker.
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+# A stand-in "long" run: 30 s, with a fraction unique to this test run so its
+# leftovers can be found and killed without touching anything else. A cancelled
+# run's other ranks may start theirs after the cancel, so they are killed on exit.
+_LONG_SLEEP="30.$$"
+TMP="$(mktemp -d)"; trap 'pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null; rm -rf "$TMP"' EXIT
 pass=0; fail=0
 _ok()  { printf "  PASS  %s\n" "$1"; pass=$((pass+1)); }
 _bad() { printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); }
@@ -33,6 +37,9 @@ _is "$(_verdict 0 "$CSV_FAIL" | tr '\n' ' ')" "rc=1 published "   "a FAILURE row
 _is "$(_verdict 137 "$CSV_OK" | tr '\n' ' ')" "rc=137 published " "a node's exit status fails the job, CSV still published"
 _is "$(_verdict 0 "" | tr '\n' ' ')"          "rc=1 unpublished " "no results fails the job"
 _is "$(_verdict 0 "" 0 | tr '\n' ' ')"        "rc=0 unpublished " "no results passes when none were required"
+CSV_HEADER='model,performance,metric,status\n'
+_is "$(_verdict 0 "$CSV_HEADER" | tr '\n' ' ')"   "rc=1 published "   "a header and no rows is no result: fails the job"
+_is "$(_verdict 0 "$CSV_HEADER" 0 | tr '\n' ' ')" "rc=0 published "   "...unless no results were required"
 
 echo ""
 echo "=== cluster.sh leaves PP_SIZE to the colocated launcher ==="
@@ -95,6 +102,10 @@ _has "$(cat "$TMP/run/perf_M.csv" 2>/dev/null)" "SUCCESS" "...and its CSV is sti
 _is "$(_colo STUB_CSV="$CSV_FAIL")" "1" "a FAILURE row fails the job"
 _is "$(_colo STUB_CSV=)" "1" "no results fails the job"
 
+_is "$(_colo MODEL_NAME= MAD_CONFIG=mad-config.kimi-k3.yaml)" "1" "a MAD_CONFIG card without MODEL_NAME stops at once"
+_has "$(cat "$TMP/run/out.txt")" "madengine layered config" "...and says the file needs madengine"
+_hasnot "$(_stub)" "docker run" "...before any container starts"
+
 _colo ALL2ALL_BACKEND=mori_low_latency PYTORCH_ALLOC_CONF=custom NCCL_SOCKET_IFNAME=ens3 >/dev/null
 _has "$(_stub)" "-e PYTORCH_HIP_ALLOC_CONF=expandable_segments:False " "MoRI backend: moriio.env reaches the container"
 _has "$(_stub)" "-e PYTORCH_ALLOC_CONF=custom " "...a submit-time value wins over the file"
@@ -106,14 +117,16 @@ rm -rf "$TMP/run"; mkdir -p "$TMP/run/logs"
 ( cd "$TMP/run" && exec env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
     LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \
     DOCKER_IMAGE_NAME=img MODEL_NAME=M MODEL_PATH="$TMP/model" MAD_GPU_ARCH=gfx950 \
-    CLUSTER_SYSFS_IB="$TMP/none" STUB_SLEEP=30 \
+    CLUSTER_SYSFS_IB="$TMP/none" STUB_SLEEP="$_LONG_SLEEP" \
     bash "$DIR/vllm_multinode/run_multinode.slurm" > "$TMP/run/out.txt" 2>&1 ) &
 _lp=$!
 for _i in $(seq 1 50); do grep -q "docker run" "$TMP/run/stub.log" 2>/dev/null && break; sleep 0.2; done
 kill -TERM "$_lp"; wait "$_lp"; _rc=$?
 _is "$_rc" "143" "TERM during the run ends the job with 143"
 _has "$(_stub)" "docker stop colocated_M_4242" "TERM during the run stops the containers"
-pkill -f "sleep 30" 2>/dev/null
+# Only this test's own stand-in sleeps (the TERM leaves them orphaned), never
+# another process on the machine that happens to run `sleep 30`.
+pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null
 
 echo ""
 echo "=== the NIAH wrapper leaves max_tokens to benchmark_niah.py ==="

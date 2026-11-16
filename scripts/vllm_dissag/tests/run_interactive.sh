@@ -120,6 +120,7 @@ docker run --rm \
     -e CONNECTOR=$CONNECTOR \
     -e WIDE_EP=$WIDE_EP \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
+    -e EP_TP_SIZE=$EP_TP_SIZE \
     -e PROXY_TYPE=${PROXY_TYPE:-vllm_router} \
     -e ROUTER_PORT=${ROUTER_PORT:-30000} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
