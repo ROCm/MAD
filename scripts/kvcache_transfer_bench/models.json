@@ -1,0 +1,33 @@
+[
+    {
+        "name": "pyt_kvcache_transfer_bench_mori",
+        "dockerfile": "Dockerfile",
+        "scripts": "scripts/slurm_launcher.slrum",
+        "url": "",
+        "data": "",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_kvcache_transfer_bench.csv",
+        "tags": [
+            "pyt",
+            "kvcache_transfer",
+            "mori_io",
+            "benchmark"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>"
+        },
+        "args": "--backends mori",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "08:00:00"
+        }
+    }
+]

@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common.utils import add_common_bench_args, append_result_to_file, collect_version_info, generate_test_sizes, resolve_hostname
+from common.utils import add_common_bench_args, append_result_to_file, collect_version_info, find_mori_root, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
 NUM_ITERS = 128
@@ -56,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     SHARED_DIR = Path(args.shared_folder)
-    mori_root = os.environ.get("MORI_ROOT", "/workspace/mori")
+    mori_root = find_mori_root()
     mori_bench = os.path.join(mori_root, "tests", "python", "io", "benchmark.py")
     if not os.path.isfile(mori_bench):
         print(f"ERROR: MORI benchmark not found: {mori_bench}", file=sys.stderr)

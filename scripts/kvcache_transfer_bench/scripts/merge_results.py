@@ -5,6 +5,7 @@ and results_mooncake.json from a shared directory into:
   - results_merged.json  (combined, normalized list)
   - results_merged.csv   (pivot: one row per transfer size, one column per backend)
   - report.html          (self-contained HTML report with table + throughput chart)
+  - perf.csv             (with --perf-csv: madengine's perf schema, one row per backend and size)
 
 Use --kv-cache-estimator-file to load KV cache mapping from a CSV file.
 """
@@ -12,6 +13,7 @@ Use --kv-cache-estimator-file to load KV cache mapping from a CSV file.
 import argparse
 import csv
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +45,40 @@ def _bytes_to_label(size_bytes: int) -> str:
         val = size_bytes / (1 << 10)
         return f"{val:g}KB"
     return f"{size_bytes}B"
+
+
+PERF_CSV_FIELDNAMES = [
+    'model', 'n_gpus', 'nnodes', 'gpus_per_node', 'training_precision',
+    'pipeline', 'args', 'tags', 'docker_file', 'base_docker', 'docker_sha',
+    'docker_image', 'git_commit', 'machine_name', 'deployment_type', 'launcher',
+    'gpu_architecture', 'performance', 'metric', 'relative_change', 'status',
+    'build_duration', 'test_duration', 'dataname', 'data_provider_type',
+    'data_size', 'data_download_duration', 'build_number',
+    'additional_docker_run_options',
+]
+
+
+def write_perf_csv(merged: dict, perf_csv: Path, verbose: bool = True) -> None:
+    """One madengine perf row per backend and transfer size: average GB/s, target <- initiator."""
+    perf_csv = Path(perf_csv)
+    perf_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(perf_csv, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDNAMES)
+        writer.writeheader()
+        for r in merged["results"]:
+            writer.writerow({
+                'model': f"kvcache_transfer_{r['backend']}_{_bytes_to_label(r['transfer_size'])}",
+                'n_gpus': '2', 'nnodes': '2', 'gpus_per_node': '1',
+                'pipeline': 'kvcache_transfer_bench', 'tags': f"kvcache_transfer,{r['backend']}",
+                'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
+                'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
+                'deployment_type': 'internode', 'launcher': 'slurm_multi',
+                'performance': f"{r['throughput_gbs']:.4f}",
+                'metric': f"GB/s ({r['transfer_size']} B)",
+                'status': 'SUCCESS' if r['throughput_gbs'] > 0 else 'FAILURE',
+            })
+    if verbose:
+        print(f"perf CSV written to {perf_csv} ({len(merged['results'])} rows)")
 
 
 def _normalize_result(entry: dict) -> dict | None:
@@ -607,10 +643,18 @@ def main():
         default=None,
         help="Path to KV cache estimator CSV. If not set, no KV cache mapping is loaded.",
     )
+    parser.add_argument(
+        "--perf-csv",
+        type=Path,
+        default=None,
+        help="Also write the results in madengine's perf.csv schema to this path.",
+    )
     args = parser.parse_args()
     input_dir = args.input_dir
     output_path = args.output or (input_dir / "results_merged.json")
-    merge_results(input_dir, output_path, verbose=not args.quiet, kv_cache_estimator_file=args.kv_cache_estimator_file)
+    merged = merge_results(input_dir, output_path, verbose=not args.quiet, kv_cache_estimator_file=args.kv_cache_estimator_file)
+    if args.perf_csv:
+        write_perf_csv(merged, args.perf_csv, verbose=not args.quiet)
     return 0
 
 

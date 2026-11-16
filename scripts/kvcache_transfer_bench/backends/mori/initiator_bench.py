@@ -16,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from common.utils import add_common_bench_args, generate_test_sizes, resolve_hostname
+from common.utils import add_common_bench_args, find_mori_root, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
 NUM_ITERS = 128
@@ -33,7 +33,7 @@ def main():
     SHARED_DIR = Path(args.shared_folder)
     target_node = args.target_node or os.environ.get("TARGET_IP", "localhost")
     master_addr = resolve_hostname(target_node)
-    mori_root = os.environ.get("MORI_ROOT", "/workspace/mori")
+    mori_root = find_mori_root()
     mori_bench = os.path.join(mori_root, "tests", "python", "io", "benchmark.py")
     if not os.path.isfile(mori_bench):
         print(f"ERROR: MORI benchmark not found: {mori_bench}", file=sys.stderr)

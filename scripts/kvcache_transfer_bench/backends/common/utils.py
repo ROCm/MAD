@@ -20,6 +20,22 @@ def resolve_hostname(hostname: str) -> str:
         return hostname
 
 
+# Where images keep a MoRI checkout: this benchmark's image, the SGLang disagg image,
+# the large-EP benchmark image.
+MORI_ROOT_CANDIDATES = ("/workspace/mori", "/sgl-workspace/mori", "/app/mori")
+
+
+def find_mori_root() -> str:
+    """MORI_ROOT if set, else the first candidate with MoRI's IO benchmark in it."""
+    explicit = os.environ.get("MORI_ROOT")
+    if explicit:
+        return explicit
+    for root in MORI_ROOT_CANDIDATES:
+        if os.path.isfile(os.path.join(root, "tests", "python", "io", "benchmark.py")):
+            return root
+    return MORI_ROOT_CANDIDATES[0]
+
+
 def generate_test_sizes(start_size: int, end_size: int) -> List[int]:
     """Generate sizes from start_size to end_size (inclusive), doubling each time."""
     if start_size > end_size:
