@@ -1,13 +1,16 @@
 [
     {
         "name": "pyt_vllm_disagg_nixl_deepseek-v3",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -17,28 +20,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_deepseek-r1",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -48,28 +61,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-R1",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_deepseek-v3-5layer",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3-5layer.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -79,28 +102,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3-5layer",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_llama-3.1-405b-fp8",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -110,7 +143,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -121,17 +155,25 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_llama-3.3-70b-fp8",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_amd-Llama-3.3-70B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -141,7 +183,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -152,17 +195,25 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_nixl_gpt-oss-120b",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_gpt-oss-120b.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -172,7 +223,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -183,17 +235,25 @@
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_deepseek-v3",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -203,28 +263,79 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
-        "name": "pyt_vllm_disagg_mori_deepseek-r1",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "name": "pyt_vllm_disagg_mori_tp_deepseek-v3",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_io",
+            "inference"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "DeepSeek-V3",
+            "xP": "1",
+            "yD": "1",
+            "WIDE_EP": "0",
+            "RUN_MORI": "1",
+            "RUN_DEEPEP": "0",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_deepseek-r1",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -234,28 +345,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-R1",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_deepseek-v3-5layer",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3-5layer.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -265,28 +386,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3-5layer",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_glm-5.1-fp8",
-        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.1",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-glm51", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_GLM-5.1-FP8.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -296,28 +427,39 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.1-FP8",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
+            "EP_TP_SIZE": "8",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_glm-5.1-fp8_niah",
-        "dockerfile": "../../docker/vllm_disagg_inference.glmv5.1",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-glm51", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_GLM-5.1-FP8.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -328,28 +470,39 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "GLM-5.1-FP8",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
+            "EP_TP_SIZE": "8",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_SCRIPT": "niah"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -359,28 +512,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-r1",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -390,28 +553,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-R1",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3-5layer",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3-5layer.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -421,28 +594,38 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3-5layer",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "0",
             "RUN_DEEPEP": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -453,29 +636,39 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer",
-        "dockerfile": "../../docker/vllm_disagg_inference",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
         "scripts": "run_xPyD_models.slurm",
         "url": "",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3-5layer.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -486,18 +679,158 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MODEL_NAME": "DeepSeek-V3-5layer",
             "xP": "1",
             "yD": "1",
+            "WIDE_EP": "1",
             "RUN_MORI": "1",
             "RUN_DEEPEP": "0",
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_kimi-k3",
+        "url": "",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-kimi-k3"},
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 4
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "xP": "2",
+            "yD": "2",
+            "EP_TP_SIZE": "2",
+            "RUN_MORI": "1",
+            "WIDE_EP": "1",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4",
+        "url": "",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-kimi-k3"},
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 4
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3-MXFP4",
+            "xP": "2",
+            "yD": "2",
+            "EP_TP_SIZE": "2",
+            "RUN_MORI": "1",
+            "WIDE_EP": "1",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x",
+        "url": "",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {"PINS": "vllm-kimi-k3"},
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3-MXFP4-MI355X.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 4
+        },
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3-MXFP4-MI355X",
+            "MODEL_WEIGHTS_NAME": "Kimi-K3-MXFP4",
+            "xP": "2",
+            "yD": "2",
+            "EP_TP_SIZE": "1",
+            "RUN_MORI": "1",
+            "WIDE_EP": "1",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
     }
 ]

@@ -41,11 +41,22 @@ REFERENCE_DOCKERFILES = {
     "jax": "docker/primus_maxtext.ubuntu.amd.Dockerfile",
     "pytorch": "docker/pyt_wan2.1_inference.ubuntu.amd.Dockerfile",
     "sglang": "docker/pyt_sglang.ubuntu.amd.Dockerfile",
-    "sglang_disagg": "docker/sglang_disagg_inference.ubuntu.amd.Dockerfile",
     "vllm": "docker/pyt_vllm.ubuntu.amd.Dockerfile",
-    "vllm_disagg": "docker/vllm_disagg_inference.ubuntu.amd.Dockerfile",
     "xdit": "docker/pyt_xdit.ubuntu.amd.Dockerfile",
 }
+# The distributed-inference images are built from pin sets (docker/pins/README.md)
+# by one Dockerfile per engine, whose BASE_IMAGE has no default: the pin set names
+# the base per architecture. The default `base_image` is the set's gfx942 base, the
+# architecture these templates were modeled on.
+REFERENCE_PIN_SETS = {
+    "sglang_disagg": "docker/pins/sglang-disagg.json",
+    "vllm_disagg": "docker/pins/vllm-mori121.json",
+}
+
+
+def reference_source(framework: str) -> str:
+    """Where the framework's default base image is read from."""
+    return REFERENCE_PIN_SETS.get(framework) or REFERENCE_DOCKERFILES.get(framework, "-")
 
 
 def available_frameworks() -> List[str]:
@@ -81,7 +92,14 @@ def template_variables(env, framework: str) -> List[str]:
 
 
 def reference_base_image(framework: str) -> Optional[str]:
-    """Return the base image of the framework's reference Dockerfile, or None."""
+    """Return the base image of the framework's reference Dockerfile or pin set, or None."""
+    if framework in REFERENCE_PIN_SETS:
+        try:
+            with open(os.path.join(REPO_ROOT, REFERENCE_PIN_SETS[framework])) as f:
+                bases = json.load(f).get("base_image") or {}
+        except (OSError, ValueError):
+            return None
+        return bases.get("gfx942") or None
     path = os.path.join(REPO_ROOT, REFERENCE_DOCKERFILES.get(framework, ""))
     try:
         with open(path) as f:
@@ -169,8 +187,8 @@ def render(framework: str, context: Dict) -> str:
             context["base_image"] = base_image
         else:
             errors.append(
-                f"no base image: pass 'base_image' (could not read ARG BASE_DOCKER from "
-                f"{REFERENCE_DOCKERFILES.get(framework, 'a reference Dockerfile')})"
+                f"no base image: pass 'base_image' (could not read it from "
+                f"{reference_source(framework)})"
             )
     if errors:
         sys.exit("ERROR: " + "; ".join(errors))
@@ -194,7 +212,7 @@ def main() -> int:
         for framework in available_frameworks():
             print(f"{framework}: {', '.join(template_variables(env, framework))}")
             print(f"  default base_image: {reference_base_image(framework) or '(none; pass base_image)'}"
-                  f" from {REFERENCE_DOCKERFILES.get(framework, '-')}")
+                  f" from {reference_source(framework)}")
         return 0
     if not args.framework:
         parser.error("--framework is required (or use --list)")

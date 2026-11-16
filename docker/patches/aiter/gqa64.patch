@@ -1,0 +1,25 @@
+MAD pin-set patch: AITER gqa64 fix (ROCm/aiter#4957)
+Upstream: https://github.com/ROCm/aiter.git @ 1d872fa07aadfcbb199851fe17e6822efaceca61
+Reproduces: fork commit 624e43586bbdb33617812ff1de5abce83d42db65 of aiter.git (applying this to the upstream commit gives its tree exactly)
+Fork commits:
+  624e4358 [MLA][glm-dsa] Disable faulty gfx942 gqa64 native-support -> use capture-safe persistent fold
+
+diff --git a/aiter/mla.py b/aiter/mla.py
+index a0b8c311dfb6421ff96affc35eb54448387885fe..dbed47cb52dbc935feef28adcf577ca876e01ce6 100644
+--- a/aiter/mla.py
++++ b/aiter/mla.py
+@@ -802,7 +802,13 @@ def mla_decode_fwd(
+                 and max_seqlen_q == 2
+             )
+             or (
+-                get_gfx() == "gfx942"
++                # [glm-dsa gqa64 fix] DISABLED: this native-support claim routes GLM-5.1
++                # gqa64 fp8 decode to mla_a8w8_qh64_qseqlen1_gqaratio64_v3_ps, which
++                # GPU-faults on gfx942. Force False so gqa64 falls through to the
++                # capture-safe persistent view-fold (nhead in range(32,128,16) below),
++                # which keeps cudagraph decode working (no in-forward allocations).
++                False
++                and get_gfx() == "gfx942"
+                 and nhead == 64
+                 and q.dtype == dtypes.fp8
+                 and kv_buffer.dtype == dtypes.fp8

@@ -95,6 +95,12 @@ perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
 
+# The snapshot goldens are test data, not output: keep them despite *.json above.
+!scripts/common/tests/snapshot/golden/**/*.json
+# Topology spec examples are inputs, not output.
+!scripts/common/topology/specs/*.json
+# Pin sets are image inputs, not output.
+!docker/pins/*.json
 slurm_results/
 slurm_output/
 scripts/kvcache_transfer_bench/shared/
