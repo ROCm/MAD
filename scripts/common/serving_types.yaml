@@ -1,0 +1,75 @@
+# The serving types a platform may be sold for, and how far MAD supports each: a spec example
+# (scripts/common/topology/specs), the launcher that runs it (none: expressible, not runnable), the
+# benchmark that measures it and the accuracy check that guards it (scripts/vllm_dissag unless
+# noted; none: still to build). tests check every file exists and that `launcher` really accepts
+# the example and nothing else does. Plan: HARDWARE_GENERALIZATION_PLAN section 8.
+online_low_latency:
+  spec: vllm_disagg_2p2d_wide_ep_tp2.json
+  launcher: vllm_dissag
+  benchmark: benchmark_xPyD.sh          # concurrency sweep: TTFT / TPOT
+  accuracy: none
+high_throughput:
+  spec: v2/helios_wide_ep72.json
+  launcher: vllm_dissag
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+disaggregated:
+  spec: sglang_disagg_1p2d_dp_ep.json
+  launcher: sglang_disagg
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+wide_ep_moe:
+  spec: vllm_disagg_2p2d_wide_ep_tp2_router_node.json
+  launcher: vllm_dissag
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+colocated:
+  spec: vllm_colocated_2n_tp8_pp2.json
+  launcher: vllm_multinode
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+long_context:
+  spec: vllm_disagg_2p2d_wide_ep_tp2.json
+  launcher: vllm_dissag
+  benchmark: benchmark_long_context.sh
+  accuracy: benchmark_niah.sh           # needle-in-a-haystack recall per context length
+agentic:
+  spec: vllm_disagg_2p2d_wide_ep_tp2.json
+  launcher: vllm_dissag
+  benchmark: benchmark_agentic.sh       # multi-turn trace replay, prefix retention
+  accuracy: none
+speculative:
+  spec: v2/speculative_draft.json
+  launcher: none
+  benchmark: none
+  accuracy: none
+multi_tenant:
+  spec: v2/mi355x_cpx_multitenant.json
+  launcher: none
+  benchmark: none
+  accuracy: none
+multimodal:
+  spec: v2/multimodal_encoder.json
+  launcher: none
+  benchmark: none
+  accuracy: none
+embeddings:
+  spec: v2/embedding_server.json
+  launcher: none
+  benchmark: none
+  accuracy: none
+heterogeneous_pools:
+  spec: v2/hetero_prefill_decode.json
+  launcher: none
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+multi_lora:
+  spec: none
+  launcher: none
+  benchmark: none
+  accuracy: none
+rl_rollout:
+  spec: none
+  launcher: none
+  benchmark: none
+  accuracy: none

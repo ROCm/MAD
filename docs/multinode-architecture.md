@@ -271,6 +271,16 @@ the site's domain label). Each node gets `MAD_TOPO_DOMAIN`, and in the per-task 
 failing rank is reported with its domain. Launchers refuse what they cannot yet run (mixed node
 types, roles other than prefill/decode/router/server, replicas).
 
+### Serving types
+
+`scripts/common/serving_types.yaml` lists the serving types a platform may be sold for and how far
+each is supported: its spec example, the launcher that runs it (or none yet), its benchmark and
+its accuracy check. Runnable today: online low latency, high throughput, disaggregated, wide-EP
+MoE, colocated, long context (NIAH accuracy), agentic. Expressible, not yet runnable:
+speculative (draft role), multi-tenant (CPX replicas), multimodal (encoder role), embeddings,
+heterogeneous pools. Not yet expressed: multi-LoRA, RL rollout. A test holds the file to the
+truth: the named launcher accepts the example and every other launcher refuses one marked none.
+
 ## Performance: model, search, registry
 
 `scripts/common/perf/model.py` ranks layouts before GPU hours are spent: a first-order roofline
