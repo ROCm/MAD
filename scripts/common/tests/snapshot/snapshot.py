@@ -41,6 +41,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parents[2]          # snapshot -> tests -> common -> scripts
+COMPAT = HERE.parents[3] / "compat"   # the capability catalog (a test may point SCRIPTS at a copy)
 STUBS = HERE / "stubs"
 GOLDEN = HERE / "golden"
 CATALOGS = ("vllm_dissag", "sglang_disagg", "vllm_multinode")
@@ -198,7 +199,7 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__", "golden"))
         # The capability catalog the launchers resolve recipe roles against.
-        shutil.copytree(SCRIPTS.parent / "compat", work / "compat")
+        shutil.copytree(COMPAT, work / "compat")
         for d in ("home", "logs", "stub", "nvme", "shared", "model", "job", "jit"):
             (work / d).mkdir()
         nodes = node_count(card)

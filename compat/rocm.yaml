@@ -267,13 +267,31 @@ kernels:
       kv_cache: [bf16, fp8_e4m3fnuz]
       placement: [hbm]
       evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
+  sglang@sglang-disagg:
+    gfx942:
+      weights: [bf16, fp8_e4m3fnuz]
+      activations: [bf16, fp8_e4m3fnuz]
+      kv_cache: [bf16]
+      placement: [hbm]
+      evidence: sglang_disagg Llama / Qwen3 / Mixtral (BF16) and Llama FP8, DeepSeek-V3/R1 (FP8) cards on MI300X
+    gfx950:
+      weights: [bf16, fp8_e4m3]
+      activations: [bf16, fp8_e4m3]
+      kv_cache: [bf16]
+      placement: [hbm]
+      evidence: the same cards on MI355X (SGLang release image for gfx950)
 
-# How each engine is told a format: the arguments a resolved role gets.
+# How each engine is told a format: the arguments a resolved role gets. A value of `auto` is the
+# engine's default and needs no argument.
 engines:
   vllm:
-    # The MAD role scripts take the KV-cache format as KV_CACHE_DTYPE and pass it on as
-    # --kv-cache-dtype; a recipe sets the variable, so that is what a resolution checks.
+    # The KV-cache format reaches vLLM as KV_CACHE_DTYPE (the wide-EP role scripts pass it on as
+    # --kv-cache-dtype) or as --kv-cache-dtype in a recipe's flags (the TP path); either agrees.
     kv_cache_env: KV_CACHE_DTYPE
+    kv_cache_arg: --kv-cache-dtype
     kv_cache_values: {bf16: auto, fp8: fp8}
     convert_args:
       int4_g32: --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
+  sglang:
+    kv_cache_arg: --kv-cache-dtype
+    kv_cache_values: {bf16: auto}

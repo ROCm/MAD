@@ -10,13 +10,19 @@ pass=0; fail=0
 _is()  { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s\n        got:  %s\n        want: %s\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
 _has() { case "$1" in *"$2"*) printf "  PASS  %s\n" "$3"; pass=$((pass+1)) ;; *) printf "  FAIL  %s\n        missing: %s\n" "$3" "$2"; fail=$((fail+1)) ;; esac; }
 
-# gate MODEL [ROLES] with extra env: prints the gate's output, then "rc=N" and the recorded note.
+# [GATE_YAML=recipes] gate MODEL [ROLES] with extra env (GATE_ENGINE, GATE_FLAGS): prints the
+# gate's output, then "rc=N" and the recorded note.
+cat > "$TMP/gate.sh" <<'GATE'
+. "$1/common/config/layers.sh"; . "$1/common/cluster.sh" >/dev/null 2>&1; config_begin
+if [ -n "${GATE_FLAGS+x}" ]; then cluster_check_recipe "$2" "$3" "${GATE_ENGINE:-vllm}" "$4" "$GATE_FLAGS" 2>&1
+else cluster_check_recipe "$2" "$3" "${GATE_ENGINE:-vllm}" "$4" 2>&1; fi
+echo "rc=$?"
+echo "note=${_CONFIG_NOTE[MAD_RECIPE_ROLES]-<none>}"
+GATE
 gate() {
     local model="$1" roles="${2:-}"; shift 2 2>/dev/null || shift
-    env -i PATH="$PATH" HOME="$TMP" MAD_SCRIPTS_DIR="$DIR" "$@" bash -c '
-        . "$0/common/config/layers.sh"; . "$0/common/cluster.sh" >/dev/null 2>&1; config_begin
-        cluster_check_recipe "$1" "$2" "$3" 2>&1; echo "rc=$?"
-        echo "note=${_CONFIG_NOTE[MAD_RECIPE_ROLES]-<none>}"' "$DIR" "$YAML" "$model" "$roles"
+    env -i PATH="$PATH" HOME="$TMP" MAD_SCRIPTS_DIR="$DIR" "$@" \
+        bash "$TMP/gate.sh" "$DIR" "${GATE_YAML:-$YAML}" "$model" "$roles"
 }
 
 echo "=== resolves ==="
@@ -46,11 +52,18 @@ _has "$out" "rc=1" "the MI355X recipe on gfx942"
 out="$(gate Kimi-K3-MXFP4-MI355X "" MAD_GPU_ARCH=gfx950 MAD_ENGINE_BUILD=vllm@vllm-mori121)"
 _has "$out" "rc=1" "an engine build the catalog does not list for the GPU"
 
+INT4="--max-num-seqs 8 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'"
+_has "$(gate Kimi-K3 server MAD_GPU_ARCH=gfx950 GATE_FLAGS="$INT4")" "rc=1" "colocated: the card's flags are compared (int4 conversion on gfx950)"
+_has "$(gate Kimi-K3 server MAD_GPU_ARCH=gfx942 GATE_FLAGS="$INT4")" "rc=0" "...and agree on gfx942"
+SG="$DIR/sglang_disagg/models.yaml"
+_has "$(GATE_YAML="$SG" gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx950 GATE_ENGINE=sglang)" "resolves with sglang@sglang-disagg" "the launcher's engine picks the catalog build"
+_has "$(GATE_YAML="$SG" gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx942 GATE_ENGINE=sglang MAD_PIN_SET=vllm-kimi-k3)" "is not a sglang build" "a pin set of another engine is refused"
+
 echo ""
 echo "=== does not gate ==="
 _has "$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx950 RECIPE_CHECK=0)" "rc=0" "RECIPE_CHECK=0"
 _has "$(gate Kimi-K3-MXFP4 "")" "rc=0" "GPU not detected"
-_has "$(gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx950)" "rc=0" "a recipe that declares no roles"
+_has "$(gate gpt-oss-120b "" MAD_GPU_ARCH=gfx950)" "rc=0" "a recipe that declares no roles"
 _has "$(gate No-Such-Model "" MAD_GPU_ARCH=gfx942)" "rc=0" "a model with no recipe (the launcher's own check)"
 out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx950 MAD_CATALOG="$TMP/none.yaml")"
 _has "$out" "rc=0" "no catalog"

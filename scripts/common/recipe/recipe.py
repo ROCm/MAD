@@ -26,7 +26,7 @@ names every need nothing meets. Nothing is guessed: a capability the catalog doe
 is not assumed.
 
 CLI (from the MAD root):
-  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--build ENGINE@BUILD | --pin-set NAME]
+  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--engine E] [--build ENGINE@BUILD | --pin-set NAME]
                     [--roles R,..]
   recipe.py explain ... (same arguments): the resolution of every role, as JSON
   recipe.py validate                      : the catalog's own references
@@ -83,9 +83,8 @@ def _pick(catalog, asked, offered, prefer):
 
 def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm"):
     """{'role', 'accelerator', 'build', 'artifact', 'weights', 'activations', 'kv_cache',
-    'placement', 'engine_args', 'engine_env', 'notes', 'problems'}; problems empty when it resolves."""
-    out = {"role": role, "accelerator": arch, "build": build, "engine_args": [], "engine_env": {},
-           "notes": [], "problems": []}
+    'placement', 'engine_args', 'kv_cache_setting', 'notes', 'problems'}; problems empty when it resolves."""
+    out = {"role": role, "accelerator": arch, "build": build, "engine_args": [], "notes": [], "problems": []}
     acc = (catalog.get("accelerators") or {}).get(arch)
     if acc is None:
         out["problems"].append(f"accelerator {arch!r} is not in the catalog (compat/rocm.yaml accelerators)")
@@ -150,8 +149,9 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm"):
             eng = (catalog.get("engines") or {}).get(engine) or {}
             vals = eng.get("kv_cache_values") or {}
             v = vals.get(used) or vals.get(_family(catalog, used))
-            if v and eng.get("kv_cache_env"):
-                out["engine_env"][eng["kv_cache_env"]] = v
+            if v and v != "auto":
+                # How the engine is told: a variable or an argument; a recipe may use either.
+                out["kv_cache_setting"] = {"value": v, "env": eng.get("kv_cache_env"), "arg": eng.get("kv_cache_arg")}
         out["kv_cache"] = {"asked": kv, "used": used}
 
     # Where the weights live.
@@ -201,39 +201,52 @@ def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
     return out
 
 
-def disagreements(recipe, resolved, catalog=None, engine="vllm"):
+def disagreements(recipe, resolved, catalog=None, engine="vllm", flags=None):
     """Where the recipe's own flags and env say something other than its roles resolve to.
 
     While roles are declared alongside hand-written flags (before they generate them), this
     keeps the two from drifting: a conversion's engine argument must be in the role's flags,
-    and a KV-cache variable must have the resolved value."""
+    and the KV-cache format must be set (variable or argument) to the resolved value. `flags`
+    are the engine flags of roles whose flags are not in the recipe (colocated serving takes
+    them from the card); without them such roles are not compared."""
     out = []
     env = (recipe or {}).get("env") or {}
+    shared = " ".join(str(v) for k, v in (recipe or {}).items() if k.endswith("_flags") and isinstance(v, str))
     for r in resolved:
         block = (recipe or {}).get(r["role"]) or {}
-        if not block:
-            continue  # the role's flags are not in the recipe (e.g. colocated: the card's)
-        flags = " ".join(str(v) for v in block.values()) if isinstance(block, dict) else str(block)
+        if block:
+            role_flags = " ".join(str(v) for v in block.values()) if isinstance(block, dict) else str(block)
+            role_flags = f"{shared} {role_flags}"
+        elif flags is not None:
+            role_flags = flags
+        else:
+            continue  # the role's flags are elsewhere and were not given
+        kv = r.get("kv_cache_setting")
+        if kv:
+            by_env = kv["env"] and str(env.get(kv["env"])) == kv["value"]
+            by_arg = kv["arg"] and f"{kv['arg']} {kv['value']}" in role_flags
+            if not (by_env or by_arg):
+                how = " or ".join(x for x in (kv["env"] and f"{kv['env']}={kv['value']}",
+                                              kv["arg"] and f"{kv['arg']} {kv['value']}") if x)
+                out.append(f"{r['role']}: resolves to a {r['kv_cache']['used']} KV cache, but the recipe "
+                           f"sets neither {how}")
         for arg in r["engine_args"]:
-            if arg not in flags:
+            if arg not in role_flags:
                 out.append(f"{r['role']}: resolves to engine argument {arg!r}, which its flags lack")
         convs = ((catalog or {}).get("engines") or {}).get(engine, {}).get("convert_args") or {}
         for fmt, arg in convs.items():
-            if arg in flags and arg not in r["engine_args"]:
+            if arg in role_flags and arg not in r["engine_args"]:
                 out.append(f"{r['role']}: its flags convert weights to {fmt} ({arg!r}), which "
                            f"{r['accelerator']} does not need -- the recipe is for another accelerator")
-        for k, v in r["engine_env"].items():
-            if str(env.get(k)) != str(v):
-                out.append(f"{r['role']}: resolves to {k}={v}, but the recipe's env sets {k}={env.get(k)}")
     return out
 
 
-def check(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
+def check(catalog, recipe, arch, build=None, roles=None, engine="vllm", flags=None):
     """(resolution, problems): the roles' resolution and everything that stops the recipe
     running on `arch` -- unmet needs first, else disagreements with its own flags."""
     res = resolve(catalog, recipe, arch, build, roles, engine)
     problems = list(dict.fromkeys(p for r in res for p in r["problems"]))
-    return res, problems or disagreements(recipe, res, catalog, engine)
+    return res, problems or disagreements(recipe, res, catalog, engine, flags)
 
 
 def validate(catalog):
@@ -264,9 +277,12 @@ def main(argv=None):
         p.add_argument("--recipes", required=True, help="models.yaml")
         p.add_argument("--model", required=True)
         p.add_argument("--arch", required=True)
+        p.add_argument("--engine", default="vllm", help="the engine the launcher runs (vllm, sglang)")
         p.add_argument("--build", help="ENGINE@BUILD, e.g. vllm@vllm-kimi-k3")
         p.add_argument("--pin-set", help="the image's pin set (docker/pins/<name>.json): its catalog build")
         p.add_argument("--roles", help="comma-separated (default: the roles the recipe declares)")
+        p.add_argument("--flags", help="engine flags of roles whose flags are not in the recipe "
+                                       "(colocated serving: the card's COLOCATED_EXTRA_ARGS)")
         p.add_argument("--catalog", default=CATALOG)
     v = sub.add_parser("validate")
     v.add_argument("--catalog", default=CATALOG)
@@ -293,8 +309,12 @@ def main(argv=None):
             print(f"ERROR: {a.model}: the image's pin set {a.pin_set!r} has no entry in the capability "
                   f"catalog (compat/rocm.yaml kernels), so what it can run is unknown", file=sys.stderr)
             return 1
-    engine = (a.build or "vllm@").split("@", 1)[0] or "vllm"
-    res, problems = check(catalog, recipe, a.arch, a.build, a.roles.split(",") if a.roles else None, engine)
+    engine = a.build.split("@", 1)[0] if a.build else a.engine
+    if a.build and engine != a.engine:
+        print(f"ERROR: {a.model}: the image's build {a.build} is not a {a.engine} build", file=sys.stderr)
+        return 1
+    res, problems = check(catalog, recipe, a.arch, a.build, a.roles.split(",") if a.roles else None, engine,
+                          a.flags)
     if a.cmd == "explain":
         print(json.dumps(res, indent=1))
     else:

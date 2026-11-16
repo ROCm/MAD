@@ -60,7 +60,8 @@ _run() { # status sleep_s [signal_after_s]
         _st="$1" _sl="$2"
         _fake_run() { sleep "$_sl"; return "$_st"; }
         _hook() { echo hook >> "$HOOK_LOG"; }
-        node_run_container _fake_run _hook' "$LIB" "$1" "$2" &
+        node_run_container _fake_run _hook
+    ' "$LIB" "$1" "$2" &
     local pid=$!
     if [ -n "${3:-}" ]; then sleep "$3"; kill -TERM "$pid"; fi
     wait "$pid"; echo "rc=$?"

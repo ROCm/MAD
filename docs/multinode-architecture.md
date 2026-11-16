@@ -151,8 +151,14 @@ python3 scripts/common/recipe/recipe.py explain ...   # the same, every role as 
 python3 scripts/common/recipe/recipe.py validate      # the catalog's own references
 ```
 
+Every vLLM and SGLang recipe declares its roles, except gpt-oss-120b (whose MXFP4 support in
+the v1.2.1 vLLM build on gfx942 is not yet recorded in the catalog). The tests require each
+card's recipe to resolve, with the card's own pin set, on exactly the GPUs the card runs on.
+
 The launchers run the same check right after the GPU-architecture gate
-(`cluster_check_recipe` in `cluster.sh`), against the detected GPU and the image's engine
+(`cluster_check_recipe` in `cluster.sh`, told the launcher's engine; the colocated launcher
+also passes the card's `COLOCATED_EXTRA_ARGS`, where its engine flags live), against the
+detected GPU and the image's engine
 build: `MAD_ENGINE_BUILD=ENGINE@PINSET` when set, else `MAD_PIN_SET`, which madengine (every
 path) and the pipeline export from the card's `PINS` build argument. A pin set with no catalog
 entry is refused for a recipe that declares roles. With neither (a plain `sbatch` of an image

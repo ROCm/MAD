@@ -45,6 +45,10 @@
 # ============================ Dense / TP-capable ============================
 
 Llama-3.1-405B-Instruct-FP8-KV:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env:
     VLLM_USE_V1: "1"
     VLLM_V1_USE_PREFILL_DECODE_ATTENTION: "1"
@@ -64,6 +68,10 @@ Llama-3.1-405B-Instruct-FP8-KV:
     tp: "--tensor-parallel-size 8 --kv-cache-dtype fp8"
 
 amd-Llama-3.3-70B-Instruct-FP8-KV:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env:
     VLLM_USE_V1: "1"
     # --disable-custom-all-reduce (below) sends every TP all-reduce through RCCL, and on
@@ -111,6 +119,10 @@ gpt-oss-120b:
 # Qwen3-32B: dense. Should serve like Llama (dense AITER path works on the
 # develop image; MoE GEMM path does not).
 Qwen3-32B:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: bf16, activations: bf16}}
+    prefill: {}
+    decode: {}
   env:
     VLLM_USE_V1: "1"
     VLLM_ROCM_USE_AITER: "1"
@@ -127,6 +139,10 @@ Qwen3-32B:
 # DeepSeek-specific or affects all MoE. TP path; conservative AITER env.
 # RESULT: also fails (device_gemm unsupported) -> MoE needs a co-versioned image.
 Qwen3-30B-A3B:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: bf16, activations: bf16}}
+    prefill: {}
+    decode: {}
   env:
     VLLM_USE_V1: "1"
     VLLM_ROCM_USE_AITER: "1"
@@ -191,6 +207,10 @@ _deepseek_recipe_env: &deepseek_recipe_env
 _deepseek_tp: &deepseek_tp "--kv-cache-dtype fp8 --block-size 16 --kv-cache-memory-bytes 20000000000 --no-enable-prefix-caching"
 
 DeepSeek-V3:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env: *deepseek_recipe_env
   prefill:
     dp: ""
@@ -200,6 +220,10 @@ DeepSeek-V3:
     tp: *deepseek_tp
 
 DeepSeek-V3-5layer:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env: *deepseek_recipe_env
   prefill:
     dp: ""
@@ -209,6 +233,10 @@ DeepSeek-V3-5layer:
     tp: *deepseek_tp
 
 DeepSeek-R1:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env: *deepseek_recipe_env
   prefill:
     dp: ""
@@ -245,6 +273,10 @@ DeepSeek-R1:
 # Long-context: the earlier ~18k collapse is fixed in-source (#47766 persistent sparse-MLA
 # metadata), not by config. Left at native max_model_len; capping was tested, no benefit.
 GLM-5.1-FP8:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}, kv_cache: fp8}
+    prefill: {}
+    decode: {}
   env:
     VLLM_USE_V1: "1"
     # v0.27 wraps layer_name in a torch OpaqueBase for the unified MLA custom ops, and

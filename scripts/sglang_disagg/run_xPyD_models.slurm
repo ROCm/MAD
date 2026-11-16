@@ -327,7 +327,7 @@ select_same_rail_nodes
 # Detects the allocation's GPU arch (and enforces GPU_ARCHS when the card sets it),
 # before the weights probe. See cluster_require_gpu_arch in cluster.sh.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
-cluster_check_recipe "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" || exit 1
+cluster_check_recipe "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" sglang || exit 1
 cluster_resolve_model_path || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"

@@ -625,15 +625,16 @@ cluster_detect_gpu_arch() {
 # cannot be determined the run continues with a warning: refusing a job on missing
 # information would be worse than the failure this check exists to prevent.
 # GPU_ARCH_CHECK=0 bypasses the check, for bringing up a recipe on a new GPU.
-# cluster_check_recipe MODELS_YAML MODEL [ROLES]: resolve the recipe's declared serving roles
+# cluster_check_recipe MODELS_YAML MODEL ENGINE [ROLES [FLAGS]]: resolve the recipe's declared serving roles
 # (models.yaml `roles:`) against this allocation's GPU and the image's engine build -- named by
 # MAD_ENGINE_BUILD (ENGINE@PINSET), else by MAD_PIN_SET, which madengine and the pipeline set
 # from the card's PINS build arg -- using scripts/common/recipe/recipe.py with the
 # capability catalog in compat/rocm.yaml. A recipe that declares no roles passes. A refusal
-# names what the hardware or build lacks. RECIPE_CHECK=0 skips it. The resolution is recorded
+# names what the hardware or build lacks. FLAGS: the engine flags of roles the recipe holds no
+# flags for (colocated serving: the card's COLOCATED_EXTRA_ARGS). RECIPE_CHECK=0 skips it. The resolution is recorded
 # in config.resolved.json as MAD_RECIPE_ROLES.
 cluster_check_recipe() {
-    local yaml="$1" model="$2" roles="${3:-}" out rc
+    local yaml="$1" model="$2" engine="$3" roles="${4:-}" flags="${5-}" out rc
     local tool="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/recipe.py"
     local catalog="${MAD_CATALOG:-$(dirname "$tool")/../../../compat/rocm.yaml}"
     if [ "${RECIPE_CHECK:-1}" = "0" ]; then
@@ -646,7 +647,8 @@ cluster_check_recipe() {
     fi
     out="$(python3 "$tool" check --catalog "$catalog" --recipes "$yaml" --model "$model" \
            --arch "$MAD_GPU_ARCH" ${MAD_ENGINE_BUILD:+--build "$MAD_ENGINE_BUILD"} \
-           ${MAD_PIN_SET:+--pin-set "$MAD_PIN_SET"} ${roles:+--roles "$roles"} 2>&1)"; rc=$?
+           ${MAD_PIN_SET:+--pin-set "$MAD_PIN_SET"} ${roles:+--roles "$roles"} \
+           ${5+--flags "$flags"} --engine "$engine" 2>&1)"; rc=$?
     [ -n "$out" ] && printf '%s\n' "$out"
     # 2: no such recipe -- whether the model needs one is the launcher's check, not this one.
     [ "$rc" -eq 2 ] && return 0

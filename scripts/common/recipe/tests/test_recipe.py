@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import recipe as R  # noqa: E402
 
 SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+MAD_ROOT = os.path.dirname(SCRIPTS)
 VLLM_RECIPES = os.path.join(SCRIPTS, "vllm_dissag", "models.yaml")
 KIMI_BUILD = "vllm@vllm-kimi-k3"
 INT4_ARG = """--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'"""
@@ -59,18 +60,38 @@ class Catalog(unittest.TestCase):
 class KimiRecipes(unittest.TestCase):
     """The declared roles reach the verdict the hand-written GPU_ARCHS states."""
 
-    def test_roles_agree_with_gpu_archs_for_every_recipe(self):
-        for path in glob.glob(os.path.join(SCRIPTS, "*", "models.yaml")):
+    def test_every_card_resolves_exactly_where_it_runs(self):
+        """A card runs on its pin set's GPUs, less its skip_gpu_arch and outside its recipe's
+        GPU_ARCHS. With the card's own build, the recipe's roles must resolve on exactly those."""
+        checked = 0
+        for path in glob.glob(os.path.join(SCRIPTS, "*", "models.json")):
             with open(path) as f:
-                recipes = yaml.safe_load(f) or {}
-            for name, recipe in recipes.items():
-                if not isinstance(recipe, dict) or not recipe.get("roles"):
+                cards = json.load(f)
+            for card in cards:
+                model = (card.get("env_vars") or {}).get("MODEL_NAME")
+                pins = (card.get("docker_build_arg") or {}).get("PINS")
+                recipe_file = (card.get("env_vars") or {}).get("MODELS_YAML") or (
+                    VLLM_RECIPES if "vllm" in os.path.basename(os.path.dirname(path))
+                    else os.path.join(os.path.dirname(path), "models.yaml"))
+                if not (model and pins) or not os.path.isfile(recipe_file):
                     continue
-                archs = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
+                with open(recipe_file) as f:
+                    recipe = (yaml.safe_load(f) or {}).get(model)
+                if not recipe or not recipe.get("roles"):
+                    continue
+                with open(os.path.join(MAD_ROOT, "docker", "pins", pins + ".json")) as f:
+                    pin_archs = json.load(f)["gpu_archs"]
+                skip = str(card.get("skip_gpu_arch") or "").replace(",", " ").split()
+                only = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
+                roles = ["server"] if "vllm_multinode" in path else None
                 for arch in ("gfx942", "gfx950"):
-                    with self.subTest(recipe=name, arch=arch):
-                        _, problems = R.check(CAT, recipe, arch)
-                        self.assertEqual(not problems, arch in archs, problems)
+                    runs = arch in pin_archs and arch not in skip and (not only or arch in only)
+                    with self.subTest(card=card["name"], arch=arch):
+                        flags = (card.get("env_vars") or {}).get("COLOCATED_EXTRA_ARGS", "") if roles else None
+                        _, problems = R.check(CAT, recipe, arch, R.build_of_pin_set(CAT, pins), roles, flags=flags)
+                        self.assertEqual(not problems, runs, problems)
+                        checked += 1
+        self.assertGreater(checked, 60)
 
     def test_gfx942_converts_mxfp4_to_int4_and_the_flags_say_so(self):
         res, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4"], "gfx942", KIMI_BUILD)
@@ -80,7 +101,7 @@ class KimiRecipes(unittest.TestCase):
             self.assertEqual(r["weights"], {"asked": "mxfp4", "used": "int4_g32", "converted": True})
             self.assertEqual(r["activations"]["used"], "fp8_e4m3fnuz")   # the family's gfx942 member
             self.assertEqual(r["engine_args"], [INT4_ARG])
-            self.assertEqual(r["engine_env"], {"KV_CACHE_DTYPE": "fp8"})
+            self.assertEqual(r["kv_cache_setting"]["value"], "fp8")
 
     def test_gfx950_is_native_mxfp4(self):
         res, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4-MI355X"], "gfx950", KIMI_BUILD)
@@ -96,6 +117,12 @@ class KimiRecipes(unittest.TestCase):
     def test_mi355x_recipe_on_gfx942_is_refused_for_the_missing_conversion(self):
         _, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4-MI355X"], "gfx942", KIMI_BUILD)
         self.assertTrue(problems and all("its flags lack" in p for p in problems), problems)
+
+    def test_colocated_flags_from_the_card_are_compared(self):
+        int4 = "--max-num-seqs 8 " + INT4_ARG
+        self.assertEqual(R.check(CAT, RECIPES["Kimi-K3"], "gfx942", KIMI_BUILD, ["server"], flags=int4)[1], [])
+        _, problems = R.check(CAT, RECIPES["Kimi-K3"], "gfx950", KIMI_BUILD, ["server"], flags=int4)
+        self.assertTrue(problems and "does not need" in problems[0], problems)
 
     def test_colocated_server_role_checks_needs_not_flags(self):
         res, problems = R.check(CAT, RECIPES["Kimi-K3"], "gfx942", KIMI_BUILD, roles=["server"])
@@ -180,8 +207,8 @@ class Cli(unittest.TestCase):
         self.assertIn("Kimi-K3-MXFP4-MI355X on gfx942", err)
 
     def test_recipe_without_roles_resolves_nothing(self):
-        rc, out, _ = self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "DeepSeek-V3", "--arch", "gfx942")
-        self.assertEqual((rc, out.strip()), (0, "DeepSeek-V3: declares no roles; nothing to resolve"))
+        rc, out, _ = self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "gpt-oss-120b", "--arch", "gfx942")
+        self.assertEqual((rc, out.strip()), (0, "gpt-oss-120b: declares no roles; nothing to resolve"))
 
     def test_no_such_recipe_is_its_own_status(self):
         self.assertEqual(self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "Nope", "--arch", "gfx942")[0], 2)
