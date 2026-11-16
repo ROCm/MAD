@@ -188,6 +188,139 @@ DeepSeek-R1:
   decode:
     dp: ""
 
+# DeepSeek-V4-Flash-FP8 (MoRI-EP; image from docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile).
+DeepSeek-V4-Flash-FP8:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_USE_V2_MODEL_RUNNER: "0"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "256"
+    KV_CACHE_DTYPE: "fp8_e4m3"
+    KV_CACHE_MEMORY_BYTES: "20000000000"
+    # vLLM snapshots free memory after distributed init, so the MoRI shmem heap
+    # and comm buffers already count against it; 0.80 left too little headroom
+    # and three prefill ranks failed the startup check.
+    GPU_MEMORY_UTILIZATION: "0.70"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    # Same decode graph as Pro. vllm#48989 wants FULL_DECODE_ONLY for DSV4
+    # (one graph over the fixed-shape decode step). PIECEWISE was the old
+    # Flash ITL A/B (~4s/tok); leave that behind for NIAH A/B.
+    # Submit-time DECODE_CUDAGRAPH_MODE wins. DSV4_EAGER=1 is the one-shot
+    # graph-vs-compress split (decode NONE +quant_fp8, never --enforce-eager).
+    DECODE_CUDAGRAPH_MODE: "FULL_DECODE_ONLY"
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4"
+    TORCHINDUCTOR_BENCHMARK_KERNEL: "0"
+    MORI_SHMEM_HEAP_SIZE: "34359738368"
+    # HMA-on: fold-ok 256/256, WRITE page 256, smoke ASCII ~4s/tok.
+    # Off = the working path. Do not call skip-swa.
+    DSV4_ENABLE_HMA: "0"
+    # Decode ITL. vLLM hands the MoE expert stack MoRI's whole preallocated
+    # recv buffer -- world_size * max_num_inp_token_per_rank rows, which is
+    # mnbt * EP -- so at con=1 one token per rank bought 8192 rows of MXFP4
+    # expert GEMM: 79.8% of decode GPU time against 0.6% for MoRI's comm
+    # (measured with a shape probe, not inferred). 1 trims that to the
+    # rows that can hold a token this forward.
+    #
+    # Flash EP8 colocated: 308.30 -> 26.80 ms ITL, and the greedy
+    # answer is BYTE-IDENTICAL to stock (md5 df15838be8d0), so the padded rows
+    # were provably inert. Prefill is untouched by construction -- there the
+    # bound equals the buffer and the patcher takes the stock path.
+    #
+    # Trim is always on and hardcoded in the connector, deliberately NOT here:
+    # a value in this file wins over an unset env, which is how a run booted
+    # trim=0 while its plan line said the default applied.
+    # TYPE 1 already answers Lisa/Paris/London. 36-prompt curl is ~4s/tok.
+    CURL_SUITE: "short"
+  # HMA and async scheduling off: the MoRIIO DSV4 path is validated HMA=0.
+  dp_flags: "--tokenizer-mode deepseek_v4 --disable-hybrid-kv-cache-manager --no-async-scheduling"
+  prefill:
+    tp: ""
+    # default mnbt=16384 took flydsl_fp8_mqa_logits (missing
+    # on 5a4c AITER e03) and killed 2k NIAH. 1024 = Pro path.
+    # seqs=4 matches Pro (was 16). NIAH is one request; extra seq slots
+    # only grow the dummy/workspace.
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+  decode:
+    tp: ""
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+
+# DeepSeek-V4-Pro-FP8 (MoRI-EP, same image as Flash). Same
+# DeepseekV4ForCausalLM / tokenizer deepseek_v4 / CSA+HCA+SWA hybrid as Flash.
+# Do NOT mix scores with Flash, DSV3, or Hy3. Official recipe is
+# MI355X colocated TP8; MI300X/MI325X unsupported. 1P/1D OOMed in
+# determine_available_memory fused-MoE dummy: 16*40960*7168*bf16 ≈ 9 GiB
+# with 125 GiB weights + 32 GiB MoRI heap leaving ~8 GiB free. First retry
+# is still 1P/1D smoke: seqs=4, max-model-len 8192 (same first Flash cells),
+# KV 4 GiB, heap 16 GiB, decode NONE. Do not mix scores. No NIAH / 2P/2D
+# until that dummy fits and smoke is Lisa Su.
+# Weights: /shared_inference/models_blog/DeepSeek-V4-Pro-FP8
+#   61L, hidden 7168, 128 heads, 384 experts top-6, 805 GiB checkpoint /
+#   125 GiB/GPU after EP8. recipe vram_minimum_gb 960. Do not uncap ctx.
+#   Do not set KV_BLOCK_SIZE=64 or GLM_SKIP_PATCHERS.
+# never loaded. Startup check is free >= util*total. Heap 16 GiB
+# + HIP left ~171.5/192 GiB free; util 0.90 wanted 172.79. Same Flash
+# 0.80 (needs 153.6) so the check passes; dummy still later.
+# util 0.80 loaded 125.16 GiB then dummy profile_run tried 10.50 GiB
+# with 748 MiB free. seqs=4 / max-model-len 8192 did not shrink it — cap
+# max-num-batched-tokens. TEP TP2×EP8 stays off (back burner).
+DeepSeek-V4-Pro-FP8:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_USE_V2_MODEL_RUNNER: "0"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "256"
+    KV_CACHE_DTYPE: "fp8_e4m3"
+    KV_CACHE_MEMORY_BYTES: "20000000000"
+    # vLLM snapshots free memory after distributed init, so the MoRI shmem heap
+    # and comm buffers already count against it; 0.80 left too little headroom
+    # and three prefill ranks failed the startup check.
+    GPU_MEMORY_UTILIZATION: "0.70"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    # Decode was NONE only because the OOM era wanted every byte
+    # (that comment's "decode NONE" belongs to the 1P/1D smoke, not to a proven
+    # graph hazard). Flash has run PIECEWISE all along, and vllm#48989 validated
+    # DSV4-Pro on FULL_DECODE_ONLY, which is the mode DSV4 decode actually wants:
+    # one graph over the whole fixed-shape decode step, no piecewise split. This
+    # targets the ~0.6-1.0 s/tok steady state, NOT the long-prompt stall (that is
+    # KV transfer volume, fixed in the geometry relabel). Prefill stays NONE:
+    # capture deadlocks the multi-node DP prefill pod.
+    # Submit-time DECODE_CUDAGRAPH_MODE wins. DSV4_EAGER=1 is the one-shot
+    # graph-vs-compress split (decode NONE +quant_fp8, never --enforce-eager).
+    DECODE_CUDAGRAPH_MODE: "FULL_DECODE_ONLY"
+    # Pro decode runs --max-num-seqs 4, so the shared 9-size list would capture
+    # 8..256 graphs that no batch can ever reach, paying capture time and pool
+    # memory for nothing. Pro is the model that OOMed at util 0.80, so
+    # keep the pool to the reachable batch sizes.
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4"
+    TORCHINDUCTOR_BENCHMARK_KERNEL: "0"
+    MORI_SHMEM_HEAP_SIZE: "17179869184"
+    # Dummy passed (mnbt 1024) then HMA-on SimpleGeo garbage.
+    # Same HMA-on hole. Off = the Flash path. TEP stays off.
+    DSV4_ENABLE_HMA: "0"
+    # Trim is on by default from the connector for Pro too -- see the Flash
+    # block above. Pro's buffer is the same mnbt * EP shape and Pro has 61
+    # layers against Flash's 43, so if anything it pays more for the padding.
+    CURL_SUITE: "short"
+  # HMA and async scheduling off: the MoRIIO DSV4 path is validated HMA=0.
+  dp_flags: "--tokenizer-mode deepseek_v4 --disable-hybrid-kv-cache-manager --no-async-scheduling"
+  prefill:
+    tp: ""
+    # 8k NIAH 400s at 8192. Keep mnbt 1024 (dummy + no flydsl).
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+  decode:
+    tp: ""
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+
 # ============================ MoE + DSA (wideEP only) ============================
 
 # GLM-5.1-FP8 (zai-org/GLM-5.1-FP8, arch GlmMoeDsaForCausalLM): MLA + DeepSeek
