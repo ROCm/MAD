@@ -8,6 +8,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-8B-Instruct.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -17,7 +18,8 @@
         ],
         "timeout": 0,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -26,10 +28,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "1",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_qwen3-32b",
@@ -40,6 +47,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Qwen3-32B.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -49,7 +57,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -58,10 +67,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "1",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_llama-3.3-70b-fp8",
@@ -72,6 +86,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_amd-Llama-3.3-70B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -81,7 +96,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -90,10 +106,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "1",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_llama-3.1-405b-fp8",
@@ -104,6 +125,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -113,7 +135,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -122,10 +145,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "1",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_mixtral-8x7b",
@@ -136,6 +164,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Mixtral-8x7B-Instruct-v0.1.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -145,7 +174,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -157,7 +187,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_deepseek-v3",
@@ -168,6 +203,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -177,7 +213,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -189,7 +226,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_deepseek-r1",
@@ -200,6 +242,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -209,7 +252,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -221,7 +265,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_dp_deepseek-v3",
@@ -232,6 +281,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -241,7 +291,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -253,7 +304,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_dp_deepseek-r1",
@@ -264,6 +320,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -273,7 +330,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -285,7 +343,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_llama-3.1-8b",
@@ -296,6 +359,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-8B-Instruct.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -305,7 +369,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -314,10 +379,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "0",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_qwen3-32b",
@@ -328,6 +398,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Qwen3-32B.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -337,7 +408,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -346,10 +418,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "0",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_llama-3.3-70b-fp8",
@@ -360,6 +437,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_amd-Llama-3.3-70B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -369,7 +447,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -378,10 +457,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "0",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_llama-3.1-405b-fp8",
@@ -392,6 +476,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8-KV.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -401,7 +486,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -410,10 +496,15 @@
             "yD": "1",
             "DP_MODE": "0",
             "RUN_MORI": "0",
-            "USE_CX7_NICS": "0",
+            "USE_CX7_NICS": "1",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_mixtral-8x7b",
@@ -424,6 +515,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Mixtral-8x7B-Instruct-v0.1.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -433,7 +525,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -445,7 +538,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_deepseek-v3",
@@ -456,6 +554,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -465,7 +564,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -477,7 +577,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mooncake_deepseek-r1",
@@ -488,6 +593,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -497,7 +603,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -509,7 +616,12 @@
             "USE_CX7_NICS": "0",
             "BENCHMARK_COMBINATIONS": "1024/1024"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_io_agentic_qwen3-32b",
@@ -520,6 +632,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_Qwen3-32B.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -530,7 +643,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -543,7 +657,12 @@
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_sglang_disagg_mori_dp_agentic_deepseek-v3",
@@ -554,6 +673,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.csv",
         "tags": [
             "pyt",
             "sglang",
@@ -564,7 +684,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
@@ -577,6 +698,11 @@
             "BENCHMARK_SCRIPT": "agentic",
             "AGENTIC_WORKLOAD": "conformance_256k"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     }
 ]
