@@ -5,6 +5,8 @@
 # to the container's root user; the batch scripts, running as the job's user, got
 # "Permission denied". Runs the scripts' own function against a fake cache.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -29,21 +31,21 @@ for S in "$D" "$C"; do
     echo "=== $n ==="
     _has "$(grep -c '^ *_clear_stale_jit_locks$' "$S")" "1" "$n: calls the cleanup once"
     _cache "$TMP/$n/default"
-    O="$(env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/default" bash -c "$F
+    O="$(env -i ${MADFAB} PATH="$PATH" AITER_JIT_DIR="$TMP/$n/default" bash -c "$F
 _clear_stale_jit_locks")"
     _has "$O" "removing stale AITER build lock $TMP/$n/default/build/lock_module_gemm_a8w8_blockscale" "default cache: says which lock it removed"
     _has "$O" "removing stale AITER build lock $TMP/$n/default/build/module_rmsnorm/build/lock" "default cache: removes the inner build/<module>/build/lock too"
     _has "$(_left "$TMP/$n/default")" "./build/module_gemm_a8w8_blockscale/module.so ./build/module_rmsnorm/blob/lock ./module_rmsnorm.so " \
          "default cache: every lock gone, built modules and other files named lock kept"
     _cache "$TMP/$n/shared"
-    env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/shared" JIT_CACHE_HOST=/somewhere bash -c "$F
+    env -i ${MADFAB} PATH="$PATH" AITER_JIT_DIR="$TMP/$n/shared" JIT_CACHE_HOST=/somewhere bash -c "$F
 _clear_stale_jit_locks" >/dev/null
     L="$(_left "$TMP/$n/shared")"
     _has    "$L" "./build/lock_module_fresh " "caller-set (maybe shared) cache: a fresh lock is left for its holder"
     _has    "$L" "./build/module_fresh/build/lock " "caller-set cache: a fresh inner lock is left too"
     _hasnot "$L" "./build/module_rmsnorm/build/lock " "caller-set cache: a 3-hour-old inner lock is removed"
     _hasnot "$L" "lock_module_gemm_a8w8_blockscale" "caller-set cache: a 3-hour-old lock is removed"
-    O="$(env -i PATH="$PATH" AITER_JIT_DIR="$TMP/$n/none" bash -c "$F
+    O="$(env -i ${MADFAB} PATH="$PATH" AITER_JIT_DIR="$TMP/$n/none" bash -c "$F
 _clear_stale_jit_locks; echo rc=\$?")"
     _has "$O" "rc=0" "no cache directory: nothing to do, no error"
 done

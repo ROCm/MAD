@@ -66,9 +66,9 @@ _rixl_setup_env_tp() {
             /^CA /{gsub(/\047/,"",$2); ca=$2}
             /Rate:/{if($2+0 >= 200) devs=devs (devs?",":"") ca":1"}
             END{print devs}')
-        export UCX_NET_DEVICES="${UCX_NET_DEVICES:-mlx5_0:1}"
+        export UCX_NET_DEVICES="${UCX_NET_DEVICES:-${MAD_FABRIC_RAILS%%,*}:1}"
     fi
-    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-eth0}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}"
     export VLLM_USE_V1=1
     export VLLM_SERVER_DEV_MODE=0
     export VLLM_NIXL_SIDE_CHANNEL_HOST="${host_ip}"
@@ -164,9 +164,9 @@ _rixl_setup_env_deepep() {
     export VLLM_NIXL_SIDE_CHANNEL_PORT=5557
     # The launcher forwards the site's fabric (cluster.sh, or what the caller passed);
     # these are only the fallbacks, and match it on the cluster this was tuned on.
-    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-eth0}"
-    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-eth0}"
-    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MAD_FABRIC_IFACE}}"
+    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${MAD_FABRIC_GID}}"
     export NCCL_CROSS_NIC=1
     export NCCL_NET_GDR_LEVEL=PHB
     export UCX_TLS=rc,sm,self,rocm_copy,rocm_ipc,tcp
@@ -176,7 +176,7 @@ _rixl_setup_env_deepep() {
             /^CA /{gsub(/\047/,"",$2); ca=$2}
             /Rate:/{if($2+0 >= 200) devs=devs (devs?",":"") ca":1"}
             END{print devs}')
-        export UCX_NET_DEVICES="${available_devs:-mlx5_0:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_5:1,mlx5_7:1,mlx5_8:1,mlx5_9:1}"
+        export UCX_NET_DEVICES="${available_devs:-$(sed 's/\(,\|$\)/:1\1/g' <<<"${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}")}"
     fi
     if [[ -z "${NCCL_IB_HCA:-}" ]]; then
         local nccl_hcas
@@ -184,7 +184,7 @@ _rixl_setup_env_deepep() {
             /^CA /{gsub(/\047/,"",$2); ca=$2}
             /Rate:/{if($2+0 >= 200) devs=devs (devs?",":"") ca}
             END{print devs}')
-        export NCCL_IB_HCA="${nccl_hcas:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
+        export NCCL_IB_HCA="${nccl_hcas:-${MAD_FABRIC_RAILS}}"
     fi
     export UCX_SOCKADDR_TLS_PRIORITY=rdmacm,tcp
     export UCX_SOCKADDR_CM_ENABLE=y

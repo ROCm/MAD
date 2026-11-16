@@ -6,6 +6,8 @@
 #   - run_xPyD_models.slurm's CONTAINER_ENV: each listed name becomes a bare `-e NAME`
 #     on docker run, comma- or space-separated, values never inlined.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -19,7 +21,7 @@ echo $((150 << 30)) > "$TMP/sys/card1/device/mem_info_vram_used"; echo $((192 <<
 FUNCS="$(sed -n '/^_GPU_SYSFS_ROOT=/,/^_print_log_tail() {/p' "$DIR/vllm_disagg.sh" | sed '$d')"
 _watch() { # <role> <log content>: start the watcher, write the log, give it time; print the capture file
     printf '%s\n' "$2" > "$TMP/logs/42/${1}_NODE1.log"
-    env -i PATH="$TMP/bin:$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=42 NODE_RANK=1 host_name=node-x \
+    env -i ${MADFAB} PATH="$TMP/bin:$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=42 NODE_RANK=1 host_name=node-x \
         _GPU_SYSFS_ROOT="$TMP/sys" bash -c "$FUNCS
         _watch_gpu_faults $1; sleep 9; kill %1 2>/dev/null; true" >/dev/null 2>&1
     cat "$TMP/logs/42/gpu_fault_NODE1.log" 2>/dev/null; rm -f "$TMP/logs/42/gpu_fault_NODE1.log"
@@ -40,7 +42,7 @@ _has "$(grep -c '^    _watch_gpu_faults \(prefill\|decode\)$' "$DIR/vllm_disagg.
 # when the script ends keeps the container, and the job, up until the wall clock.
 printf 'INFO serving\n' > "$TMP/logs/42/decode_NODE1.log"
 _t0=$(date +%s)
-O="$(env -i PATH="$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=42 NODE_RANK=1 bash -c "$FUNCS
+O="$(env -i ${MADFAB} PATH="$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=42 NODE_RANK=1 bash -c "$FUNCS
     _watch_gpu_faults decode; echo \"watchers:\${_GPU_FAULT_WATCHERS}\"; echo script-done" 2>&1 | timeout 20 cat)"
 _rc=$?; _t=$(( $(date +%s) - _t0 ))
 _has "$O" "script-done" "the script's output arrives"
@@ -54,7 +56,7 @@ _has "${_wpids:-none}" "${_wpids:-x}" "the script recorded its watcher's pid"
 echo ""
 echo "=== CONTAINER_ENV ==="
 LINES="$(sed -n '/^_EXTRA_ENV=""$/,/^for _v in \${CONTAINER_ENV/p' "$DIR/node.sh")"
-_env() { env -i CONTAINER_ENV="$1" bash -c "$LINES"'
+_env() { env -i ${MADFAB} CONTAINER_ENV="$1" bash -c "$LINES"'
 echo "[$_EXTRA_ENV]"'; }
 _has "$(_env 'HSA_NO_SCRATCH_RECLAIM,ROCM_AITER_FA')" "[ -e HSA_NO_SCRATCH_RECLAIM -e ROCM_AITER_FA]" "comma-separated names become bare -e NAME"
 _has "$(_env 'A B,C')" "[ -e A -e B -e C]" "spaces and commas both separate"

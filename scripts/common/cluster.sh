@@ -224,6 +224,7 @@ cluster_socket_ifname() {
 # by scripts/common/platform/fabric.py (detected from the RDMA devices and drivers unless
 # CLUSTER_ARCHETYPE names the family). A new NIC family is a catalog entry, not a code branch.
 _arch_gid=3; _arch_iface=eth0; _arch_drivers=mlx5; _arch_kv_nic=mlx5_1; _arch_rails=""; _arch_env=()
+_arch_rails_export=""; _arch_tc=""; _arch_sl=""
 if _fabric_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/fabric.py" shell 2>&1)"; then
     eval "${_fabric_out}"
 else
@@ -258,11 +259,15 @@ export KV_IB_DEVICE="${KV_IB_DEVICE:-${_arch_kv_nic}}"
 # CLUSTER_FABRIC_DERIVED=1: this family's rails and settings are derived here (the catalog names
 # its rails), so a launcher forwards them into the containers, whose defaults are one CX7 site's.
 export CLUSTER_FABRIC_DERIVED=0
-if [ -n "${_arch_rails}" ]; then
+if [ -n "${_arch_rails_export}" ]; then
     CLUSTER_FABRIC_DERIVED=1
-    export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails}}"
-    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails}}"
+    export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails_export}}"
+    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails_export}}"
 fi
+# The family's values for the containers, whose own defaults they replace (the connectors fall
+# back to these, not to one site's names): forwarded by name (node_lib.sh node_mad_env_args).
+export MAD_FABRIC_RAILS="${_arch_rails}" MAD_FABRIC_GID="${_arch_gid}" MAD_FABRIC_IFACE="${_arch_iface}" \
+       MAD_FABRIC_KV_NIC="${_arch_kv_nic}" MAD_FABRIC_RDMA_TC="${_arch_tc}" MAD_FABRIC_RDMA_SL="${_arch_sl}"
 export FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
 
 # --------------------------------------------------------------- ports

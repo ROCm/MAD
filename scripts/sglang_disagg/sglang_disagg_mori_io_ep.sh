@@ -475,8 +475,8 @@ fi
 unset PREFILL_CMD DECODE_CMD ROUTER_CMD 2>/dev/null || true
 
 setup_sglang_worker_env() {
-    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-eth0}}"
-    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-eth0}}"
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-${MAD_FABRIC_IFACE}}}"
     export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
     export SGLANG_MORI_FP8_DISP="${SGLANG_MORI_FP8_DISP:-True}"
     export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"

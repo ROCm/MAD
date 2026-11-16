@@ -5,6 +5,8 @@
 # gpu_fault_NODE<n>.log with the kernel's amdgpu lines, and the launcher's output pipe
 # still closes when it exits (the watcher must not hold it). No GPUs.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -21,7 +23,7 @@ printf '#!/bin/sh\necho "[t] amdgpu 0000:75:00.0: amdgpu: [mmhub0] no-retry page
 FUNCS="$(sed -n '/^_print_gpu_snapshot() {/,/^}$/p' "$L"; _watcher "$L")"
 printf '%s\n' 'Memory access fault by GPU node-3 (Agent handle: 0x5c) on address 0x7134. Reason: Unknown.' 'Fatal Python error: Aborted' \
     > "$TMP/logs/7/prefill_NODE0.log"
-O="$(env -i PATH="$TMP/bin:$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=7 NODE_RANK=0 bash -c "$FUNCS
+O="$(env -i ${MADFAB} PATH="$TMP/bin:$PATH" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=7 NODE_RANK=0 bash -c "$FUNCS
 _watch_gpu_faults prefill; sleep 9; echo script-done" 2>&1 | timeout 30 cat)"
 C="$(cat "$TMP/logs/7/gpu_fault_NODE0.log" 2>/dev/null)"
 _has "$C" "Memory access fault by GPU node-3" "the capture quotes the runtime's fault line"

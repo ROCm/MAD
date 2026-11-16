@@ -4,6 +4,8 @@
 # memory fails before the barrier and names that GPU, and GPU_CLEAN_CHECK=0 skips it.
 # Runs the real functions, cut out of the script. No GPUs needed.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -22,7 +24,7 @@ _fake_node() { # <root> <used GiB per card...>: cards 1.. with PCI-looking targe
 FUNCS="$(sed -n '/^_GPU_SYSFS_ROOT=/,/^_print_log_tail() {/p' "$DIR/vllm_disagg.sh" | sed '$d')"
 _run() { # <root> [VAR=value...]: what the check prints, then "STARTED" if it let the node go on
     local root=$1; shift
-    env -i PATH="$PATH" _GPU_SYSFS_ROOT="$root" host_name=node-x "$@" bash -c "
+    env -i ${MADFAB} PATH="$PATH" _GPU_SYSFS_ROOT="$root" host_name=node-x "$@" bash -c "
         _job_fail() { echo \"JOB_FAIL: \$1\"; exit 1; }
         $FUNCS
         _check_gpus_clean

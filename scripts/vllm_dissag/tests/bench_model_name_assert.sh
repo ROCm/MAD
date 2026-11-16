@@ -4,6 +4,8 @@
 # name; the colocated launcher always serves under MODEL_NAME, and some disagg recipes
 # set --served-model-name, so requesting MODEL_PATH failed every request there.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 pass=0; fail=0
 _is() { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s, want %s)\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
@@ -23,7 +25,7 @@ _is "$(grep -c 'export SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${MODEL_PATH}}"' 
 # per-cell formula), under the env a run would set.
 _lc_prompts() { # con, then VAR=value...
     local con=$1; shift
-    env -i PATH="$PATH" "$@" bash -c "
+    env -i ${MADFAB} PATH="$PATH" "$@" bash -c "
         $(grep -E '^(NUM_PROMPTS_FACTOR|MIN_PROMPTS)=' "$DIR/benchmark_long_context.sh")
         con=$con
         $(grep -E '^\s*(n_prompts=|\[ \"\$n_prompts\")' "$DIR/benchmark_long_context.sh" | sed 's/^ *//')

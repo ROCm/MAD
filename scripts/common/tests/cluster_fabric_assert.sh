@@ -73,6 +73,18 @@ _is "$(_env ainic)" "roce=1" "ainic sets RCCL_AINIC_ROCE"
 _is "$(_env ainic RCCL_AINIC_ROCE=0)" "roce=0" "...unless the run set it"
 _is "$(_env cx7)" "roce=" "other families do not"
 
+echo "=== the family's values for the containers (MAD_FABRIC_*) ==="
+cat > "$TMP/fab.sh" <<'FAB'
+. "$_CLUSTER_SH" >/dev/null 2>&1
+echo "rails=$MAD_FABRIC_RAILS gid=$MAD_FABRIC_GID if=$MAD_FABRIC_IFACE kv=$MAD_FABRIC_KV_NIC tc=$MAD_FABRIC_RDMA_TC sl=$MAD_FABRIC_RDMA_SL derived=$CLUSTER_FABRIC_DERIVED hca=${NCCL_IB_HCA:-}"
+FAB
+_fab() { local root="$TMP/$1"; shift
+    env -i HOME="$TMP" USER=t PATH="$root/bin:$(dirname "$(command -v python3)"):/usr/bin:/bin" \
+        CLUSTER_SYSFS_IB="$root/ib" CLUSTER_SYSFS_NET="$root/net" _CLUSTER_SH="$DIR/cluster.sh" "$@" bash "$TMP/fab.sh"; }
+_is "$(_fab cx7)" "rails=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9 gid=3 if=eth0 kv=mlx5_1 tc=41 sl=0 derived=0 hca=" \
+    "cx7: the validated rails for the connectors, NCCL_IB_HCA left to them"
+_is "$(_fab ainic)" "rails=$R8 gid=1 if=eno0 kv=rdma0 tc=41 sl=0 derived=1 hca=$R8" "ainic: rails found on the node, set and passed"
+
 echo "=== a new NIC family is a catalog entry ==="
 python3 - "$DIR/../../compat/rocm.yaml" "$TMP/catalog.yaml" <<'PY'
 import sys, yaml

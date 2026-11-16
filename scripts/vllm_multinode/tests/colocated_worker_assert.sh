@@ -4,6 +4,8 @@
 # so, the head stops at once on that instead of waiting out its readiness timeout,
 # and a worker the head shuts down still exits 0.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$DIR/serve_colocated.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -27,7 +29,7 @@ chmod +x "$B/vllm"
 
 _run() { # NODE_RANK [VAR=value ...]: serve_colocated.sh as that node, logs under $TMP/logs
     local rank="$1"; shift
-    env -i PATH="$B:$PATH" HOME="$TMP" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=5 NODE_RANK="$rank" NNODES=2 \
+    env -i ${MADFAB} PATH="$B:$PATH" HOME="$TMP" _RUN_LOGS="$TMP/logs" SLURM_JOB_ID=5 NODE_RANK="$rank" NNODES=2 \
         MODEL_PATH="$TMP/model" MODEL_NAME=M MASTER_ADDR=127.0.0.1 IPADDRS=127.0.0.1,127.0.0.2 \
         SHARED_DIR="$TMP/shared" TP_SIZE=8 PP_SIZE=2 GPUS_PER_NODE=8 LOG_WAIT_TIMEOUT_SECONDS=60 "$@" \
         bash "$SCRIPT"

@@ -114,15 +114,15 @@ node_topology() {
     echo "[topology] node ${SLURM_PROCID:-0}:${_TOPO_ENV//-e / }"
 }
 
-# The recipe's per-role values for the container, as `-e NAME` words (docker reads each value
-# from this environment, so engine arguments with quotes or JSON pass intact): every exported
+# MAD's own values for the container, as `-e NAME` words (docker reads each value from this
+# environment, so engine arguments with quotes or JSON pass intact): every exported
 # MAD_ROLE_MODEL_PATH_<ROLE> and MAD_ROLE_ENGINE_ARGS_<ROLE> (cluster_check_recipe,
-# cluster_resolve_role_artifacts), and MAD_RECIPE_FILE (layers.sh config_recipe_file).
-# Empty when the recipe gives none.
-node_role_env_args() {
+# cluster_resolve_role_artifacts), MAD_RECIPE_FILE (layers.sh config_recipe_file) and the
+# fabric's MAD_FABRIC_* (cluster.sh, from compat/rocm.yaml fabrics). Absent ones are skipped.
+node_mad_env_args() {
     local v
     for v in $(compgen -e); do
-        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*|MAD_RECIPE_FILE) printf -- '-e %s ' "$v" ;; esac
+        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*|MAD_RECIPE_FILE|MAD_FABRIC_*) printf -- '-e %s ' "$v" ;; esac
     done
 }
 

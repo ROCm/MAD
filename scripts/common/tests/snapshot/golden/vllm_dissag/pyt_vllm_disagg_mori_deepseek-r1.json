@@ -121,7 +121,13 @@
      "MORI_NUM_QP_PER_PE=8",
      "HSA_FORCE_FINE_GRAIN_PCIE=1",
      "HSA_ENABLE_SDMA=1",
-     "MORI_GPU_ARCHS=gfx942"
+     "MORI_GPU_ARCHS=gfx942",
+     "MAD_FABRIC_GID",
+     "MAD_FABRIC_IFACE",
+     "MAD_FABRIC_KV_NIC",
+     "MAD_FABRIC_RAILS",
+     "MAD_FABRIC_RDMA_SL",
+     "MAD_FABRIC_RDMA_TC"
     ],
     "env_file": [],
     "image": "img:snapshot",
@@ -270,7 +276,13 @@
      "MORI_NUM_QP_PER_PE=8",
      "HSA_FORCE_FINE_GRAIN_PCIE=1",
      "HSA_ENABLE_SDMA=1",
-     "MORI_GPU_ARCHS=gfx942"
+     "MORI_GPU_ARCHS=gfx942",
+     "MAD_FABRIC_GID",
+     "MAD_FABRIC_IFACE",
+     "MAD_FABRIC_KV_NIC",
+     "MAD_FABRIC_RAILS",
+     "MAD_FABRIC_RDMA_SL",
+     "MAD_FABRIC_RDMA_TC"
     ],
     "env_file": [],
     "image": "img:snapshot",

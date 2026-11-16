@@ -313,7 +313,11 @@ fabrics:
     gid_index: 3
     socket_ifname: eth0
     rdma_drivers: mlx5
-    kv_nic: mlx5_1
+    kv_nic: mlx5_1        # the management NIC: cross-rail safe for KV transfer
+    # The rails of the CX7 site the connectors were validated on; on cx7 the connectors choose
+    # (rixl.sh probes ibstat first), so cluster.sh passes these as MAD_FABRIC_RAILS only.
+    rails: {default: [mlx5_0, mlx5_2, mlx5_3, mlx5_4, mlx5_5, mlx5_7, mlx5_8, mlx5_9], connectors_choose: true}
+    rdma_qos: {tc: 41, sl: 0}   # RoCE DSCP for lossless RDMA, as every family ran with so far; set per site
   ainic:
     description: AMD AI NIC (Pollara), RoCE
     match: [rdma, ionic]
@@ -323,6 +327,7 @@ fabrics:
     kv_nic: rdma0
     rails: {driver: ionic, default: [rdma0, rdma1, rdma2, rdma3, rdma4, rdma5, rdma6, rdma7]}
     env: {RCCL_AINIC_ROCE: "1"}     # without it the AINIC path falls back to verbs/sockets silently
+    rdma_qos: {tc: 41, sl: 0}
   thor2:
     description: Broadcom Thor2, RoCE
     match: [bnxt_re, bnxt_en]
@@ -331,6 +336,7 @@ fabrics:
     rdma_drivers: bnxt_re
     kv_nic: bnxt_re0
     rails: {driver: bnxt_en, default: [bnxt_re0, bnxt_re1, bnxt_re2, bnxt_re3, bnxt_re4, bnxt_re5, bnxt_re6, bnxt_re7]}
+    rdma_qos: {tc: 41, sl: 0}
 
 # Scale-up fabrics: the domain inside which tensor/expert-parallel traffic belongs.
 scale_up_fabrics:

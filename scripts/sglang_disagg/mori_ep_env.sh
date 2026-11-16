@@ -9,12 +9,14 @@
 # USE_CX7_NICS=0 — use mlx5_1 100G management NIC
 USE_CX7_NICS="${USE_CX7_NICS:-1}"
 
+# The NICs: the fabric's rails, or its KV NIC (the management NIC on cx7), from the launcher
+# (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics).
 if [[ "$USE_CX7_NICS" == "1" ]]; then
-    _DEFAULT_IB="mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9"
-    echo "[mori_ep_env] NIC mode: CX7 multi-rail (${_DEFAULT_IB}) — same-rail nodes required"
+    _DEFAULT_IB="${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}"
+    echo "[mori_ep_env] NIC mode: multi-rail (${_DEFAULT_IB}) — same-rail nodes required"
 else
-    _DEFAULT_IB="mlx5_1"
-    echo "[mori_ep_env] NIC mode: mlx5_1 management NIC — cross-rail safe"
+    _DEFAULT_IB="${MAD_FABRIC_KV_NIC:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}"
+    echo "[mori_ep_env] NIC mode: ${_DEFAULT_IB} (one NIC) — cross-rail safe"
 fi
 
 # =============================================================

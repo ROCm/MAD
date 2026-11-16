@@ -10,6 +10,8 @@
 #     --all2all-backend mori_high_throughput + --block-size 16, exactly ONE --compilation-config
 #   - slurm docker -e forwards the RDMA-fix env (expandable_segments:False x2, IPC_MODE_LEGACY=0)
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SLURM="$DIR/run_xPyD_models.slurm"
 # What runs on each node is node.sh, which the launcher starts with srun; checks of
@@ -19,7 +21,7 @@ pass=0; fail=0
 
 # emit argv for a cell at a given NODE_RANK (xP=1 yD=1: rank 0 prefill, rank 1 decode)
 _argv_at() { # rank connector wide_ep ep_backend model model_path
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK="$1" xP=1 yD=1 CONNECTOR="$2" WIDE_EP="$3" EP_BACKEND="$4" \
     MODEL_NAME="$5" MODEL_PATH="$6" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
@@ -28,7 +30,7 @@ _argv_at() { # rank connector wide_ep ep_backend model model_path
 
 # emit argv for a cell
 _argv() { # connector wide_ep ep_backend model model_path
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH="$5" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
@@ -127,7 +129,7 @@ _has "$V" '"Kimi-K3-MXFP4"' "slurm VALID_MODELS accepts Kimi-K3-MXFP4"
 echo ""
 echo "=== moriio + wideEP (Kimi-K3-MXFP4, 2P/2D TP2×DP8) ==="
 _argv_k3() {
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 \
     MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -150,7 +152,7 @@ _hasnot "$C" "-tp 1" "K3 not -tp 1"
 
 echo ""
 echo "=== -e EP_TP_SIZE=1 override beats the recipe (K3 falls back to plain wideEP -tp 1) ==="
-Cov="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+Cov="$(env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 EP_TP_SIZE=1 \
     MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -161,7 +163,7 @@ _hasnot "$Cov" "--tensor-parallel-size" "EP_TP_SIZE=1 override -> no --tensor-pa
 
 echo ""
 echo "=== EP_TP_SIZE divisibility guard rejects an indivisible value ==="
-if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+if env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 EP_TP_SIZE=3 \
     MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -177,7 +179,7 @@ echo ""
 echo "=== non-K3 wideEP: EP_TP_SIZE dormant (plain -tp 1, no role split) ==="
 # emit argv for an explicit rank/topology cell
 _argv_rank() { # connector wide ep model rank xP yD
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK="$5" xP="$6" yD="$7" CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH=/m/M MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -197,7 +199,7 @@ _hasnot "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> no --kv-tran
 
 echo ""
 echo "=== EP_TP_SIZE>1 needs equal pools ==="
-if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+if env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=1 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=Kimi-K3-MXFP4 MODEL_PATH=/m/K3 MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
@@ -211,7 +213,7 @@ echo ""
 echo "=== TP_SIZE from cluster.sh does not leak into the wideEP layout ==="
 # cluster.sh exports TP_SIZE=GPUS_PER_NODE for the colocated launcher; the disagg
 # launcher reads only EP_TP_SIZE, so DSV3 stays TP1/DP16.
-Dt="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+Dt="$(env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m/M TP_SIZE=8 MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -223,7 +225,7 @@ _hasadj "$Dt" "--data-parallel-size" "16" "TP_SIZE=8 in env -> DSV3 still dp_siz
 echo ""
 echo "=== EP_TP_SIZE knob is model-agnostic (DSV3 behaves like K3 per value) ==="
 _argv_eptp() { # model ep_tp_size
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME="$1" MODEL_PATH=/m/M EP_TP_SIZE="$2" MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -231,7 +233,7 @@ _argv_eptp() { # model ep_tp_size
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 _guard_rejects() { # model ep_tp_size  (indivisible -> vllm_disagg exits nonzero)
-  if env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  if env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
       DRY_RUN=1 NODE_RANK=0 xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
       MODEL_NAME="$1" MODEL_PATH=/m/M EP_TP_SIZE="$2" MASTER_ADDR=10.0.0.1 \
       IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -325,7 +327,7 @@ echo "=== GPU-arch gate (cluster_require_gpu_arch) ==="
 # this is where the two agree on which GPUs a recipe may use. MAD_GPU_ARCH stands in for the
 # probe. Strict mode, because run_multinode.slurm sources cluster.sh under it.
 _gate() { # detected allowed [extra env]
-  env -i PATH="$PATH" HOME="$HOME" MAD_GPU_ARCH="$1" ${3:+$3} bash -c \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" MAD_GPU_ARCH="$1" ${3:+$3} bash -c \
     'set -euo pipefail; . "$0" >/dev/null; cluster_require_gpu_arch M "$1"' \
     "$DIR/../common/cluster.sh" "$2" >/dev/null 2>&1
 }
@@ -359,7 +361,7 @@ for m in json.load(open(sys.argv[1])):
 for _card in pyt_vllm_disagg_mori_glm-5.1-fp8 pyt_vllm_disagg_mori_glm-5.1-fp8_niah; do
   mapfile -t _genv < <(_glm_card_env "$_card")
   for _rank in 0 1; do
-    G="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" "${_genv[@]}" \
+    G="$(env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" "${_genv[@]}" \
         DRY_RUN=1 NODE_RANK="$_rank" MODEL_PATH=/m/GLM MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
         GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
         bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f')"
@@ -380,7 +382,7 @@ Rt="$(_argv rixl 0 '' amd-Llama-3.3-70B-Instruct-FP8-KV /m/Llama)"
 _hasadj "$Rt" "--gpu-memory-utilization" "0.8" "rixl TP: launcher fallback reaches vllm serve"
 Rd="$(_argv rixl 1 deepep DeepSeek-V3 /m/DSV3)"
 _hasadj "$Rd" "--gpu-memory-utilization" "0.8" "rixl deepep: launcher fallback reaches vllm serve"
-Ro="$(env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+Ro="$(env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR=rixl WIDE_EP=0 EP_BACKEND='' \
     MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV MODEL_PATH=/m/Llama MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2 GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router \
@@ -413,7 +415,7 @@ echo "=== rixl deepep honours the recipe's AITER and cudagraph knobs (as moriio 
 # _dryrun_emit prints the server's AITER env as "===ENV K=V" lines after the argv.
 _raw_at() { # rank connector wide_ep ep_backend model model_path [VAR=value ...]
   local r="$1" c="$2" w="$3" e="$4" m="$5" p="$6"; shift 6
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK="$r" xP=1 yD=1 CONNECTOR="$c" WIDE_EP="$w" EP_BACKEND="$e" \
     MODEL_NAME="$m" MODEL_PATH="$p" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 "$@" \
@@ -464,7 +466,7 @@ _WFUNCS="$(sed -n '/^_FATAL_SERVER_LOG_RE=/p' "$DIR/vllm_disagg.sh"; sed -n '/^_
 printf 'INFO loading\n' > "$_WT/7/decode_NODE2.log"; printf 'INFO up\nApplication startup complete.\n' > "$_WT/7/prefill_NODE0.log"
 printf '(Worker pid=2581) ERROR WorkerProc failed to start.\nValueError: Free memory on device cuda:4 (140.65/191.98 GiB) on startup is less than desired\n' > "$_WT/7/decode_NODE3.log"
 _t0=$(date +%s)
-_WO="$(env -i PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
+_WO="$(env -i ${MADFAB} PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
 _job_fail() { echo \"JOBFAIL: \$1\"; exit 3; }
 _wait_log_signal_or_fail $_WT/7/decode_NODE2.log 'decode master' 'Application startup complete.' 60 1" 2>&1)"
 _wt=$(( $(date +%s) - _t0 ))
@@ -473,7 +475,7 @@ _has "$_WO" "JOBFAIL: decode master failed to start after 0s: a server died (see
 _has "$_WO" "Free memory on device cuda:4" "the dead server's own error is printed"
 _has "took<5s=$([ "$_wt" -lt 5 ] && echo yes || echo no)" "took<5s=yes" "no waiting for the timeout"
 rm -f "$_WT/7/decode_NODE3.log"; printf 'Application startup complete.\n' >> "$_WT/7/decode_NODE2.log"
-_WO="$(env -i PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
+_WO="$(env -i ${MADFAB} PATH="$PATH" JOB_ABORT_FILE="$_WT/7/ABORTED" bash -c "$_WFUNCS
 _job_fail() { echo \"JOBFAIL: \$1\"; exit 3; }
 _wait_log_signal_or_fail $_WT/7/decode_NODE2.log 'decode master' 'Application startup complete.' 60 1" 2>&1)"
 _has "$_WO" "Ready: decode master" "healthy servers: the wait returns ready"
@@ -485,7 +487,7 @@ echo "=== MoRIIO transfer tuning reaches the connector config, only when set ===
 # environment variables ("deprecated and ignored"); they must be in kv_connector_extra_config.
 _argv_tune() { # rank [VAR=value ...] -> argv of the DeepSeek-V3 wideEP moriio server
   local r="$1"; shift
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK="$r" xP=1 yD=1 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
     MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m/DSV3 MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
     GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 "$@" \

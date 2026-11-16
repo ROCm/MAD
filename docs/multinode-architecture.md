@@ -232,7 +232,11 @@ The node and the network are described in `compat/rocm.yaml` too, so code does n
 - `fabrics`: the scale-out NIC families (`cx7`, `ainic`, `thor2`) -- the names that identify each,
   the GID index, control interface, RDMA drivers, KV NIC, how its GPU rails are found, and its
   own settings. `cluster.sh` fills from the detected family only what the run did not pass
-  (`scripts/common/platform/fabric.py`); a new NIC family is a catalog entry.
+  (`scripts/common/platform/fabric.py`); a new NIC family is a catalog entry. It also hands
+  the family's values to the containers as `MAD_FABRIC_RAILS`, `_GID`, `_IFACE`, `_KV_NIC`,
+  `_RDMA_TC`, `_RDMA_SL`, which the connectors use where they used to hold one CX7 site's
+  device names and GID; a role script started by hand takes them from
+  `fabric.py container-env`.
 - `scale_up_fabrics`: the domain tensor/expert-parallel traffic belongs in (`xgmi` in a node,
   `ualoe` across a rack).
 

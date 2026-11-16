@@ -18,6 +18,18 @@ from pathlib import Path
 # set GPUS_PER_NODE from the run's platform, and nothing assumes it.
 os.environ.setdefault("GPUS_PER_NODE", "8")
 
+
+def _fabric_env():
+    """The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), CX7 family."""
+    import subprocess
+    out = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1].parent / "platform" / "fabric.py"),
+                          "container-env"], env=dict(os.environ, CLUSTER_ARCHETYPE="cx7"),
+                         capture_output=True, text=True, check=True).stdout.split()
+    return dict(w.split("=", 1) for w in out)
+
+
+FABRIC = _fabric_env()
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import topology as T  # noqa: E402
@@ -232,7 +244,7 @@ class RoleScriptsFollowTheSpec(unittest.TestCase):
         import os, subprocess
         base = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"), "DRY_RUN": "1",
                 "NODE_RANK": "0", "xP": "1", "yD": "1", "MODEL_PATH": "/m/M", "MASTER_ADDR": "10.0.0.1",
-                "IPADDRS": "10.0.0.1,10.0.0.2", "GPUS_PER_NODE": "8", "SLURM_JOB_ID": "T"}
+                "IPADDRS": "10.0.0.1,10.0.0.2", "GPUS_PER_NODE": "8", "SLURM_JOB_ID": "T", **FABRIC}
         base.update(env)
         p = subprocess.run(["bash", str(script)], env=base, capture_output=True, text=True, timeout=120)
         return [l for l in p.stdout.splitlines() if l.startswith("===DRYRUN")]
@@ -261,7 +273,7 @@ class RoleScriptsFollowTheSpec(unittest.TestCase):
         env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp"), "DRY_RUN": "1", "xP": "1",
                "yD": "1", "MODEL_PATH": "/m/M", "MASTER_ADDR": "10.0.0.1", "GPUS_PER_NODE": "8", "SLURM_JOB_ID": "T",
                "NIXL_COOKBOOK_PATH": str(d), "CONNECTOR": "moriio", "WIDE_EP": "1", "EP_BACKEND": "mori",
-               "MODEL_NAME": "DeepSeek-V3", "PROXY_TYPE": "vllm_router", "ROUTER_PORT": "30000", **common}
+               "MODEL_NAME": "DeepSeek-V3", "PROXY_TYPE": "vllm_router", "ROUTER_PORT": "30000", **FABRIC, **common}
         out = subprocess.run(["bash", str(d / "vllm_disagg.sh")], env=env, capture_output=True, text=True).stdout
         self.assertIn("[dry-run] router node", out)
         out = subprocess.run(["bash", str(d / "vllm_disagg.sh")], env=dict(env, NODE_RANK="0"),

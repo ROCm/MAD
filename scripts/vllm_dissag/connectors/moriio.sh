@@ -60,23 +60,24 @@ connector_setup_env() {
     export VLLM_USE_V1=1
     export VLLM_ALL2ALL_BACKEND=mori
 
-    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
-    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
+    # Fabric fallbacks: the detected family's values from the launcher (MAD_FABRIC_*).
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-${MAD_FABRIC_IFACE}}}"
 
     export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-10800}"
     export VLLM_RINGBUFFER_WARNING_INTERVAL="${VLLM_RINGBUFFER_WARNING_INTERVAL:-3600}"
     export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600}"
     export VLLM_RPC_TIMEOUT="${VLLM_RPC_TIMEOUT:-300000}"
 
-    export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
-    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
+    export NCCL_IB_HCA="${NCCL_IB_HCA:-${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}"
+    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${MAD_FABRIC_GID}}"
     export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-3}"
     export NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-1}"
-    export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-3}"
-    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
-    # MoRI RDMA QoS — TC=41 (RoCE DSCP for lossless RDMA), SL=0. Override per-cluster.
-    export MORI_RDMA_TC="${MORI_RDMA_TC:-41}"
-    export MORI_RDMA_SL="${MORI_RDMA_SL:-0}"
+    export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-${MAD_FABRIC_GID}}"
+    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${MAD_FABRIC_RAILS}}"
+    # MoRI RDMA QoS: the fabric's (compat/rocm.yaml fabrics rdma_qos). Override per site.
+    export MORI_RDMA_TC="${MORI_RDMA_TC:-${MAD_FABRIC_RDMA_TC}}"
+    export MORI_RDMA_SL="${MORI_RDMA_SL:-${MAD_FABRIC_RDMA_SL}}"
 
     export MORI_NUM_QP_PER_PE="${MORI_NUM_QP_PER_PE:-4}"
     # VLLM_MORIIO_QP_PER_TRANSFER / _NUM_WORKERS / _POST_BATCH_SIZE are not read from the

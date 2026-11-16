@@ -2,12 +2,14 @@
 # mori_ep_env.sh applies connectors/mori.env as `${KEY:-VALUE}`: every value in the
 # file, under anything the container was given, and the derived values after it.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 D="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
 _is() { [ "$1" = "$2" ] && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s\n        got:  %s\n        want: %s\n" "$3" "$1" "$2"; fail=$((fail+1)); }; }
 mkdir "$TMP/bin"; printf '#!/bin/sh\necho "default via 10.0.0.254 dev ens9"\n' > "$TMP/bin/ip"; chmod +x "$TMP/bin/ip"
-_env() { env -i PATH="$TMP/bin:/usr/bin:/bin" "$@" bash -c '. "$0" >/dev/null 2>&1; env' "$D/mori_ep_env.sh"; }
+_env() { env -i ${MADFAB} PATH="$TMP/bin:/usr/bin:/bin" "$@" bash -c '. "$0" >/dev/null 2>&1; env' "$D/mori_ep_env.sh"; }
 _get() { grep "^$1=" <<<"$2" | cut -d= -f2-; }
 
 out="$(_env)"

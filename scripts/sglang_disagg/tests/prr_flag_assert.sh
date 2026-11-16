@@ -7,6 +7,8 @@
 # read. Also that a server rejecting its command line is caught as fatal at once. Uses
 # fake sglang installs whose launch_server is a real argparse parser. No GPUs.
 set -u
+# The fabric values a launcher gives the containers (cluster.sh MAD_FABRIC_*), for the CX7 family.
+MADFAB="$(CLUSTER_ARCHETYPE=cx7 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/common/platform/fabric.py" container-env)"
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
@@ -27,7 +29,7 @@ p.add_argument("--disable-radix-cache", action="store_true")' '# removed: --pref
 mkdir -p "$TMP/none"
 
 _run() { # <install> <bash snippet using the compat functions>
-    env -i PATH="$PATH" HOME="$HOME" PYTHONPATH="$TMP/$1" PYTHONNOUSERSITE=1 bash -c "
+    env -i ${MADFAB} PATH="$PATH" HOME="$HOME" PYTHONPATH="$TMP/$1" PYTHONNOUSERSITE=1 bash -c "
         source '$DIR/sglang_compat.sh'; $2" 2>/dev/null
 }
 F='--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512'

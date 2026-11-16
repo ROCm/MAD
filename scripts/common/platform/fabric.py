@@ -9,6 +9,7 @@ as shell assignments to cluster.sh's _arch_* variables. Detection reads CLUSTER_
 
     fabric.py shell [--catalog PATH]
     fabric.py detect [--catalog PATH]       the family name
+    fabric.py container-env                 the MAD_FABRIC_* the containers get, as NAME=VALUE words
 """
 import argparse
 import os
@@ -65,14 +66,21 @@ def settle(catalog, family, devs):
     found = [d for d, drv in devs if rails_spec.get("driver") and drv == rails_spec["driver"]]
     rails = found or list(rails_spec.get("default") or [])
     kv = found[0] if found else f.get("kv_nic", "")
+    qos = f.get("rdma_qos") or {}
     return {"gid": f.get("gid_index", ""), "iface": f.get("socket_ifname", ""),
             "drivers": f.get("rdma_drivers", ""), "kv_nic": kv, "rails": ",".join(rails),
-            "env": f.get("env") or {}}
+            "set_rails": not rails_spec.get("connectors_choose"),
+            "tc": qos.get("tc", ""), "sl": qos.get("sl", ""), "env": f.get("env") or {}}
+
+
+def container_env(v):
+    return {"MAD_FABRIC_RAILS": v["rails"], "MAD_FABRIC_GID": v["gid"], "MAD_FABRIC_IFACE": v["iface"],
+            "MAD_FABRIC_KV_NIC": v["kv_nic"], "MAD_FABRIC_RDMA_TC": v["tc"], "MAD_FABRIC_RDMA_SL": v["sl"]}
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["shell", "detect"])
+    ap.add_argument("cmd", choices=["shell", "detect", "container-env"])
     ap.add_argument("--catalog", default=os.environ.get("MAD_CATALOG") or CATALOG)
     a = ap.parse_args(argv)
     catalog = load(a.catalog)
@@ -82,10 +90,17 @@ def main(argv=None):
         print(family)
         return 0
     v = settle(catalog, family, devs)
+    if a.cmd == "container-env":
+        # The MAD_FABRIC_* a launcher gives the containers, as NAME=VALUE words (for tests and
+        # hand runs of a role script: `env $(fabric.py container-env) bash vllm_disagg.sh`).
+        print(" ".join(f"{k}={val}" for k, val in container_env(v).items()))
+        return 0
     q = shlex.quote
     print(f"CLUSTER_ARCHETYPE={q(family)}")
     print(f"_arch_gid={q(str(v['gid']))}; _arch_iface={q(v['iface'])}; _arch_drivers={q(v['drivers'])}")
     print(f"_arch_kv_nic={q(v['kv_nic'])}; _arch_rails={q(v['rails'])}")
+    print(f"_arch_rails_export={q(v['rails'] if v['set_rails'] else '')}")
+    print(f"_arch_tc={q(str(v['tc']))}; _arch_sl={q(str(v['sl']))}")
     print("_arch_env=(" + " ".join(q(f"{k}={val}") for k, val in v["env"].items()) + ")")
     return 0
 

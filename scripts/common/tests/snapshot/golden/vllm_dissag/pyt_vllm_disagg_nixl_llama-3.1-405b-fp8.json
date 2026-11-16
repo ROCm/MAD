@@ -109,7 +109,13 @@
      "PYTORCH_HIP_ALLOC_CONF=expandable_segments:False",
      "HSA_ENABLE_IPC_MODE_LEGACY=0",
      "HSA_NO_SCRATCH_RECLAIM=1",
-     "MORI_GPU_ARCHS=gfx942"
+     "MORI_GPU_ARCHS=gfx942",
+     "MAD_FABRIC_GID",
+     "MAD_FABRIC_IFACE",
+     "MAD_FABRIC_KV_NIC",
+     "MAD_FABRIC_RAILS",
+     "MAD_FABRIC_RDMA_SL",
+     "MAD_FABRIC_RDMA_TC"
     ],
     "env_file": [],
     "image": "img:snapshot",
@@ -225,7 +231,13 @@
      "PYTORCH_HIP_ALLOC_CONF=expandable_segments:False",
      "HSA_ENABLE_IPC_MODE_LEGACY=0",
      "HSA_NO_SCRATCH_RECLAIM=1",
-     "MORI_GPU_ARCHS=gfx942"
+     "MORI_GPU_ARCHS=gfx942",
+     "MAD_FABRIC_GID",
+     "MAD_FABRIC_IFACE",
+     "MAD_FABRIC_KV_NIC",
+     "MAD_FABRIC_RAILS",
+     "MAD_FABRIC_RDMA_SL",
+     "MAD_FABRIC_RDMA_TC"
     ],
     "env_file": [],
     "image": "img:snapshot",
