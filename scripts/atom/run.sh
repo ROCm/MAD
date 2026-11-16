@@ -33,6 +33,7 @@ fi
 MAD_MODEL_NAME=$(echo $MAD_MODEL_NAME | tr "/" "_")
 
 PERF_ARGS=""
+PROFILE=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model_repo) MODEL="$2"; shift ;;
@@ -42,6 +43,7 @@ while [[ "$#" -gt 0 ]]; do
         --perf) PERF_ARGS="$PERF_ARGS --perf $2"; shift ;;
         --perf-output) PERF_ARGS="$PERF_ARGS --perf-output $2"; shift ;;
         --no-perf-merge) PERF_ARGS="$PERF_ARGS --no-perf-merge" ;;
+        --profile) PROFILE=true ;;
         *)
             echo "Unknown parameter passed: $1" >&2
             echo "Usage: run.sh --model_repo <repo> [--config <yaml>] [--benchmark <name>] [--output_csv <csv>] [--perf <yaml>] [--perf-output <yaml>] [--no-perf-merge]" >&2
@@ -55,8 +57,17 @@ MODEL_NAME=$(basename $MODEL)
 
 # By default run all benchmarks in configs/default.yaml; accept either CLI or env variable overrides
 if [[ -z "$BENCHMARK" ]]; then
-    BENCHMARK=${BENCHMARK_ARG:-"all"}
+    # Infer benchmark from tag name if not explicitly set
+    if [[ "$MAD_MODEL_NAME" == *"-accuracy"* ]]; then
+        BENCHMARK=${BENCHMARK_ARG:-"accuracy"}
+    elif [[ "$MAD_MODEL_NAME" == *"-perf"* ]]; then
+        BENCHMARK=${BENCHMARK_ARG:-"serving"}
+    else
+        BENCHMARK=${BENCHMARK_ARG:-"all"}
+    fi
 fi
+# CONFIG is always provided via --config flag from madengine or models.json
+# If somehow not provided, use default.yaml as fallback
 if [[ -z "$CONFIG" ]]; then
     CONFIG=${CONFIG_ARG:-"configs/default.yaml"}
 fi
@@ -70,8 +81,32 @@ fi
 pip install -qqq lm-eval[api] hf-transfer
 
 
+# install profiling dependencies (rocm-trace-lite) only when profiling; mirrors scripts/sglang/run.sh
+if $PROFILE; then
+    apt-get update || true
+    apt-get install -y g++ || true
+    apt-get install -y libsqlite3-dev || true
+    # Some ATOM images ship a broken apt state (rccl pin) and/or a libsqlite3-dev version that
+    # conflicts with the held libsqlite3-0, so apt can't produce sqlite3.h. Fall back to fetching
+    # the .debs and extracting them directly (no dependency resolution) to get the header + .so.
+    if [ ! -f /usr/include/sqlite3.h ]; then
+        SQV=$(apt-cache policy libsqlite3-0 | awk '/Candidate:/{print $2}')
+        ( cd /tmp && (apt-get download libsqlite3-0=$SQV libsqlite3-dev=$SQV || apt-get download libsqlite3-0 libsqlite3-dev) \
+          && for d in libsqlite3-0_*.deb libsqlite3-dev_*.deb; do [ -f "$d" ] && dpkg -x "$d" /; done && ldconfig )
+    fi
+    git clone https://github.com/amathews-amd/rocm-trace-lite.git
+    cd rocm-trace-lite
+    git checkout amathews-amd/sig_handle
+    sed -i 's/    _generate_perfetto(output, json_file)/    pass  # perfetto JSON export disabled: 300+ GB penalty, unused (kernels read from the .db)/' rocm_trace_lite/cmd_trace.py
+    sed -i 's/sys.exit(result.returncode if result is not None else 0)/sys.exit(getattr(result, "returncode", 0) if "result" in dir() else 0)/g' rocm_trace_lite/cmd_trace.py
+    make -j
+    make install
+    pip install -e .
+    cd ..
+fi
+
 # Run benchmark; use -u to make python prints unbuffered
-python3 -u run_atom.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $PERF_ARGS
+python3 -u run_atom.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $PERF_ARGS
 
 # move the output csv to parent directory
 mv "perf_${MODEL_NAME}.csv" ../$OUTPUT_CSV

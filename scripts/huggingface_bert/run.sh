@@ -46,7 +46,7 @@ HF_PATH='/workspace/transformers'
 
 torchrun $HF_PATH/examples/pytorch/language-modeling/run_mlm.py \
      --model_name_or_path bert-large-uncased \
-     --dataset_name wikitext \
+     --dataset_name Salesforce/wikitext \
      --dataset_config_name wikitext-2-raw-v1 \
      --do_train \
      --max_steps 150 \

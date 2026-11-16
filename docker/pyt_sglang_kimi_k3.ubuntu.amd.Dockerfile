@@ -27,8 +27,8 @@
 # Kimi K3 day-0 support landed in sgl-project/sglang#32541 and is not in a
 # tagged SGLang ROCm release yet; this model-specific image is the only ROCm
 # build carrying the KDA / Stable LatentMoE / AITER A8W4 support the checkpoint
-# needs. Kept separate from docker/pyt_sglang, which is still on the v0.4.5
-# rocm630 base that the existing SGLang entry is validated against.
+# needs. Kept separate from docker/pyt_sglang, whose lmsysorg/sglang
+# v0.5.18-rocm720-mi35x base does not include K3 support.
 #
 # The tag is the day-0 image named in the AMD tracking issue
 # https://github.com/sgl-project/sglang/issues/32548, which is what its MI355X

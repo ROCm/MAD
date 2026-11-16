@@ -1,13 +1,125 @@
 # ATOM Performance Recipes
-# Source: https://github.com/ROCm/ATOM/pull/1718 (recipes/Kimi-K3.md)
+# Source: https://github.com/ROCm/ATOM/tree/main/recipes
+# This file contains model-specific extra_args and env configurations for optimal ATOM performance
 # Merge strategy: User config wins; perf fills gaps (missing keys only)
 
+# GPT-OSS
+- model: openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8
+  extra_args:
+    --kv_cache_dtype: fp8
+    --gpu-memory-utilization: 0.5
+  env: {}
+
+# Kimi K2.5 MXFP4 variant (must come before base kimi-k2.5 for pattern matching)
+- model: amd/Kimi-K2.5-MXFP4 amd/Kimi-K2.6-MXFP4
+  extra_args:
+    --kv_cache_dtype: fp8
+    --trust-remote-code: true
+  env:
+    HSA_NO_SCRATCH_RECLAIM: '1'
+
+# Kimi K2.5 (BF16 variant)
+- model: moonshotai/Kimi-K2.5 moonshotai/Kimi-K2.6
+  extra_args:
+    --kv_cache_dtype: fp8
+    --trust-remote-code: true
+  env: {}
+
+# Llama 3.1 8B
+- model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
+  extra_args:
+    --kv_cache_dtype: fp8
+    --gpu-memory-utilization: 0.9
+  env:
+    ATOM_DISABLE_VLLM_PLUGIN_ATTENTION: '1'
+
+# Llama 3.1 405B
+- model: amd/Llama-3.1-405B-Instruct-FP8-KV amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+  extra_args:
+    --kv_cache_dtype: fp8
+    --gpu-memory-utilization: 0.9
+  env: {}
+
+# Llama 3.3 70B (FP8 and MXFP4 variants)
+- model: amd/Llama-3.3-70B-Instruct-FP8-KV amd/Llama-3.3-70B-Instruct-MXFP4-Preview
+    meta-llama/Llama-3.3-70B-Instruct
+  extra_args:
+    --kv_cache_dtype: fp8
+    --gpu-memory-utilization: 0.9
+    --max-num-seqs: 1024
+    --max-num-batched-tokens: 131072
+    --max-model-len: 8192
+  env: {}
+
+# DeepSeek-R1 MTP variant (must come before base deepseek-r1 for pattern matching)
+- model: amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4
+  extra_args:
+    --kv_cache_dtype: fp8
+    --method: mtp
+    --num-speculative-tokens: 3
+    --no-enable_prefix_caching: true
+  env: {}
+
+# DeepSeek-R1 (base variants)
+- model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-Preview
+  extra_args:
+    --kv_cache_dtype: fp8
+  bench_serving:
+    num_prompts_multiplier: 2
+  env: {}
+
+# Qwen3-235B
+- model: Qwen/Qwen3-235B-A22B-Thinking-2507-FP8 Qwen/Qwen3-235B-A22B-Thinking-2507
+    Qwen/Qwen3-235B-A22B
+  extra_args:
+    --kv_cache_dtype: fp8
+    --max-model-len: 16384
+    --max-num-batched-tokens: 20000
+  env:
+    AITER_QUICK_REDUCE_QUANTIZATION: INT4
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: '1'
+
+- model: Qwen/Qwen3-Next-80B-A3B-Instruct
+  extra_args:
+    --kv_cache_dtype: fp8
+  env:
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: 1
+    ATOM_ENABLE_ALLREDUCE_RMSNORM_FUSION: 1
+    ATOM_USE_FLYDSL_GDR: 1
+
+# GLM-5
+- model: zai-org/GLM-5 zai-org/GLM-5-FP8 zai-org/GLM-5.1
+  extra_args:
+    --kv_cache_dtype: fp8
+  env: {}
+
+# MiniMax-M2.5 (based on ATOM recipe, no vLLM plugin)
+- model: MiniMaxAI/MiniMax-M2.5 minimax-m2.5 minimax_m2.5
+  extra_args:
+    --kv_cache_dtype: fp8
+    --trust-remote-code: true
+    --gpu-memory-utilization: 0.9
+    --no-enable_prefix_caching: true
+  env:
+    AITER_QUICK_REDUCE_QUANTIZATION: INT4
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: '1'
+
+# DeepSeek-V4-Pro
+- model: deepseek-ai/DeepSeek-V4-Pro deepseek-ai/DeepSeek-V4-Flash
+  extra_args:
+    --kv_cache_dtype: fp8
+  env:
+    ATOM_DISABLE_MMAP: true
+    AITER_BF16_FP8_MOE_BOUND: 0
+    ATOM_MOE_GU_ITLV: 1
+
 # Kimi-K3 MXFP4 (gfx950 / MI355)
+# Source: https://github.com/ROCm/ATOM/pull/1718 (recipes/Kimi-K3.md)
 - model: moonshotai/Kimi-K3
   extra_args:
     --trust-remote-code: true
     --max-model-len: 16384
-    --max-num-seqs: 64
+    --max-num-seqs: 256
     --max-num-batched-tokens: 10240
     --gpu-memory-utilization: 0.93
     --block-size: 128

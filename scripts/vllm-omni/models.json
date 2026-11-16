@@ -1,0 +1,55 @@
+[
+    {
+        "name": "vllm-omni-perf",
+        "url": "",
+        "dockerfile": "../../docker/vllm-omni",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "vllm-omni-perf",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "vllm-omni-accuracy",
+        "url": "",
+        "dockerfile": "../../docker/vllm-omni",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "vllm-omni-accuracy",
+            "accuracy",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm-omni_flux.1-dev",
+        "url": "",
+        "dockerfile": "../../docker/vllm-omni",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_FLUX.1-dev.csv",
+        "tags": [
+            "pyt",
+            "vllm-omni",
+            "inference"
+        ],
+        "timeout": 43200,
+        "args": "--model_repo black-forest-labs/FLUX.1-dev --config configs/default.yaml --benchmark serving"
+    }
+]

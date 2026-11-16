@@ -1,5 +1,40 @@
 [
     {
+        "name": "sglang-perf",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "itej89@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "sglang-perf",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "sglang-accuracy",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "sglang-accuracy",
+            "accuracy",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
         "name": "pyt_sglang_deepseek-r1-distill-qwen-32b",
         "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
@@ -15,7 +50,139 @@
             "inference"
         ],
         "timeout": 28800,
-        "args": "--model_repo deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --test_option latency --num_gpu 8 --datatype bfloat16 --dataset random --batch_size 1,8,32 --lat_input_output_len '128:128;128:1024;1024:128;1024:1024'"
+        "args": "--model_repo deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-r1",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo deepseek-ai/DeepSeek-R1 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-v4-flash",
+        "dockerfile": "../../docker/pyt_sglang_dsv4",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Flash.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V4-Flash --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-v4-pro",
+        "dockerfile": "../../docker/pyt_sglang_dsv4",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Pro.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V4-Pro --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_flux.1-dev",
+        "dockerfile": "../../docker/pyt_sglang_flux",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_FLUX.1-dev.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo black-forest-labs/FLUX.1-dev --config configs/default.yaml --benchmark serving"
+    },
+    {
+        "name": "pyt_sglang_flux.1-dev-throughput",
+        "dockerfile": "../../docker/pyt_sglang_flux",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_FLUX.1-dev.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo black-forest-labs/FLUX.1-dev --config configs/default.yaml --benchmark throughput"
+    },
+    {
+        "name": "pyt_sglang_flux.1-dev-latency",
+        "dockerfile": "../../docker/pyt_sglang_flux",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_FLUX.1-dev.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo black-forest-labs/FLUX.1-dev --config configs/default.yaml --benchmark latency"
+    },
+    {
+        "name": "pyt_sglang_flux.2-dev",
+        "dockerfile": "../../docker/pyt_sglang_flux",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_FLUX.2-dev.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo black-forest-labs/FLUX.2-dev --config configs/default.yaml --benchmark serving"
     },
     {
         "name": "pyt_sglang_kimi-k3",
@@ -54,5 +221,95 @@
         "timeout": -1,
         "skip_gpu_arch": "gfx942",
         "args": "--model_repo moonshotai/Kimi-K3 --config configs/kimi_k3.yaml --variant dspark"
+    },
+    {
+        "name": "pyt_sglang_llama-3.3-70b",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.3-70B-Instruct.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_llama-3.3-70b_fp8",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.3-70B-Instruct-FP8-KV.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo amd/Llama-3.3-70B-Instruct-FP8-KV --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_wan2.2-t2v-a14b",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Wan2.2-T2V-A14B-Diffusers.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "args": "--model_repo Wan-AI/Wan2.2-T2V-A14B-Diffusers --config configs/default.yaml --benchmark serving"
+    },
+    {
+        "name": "pyt_sglang_wan2.2-t2v-a14b-throughput",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Wan2.2-T2V-A14B-Diffusers.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "args": "--model_repo Wan-AI/Wan2.2-T2V-A14B-Diffusers --config configs/default.yaml --benchmark throughput"
+    },
+    {
+        "name": "pyt_sglang_wan2.2-t2v-a14b-latency",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Wan2.2-T2V-A14B-Diffusers.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": 43200,
+        "args": "--model_repo Wan-AI/Wan2.2-T2V-A14B-Diffusers --config configs/default.yaml --benchmark latency"
     }
 ]

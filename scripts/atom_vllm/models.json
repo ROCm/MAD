@@ -1,0 +1,76 @@
+[
+    {
+        "name": "atom-vllm-perf",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "atom-vllm-perf",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "pyt_atom_vllm_llama-3.1-405b",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo meta-llama/Llama-3.1-405B-Instruct --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_llama-3.1-405b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo meta-llama/Llama-3.1-405B-Instruct-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_llama-3.3-70b",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.3-70B-Instruct.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.yaml"
+    }
+]

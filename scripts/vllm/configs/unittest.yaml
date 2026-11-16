@@ -43,7 +43,18 @@
     --load-format: dummy
   bench_args:
     --random-range-ratio: 0.8
-    --lmeval_apply_chat_template: True
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+- benchmark: accuracy
+  model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  dtype: auto
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  bench_args:
+    --apply_chat_template: True
   arch_overrides:
     gfx942:
       dtype: float16

@@ -1,5 +1,40 @@
 [
     {
+        "name": "vllm-perf",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "itej89@amd.com",
+        "training_precision": "",
+		"multiple_results": "perf_auto.csv",
+        "tags": [
+            "vllm-perf",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
+        "name": "vllm-accuracy",
+        "url": "",
+        "dockerfile": "../../docker/pyt_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_auto.csv",
+        "tags": [
+            "vllm-accuracy",
+            "accuracy",
+            "inference"
+        ],
+        "timeout": 432000,
+        "args": ""
+    },
+    {
         "name": "pyt_vllm_command-a-plus",
         "dockerfile": "../../docker/pyt_vllm",
         "scripts": "run.sh",
@@ -196,7 +231,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "multiple_results": "perf_gpt-oss120b-w-mxfp4-a-fp8.csv",
+        "multiple_results": "perf_gpt-oss-120b-w-mxfp4-a-fp8.csv",
         "tags": [
             "pyt",
             "vllm",
@@ -204,7 +239,7 @@
             "inference"
         ],
         "timeout": -1,
-        "args": "--model_repo amd/gpt-oss120b-w-mxfp4-a-fp8 --config configs/default.yaml"
+        "args": "--model_repo amd/gpt-oss-120b-w-mxfp4-a-fp8 --config configs/default.yaml"
     },
     {
         "name": "pyt_vllm_glm-5.1_fp8",
