@@ -79,7 +79,8 @@ docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Doc
 | `MAD_SYSTEM_GPU_ARCHITECTURE` | `gfx942` | Selects the stack (table above). |
 | `INSTALL_MORI` | `auto` | `1` builds and installs MoRI at `MORI_COMMIT`; `0` keeps the base image's MoRI. `auto`: `1` on gfx942, `0` elsewhere. |
 | `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when MoRI is installed. |
-| `BASE_DOCKER` | per architecture | Base SGLang ROCm image; when set, overrides the per-architecture base. |
+| `BASE_DOCKER` | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | Base SGLang ROCm image on gfx942. |
+| `BASE_DOCKER_GFX950` | `rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924` | Base SGLang ROCm image on gfx950. |
 | `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
 
 Examples:

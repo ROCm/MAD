@@ -32,13 +32,15 @@
 #                    GPU memory with ibv_reg_mr only, which fails ("errno 22") on nodes
 #                    without a GPU peer-memory module, e.g. MI355X with AMD AINIC; v1.2.3
 #                    falls back to dma-buf. The disagg launchers adapt to 0.5.20's options.
-# BASE_DOCKER, when set, overrides the per-architecture base.
+# One base image ARG per architecture: BASE_DOCKER is gfx942's (the default architecture,
+# and the name this file and other MAD Dockerfiles have always used for the base, which
+# tools read as "the base image" -- so it keeps a value), BASE_DOCKER_GFX950 gfx950's.
 ARG MAD_SYSTEM_GPU_ARCHITECTURE=gfx942
-ARG BASE_DOCKER=
-FROM lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x AS stack-gfx942
-FROM rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924 AS stack-gfx950
-FROM stack-${MAD_SYSTEM_GPU_ARCHITECTURE} AS stack-arch
-FROM ${BASE_DOCKER:-stack-arch}
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x
+ARG BASE_DOCKER_GFX950=rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924
+FROM ${BASE_DOCKER} AS stack-gfx942
+FROM ${BASE_DOCKER_GFX950} AS stack-gfx950
+FROM stack-${MAD_SYSTEM_GPU_ARCHITECTURE}
 ARG MAD_SYSTEM_GPU_ARCHITECTURE
 
 RUN sed -i 's|http://|https://|g' /etc/apt/sources.list
