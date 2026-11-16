@@ -60,6 +60,8 @@ def list_models():
             owner="mad.support@amd.com",
             tags=["training", "primus", "megatron", "pretrain"],
             args="",
+            # run.sh writes this CSV and prints no performance: line.
+            multiple_results="primus_perf_output.csv",
         )
     ]
     if not os.path.isdir(PRIMUS_ROOT):
