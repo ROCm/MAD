@@ -178,6 +178,34 @@ class KimiRecipes(unittest.TestCase):
 
 
 
+class RequiresAccuracyPlatform(unittest.TestCase):
+    def test_min_gpu_memory(self):
+        r = copy.deepcopy(DQ); r["requires"] = {"min_gpu_memory_gb": 250}
+        _, problems = R.check(CAT, r, "gfx942", KIMI_BUILD, platform="mi300x-oam-8")
+        self.assertEqual(problems, ["needs 250 GB per GPU; MI300X (mi300x-oam-8) has 192 GB"])
+        _, problems = R.check(CAT, r, "gfx942", KIMI_BUILD)      # no platform: the largest gfx942 (MI325X)
+        self.assertNotIn("needs 250", " ".join(problems))
+        r["requires"]["min_gpu_memory_gb"] = 300
+        _, problems = R.check(CAT, r, "gfx942", KIMI_BUILD)
+        self.assertEqual(problems, ["needs 300 GB per GPU; MI325X has 256 GB"])
+
+    def test_accuracy_records_say_what_and_when(self):
+        r = copy.deepcopy(DQ); r["accuracy"] = [{"task": "gsm8k", "score": 0.91}]
+        self.assertEqual(R.check(CAT, r, "gfx950", KIMI_BUILD)[1], ["accuracy[0]: missing date"])
+        r["accuracy"][0]["date"] = "2026-11-16"
+        self.assertEqual(R.check(CAT, r, "gfx950", KIMI_BUILD)[1], [])
+
+    def test_a_platform_variant_is_more_specific_than_the_accelerator(self):
+        r = copy.deepcopy(DQ)
+        r["roles"]["variants"] = {"gfx942": {"decode": {"kv_cache": "bf16"}, "prefill": {"kv_cache": "bf16"}},
+                                  "mi325x-oam-8": {"decode": {"kv_cache": "fp8"}, "prefill": {"kv_cache": "fp8"}}}
+        r["roles"]["prefill"]["quantization"]["activations"] = "fp8"
+        res, _ = R.check(CAT, r, "gfx942", KIMI_BUILD)
+        self.assertEqual(used(res, "decode", "kv_cache"), "bf16")
+        res, _ = R.check(CAT, r, "gfx942", KIMI_BUILD, platform="mi325x-oam-8")
+        self.assertEqual(used(res, "decode", "kv_cache"), "fp8_e4m3fnuz")
+
+
 class BringUp(unittest.TestCase):
     def test_cdna5_lists_every_gap(self):
         r = R.bringup(CAT, "cdna5")

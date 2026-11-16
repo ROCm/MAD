@@ -130,7 +130,10 @@ Kimi-K3-MXFP4:
 
 A format is an exact name (`fp8_e4m3fnuz`, `mxfp4`) or a family (`fp8`, `mx`) meaning the
 GPU's own member of it. Per role there are also `artifact` (a checkpoint other than the
-model's) and `placement` (`hbm`, `host`, `nvme_stream`).
+model's) and `placement` (`hbm`, `host`, `nvme_stream`). `variants:` under `roles:` may be keyed
+by an accelerator or by a platform (`MAD_PLATFORM`; the more specific). A recipe may state
+`requires: {min_gpu_memory_gb: N}` (checked against the platform's product, else the
+accelerator's largest) and `accuracy:` records (`task`, `score`, `date`, optional `pins`).
 
 `compat/rocm.yaml` holds what the roles are checked against: `formats`; `accelerators` (what
 each GPU's matrix cores compute on, memory, wave size, scale-up domain); `kernels` (per

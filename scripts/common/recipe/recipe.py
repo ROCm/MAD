@@ -62,12 +62,15 @@ def _merge(base, over):
     return out
 
 
-def role_spec(recipe, role, arch):
-    """A role's needs: `default`, then the role, then the accelerator's variant of both."""
+def role_spec(recipe, role, arch, platform=None):
+    """A role's needs: `default`, then the role, then the accelerator's variant of both, then the
+    platform's (a variant key is an accelerator or a platform name; the platform is more specific)."""
     roles = (recipe or {}).get("roles") or {}
-    variant = (roles.get("variants") or {}).get(arch) or {}
     spec = _merge(roles.get("default"), roles.get(role))
-    return _merge(spec, _merge(variant.get("default"), variant.get(role)))
+    for key in (arch, platform):
+        variant = (roles.get("variants") or {}).get(key) or {} if key else {}
+        spec = _merge(spec, _merge(variant.get("default"), variant.get(role)))
+    return spec
 
 
 def _family(catalog, name):
@@ -85,7 +88,7 @@ def _pick(catalog, asked, offered, prefer):
     return (native or members or [None])[0]
 
 
-def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm"):
+def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platform=None):
     """{'role', 'accelerator', 'build', 'artifact', 'weights', 'activations', 'kv_cache',
     'placement', 'engine_args', 'kv_cache_setting', 'notes', 'problems'}; problems empty when it resolves."""
     out = {"role": role, "accelerator": arch, "build": build, "engine_args": [], "notes": [], "problems": []}
@@ -93,7 +96,7 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm"):
     if acc is None:
         out["problems"].append(f"accelerator {arch!r} is not in the catalog (compat/rocm.yaml accelerators)")
         return out
-    spec = role_spec(recipe, role, arch)
+    spec = role_spec(recipe, role, arch, platform)
     q = spec.get("quantization") or {}
     out["artifact"] = spec.get("artifact")
     matmul = acc.get("matmul") or []
@@ -179,7 +182,7 @@ def builds_for(catalog, arch, engine):
             if b.split("@", 1)[0] == engine and arch in (per or {})]
 
 
-def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
+def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm", platform=None):
     """Every role's resolution; also checks the KV-cache format agrees across roles that
     hand a KV cache over (prefill -> decode).
 
@@ -188,7 +191,7 @@ def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
     what the hardware lacks."""
     if build is None:
         for b in builds_for(catalog, arch, engine):
-            res = resolve(catalog, recipe, arch, b, roles, engine)
+            res = resolve(catalog, recipe, arch, b, roles, engine, platform)
             if not any(r["problems"] for r in res) and not disagreements(recipe, res, catalog, engine):
                 for r in res:
                     r["notes"].insert(0, f"no engine build given: resolves with {b} (the first catalog build "
@@ -196,7 +199,7 @@ def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm"):
                 return res
     declared = [r for r in ROLES if r in ((recipe or {}).get("roles") or {})]
     roles = roles or declared or ["prefill", "decode"]
-    out = [resolve_role(catalog, recipe, r, arch, build, engine) for r in roles]
+    out = [resolve_role(catalog, recipe, r, arch, build, engine, platform) for r in roles]
     by = {r["role"]: r for r in out}
     p, d = by.get("prefill"), by.get("decode")
     if p and d and (p.get("kv_cache") or {}).get("used") != (d.get("kv_cache") or {}).get("used"):
@@ -253,13 +256,49 @@ def supported_archs(recipe):
     return str(((recipe or {}).get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
 
 
-def check(catalog, recipe, arch, build=None, roles=None, engine="vllm", flags=None):
+def requirement_problems(catalog, recipe, arch, platform=None):
+    """The recipe's `requires:` against the hardware. min_gpu_memory_gb: against the platform's
+    product when the run names one, else the accelerator's largest product (unknown: no refusal)."""
+    req = ((recipe or {}).get("roles") or {}).get("requires") or (recipe or {}).get("requires") or {}
+    need = req.get("min_gpu_memory_gb")
+    if not need:
+        return []
+    acc = (catalog.get("accelerators") or {}).get(arch) or {}
+    products = acc.get("products") or {}
+    plat = (catalog.get("platforms") or {}).get(platform) if platform else None
+    if plat and plat.get("product") in products:
+        have, what = products[plat["product"]].get("hbm_gb"), f"{plat['product']} ({platform})"
+    else:
+        sizes = {p: d.get("hbm_gb") for p, d in products.items() if d.get("hbm_gb")}
+        if not sizes:
+            return []
+        what = max(sizes, key=sizes.get)
+        have = sizes[what]
+    if have is not None and have < need:
+        return [f"needs {need} GB per GPU; {what} has {have} GB"]
+    return []
+
+
+def accuracy_problems(recipe):
+    """`accuracy:` records (a variant's quality validation) must say what was measured and when."""
+    out = []
+    for i, a in enumerate((recipe or {}).get("accuracy") or []):
+        for key in ("task", "score", "date"):
+            if key not in (a or {}):
+                out.append(f"accuracy[{i}]: missing {key}")
+    return out
+
+
+def check(catalog, recipe, arch, build=None, roles=None, engine="vllm", flags=None, platform=None):
     """(resolution, problems): the roles' resolution and everything that stops the recipe
-    running on `arch` -- its declared accelerators, unmet needs, contradicting flags."""
+    running on `arch` -- its declared accelerators, requirements, unmet needs, contradicting flags."""
     only = supported_archs(recipe)
     if only and arch not in only:
         return [], [f"the recipe is written for {', '.join(only)} (GPU_ARCHS), not {arch}"]
-    res = resolve(catalog, recipe, arch, build, roles, engine)
+    pre = requirement_problems(catalog, recipe, arch, platform) + accuracy_problems(recipe)
+    if pre:
+        return [], pre
+    res = resolve(catalog, recipe, arch, build, roles, engine, platform)
     problems = list(dict.fromkeys(p for r in res for p in r["problems"]))
     return res, problems or disagreements(recipe, res, catalog, engine, flags)
 
@@ -364,6 +403,8 @@ def main(argv=None):
         p.add_argument("--model", required=True)
         p.add_argument("--arch", required=True)
         p.add_argument("--engine", default="vllm", help="the engine the launcher runs (vllm, sglang)")
+        p.add_argument("--platform", default=os.environ.get("MAD_PLATFORM") or None,
+                       help="the run's platform (MAD_PLATFORM): platform variants and memory requirements")
         p.add_argument("--build", help="ENGINE@BUILD, e.g. vllm@vllm-kimi-k3")
         p.add_argument("--pin-set", help="the image's pin set (docker/pins/<name>.json): its catalog build")
         p.add_argument("--roles", help="comma-separated (default: the roles the recipe declares)")
@@ -417,7 +458,7 @@ def main(argv=None):
         print(f"ERROR: {a.model}: the image's build {a.build} is not a {a.engine} build", file=sys.stderr)
         return 1
     res, problems = check(catalog, recipe, a.arch, a.build, a.roles.split(",") if a.roles else None, engine,
-                          a.flags)
+                          a.flags, a.platform)
     if a.exports and not problems:
         with open(a.exports, "w") as f:
             f.write(shell_exports(res))
