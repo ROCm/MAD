@@ -389,7 +389,8 @@ case "$BENCHMARK_SCRIPT" in
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
     accuracy)     BENCHMARK_SCRIPT_FILE="benchmark_accuracy.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, accuracy)" >&2; exit 1 ;;
+    lora)         BENCHMARK_SCRIPT_FILE="benchmark_lora.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, accuracy, lora)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2

@@ -303,6 +303,12 @@ engines:
     speculative:
       arg: --speculative-config
       methods: [ngram, eagle, eagle3, medusa, mlp_speculator, deepseek_mtp]
+    # Multi-LoRA (a role's `lora:`): adapters served beside the base model.
+    lora:
+      enable: --enable-lora
+      modules: --lora-modules          # name=path, one word per adapter
+      max_loras: --max-loras
+      max_rank: --max-lora-rank
   sglang:
     kv_cache_arg: --kv-cache-dtype
     kv_cache_values: {bf16: auto}
@@ -310,6 +316,11 @@ engines:
       methods: [EAGLE, EAGLE3, NEXTN]
       args: {method: --speculative-algorithm, model: --speculative-draft-model-path,
              num_speculative_tokens: --speculative-num-steps}
+    lora:
+      enable: --enable-lora
+      modules: --lora-paths
+      max_loras: --max-loras-per-batch
+      max_rank: --max-lora-rank
 
 # ----------------------------------------------------------------------------------------------
 # Fabrics: the scale-out NIC families a site may have, as data. scripts/common/cluster.sh fills

@@ -316,6 +316,14 @@ accepted by the colocated launcher. `BENCHMARK_SCRIPT=embeddings` (`benchmark_em
 measures `/v1/embeddings` per concurrency -- inputs/s, p50 and p99 latency -- and fails a run
 whose requests failed or returned the wrong number of embeddings.
 
+### Multi-LoRA
+
+A role's `lora: {modules: {name: path}, max_loras, max_rank}` becomes the engine's own arguments
+(`--enable-lora --lora-modules name=path ...` for vLLM, `--lora-paths` for SGLang) and exports
+`LORA_ADAPTERS` (config wins). `BENCHMARK_SCRIPT=lora` (`benchmark_lora.py`) spreads chat
+requests over the adapters -- each served under its own name -- per concurrency, and fails a
+run whose adapter requests fail.
+
 ### Accuracy
 
 `BENCHMARK_SCRIPT=accuracy` (vLLM disaggregated and colocated launchers) runs

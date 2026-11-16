@@ -68,11 +68,11 @@ heterogeneous_pools:
   launcher: none
   benchmark: benchmark_xPyD.sh
   accuracy: none
-multi_lora:
-  spec: none
-  launcher: none
-  benchmark: none
-  accuracy: none
+multi_lora:                             # a role's `lora:` (adapters beside the base model)
+  spec: vllm_colocated_2n_tp8_pp2.json
+  launcher: vllm_multinode
+  benchmark: benchmark_lora.sh          # BENCHMARK_SCRIPT=lora: requests spread over the adapters
+  accuracy: benchmark_accuracy.sh
 rl_rollout:
   spec: none
   launcher: none

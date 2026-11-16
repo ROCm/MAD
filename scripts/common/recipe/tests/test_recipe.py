@@ -239,6 +239,19 @@ class Speculative(unittest.TestCase):
                           "--speculative-num-steps", "3"])
 
 
+class Lora(unittest.TestCase):
+    def test_adapters_become_the_engines_arguments(self):
+        r = copy.deepcopy(RECIPES["Qwen3-32B"])
+        r["roles"]["default"]["lora"] = {"modules": {"sql": "/a/sql", "chat": "/a/chat"}, "max_loras": 2, "max_rank": 64}
+        res, problems = R.check(CAT, r, "gfx942", "vllm@vllm-mori121")
+        self.assertEqual(problems, [])
+        self.assertEqual(shlex.split(res[0]["inject"][0]),
+                         ["--enable-lora", "--lora-modules", "sql=/a/sql", "chat=/a/chat",
+                          "--max-loras", "2", "--max-lora-rank", "64"])
+        r["roles"]["default"]["lora"] = {"max_loras": 2}
+        self.assertTrue(R.check(CAT, r, "gfx942", "vllm@vllm-mori121")[1])
+
+
 class BringUp(unittest.TestCase):
     def test_cdna5_lists_every_gap(self):
         r = R.bringup(CAT, "cdna5")

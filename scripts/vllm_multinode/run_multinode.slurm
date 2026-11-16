@@ -150,7 +150,8 @@ case "$BENCHMARK_SCRIPT" in
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
     accuracy)     BENCHMARK_SCRIPT_FILE="benchmark_accuracy.sh" ;;
     embeddings)   BENCHMARK_SCRIPT_FILE="benchmark_embeddings.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah, accuracy, embeddings)" >&2; exit 1 ;;
+    lora)         BENCHMARK_SCRIPT_FILE="benchmark_lora.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, niah, accuracy, embeddings, lora)" >&2; exit 1 ;;
 esac
 
 echo "=========================== colocated multi-node ==========================="

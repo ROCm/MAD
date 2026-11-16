@@ -122,7 +122,7 @@ node_topology() {
 node_mad_env_args() {
     local v
     for v in $(compgen -e); do
-        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*|MAD_RECIPE_FILE|MAD_FABRIC_*) printf -- '-e %s ' "$v" ;; esac
+        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*|MAD_RECIPE_FILE|MAD_FABRIC_*|LORA_ADAPTERS) printf -- '-e %s ' "$v" ;; esac
     done
 }
 

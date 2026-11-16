@@ -400,6 +400,42 @@ def save_embeddings_perf_csv(results: Dict[int, Dict], output_file: str, model_n
     print(f"Saved {len(results)} embeddings rows to perf.csv: {output_file}")
 
 
+def parse_lora_log(log_file: str) -> Dict[int, Dict]:
+    """benchmark_lora.py summaries, by concurrency."""
+    out = {}
+    pat = (r'LORA adapters=(\d+) concurrency=(\d+) requests_per_s=([\d.]+) p50_ms=([\d.]+) '
+           r'p99_ms=([\d.]+) n=(\d+) errors=(\d+)')
+    with open(log_file) as f:
+        for line in f:
+            m = re.search(pat, line)
+            if m:
+                k, c, rps, p50, p99, n, e = m.groups()
+                out[int(c)] = {'adapters': int(k), 'requests_per_s': float(rps), 'p50_ms': float(p50),
+                               'p99_ms': float(p99), 'n': int(n), 'errors': int(e)}
+    return out
+
+
+def save_lora_perf_csv(results: Dict[int, Dict], output_file: str, model_name: str = "", pipeline: str = "vllm"):
+    """One perf.csv row per concurrency: requests/s over the adapters; FAILURE when requests failed."""
+    if not results:
+        print("No LoRA results to save to perf.csv.")
+        return
+    meta = _get_run_metadata(pipeline)
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDNAMES)
+        writer.writeheader()
+        for c in sorted(results):
+            d = results[c]
+            row = {k: '' for k in PERF_CSV_FIELDNAMES}
+            row.update(meta)
+            row.update({'model': model_name, 'performance': f"{d['requests_per_s']:.2f}",
+                        'metric': f"lora requests/s (adapters={d['adapters']} concurrency={c} "
+                                  f"p50_ms={d['p50_ms']:.0f} p99_ms={d['p99_ms']:.0f})",
+                        'status': 'FAILURE' if d['errors'] or not d['n'] else 'SUCCESS'})
+            writer.writerow({k: row.get(k, '') for k in PERF_CSV_FIELDNAMES})
+    print(f"Saved {len(results)} LoRA rows to perf.csv: {output_file}")
+
+
 def niah_length_failed(data: Dict) -> bool:
     """A context length failed if any of its requests timed out or errored. A low retrieval
     score is a measurement, not a failure."""
@@ -634,6 +670,8 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
+    parser.add_argument('--lora', action='store_true',
+                        help='Parse benchmark_lora.py summaries (requires --perf-csv)')
     parser.add_argument('--embeddings', action='store_true',
                         help='Parse benchmark_embeddings.py summaries (requires --perf-csv)')
     parser.add_argument('--accuracy', action='store_true',
@@ -664,6 +702,13 @@ def main():
         sys.exit(1)
 
     print(f"Parsing log file: {log_file}")
+
+    if args.lora:
+        if not args.perf_csv:
+            print("Error: --lora requires --perf-csv")
+            sys.exit(1)
+        save_lora_perf_csv(parse_lora_log(log_file), args.perf_csv, args.model_name)
+        return
 
     if args.embeddings:
         if not args.perf_csv:

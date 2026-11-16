@@ -16,7 +16,8 @@ needs, in vendor-neutral terms, under `roles:`:
 
 Per role: `artifact` (a checkpoint other than the model's own), `quantization.weights` and
 `quantization.activations`, `kv_cache`, `placement` (hbm, host or nvme_stream), `speculative`
-({method, model, num_speculative_tokens}: the engine's speculative-decoding arguments). A format is
+({method, model, num_speculative_tokens}: the engine's speculative-decoding arguments), `lora`
+({modules: {name: path}, max_loras, max_rank}: adapters served beside the base model). A format is
 an exact name from compat/rocm.yaml `formats`, or a family (`fp8`, `mx`, ...) meaning the
 accelerator's native member of it.
 
@@ -177,6 +178,23 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
                                                for k, v in sp.items() if k in (conf.get("args") or {})))
         out["speculative"] = sp
 
+    # Multi-LoRA: adapters served beside the base model, by the engine's own arguments.
+    lora = spec.get("lora")
+    if lora:
+        import shlex
+        conf = ((catalog.get("engines") or {}).get(engine) or {}).get("lora")
+        if not conf:
+            out["problems"].append(f"{role}: lora -- {engine} has no LoRA arguments in compat/rocm.yaml engines")
+        elif not lora.get("modules"):
+            out["problems"].append(f"{role}: lora needs modules ({{name: path}})")
+        else:
+            words = [conf["enable"], conf["modules"]] + [shlex.quote(f"{n}={p}") for n, p in lora["modules"].items()]
+            for key in ("max_loras", "max_rank"):
+                if lora.get(key) is not None:
+                    words += [conf[key], str(lora[key])]
+            out["engine_args"].append(" ".join(words))
+            out["lora_adapters"] = list(lora["modules"])
+
     # Where the weights live.
     place = spec.get("placement", "hbm")
     allowed = (kernels or {}).get("placement") or ["hbm"]
@@ -330,6 +348,8 @@ def shell_exports(resolved):
         if r.get("artifact"):
             lines.append(f'[ -n "${{MAD_ROLE_ARTIFACT_{role}:-}}" ] || '
                          f"export MAD_ROLE_ARTIFACT_{role}={shlex.quote(str(r['artifact']))}")
+        if r.get("lora_adapters"):        # the names the LoRA benchmark asks for (config wins)
+            lines.append(f'[ -n "${{LORA_ADAPTERS:-}}" ] || export LORA_ADAPTERS={shlex.quote(",".join(r["lora_adapters"]))}')
         if r.get("inject"):
             words = shlex.join(w for a in r["inject"] for w in shlex.split(a))
             lines.append(f'[ -n "${{MAD_ROLE_ENGINE_ARGS_{role}:-}}" ] || '
