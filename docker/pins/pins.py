@@ -157,6 +157,11 @@ def build_env(spec, arch, base):
     out.update(MORI_BUILD=int(mori_on), MORI_REPO=mori.get("repo", ""),
                MORI_COMMIT=mori.get("commit", ""))
 
+    rdma = c.get("rdma_core") or {}
+    rdma_on = bool(rdma) and rdma.get("enabled", True) and arch in (rdma.get("archs") or [arch])
+    out.update(RDMA_CORE_BUILD=int(rdma_on), RDMA_CORE_REPO=rdma.get("repo", ""),
+               RDMA_CORE_COMMIT=rdma.get("commit", ""))
+
     aiter = c.get("aiter") or {}
     flydsl = aiter.get("flydsl") or {}
     out.update(AITER_KIND="wheel" if "wheel" in aiter else ("source" if "commit" in aiter else ""),

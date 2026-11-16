@@ -22,6 +22,15 @@
         "gfx942"
       ],
       "why": "gfx942 only (INSTALL_MORI=auto); installed editable in the image's /sgl-workspace/mori. No dma-buf fallback (see mori#721)."
+    },
+    "rdma_core": {
+      "repo": "https://github.com/linux-rdma/rdma-core.git",
+      "commit": "558104fc33266abe8a9deb50a81769d1a72fbf72",
+      "ref": "v61.0",
+      "archs": [
+        "gfx950"
+      ],
+      "why": "gfx950's base ships rdma-core 39 plus Broadcom bnxt-rocelib 235.2.86.0, which needs Broadcom's out-of-tree bnxt_re driver. On Thor2 (BCM57608) under the in-kernel driver its NICs are rejected (kernel ABI 1), and rdma-core 39..53 cannot create QPs; v54.0 is the first release that can. v61.0 matches the rdma-core of the hosts it was validated on (CentOS Stream 9). Built over the base's rdma-core; hosts on Broadcom's out-of-tree driver need the base stack instead."
     }
   },
   "pip": [

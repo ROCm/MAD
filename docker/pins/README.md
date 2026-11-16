@@ -66,7 +66,10 @@ transfer). To take a fix, move the pin and rebuild.
   Kimi-K3 tuned MoE configs, `aiter.ops.triton.conv` and flydsl 0.2.4. Runtime
   differences between the architectures are recipe settings in `models.yaml`.
 - `sglang-disagg`: the SGLang release image per architecture; MoRI 158c7e8 is added on
-  gfx942 only (gfx950's image ships its MoRI).
+  gfx942 only (gfx950's image ships its MoRI). On gfx950, rdma-core v61.0 is built over
+  the base's rdma-core 39 + Broadcom bnxt-rocelib: Thor2 NICs under the in-kernel
+  bnxt_re driver need rdma-core v54.0 or later, while hosts on Broadcom's out-of-tree
+  driver need the base's stack.
 
 The ROCm 7.2.3 GPU-RDMA settings (`expandable_segments:False`,
 `HSA_ENABLE_IPC_MODE_LEGACY=0`) are not in any image: they are in

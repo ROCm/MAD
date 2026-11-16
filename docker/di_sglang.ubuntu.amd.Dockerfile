@@ -74,6 +74,23 @@ RUN apt-get update && \
     libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
     cmake
 
+# rdma-core at the pinned commit, installed over the base's RDMA user space, where the
+# pin set asks for it on this architecture.
+RUN . /opt/mad/pins/build.env && \
+    if [ "${RDMA_CORE_BUILD}" = "1" ]; then \
+      apt-get update && \
+      apt-get install -y --no-install-recommends libnl-3-dev libnl-route-3-dev libudev-dev pkg-config ninja-build && \
+      git init -q /tmp/rdma-core && cd /tmp/rdma-core && \
+      git fetch -q --depth 1 "${RDMA_CORE_REPO}" "${RDMA_CORE_COMMIT}" && git checkout -q FETCH_HEAD && \
+      cmake -S . -B build -GNinja -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_INSTALL_LIBDIR=lib/x86_64-linux-gnu -DCMAKE_INSTALL_SYSCONFDIR=/etc -DCMAKE_INSTALL_RUNDIR=/run \
+        -DNO_MAN_PAGES=1 -DNO_PYVERBS=1 && \
+      ninja -C build install && ldconfig && cd / && rm -rf /tmp/rdma-core && \
+      echo "RDMA_CORE_COMMIT=${RDMA_CORE_COMMIT}" >> /app/versions.txt ; \
+    else \
+      echo "RDMA_CORE_COMMIT=base" >> /app/versions.txt ; \
+    fi
+
 # MoRI at the pinned commit, editable in the image's own /sgl-workspace/mori, where
 # the pin set asks for it on this architecture.
 WORKDIR /sgl-workspace/mori

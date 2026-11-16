@@ -64,7 +64,7 @@ def legacy_source(name, repo, ref_arg, ref):
 
 # Repositories that are sources of record; a legacy source elsewhere was a fork, which a
 # pin set now carries as upstream + patches.
-UPSTREAM = ("https://github.com/ROCm/", "https://github.com/vllm-project/")
+UPSTREAM = ("https://github.com/ROCm/", "https://github.com/vllm-project/", "https://github.com/linux-rdma/")
 
 
 def resolve(name, ref_arg, ref):
