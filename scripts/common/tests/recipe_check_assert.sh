@@ -70,6 +70,27 @@ _has "$out" "rc=0" "no catalog"
 _has "$out" "NOT being checked" "...said loudly"
 
 echo ""
+echo "=== GPU memory for recipes that size memory from it ==="
+KFD="$TMP/kfd"; mkdir -p "$KFD/0" "$KFD/1/mem_banks/0" "$KFD/1/mem_banks/1"
+printf 'gfx_target_version 0\n' > "$KFD/0/properties"                       # the CPU node
+printf 'gfx_target_version 90402\n' > "$KFD/1/properties"
+printf 'heap_type 1\nsize_in_bytes 206141652992\n' > "$KFD/1/mem_banks/0/properties"
+printf 'heap_type 2\nsize_in_bytes 4096\n' > "$KFD/1/mem_banks/1/properties"
+cat > "$TMP/mem.yaml" <<'YAML'
+Rel: {memory: {KV: {fraction: 0.1}}}
+Abs: {env: {KV: "1"}, memory: {KV: {fraction: 0.1}}}
+YAML
+cat > "$TMP/mem.sh" <<'MEM'
+. "$1/common/cluster.sh" >/dev/null 2>&1
+cluster_gpu_memory_for_recipe "$2" "$3" 2>&1; echo "rc=$? bytes=${MAD_GPU_MEMORY_BYTES:-}"
+MEM
+mem() { env -i PATH="$PATH" HOME="$TMP" MAD_SCRIPTS_DIR="$DIR" "${@:2}" bash "$TMP/mem.sh" "$DIR" "$TMP/mem.yaml" "$1"; }
+_has "$(mem Rel CLUSTER_SYSFS_KFD="$KFD")" "rc=0 bytes=206141652992" "probed: the GPU's largest memory bank"
+_has "$(mem Rel MAD_GPU_MEMORY_BYTES=5)" "rc=0 bytes=5" "set explicitly: not probed"
+_has "$(mem Abs CLUSTER_SYSFS_KFD="$TMP/none")" "rc=0 bytes=" "an explicit value in the recipe: nothing to probe"
+_has "$(mem Rel CLUSTER_SYSFS_KFD="$TMP/none")" "rc=1" "unreadable GPU memory is refused"
+
+echo ""
 echo "======================================================"
 echo "  recipe_check_assert: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -702,6 +702,57 @@ cluster_resolve_role_artifacts() {
     return 0
 }
 
+# One GPU's memory in bytes on this node: the largest memory bank of the first GPU in the KFD
+# topology (CLUSTER_SYSFS_KFD overrides the root, for tests). Empty when it cannot tell.
+_cluster_local_gpu_memory() {
+    local root="${CLUSTER_SYSFS_KFD:-/sys/class/kfd/kfd/topology/nodes}" n v b sz best=0
+    for n in "$root"/*; do
+        [ -r "$n/properties" ] || continue
+        v="$(awk '$1=="gfx_target_version"{print $2}' "$n/properties" 2>/dev/null)"
+        [ -n "$v" ] && [ "$v" != "0" ] || continue
+        for b in "$n"/mem_banks/*/properties; do
+            sz="$(awk '$1=="size_in_bytes"{print $2}' "$b" 2>/dev/null)"
+            [ -n "$sz" ] && [ "$sz" -gt "$best" ] && best="$sz"
+        done
+        break
+    done
+    [ "$best" -gt 0 ] && echo "$best"
+    return 0
+}
+
+# cluster_gpu_memory_for_recipe MODELS_YAML MODEL: when the recipe sizes memory from the GPU
+# (models.yaml `memory:` fractions, scripts/common/recipe/models.py), export
+# MAD_GPU_MEMORY_BYTES: as set, else one GPU's memory probed on every node, the smallest. A
+# recipe that does not: nothing is probed. Refuses when the size cannot be found.
+cluster_gpu_memory_for_recipe() {
+    local yaml="$1" model="$2" lib out sizes
+    lib="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/models.py"
+    [ -f "$lib" ] && [ -f "$yaml" ] || return 0
+    python3 "$lib" "$yaml" "$model" --needs-memory 2>/dev/null || return 0
+    if [ -n "${MAD_GPU_MEMORY_BYTES:-}" ]; then
+        echo "GPU memory: ${MAD_GPU_MEMORY_BYTES} bytes (set explicitly, not probed)"
+        export MAD_GPU_MEMORY_BYTES
+        return 0
+    fi
+    if [ -n "${SLURM_JOB_ID:-}" ] && { _dispatch_per_task || command -v srun >/dev/null 2>&1; }; then
+        out="$(dispatch_gather gpu-memory /bin/bash -c \
+            "CLUSTER_SYSFS_KFD='${CLUSTER_SYSFS_KFD:-}'; $(declare -f _cluster_local_gpu_memory); echo \"\$(hostname) \$(_cluster_local_gpu_memory)\"; exit 0" \
+            2>/dev/null || true)"
+    else
+        out="$(hostname) $(_cluster_local_gpu_memory)"
+    fi
+    sizes="$(printf '%s\n' "${out}" | awk 'NF>=2 && $2>0 {print $2}' | sort -n || true)"
+    if [ -z "$sizes" ]; then
+        echo "x ${model}'s recipe sizes memory from the GPU, and this allocation's GPU memory could" >&2
+        echo "  not be read. Set MAD_GPU_MEMORY_BYTES (one GPU, in bytes)." >&2
+        return 1
+    fi
+    MAD_GPU_MEMORY_BYTES="$(printf '%s\n' "$sizes" | head -1)"
+    export MAD_GPU_MEMORY_BYTES
+    echo "GPU memory: ${MAD_GPU_MEMORY_BYTES} bytes per GPU (the smallest on the allocated nodes)"
+    return 0
+}
+
 cluster_require_gpu_arch() {
     local model="$1" allowed="${2:-}"
     cluster_detect_gpu_arch || return 1

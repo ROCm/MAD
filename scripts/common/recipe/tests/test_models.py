@@ -70,6 +70,33 @@ class Effective(unittest.TestCase):
             self.assertEqual(M.main([src, "Plain", "--uses-variants"]), 1)
 
 
+class Memory(unittest.TestCase):
+    R = {"env": {"EXPLICIT": "5"},
+         "memory": {"KV": {"fraction": 0.1}, "HEAP": {"gib": 16}, "RAW": {"bytes": 7}, "EXPLICIT": {"gib": 1}}}
+
+    def test_sizes_from_the_gpu_and_explicit_values_win(self):
+        r = M.with_memory(self.R, 200_000_000_000)
+        self.assertEqual(r["env"], {"EXPLICIT": "5", "KV": "20000000000", "HEAP": str(16 * 2**30), "RAW": "7"})
+        self.assertNotIn("memory", r)
+
+    def test_a_fraction_needs_the_gpu_size(self):
+        with self.assertRaises(ValueError):
+            M.with_memory(self.R, None)
+        self.assertEqual(M.with_memory({"memory": {"H": {"gib": 1}}}, None)["env"], {"H": str(2**30)})
+
+    def test_cli_needs_memory_and_write(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "m.yaml"), os.path.join(d, "eff.yaml")
+            with open(src, "w") as f:
+                yaml.safe_dump({"X": self.R, "Y": {"memory": {"H": {"gib": 1}}}}, f)
+            self.assertEqual(M.main([src, "X", "--needs-memory"]), 0)
+            self.assertEqual(M.main([src, "Y", "--needs-memory"]), 1)          # no fraction: no probe
+            self.assertEqual(M.main([src, "X", "--uses-variants"]), 0)         # needs resolving
+            self.assertEqual(M.main([src, "X", "--write", out, "--hbm-bytes", "100"]), 0)
+            with open(out) as f:
+                self.assertEqual(yaml.safe_load(f)["X"]["env"]["KV"], "10")
+
+
 class RealRecipes(unittest.TestCase):
     """Every recipe in the repository loads; the merged Kimi-K3-MXFP4 keeps both GPUs' recipes."""
 

@@ -110,6 +110,23 @@ class RolesEndToEnd(unittest.TestCase):
             self.assertEqual(words[:3], ["vllm", "serve", ckpt])
             self.assertEqual(words[words.index("--quantization-config") + 1], INT4)
 
+    def test_memory_from_the_gpu_reproduces_the_absolute_size(self):
+        """DeepSeek-V3's 20 GB KV budget as a tenth of a 200 GB GPU: the same engine command."""
+        card = self.card("vllm_dissag", "pyt_vllm_disagg_mori_deepseek-v3")
+        before = self.run_card("vllm_dissag", card)
+
+        def relative(r):
+            del r["env"]["KV_CACHE_MEMORY_BYTES"]
+            r["memory"] = {"KV_CACHE_MEMORY_BYTES": {"fraction": 0.1}}
+        self.edit_recipe("vllm_dissag", "DeepSeek-V3", relative)
+        card["env_vars"]["MAD_GPU_MEMORY_BYTES"] = "200000000000"
+        after = self.run_card("vllm_dissag", card)
+        for b, a in zip(before["ranks"], after["ranks"]):
+            self.assertEqual(self.argv(a), self.argv(b))
+        self.assertIn("--kv-cache-memory-bytes", self.argv(after["ranks"][0]))
+        words = self.argv(after["ranks"][0])
+        self.assertEqual(words[words.index("--kv-cache-memory-bytes") + 1], "20000000000")
+
 
 if __name__ == "__main__":
     unittest.main()

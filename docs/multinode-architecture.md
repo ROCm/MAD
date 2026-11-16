@@ -201,6 +201,23 @@ containers read it through `MAD_RECIPE_FILE`; started by hand from a checkout, a
 resolves it itself, and inside a container without it, it refuses rather than run the base.
 The variant is chosen by name (alias or default), not yet by the GPU the job lands on.
 
+### Memory sized from the GPU
+
+Byte counts tuned for one GPU (`KV_CACHE_MEMORY_BYTES: "40000000000"` on 288 GB) are wrong on
+another. A recipe can size them from the GPU instead:
+
+```yaml
+memory:
+  KV_CACHE_MEMORY_BYTES: {fraction: 0.104}   # of one GPU's memory
+  MORI_SHMEM_HEAP_SIZE: {gib: 16}
+```
+
+An env value of the same name wins, so today's validated byte counts stay as explicit
+overrides. When a recipe has a fraction, the launcher finds one GPU's memory first
+(`cluster_gpu_memory_for_recipe`: `MAD_GPU_MEMORY_BYTES` when set, else the largest memory
+bank of the first GPU in the KFD topology, smallest across nodes; refused when unreadable),
+and the derived values go into the job's recipe (`MAD_RECIPE_FILE`) like any recipe value.
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in

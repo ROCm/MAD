@@ -124,6 +124,8 @@ config_layer site
 . "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
 # The recipe's env: block over site defaults, under what was submitted
 # (common/config/layers.sh); serve_colocated.sh applies the rest in the container.
+# Memory sizes the recipe derives from the GPU (models.yaml memory:) need its size first.
+cluster_gpu_memory_for_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME" || exit 1
 config_apply_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
