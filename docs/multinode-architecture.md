@@ -15,6 +15,7 @@ the concepts (prefill and decode, launchers, connectors).
 - [Platforms and fabrics as data](#platforms-and-fabrics-as-data)
 - [Topology v2: GPUs, domains and placement](#topology-v2-gpus-domains-and-placement)
 - [Performance: model, search, registry](#performance-model-search-registry)
+- [Adding hardware, formats and serving types](#adding-hardware-formats-and-serving-types)
 - [Offline checks per layer](#offline-checks-per-layer)
 
 ## One run, in order
@@ -295,6 +296,21 @@ exist, `perf/calibration.yaml` (per platform: `efficiency`, measured / modelled)
 model, platform, pin set and serving type with their SLO, accuracy and what reproduces them
 (`config.resolved.json`, topology, recipe); `best` returns the highest throughput that meets
 its SLO and an accuracy floor. Where the shared registry lives is not decided yet.
+
+## Adding hardware, formats and serving types
+
+Each is a data change plus the check that proves it; no launcher or role script changes.
+
+| To add | Change | Proves it |
+|---|---|---|
+| An accelerator (GPU generation) | `compat/rocm.yaml accelerators`: target, products (HBM), matmul formats, peak TFLOPS, partition sizes | `recipe.py validate`; `recipe.py bringup --arch X` lists what is still missing |
+| An engine build for it | a pin set's `gpu_archs` + base image (`docker/pins`), and `kernels.<engine>@<pin set>.<arch>` (formats it runs, conversions, placements) | `pins.py validate` (refuses an arch without a kernels entry); recipe tests |
+| A node type | `platforms`: accelerator, product, GPUs per node, scale-up domain, NICs per GPU and speeds | `recipe.py validate`; `platform_assert.sh`; `MAD_PLATFORM=<name>` on a run |
+| A NIC family | `fabrics`: match names, GID, interface, drivers, KV NIC, rails, RDMA QoS, own settings; add it to `fabric_detection.order` | `cluster_fabric_assert.sh` with a fake sysfs tree of that node |
+| A site | `clusters` example, or a site file passed as `MAD_CLUSTER_FILE` | `platform_assert.sh` |
+| A number format | `formats` (bits, family, block, scale); kernels that run it; `engines` arguments that select it | recipe tests |
+| A recipe for the new GPU | a `variants:` entry (or an alias) in the model's recipe; `memory:` fractions instead of byte counts | recipe tests (every card resolves exactly where it runs); snapshots |
+| A serving type | a topology spec example (`specs/v2`), an entry in `serving_types.yaml`, then a launcher and a benchmark | `test_serving_types.py` |
 
 ## Offline checks per layer
 
