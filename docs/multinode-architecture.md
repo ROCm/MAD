@@ -306,6 +306,14 @@ truth: the named launcher accepts the example and every other launcher refuses o
 `SERVE_PORT` on the head node -- so the sweep, NIAH and accuracy benchmarks measure the fleet
 unchanged. With a partition mode (CPX), the logical GPUs are what is divided.
 
+### Embeddings
+
+An embedding model runs as a colocated server whose flags make it one (vLLM: `--runner pooling`
+in `COLOCATED_EXTRA_ARGS`), usually as replicas of TP 1; a topology role of kind `embedding` is
+accepted by the colocated launcher. `BENCHMARK_SCRIPT=embeddings` (`benchmark_embeddings.py`)
+measures `/v1/embeddings` per concurrency -- inputs/s, p50 and p99 latency -- and fails a run
+whose requests failed or returned the wrong number of embeddings.
+
 ### Accuracy
 
 `BENCHMARK_SCRIPT=accuracy` (vLLM disaggregated and colocated launchers) runs

@@ -362,6 +362,44 @@ def save_accuracy_perf_csv(results: Dict[str, Dict], output_file: str, model_nam
     print(f"Saved {len(results)} accuracy rows to perf.csv: {output_file}")
 
 
+def parse_embeddings_log(log_file: str) -> Dict[int, Dict]:
+    """benchmark_embeddings.py summaries, by concurrency:
+      EMBEDDINGS concurrency=<c> requests_per_s=<r> inputs_per_s=<i> p50_ms=<a> p99_ms=<b> n=<n> errors=<e>"""
+    out = {}
+    pat = (r'EMBEDDINGS concurrency=(\d+) requests_per_s=([\d.]+) inputs_per_s=([\d.]+) '
+           r'p50_ms=([\d.]+) p99_ms=([\d.]+) n=(\d+) errors=(\d+)')
+    with open(log_file) as f:
+        for line in f:
+            m = re.search(pat, line)
+            if m:
+                c, rps, ips, p50, p99, n, e = m.groups()
+                out[int(c)] = {'requests_per_s': float(rps), 'inputs_per_s': float(ips), 'p50_ms': float(p50),
+                               'p99_ms': float(p99), 'n': int(n), 'errors': int(e)}
+    return out
+
+
+def save_embeddings_perf_csv(results: Dict[int, Dict], output_file: str, model_name: str = "",
+                             pipeline: str = "vllm"):
+    """One perf.csv row per concurrency: inputs embedded per second; FAILURE when requests failed."""
+    if not results:
+        print("No embeddings results to save to perf.csv.")
+        return
+    meta = _get_run_metadata(pipeline)
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=PERF_CSV_FIELDNAMES)
+        writer.writeheader()
+        for c in sorted(results):
+            d = results[c]
+            row = {k: '' for k in PERF_CSV_FIELDNAMES}
+            row.update(meta)
+            row.update({'model': model_name, 'performance': f"{d['inputs_per_s']:.1f}",
+                        'metric': f"embeddings inputs/s (concurrency={c} p50_ms={d['p50_ms']:.0f} "
+                                  f"p99_ms={d['p99_ms']:.0f})",
+                        'status': 'FAILURE' if d['errors'] or not d['n'] else 'SUCCESS'})
+            writer.writerow({k: row.get(k, '') for k in PERF_CSV_FIELDNAMES})
+    print(f"Saved {len(results)} embeddings rows to perf.csv: {output_file}")
+
+
 def niah_length_failed(data: Dict) -> bool:
     """A context length failed if any of its requests timed out or errored. A low retrieval
     score is a measurement, not a failure."""
@@ -596,6 +634,8 @@ def main():
     parser.add_argument('--model-name', type=str, default='', help='Model name for perf.csv')
     parser.add_argument('--niah', action='store_true',
                         help='Parse NIAH retrieval log instead of throughput sweep (requires --perf-csv)')
+    parser.add_argument('--embeddings', action='store_true',
+                        help='Parse benchmark_embeddings.py summaries (requires --perf-csv)')
     parser.add_argument('--accuracy', action='store_true',
                         help='Parse benchmark_accuracy.py summaries (requires --perf-csv)')
     parser.add_argument('--narrow', action='store_true',
@@ -624,6 +664,13 @@ def main():
         sys.exit(1)
 
     print(f"Parsing log file: {log_file}")
+
+    if args.embeddings:
+        if not args.perf_csv:
+            print("Error: --embeddings requires --perf-csv")
+            sys.exit(1)
+        save_embeddings_perf_csv(parse_embeddings_log(log_file), args.perf_csv, args.model_name)
+        return
 
     if args.accuracy:
         if not args.perf_csv:

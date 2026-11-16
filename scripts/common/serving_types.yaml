@@ -58,10 +58,10 @@ multimodal:
   launcher: none
   benchmark: none
   accuracy: none
-embeddings:
+embeddings:                             # a pooling server (flags: e.g. --runner pooling), replicas of TP 1
   spec: v2/embedding_server.json
-  launcher: none
-  benchmark: none
+  launcher: vllm_multinode
+  benchmark: benchmark_embeddings.sh    # BENCHMARK_SCRIPT=embeddings: inputs/s, p50/p99 per concurrency
   accuracy: none
 heterogeneous_pools:
   spec: v2/hetero_prefill_decode.json

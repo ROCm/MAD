@@ -376,7 +376,8 @@ def legacy_env(spec, launcher, env=None):
     if per_role - {gpus}:
         raise TopologyError(f"{launcher} runs one node type; roles on other platforms ({sorted(per_role)} GPUs "
                             f"per node, the run {gpus}) need a launcher for heterogeneous pools")
-    other = [r["name"] for r in roles if kind(r) not in ("prefill", "decode", "router", "server")]
+    runs = ("prefill", "decode", "router", "server") + (("embedding",) if launcher == "vllm_multinode" else ())
+    other = [r["name"] for r in roles if kind(r) not in runs]
     if other:
         raise TopologyError(f"{launcher} runs prefill/decode/router/server roles; {other} need their serving type")
     engine = {"vllm_multinode": "vllm", "vllm_dissag": "vllm", "sglang_disagg": "sglang"}.get(launcher)
