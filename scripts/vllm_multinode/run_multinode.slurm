@@ -181,6 +181,7 @@ launcher_node_ips
 # The card's GPU_ARCHS names the GPUs this recipe is written for; checked before the
 # weights probe so the wrong GPU costs seconds (cluster_require_gpu_arch, cluster.sh).
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
+cluster_check_recipe "${SHARED_DIR}/models.yaml" "${MODEL_NAME}" server || exit 1
 cluster_report_rdma_rails
 
 cluster_resolve_model_path || exit 1

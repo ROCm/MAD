@@ -11,6 +11,7 @@ the concepts (prefill and decode, launchers, connectors).
 - [The layers](#the-layers)
 - [What differs per launcher](#what-differs-per-launcher)
 - [How an image is built](#how-an-image-is-built)
+- [What a recipe needs from the hardware](#what-a-recipe-needs-from-the-hardware)
 - [Offline checks per layer](#offline-checks-per-layer)
 
 ## One run, in order
@@ -106,6 +107,57 @@ The image carries no recipe, tuning or platform environment: those are applied a
 is the reference: what each set pins and why, the patches and the upstream changes they wait on,
 the rules, and the per-model Dockerfiles the sets replace.
 
+## What a recipe needs from the hardware
+
+A recipe's flags are written for one GPU and one engine build. Its `roles:` block says what
+each serving role needs in terms that do not depend on either, so the launcher can check a
+recipe against the hardware it landed on, and a new GPU is a catalog entry rather than an
+edit to every recipe:
+
+```yaml
+Kimi-K3-MXFP4:
+  roles:
+    default:                                   # every role, unless it says otherwise
+      quantization: {weights: mxfp4, activations: fp8}
+      kv_cache: fp8
+    prefill: {}
+    decode: {}
+    # decode: {artifact: org/model-w4a16, quantization: {activations: bf16}}  # per-role formats/checkpoints
+    # variants: {gfx942: {prefill: {...}}}                                    # per accelerator, over the above
+```
+
+A format is an exact name (`fp8_e4m3fnuz`, `mxfp4`) or a family (`fp8`, `mx`) meaning the
+GPU's own member of it. Per role there are also `artifact` (a checkpoint other than the
+model's) and `placement` (`hbm`, `host`, `nvme_stream`).
+
+`compat/rocm.yaml` holds what the roles are checked against: `formats`; `accelerators` (what
+each GPU's matrix cores compute on, memory, wave size, scale-up domain); `kernels` (per
+engine build and GPU: the weight, activation and KV-cache formats it runs, the conversions
+it makes, where weights may live); and `engines` (the arguments and variables that select a
+format). Nothing absent from the catalog is assumed.
+
+`scripts/common/recipe/recipe.py` resolves each role: the formats it will really use, any
+conversion (MXFP4 weights become packed int4 on gfx942, which has no MXFP4 matrix
+instruction) with the engine argument that makes it, and the KV-cache format both sides
+of a prefill-to-decode handoff must agree on. A refusal names every need nothing meets.
+While roles sit beside hand-written flags, the check also refuses a recipe whose flags
+disagree with them, so the gfx942 recipe is refused on gfx950 for the conversion it
+forces, matching its `GPU_ARCHS`.
+
+```
+python3 scripts/common/recipe/recipe.py check   --recipes scripts/vllm_dissag/models.yaml \
+        --model Kimi-K3-MXFP4 --arch gfx942 --build vllm@vllm-kimi-k3
+python3 scripts/common/recipe/recipe.py explain ...   # the same, every role as JSON
+python3 scripts/common/recipe/recipe.py validate      # the catalog's own references
+```
+
+The launchers run the same check right after the GPU-architecture gate
+(`cluster_check_recipe` in `cluster.sh`), against the detected GPU and, when
+`MAD_ENGINE_BUILD=ENGINE@PINSET` names it, the image's engine build. Without it, the first
+catalog build for that GPU that resolves the recipe is used, and named. The resolution is
+recorded in `config.resolved.json` as `MAD_RECIPE_ROLES`. `RECIPE_CHECK=0` skips the check;
+a recipe without `roles:` passes as before.
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in
@@ -122,3 +174,4 @@ None of these need GPUs; run them from the MAD root. The full list is in
 | Site fabric | `bash scripts/common/tests/cluster_fabric_assert.sh` |
 | Kubernetes | `python3 -m unittest discover -s scripts/common/k8s/tests` |
 | Pin sets | `python3 docker/pins/pins.py validate`; `python3 -m unittest discover -s docker/pins/tests` |
+| Recipe roles, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |

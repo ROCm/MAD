@@ -625,6 +625,39 @@ cluster_detect_gpu_arch() {
 # cannot be determined the run continues with a warning: refusing a job on missing
 # information would be worse than the failure this check exists to prevent.
 # GPU_ARCH_CHECK=0 bypasses the check, for bringing up a recipe on a new GPU.
+# cluster_check_recipe MODELS_YAML MODEL [ROLES]: resolve the recipe's declared serving roles
+# (models.yaml `roles:`) against this allocation's GPU and, when MAD_ENGINE_BUILD names it
+# (ENGINE@PINSET), the image's engine build -- scripts/common/recipe/recipe.py with the
+# capability catalog in compat/rocm.yaml. A recipe that declares no roles passes. A refusal
+# names what the hardware or build lacks. RECIPE_CHECK=0 skips it. The resolution is recorded
+# in config.resolved.json as MAD_RECIPE_ROLES.
+cluster_check_recipe() {
+    local yaml="$1" model="$2" roles="${3:-}" out rc
+    local tool="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/recipe.py"
+    local catalog="${MAD_CATALOG:-$(dirname "$tool")/../../../compat/rocm.yaml}"
+    if [ "${RECIPE_CHECK:-1}" = "0" ]; then
+        echo "RECIPE_CHECK=0: not resolving ${model}'s roles"; return 0
+    fi
+    [ -n "${MAD_GPU_ARCH:-}" ] || return 0
+    if [ ! -f "$tool" ] || [ ! -f "$catalog" ]; then
+        echo "WARN: no capability catalog (${catalog}); ${model}'s roles are NOT being checked" >&2
+        return 0
+    fi
+    out="$(python3 "$tool" check --catalog "$catalog" --recipes "$yaml" --model "$model" \
+           --arch "$MAD_GPU_ARCH" ${MAD_ENGINE_BUILD:+--build "$MAD_ENGINE_BUILD"} ${roles:+--roles "$roles"} 2>&1)"; rc=$?
+    [ -n "$out" ] && printf '%s\n' "$out"
+    # 2: no such recipe -- whether the model needs one is the launcher's check, not this one.
+    [ "$rc" -eq 2 ] && return 0
+    if [ "$rc" -eq 0 ]; then
+        out="$(sed -n 's/^\[recipe\] .* resolves on /resolves on /p' <<<"$out")"
+        if [ -n "$out" ] && declare -F config_note >/dev/null; then config_note MAD_RECIPE_ROLES "$out" recipe-check; fi
+        return 0
+    fi
+    echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}} (above)." >&2
+    echo "  Use the model's recipe for this GPU, or RECIPE_CHECK=0 to run it anyway." >&2
+    return 1
+}
+
 cluster_require_gpu_arch() {
     local model="$1" allowed="${2:-}"
     cluster_detect_gpu_arch || return 1

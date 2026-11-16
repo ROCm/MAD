@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""Offline tests of scripts/common/recipe/recipe.py against compat/rocm.yaml.
+
+    python3 scripts/common/recipe/tests/test_recipe.py
+"""
+import copy
+import glob
+import io
+import json
+import os
+import sys
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+
+import yaml
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import recipe as R  # noqa: E402
+
+SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+VLLM_RECIPES = os.path.join(SCRIPTS, "vllm_dissag", "models.yaml")
+KIMI_BUILD = "vllm@vllm-kimi-k3"
+INT4_ARG = """--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'"""
+
+CAT = R.load_catalog()
+with open(VLLM_RECIPES) as _f:
+    RECIPES = yaml.safe_load(_f)
+
+# A disaggregated-quantization recipe in the shape of arXiv 2609.26333: prefill is compute
+# bound and runs W4A4 FP4 from its own checkpoint; decode is bandwidth bound and runs
+# weight-only 4-bit with 16-bit activations from another. The KV cache both share is fp8.
+DQ = {
+    "roles": {
+        "default": {"kv_cache": "fp8"},
+        "prefill": {"artifact": "org/model-w4a4-mxfp4", "quantization": {"weights": "mxfp4", "activations": "mxfp4"}},
+        "decode": {"artifact": "org/model-w4a16", "quantization": {"weights": "mxfp4", "activations": "bf16"}},
+    }
+}
+
+
+def used(res, role, need):
+    return next(r for r in res if r["role"] == role)[need]["used"]
+
+
+class Catalog(unittest.TestCase):
+    def test_catalog_is_consistent(self):
+        self.assertEqual(R.validate(CAT), [])
+
+    def test_validate_names_a_bad_reference(self):
+        bad = copy.deepcopy(CAT)
+        bad["kernels"][KIMI_BUILD]["gfx942"]["weights"].append("fp5_imaginary")
+        bad["kernels"]["vllm@x"] = {"gfx000": {}}
+        problems = R.validate(bad)
+        self.assertTrue(any("fp5_imaginary" in p for p in problems), problems)
+        self.assertTrue(any("gfx000" in p for p in problems), problems)
+
+
+class KimiRecipes(unittest.TestCase):
+    """The declared roles reach the verdict the hand-written GPU_ARCHS states."""
+
+    def test_roles_agree_with_gpu_archs_for_every_recipe(self):
+        for path in glob.glob(os.path.join(SCRIPTS, "*", "models.yaml")):
+            with open(path) as f:
+                recipes = yaml.safe_load(f) or {}
+            for name, recipe in recipes.items():
+                if not isinstance(recipe, dict) or not recipe.get("roles"):
+                    continue
+                archs = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
+                for arch in ("gfx942", "gfx950"):
+                    with self.subTest(recipe=name, arch=arch):
+                        _, problems = R.check(CAT, recipe, arch)
+                        self.assertEqual(not problems, arch in archs, problems)
+
+    def test_gfx942_converts_mxfp4_to_int4_and_the_flags_say_so(self):
+        res, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4"], "gfx942", KIMI_BUILD)
+        self.assertEqual(problems, [])
+        for role in ("prefill", "decode"):
+            r = next(x for x in res if x["role"] == role)
+            self.assertEqual(r["weights"], {"asked": "mxfp4", "used": "int4_g32", "converted": True})
+            self.assertEqual(r["activations"]["used"], "fp8_e4m3fnuz")   # the family's gfx942 member
+            self.assertEqual(r["engine_args"], [INT4_ARG])
+            self.assertEqual(r["engine_env"], {"KV_CACHE_DTYPE": "fp8"})
+
+    def test_gfx950_is_native_mxfp4(self):
+        res, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4-MI355X"], "gfx950", KIMI_BUILD)
+        self.assertEqual(problems, [])
+        self.assertEqual(used(res, "prefill", "weights"), "mxfp4")
+        self.assertEqual(used(res, "decode", "kv_cache"), "fp8_e4m3")
+        self.assertEqual(res[0]["engine_args"], [])
+
+    def test_mi300x_recipe_on_gfx950_is_refused_for_its_conversion(self):
+        _, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4"], "gfx950", KIMI_BUILD)
+        self.assertTrue(problems and all("does not need" in p for p in problems), problems)
+
+    def test_mi355x_recipe_on_gfx942_is_refused_for_the_missing_conversion(self):
+        _, problems = R.check(CAT, RECIPES["Kimi-K3-MXFP4-MI355X"], "gfx942", KIMI_BUILD)
+        self.assertTrue(problems and all("its flags lack" in p for p in problems), problems)
+
+    def test_colocated_server_role_checks_needs_not_flags(self):
+        res, problems = R.check(CAT, RECIPES["Kimi-K3"], "gfx942", KIMI_BUILD, roles=["server"])
+        self.assertEqual(problems, [])
+        self.assertEqual(used(res, "server", "weights"), "int4_g32")
+
+    def test_without_a_build_the_first_catalog_build_that_resolves_is_named(self):
+        res, problems = R.check(CAT, RECIPES["Kimi-K3"], "gfx942")
+        self.assertEqual(problems, [])
+        self.assertIn(KIMI_BUILD, res[0]["notes"][0])
+
+
+
+class Refusals(unittest.TestCase):
+    def test_unknown_accelerator(self):
+        _, problems = R.check(CAT, DQ, "gfx999")
+        self.assertTrue(any("gfx999" in p and "not in the catalog" in p for p in problems), problems)
+
+    def test_build_that_does_not_list_the_accelerator(self):
+        _, problems = R.check(CAT, DQ, "cdna5", KIMI_BUILD)
+        self.assertTrue(any("lists no support for cdna5" in p for p in problems), problems)
+
+    def test_placement_the_build_lacks(self):
+        dq = copy.deepcopy(DQ)
+        dq["roles"]["prefill"]["placement"] = "nvme_stream"
+        _, problems = R.check(CAT, dq, "gfx950", KIMI_BUILD)
+        self.assertTrue(any("placement 'nvme_stream'" in p for p in problems), problems)
+
+    def test_kv_cache_handed_over_in_two_formats(self):
+        dq = copy.deepcopy(DQ)
+        dq["roles"]["decode"]["kv_cache"] = "bf16"
+        _, problems = R.check(CAT, dq, "gfx950", KIMI_BUILD)
+        self.assertTrue(any("KV cache handed from prefill" in p for p in problems), problems)
+
+    def test_nvfp4_is_not_assumed_anywhere(self):
+        for arch in CAT["accelerators"]:
+            with self.subTest(arch=arch):
+                _, problems = R.check(CAT, {"roles": {"server": {"quantization": {"activations": "nvfp4"}}}}, arch)
+                self.assertTrue(problems)
+
+
+class DisaggregatedQuantization(unittest.TestCase):
+    """Per-role formats and artifacts: the case the roles model exists for."""
+
+    def test_resolves_where_fp4_compute_exists(self):
+        for arch, build in (("gfx950", KIMI_BUILD), ("cdna5", None)):
+            with self.subTest(arch=arch):
+                res, problems = R.check(CAT, DQ, arch, build)
+                self.assertEqual(problems, [])
+                self.assertEqual(used(res, "prefill", "activations"), "mxfp4")
+                self.assertEqual(used(res, "decode", "activations"), "bf16")
+                self.assertEqual(next(r for r in res if r["role"] == "prefill")["artifact"], "org/model-w4a4-mxfp4")
+                self.assertEqual(next(r for r in res if r["role"] == "decode")["artifact"], "org/model-w4a16")
+
+    def test_refused_on_gfx942_naming_fp4_activations(self):
+        _, problems = R.check(CAT, DQ, "gfx942", KIMI_BUILD)
+        self.assertTrue(any(p.startswith("prefill: activations 'mxfp4'") for p in problems), problems)
+        self.assertFalse(any(p.startswith("decode:") for p in problems), "weight-only decode fits gfx942")
+
+    def test_a_variant_overrides_a_role_on_one_accelerator(self):
+        dq = copy.deepcopy(DQ)
+        dq["roles"]["variants"] = {"gfx942": {"prefill": {"quantization": {"activations": "fp8"}}}}
+        res, problems = R.check(CAT, dq, "gfx942", KIMI_BUILD)
+        self.assertEqual(problems, [])
+        self.assertEqual(used(res, "prefill", "activations"), "fp8_e4m3fnuz")
+        self.assertEqual(used(res, "prefill", "weights"), "int4_g32")
+        res, _ = R.check(CAT, dq, "gfx950", KIMI_BUILD)
+        self.assertEqual(used(res, "prefill", "activations"), "mxfp4")   # other accelerators keep the role's
+
+
+class Cli(unittest.TestCase):
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            rc = R.main(list(argv))
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_check_refuses_with_the_reason(self):
+        rc, _, err = self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "Kimi-K3-MXFP4-MI355X",
+                                  "--arch", "gfx942", "--build", KIMI_BUILD)
+        self.assertEqual(rc, 1)
+        self.assertIn("Kimi-K3-MXFP4-MI355X on gfx942", err)
+
+    def test_recipe_without_roles_resolves_nothing(self):
+        rc, out, _ = self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "DeepSeek-V3", "--arch", "gfx942")
+        self.assertEqual((rc, out.strip()), (0, "DeepSeek-V3: declares no roles; nothing to resolve"))
+
+    def test_no_such_recipe_is_its_own_status(self):
+        self.assertEqual(self.run_cli("check", "--recipes", VLLM_RECIPES, "--model", "Nope", "--arch", "gfx942")[0], 2)
+
+    def test_explain_is_json(self):
+        rc, out, _ = self.run_cli("explain", "--recipes", VLLM_RECIPES, "--model", "Kimi-K3-MXFP4",
+                                  "--arch", "gfx942", "--build", KIMI_BUILD)
+        self.assertEqual(rc, 0)
+        self.assertEqual([r["role"] for r in json.loads(out)], ["prefill", "decode"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

@@ -754,6 +754,9 @@ python3 -m unittest discover -s scripts/common/topology/tests -v
 python3 -m unittest discover -s scripts/common/config/tests -v
 python3 -m unittest discover -s scripts/common/k8s/tests -v
 python3 -m unittest discover -s docker/pins/tests -v           # the pin sets
+python3 scripts/common/recipe/recipe.py validate               # the capability catalog in compat/rocm.yaml
+python3 -m unittest discover -s scripts/common/recipe/tests -v  # recipe roles against GPUs and engine builds
+bash scripts/common/tests/recipe_check_assert.sh               # the launchers' recipe gate
 ```
 
 A change that alters what a node runs on purpose shows up as a snapshot difference:

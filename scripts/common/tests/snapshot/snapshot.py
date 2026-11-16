@@ -197,6 +197,8 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
                         ignore=shutil.ignore_patterns("__pycache__", "golden"))
+        # The capability catalog the launchers resolve recipe roles against.
+        shutil.copytree(SCRIPTS.parent / "compat", work / "compat")
         for d in ("home", "logs", "stub", "nvme", "shared", "model", "job", "jit"):
             (work / d).mkdir()
         nodes = node_count(card)

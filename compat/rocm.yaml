@@ -168,3 +168,112 @@ components:
           - wget -q https://github.com/etcd-io/etcd/releases/download/v3.6.0-rc.5/etcd-v3.6.0-rc.5-linux-amd64.tar.gz -O /tmp/etcd.tar.gz
           - mkdir -p /usr/local/bin/etcd && tar -xf /tmp/etcd.tar.gz -C /usr/local/bin/etcd --strip-components=1 && rm /tmp/etcd.tar.gz
       note: v1.4.1 plus ai-dynamo/nixl#2191 (ROCm fix, not in v1.4.1). Replaces any NIXL the base ships.
+
+# ---------------------------------------------------------------------------------------
+# Hardware and number-format capabilities (MAD scripts/common/recipe/recipe.py).
+#
+# A recipe (scripts/<dir>/models.yaml) states what each serving role needs -- the weight,
+# activation and KV-cache formats, where the weights live -- in the vendor-neutral names
+# below. Resolving it for a run checks those needs against the accelerator the run gets and
+# the engine build the image carries, and turns them into the engine's own arguments; a need
+# nobody can meet is refused by name before anything is allocated. Every capability names
+# its evidence: a recipe that runs on it, a document, or a source the engine build carries.
+# ---------------------------------------------------------------------------------------
+
+# Number formats, by what they are, not by who named them.
+formats:
+  bf16:          {bits: 16, family: bf16}
+  fp16:          {bits: 16, family: fp16}
+  fp8_e4m3:      {bits: 8, family: fp8, note: OCP FP8 E4M3 (e4m3fn)}
+  fp8_e4m3fnuz:  {bits: 8, family: fp8, note: FP8 E4M3 with no negative zero; CDNA 3 native}
+  fp8_e5m2:      {bits: 8, family: fp8}
+  mxfp8:         {bits: 8, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
+  mxfp6:         {bits: 6, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
+  mxfp4:         {bits: 4, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
+  nvfp4:         {bits: 4, family: fp4, block: 16, scale: fp8_e4m3, note: NVIDIA FP4 with FP8 block scales}
+  int4_g32:      {bits: 4, family: int, block: 32, scale: fp16, weight_only: true, note: packed int4 per group of 32 ("int4_per_group_32")}
+  int8:          {bits: 8, family: int}
+  lut3:          {bits: 3, family: lut, weight_only: true, note: codebook (non-uniform) weights}
+  lut2:          {bits: 2, family: lut, weight_only: true, note: codebook (non-uniform) weights}
+
+# A format family a recipe may name instead of an exact format: the run takes the
+# accelerator's native member of the family ("fp8" is e4m3fnuz on CDNA 3, e4m3 on CDNA 4).
+format_families: [bf16, fp16, fp8, mx, fp4, int, lut]
+
+# GPU architectures, by compiler target. `matmul` is what the matrix cores compute on
+# natively; anything else needs a conversion an engine build must provide (kernels below).
+accelerators:
+  gfx942:
+    generation: CDNA 3
+    products: {MI300X: {hbm_gb: 192, hbm_tbps: 5.3}, MI325X: {hbm_gb: 256, hbm_tbps: 6.0}}
+    wave_size: 64
+    matmul: [bf16, fp16, fp8_e4m3fnuz, fp8_e5m2, int8]
+    partitions: [SPX, DPX, QPX, CPX]
+    evidence: >-
+      scripts/vllm_dissag/models.yaml (Kimi-K3 on MI300X): "gfx942 has no scaled-MXFP4 MFMA",
+      FP8 KV cache in every MI300X disagg recipe.
+  gfx950:
+    generation: CDNA 4
+    products: {MI350X: {hbm_gb: 288, hbm_tbps: 8.0}, MI355X: {hbm_gb: 288, hbm_tbps: 8.0}}
+    wave_size: 64
+    matmul: [bf16, fp16, fp8_e4m3, fp8_e5m2, mxfp8, mxfp6, mxfp4, int8]
+    partitions: [SPX, DPX, QPX, CPX]
+    evidence: >-
+      scripts/vllm_dissag/models.yaml (Kimi-K3-MXFP4-MI355X): "gfx950 has scaled-MXFP4 MFMA";
+      AMD CDNA 5 white paper (MI355X memory 288 GB HBM3E, 8 TB/s).
+  cdna5:
+    generation: CDNA 5
+    target: tbd                     # compiler target not published yet; resolution works on this key
+    products: {MI455X: {hbm_gb: 432, hbm_tbps: 23.3}}
+    wave_size: 32
+    matmul: [bf16, fp16, fp8_e4m3, mxfp8, mxfp6, mxfp4]
+    mx_block_sizes: [16, 32]
+    mx_fractional_scale: true
+    partitions: [SPX, DPX, QPX, CPX]
+    coherent_host_link_gbps: 256
+    scale_up: {fabric: UALoE, gpus_per_domain: 72, tbps_per_gpu: 3.6}
+    evidence: AMD CDNA 5 white paper (2026). NVFP4 is not listed as native; it is not assumed.
+
+# What an engine build supports per target: weight, activation and KV-cache formats, where
+# weights can live, and conversions it performs (a format the target cannot compute on,
+# requantized to one it can). Keyed by engine and build (today: the pin set it is built from,
+# docker/pins/<name>.json).
+kernels:
+  vllm@vllm-kimi-k3:
+    gfx942:
+      weights: [bf16, fp8_e4m3fnuz, int4_g32]
+      activations: [bf16, fp8_e4m3fnuz]
+      kv_cache: [bf16, fp8_e4m3fnuz]
+      convert: {mxfp4: int4_g32}
+      placement: [hbm]
+      evidence: Kimi-K3 / Kimi-K3-MXFP4 2P2D on MI300X (MoE requantized to int4 for SiTUv2)
+    gfx950:
+      weights: [bf16, fp8_e4m3, mxfp4]
+      activations: [bf16, fp8_e4m3, mxfp4]
+      kv_cache: [bf16, fp8_e4m3]
+      placement: [hbm]
+      evidence: Kimi-K3-MXFP4-MI355X (bring-up recipe, not validated)
+  vllm@vllm-mori121:
+    gfx942:
+      weights: [bf16, fp8_e4m3fnuz]
+      activations: [bf16, fp8_e4m3fnuz]
+      kv_cache: [bf16, fp8_e4m3fnuz]
+      placement: [hbm]
+      evidence: DeepSeek-V3/R1 and Llama FP8 disagg cards on MI300X
+  vllm@vllm-glm51:
+    gfx942:
+      weights: [bf16, fp8_e4m3fnuz]
+      activations: [bf16, fp8_e4m3fnuz]
+      kv_cache: [bf16, fp8_e4m3fnuz]
+      placement: [hbm]
+      evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
+
+# How each engine is told a format: the arguments a resolved role gets.
+engines:
+  vllm:
+    # The MAD role scripts take the KV-cache format as KV_CACHE_DTYPE and pass it on as
+    # --kv-cache-dtype; a recipe sets the variable, so that is what a resolution checks.
+    kv_cache_env: KV_CACHE_DTYPE
+    kv_cache_values: {bf16: auto, fp8: fp8}
+    convert_args:
+      int4_g32: --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
