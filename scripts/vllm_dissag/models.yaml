@@ -188,6 +188,83 @@ DeepSeek-R1:
   decode:
     dp: ""
 
+# DeepSeek-V4-Flash-FP8 (DeepseekV4ForCausalLM): sparse MLA + SWA, 43 layers,
+# 256 routed experts top-6, FP8. wideEP-only. Do not reuse the V3 recipe.
+#
+# IMAGE CONTRACT: config only. Serve from the image pinned in
+# docker/vllm_disagg_inference.dsv4.ubuntu.amd.Dockerfile; its vLLM carries the DSV4
+# MoRI/MoRIIO fixes in-source. A stock v0.29.0 image is not supported.
+#
+#   - KV_BLOCK_SIZE=256 + fp8_e4m3   DSV4 KV layout (vLLM remaps to fp8_ds_mla)
+#   - VLLM_ROCM_USE_AITER_MLA=1      AITER sparse MLA path
+#   - DSV4_TRANSFER_ATTN=1           the image defaults it to 0, which skips the
+#                                    full-attention KV transfer; decode then never sees
+#                                    the prompt and long-context retrieval fails
+#   - max-model-len 40960            NIAH 35k words fits; native 1M does not
+#   - max-num-batched-tokens 1024    also sizes the MoRI recv buffer
+# MoRI dispatch trim (MORI_TRIM_DISPATCH) is on by default in the image; nothing to set.
+DeepSeek-V4-Flash-FP8:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "256"
+    KV_CACHE_DTYPE: "fp8_e4m3"
+    KV_CACHE_MEMORY_BYTES: "20000000000"
+    GPU_MEMORY_UTILIZATION: "0.80"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "FULL_DECODE_ONLY"
+    # max-num-seqs is 4, so larger capture sizes are unreachable.
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4"
+    TORCHINDUCTOR_BENCHMARK_KERNEL: "0"
+    MORI_SHMEM_HEAP_SIZE: "34359738368"
+    DSV4_TRANSFER_ATTN: "1"
+    # A cold AITER/MoRI JIT boot can exceed the 4000 s connector default.
+    LOG_WAIT_TIMEOUT_SECONDS: "10800"
+  dp_flags: "--tokenizer-mode deepseek_v4"
+  prefill:
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+  decode:
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+
+# DeepSeek-V4-Pro-FP8: same DeepseekV4ForCausalLM architecture, image and knobs as
+# DeepSeek-V4-Flash-FP8 above (see it for the per-knob reasons). 61 layers, 384
+# routed experts top-6, ~806 GB FP8 checkpoint (~125 GiB/GPU at EP8). wideEP-only.
+# Differences from Flash:
+#   - MORI_SHMEM_HEAP_SIZE 16 GiB    125 GiB of weights + Flash's 32 GiB heap OOMs
+#                                    the profile_run MoE dummy batch
+#   - max-num-batched-tokens 1024    load-bearing here: larger values OOM that same
+#                                    dummy batch, not just resize the MoRI buffer
+DeepSeek-V4-Pro-FP8:
+  env:
+    VLLM_USE_V1: "1"
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_USE_AITER_PAGED_ATTN: "0"
+    VLLM_ROCM_USE_AITER_RMSNORM: "1"
+    VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+    VLLM_ROCM_USE_AITER_MLA: "1"
+    KV_BLOCK_SIZE: "256"
+    KV_CACHE_DTYPE: "fp8_e4m3"
+    KV_CACHE_MEMORY_BYTES: "20000000000"
+    GPU_MEMORY_UTILIZATION: "0.80"
+    VLLM_CUDAGRAPH_MODE: "NONE"
+    PREFILL_CUDAGRAPH_MODE: "NONE"
+    DECODE_CUDAGRAPH_MODE: "FULL_DECODE_ONLY"
+    CUDAGRAPH_CAPTURE_SIZES: "1 2 4"
+    TORCHINDUCTOR_BENCHMARK_KERNEL: "0"
+    MORI_SHMEM_HEAP_SIZE: "17179869184"
+    DSV4_TRANSFER_ATTN: "1"
+    LOG_WAIT_TIMEOUT_SECONDS: "10800"
+  dp_flags: "--tokenizer-mode deepseek_v4"
+  prefill:
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+  decode:
+    dp: "--max-num-seqs 4 --max-model-len 40960 --max-num-batched-tokens 1024"
+
 # ============================ MoE + DSA (wideEP only) ============================
 
 # GLM-5.1-FP8 (zai-org/GLM-5.1-FP8, arch GlmMoeDsaForCausalLM): MLA + DeepSeek
