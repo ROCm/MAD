@@ -90,3 +90,28 @@
   out: 1024
   dtype: auto
   max_concurrency: 1
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+
+# CohereLabs/command-a-plus-05-2026-fp8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    CohereLabs/command-a-plus-05-2026-fp8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+
+# Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+# own row: perf.yaml has a separate entry for this model (fp8 KV), outside the "Standard AITER models" group
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+  tp: 1
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1

@@ -37,3 +37,27 @@
   model: black-forest-labs/FLUX.2-dev
   tp: 8
   dtype: auto
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+
+# black-forest-labs/FLUX.2-dev  [confidence: medium]
+## FLUX.2-dev text-to-image
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 8
+  dtype: auto
+  num_images: 1
+  height: 1024
+  width: 1024
+  max_concurrency: 1
+
+- benchmark: serving
+  hf_pipeline_tag: text-to-image
+  model: black-forest-labs/FLUX.2-dev
+  tp: 8
+  dtype: auto
+  num_images: 1
+  height: 2048
+  width: 2048
+  max_concurrency: 1

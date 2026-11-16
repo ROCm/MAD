@@ -21,7 +21,7 @@
     AITER_QUICK_REDUCE_QUANTIZATION: INT4
 
 # Kimi K2-Thinking
-- model: amd/Kimi-K2-Thinking-MXFP4 moonshotai/Kimi-K2-Thinking
+- model: amd/Kimi-K2-Thinking-MXFP4-AttnFP8 amd/Kimi-K2-Thinking-MXFP4 moonshotai/Kimi-K2-Thinking
   extra_args:
     --kv-cache-dtype: fp8
     --trust-remote-code: True
@@ -91,19 +91,40 @@
     --max-model-len: 16384
     --max-num-batched-tokens: 16384
 
-# DeepSeek-V4
-- model: deepseek-ai/DeepSeek-V4-Pro deepseek-ai/DeepSeek-V4-Flash
+# DeepSeek-V4 (the ATOM recipe says to keep --max-num-seqs at or below 512)
+- model: deepseek-ai/DeepSeek-V4-Pro
   extra_args:
+    --kv-cache-dtype: fp8
+    --tokenizer-mode: deepseek_v4
     --trust-remote-code: True
     --async-scheduling: True
     --no-enable-prefix-caching: True
     --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
     --gpu-memory-utilization: 0.9
+    --max-num-seqs: 512
     --max-model-len: 16384
     --max-num-batched-tokens: 16384
   env:
     AITER_BF16_FP8_MOE_BOUND: '0'
     ATOM_MOE_GU_ITLV: '1'
+
+# DeepSeek-V4-Flash (follows ROCm/ATOM CI: no async scheduling, V2 model runner)
+- model: deepseek-ai/DeepSeek-V4-Flash
+  extra_args:
+    --kv-cache-dtype: fp8
+    --tokenizer-mode: deepseek_v4
+    --trust-remote-code: True
+    --no-async-scheduling: True
+    --no-enable-prefix-caching: True
+    --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
+    --gpu-memory-utilization: 0.9
+    --max-num-seqs: 512
+    --max-model-len: 16384
+    --max-num-batched-tokens: 16384
+  env:
+    AITER_BF16_FP8_MOE_BOUND: '0'
+    ATOM_MOE_GU_ITLV: '1'
+    VLLM_USE_V2_MODEL_RUNNER: '1'
 
 # GLM-4
 - model: zai-org/GLM-4.7-FP8 zai-org/GLM-4-FP8
@@ -155,10 +176,14 @@
     --kv-cache-dtype: fp8
     --trust-remote-code: True
     --async-scheduling: True
+    --enable-expert-parallel: True
     --compilation-config: "{\"cudagraph_mode\": \"FULL_AND_PIECEWISE\"}"
     --gpu-memory-utilization: 0.9
     --max-model-len: 16384
     --max-num-batched-tokens: 16384
+  env:
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: '1'
+    ATOM_FP8_BLOCKSCALE_WEIGHT_PRESHUFFLE: '0'
 
 # Qwen3.5
 - model: Qwen/Qwen3.5-397B-A17B-FP8 Qwen/Qwen3.5-397B-A17B amd/Qwen3.5-397B-A17B-MXFP4
@@ -170,6 +195,11 @@
     --gpu-memory-utilization: 0.9
     --max-model-len: 16384
     --max-num-batched-tokens: 16384
+  env:
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: '1'
+    ATOM_USE_CUSTOM_ALL_GATHER: '0'
+    ATOM_FP8_BLOCKSCALE_WEIGHT_PRESHUFFLE: '0'
+    GATED_DELTA_RULE_TRITON_AUTOTUNE: '1'
 
 # Qwen3-Next
 - model: Qwen/Qwen3-Next-80B-A3B-Instruct-FP8 Qwen/Qwen3-Next-80B-A3B-Instruct
@@ -181,3 +211,9 @@
     --gpu-memory-utilization: 0.9
     --max-model-len: 16384
     --max-num-batched-tokens: 16384
+  env:
+    ATOM_ENABLE_QK_NORM_ROPE_CACHE_QUANT_FUSION: '1'
+    ATOM_USE_CUSTOM_ALL_GATHER: '0'
+    ATOM_USE_FLYDSL_GDR: '1'
+    ATOM_FP8_BLOCKSCALE_WEIGHT_PRESHUFFLE: '0'
+    GATED_DELTA_RULE_TRITON_AUTOTUNE: '1'

@@ -9,8 +9,17 @@
   dtype: auto
   max_concurrency: 1 8 32
 
+## Split so each model matches its own perf.yaml entry (overrides are matched per base entry)
 - benchmark: serving
-  model: meta-llama/Llama-3.1-405B-Instruct meta-llama/Llama-3.1-405B-Instruct-FP8
+  model: meta-llama/Llama-3.1-405B-Instruct
+  tp: 8
+  inp: 128 512 1024 2048
+  out: 128 512 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-405B-Instruct-FP8
   tp: 8
   inp: 128 512 1024 2048
   out: 128 512 1024
