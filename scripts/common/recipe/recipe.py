@@ -314,6 +314,13 @@ def validate(catalog):
             bad.append(f"platforms.{name}: unknown scale-up fabric {(p.get('scale_up') or {}).get('fabric')!r}")
         if not isinstance(p.get("gpus_per_node"), int) or p["gpus_per_node"] < 1:
             bad.append(f"platforms.{name}: gpus_per_node must be a positive integer")
+    if catalog.get("default_platform") and catalog["default_platform"] not in (catalog.get("platforms") or {}):
+        bad.append(f"default_platform: unknown platform {catalog['default_platform']!r}")
+    for name, c in (catalog.get("clusters") or {}).items():
+        if (c or {}).get("platform") not in (catalog.get("platforms") or {}):
+            bad.append(f"clusters.{name}: unknown platform {(c or {}).get('platform')!r}")
+        if (c or {}).get("fabric") and c["fabric"] not in fabrics:
+            bad.append(f"clusters.{name}: unknown fabric {c['fabric']!r}")
     return bad
 
 

@@ -32,6 +32,23 @@ _has "$(plat MAD_GPU_COUNT=32)" "rc=0" "more GPUs (a partition mode) is fine"
 _has "$(plat MAD_GPU_ARCH=gfx950)" "rc=0" "unknown facts are not refused"
 
 echo ""
+echo "=== site profiles (MAD_CLUSTER, MAD_CLUSTER_FILE) ==="
+cat > "$TMP/c.sh" <<'C'
+. "$1/common/cluster.sh" >/dev/null 2>"$2/err"
+echo "plat=${MAD_PLATFORM:-} fab=${CLUSTER_ARCHETYPE:-} shared=${SHARED_MOUNT:-} nvme=${NVME_ROOT:-} gpus=${GPUS_PER_NODE:-}"
+C
+site() { env -i PATH="$PATH" HOME="$TMP" MAD_SCRIPTS_DIR="$DIR" CLUSTER_SYSFS_IB="$TMP/none" "$@" bash "$TMP/c.sh" "$DIR" "$TMP"; }
+_has "$(site MAD_CLUSTER=example-slurm-mi355x-ainic)" "plat=mi355x-ubb-8 fab=ainic shared=/shared nvme=/mnt/nvme gpus=8" \
+    "a catalog example sets the platform, the fabric family and the site defaults"
+printf 'platform: mi455x-helios-tray\nfabric: thor2\nenv: {SHARED_MOUNT: /site/shared}\n' > "$TMP/site.yaml"
+_has "$(site MAD_CLUSTER_FILE="$TMP/site.yaml")" "plat=mi455x-helios-tray fab=thor2 shared=/site/shared" "a site's own file"
+_has "$(site MAD_CLUSTER_FILE="$TMP/site.yaml")" "gpus=4" "...whose platform sizes the run"
+_has "$(site MAD_CLUSTER_FILE="$TMP/site.yaml" SHARED_MOUNT=/mine MAD_PLATFORM=mi300x-oam-8)" "plat=mi300x-oam-8 fab=thor2 shared=/mine" \
+    "what the run passed wins"
+site MAD_CLUSTER=nope >/dev/null
+_has "$(cat "$TMP/err")" "unknown cluster 'nope'" "an unknown site is refused"
+
+echo ""
 echo "======================================================"
 echo "  platform_assert: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

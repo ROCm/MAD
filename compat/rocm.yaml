@@ -381,3 +381,19 @@ platforms:
     nics_per_gpu: 3
     coherent_host_link: true
     evidence: CDNA 5 white paper (Helios rack); not yet available to run on
+
+# Clusters: a site -- its platform, fabric family, and the site defaults a run gets when it passes
+# none (storage roots, subnet). A run names one with MAD_CLUSTER (an entry here) or MAD_CLUSTER_FILE
+# (a file of the same shape, kept with the site rather than in this public repository); cluster.sh
+# applies it before its own fallbacks, and anything the run passes wins. These entries are examples.
+clusters:
+  example-slurm-mi300x-cx7:
+    scheduler: slurm
+    platform: mi300x-oam-8
+    fabric: cx7
+    env: {SHARED_MOUNT: /shared_inference, NVME_ROOT: /mnt/nvme}
+  example-slurm-mi355x-ainic:
+    scheduler: slurm
+    platform: mi355x-ubb-8
+    fabric: ainic
+    env: {SHARED_MOUNT: /shared, NVME_ROOT: /mnt/nvme}

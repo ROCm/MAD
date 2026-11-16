@@ -39,6 +39,18 @@
 # default -- an unset name under `set -u` is a fatal error, not an empty string.
 # =============================================================================
 
+# --------------------------------------------------------------- site profile
+# MAD_CLUSTER (compat/rocm.yaml clusters) or MAD_CLUSTER_FILE (a site's own file of that shape):
+# the site's platform, fabric family and defaults, set here only where the run passed nothing.
+if [ -n "${MAD_CLUSTER:-}${MAD_CLUSTER_FILE:-}" ]; then
+    if _cluster_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/platform.py" cluster 2>&1)"; then
+        eval "${_cluster_out}"
+    else
+        echo "ERROR: site profile: ${_cluster_out}" >&2
+        _CLUSTER_PLATFORM_ERROR="site profile: ${_cluster_out}"
+    fi
+fi
+
 # --------------------------------------------------------------- weights
 # Local NVMe first, shared NFS second. /mnt/m2m_nobackup is per-node and NOT
 # uniform across this cluster; /shared_inference is one NFS export that every
