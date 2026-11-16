@@ -23,7 +23,7 @@ fuser -k "${BARRIER_PORT:-5000}/tcp" 2>/dev/null || true
 fuser -k 2222/tcp 2>/dev/null || true
 fuser -k 15000/tcp 2>/dev/null || true
 fuser -k 30000/tcp 2>/dev/null || true
-fuser -k 36367/tcp 2>/dev/null || true   # router discovery / moriio proxy_ping
+fuser -k 31367/tcp 2>/dev/null || true   # router discovery / moriio proxy_ping
 fuser -k 20005/tcp 2>/dev/null || true   # serve port
 sleep 2
 

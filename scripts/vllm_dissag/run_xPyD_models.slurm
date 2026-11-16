@@ -439,6 +439,7 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # BENCHMARK_SCRIPT=agentic.
 #   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
 #   validate               -> benchmark_validate.sh     (niah then smoke; curl already ran)
+#   accuracy               -> benchmark_accuracy.sh     (20-prompt correctness suite)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
@@ -446,7 +447,8 @@ case "$BENCHMARK_SCRIPT" in
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
     validate)     BENCHMARK_SCRIPT_FILE="benchmark_validate.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, validate)" >&2; exit 1 ;;
+    accuracy)     BENCHMARK_SCRIPT_FILE="benchmark_accuracy.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, validate, accuracy)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -671,6 +673,9 @@ docker run --rm \
     ${NIAH_STOP_BLANK:+-e NIAH_STOP_BLANK=$NIAH_STOP_BLANK} \
     ${NIAH_PAIR_SLEEP_S:+-e NIAH_PAIR_SLEEP_S=$NIAH_PAIR_SLEEP_S} \
     ${NIAH_WARMUP_SCORE_SLEEP_S:+-e NIAH_WARMUP_SCORE_SLEEP_S=$NIAH_WARMUP_SCORE_SLEEP_S} \
+    ${ACC_THINKING:+-e ACC_THINKING=$ACC_THINKING} \
+    ${ACC_MAXTOK:+-e ACC_MAXTOK=$ACC_MAXTOK} \
+    ${ACC_TIMEOUT:+-e ACC_TIMEOUT=$ACC_TIMEOUT} \
     ${NIAH_DS_WRAP:+-e NIAH_DS_WRAP=$NIAH_DS_WRAP} \
     ${NIAH_MIN_TOKENS:+-e NIAH_MIN_TOKENS=$NIAH_MIN_TOKENS} \
     ${DSV4_ENABLE_HMA:+-e DSV4_ENABLE_HMA=$DSV4_ENABLE_HMA} \

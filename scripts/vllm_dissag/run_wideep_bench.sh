@@ -30,7 +30,7 @@ usage() {
     cat <<'EOF'
 Usage: ./run_wideep_bench.sh BENCH MODEL TOPO [flags]
 
-  BENCH   niah | smoke | validate
+  BENCH   niah | smoke | validate | accuracy
   MODEL   glm | glm51 | glm52 | dsv3 | dsv4fls | dsv4pro | hy3 | hy3p | GLM-5.1-FP8 | ...
   TOPO    1p1d | 2p2d | 3p3d | 4p4d | ep8 | ep16 | ep24 | ep32
           asymmetric: 1p2d | 2p1d | 2p3d | 3p2d  (driver derives per-role DP)
@@ -161,7 +161,17 @@ case "$BENCH" in
             BENCHMARK_CON="${BENCHMARK_CON:-1 8 16 32}"
         fi
         ;;
-    *) echo "Error: unknown BENCH '$BENCH' (niah|smoke|validate)" >&2; usage ;;
+    accuracy)
+        # 20-prompt correctness suite (benchmark_accuracy.py). curl still runs
+        # first from moriio.sh; no NIAH, no sweep.
+        BENCHMARK_SCRIPT=accuracy
+        ACC_THINKING="${ACC_THINKING:-chat}"
+        ACC_TIMEOUT="${ACC_TIMEOUT:-900}"
+        NIAH_WORDS=""
+        BENCHMARK_COMBINATIONS=""
+        unset NIAH_LIST_PRIME || true
+        ;;
+    *) echo "Error: unknown BENCH '$BENCH' (niah|smoke|validate|accuracy)" >&2; usage ;;
 esac
 
 # Walltime scales with node count (AITER JIT). validate uses niah's budget
@@ -182,6 +192,10 @@ if [[ -z "$TIME_ARG" ]]; then
         niah-2p2d)  TIME_ARG=08:00:00 ;;
         niah-3p3d)  TIME_ARG=10:00:00 ;;
         niah-4p4d)  TIME_ARG=12:00:00 ;;
+        accuracy-1p1d)  TIME_ARG=04:00:00 ;;
+        accuracy-2p2d)  TIME_ARG=04:00:00 ;;
+        accuracy-3p3d)  TIME_ARG=06:00:00 ;;
+        accuracy-4p4d)  TIME_ARG=08:00:00 ;;
         smoke-1p1d) TIME_ARG=04:00:00 ;;
         smoke-2p2d) TIME_ARG=06:00:00 ;;
         smoke-3p3d) TIME_ARG=07:00:00 ;;
@@ -194,6 +208,7 @@ if [[ -z "$TIME_ARG" ]]; then
             smoke-1p1d) TIME_ARG=06:00:00 ;;
             smoke-2p2d) TIME_ARG=08:00:00 ;;
             niah-1p1d|niah-2p2d) TIME_ARG=12:00:00 ;;
+            accuracy-1p1d|accuracy-2p2d) TIME_ARG=04:00:00 ;;
         esac
     fi
     if [[ "$SHORT" == "dsv4pro" ]]; then
@@ -201,6 +216,7 @@ if [[ -z "$TIME_ARG" ]]; then
             smoke-1p1d) TIME_ARG=08:00:00 ;;
             smoke-2p2d) TIME_ARG=10:00:00 ;;
             niah-1p1d|niah-2p2d|niah-4p4d) TIME_ARG=12:00:00 ;;
+            accuracy-1p1d|accuracy-2p2d|accuracy-4p4d) TIME_ARG=04:00:00 ;;
         esac
     fi
     # Asymmetric topologies match no case arm above and would leave TIME_ARG
@@ -208,6 +224,7 @@ if [[ -z "$TIME_ARG" ]]; then
     if [[ -z "$TIME_ARG" ]]; then
         case "$WT_BENCH" in
             niah)  TIME_ARG=$(printf '%02d:00:00' $(( N < 6 ? 6 : 8 )) ) ;;
+            accuracy) TIME_ARG=04:00:00 ;;
             smoke) TIME_ARG=$(printf '%02d:00:00' $(( N < 6 ? 4 : 6 )) ) ;;
         esac
         echo "note: $BENCH-$TOPO has no walltime default; using $TIME_ARG for N=$N" >&2
@@ -413,6 +430,11 @@ if [[ "$MODEL_NAME" == "DeepSeek-V4-Flash-FP8" || "$MODEL_NAME" == "DeepSeek-V4-
     fi
 fi
 
+if [[ "$BENCH" == "accuracy" ]]; then
+    EXTRA_ENV+=(ACC_THINKING="$ACC_THINKING" ACC_TIMEOUT="$ACC_TIMEOUT")
+    [[ -n "${ACC_MAXTOK:-}" ]] && EXTRA_ENV+=(ACC_MAXTOK="$ACC_MAXTOK")
+fi
+
 # EP16 NFS+JIT boot exceeds a 4000s gate. --export=ALL can leak a smaller
 # LOG_WAIT_TIMEOUT_SECONDS from the submit shell; force unless overridden.
 LOG_WAIT_TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-10800}"
@@ -449,6 +471,7 @@ echo "PROXY_TYPE=${PROXY_TYPE:-vllm_router}  SKIP_MORIIO_DP=${ROUTER_SKIP_MORIIO
 echo "TIME=$TIME_ARG"
 [[ "$BENCH" == "smoke" || "$BENCH" == "validate" ]] && echo "SMOKE CON=${BENCHMARK_CON:-default}  COMBOS=$BENCHMARK_COMBINATIONS  STEP_SEC_PER_TOK=${STEP_SEC_PER_TOK:-}  STEP_TIMEOUT=${STEP_TIMEOUT:-}"
 [[ "$BENCH" == "niah" || "$BENCH" == "validate" ]] && echo "NIAH_METHOD=${NIAH_METHOD:-}  NIAH_WORDS=$NIAH_WORDS  NIAH_SEEDS=$NIAH_SEEDS  HALT=$NIAH_HALT_ON_FAIL  MAXTOK=${NIAH_MAXTOK:-}  WARMUP=${NIAH_WARMUP:-}  TIMEOUT=${NIAH_TIMEOUT:-}  WRAP=0  TERSE=${NIAH_TERSE:-0}  STOP_BLANK=${NIAH_STOP_BLANK:-0}  MINTOK=${NIAH_MIN_TOKENS:-0}  PRIME=${NIAH_LIST_PRIME:-}  STOP=${NIAH_STOP:-}  LOGPROBS=${NIAH_LOGPROBS:-0}"
+[[ "$BENCH" == "accuracy" ]] && echo "ACCURACY prompts=20  THINKING=${ACC_THINKING}  MAXTOK=${ACC_MAXTOK:-auto}  TIMEOUT=${ACC_TIMEOUT}"
 [[ ${#EXTRA_ENV[@]} -gt 0 ]] && echo "EXTRA ${EXTRA_ENV[*]}"
 echo "JOB_NAME=$JOB_NAME  ACCOUNT=${ACCOUNT:-default}  PARTITION=${PARTITION:-default}  QOS=${QOS:-default}  ${SBATCH_LOC[*]:-any-node}"
 [[ -n "$AFTER_JOB" ]] && echo "DEPENDENCY=afterany:${AFTER_JOB}"
@@ -514,6 +537,10 @@ if [[ "$BENCH" == "niah" || "$BENCH" == "validate" ]]; then
     export NIAH_LIST_PRIME="${NIAH_LIST_PRIME:-}"
     export NIAH_STOP="${NIAH_STOP:-}"
     export NIAH_LOGPROBS="${NIAH_LOGPROBS:-0}"
+fi
+if [[ "$BENCH" == "accuracy" ]]; then
+    export ACC_THINKING ACC_TIMEOUT
+    [[ -n "${ACC_MAXTOK:-}" ]] && export ACC_MAXTOK
 fi
 if [[ ${#EXTRA_ENV[@]} -gt 0 ]]; then
     export "${EXTRA_ENV[@]}"
