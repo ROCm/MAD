@@ -295,10 +295,20 @@ scale-up link; `search` ranks platforms x pool sizes x batch x native formats, d
 whose weights do not fit. It ignores overlap and kernels: it ranks, it does not predict. Once runs
 exist, `perf/calibration.yaml` (per platform: `efficiency`, measured / modelled) corrects it.
 
-`scripts/common/perf/registry.py` is the record of best-known configurations: results keyed by
-model, platform, pin set and serving type with their SLO, accuracy and what reproduces them
-(`config.resolved.json`, topology, recipe); `best` returns the highest throughput that meets
-its SLO and an accuracy floor. Where the shared registry lives is not decided yet.
+`scripts/common/perf/registry.py` records measured runs (model, platform, launcher, the card's
+shape, pin set, serving type, SLO, accuracy, throughput, what reproduces them, and `apply`: the
+recipe keys that made them). `best` returns the highest throughput meeting its SLO and an accuracy
+floor; `promote` copies it into `scripts/common/perf/best_known.jsonl`.
+
+**The best-known configuration is what MAD runs by default**, through STANDALONE and madengine
+alike: the launcher lays the matching record's `apply` over the recipe (`models.py for_job`) --
+same model and launcher, the run's platform (`MAD_PLATFORM`, else a platform of the detected GPU
+and GPU count), the card's shape, and the pin set when the record names one -- so the job's
+recipe file and every container get it, and `config.resolved.json` names it (`MAD_BEST_KNOWN`).
+It is a layer like the others: a value passed through config still wins, and `MAD_BEST_CONFIG=0`
+runs the recipe as written (`MAD_BEST_REGISTRY` names another file). A record never changes the
+shape of a run (its node counts are the card's); a different shape is a different card or an
+override of the node count through config.
 
 ## Adding hardware, formats and serving types
 

@@ -137,6 +137,37 @@ class RolesEndToEnd(unittest.TestCase):
         on942 = self.argv(self.run_card("vllm_dissag", self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4"))["ranks"][0])
         self.assertIn("--quantization-config", on942)
 
+    def best(self, **rec):
+        r = {"model": "DeepSeek-V3", "launcher": "vllm_dissag", "platform": "mi300x-oam-8",
+             "throughput": 1000, "date": "2026-11-16", "config": "run/config.resolved.json",
+             "apply": {"env": {"KV_CACHE_MEMORY_BYTES": "30000000000"}}, **rec}
+        (self.scripts / "common" / "perf" / "best_known.jsonl").write_text(json.dumps(r) + "\n")
+
+    def kv_bytes(self, card):
+        words = self.argv(self.run_card("vllm_dissag", card)["ranks"][0])
+        return words[words.index("--kv-cache-memory-bytes") + 1]
+
+    def test_the_best_known_configuration_is_the_default_run(self):
+        card = self.card("vllm_dissag", "pyt_vllm_disagg_mori_deepseek-v3")
+        self.assertEqual(self.kv_bytes(card), "20000000000")             # the recipe
+        self.best()
+        self.assertEqual(self.kv_bytes(card), "30000000000")             # the best-known record over it
+
+    def test_config_still_wins_and_it_can_be_switched_off(self):
+        self.best()
+        card = self.card("vllm_dissag", "pyt_vllm_disagg_mori_deepseek-v3")
+        given = json.loads(json.dumps(card)); given["env_vars"]["KV_CACHE_MEMORY_BYTES"] = "25000000000"
+        self.assertEqual(self.kv_bytes(given), "25000000000")            # passed through config
+        off = json.loads(json.dumps(card)); off["env_vars"]["MAD_BEST_CONFIG"] = "0"
+        self.assertEqual(self.kv_bytes(off), "20000000000")
+
+    def test_a_record_for_another_shape_or_platform_does_not_apply(self):
+        card = self.card("vllm_dissag", "pyt_vllm_disagg_mori_deepseek-v3")
+        self.best(shape={"xP": 99})
+        self.assertEqual(self.kv_bytes(card), "20000000000")
+        self.best(platform="mi355x-ubb-8")
+        self.assertEqual(self.kv_bytes(card), "20000000000")
+
 
 if __name__ == "__main__":
     unittest.main()

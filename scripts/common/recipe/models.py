@@ -117,13 +117,83 @@ def with_memory(recipe, hbm_bytes):
     return out
 
 
+BEST_KNOWN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "perf", "best_known.jsonl")
+SHAPE_KEYS = ("xP", "yD", "NNODES", "TP_SIZE", "PP_SIZE", "EP_TP_SIZE", "WIDE_EP", "DP_MODE")
+
+
+def best_record(name, env=None):
+    """The best-known configuration for this run of NAME, or None: a record of the registry
+    (MAD_BEST_REGISTRY, default perf/best_known.jsonl) for this model and launcher (MAD_LAUNCHER),
+    on this platform (MAD_PLATFORM; else a platform with the detected accelerator, MAD_GPU_ARCH,
+    and GPUS_PER_NODE), with the card's shape and, when the record names one, pin set
+    (MAD_PIN_SET); the highest throughput among those. MAD_BEST_CONFIG=0: none."""
+    env = os.environ if env is None else env
+    if env.get("MAD_BEST_CONFIG", "1") == "0" or not name:
+        return None
+    path = env.get("MAD_BEST_REGISTRY") or BEST_KNOWN
+    try:
+        with open(path) as f:
+            rows = [json.loads(line) for line in f if line.strip() and not line.lstrip().startswith("#")]
+    except FileNotFoundError:
+        return None
+    rows = [r for r in rows if r.get("model") == name and r.get("launcher") == env.get("MAD_LAUNCHER")]
+    if not rows:
+        return None
+    platforms = _catalog_platforms()
+    def platform_ok(r):
+        if env.get("MAD_PLATFORM"):
+            return r.get("platform") == env["MAD_PLATFORM"]
+        p = platforms.get(r.get("platform")) or {}
+        return (bool(env.get("MAD_GPU_ARCH")) and p.get("accelerator") == env["MAD_GPU_ARCH"]
+                and str(p.get("gpus_per_node")) == str(env.get("GPUS_PER_NODE", p.get("gpus_per_node"))))
+    def shape_ok(r):
+        return all(str(env.get(k, "")) == str(v) for k, v in (r.get("shape") or {}).items())
+    def pins_ok(r):
+        return not r.get("pin_set") or r["pin_set"] == env.get("MAD_PIN_SET")
+    rows = [r for r in rows if platform_ok(r) and shape_ok(r) and pins_ok(r)]
+    return max(rows, key=lambda r: r.get("throughput", 0)) if rows else None
+
+
+def has_best_records(name, env=None):
+    """Whether the registry holds any record for NAME and this launcher (so the GPU is needed)."""
+    env = os.environ if env is None else env
+    if env.get("MAD_BEST_CONFIG", "1") == "0":
+        return False
+    try:
+        with open(env.get("MAD_BEST_REGISTRY") or BEST_KNOWN) as f:
+            return any(json.loads(l).get("model") == name and json.loads(l).get("launcher") == env.get("MAD_LAUNCHER")
+                       for l in f if l.strip() and not l.lstrip().startswith("#"))
+    except FileNotFoundError:
+        return False
+
+
+def _catalog_platforms():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "compat", "rocm.yaml")
+    try:
+        with open(path) as f:
+            return (yaml.safe_load(f) or {}).get("platforms") or {}
+    except FileNotFoundError:
+        return {}
+
+
+def for_job(models, name, arch=None, env=None):
+    """The recipe this run uses: effective(name, arch) with the best-known configuration for the
+    run laid over it (best_record). Returns (recipe, record or None)."""
+    recipe = effective(models, name, arch)
+    rec = best_record(name, env) if recipe is not None else None
+    if rec:
+        recipe = _overlay(recipe, rec.get("apply") or {})
+    return recipe, rec
+
+
 def uses_variants(models, name):
     """Whether NAME's recipe needs resolving before a plain reader can use it: an alias,
     per-accelerator variants, or memory sizes derived from the GPU."""
     r = (models or {}).get(name)
     if not isinstance(r, dict):
         return False
-    return "alias" in r or bool(r.get("variants")) or bool(memory_needed(effective(models, name)))
+    return ("alias" in r or bool(r.get("variants")) or bool(memory_needed(effective(models, name)))
+            or best_record(name) is not None)
 
 
 def hbm_from_env():
@@ -145,7 +215,7 @@ def main(argv=None):
     ap.add_argument("--write")
     ap.add_argument("--uses-variants", action="store_true")
     ap.add_argument("--picks-variant", action="store_true",
-                    help="exit 0 when NAME's variant depends on the GPU (variants, no alias pinning one)")
+                    help="exit 0 when what NAME runs depends on the GPU (variants, or best-known records)")
     ap.add_argument("--needs-memory", action="store_true",
                     help="exit 0 when NAME's recipe sizes memory from the GPU (memory: fraction)")
     ap.add_argument("--hbm-bytes", type=int, default=hbm_from_env(),
@@ -157,8 +227,11 @@ def main(argv=None):
         return 0 if uses_variants(models, a.name) else 1
     if a.picks_variant:
         r = models.get(a.name)
-        return 0 if isinstance(r, dict) and "alias" not in r and r.get("variants") else 1
-    recipe = effective(models, a.name, a.arch)
+        return 0 if (isinstance(r, dict) and "alias" not in r and r.get("variants")) or has_best_records(a.name) else 1
+    recipe, best = for_job(models, a.name, a.arch)
+    if best and a.write:
+        print(f"[best-known] {a.name}: the {best.get('platform')} record of {best.get('date', 'undated')} "
+              "over the recipe", file=sys.stderr)
     if recipe is None:
         print(f"no recipe {a.name!r} in {a.yaml}", file=sys.stderr)
         return 2

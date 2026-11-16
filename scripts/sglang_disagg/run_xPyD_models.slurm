@@ -128,6 +128,7 @@ LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs
 config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
+export MAD_LAUNCHER="${MAD_LAUNCHER:-sglang_disagg}"   # which launcher (best-known records name it)
 . "${MOONCAKE_REPO_DIR}/../common/topology/apply.sh" sglang_disagg
 config_layer topology
 xP="${xP:-1}" #-> Number of Prefill Servers

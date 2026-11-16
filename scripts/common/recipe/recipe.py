@@ -443,7 +443,7 @@ def main(argv=None):
         recipes = yaml.safe_load(f) or {}
     # The recipe as the launcher applies it: the alias followed (it pins its variant), else the
     # variant of the GPU checked (the detected one, as config_apply_recipe), else the default.
-    recipe = models.effective(recipes, a.model, a.arch)
+    recipe, _ = models.for_job(recipes, a.model, a.arch)      # with the run's best-known configuration
     if recipe is None:
         print(f"ERROR: no recipe {a.model!r} in {a.recipes}", file=sys.stderr)
         return 2

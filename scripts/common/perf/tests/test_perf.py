@@ -60,7 +60,7 @@ class Registry(unittest.TestCase):
     def test_best_meets_the_slo_and_accuracy(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "reg.jsonl")
-            base = {"model": "DeepSeek-V3", "platform": "mi355x-ubb-8", "pin_set": "vllm-mori121",
+            base = {"model": "DeepSeek-V3", "platform": "mi355x-ubb-8", "pin_set": "vllm-mori121", "launcher": "vllm_dissag",
                     "serving_type": "disagg", "slo": {"tpot_ms": 50}, "config": "run1/config.resolved.json"}
             R.record(path, dict(base, throughput=900, tpot_ms=40, accuracy={"gsm8k": 0.95}))
             R.record(path, dict(base, throughput=1200, tpot_ms=70, accuracy={"gsm8k": 0.95}))   # misses SLO
@@ -70,6 +70,28 @@ class Registry(unittest.TestCase):
             self.assertIsNone(R.best(path, platform="mi300x-oam-8"))
             with self.assertRaisesRegex(ValueError, "needs throughput"):
                 R.record(path, {k: v for k, v in base.items()})
+
+
+class Promote(unittest.TestCase):
+    def test_the_best_run_replaces_the_default(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "recipe"))
+        import models
+        with tempfile.TemporaryDirectory() as d:
+            runs, bk = os.path.join(d, "runs.jsonl"), os.path.join(d, "best.jsonl")
+            with open(bk, "w") as f:
+                f.write("# header\n")
+            base = {"model": "DeepSeek-V3", "platform": "mi300x-oam-8", "launcher": "vllm_dissag",
+                    "shape": {"xP": 1, "yD": 1}, "config": "c", "apply": {"env": {"K": "1"}}}
+            R.record(runs, dict(base, throughput=10))
+            R.promote(runs, bk, model="DeepSeek-V3")
+            R.record(runs, dict(base, throughput=20, apply={"env": {"K": "2"}}))
+            R.promote(runs, bk, model="DeepSeek-V3")
+            rows = [l for l in open(bk) if not l.startswith("#")]
+            self.assertEqual(len(rows), 1)                       # replaced, not appended
+            env = {"MAD_BEST_REGISTRY": bk, "MAD_LAUNCHER": "vllm_dissag", "MAD_PLATFORM": "mi300x-oam-8",
+                   "xP": "1", "yD": "1"}
+            self.assertEqual(models.best_record("DeepSeek-V3", env)["apply"]["env"]["K"], "2")
+            self.assertIsNone(models.best_record("DeepSeek-V3", dict(env, MAD_BEST_CONFIG="0")))
 
 
 if __name__ == "__main__":
