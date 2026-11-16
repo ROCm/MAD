@@ -14,6 +14,7 @@ the concepts (prefill and decode, launchers, connectors).
 - [What a recipe needs from the hardware](#what-a-recipe-needs-from-the-hardware)
 - [Platforms and fabrics as data](#platforms-and-fabrics-as-data)
 - [Topology v2: GPUs, domains and placement](#topology-v2-gpus-domains-and-placement)
+- [Performance: model, search, registry](#performance-model-search-registry)
 - [Offline checks per layer](#offline-checks-per-layer)
 
 ## One run, in order
@@ -270,6 +271,21 @@ the site's domain label). Each node gets `MAD_TOPO_DOMAIN`, and in the per-task 
 failing rank is reported with its domain. Launchers refuse what they cannot yet run (mixed node
 types, roles other than prefill/decode/router/server, replicas).
 
+## Performance: model, search, registry
+
+`scripts/common/perf/model.py` ranks layouts before GPU hours are spent: a first-order roofline
+per GPU from the catalog (peak dense TFLOPS per format, HBM bandwidth, scale-up and NIC speeds)
+and a model's architecture (`perf/models.yaml`, from public configs). `estimate` gives prefill
+and decode tokens/s per GPU, what bounds decode, and whether the MoE all-to-all stays on the
+scale-up link; `search` ranks platforms x pool sizes x batch x native formats, dropping layouts
+whose weights do not fit. It ignores overlap and kernels: it ranks, it does not predict. Once runs
+exist, `perf/calibration.yaml` (per platform: `efficiency`, measured / modelled) corrects it.
+
+`scripts/common/perf/registry.py` is the record of best-known configurations: results keyed by
+model, platform, pin set and serving type with their SLO, accuracy and what reproduces them
+(`config.resolved.json`, topology, recipe); `best` returns the highest throughput that meets
+its SLO and an accuracy floor. Where the shared registry lives is not decided yet.
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in
@@ -286,4 +302,5 @@ None of these need GPUs; run them from the MAD root. The full list is in
 | Site fabric, platform | `bash scripts/common/tests/cluster_fabric_assert.sh`, `bash scripts/common/tests/platform_assert.sh` |
 | Kubernetes | `python3 -m unittest discover -s scripts/common/k8s/tests` |
 | Pin sets | `python3 docker/pins/pins.py validate`; `python3 -m unittest discover -s docker/pins/tests` |
+| Performance model, registry | `python3 -m unittest discover -s scripts/common/perf/tests` |
 | Recipe roles, variants, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |
