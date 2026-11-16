@@ -345,7 +345,7 @@ else
     echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD, proxy co-located on prefill master)"
 fi
 if [[ "${WIDE_EP:-0}" == "1" ]]; then
-    echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE:-8}/$EP_TP_SIZE (wideEP)"
+    echo "Parallelism: EP_TP_SIZE=$EP_TP_SIZE -> DP ranks/node = ${GPUS_PER_NODE}/$EP_TP_SIZE (wideEP)"
 else
     echo "Parallelism: TP (WIDE_EP=0) -> degree from the model's tp: flags in models.yaml"
 fi

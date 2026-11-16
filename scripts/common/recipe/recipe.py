@@ -295,6 +295,25 @@ def validate(catalog):
     for fam in {d.get("family") for d in (catalog.get("formats") or {}).values()}:
         if fam not in (catalog.get("format_families") or []):
             bad.append(f"formats: family {fam!r} not in format_families")
+    fabrics = catalog.get("fabrics") or {}
+    det = catalog.get("fabric_detection") or {}
+    for name in list(det.get("order") or []) + ([det["unknown"]] if det.get("unknown") else []):
+        if name not in fabrics:
+            bad.append(f"fabric_detection: unknown fabric {name!r}")
+    for name, f in fabrics.items():
+        for key in ("match", "gid_index", "socket_ifname", "rdma_drivers", "kv_nic"):
+            if key not in (f or {}):
+                bad.append(f"fabrics.{name}: missing {key}")
+    accs, ups = catalog.get("accelerators") or {}, catalog.get("scale_up_fabrics") or {}
+    for name, p in (catalog.get("platforms") or {}).items():
+        if p.get("accelerator") not in accs:
+            bad.append(f"platforms.{name}: unknown accelerator {p.get('accelerator')!r}")
+        elif p.get("product") and p["product"] not in ((accs[p["accelerator"]] or {}).get("products") or {}):
+            bad.append(f"platforms.{name}: {p['product']!r} is not a product of {p['accelerator']}")
+        if (p.get("scale_up") or {}).get("fabric") not in ups:
+            bad.append(f"platforms.{name}: unknown scale-up fabric {(p.get('scale_up') or {}).get('fabric')!r}")
+        if not isinstance(p.get("gpus_per_node"), int) or p["gpus_per_node"] < 1:
+            bad.append(f"platforms.{name}: gpus_per_node must be a positive integer")
     return bad
 
 

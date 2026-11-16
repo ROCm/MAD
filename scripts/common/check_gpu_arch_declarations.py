@@ -29,9 +29,12 @@ import yaml
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "recipe"))
 import models  # noqa: E402  (aliases and per-accelerator variants)
 
-# The architectures multinode cards are run on. A new one goes here, and rule 2
-# then makes every restricted card say whether it supports it.
-KNOWN_ARCHS = ("gfx942", "gfx950")
+# The architectures multinode cards are run on: the catalog's accelerators with a compiler
+# target (compat/rocm.yaml; not one still `target: tbd`). A new one is a catalog entry, and
+# rule 2 then makes every restricted card say whether it supports it.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "compat", "rocm.yaml")) as _f:
+    KNOWN_ARCHS = tuple(sorted(a for a, d in (yaml.safe_load(_f).get("accelerators") or {}).items()
+                               if (d or {}).get("target", a) != "tbd"))
 
 
 def split(v):

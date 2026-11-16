@@ -166,7 +166,7 @@ def _get_run_metadata(pipeline: str = "sglang"):
         'launcher': 'slurm_multi',
         # The launcher detects the allocation's GPU and forwards it; gfx942 only
         # when run by hand without it, which is what this used to say unconditionally.
-        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', 'gfx942'),
+        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', ''),   # the detected GPU (launcher); unknown stays unknown
     }
 
 

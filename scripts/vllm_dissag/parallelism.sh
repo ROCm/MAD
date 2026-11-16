@@ -18,7 +18,7 @@
 #   child  -> --data-parallel-start-rank <r> --headless
 # (TP mode has no master/child distinction; callers don't invoke this for TP.)
 parallelism_role_args() {
-    local role="$1" dp_start_rank="$2" gpus_per_node="${3:-8}"
+    local role="$1" dp_start_rank="$2" gpus_per_node="${3:?gpus per node}"
     if [[ "$role" == "master" ]]; then
         printf -- '--api-server-count=%s' "${gpus_per_node}"
     else

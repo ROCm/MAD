@@ -59,6 +59,14 @@ CONTAINER_SCRIPT_DIRS = {"/opt/nixl-vllm-cookbook": "vllm_dissag", "/opt/mooncak
                          "/mad_scripts": ""}
 
 
+def default_gpus_per_node():
+    """GPUs per node of the catalog's default platform: what cluster.sh gives a run naming none."""
+    import yaml
+    with open(COMPAT / "rocm.yaml") as f:
+        c = yaml.safe_load(f)
+    return c["platforms"][c["default_platform"]]["gpus_per_node"]
+
+
 def gpu_arch(card):
     """The GPU a card runs on: gfx950 when it skips gfx942, else gfx942."""
     skip = card.get("skip_gpu_arch") or []
@@ -352,6 +360,7 @@ def spec_file_equivalence(a):
             gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
             env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
             env["SLURM_NNODES"] = str(node_count(card))
+            env.setdefault("GPUS_PER_NODE", str(default_gpus_per_node()))   # as cluster.sh: the platform's
             spec = topology.from_env(env, catalog)
             with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
                 json.dump(spec, f)

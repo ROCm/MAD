@@ -58,9 +58,22 @@ def _int(env, name, default):
         raise TopologyError(f"{name}={v!r} is not an integer")
 
 
+def gpus_per_node(spec, env=None):
+    """The spec's gpus_per_node, else GPUS_PER_NODE (cluster.sh: the run's platform). Never assumed."""
+    if spec.get("gpus_per_node") is not None:
+        return spec["gpus_per_node"]
+    v = _int(env if env is not None else {}, "GPUS_PER_NODE", None)
+    if v is None:
+        v = _int(os.environ, "GPUS_PER_NODE", None)
+    if v is None:
+        raise TopologyError("gpus_per_node unknown: give it in the spec, or GPUS_PER_NODE "
+                            "(the launchers set it from the platform, compat/rocm.yaml platforms)")
+    return v
+
+
 def from_env(env, launcher):
     """The spec a launcher builds today from its environment."""
-    gpus = _int(env, "GPUS_PER_NODE", 8)
+    gpus = gpus_per_node({}, env)
     if launcher == "vllm_multinode":
         nnodes = _int(env, "SLURM_NNODES", 1)
         tp = _int(env, "TP_SIZE", gpus)
@@ -111,7 +124,7 @@ def validate(spec):
     for r in roles:
         if not isinstance(r.get("nodes"), int) or r["nodes"] < 1:
             raise TopologyError(f"role {r.get('name')!r}: nodes must be a positive integer")
-    gpus = spec.get("gpus_per_node", 8)
+    gpus = gpus_per_node(spec)
     for r in roles:
         p = r.get("parallel") or {}
         if p.get("mode") == "wide_ep" and gpus % p.get("ep_tp", 1):
@@ -150,7 +163,7 @@ def resolve(spec, rank):
     out["router"] = bool(router and router.get("host") == r["name"] and router.get("index", 0) == index)
     p = r.get("parallel") or {}
     if p.get("mode") == "wide_ep":
-        per_node = spec.get("gpus_per_node", 8) // p.get("ep_tp", 1)
+        per_node = gpus_per_node(spec) // p.get("ep_tp", 1)
         out.update({"dp_per_node": per_node, "dp_size": r["nodes"] * per_node, "dp_start_rank": index * per_node})
     return out
 
@@ -162,7 +175,7 @@ def legacy_env(spec, launcher, env=None):
     read from xP / yD / WIDE_EP / ... A setting the caller also gave must agree."""
     validate(spec)
     roles = spec["roles"]
-    gpus = spec.get("gpus_per_node", 8)
+    gpus = gpus_per_node(spec, env)
     engine = {"vllm_multinode": "vllm", "vllm_dissag": "vllm", "sglang_disagg": "sglang"}.get(launcher)
     if engine and spec.get("engine", engine) != engine:
         raise TopologyError(f"{launcher} runs {engine}, the spec is for {spec['engine']}")

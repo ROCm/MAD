@@ -12,6 +12,7 @@ the concepts (prefill and decode, launchers, connectors).
 - [What differs per launcher](#what-differs-per-launcher)
 - [How an image is built](#how-an-image-is-built)
 - [What a recipe needs from the hardware](#what-a-recipe-needs-from-the-hardware)
+- [Platforms and fabrics as data](#platforms-and-fabrics-as-data)
 - [Offline checks per layer](#offline-checks-per-layer)
 
 ## One run, in order
@@ -218,6 +219,25 @@ overrides. When a recipe has a fraction, the launcher finds one GPU's memory fir
 bank of the first GPU in the KFD topology, smallest across nodes; refused when unreadable),
 and the derived values go into the job's recipe (`MAD_RECIPE_FILE`) like any recipe value.
 
+## Platforms and fabrics as data
+
+The node and the network are described in `compat/rocm.yaml` too, so code does not hold them:
+
+- `platforms`: a node type -- accelerator and product, GPUs per node, scale-up domain, NICs per
+  GPU (`mi300x-oam-8`, `mi325x-oam-8`, `mi355x-ubb-8`, `mi455x-helios-tray`). A run names its
+  platform with `MAD_PLATFORM`; `cluster.sh` takes `GPUS_PER_NODE` from it (else from
+  `default_platform`), and the GPU probe verifies it: the nodes' accelerator must be the
+  platform's, and no node may have fewer GPUs than the run uses. The containers no longer
+  assume 8 GPUs; the launchers pass `GPUS_PER_NODE`.
+- `fabrics`: the scale-out NIC families (`cx7`, `ainic`, `thor2`) -- the names that identify each,
+  the GID index, control interface, RDMA drivers, KV NIC, how its GPU rails are found, and its
+  own settings. `cluster.sh` fills from the detected family only what the run did not pass
+  (`scripts/common/platform/fabric.py`); a new NIC family is a catalog entry.
+- `scale_up_fabrics`: the domain tensor/expert-parallel traffic belongs in (`xgmi` in a node,
+  `ualoe` across a rack).
+
+`recipe.py validate` checks these references with the rest of the catalog.
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in
@@ -231,7 +251,7 @@ None of these need GPUs; run them from the MAD root. The full list is in
 | Node selection, verdict | `bash scripts/common/tests/launcher_lib_assert.sh`, `bash scripts/common/tests/launcher_verdict_assert.sh` |
 | Dispatcher | `bash scripts/common/tests/dispatch_assert.sh` |
 | Node program | `bash scripts/common/tests/node_lib_assert.sh` |
-| Site fabric | `bash scripts/common/tests/cluster_fabric_assert.sh` |
+| Site fabric, platform | `bash scripts/common/tests/cluster_fabric_assert.sh`, `bash scripts/common/tests/platform_assert.sh` |
 | Kubernetes | `python3 -m unittest discover -s scripts/common/k8s/tests` |
 | Pin sets | `python3 docker/pins/pins.py validate`; `python3 -m unittest discover -s docker/pins/tests` |
 | Recipe roles, variants, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |

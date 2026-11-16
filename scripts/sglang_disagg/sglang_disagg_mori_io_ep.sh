@@ -229,8 +229,8 @@ fi
 # DP_MODE=0: CLI --tp-size is IO_EP_TP_SIZE (default 8) on every worker; PREFILL_EP_SIZE/DECODE_EP_SIZE
 # still scale with xP/yD×GPUS_PER_NODE for MoRI env (not passed as CLI unless DP_MODE=1).
 # DP_MODE=1: --tp-size scales with cluster; --dp-size/--ep-size on CLI (same total degree as Nnodes×GPUS_PER_NODE).
-GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
-GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-8}"
+GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/rocm.yaml platforms)}"
+GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-${GPUS_PER_NODE}}"
 
 if [[ "$DP_MODE" == "1" ]]; then
     PREFILL_TP_SIZE=$((xP * GPUS_PER_NODE))
@@ -294,7 +294,7 @@ config_path = os.environ["MODELS_YAML"]
 model_name = os.environ["MODEL_NAME"]
 mode = os.environ["PARALLEL_MODE"]
 xP = int(os.environ.get("xP", "1"))
-gpus_per_node = int(os.environ.get("GPUS_PER_NODE", "8"))
+gpus_per_node = int(os.environ["GPUS_PER_NODE"])
 
 with open(config_path, "r", encoding="utf-8") as f:
     models = yaml.safe_load(f) or {}

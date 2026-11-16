@@ -30,7 +30,8 @@ echo "arch=$CLUSTER_ARCHETYPE gid=$NCCL_IB_GID_INDEX if=$NCCL_SOCKET_IFNAME kv=$
 RESOLVE
 _resolve() {
     local root="$TMP/$1"; shift
-    env -i HOME="$TMP" USER=t PATH="$root/bin:/usr/bin:/bin" \
+    # The python3 that runs the launchers (cluster.sh reads the fabric catalog with PyYAML).
+    env -i HOME="$TMP" USER=t PATH="$root/bin:$(dirname "$(command -v python3)"):/usr/bin:/bin" \
         CLUSTER_SYSFS_IB="$root/ib" CLUSTER_SYSFS_NET="$root/net" _CLUSTER_SH="$DIR/cluster.sh" "$@" \
         bash "$TMP/resolve.sh"
 }
@@ -59,6 +60,33 @@ _is "$(_resolve ionic NCCL_IB_HCA=ionic_0 NCCL_SOCKET_IFNAME=enX KV_IB_DEVICE=io
     "arch=ainic gid=0 if=enX kv=ionic_3 hca=ionic_0 mori=$I8"                            "passed HCA, interface, KV NIC and GID are kept"
 _is "$(_resolve ionic CLUSTER_ARCHETYPE=cx7)" "arch=cx7 gid=3 if=ens3 kv=mlx5_1 hca= mori=" \
     "a passed archetype is not re-detected"
+
+echo "=== a family's own settings ==="
+cat > "$TMP/env.sh" <<'ENVSH'
+. "$_CLUSTER_SH" >/dev/null 2>&1
+echo "roce=${RCCL_AINIC_ROCE:-}"
+ENVSH
+_env() { local root="$TMP/$1"; shift
+    env -i HOME="$TMP" USER=t PATH="$root/bin:$(dirname "$(command -v python3)"):/usr/bin:/bin" \
+        CLUSTER_SYSFS_IB="$root/ib" CLUSTER_SYSFS_NET="$root/net" _CLUSTER_SH="$DIR/cluster.sh" "$@" bash "$TMP/env.sh"; }
+_is "$(_env ainic)" "roce=1" "ainic sets RCCL_AINIC_ROCE"
+_is "$(_env ainic RCCL_AINIC_ROCE=0)" "roce=0" "...unless the run set it"
+_is "$(_env cx7)" "roce=" "other families do not"
+
+echo "=== a new NIC family is a catalog entry ==="
+python3 - "$DIR/../../compat/rocm.yaml" "$TMP/catalog.yaml" <<'PY'
+import sys, yaml
+c = yaml.safe_load(open(sys.argv[1]))
+c["fabrics"]["newnic"] = {"match": ["vnic"], "gid_index": 5, "socket_ifname": "enx0", "rdma_drivers": "vnic",
+                          "kv_nic": "vnic0", "rails": {"driver": "vnic_drv", "default": ["vnic0", "vnic1"]}}
+c["fabric_detection"]["order"].insert(0, "newnic")
+yaml.safe_dump(c, open(sys.argv[2], "w"))
+PY
+_layout newnic enx0 "enx0 lo" $(for i in 0 1 2; do echo vnic_drv:vnic$i; done)
+_is "$(_resolve newnic MAD_CATALOG="$TMP/catalog.yaml")" "arch=newnic gid=5 if=enx0 kv=vnic0 hca=vnic0,vnic1,vnic2 mori=vnic0,vnic1,vnic2" \
+    "detected, rails found by driver, values from the catalog -- no code change"
+_is "$(_resolve cx7 MAD_CATALOG="$TMP/none.yaml" 2>/dev/null)" "arch=unknown gid=3 if=eth0 kv=mlx5_1 hca= mori=" \
+    "no catalog: the old cx7 values, with a warning"
 
 echo "======================================================"
 echo "  cluster_fabric_assert: ${pass} passed, ${fail} failed"

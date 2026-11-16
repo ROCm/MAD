@@ -57,6 +57,15 @@ class Catalog(unittest.TestCase):
     def test_catalog_is_consistent(self):
         self.assertEqual(R.validate(CAT), [])
 
+    def test_validate_checks_fabrics_and_platforms(self):
+        bad = copy.deepcopy(CAT)
+        bad["fabric_detection"]["order"].append("nope")
+        bad["platforms"]["x"] = {"accelerator": "gfx942", "product": "MI999", "gpus_per_node": 0,
+                                 "scale_up": {"fabric": "warp"}}
+        problems = R.validate(bad)
+        for want in ("unknown fabric 'nope'", "'MI999' is not a product", "gpus_per_node", "scale-up fabric 'warp'"):
+            self.assertTrue(any(want in p for p in problems), (want, problems))
+
     def test_validate_names_a_bad_reference(self):
         bad = copy.deepcopy(CAT)
         bad["kernels"][KIMI_BUILD]["gfx942"]["weights"].append("fp5_imaginary")

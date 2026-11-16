@@ -128,6 +128,7 @@ echo ""
 echo "=== run_xPyD_models.slurm (vLLM disagg): ports and containers of this job only ==="
 # On a copy of scripts/: this launcher publishes its CSV into its own directory.
 cp -a "$DIR" "$TMP/scripts"
+cp -a "$DIR/../compat" "$TMP/compat"     # the platform and fabric catalog cluster.sh reads
 rm -rf "$TMP/run"; mkdir -p "$TMP/run/logs"
 ( cd "$TMP/run" && env -i PATH="$B:$PATH" HOME="$TMP" USER=t STUB_LOG="$TMP/run/stub.log" \
     LOG_PATH="$TMP/run/logs" SLURM_JOB_ID=4242 SLURM_NNODES=2 SLURM_JOB_NODELIST=nodeA,nodeB \

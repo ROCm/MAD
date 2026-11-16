@@ -313,7 +313,7 @@ connector_launch_worker() {
     # is a full server; the kv-transfer-config is attached on all nodes (no DP
     # master/child split). kv-cache-dtype/block-size come from models.yaml.
     local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
-    local _tp_size="${IO_TP_SIZE:-${GENERIC_TP_SIZE:-8}}"
+    local _tp_size="${IO_TP_SIZE:-${GENERIC_TP_SIZE:-${GPUS_PER_NODE}}}"
 
     # The connector owns the parallelism *degree* (--tensor-parallel-size) for the
     # moriio+TP path, so strip any --tensor-parallel-size N that a models.yaml entry

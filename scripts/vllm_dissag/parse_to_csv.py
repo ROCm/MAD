@@ -255,7 +255,7 @@ def _get_run_metadata(pipeline: str = "vllm"):
     yD = os.environ.get('yD', '1')
     run_mori = os.environ.get('RUN_MORI', '0')
     run_deepep = os.environ.get('RUN_DEEPEP', '0')
-    gpus = os.environ.get('GPUS_PER_NODE', '8')
+    gpus = os.environ.get('GPUS_PER_NODE', '')   # the launcher's, from the run's platform
 
     # Determine backend tag
     if run_mori == '1':
@@ -271,20 +271,20 @@ def _get_run_metadata(pipeline: str = "vllm"):
         except (TypeError, ValueError):
             return default
 
-    gpus_per_node = _as_int(gpus, 8)
+    gpus_per_node = _as_int(gpus, None)            # unknown: recorded as unknown, not guessed
     nnodes = _as_int(os.environ.get('NNODES'), _as_int(xP, 1) + _as_int(yD, 1))
 
     return {
         'pipeline': pipeline,
         'deployment_type': os.environ.get('PERF_DEPLOYMENT_TYPE') or f'disagg_{xP}P{yD}D',
         'tags': os.environ.get('PERF_TAGS') or f'{pipeline}_disagg,{backend}',
-        'n_gpus': str(nnodes * gpus_per_node),
+        'n_gpus': str(nnodes * gpus_per_node) if gpus_per_node else '',
         'nnodes': str(nnodes),
-        'gpus_per_node': str(gpus_per_node),
+        'gpus_per_node': str(gpus_per_node) if gpus_per_node else '',
         'docker_image': os.environ.get('DOCKER_IMAGE_NAME', ''),
         'machine_name': os.environ.get('SLURM_JOB_NODELIST', ''),
         'launcher': 'slurm_multi',
-        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', 'gfx942'),
+        'gpu_architecture': os.environ.get('PERF_GPU_ARCH', ''),   # the detected GPU (launcher); unknown stays unknown
     }
 
 

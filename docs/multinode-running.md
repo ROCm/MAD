@@ -748,6 +748,7 @@ bash scripts/common/tests/dispatch_assert.sh          # dispatch selection, fail
 bash scripts/common/tests/launcher_lib_assert.sh      # node selection, addresses, node program, verdict
 bash scripts/common/tests/config_layers_assert.sh     # the configuration layers and config.resolved.json
 bash scripts/common/tests/cluster_fabric_assert.sh    # cluster.sh's fabric fallback on fake sysfs trees
+bash scripts/common/tests/platform_assert.sh          # GPUs per node from the platform; probes verify it
 python3 scripts/common/tests/snapshot/snapshot.py --spooled    # each launcher run as sbatch runs it, from a spool copy
 python3 scripts/common/tests/snapshot/snapshot.py --spec-file  # every card run from a topology spec file
 python3 -m unittest discover -s scripts/common/topology/tests -v

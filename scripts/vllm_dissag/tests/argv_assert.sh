@@ -265,7 +265,7 @@ for cf in moriio rixl; do
     _has "$E" "PYTORCH_ALLOC_CONF=expandable_segments:False" "${cf}.env: PYTORCH_ALLOC_CONF"
     _has "$E" "PYTORCH_HIP_ALLOC_CONF=expandable_segments:False" "${cf}.env: PYTORCH_HIP_ALLOC_CONF"
     _has "$E" "HSA_ENABLE_IPC_MODE_LEGACY=0" "${cf}.env: IPC_MODE_LEGACY=0"
-    _has "$E" "MORI_GPU_ARCHS=gfx942" "${cf}.env: MORI_GPU_ARCHS"
+    _hasnot "$E" "MORI_GPU_ARCHS=" "${cf}.env: no MORI_GPU_ARCHS pin (the image's arch, or the detected GPU)"
   else
     printf "  FAIL  connectors/%s.env missing\n" "$cf"; fail=$((fail+1))
   fi

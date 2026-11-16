@@ -30,7 +30,7 @@ _BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
 BENCHMARK_PORT="${BENCHMARK_PORT:-2584}"
-GPUS_TOTAL="${GPUS_TOTAL:-$(( (${xP:-1} > ${yD:-1} ? ${xP:-1} : ${yD:-1}) * ${GPUS_PER_NODE:-8} ))}"
+GPUS_TOTAL="${GPUS_TOTAL:-$(( (${xP:-1} > ${yD:-1} ? ${xP:-1} : ${yD:-1}) * ${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/rocm.yaml platforms)} ))}"
 LOG="/run_logs/${SLURM_JOB_ID}/benchmark_long_context_${SLURM_JOB_ID}_${timestamp}_xP${xP}_yD${yD}_${MODEL_NAME}"
 
 CON="${BENCHMARK_CON:-1 4 8}"

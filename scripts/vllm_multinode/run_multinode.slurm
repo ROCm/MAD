@@ -129,7 +129,7 @@ cluster_gpu_memory_for_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME" || exit 
 config_apply_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
-GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+GPUS_PER_NODE="${GPUS_PER_NODE:?cluster.sh sets it from the run platform}"
 SERVE_PORT="${SERVE_PORT:-8000}"
 MASTER_PORT="${MASTER_PORT:-29500}"
 
@@ -235,7 +235,7 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; do
 #     scripts/vllm_dissag/connectors/moriio.env (expandable_segments:False on both
 #     allocators, HSA_ENABLE_IPC_MODE_LEGACY=0, the RDMA tuning), which PyTorch and
 #     MoRI read at start-up. A value exported at submit time wins over the file, and
-#     MORI_GPU_ARCHS follows the detected GPU unless it was set (the file pins gfx942).
+#     MORI_GPU_ARCHS is the submitted value, else the detected GPU (else the image's).
 COLOCATED_ENV_ARGS=""
 case "${ALL2ALL_BACKEND}" in
     mori*)
@@ -244,13 +244,14 @@ case "${ALL2ALL_BACKEND}" in
         while IFS= read -r _line; do
             [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
             _k="${_line%%=*}"; _v="${_line#*=}"
-            [ "$_k" = MORI_GPU_ARCHS ] && [ -z "${MORI_GPU_ARCHS:-}" ] && [ -n "${MAD_GPU_ARCH:-}" ] && _v="$MAD_GPU_ARCH"
             COLOCATED_ENV_ARGS+=" -e ${_k}=${!_k:-$_v}"
         done < "$_MORI_ENV_FILE"
+        _mori_arch="${MORI_GPU_ARCHS:-${MAD_GPU_ARCH:-}}"
+        [ -n "$_mori_arch" ] && COLOCATED_ENV_ARGS+=" -e MORI_GPU_ARCHS=${_mori_arch}"
         ;;
 esac
 _FABRIC_FWD="$_FABRIC_PASSED"
-case "${CLUSTER_ARCHETYPE:-}" in ainic|thor2) _FABRIC_FWD="$_FABRIC_VARS" ;; esac
+[ "${CLUSTER_FABRIC_DERIVED:-0}" = 1 ] && _FABRIC_FWD="$_FABRIC_VARS"   # cluster.sh derived this fabric (catalog rails)
 for _v in $_FABRIC_FWD; do
     case " $COLOCATED_ENV_ARGS " in *" -e ${_v}="*) continue ;; esac
     [ -n "${!_v:-}" ] && COLOCATED_ENV_ARGS+=" -e ${_v}=${!_v}"

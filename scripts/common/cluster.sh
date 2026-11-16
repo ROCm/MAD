@@ -172,7 +172,18 @@ cluster_job_verdict() {
     return 0
 }
 # --------------------------------------------------------------- topology
-export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+# GPUs per node: what the run passed, else its platform's (MAD_PLATFORM, else the catalog's
+# default_platform -- compat/rocm.yaml `platforms`). A named platform is also verified against
+# the nodes by cluster_require_gpu_arch (accelerator, GPU count).
+if _platform_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/platform.py" shell 2>&1)"; then
+    eval "${_platform_out}"
+    export GPUS_PER_NODE="${GPUS_PER_NODE:-${_platform_gpus}}"
+else
+    echo "ERROR: platform: ${_platform_out}" >&2
+    _CLUSTER_PLATFORM_ERROR="${_platform_out}"
+fi
+[ -n "${GPUS_PER_NODE:-}" ] || { echo "ERROR: GPUS_PER_NODE is unknown (no platform catalog); set it" >&2; _CLUSTER_PLATFORM_ERROR="GPUS_PER_NODE unknown"; }
+export GPUS_PER_NODE
 export NNODES="${NNODES:-${SLURM_NNODES:-1}}"
 export xP="${xP:-1}"
 export yD="${yD:-1}"
@@ -193,54 +204,12 @@ export TP_SIZE="${TP_SIZE:-${GPUS_PER_NODE}}"
 # explicitly to override, or set any individual variable below -- everything here
 # is ${VAR:-default}, so an explicit value always wins over the archetype.
 #
-#   cx7      Mellanox CX7 / RoCE          mlx5_*      GID 3   iface eth0
-#   ainic    AMD AINIC / Pollara          rdma0..7    GID 1   iface eno0
-#   thor2    Broadcom Thor2 / RoCE        bnxt_re0..7 GID 3   iface fenic0
+# The families (cx7, ainic, thor2 today) and their values are in compat/rocm.yaml `fabrics`.
 #
-# Archetype facts and the confirm-on-node procedure:
-# .claude/skills/mad-slurm-multinode/references/cluster-types.md
 # Where the node lists its RDMA devices and network interfaces. Parameters only so
 # the offline tests can point detection at a fake tree.
 export CLUSTER_SYSFS_IB="${CLUSTER_SYSFS_IB:-/sys/class/infiniband}"
 export CLUSTER_SYSFS_NET="${CLUSTER_SYSFS_NET:-/sys/class/net}"
-
-# Kernel driver behind an RDMA device (ionic, bnxt_en, mlx5_core), or nothing.
-_cluster_ib_driver() {
-    local link
-    link="$(readlink "${CLUSTER_SYSFS_IB}/$1/device/driver" 2>/dev/null)" || return 0
-    basename "$link"
-}
-
-# Everything below is a FALLBACK: it fills only what the run did not pass, and an
-# explicit value always wins. It classifies by device name and by the driver
-# behind it, because the same adapter is named differently per site (AINIC is
-# rdma0..7 on one cluster and ionic_0..7 on another).
-cluster_detect_archetype() {
-    local devs="" drivers="" d
-    if [ -d "${CLUSTER_SYSFS_IB}" ]; then
-        devs="$(ls "${CLUSTER_SYSFS_IB}" 2>/dev/null)"
-        for d in $devs; do drivers="$drivers $(_cluster_ib_driver "$d")"; done
-    elif command -v ibv_devices >/dev/null 2>&1; then
-        devs="$(ibv_devices 2>/dev/null | awk 'NR>2 {print $1}')"
-    fi
-    case "${devs} ${drivers}" in
-        *bnxt_re*|*bnxt_en*) echo thor2 ;;
-        *rdma*|*ionic*)      echo ainic ;;
-        *mlx5*)              echo cx7 ;;
-        *)                   echo unknown ;;
-    esac
-}
-
-# RDMA devices on this node whose driver is $1, comma-separated in natural order,
-# or nothing when sysfs cannot say (then the archetype's fixed list is used).
-cluster_rdma_rails() {
-    local d out=""
-    [ -d "${CLUSTER_SYSFS_IB}" ] || return 0
-    for d in $(ls "${CLUSTER_SYSFS_IB}" 2>/dev/null | sort -V); do
-        [ "$(_cluster_ib_driver "$d")" = "$1" ] && out="${out:+$out,}$d"
-    done
-    echo "$out"
-}
 
 # The archetype's usual control interface if this node has it, else the
 # interface of the IPv4 default route, else the usual name unchanged.
@@ -251,32 +220,20 @@ cluster_socket_ifname() {
     echo "${dflt:-$want}"
 }
 
-export CLUSTER_ARCHETYPE="${CLUSTER_ARCHETYPE:-$(cluster_detect_archetype)}"
-
-case "${CLUSTER_ARCHETYPE}" in
-    ainic)
-        _arch_gid=1;  _arch_iface=eno0;   _arch_drivers=ionic;   _arch_kv_nic=rdma0
-        # Without this the AINIC path falls back to verbs/sockets silently.
-        export RCCL_AINIC_ROCE="${RCCL_AINIC_ROCE:-1}"
-        ;;
-    thor2)
-        _arch_gid=3;  _arch_iface=fenic0; _arch_drivers=bnxt_re; _arch_kv_nic=bnxt_re0
-        ;;
-    *)
-        # cx7 and unknown share these: the previous hardcoded values, so a node
-        # this cannot classify behaves exactly as before rather than differently.
-        _arch_gid=3;  _arch_iface=eth0;   _arch_drivers=mlx5;    _arch_kv_nic=mlx5_1
-        ;;
-esac
-
-# The rails as this node names them, for the fabrics whose names vary by site.
-_arch_found_rails=""
-case "${CLUSTER_ARCHETYPE}" in
-    ainic) _arch_found_rails="$(cluster_rdma_rails ionic)" ;;
-    thor2) _arch_found_rails="$(cluster_rdma_rails bnxt_en)" ;;
-esac
-[ -n "${_arch_found_rails}" ] && _arch_kv_nic="${_arch_found_rails%%,*}"
-
+# The family and its fallback values are data: compat/rocm.yaml `fabrics`, settled for this node
+# by scripts/common/platform/fabric.py (detected from the RDMA devices and drivers unless
+# CLUSTER_ARCHETYPE names the family). A new NIC family is a catalog entry, not a code branch.
+_arch_gid=3; _arch_iface=eth0; _arch_drivers=mlx5; _arch_kv_nic=mlx5_1; _arch_rails=""; _arch_env=()
+if _fabric_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/fabric.py" shell 2>&1)"; then
+    eval "${_fabric_out}"
+else
+    echo "WARN: the fabric catalog could not be read (${_fabric_out}); using the cx7 fallback values" >&2
+    CLUSTER_ARCHETYPE="${CLUSTER_ARCHETYPE:-unknown}"
+fi
+export CLUSTER_ARCHETYPE
+for _kv in "${_arch_env[@]}"; do                 # the family's own settings, unless the run set them
+    _kn="${_kv%%=*}"; [ -n "${!_kn:-}" ] || export "${_kv}"
+done
 export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${_arch_gid}}"
 export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-$(cluster_socket_ifname "${_arch_iface}")}"
 export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${NCCL_SOCKET_IFNAME}}"
@@ -298,13 +255,11 @@ export KV_IB_DEVICE="${KV_IB_DEVICE:-${_arch_kv_nic}}"
 # rails come from the archetype. On cx7 nothing is set here: each connector keeps
 # the choice it already makes (rixl.sh even probes ibstat, which a preset
 # NCCL_IB_HCA would switch off), so the fabric this was validated on is unchanged.
-case "${CLUSTER_ARCHETYPE}" in
-    ainic) _arch_rails="rdma0,rdma1,rdma2,rdma3,rdma4,rdma5,rdma6,rdma7" ;;
-    thor2) _arch_rails="bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7" ;;
-    *)     _arch_rails="" ;;
-esac
-[ -n "${_arch_found_rails}" ] && _arch_rails="${_arch_found_rails}"
+# CLUSTER_FABRIC_DERIVED=1: this family's rails and settings are derived here (the catalog names
+# its rails), so a launcher forwards them into the containers, whose defaults are one CX7 site's.
+export CLUSTER_FABRIC_DERIVED=0
 if [ -n "${_arch_rails}" ]; then
+    CLUSTER_FABRIC_DERIVED=1
     export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails}}"
     export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails}}"
 fi
@@ -576,6 +531,19 @@ _cluster_local_gpu_arch() {
     echo "$_arch"
 }
 
+# GPUs on this node: the KFD topology nodes with a GPU target (each logical GPU in a
+# partition mode counts). Empty when it cannot tell.
+_cluster_local_gpu_count() {
+    local _p _v _n=0
+    for _p in /sys/class/kfd/kfd/topology/nodes/*/properties; do
+        [ -r "$_p" ] || continue
+        _v="$(awk '$1=="gfx_target_version"{print $2}' "$_p" 2>/dev/null)"
+        [ -n "$_v" ] && [ "$_v" != "0" ] && _n=$((_n + 1))
+    done
+    [ "$_n" -gt 0 ] && echo "$_n"
+    return 0
+}
+
 # cluster_detect_gpu_arch
 #
 # Sets and exports MAD_GPU_ARCH to the architecture of EVERY allocated node, or
@@ -595,11 +563,14 @@ cluster_detect_gpu_arch() {
         # Same shape as cluster_check_model_path: the body always exits 0, so a node
         # that cannot answer shows up as a missing line, not as a failed step in sacct.
         out="$(dispatch_gather gpu-arch /bin/bash -c \
-            "$(declare -f _cluster_local_gpu_arch); echo \"\$(hostname) \$(_cluster_local_gpu_arch)\"; exit 0" \
+            "$(declare -f _cluster_local_gpu_arch _cluster_local_gpu_count); echo \"\$(hostname) \$(_cluster_local_gpu_arch) \$(_cluster_local_gpu_count)\"; exit 0" \
             2>/dev/null || true)"
     else
-        out="$(hostname) $(_cluster_local_gpu_arch)"
+        out="$(hostname) $(_cluster_local_gpu_arch) $(_cluster_local_gpu_count)"
     fi
+    # The fewest GPUs any node has (third column), for cluster_require_gpu_arch.
+    MAD_GPU_COUNT="$(printf '%s\n' "${out}" | awk 'NF>=3 && $3>0 {print $3}' | sort -n | head -1 || true)"
+    export MAD_GPU_COUNT
     [ -n "${out}" ] && printf '%s\n' "${out}" | sed 's/^/  gpu arch: /'
     # Sourced under `set -euo pipefail` by run_multinode.slurm: a probe that finds
     # nothing must fall through to the warning below, not end the job.
@@ -753,11 +724,34 @@ cluster_gpu_memory_for_recipe() {
     return 0
 }
 
+# The probes verify the platform rather than decide it: a platform the run named
+# (MAD_PLATFORM) must have the accelerator the nodes report, and no node may have fewer GPUs
+# than the run will use per node (GPUS_PER_NODE). Unknown facts are not refused.
+cluster_verify_platform() {
+    if [ -n "${_CLUSTER_PLATFORM_ERROR:-}" ]; then
+        echo "x platform: ${_CLUSTER_PLATFORM_ERROR}" >&2
+        return 1
+    fi
+    if [ -n "${MAD_PLATFORM_ACCELERATOR:-}" ] && [ -n "${MAD_GPU_ARCH:-}" ] \
+       && [ "${MAD_PLATFORM_ACCELERATOR}" != "${MAD_GPU_ARCH}" ]; then
+        echo "x MAD_PLATFORM=${MAD_PLATFORM} is ${MAD_PLATFORM_ACCELERATOR}, but these nodes are ${MAD_GPU_ARCH}." >&2
+        return 1
+    fi
+    if [ -n "${MAD_GPU_COUNT:-}" ] && [ "${MAD_GPU_COUNT}" -lt "${GPUS_PER_NODE}" ]; then
+        echo "x The run uses ${GPUS_PER_NODE} GPUs per node, but a node has ${MAD_GPU_COUNT}." >&2
+        echo "  Set GPUS_PER_NODE, or MAD_PLATFORM to this node type (compat/rocm.yaml platforms)." >&2
+        return 1
+    fi
+    [ -n "${MAD_PLATFORM:-}" ] && echo "+ platform ${MAD_PLATFORM}: ${MAD_GPU_ARCH:-arch unknown}, ${GPUS_PER_NODE} GPUs per node"
+    return 0
+}
+
 cluster_require_gpu_arch() {
     local model="$1" allowed="${2:-}"
     cluster_detect_gpu_arch || return 1
     # Label the results with the GPU the run actually used rather than a default.
     export PERF_GPU_ARCH="${PERF_GPU_ARCH:-${MAD_GPU_ARCH}}"
+    cluster_verify_platform || return 1
     [ -n "${allowed//[, ]/}" ] || return 0
     if [ "${GPU_ARCH_CHECK:-1}" = "0" ]; then
         echo "GPU_ARCH_CHECK=0: not enforcing ${model}'s supported archs (${allowed})"

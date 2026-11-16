@@ -40,7 +40,7 @@ echo "[host-rdma] mounts: $_RDMA_MOUNTS"
 # yaml and use the fallback. Models needing a static value can specify it in yaml.
 # The 0.70 at EP>=32 accounts for larger MoRI dispatch/combine buffers at high EP
 # width; measured on GLM but applies to any MoRI model as a safe default.
-_EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
+_EP_WIDTH=$(( yD * GPUS_PER_NODE ))
 if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
 echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
@@ -197,7 +197,7 @@ docker run --rm \
     ${VLLM_MORIIO_POST_BATCH_SIZE:+-e VLLM_MORIIO_POST_BATCH_SIZE=$VLLM_MORIIO_POST_BATCH_SIZE} \
     ${GPU_MEMORY_UTILIZATION:+-e GPU_MEMORY_UTILIZATION=$GPU_MEMORY_UTILIZATION} \
     -e _GPU_MEM_UTIL_LAUNCHER_DEFAULT=$_GPU_MEM_UTIL_LAUNCHER_DEFAULT \
-    -e GPUS_PER_NODE=${GPUS_PER_NODE:-8} \
+    -e GPUS_PER_NODE=${GPUS_PER_NODE} \
     ${GPU_MAX_HW_QUEUES:+-e GPU_MAX_HW_QUEUES=$GPU_MAX_HW_QUEUES} \
     ${HIP_FORCE_DEV_KERNARG:+-e HIP_FORCE_DEV_KERNARG=$HIP_FORCE_DEV_KERNARG} \
     ${HSA_NO_SCRATCH_RECLAIM:+-e HSA_NO_SCRATCH_RECLAIM=$HSA_NO_SCRATCH_RECLAIM} \

@@ -168,14 +168,12 @@ fi
 _FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME MORI_RDMA_DEVICES MORI_IB_GID_INDEX MORI_SOCKET_IFNAME IB_DEVICES IBDEVICES RCCL_AINIC_ROCE"
 _FABRIC_PASSED=""
 for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
-# Node shape the container sizes its servers from (sglang_disagg_mori_io_ep.sh:
-# GPUS_PER_NODE, and GENERIC_TP_SIZE in TP mode, both default 8). Like the fabric,
-# these reached the container only as its defaults, so no setting could run the
-# card on nodes with other than 8 GPUs. Forwarded when the caller set them, and
-# only then: cluster.sh defaults GPUS_PER_NODE to 8 below, the container's own
-# default, so a run that sets nothing starts exactly as before.
-_SHAPE_PASSED=""
-for _v in GPUS_PER_NODE GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
+# Node shape the container sizes its servers from (sglang_disagg_mori_io_ep.sh). GPUS_PER_NODE
+# always: cluster.sh takes it from the run's platform (compat/rocm.yaml platforms), and the
+# container no longer assumes 8. GENERIC_TP_SIZE (TP mode; the container defaults it to
+# GPUS_PER_NODE) when the caller set it.
+_SHAPE_PASSED="GPUS_PER_NODE"
+for _v in GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
 . "${MAD_SCRIPTS_DIR}/common/cluster.sh"
 config_layer site
 . "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
@@ -190,7 +188,7 @@ config_layer site
 # On cx7 / unknown, cluster.sh-only values are NOT forwarded: the container keeps
 # the defaults it has always run with on that fabric.
 _FABRIC_FWD="$_FABRIC_PASSED"
-case "${CLUSTER_ARCHETYPE:-}" in ainic|thor2) _FABRIC_FWD="$_FABRIC_VARS" ;; esac
+[ "${CLUSTER_FABRIC_DERIVED:-0}" = 1 ] && _FABRIC_FWD="$_FABRIC_VARS"   # cluster.sh derived this fabric (catalog rails)
 # IB_DEVICES is what the container hands sglang as --disaggregation-ib-device. A
 # caller or cluster.sh naming the rails as MORI_RDMA_DEVICES means the same NICs.
 if [ -z "${IB_DEVICES:-}" ] && [ -n "${MORI_RDMA_DEVICES:-}" ]; then

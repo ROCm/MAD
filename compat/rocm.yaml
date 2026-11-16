@@ -295,3 +295,83 @@ engines:
   sglang:
     kv_cache_arg: --kv-cache-dtype
     kv_cache_values: {bf16: auto}
+
+# ----------------------------------------------------------------------------------------------
+# Fabrics: the scale-out NIC families a site may have, as data. scripts/common/cluster.sh fills
+# what a run does not pass from the family it detects (scripts/common/platform/fabric.py); an
+# explicit value always wins. `match`: substrings of RDMA device or driver names that identify the
+# family, tried in fabric_detection.order. `rails`: the driver whose devices are the GPU rails
+# (found on the node), and the names to use when the node cannot be read; none: the connectors
+# keep their own choice.
+fabric_detection:
+  order: [thor2, ainic, cx7]
+  unknown: cx7          # a node nothing matches behaves as before the families existed
+fabrics:
+  cx7:
+    description: NVIDIA (Mellanox) ConnectX-7, RoCE
+    match: [mlx5]
+    gid_index: 3
+    socket_ifname: eth0
+    rdma_drivers: mlx5
+    kv_nic: mlx5_1
+  ainic:
+    description: AMD AI NIC (Pollara), RoCE
+    match: [rdma, ionic]
+    gid_index: 1
+    socket_ifname: eno0
+    rdma_drivers: ionic
+    kv_nic: rdma0
+    rails: {driver: ionic, default: [rdma0, rdma1, rdma2, rdma3, rdma4, rdma5, rdma6, rdma7]}
+    env: {RCCL_AINIC_ROCE: "1"}     # without it the AINIC path falls back to verbs/sockets silently
+  thor2:
+    description: Broadcom Thor2, RoCE
+    match: [bnxt_re, bnxt_en]
+    gid_index: 3
+    socket_ifname: fenic0
+    rdma_drivers: bnxt_re
+    kv_nic: bnxt_re0
+    rails: {driver: bnxt_en, default: [bnxt_re0, bnxt_re1, bnxt_re2, bnxt_re3, bnxt_re4, bnxt_re5, bnxt_re6, bnxt_re7]}
+
+# Scale-up fabrics: the domain inside which tensor/expert-parallel traffic belongs.
+scale_up_fabrics:
+  xgmi:
+    description: Infinity Fabric links between the GPUs of one node
+    scope: node
+  ualoe:
+    description: UALink over Ethernet, switched across a rack (CDNA 5 white paper)
+    scope: rack
+    switched: true
+
+# Platforms: a node type -- its accelerator, GPUs per node, NICs and their GPU affinity, scale-up.
+# nics_per_gpu counts the scale-out NICs serving each GPU (rails). A run names its platform with
+# MAD_PLATFORM (scripts/common/platform/platform.py); cluster.sh then takes GPUS_PER_NODE from it
+# and the GPU probe verifies the accelerator and the GPU count. default_platform: the shape a run
+# that names none gets (not verified: it says only how many GPUs to use per node).
+default_platform: mi300x-oam-8
+platforms:
+  mi300x-oam-8:
+    accelerator: gfx942
+    product: MI300X
+    gpus_per_node: 8
+    scale_up: {fabric: xgmi, gpus_per_domain: 8}
+    nics_per_gpu: 1
+  mi325x-oam-8:
+    accelerator: gfx942
+    product: MI325X
+    gpus_per_node: 8
+    scale_up: {fabric: xgmi, gpus_per_domain: 8}
+    nics_per_gpu: 1
+  mi355x-ubb-8:
+    accelerator: gfx950
+    product: MI355X
+    gpus_per_node: 8
+    scale_up: {fabric: xgmi, gpus_per_domain: 8}
+    nics_per_gpu: 1
+  mi455x-helios-tray:
+    accelerator: cdna5
+    product: MI455X
+    gpus_per_node: 4
+    scale_up: {fabric: ualoe, gpus_per_domain: 72}
+    nics_per_gpu: 3
+    coherent_host_link: true
+    evidence: CDNA 5 white paper (Helios rack); not yet available to run on

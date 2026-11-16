@@ -9,9 +9,14 @@ argv. Run from the MAD repo root:
     python3 -m unittest discover -s scripts/common/topology/tests -v
 """
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+# These tests describe today's 8-GPU nodes (compat/rocm.yaml default_platform); the launchers
+# set GPUS_PER_NODE from the run's platform, and nothing assumes it.
+os.environ.setdefault("GPUS_PER_NODE", "8")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -154,14 +159,14 @@ class SpecFile(unittest.TestCase):
         import os, subprocess
         sh = f'. {HERE.parent / "apply.sh"} vllm_dissag; echo "xP=$xP"'
         ok = subprocess.run(["bash", "-c", sh], capture_output=True, text=True,
-                            env={"PATH": os.environ["PATH"], "MAD_TOPOLOGY": str(SPECS / "vllm_disagg_2p2d_wide_ep_tp2.json")})
+                            env={"PATH": os.environ["PATH"], "GPUS_PER_NODE": "8", "MAD_TOPOLOGY": str(SPECS / "vllm_disagg_2p2d_wide_ep_tp2.json")})
         self.assertEqual(ok.returncode, 0, ok.stderr)
         self.assertIn("xP=2", ok.stdout.splitlines())
         bad = subprocess.run(["bash", "-c", sh], capture_output=True, text=True,
-                             env={"PATH": os.environ["PATH"], "MAD_TOPOLOGY": "/nonexistent.json"})
+                             env={"PATH": os.environ["PATH"], "GPUS_PER_NODE": "8", "MAD_TOPOLOGY": "/nonexistent.json"})
         self.assertEqual(bad.returncode, 1)
         self.assertNotIn("xP=", bad.stdout)
-        unset = subprocess.run(["bash", "-c", sh], capture_output=True, text=True, env={"PATH": os.environ["PATH"]})
+        unset = subprocess.run(["bash", "-c", sh], capture_output=True, text=True, env={"PATH": os.environ["PATH"], "GPUS_PER_NODE": "8"})
         self.assertEqual(unset.stdout.strip(), "xP=")
 
 
