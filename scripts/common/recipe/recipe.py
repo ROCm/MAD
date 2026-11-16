@@ -438,9 +438,9 @@ def main(argv=None):
         return 1 if bad else 0
     with open(a.recipes) as f:
         recipes = yaml.safe_load(f) or {}
-    # The recipe as the launcher applies it: the alias followed, its accelerator's variant (or
-    # the default one) applied -- not chosen by the GPU found, so this checks what will run.
-    recipe = models.effective(recipes, a.model)
+    # The recipe as the launcher applies it: the alias followed (it pins its variant), else the
+    # variant of the GPU checked (the detected one, as config_apply_recipe), else the default.
+    recipe = models.effective(recipes, a.model, a.arch)
     if recipe is None:
         print(f"ERROR: no recipe {a.model!r} in {a.recipes}", file=sys.stderr)
         return 2

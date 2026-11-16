@@ -127,6 +127,16 @@ class RolesEndToEnd(unittest.TestCase):
         words = self.argv(after["ranks"][0])
         self.assertEqual(words[words.index("--kv-cache-memory-bytes") + 1], "20000000000")
 
+    def test_one_recipe_runs_the_variant_of_the_gpu_it_lands_on(self):
+        """Kimi-K3-MXFP4 (gfx942 and gfx950 variants) on gfx950 nodes: the gfx950 recipe, natively."""
+        card = self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4")
+        card["env_vars"]["MAD_GPU_ARCH"] = "gfx950"
+        words = self.argv(self.run_card("vllm_dissag", card)["ranks"][0])
+        self.assertNotIn("--quantization-config", words)                 # no int4 conversion
+        self.assertEqual(words[words.index("--max-num-batched-tokens") + 1], "4096")
+        on942 = self.argv(self.run_card("vllm_dissag", self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4"))["ranks"][0])
+        self.assertIn("--quantization-config", on942)
+
 
 if __name__ == "__main__":
     unittest.main()

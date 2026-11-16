@@ -231,6 +231,8 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # submitted or set by the topology spec (common/config/layers.sh).
 # Memory sizes the recipe derives from the GPU (models.yaml memory:) need its size first.
 cluster_gpu_memory_for_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" || exit 1
+# A recipe with per-accelerator variants runs the one of the GPU it lands on.
+cluster_gpu_arch_for_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" || exit 1
 config_apply_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" "${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
 CONNECTOR_ENV_ARGS=""

@@ -206,7 +206,10 @@ replaces. `scripts/common/recipe/models.py` is the one reader (launchers, the re
 recipe as the job uses it to `$LOG_PATH/<job>/recipe.yaml` (`config_recipe_file`) and the
 containers read it through `MAD_RECIPE_FILE`; started by hand from a checkout, a role script
 resolves it itself, and inside a container without it, it refuses rather than run the base.
-The variant is chosen by name (alias or default), not yet by the GPU the job lands on.
+A recipe with `variants:` (no alias pinning one) runs the variant of the GPU the job lands on:
+the launcher finds the GPU first (`cluster_gpu_arch_for_recipe`), then applies that variant
+(else `default_arch`'s). So one `Kimi-K3-MXFP4` card runs its gfx942 recipe on MI300X and its
+gfx950 recipe on MI355X; an alias still pins its own.
 
 ### Memory sized from the GPU
 

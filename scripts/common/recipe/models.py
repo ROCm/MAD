@@ -140,9 +140,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("yaml")
     ap.add_argument("name")
-    ap.add_argument("--arch")
+    ap.add_argument("--arch", default=os.environ.get("MAD_GPU_ARCH") or None,
+                    help="the GPU whose variant applies (default: MAD_GPU_ARCH; an alias pins its own)")
     ap.add_argument("--write")
     ap.add_argument("--uses-variants", action="store_true")
+    ap.add_argument("--picks-variant", action="store_true",
+                    help="exit 0 when NAME's variant depends on the GPU (variants, no alias pinning one)")
     ap.add_argument("--needs-memory", action="store_true",
                     help="exit 0 when NAME's recipe sizes memory from the GPU (memory: fraction)")
     ap.add_argument("--hbm-bytes", type=int, default=hbm_from_env(),
@@ -152,6 +155,9 @@ def main(argv=None):
         models = yaml.safe_load(f) or {}
     if a.uses_variants:
         return 0 if uses_variants(models, a.name) else 1
+    if a.picks_variant:
+        r = models.get(a.name)
+        return 0 if isinstance(r, dict) and "alias" not in r and r.get("variants") else 1
     recipe = effective(models, a.name, a.arch)
     if recipe is None:
         print(f"no recipe {a.name!r} in {a.yaml}", file=sys.stderr)

@@ -114,7 +114,8 @@ import os, sys, yaml
 import models  # scripts/common/recipe/models.py: aliases and per-accelerator variants
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
 try:
-    r = models.with_memory(models.effective(m, os.environ["MODEL_NAME"]), models.hbm_from_env())
+    r = models.with_memory(models.effective(m, os.environ["MODEL_NAME"], os.environ.get("MAD_GPU_ARCH") or None),
+                           models.hbm_from_env())
 except ValueError as e:
     sys.exit(f"[config] {os.environ['MODEL_NAME']}: {e}")
 for k, v in ((r or {}).get("env") or {}).items():

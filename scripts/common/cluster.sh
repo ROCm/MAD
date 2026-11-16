@@ -569,6 +569,7 @@ _cluster_local_gpu_count() {
 # two architectures cannot run one recipe, and that is never the scheduler's
 # intent, so it is reported rather than resolved.
 cluster_detect_gpu_arch() {
+    [ "${_CLUSTER_ARCH_PROBED:-0}" = 1 ] && return 0     # probed already (a recipe variant needed it)
     if [ -n "${MAD_GPU_ARCH:-}" ]; then
         echo "GPU arch: ${MAD_GPU_ARCH} (set explicitly, not probed)"
         export MAD_GPU_ARCH
@@ -602,7 +603,19 @@ cluster_detect_gpu_arch() {
             return 1 ;;
     esac
     export MAD_GPU_ARCH
+    _CLUSTER_ARCH_PROBED=1
     return 0
+}
+
+# cluster_gpu_arch_for_recipe MODELS_YAML MODEL: a recipe written as per-accelerator variants
+# (models.yaml `variants:`, not an alias that pins one) runs the variant of the GPU it lands on,
+# so the GPU is found before the recipe is applied. Any other recipe: nothing is probed here.
+cluster_gpu_arch_for_recipe() {
+    local yaml="$1" model="$2" lib
+    lib="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/models.py"
+    [ -f "$lib" ] && [ -f "$yaml" ] || return 0
+    python3 "$lib" "$yaml" "$model" --picks-variant 2>/dev/null || return 0
+    cluster_detect_gpu_arch
 }
 
 # cluster_require_gpu_arch <model> <allowed archs>
