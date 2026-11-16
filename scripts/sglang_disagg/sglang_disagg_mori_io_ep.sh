@@ -183,6 +183,35 @@ _job_fail() {  # <reason>
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/mori_ep_env.sh"
 
+# A loopback RC round trip on every KV NIC before any server starts. MoRI's start-up only
+# opens the devices, so an RDMA user space that cannot create QPs (rdma-core < 54 on Thor2
+# under the in-kernel bnxt_re driver) otherwise shows up as KV transfers that never
+# complete, behind --watchdog-timeout: one run hung 15 minutes that way.
+_rdma_preflight() {
+    local dev out rc try spid port=19400 gid="${MORI_IB_GID_INDEX:-3}" failed=""
+    if ! command -v ibv_rc_pingpong >/dev/null 2>&1; then
+        echo "[rdma-preflight] skipped: ibv_rc_pingpong is not in the image"
+        return 0
+    fi
+    for dev in ${IB_DEVICES//,/ }; do
+        dev="${dev%%:*}"
+        port=$((port + 1))
+        timeout 15 ibv_rc_pingpong -d "$dev" -g "$gid" -n 5 -p "$port" >/dev/null 2>&1 &
+        spid=$!
+        for try in $(seq 1 10); do
+            out="$(timeout 15 ibv_rc_pingpong -d "$dev" -g "$gid" -n 5 -p "$port" 127.0.0.1 2>&1)"
+            rc=$?
+            grep -q "Couldn't connect" <<<"$out" || break
+            sleep 0.3
+        done
+        kill "$spid" 2>/dev/null
+        wait "$spid" 2>/dev/null
+        [ "$rc" -eq 0 ] || failed="${failed}${failed:+; }${dev}: $(grep -v '^$' <<<"$out" | tail -n 1)"
+    done
+    [ -z "$failed" ] || _job_fail "RDMA preflight on ${host_name}: no working QP (GID ${gid}) on ${failed}. The image's RDMA user space does not match this host's NIC driver (docker/pins/README.md); RDMA_PREFLIGHT=0 skips this check"
+    echo "[rdma-preflight] loopback RC round trip OK on ${IB_DEVICES} (GID ${gid})"
+}
+
 # This node's role and commands, from models.yaml (render.py); the launcher's topology
 # (MAD_TOPO_*) decides the role. Sets ROLE, ROLE_INDEX, RUNS_SERVER, RUNS_ROUTER,
 # TP_SIZE, SERVER_ARGV, ROUTER_ARGV, IP_FIRST_PREFILL and IP_FIRST_DECODE.
@@ -203,6 +232,7 @@ fi
 # =============================================================================
 
 if ! _dry_run; then
+[[ "${RDMA_PREFLIGHT:-1}" == "1" ]] && _rdma_preflight
 echo "Waiting at the container creation barrier on $host_name"
 python $MOONCAKE_COOKBOOK_PATH/socket_barrier.py \
     --local-ip ${host_ip} \

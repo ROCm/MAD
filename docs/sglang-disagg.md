@@ -402,7 +402,7 @@ With `DP_MODE=1` it also sets MoRI EP tuning:
 
 Only the names the batch script forwards reach the container from your submit environment:
 `USE_CX7_NICS`, `NCCL_DEBUG`, `NCCL_DEBUG_SUBSYS`, `NCCL_DEBUG_FILE`, the fabric names above when
-set, and `GPUS_PER_NODE` / `GENERIC_TP_SIZE` when set.
+set, `RDMA_PREFLIGHT` when set, and `GPUS_PER_NODE` / `GENERIC_TP_SIZE` when set.
 
 ## Model weights
 
@@ -424,6 +424,7 @@ first that is present, non-empty and identical on every node. `MODEL_WEIGHTS_NAM
 | `RUN_MORI` | `0` when unset | `1` MoRI IO, else Mooncake |
 | `USE_CX7_NICS` | `0` | See above |
 | `REQUIRE_SAME_RAIL` | `1` | `0` skips the same-rail check |
+| `RDMA_PREFLIGHT` | `1` | Before the servers start, each node runs a loopback `ibv_rc_pingpong` on every `IB_DEVICES` NIC at `MORI_IB_GID_INDEX` and fails the job if one cannot create a working QP (an image whose RDMA user space does not match the host's NIC driver). `0` skips it |
 | `BENCHMARK_SCRIPT` | `sweep` | `sweep` (`benchmark_xPyD.sh`) or `agentic` (`benchmark_agentic.sh`) |
 | `BENCHMARK_COMBINATIONS` | `1024/1024 8192/1024` | ISL/OSL pairs for the sweep, space-separated |
 | `BENCHMARK_ITR` | `1` | Sweep iterations |
