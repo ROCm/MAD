@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Mooncake Benchmark - Initiator Node
-Same approach as mori/rixl: shared-folder coordination, read target port and metadata port from shared folder.
+Same approach as mori/nixl: shared-folder coordination, read target port and metadata port from shared folder.
 Per size: initializes Mooncake TransferEngine, allocates VRAM, runs benchmark (WorkerThreads), computes throughput,
 writes per-size result and appends to results_mooncake.json.
-CLI args match rixl/mori; other params (protocol, device, threads, etc.) are hardcoded or from env.
+CLI args match nixl/mori; other params (protocol, device, threads, etc.) are hardcoded or from env.
 """
 
 import argparse
@@ -62,7 +62,8 @@ class WorkerThread:
             self.remote_buffer_ptr,
             self.block_size,
         )
-        if batch_id < 0:
+        # transfer_submit_write returns 0 on failure (-1 in older Mooncake).
+        if batch_id <= 0:
             return None
         while True:
             status = self.engine.transfer_check_status(batch_id)
@@ -89,7 +90,7 @@ class WorkerThread:
             else:
                 self._do_one_write_sync()
 
-        # Benchmark: one iteration, wait for completion, next (same as RIXL)
+        # Benchmark: one iteration, wait for completion, next (same as NIXL)
         iters_done = 0
         while iters_done < num_to_run and (use_iters or time.time() < end_time) and self.running:
             if self.operation == "read":
@@ -152,11 +153,11 @@ def delete_engine_metadata(metadata_url, session_id):
 def main():
     global SHARED_DIR
 
-    parser = argparse.ArgumentParser(description="Mooncake Benchmark Initiator (same args as rixl/mori)")
+    parser = argparse.ArgumentParser(description="Mooncake Benchmark Initiator (same args as nixl/mori)")
     add_common_bench_args(parser, default_shared="shared", include_append=True)
     args = parser.parse_args()
 
-    # Hardcoded / from env (same style as rixl/mori)
+    # Hardcoded / from env (same style as nixl/mori)
     protocol = "rdma"
     device_name = os.environ.get("IBDEVICES", "mlx5_0")
     gpu_id = 0

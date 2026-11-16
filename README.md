@@ -16,11 +16,11 @@ Below are blueprints of supported models along with their documentation.
 |-----------|-------------|--------|
 | [**Kimi-K3 inference (vLLM / SGLang / ATOM)**](benchmark/kimi_k3/README.md) | Kimi-K3 (2.8T) day-0 inference on MI350X/MI355X across three frameworks | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
 | [**xDiT diffusion inference**](benchmark/xdit/README.md) | Diffusion Transformer inference using xDiT | FLUX.1, FLUX.1 Kontext, FLUX.2, FLUX.2 Klein, HunyuanVideo, HunyuanVideo 1.5, LTX-2, Stable Diffusion 3.5, Wan 2.1, Wan 2.2, Z-Image Turbo |
-| [**JAX MaxText training**](benchmark/jax_maxtext/README.md) | Train LLMs on AMD Instinct GPUs using JAX MaxText | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Mixtral-8x7B |
+| [**JAX training (MaxText + MaxDiffusion)**](benchmark/jax_maxtext/README.md) | Train LLMs and diffusion models on AMD Instinct GPUs using JAX, via Primus | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Gemma4 26B/31B, Mixtral-8x7B, Qwen3 14B/30B-A3B, FLUX.1-dev, WAN 2.1 1.3B/14B |
 | [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Kimi-K3, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
 | [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B, Kimi-K3 |
 | [**PyTorch training**](benchmark/pytorch_train/README.md) | Train LLMs on AMD Instinct GPUs using AMD's Primus | Llama 2/3/3.1/3.2/3.3/4, GPT-OSS 20B/120B, Qwen2/2.5/3, Flux, SDXL, DLRM, and others |
-| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, Janus-Pro-7B, HunyuanVideo |
+| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, HunyuanVideo |
 | [**Megatron-LM training**](benchmark/megatron_lm/README.md) | Train LLMs on AMD Instinct GPUs using ROCm Megatron-LM | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.3 70B, DeepSeek-V2-lite, DeepSeek-V3, Mixtral 8x7B/8x22B, Qwen 2.5 7B/72B |
 | [**MPT-30B training (llm-foundry)**](benchmark/llm-foundry/mpt-30b/README.md) | LLM Training for Mosaic Pretrained Transformer (MPT) models using llm-foundry | MPT-30B |
 | [**PyTorch PEFT/FSDP fine-tuning**](scripts/pytorch_train/HF_PEFT_FSDP/README.md) | Finetuning a HF model with LoRA approach & FSDP strategy | Llama-2-70b-chat-hf |
@@ -213,6 +213,7 @@ Add an entry to `models.json`:
 | `timeout` | ❌ | Model-specific timeout override |
 | `multiple_results` | ❌ | CSV file for multiple results |
 | `args` | ❌ | Additional script arguments |
+| `image_spec` | ❌ | Declarative image instead of `dockerfile` (see below) |
 
 #### Step 3: Docker Setup
 
@@ -243,6 +244,53 @@ RUN URL=https://example.com/model-data.zip && \
 # Set working directory
 WORKDIR /workspace
 ```
+
+#### Alternative: Declarative `image_spec`
+
+A workload folder can describe its image instead of pointing at a Dockerfile.
+`compat/rocm.yaml` is the compatibility matrix: the ROCm releases, wheel
+indexes and component builds MAD authorizes. A folder's `image_spec.yaml`, next
+to its `models.json`, selects from it; what a spec selects is what that workload
+is locked to. madengine adds every build a selection requires, installs them in
+dependency order (one image layer each), and fails before building if a
+requirement has no authorized build.
+
+```yaml
+# scripts/vllm/image_spec.yaml
+rocm: "10.1"
+python: "3.14"
+components:
+  vllm: "0.29.1.dev0+rocm10.1.0.g98dff2a81.d20261002@frameworks-vllm"
+```
+
+A card opts in by referencing the folder's spec with OmegaConf, and can
+override any part of it; cards with a `dockerfile` are unchanged:
+
+```json
+"image_spec": "${image_spec}"
+"image_spec": {"extends": "${image_spec}", "gpu_arch": "gfx942"}
+```
+
+A spec can force a relative install order with `order: [a, b]`; it adds to
+the dependency order and fails if it contradicts what a component requires.
+
+To move an existing workload onto a spec, build its image as today and let
+madengine draft the spec from what the Dockerfile added on top of its base:
+
+```bash
+madengine stack infer <built-image> --base <base-image> -o scripts/<dir>/image_spec.yaml
+```
+
+The draft selects the authorized builds it found; packages compat has no build
+for yet are listed as candidates for new `compat/rocm.yaml` entries.
+
+- `madengine build --tags <card> --explain` prints the resolved plan without building.
+- `madengine stack show scripts/vllm` lists the components in install order and why
+  each is there; `stack check` compares the wheels' declared dependencies with the
+  plan; `stack diff scripts/vllm scripts/kvcache_transfer_bench` shows where two
+  workloads differ; `stack harvest <index>` lists what an index offers.
+- `build_manifest.json` records the resolved plan (`build_plan`) and the installed
+  stack (`image_info`) for each image.
 
 #### Step 4: Script Implementation
 
