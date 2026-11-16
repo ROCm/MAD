@@ -299,9 +299,17 @@ engines:
     kv_cache_values: {bf16: auto, fp8: fp8}
     convert_args:
       int4_g32: --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
+    # Speculative decoding (a role's `speculative:`): the methods vLLM documents, one JSON argument.
+    speculative:
+      arg: --speculative-config
+      methods: [ngram, eagle, eagle3, medusa, mlp_speculator, deepseek_mtp]
   sglang:
     kv_cache_arg: --kv-cache-dtype
     kv_cache_values: {bf16: auto}
+    speculative:                    # the algorithms SGLang documents, one argument per key
+      methods: [EAGLE, EAGLE3, NEXTN]
+      args: {method: --speculative-algorithm, model: --speculative-draft-model-path,
+             num_speculative_tokens: --speculative-num-steps}
 
 # ----------------------------------------------------------------------------------------------
 # Fabrics: the scale-out NIC families a site may have, as data. scripts/common/cluster.sh fills

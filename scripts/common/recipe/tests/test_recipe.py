@@ -210,6 +210,35 @@ class RequiresAccuracyPlatform(unittest.TestCase):
         self.assertEqual(used(res, "decode", "kv_cache"), "fp8_e4m3fnuz")
 
 
+class Speculative(unittest.TestCase):
+    def spec(self, **sp):
+        r = copy.deepcopy(RECIPES["Qwen3-32B"])
+        r["roles"]["decode"] = {"speculative": {"method": "eagle3", "model": "org/draft", "num_speculative_tokens": 3, **sp}}
+        return r
+
+    def test_vllm_gets_one_json_argument_added(self):
+        res, problems = R.check(CAT, self.spec(), "gfx942", "vllm@vllm-mori121")
+        self.assertEqual(problems, [])
+        dec = next(r for r in res if r["role"] == "decode")
+        words = shlex.split(" ".join(dec["inject"]))
+        self.assertEqual(words[0], "--speculative-config")
+        self.assertEqual(json.loads(words[1]), {"method": "eagle3", "model": "org/draft", "num_speculative_tokens": 3})
+        self.assertEqual(next(r for r in res if r["role"] == "prefill")["inject"], [])
+
+    def test_an_unknown_method_is_refused(self):
+        _, problems = R.check(CAT, self.spec(method="psychic"), "gfx942", "vllm@vllm-mori121")
+        self.assertTrue(problems and "speculative method 'psychic'" in problems[0], problems)
+
+    def test_sglang_gets_its_own_arguments(self):
+        r = copy.deepcopy(yaml.safe_load(open(os.path.join(SCRIPTS, "sglang_disagg", "models.yaml")))["Qwen3-32B"])
+        r["roles"]["decode"] = {"speculative": {"method": "EAGLE3", "model": "org/draft", "num_speculative_tokens": 3}}
+        res, problems = R.check(CAT, r, "gfx950", engine="sglang")
+        self.assertEqual(problems, [])
+        self.assertEqual(shlex.split(" ".join(next(x for x in res if x["role"] == "decode")["inject"])),
+                         ["--speculative-algorithm", "EAGLE3", "--speculative-draft-model-path", "org/draft",
+                          "--speculative-num-steps", "3"])
+
+
 class BringUp(unittest.TestCase):
     def test_cdna5_lists_every_gap(self):
         r = R.bringup(CAT, "cdna5")

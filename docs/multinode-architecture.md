@@ -132,7 +132,10 @@ Kimi-K3-MXFP4:
 
 A format is an exact name (`fp8_e4m3fnuz`, `mxfp4`) or a family (`fp8`, `mx`) meaning the
 GPU's own member of it. Per role there are also `artifact` (a checkpoint other than the
-model's) and `placement` (`hbm`, `host`, `nvme_stream`). `variants:` under `roles:` may be keyed
+model's), `placement` (`hbm`, `host`, `nvme_stream`) and `speculative`
+(`{method, model, num_speculative_tokens}`: turned into the engine's own arguments -- one
+`--speculative-config` JSON for vLLM, the algorithm/draft-path/steps flags for SGLang -- from
+`compat/rocm.yaml engines`; a method the engine does not document is refused). `variants:` under `roles:` may be keyed
 by an accelerator or by a platform (`MAD_PLATFORM`; the more specific). A recipe may state
 `requires: {min_gpu_memory_gb: N}` (checked against the platform's product, else the
 accelerator's largest) and `accuracy:` records (`task`, `score`, `date`, optional `pins`).

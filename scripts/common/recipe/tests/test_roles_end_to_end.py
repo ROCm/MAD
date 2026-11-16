@@ -185,6 +185,13 @@ class RolesEndToEnd(unittest.TestCase):
         on950 = json.loads(json.dumps(generic)); on950["env_vars"]["MAD_GPU_ARCH"] = "gfx950"
         self.assertNotIn("--quantization-config", self.argv(self.run_card("vllm_multinode", on950)["ranks"][0]))
 
+    def test_speculative_decoding_reaches_the_server(self):
+        self.edit_recipe("vllm_dissag", "Kimi-K3", lambda r: r["roles"].update(
+            {"server": {"speculative": {"method": "eagle3", "model": "org/draft", "num_speculative_tokens": 3}}}))
+        words = self.argv(self.run_card("vllm_multinode", self.card("vllm_multinode", "pyt_vllm_kimi-k3_wideep_moriep"))["ranks"][0])
+        conf = json.loads(words[words.index("--speculative-config") + 1])
+        self.assertEqual(conf["method"], "eagle3")
+
 
 if __name__ == "__main__":
     unittest.main()

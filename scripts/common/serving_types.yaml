@@ -38,7 +38,12 @@ agentic:
   launcher: vllm_dissag
   benchmark: benchmark_agentic.sh       # multi-turn trace replay, prefix retention
   accuracy: none
-speculative:
+speculative:                            # a role's `speculative:` in the recipe (draft inside the server)
+  spec: vllm_colocated_2n_tp8_pp2.json
+  launcher: vllm_multinode
+  benchmark: benchmark_xPyD.sh
+  accuracy: none
+speculative_draft_pool:                 # the draft model on GPUs of its own (a draft role)
   spec: v2/speculative_draft.json
   launcher: none
   benchmark: none

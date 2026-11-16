@@ -15,7 +15,8 @@ needs, in vendor-neutral terms, under `roles:`:
           gfx942: {default: {...}}
 
 Per role: `artifact` (a checkpoint other than the model's own), `quantization.weights` and
-`quantization.activations`, `kv_cache`, `placement` (hbm, host or nvme_stream). A format is
+`quantization.activations`, `kv_cache`, `placement` (hbm, host or nvme_stream), `speculative`
+({method, model, num_speculative_tokens}: the engine's speculative-decoding arguments). A format is
 an exact name from compat/rocm.yaml `formats`, or a family (`fp8`, `mx`, ...) meaning the
 accelerator's native member of it.
 
@@ -161,6 +162,21 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
                 out["kv_cache_setting"] = {"value": v, "env": eng.get("kv_cache_env"), "arg": eng.get("kv_cache_arg")}
         out["kv_cache"] = {"asked": kv, "used": used}
 
+    # Speculative decoding: a draft model or method the engine runs inside the role's server.
+    sp = spec.get("speculative")
+    if sp:
+        import shlex
+        conf = ((catalog.get("engines") or {}).get(engine) or {}).get("speculative") or {}
+        if sp.get("method") not in (conf.get("methods") or []):
+            out["problems"].append(f"{role}: speculative method {sp.get('method')!r} -- {engine} offers "
+                                   f"{conf.get('methods') or 'none'} (compat/rocm.yaml engines)")
+        elif conf.get("arg"):
+            out["engine_args"].append(f"{conf['arg']} {shlex.quote(json.dumps(sp, separators=(',', ':')))}")
+        else:
+            out["engine_args"].append(" ".join(f"{conf['args'][k]} {shlex.quote(str(v))}"
+                                               for k, v in sp.items() if k in (conf.get("args") or {})))
+        out["speculative"] = sp
+
     # Where the weights live.
     place = spec.get("placement", "hbm")
     allowed = (kernels or {}).get("placement") or ["hbm"]
@@ -223,7 +239,7 @@ def disagreements(recipe, resolved, catalog=None, engine="vllm", flags=None):
     env = (recipe or {}).get("env") or {}
     shared = " ".join(str(v) for k, v in (recipe or {}).items() if k.endswith("_flags") and isinstance(v, str))
     for r in resolved:
-        r.setdefault("inject", [])
+        r["inject"] = []          # recomputed on every call (the no-build fallback calls it per build)
         block = (recipe or {}).get(r["role"]) or {}
         if block:
             role_flags = " ".join(str(v) for v in block.values()) if isinstance(block, dict) else str(block)
