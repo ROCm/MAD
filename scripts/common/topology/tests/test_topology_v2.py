@@ -114,12 +114,15 @@ class SchedulerHints(unittest.TestCase):
         h = T.scheduler_hints(spec("helios_wide_ep72.json"), "slurm")
         self.assertEqual(h["options"], ["--segment=18"])
 
-    def test_kubernetes_affinity_needs_the_sites_label(self):
-        self.assertEqual(T.scheduler_hints(spec("helios_wide_ep72.json"), "kubernetes")["options"], [])
-        h = T.scheduler_hints(spec("helios_wide_ep72.json"), "kubernetes", "example.com/rack")
-        self.assertEqual(len(h["options"]), 2)
-        self.assertEqual(h["options"][0]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
-                         ["topologyKey"], "example.com/rack")
+    def test_kubernetes_holds_a_run_in_one_domain(self):
+        s = spec("helios_tp8_server.json")
+        self.assertEqual(T.scheduler_hints(s, "kubernetes")["options"], [])          # no label: nothing asked
+        self.assertEqual(T.scheduler_hints(spec("helios_tp8_server.json"), "kubernetes", "example.com/rack")["options"],
+                         [{"pod_affinity_topology_key": "example.com/rack"}])
+
+    def test_kubernetes_refuses_roles_in_different_domains(self):
+        with self.assertRaisesRegex(T.TopologyError, "a Job per role"):
+            T.scheduler_hints(spec("helios_wide_ep72.json"), "kubernetes", "example.com/rack")
 
     def test_single_node_domains_ask_for_nothing(self):
         self.assertEqual(T.scheduler_hints(spec("speculative_draft.json"), "slurm")["options"], [])

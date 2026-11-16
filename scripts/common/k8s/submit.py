@@ -40,6 +40,7 @@ import io
 import json
 import re
 import subprocess
+import os
 import sys
 import tarfile
 import time
@@ -116,6 +117,24 @@ def platform_gpus(env):
     c = yaml.safe_load(path.read_text()) or {}
     p = (c.get("platforms") or {}).get(env.get("MAD_PLATFORM") or c.get("default_platform")) or {}
     return p.get("gpus_per_node")
+
+
+def domain_affinity(env, card, label):
+    """The node label holding the Job in one scale-up domain (topology.py scheduler-hints), or None."""
+    if not env.get("MAD_TOPOLOGY") or not label:
+        return None
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "topology"))
+    import topology
+    old = dict(os.environ)
+    os.environ.update({k: str(v) for k, v in env.items()})
+    try:
+        spec = topology.validate(topology.load(env["MAD_TOPOLOGY"], str(Path(__file__).resolve().parents[2])))
+        hints = topology.scheduler_hints(spec, "kubernetes", label)
+    except topology.TopologyError as e:
+        die(f"MAD_TOPOLOGY: {e}")
+    finally:
+        os.environ.clear(); os.environ.update(old)
+    return next((o["pod_affinity_topology_key"] for o in hints["options"] if isinstance(o, dict)), None)
 
 
 def first_positive(*values):
@@ -286,6 +305,12 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
             {"labelSelector": {"matchLabels": {HOST_NETWORK_LABEL: "true"}},
              "namespaceSelector": {},
              "topologyKey": "kubernetes.io/hostname"}]}}
+    # The topology's placement: the whole Job inside one scale-up domain on the site's node label,
+    # as madengine's slurm_multi_env.k8s_domain_affinity asks it.
+    key = domain_affinity(env, card, k8s.get("domain_label") or env.get("MAD_K8S_DOMAIN_LABEL"))
+    if key:
+        pod.setdefault("affinity", {})["podAffinity"] = {"requiredDuringSchedulingIgnoredDuringExecution": [
+            {"labelSelector": {"matchLabels": {"job-name": name}}, "topologyKey": key}]}
     if k8s.get("node_selector"):
         pod["nodeSelector"] = k8s["node_selector"]
     if k8s.get("tolerations"):

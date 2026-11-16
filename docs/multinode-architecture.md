@@ -283,8 +283,10 @@ none of this resolves exactly as before. Examples: `scripts/common/topology/spec
 
 `topology.py check` prints the placement and fabric-tier notes (an EP all-to-all that crosses
 scale-out, for example); `topology.py scheduler-hints --scheduler slurm|kubernetes` says what to
-ask the scheduler for (`--segment=<nodes per domain>` with SLURM's block topology; pod affinity on
-the site's domain label). Each node gets `MAD_TOPO_DOMAIN`, and in the per-task dispatch modes a
+ask the scheduler for. SLURM: `--segment=<nodes per domain>` (block topology), added to the job in
+both modes. Kubernetes: with the site's domain label (`k8s.domain_label` / `MAD_K8S_DOMAIN_LABEL`),
+pod affinity holding the whole Job inside one domain, in madengine's and MAD's submit alike; a
+placement one Job cannot hold (roles in different domains) is refused -- it needs a Job per role. Each node gets `MAD_TOPO_DOMAIN`, and in the per-task dispatch modes a
 failing rank is reported with its domain. Launchers refuse what they cannot yet run (mixed node
 types, roles other than prefill/decode/router/server).
 

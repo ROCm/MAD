@@ -95,6 +95,15 @@ class TestSubmitDryRun(unittest.TestCase):
         self.assertEqual(submit.platform_gpus({}), 8)                               # default_platform
         self.assertEqual(submit.platform_gpus({"MAD_PLATFORM": "mi455x-helios-tray"}), 4)
 
+    def test_a_run_held_in_one_scale_up_domain(self):
+        spec = str(ROOT / "scripts/common/topology/specs/v2/helios_tp8_server.json")
+        _, objs, pod, _ = dry_run("--env", f"MAD_TOPOLOGY={spec}", "--env", "MAD_K8S_DOMAIN_LABEL=example.com/rack",
+                                  config={"k8s": {"gpu_count": 4}})
+        term = pod["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]
+        self.assertEqual(term["topologyKey"], "example.com/rack")
+        _, _, pod, _ = dry_run(config={"k8s": {"gpu_count": 4}})
+        self.assertNotIn("podAffinity", pod.get("affinity") or {})
+
     def test_pod_hostnames_are_dns_labels(self):
         out, _, _, _ = dry_run()
         self.assertRegex(out["name"], r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")

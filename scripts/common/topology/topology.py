@@ -284,13 +284,19 @@ def scheduler_hints(spec, scheduler, domain_label=None):
         out["options"].append(f"--segment={min(width, ds[1])}")
         out["notes"].append("needs SLURM's topology/block plugin with one block per scale-up domain")
     elif scheduler == "kubernetes":
+        # One Indexed Job has one pod template: it can hold the whole run inside one scale-up
+        # domain (pod affinity on the domain's node label), not put roles in different domains.
+        spread = [c for c in spec.get("placement") or [] if "spread_domains" in c]
+        if spread:
+            raise TopologyError("Kubernetes: one Job cannot put roles in different scale-up domains "
+                                f"({spread}); that needs a Job per role, not supported yet")
+        if nnodes(spec) > ds[1]:
+            raise TopologyError(f"Kubernetes: same_domain {together} on a run of {nnodes(spec)} nodes, larger "
+                                f"than a {ds[1]}-node domain: one Job can only hold the whole run in one domain")
         if not domain_label:
-            out["notes"].append("no domain_label in the site profile: placement is not requested")
+            out["notes"].append("no domain label (k8s.domain_label / MAD_K8S_DOMAIN_LABEL): placement is not requested")
         else:
-            for group in together:
-                out["options"].append({"podAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": [
-                    {"labelSelector": {"matchExpressions": [{"key": "mad.role", "operator": "In", "values": group}]},
-                     "topologyKey": domain_label}]}})
+            out["options"].append({"pod_affinity_topology_key": domain_label})
     else:
         raise TopologyError(f"scheduler {scheduler!r} (slurm or kubernetes)")
     return out
