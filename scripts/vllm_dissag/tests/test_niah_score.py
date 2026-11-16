@@ -138,6 +138,43 @@ def main():
     s = score_answer("")
     _check("empty: r@10 is 0.00", abs(s["r_at_k"] - 0.0) < 1e-9)
 
+    # Padding with haystack filler is invisible to decoys / p@10 / streak.
+    # A 44-item answer with 10 animals read 10/10 RETRIEVAL on every older field.
+    filler_dump = ("table, chair, window, bottle, " + ", ".join(ANIMALS))
+    s = score_answer(filler_dump)
+    _check("dump: still 10/10 on the bag", len(s["found"]) == 10 and not s["decoys"])
+    _check("dump: filler names the padding",
+           s["filler"] == ["bottle", "chair", "table", "window"])
+    _check("dump: 14 items, 4 extra", s["items"] == 14 and s["extra"] == 4)
+    _check("dump: list_precision 10/14", abs(s["list_precision"] - 10 / 14) < 1e-9)
+    s = score_answer(", ".join(ANIMALS))
+    _check("clean list: no filler, no extra, precision 1.00",
+           s["filler"] == [] and s["extra"] == 0 and abs(s["list_precision"] - 1.0) < 1e-9)
+    s = score_answer("")
+    _check("empty: extra 0 and precision 0.00",
+           s["items"] == 0 and s["extra"] == 0 and s["list_precision"] == 0.0)
+
+    # Denials are excluded from order metrics but still count as found= (the
+    # known negation blind spot): both halves are pinned here.
+    s = score_answer("kangaroo, penguin, **crocodile** (not found)")
+    _check("negation after: crocodile is negated", s["negated"] == ["crocodile"])
+    _check("negation after: earlier needles keep their order",
+           s["order"] == ["kangaroo", "penguin"])
+    _check("negation: bag found= still counts it", "crocodile" in s["found"])
+    _check("negation: order skips it", "crocodile" not in s["order"])
+    s = score_answer("There is no tiger here. kangaroo")
+    _check("negation before: tiger is negated", s["negated"] == ["tiger"])
+    s = score_answer("No cats. Then kangaroo, tiger")
+    _check("negation stops at the clause break", s["negated"] == ["cat"])
+
+    _check("mentions: whole word", niah_score.mentions("a tiger here", "tiger"))
+    _check("mentions: plural", niah_score.mentions("two tigers", "tiger"))
+    _check("mentions: not a substring", not niah_score.mentions("tigerlily", "tiger"))
+    _check("bag: junk is INVALID", niah_score.bag_verdict(10, 0, "hyperfine") == "INVALID")
+    _check("bag: 3 decoys is GUESSING", niah_score.bag_verdict(10, 3).startswith("GUESSING"))
+    _check("bag: 8 is RETRIEVAL, 5 PARTIAL, 4 NONE",
+           [niah_score.bag_verdict(n, 0) for n in (8, 5, 4)] == ["RETRIEVAL", "PARTIAL", "NONE"])
+
     import benchmark_niah as _niah
     _check("all None is a failed ladder",
            _niah.no_scored_answers({2000: [None, None], 8000: [None]}))
