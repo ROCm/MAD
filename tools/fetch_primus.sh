@@ -30,6 +30,10 @@
 # to enumerate models, and both primus_* dockerfiles COPY the tree into the image. Without
 # it, discovery reports zero models instead of a missing prerequisite.
 #
+# Default pin is jax-maxtext-v26.7, matching docker/primus_maxtext's
+# rocm/jax-training:maxtext-v26.7 base (MaxText release/v26.7 + JAX 0.11 MaxDiffusion fixes).
+# Override PRIMUS_REF for another branch or commit.
+#
 # Run on the host, from anywhere:
 #   tools/fetch_primus.sh
 #
@@ -38,27 +42,37 @@
 set -uo pipefail
 
 PRIMUS_URL="${PRIMUS_URL:-https://github.com/AMD-AGI/Primus}"
-PRIMUS_REF="${PRIMUS_REF:-main}"
+PRIMUS_REF="${PRIMUS_REF:-jax-maxtext-v26.7}"
 
 MAD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRIMUS_DIR="${PRIMUS_DIR:-$MAD_ROOT/scripts/Primus}"
+# Compare against --show-toplevel below, which is physical, and accept a relative override.
+[[ -d "$PRIMUS_DIR" ]] && PRIMUS_DIR="$(cd "$PRIMUS_DIR" && pwd -P)"
 
 log() { echo "[fetch-primus] $*"; }
 die() { echo "[fetch-primus] ERROR: $*" >&2; exit 1; }
 
+# rev-parse alone is not enough: inside the MAD work tree it walks up and answers for MAD,
+# so an uninitialized scripts/Primus submodule would look like a checkout and the sync below
+# would rewrite MAD itself. Require the directory to be the top of its own repository.
+is_primus_checkout() {
+  [[ -e "$PRIMUS_DIR/.git" ]] &&
+    [[ "$(git -C "$PRIMUS_DIR" rev-parse --show-toplevel 2>/dev/null)" == "$PRIMUS_DIR" ]]
+}
+
 command -v git >/dev/null || die "git not found on PATH."
 
-if git -C "$PRIMUS_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  log "already checked out at $PRIMUS_DIR"
-elif [[ -d "$PRIMUS_DIR" ]] && [[ -z "$(ls -A "$PRIMUS_DIR" 2>/dev/null)" ]]; then
-  # Empty dir left by an uninitialized git submodule; remove so clone succeeds.
-  rmdir "$PRIMUS_DIR"
-  log "cloning $PRIMUS_URL ($PRIMUS_REF) into $PRIMUS_DIR"
-  git clone --branch "$PRIMUS_REF" "$PRIMUS_URL" "$PRIMUS_DIR" \
-    || die "clone failed. For a private repo, check that your git credentials can read $PRIMUS_URL."
-elif [[ -e "$PRIMUS_DIR" ]]; then
+if is_primus_checkout; then
+  log "already checked out at $PRIMUS_DIR; syncing $PRIMUS_REF"
+  git -C "$PRIMUS_DIR" fetch "$PRIMUS_URL" "$PRIMUS_REF" \
+    || die "fetch of $PRIMUS_REF from $PRIMUS_URL failed."
+  git -C "$PRIMUS_DIR" checkout --detach FETCH_HEAD \
+    || die "checkout of $PRIMUS_REF failed. Commit or stash local changes in $PRIMUS_DIR and re-run."
+elif [[ -e "$PRIMUS_DIR" ]] && [[ -n "$(ls -A "$PRIMUS_DIR" 2>/dev/null)" ]]; then
   die "$PRIMUS_DIR exists but is not a git checkout. Move it aside and re-run."
 else
+  # Either nothing there or the empty dir left by an uninitialized submodule, which
+  # git clone accepts as a destination.
   log "cloning $PRIMUS_URL ($PRIMUS_REF) into $PRIMUS_DIR"
   # Deliberately not --recursive, and no submodules are initialized afterwards. Both
   # primus_* images take their framework from the base image (/workspace/maxtext,

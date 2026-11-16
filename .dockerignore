@@ -18,7 +18,7 @@ perf_metrics_*.jsonl
 scripts/jax-maxtext/output/
 scripts/jax-maxdiffusion/output/
 **/.jax_cache/
-**/core.*
+**/core.[0-9]*
 scripts/Primus/data/
 # Python caches, and the pin-set tests (docker/pins/ is copied into the DI images).
 **/__pycache__/
