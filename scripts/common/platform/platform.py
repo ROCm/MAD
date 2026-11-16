@@ -71,7 +71,8 @@ def main(argv=None):
     q = shlex.quote
     print(f"_platform_name={q(name)}; _platform_gpus={q(str(p['gpus_per_node']))}")
     if named:
-        print(f"export MAD_PLATFORM_ACCELERATOR={q(p['accelerator'])} MAD_PLATFORM_GPUS={q(str(p['gpus_per_node']))}")
+        print(f'export MAD_PLATFORM_ACCELERATOR="${{MAD_PLATFORM_ACCELERATOR:-{p["accelerator"]}}}" '
+              f'MAD_PLATFORM_GPUS="${{MAD_PLATFORM_GPUS:-{p["gpus_per_node"]}}}"')
     return 0
 
 

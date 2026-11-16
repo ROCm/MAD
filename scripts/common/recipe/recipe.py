@@ -304,17 +304,20 @@ def check(catalog, recipe, arch, build=None, roles=None, engine="vllm", flags=No
 
 
 def shell_exports(resolved):
-    """export lines for the launcher: each role's artifact and the engine arguments to add.
+    """export lines for the launcher: each role's artifact and the engine arguments to add, each
+    only where the run did not pass its own (config passthrough).
     The arguments are shell-quoted words (shlex), safe for shlex.split and for eval."""
     import shlex
     lines = []
     for r in resolved:
         role = r["role"].upper()
         if r.get("artifact"):
-            lines.append(f"export MAD_ROLE_ARTIFACT_{role}={shlex.quote(str(r['artifact']))}")
+            lines.append(f'[ -n "${{MAD_ROLE_ARTIFACT_{role}:-}}" ] || '
+                         f"export MAD_ROLE_ARTIFACT_{role}={shlex.quote(str(r['artifact']))}")
         if r.get("inject"):
             words = shlex.join(w for a in r["inject"] for w in shlex.split(a))
-            lines.append(f"export MAD_ROLE_ENGINE_ARGS_{role}={shlex.quote(words)}")
+            lines.append(f'[ -n "${{MAD_ROLE_ENGINE_ARGS_{role}:-}}" ] || '
+                         f"export MAD_ROLE_ENGINE_ARGS_{role}={shlex.quote(words)}")
     return "".join(x + "\n" for x in lines)
 
 

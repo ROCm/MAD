@@ -270,16 +270,20 @@ export KV_IB_DEVICE="${KV_IB_DEVICE:-${_arch_kv_nic}}"
 # NCCL_IB_HCA would switch off), so the fabric this was validated on is unchanged.
 # CLUSTER_FABRIC_DERIVED=1: this family's rails and settings are derived here (the catalog names
 # its rails), so a launcher forwards them into the containers, whose defaults are one CX7 site's.
+_fabric_derived_given="${CLUSTER_FABRIC_DERIVED:-}"
 export CLUSTER_FABRIC_DERIVED=0
 if [ -n "${_arch_rails_export}" ]; then
     CLUSTER_FABRIC_DERIVED=1
     export NCCL_IB_HCA="${NCCL_IB_HCA:-${_arch_rails_export}}"
     export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_arch_rails_export}}"
 fi
+[ -n "${_fabric_derived_given}" ] && CLUSTER_FABRIC_DERIVED="${_fabric_derived_given}"   # config wins
 # The family's values for the containers, whose own defaults they replace (the connectors fall
 # back to these, not to one site's names): forwarded by name (node_lib.sh node_mad_env_args).
-export MAD_FABRIC_RAILS="${_arch_rails}" MAD_FABRIC_GID="${_arch_gid}" MAD_FABRIC_IFACE="${_arch_iface}" \
-       MAD_FABRIC_KV_NIC="${_arch_kv_nic}" MAD_FABRIC_RDMA_TC="${_arch_tc}" MAD_FABRIC_RDMA_SL="${_arch_sl}"
+# A value passed through config (submit env, mad-config, a site profile) wins over the family's.
+export MAD_FABRIC_RAILS="${MAD_FABRIC_RAILS:-${_arch_rails}}" MAD_FABRIC_GID="${MAD_FABRIC_GID:-${_arch_gid}}" \
+       MAD_FABRIC_IFACE="${MAD_FABRIC_IFACE:-${_arch_iface}}" MAD_FABRIC_KV_NIC="${MAD_FABRIC_KV_NIC:-${_arch_kv_nic}}" \
+       MAD_FABRIC_RDMA_TC="${MAD_FABRIC_RDMA_TC:-${_arch_tc}}" MAD_FABRIC_RDMA_SL="${MAD_FABRIC_RDMA_SL:-${_arch_sl}}"
 export FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
 
 # --------------------------------------------------------------- ports
@@ -587,7 +591,8 @@ cluster_detect_gpu_arch() {
         out="$(hostname) $(_cluster_local_gpu_arch) $(_cluster_local_gpu_count)"
     fi
     # The fewest GPUs any node has (third column), for cluster_require_gpu_arch.
-    MAD_GPU_COUNT="$(printf '%s\n' "${out}" | awk 'NF>=3 && $3>0 {print $3}' | sort -n | head -1 || true)"
+    [ -n "${MAD_GPU_COUNT:-}" ] || \
+        MAD_GPU_COUNT="$(printf '%s\n' "${out}" | awk 'NF>=3 && $3>0 {print $3}' | sort -n | head -1 || true)"
     export MAD_GPU_COUNT
     [ -n "${out}" ] && printf '%s\n' "${out}" | sed 's/^/  gpu arch: /'
     # Sourced under `set -euo pipefail` by run_multinode.slurm: a probe that finds
@@ -667,7 +672,7 @@ cluster_check_recipe() {
         local v
         while read -r v; do
             [ -n "$v" ] && declare -F config_note >/dev/null && config_note "$v" "${!v}" recipe-check
-        done < <(sed -n 's/^export \([A-Z0-9_]*\)=.*/\1/p' "$exports")
+        done < <(sed -n 's/.*export \([A-Z0-9_]*\)=.*/\1/p' "$exports")
         rm -f "$exports"
         out="$(sed -n 's/^\[recipe\] .* resolves on /resolves on /p' <<<"$out")"
         if [ -n "$out" ] && declare -F config_note >/dev/null; then config_note MAD_RECIPE_ROLES "$out" recipe-check; fi
@@ -688,6 +693,10 @@ cluster_resolve_role_artifacts() {
     for var in $(compgen -v MAD_ROLE_ARTIFACT_); do
         role="${var#MAD_ROLE_ARTIFACT_}"; name="${!var}"
         [ -n "$name" ] || continue
+        local given="MAD_ROLE_MODEL_PATH_${role}"
+        if [ -n "${!given:-}" ]; then                  # a path passed through config wins
+            echo "Role ${role,,}: ${!given} (set explicitly)"; continue
+        fi
         echo "Role ${role,,}: the recipe names its own artifact, ${name}"
         if [[ "$name" == /* ]]; then
             cluster_check_model_path "$name" "$(dirname "$name")" || { echo "x FATAL: ${name} (${role,,}) is not usable on all nodes"; return 1; }

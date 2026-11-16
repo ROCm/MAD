@@ -132,6 +132,9 @@ for k, v in ((r or {}).get("env") or {}).items():
 config_recipe_file() {
     local yaml="$1" model="$2" dir tmp
     [[ -n "$model" && -f "$yaml" && -n "${LOG_PATH:-}" && -n "${SLURM_JOB_ID:-}" ]] || return 0
+    if [[ -n "${MAD_RECIPE_FILE:-}" ]]; then                 # a recipe file passed through config wins
+        echo "[config] ${model}: the recipe file given, ${MAD_RECIPE_FILE}"; return 0
+    fi
     PYTHONPATH="${_CONFIG_RECIPE_LIB}" python3 -m models "$yaml" "$model" --uses-variants || return 0
     dir="${LOG_PATH}/${SLURM_JOB_ID}"
     mkdir -p "$dir" || return 1
