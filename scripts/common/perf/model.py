@@ -17,7 +17,8 @@ predict. `efficiency` (measured / modelled, per platform) calibrates it once run
 (perf/calibration.yaml, when present).
 
     model.py estimate --model M --platform P [--weights F --compute F --kv F --gpus G --batch B --context L]
-    model.py search   --model M --platforms P1,P2 [--context L --batch B,..]   ranked decode layouts
+    model.py search   --model M --platforms P1,P2 [--context L --batch B,..] [--emit-spec FILE]
+                      ranked decode layouts; the best as a topology spec the launchers run
 """
 import argparse
 import json
@@ -123,6 +124,23 @@ def search(catalog, model, platforms, context=4096, batches=(16, 64, 256), forma
     return sorted(out, key=lambda e: -e["decode_tokens_per_s_per_gpu"])
 
 
+def to_spec(catalog, layout, engine="vllm"):
+    """A topology spec (v2) for a search result: prefill and decode pools of the layout's size on
+    its platform, wide EP, each kept inside one scale-up domain when it fits there."""
+    plat = catalog["platforms"][layout["platform"]]
+    domain = (plat.get("scale_up") or {}).get("gpus_per_domain", plat["gpus_per_node"])
+    roles = [{"name": r, "gpus": layout["gpus"], "parallel": {"mode": "wide_ep", "ep_tp": 1}}
+             for r in ("prefill", "decode")]
+    spec = {"engine": engine, "layout": "disagg", "platform": layout["platform"], "roles": roles,
+            "router": {"host": "prefill", "index": 0},
+            "about": f"from perf/model.py search: {layout['compute']}, batch {layout['batch']} per GPU, "
+                     f"~{layout['decode_tokens_per_s_per_gpu']:.0f} decode tok/s/GPU modelled"}
+    if layout["gpus"] <= domain and domain > plat["gpus_per_node"]:
+        spec["placement"] = [{"same_domain": ["prefill"]}, {"same_domain": ["decode"]},
+                             {"spread_domains": ["prefill", "decode"]}]
+    return spec
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -137,6 +155,7 @@ def main(argv=None):
     s.add_argument("--context", type=int, default=4096)
     s.add_argument("--batch", default="16,64,256")
     s.add_argument("--top", type=int, default=10)
+    s.add_argument("--emit-spec", help="write the best layout as a topology spec (v2) to this file")
     for p in (e, s):
         p.add_argument("--model", required=True)
         p.add_argument("--catalog", default=CATALOG)
@@ -149,6 +168,9 @@ def main(argv=None):
         return 0
     rows = search(catalog, model, a.platforms.split(","), a.context, [int(b) for b in a.batch.split(",")])
     print(f"{'platform':22} {'gpus':>4} {'batch':>5} {'format':10} {'tok/s/GPU':>10} {'bound':7} a2a")
+    if a.emit_spec and rows:
+        with open(a.emit_spec, "w") as f:
+            json.dump(to_spec(catalog, rows[0]), f, indent=1)
     for r in rows[:a.top]:
         print(f"{r['platform']:22} {r['gpus']:>4} {r['batch']:>5} {r['compute']:10} "
               f"{r['decode_tokens_per_s_per_gpu']:>10.0f} {r['decode_bound']:7} {r['all_to_all_link']}")

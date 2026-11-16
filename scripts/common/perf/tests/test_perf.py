@@ -44,6 +44,18 @@ class Model(unittest.TestCase):
         self.assertEqual(len({(r["platform"], r["gpus"], r["batch"], r["compute"]) for r in rows}), len(rows))
 
 
+class ToSpec(unittest.TestCase):
+    def test_the_best_layout_becomes_a_valid_spec(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "topology"))
+        import topology as T
+        best = M.search(CAT, DSV3, ["mi455x-helios-tray"])[0]
+        spec = T.validate(M.to_spec(CAT, best))
+        self.assertEqual(T.gpus_per_node(spec), 4)
+        if best["gpus"] <= 72:
+            self.assertIn({"same_domain": ["decode"]}, spec["placement"])
+        T.legacy_env(spec, "vllm_dissag", {})      # a launcher runs it
+
+
 class Registry(unittest.TestCase):
     def test_best_meets_the_slo_and_accuracy(self):
         with tempfile.TemporaryDirectory() as d:
