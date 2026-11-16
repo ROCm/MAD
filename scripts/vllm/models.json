@@ -8,7 +8,7 @@
         "n_gpus": "-1",
         "owner": "itej89@amd.com",
         "training_precision": "",
-        "multiple_results": "perf_auto.csv",
+		"multiple_results": "perf_auto.csv",
         "tags": [
             "vllm-perf",
             "inference"
