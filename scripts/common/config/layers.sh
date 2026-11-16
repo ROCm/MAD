@@ -30,6 +30,9 @@
 #     ...
 #     config_write "$LOG_PATH/$SLURM_JOB_ID/config.resolved.json"
 
+# The recipe loader (aliases, per-accelerator variants): scripts/common/recipe/models.py.
+_CONFIG_RECIPE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../recipe" && pwd)"
+
 # Names set when the launcher started, and the layer that last set each name.
 config_begin() {
     declare -gA _CONFIG_SRC=() _CONFIG_VAL=() _CONFIG_NOTE=() _CONFIG_RECIPE=()
@@ -106,13 +109,34 @@ config_apply_recipe() {
         fi
         export "$k=$v"
         _CONFIG_SRC[$k]=recipe
-    done < <(MODELS_YAML="$yaml" MODEL_NAME="$model" python3 -c '
+    done < <(MODELS_YAML="$yaml" MODEL_NAME="$model" PYTHONPATH="${_CONFIG_RECIPE_LIB}${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import os, sys, yaml
+import models  # scripts/common/recipe/models.py: aliases and per-accelerator variants
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
-for k, v in ((m.get(os.environ["MODEL_NAME"]) or {}).get("env") or {}).items():
+for k, v in ((models.effective(m, os.environ["MODEL_NAME"]) or {}).get("env") or {}).items():
     sys.stdout.write(f"{k}={v}\0")
 ')
     _config_snapshot
+}
+
+# config_recipe_file MODELS_YAML MODEL: when MODEL's recipe is an alias or has per-accelerator
+# variants (scripts/common/recipe/models.py), write the recipe as this job uses it to
+# $LOG_PATH/$SLURM_JOB_ID/recipe.yaml and export MAD_RECIPE_FILE, its path in the containers
+# (/run_logs/...), so the role scripts -- which read a recipe by name, without aliases -- run
+# exactly the recipe the launcher applied. A recipe that uses neither: nothing changes.
+config_recipe_file() {
+    local yaml="$1" model="$2" dir tmp
+    [[ -n "$model" && -f "$yaml" && -n "${LOG_PATH:-}" && -n "${SLURM_JOB_ID:-}" ]] || return 0
+    PYTHONPATH="${_CONFIG_RECIPE_LIB}" python3 -m models "$yaml" "$model" --uses-variants || return 0
+    dir="${LOG_PATH}/${SLURM_JOB_ID}"
+    mkdir -p "$dir" || return 1
+    # Written whole, then renamed: every node of a job array writes the same file.
+    tmp="$(mktemp "${dir}/.recipe.XXXXXX")" || return 1
+    PYTHONPATH="${_CONFIG_RECIPE_LIB}" python3 -m models "$yaml" "$model" --write "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "${dir}/recipe.yaml"
+    export MAD_RECIPE_FILE="/run_logs/${SLURM_JOB_ID}/recipe.yaml"
+    config_note MAD_RECIPE_FILE "$MAD_RECIPE_FILE" launcher
+    echo "[config] ${model}: the recipe as this job uses it -> ${dir}/recipe.yaml"
 }
 
 # config_recipe KEY: the recipe's value for KEY (after config_apply_recipe), or empty --

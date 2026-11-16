@@ -507,21 +507,6 @@ _kimik3_recipe_env: &kimik3_recipe_env
   # Sleep-fence duration; INERT now that K3_WRITE_FENCE=0 (readback is the active path on v4). Kept for reference.
   K3_WRITE_FENCE_MS: "20"
 
-Kimi-K3-MXFP4:
-  env: *kimik3_recipe_env
-  prefill:
-    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
-
-  decode:
-    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
-  roles:                                # as Kimi-K3: MXFP4 weights, fp8 activations and KV
-    default:
-      quantization: {weights: mxfp4, activations: fp8}
-      kv_cache: fp8
-    prefill: {}
-    decode: {}
-
-
 # ============================ Kimi-K3 native MXFP4 on MI355X / gfx950 ============================
 # BRING-UP RECIPE, NOT VALIDATED. MoRIIO disagg with Kimi-K3 has only run on MI300X; see
 # docker/pins/README.md (vllm-kimi-k3) for what a first gfx950 run may hit.
@@ -577,15 +562,32 @@ _kimi_k3_mi355x_dp_flags: &kimi_k3_mi355x_dp_flags >-
   --max-num-seqs 8
   --max-num-batched-tokens 4096
 
-Kimi-K3-MXFP4-MI355X:
-  env: *kimi_k3_mi355x_recipe_env
-  prefill:
-    dp: *kimi_k3_mi355x_dp_flags
-  decode:
-    dp: *kimi_k3_mi355x_dp_flags
-  roles:                                # the same model needs; on gfx950 MXFP4 is native
-    default:
+# Kimi-K3-MXFP4: one recipe, a variant per accelerator (scripts/common/recipe/models.py). The
+# MI300X recipe above is its gfx942 variant and the default; the gfx950 variant is the MI355X
+# bring-up recipe, which a card names as Kimi-K3-MXFP4-MI355X. Placed after both sets of
+# anchors, which YAML needs defined first.
+Kimi-K3-MXFP4:
+  default_arch: gfx942
+  roles:                                # MXFP4 weights, fp8 activations and KV on every GPU; gfx942
+    default:                            # converts the weights to int4 (its flags say so)
       quantization: {weights: mxfp4, activations: fp8}
       kv_cache: fp8
     prefill: {}
     decode: {}
+  variants:
+    gfx942:
+      env: *kimik3_recipe_env
+      prefill:
+        dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
+      decode:
+        dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
+    gfx950:
+      env: *kimi_k3_mi355x_recipe_env
+      prefill:
+        dp: *kimi_k3_mi355x_dp_flags
+      decode:
+        dp: *kimi_k3_mi355x_dp_flags
+
+Kimi-K3-MXFP4-MI355X:                   # the gfx950 variant, by name for its card
+  alias: Kimi-K3-MXFP4
+  arch: gfx950

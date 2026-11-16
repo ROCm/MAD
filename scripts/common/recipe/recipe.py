@@ -39,6 +39,9 @@ import sys
 
 import yaml
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import models  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAD_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 CATALOG = os.path.join(MAD_ROOT, "compat", "rocm.yaml")
@@ -324,7 +327,9 @@ def main(argv=None):
         return 1 if bad else 0
     with open(a.recipes) as f:
         recipes = yaml.safe_load(f) or {}
-    recipe = recipes.get(a.model)
+    # The recipe as the launcher applies it: the alias followed, its accelerator's variant (or
+    # the default one) applied -- not chosen by the GPU found, so this checks what will run.
+    recipe = models.effective(recipes, a.model)
     if recipe is None:
         print(f"ERROR: no recipe {a.model!r} in {a.recipes}", file=sys.stderr)
         return 2

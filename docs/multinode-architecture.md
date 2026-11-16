@@ -178,6 +178,29 @@ built by hand), the first catalog build for that GPU that resolves the recipe is
 recorded in `config.resolved.json` as `MAD_RECIPE_ROLES`. `RECIPE_CHECK=0` skips the check;
 a recipe without `roles:` passes as before.
 
+### One recipe, a variant per accelerator
+
+A recipe can hold what differs per GPU as `variants:`, with `default_arch` for when nothing
+names one, and a card can name one variant through an alias:
+
+```yaml
+Kimi-K3-MXFP4:
+  default_arch: gfx942
+  roles: {...}                         # shared
+  variants:
+    gfx942: {env: *kimik3_recipe_env, prefill: {dp: "..."}, decode: {dp: "..."}}
+    gfx950: {env: *kimi_k3_mi355x_recipe_env, prefill: {dp: *kimi_k3_mi355x_dp_flags}, ...}
+Kimi-K3-MXFP4-MI355X: {alias: Kimi-K3-MXFP4, arch: gfx950}
+```
+
+A variant is laid over the base: mappings merge, a `null` removes a key, anything else
+replaces. `scripts/common/recipe/models.py` is the one reader (launchers, the recipe check,
+`check_gpu_arch_declarations.py`). For a recipe that uses either, the launcher writes the
+recipe as the job uses it to `$LOG_PATH/<job>/recipe.yaml` (`config_recipe_file`) and the
+containers read it through `MAD_RECIPE_FILE`; started by hand from a checkout, a role script
+resolves it itself, and inside a container without it, it refuses rather than run the base.
+The variant is chosen by name (alias or default), not yet by the GPU the job lands on.
+
 ## Offline checks per layer
 
 None of these need GPUs; run them from the MAD root. The full list is in
@@ -194,4 +217,4 @@ None of these need GPUs; run them from the MAD root. The full list is in
 | Site fabric | `bash scripts/common/tests/cluster_fabric_assert.sh` |
 | Kubernetes | `python3 -m unittest discover -s scripts/common/k8s/tests` |
 | Pin sets | `python3 docker/pins/pins.py validate`; `python3 -m unittest discover -s docker/pins/tests` |
-| Recipe roles, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |
+| Recipe roles, variants, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |

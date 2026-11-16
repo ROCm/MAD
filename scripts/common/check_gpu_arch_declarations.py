@@ -26,6 +26,9 @@ import sys
 
 import yaml
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "recipe"))
+import models  # noqa: E402  (aliases and per-accelerator variants)
+
 # The architectures multinode cards are run on. A new one goes here, and rule 2
 # then makes every restricted card say whether it supports it.
 KNOWN_ARCHS = ("gfx942", "gfx950")
@@ -51,7 +54,7 @@ def main(root):
             allowed = split(env.get("GPU_ARCHS"))
             source = "card env_vars"
             if not allowed and group == "vllm_dissag":
-                rec = recipes.get(env.get("MODEL_NAME", "")) or {}
+                rec = models.effective(recipes, env.get("MODEL_NAME", "")) or {}
                 allowed = split((rec.get("env") or {}).get("GPU_ARCHS"))
                 source = "models.yaml %s" % env.get("MODEL_NAME")
             if not allowed:

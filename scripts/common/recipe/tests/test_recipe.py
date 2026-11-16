@@ -27,7 +27,8 @@ INT4_ARG = """--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'"""
 
 CAT = R.load_catalog()
 with open(VLLM_RECIPES) as _f:
-    RECIPES = yaml.safe_load(_f)
+    _RAW = yaml.safe_load(_f)
+RECIPES = {name: R.models.effective(_RAW, name) for name in _RAW}   # as the launchers read them
 
 # A disaggregated-quantization recipe in the shape of arXiv 2609.26333: prefill is compute
 # bound and runs W4A4 FP4 from its own checkpoint; decode is bandwidth bound and runs
@@ -84,7 +85,7 @@ class KimiRecipes(unittest.TestCase):
                 if not (model and pins) or not os.path.isfile(recipe_file):
                     continue
                 with open(recipe_file) as f:
-                    recipe = (yaml.safe_load(f) or {}).get(model)
+                    recipe = R.models.effective(yaml.safe_load(f) or {}, model)
                 if not recipe or not recipe.get("roles"):
                     continue
                 with open(os.path.join(MAD_ROOT, "docker", "pins", pins + ".json")) as f:

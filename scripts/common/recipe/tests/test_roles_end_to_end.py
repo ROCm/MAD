@@ -59,7 +59,8 @@ class RolesEndToEnd(unittest.TestCase):
         """The MI300X Kimi recipe with its int4 flag removed: gfx942 still gets it, from the roles."""
         def drop_int4(r):
             for role in ("prefill", "decode"):
-                r[role]["dp"] = r[role]["dp"].replace(f"--quantization-config '{INT4}'", "")
+                flags = r["variants"]["gfx942"][role]
+                flags["dp"] = flags["dp"].replace(f"--quantization-config '{INT4}'", "")
         self.edit_recipe("vllm_dissag", "Kimi-K3-MXFP4", drop_int4)
         got = self.run_card("vllm_dissag", self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4"))
         for rank in got["ranks"]:

@@ -117,11 +117,12 @@ node_topology() {
 # The recipe's per-role values for the container, as `-e NAME` words (docker reads each value
 # from this environment, so engine arguments with quotes or JSON pass intact): every exported
 # MAD_ROLE_MODEL_PATH_<ROLE> and MAD_ROLE_ENGINE_ARGS_<ROLE> (cluster_check_recipe,
-# cluster_resolve_role_artifacts). Empty when the recipe gives none.
+# cluster_resolve_role_artifacts), and MAD_RECIPE_FILE (layers.sh config_recipe_file).
+# Empty when the recipe gives none.
 node_role_env_args() {
     local v
     for v in $(compgen -e); do
-        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*) printf -- '-e %s ' "$v" ;; esac
+        case "$v" in MAD_ROLE_MODEL_PATH_*|MAD_ROLE_ENGINE_ARGS_*|MAD_RECIPE_FILE) printf -- '-e %s ' "$v" ;; esac
     done
 }
 

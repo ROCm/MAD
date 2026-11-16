@@ -65,7 +65,26 @@ echo "[colocated] TP=${TP_SIZE} PP=${PP_SIZE} EP=${ENABLE_EP} all2all=${ALL2ALL_
 # Per-model env from the shared models.yaml (same precedence rule as the disagg
 # driver: connector default < models.yaml env: < submit-time -e).
 # -----------------------------------------------------------------------------
-MODELS_YAML="${MODELS_YAML:-${SHARED_DIR}/models.yaml}"
+MODELS_YAML="${MODELS_YAML:-${MAD_RECIPE_FILE:-${SHARED_DIR}/models.yaml}}"  # MAD_RECIPE_FILE: layers.sh config_recipe_file
+# A recipe with an alias or per-accelerator variants (scripts/common/recipe/models.py), run
+# without the launcher's resolved copy (MAD_RECIPE_FILE): resolve it here from a checkout, else
+# refuse -- read as written, its name would give only the base, not a runnable recipe.
+if [[ -z "${MAD_RECIPE_FILE:-}" && -n "${MODEL_NAME:-}" && -f "$MODELS_YAML" ]] && python3 - "$MODELS_YAML" "$MODEL_NAME" <<'PY'
+import sys, yaml
+r = (yaml.safe_load(open(sys.argv[1])) or {}).get(sys.argv[2])
+sys.exit(0 if isinstance(r, dict) and ("alias" in r or r.get("variants")) else 1)
+PY
+then
+    _recipe_lib="$(dirname "$MODELS_YAML")/../common/recipe/models.py"
+    if [[ ! -f "$_recipe_lib" ]]; then
+        echo "ERROR: ${MODEL_NAME}'s recipe has per-accelerator variants; start this through its launcher" >&2
+        echo "       (which passes MAD_RECIPE_FILE), or set MAD_RECIPE_FILE to the resolved recipe." >&2
+        exit 1
+    fi
+    _recipe_eff="$(mktemp)"
+    python3 "$_recipe_lib" "$MODELS_YAML" "$MODEL_NAME" --write "$_recipe_eff" || exit 1
+    MODELS_YAML="$_recipe_eff"
+fi
 if [[ -n "$MODEL_NAME" && -f "$MODELS_YAML" ]]; then
     export MODELS_YAML MODEL_NAME
     _yaml_env="$(python3 - <<'PY'

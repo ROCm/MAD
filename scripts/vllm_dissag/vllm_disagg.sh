@@ -95,8 +95,30 @@ host_name=$(hostname)
 # EP_TP_SIZE (TP within each EP pool; unset/1 = plain wideEP) may be supplied by the
 # recipe env: block, which is exported further below. Resolve it early -- env/-e wins --
 # so the topology math can size per-node DP ranks (TP-within-EP -> fewer ranks/node).
-if [[ -z "${EP_TP_SIZE:-}" && -n "$MODEL_NAME" && -f "${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" ]]; then
-    EP_TP_SIZE="$(MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
+# The recipe: the job's own copy when the launcher wrote one (MAD_RECIPE_FILE: an alias or a
+# per-accelerator variant, resolved -- common/config/layers.sh config_recipe_file), else models.yaml.
+MODELS_YAML="${MODELS_YAML:-${MAD_RECIPE_FILE:-${SCRIPT_DIR}/models.yaml}}"
+# A recipe with an alias or per-accelerator variants (scripts/common/recipe/models.py), run
+# without the launcher's resolved copy (MAD_RECIPE_FILE): resolve it here from a checkout, else
+# refuse -- read as written, its name would give only the base, not a runnable recipe.
+if [[ -z "${MAD_RECIPE_FILE:-}" && -n "${MODEL_NAME:-}" && -f "$MODELS_YAML" ]] && python3 - "$MODELS_YAML" "$MODEL_NAME" <<'PY'
+import sys, yaml
+r = (yaml.safe_load(open(sys.argv[1])) or {}).get(sys.argv[2])
+sys.exit(0 if isinstance(r, dict) and ("alias" in r or r.get("variants")) else 1)
+PY
+then
+    _recipe_lib="$(dirname "$MODELS_YAML")/../common/recipe/models.py"
+    if [[ ! -f "$_recipe_lib" ]]; then
+        echo "ERROR: ${MODEL_NAME}'s recipe has per-accelerator variants; start this through its launcher" >&2
+        echo "       (which passes MAD_RECIPE_FILE), or set MAD_RECIPE_FILE to the resolved recipe." >&2
+        exit 1
+    fi
+    _recipe_eff="$(mktemp)"
+    python3 "$_recipe_lib" "$MODELS_YAML" "$MODEL_NAME" --write "$_recipe_eff" || exit 1
+    MODELS_YAML="$_recipe_eff"
+fi
+if [[ -z "${EP_TP_SIZE:-}" && -n "$MODEL_NAME" && -f "${MODELS_YAML}" ]]; then
+    EP_TP_SIZE="$(MODELS_YAML="${MODELS_YAML}" MODEL_NAME="$MODEL_NAME" python3 - <<'PY'
 import os, yaml
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
 cfg = m.get(os.environ["MODEL_NAME"]) or {}
@@ -453,7 +475,7 @@ print_node_info() {
 # PARALLEL_MODE mirrors sglang: WIDE_EP=1 -> dp, WIDE_EP=0 -> tp.
 if [[ "$WIDE_EP" == "1" ]]; then PARALLEL_MODE=dp; else PARALLEL_MODE=tp; fi
 
-MODELS_YAML="${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}"
+MODELS_YAML="${MODELS_YAML:-${MAD_RECIPE_FILE:-${SCRIPT_DIR}/models.yaml}}"
 MODEL_CONFIG_PREFILL=""
 MODEL_CONFIG_DECODE=""
 if [[ -n "$MODEL_NAME" && -f "$MODELS_YAML" ]]; then

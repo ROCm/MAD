@@ -124,6 +124,7 @@ def engine_dry_run(catalog, docker, work, client_env=None):
     for k, v in container_env(docker, client_env).items():
         for cdir, sub in CONTAINER_SCRIPT_DIRS.items():
             v = v.replace(cdir, str(scripts / sub) if sub else str(scripts))
+        v = v.replace("/run_logs/", str(work / "logs") + "/")   # -v $LOG_PATH:/run_logs
         env[k] = v
     env.update({"PATH": f"{STUBS}:{os.environ['PATH']}", "HOME": str(work / "home"), "DRY_RUN": "1"})
     if catalog == "vllm_dissag":

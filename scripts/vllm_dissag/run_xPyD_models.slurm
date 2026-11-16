@@ -315,6 +315,7 @@ echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
+config_recipe_file "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" || exit 1
 cluster_check_recipe "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" vllm || exit 1
 cluster_report_rdma_rails
 # MoRI JIT-compiles its EP kernels for MORI_GPU_ARCHS. connectors/moriio.env pins it to
