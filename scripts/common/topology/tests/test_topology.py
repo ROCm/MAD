@@ -33,6 +33,8 @@ FABRIC = _fabric_env()
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import topology as T  # noqa: E402
+sys.path.insert(0, str(HERE.parents[1] / "tests" / "snapshot"))
+import snapshot as S  # noqa: E402
 
 SCRIPTS = HERE.parents[2]
 GOLDEN = SCRIPTS / "common" / "tests" / "snapshot" / "golden"
@@ -50,7 +52,7 @@ class GoldenRoles(unittest.TestCase):
                 gold = json.loads((GOLDEN / launcher / f"{card['name']}.json").read_text())
                 if gold["exit_code"] != 0:
                     continue        # stops before any node runs (madengine-only card)
-                env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+                env = S.launch_env(card, launcher, gold["inputs"]["gpu_arch"])   # card over its recipe
                 env["SLURM_NNODES"] = str(gold["inputs"]["nodes"])
                 spec = T.from_env(env, launcher)
                 self.assertEqual(T.nnodes(spec), len(gold["ranks"]), card["name"])

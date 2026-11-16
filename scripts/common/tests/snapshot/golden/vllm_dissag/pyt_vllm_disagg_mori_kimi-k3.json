@@ -143,7 +143,8 @@
      "MAD_FABRIC_KV_NIC",
      "MAD_FABRIC_RAILS",
      "MAD_FABRIC_RDMA_SL",
-     "MAD_FABRIC_RDMA_TC"
+     "MAD_FABRIC_RDMA_TC",
+     "MAD_RECIPE_FILE"
     ],
     "env_file": [],
     "image": "img:snapshot",
@@ -312,7 +313,8 @@
      "MAD_FABRIC_KV_NIC",
      "MAD_FABRIC_RAILS",
      "MAD_FABRIC_RDMA_SL",
-     "MAD_FABRIC_RDMA_TC"
+     "MAD_FABRIC_RDMA_TC",
+     "MAD_RECIPE_FILE"
     ],
     "env_file": [],
     "image": "img:snapshot",
@@ -483,7 +485,8 @@
      "MAD_FABRIC_KV_NIC",
      "MAD_FABRIC_RAILS",
      "MAD_FABRIC_RDMA_SL",
-     "MAD_FABRIC_RDMA_TC"
+     "MAD_FABRIC_RDMA_TC",
+     "MAD_RECIPE_FILE"
     ],
     "env_file": [],
     "image": "img:snapshot",
@@ -662,7 +665,8 @@
      "MAD_FABRIC_KV_NIC",
      "MAD_FABRIC_RAILS",
      "MAD_FABRIC_RDMA_SL",
-     "MAD_FABRIC_RDMA_TC"
+     "MAD_FABRIC_RDMA_TC",
+     "MAD_RECIPE_FILE"
     ],
     "env_file": [],
     "image": "img:snapshot",

@@ -79,8 +79,9 @@ class KimiRecipes(unittest.TestCase):
     """The declared roles reach the verdict the hand-written GPU_ARCHS states."""
 
     def test_every_card_resolves_exactly_where_it_runs(self):
-        """A card runs on its pin set's GPUs, less its skip_gpu_arch and outside its recipe's
-        GPU_ARCHS. With the card's own build, the recipe's roles must resolve on exactly those."""
+        """A card runs on its pin set's GPUs it does not skip; there its recipe's variant for the GPU
+        (GPU_ARCHS) must resolve with the card's own build, and where the recipe does not cover a
+        GPU the card does not skip, the check must refuse."""
         checked = 0
         for path in glob.glob(os.path.join(SCRIPTS, "*", "models.json")):
             with open(path) as f:
@@ -94,16 +95,19 @@ class KimiRecipes(unittest.TestCase):
                 if not (model and pins) or not os.path.isfile(recipe_file):
                     continue
                 with open(recipe_file) as f:
-                    recipe = R.models.effective(yaml.safe_load(f) or {}, model)
-                if not recipe or not recipe.get("roles"):
+                    raw = yaml.safe_load(f) or {}
+                if not (R.models.effective(raw, model) or {}).get("roles"):
                     continue
                 with open(os.path.join(MAD_ROOT, "docker", "pins", pins + ".json")) as f:
                     pin_archs = json.load(f)["gpu_archs"]
                 skip = str(card.get("skip_gpu_arch") or "").replace(",", " ").split()
-                only = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
                 roles = ["server"] if "vllm_multinode" in path else None
                 for arch in ("gfx942", "gfx950"):
-                    runs = arch in pin_archs and arch not in skip and (not only or arch in only)
+                    recipe = R.models.effective(raw, model, arch)      # the GPU's variant, as the launcher
+                    only = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
+                    if arch in skip:
+                        continue          # a card may run on fewer GPUs than its recipe supports
+                    runs = arch in pin_archs and (not only or arch in only)
                     with self.subTest(card=card["name"], arch=arch):
                         flags = (card.get("env_vars") or {}).get("COLOCATED_EXTRA_ARGS", "") if roles else None
                         _, problems = R.check(CAT, recipe, arch, R.build_of_pin_set(CAT, pins), roles, flags=flags)

@@ -832,5 +832,93 @@
             "REQUIRE_LOCAL_WEIGHTS": "1"
         },
         "args": ""
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_kimi-k3_auto",
+        "url": "",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {
+            "PINS": "vllm-kimi-k3"
+        },
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "any_gpu"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 4
+        },
+        "slurm": {
+            "nodes": 4,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "xP": "2",
+            "yD": "2",
+            "RUN_MORI": "1",
+            "WIDE_EP": "1",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4_auto",
+        "url": "",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {
+            "PINS": "vllm-kimi-k3"
+        },
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "mori_ep",
+            "inference",
+            "any_gpu"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 4
+        },
+        "slurm": {
+            "nodes": 4,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3-MXFP4",
+            "xP": "2",
+            "yD": "2",
+            "RUN_MORI": "1",
+            "WIDE_EP": "1",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
     }
 ]

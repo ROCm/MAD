@@ -211,6 +211,16 @@ the launcher finds the GPU first (`cluster_gpu_arch_for_recipe`), then applies t
 (else `default_arch`'s). So one `Kimi-K3-MXFP4` card runs its gfx942 recipe on MI300X and its
 gfx950 recipe on MI355X; an alias still pins its own.
 
+### Cards without a GPU name
+
+`pyt_vllm_kimi-k3_pp2xtp8`, `pyt_vllm_kimi-k3_wideep_allgather`, `pyt_vllm_kimi-k3_wideep_moriep`
+(colocated) and `pyt_vllm_disagg_mori_kimi-k3_auto`, `pyt_vllm_disagg_mori_kimi-k3-mxfp4_auto`
+(disaggregated) carry no GPU fact: no `skip_gpu_arch`, `GPU_ARCHS`, GPUs per node, `EP_TP_SIZE`
+or weight conversion (tag `any_gpu`). The recipe's variant for the GPU the job lands on decides
+those, the roles add a conversion where the GPU needs one, and the site's context says how many
+GPUs a node has. Tests require each, on gfx942, to run the same engine commands as its MI300X-named
+twin and, on gfx950, as the MI355X card. The GPU-named cards stay as they are.
+
 ### Memory sized from the GPU
 
 Byte counts tuned for one GPU (`KV_CACHE_MEMORY_BYTES: "40000000000"` on 288 GB) are wrong on

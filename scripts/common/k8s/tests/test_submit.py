@@ -89,6 +89,12 @@ class TestSubmitDryRun(unittest.TestCase):
         _, objs, _, _ = dry_run("--timeout", "1234")
         self.assertEqual(objs["Job"]["spec"]["activeDeadlineSeconds"], 1234)
 
+    def test_a_card_without_a_gpu_count_takes_its_platforms(self):
+        sys.path.insert(0, str(SUBMIT.parent))
+        import submit
+        self.assertEqual(submit.platform_gpus({}), 8)                               # default_platform
+        self.assertEqual(submit.platform_gpus({"MAD_PLATFORM": "mi455x-helios-tray"}), 4)
+
     def test_pod_hostnames_are_dns_labels(self):
         out, _, _, _ = dry_run()
         self.assertRegex(out["name"], r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")

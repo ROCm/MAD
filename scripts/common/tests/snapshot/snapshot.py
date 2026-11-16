@@ -59,6 +59,26 @@ CONTAINER_SCRIPT_DIRS = {"/opt/nixl-vllm-cookbook": "vllm_dissag", "/opt/mooncak
                          "/mad_scripts": ""}
 
 
+TOPOLOGY_RECIPE_KEYS = ("EP_TP_SIZE",)   # what a launcher takes from the recipe to size the run
+
+
+def launch_env(card, catalog, arch=None):
+    """The settings a launcher builds its topology from: the card's env_vars over the recipe's
+    (the variant of the card's GPU) for the keys the launcher reads from the recipe."""
+    import yaml
+    sys.path.insert(0, str(SCRIPTS / "common" / "recipe"))
+    import models
+    env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+    recipes = SCRIPTS / ("vllm_dissag" if catalog in ("vllm_dissag", "vllm_multinode") else catalog) / "models.yaml"
+    name = env.get("MODEL_NAME")
+    if name and recipes.is_file():
+        r = models.effective(yaml.safe_load(recipes.read_text()) or {}, name, arch or gpu_arch(card)) or {}
+        for k in TOPOLOGY_RECIPE_KEYS:
+            if k in (r.get("env") or {}):
+                env.setdefault(k, str(r["env"][k]))
+    return env
+
+
 def default_gpus_per_node():
     """GPUs per node of the catalog's default platform: what cluster.sh gives a run naming none."""
     import yaml
@@ -358,7 +378,7 @@ def spec_file_equivalence(a):
                 continue
             checked += 1
             gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
-            env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+            env = launch_env(card, catalog)
             env["SLURM_NNODES"] = str(node_count(card))
             env.setdefault("GPUS_PER_NODE", str(default_gpus_per_node()))   # as cluster.sh: the platform's
             spec = topology.from_env(env, catalog)

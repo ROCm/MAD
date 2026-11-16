@@ -168,6 +168,23 @@ class RolesEndToEnd(unittest.TestCase):
         self.best(platform="mi355x-ubb-8")
         self.assertEqual(self.kv_bytes(card), "20000000000")
 
+    def test_a_card_without_a_gpu_name_runs_like_each_gpus_own_card(self):
+        """The generic Kimi-K3-MXFP4 card: on gfx950 nodes, the same engine commands as the
+        MI355X card (the gfx950 variant: native MXFP4, EP_TP_SIZE 1); on gfx942, as the MI300X one."""
+        generic = self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4_auto")
+        on950 = json.loads(json.dumps(generic)); on950["env_vars"]["MAD_GPU_ARCH"] = "gfx950"
+        engines = lambda got: [[b["argv"] for b in r["engine"]["blocks"]] for r in got["ranks"]]
+        mi355x = self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x")
+        self.assertEqual(engines(self.run_card("vllm_dissag", on950)), engines(self.run_card("vllm_dissag", mi355x)))
+        mi300x = self.card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4")
+        self.assertEqual(engines(self.run_card("vllm_dissag", generic)), engines(self.run_card("vllm_dissag", mi300x)))
+
+    def test_a_colocated_card_without_a_gpu_name_converts_only_on_gfx942(self):
+        generic = self.card("vllm_multinode", "pyt_vllm_kimi-k3_wideep_moriep")
+        self.assertIn("--quantization-config", self.argv(self.run_card("vllm_multinode", generic)["ranks"][0]))
+        on950 = json.loads(json.dumps(generic)); on950["env_vars"]["MAD_GPU_ARCH"] = "gfx950"
+        self.assertNotIn("--quantization-config", self.argv(self.run_card("vllm_multinode", on950)["ranks"][0]))
+
 
 if __name__ == "__main__":
     unittest.main()

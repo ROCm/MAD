@@ -42,7 +42,9 @@ class RecipeLayer(unittest.TestCase):
         y = self.scripts / "vllm_dissag" / "models.yaml"
         text = y.read_text()
         m = yaml.safe_load(text)
-        m[self.model]["env"].update(recipe_env)
+        r = m[self.model]
+        # A recipe with per-GPU variants keeps its env in the variant (gfx942 here).
+        (r["variants"]["gfx942"] if "variants" in r else r)["env"].update(recipe_env)
         y.write_text(yaml.safe_dump(m, sort_keys=False))
         card = json.loads(json.dumps(self.card))
         card["env_vars"].update(card_env or {})

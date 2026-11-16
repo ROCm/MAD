@@ -404,23 +404,6 @@ _kimi_k3_dp_flags: &kimi_k3_dp_flags >-
   --max-num-batched-tokens 2048
   --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
 
-Kimi-K3:
-  env: *kimi_k3_recipe_env
-  prefill:
-    dp: *kimi_k3_dp_flags
-  decode:
-    dp: *kimi_k3_dp_flags
-  # What every role needs, independent of GPU and engine (scripts/common/recipe/recipe.py
-  # checks it against compat/rocm.yaml before the job allocates anything). MXFP4 MoE weights
-  # with fp8 activations (the A8W4 path): gfx942 has no MXFP4 matmul, so the engine build
-  # converts the weights to int4 -- the --quantization-config above is that conversion.
-  roles:
-    default:
-      quantization: {weights: mxfp4, activations: fp8}
-      kv_cache: fp8
-    prefill: {}
-    decode: {}
-
 # Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs proven by the PR#241
 # standalone Kimi-K3 launcher (out of tree); vLLM connector fixes live in the
 # disagg image (the PR#241-proven v4 build; the recipe's vLLM/MoRIIO connector fixes are folded into that image's vLLM source).
@@ -561,6 +544,28 @@ _kimi_k3_mi355x_dp_flags: &kimi_k3_mi355x_dp_flags >-
   --max-model-len 320000
   --max-num-seqs 8
   --max-num-batched-tokens 4096
+
+Kimi-K3:                                # one recipe: the gfx942 variant above is the default
+  default_arch: gfx942
+  roles:                                # MXFP4 weights, fp8 activations and KV; gfx942 converts to int4
+    default:
+      quantization: {weights: mxfp4, activations: fp8}
+      kv_cache: fp8
+    prefill: {}
+    decode: {}
+  variants:
+    gfx942:
+      env: *kimi_k3_recipe_env
+      prefill:
+        dp: *kimi_k3_dp_flags
+      decode:
+        dp: *kimi_k3_dp_flags
+    gfx950:                             # MXFP4 is native: the MI355X recipe (see Kimi-K3-MXFP4)
+      env: *kimi_k3_mi355x_recipe_env
+      prefill:
+        dp: *kimi_k3_mi355x_dp_flags
+      decode:
+        dp: *kimi_k3_mi355x_dp_flags
 
 # Kimi-K3-MXFP4: one recipe, a variant per accelerator (scripts/common/recipe/models.py). The
 # MI300X recipe above is its gfx942 variant and the default; the gfx950 variant is the MI355X

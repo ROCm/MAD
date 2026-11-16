@@ -56,9 +56,15 @@ def main(root):
             env = card.get("env_vars") or {}
             allowed = split(env.get("GPU_ARCHS"))
             source = "card env_vars"
-            if not allowed and group == "vllm_dissag":
-                rec = models.effective(recipes, env.get("MODEL_NAME", "")) or {}
-                allowed = split((rec.get("env") or {}).get("GPU_ARCHS"))
+            if not allowed and group in ("vllm_dissag", "vllm_multinode") and env.get("MODEL_NAME") in recipes:
+                # Every GPU the recipe has a variant for (or its GPU_ARCHS, without variants).
+                allowed = set()
+                for arch in KNOWN_ARCHS:
+                    rec = models.effective(recipes, env["MODEL_NAME"], arch) or {}
+                    archs = split((rec.get("env") or {}).get("GPU_ARCHS"))
+                    if not archs or arch in archs:
+                        allowed.add(arch)
+                allowed = set() if allowed == set(KNOWN_ARCHS) else allowed
                 source = "models.yaml %s" % env.get("MODEL_NAME")
             if not allowed:
                 continue

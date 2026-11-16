@@ -105,6 +105,19 @@ def run_timeout(card, cli_timeout=None):
         return None
 
 
+def platform_gpus(env):
+    """GPUs per node of the run's platform (MAD_PLATFORM, else default_platform; compat/rocm.yaml),
+    as the launchers take it -- for a card that states no GPU count. As madengine's
+    slurm_multi_env.platform_gpus_per_node."""
+    import yaml
+    path = Path(__file__).resolve().parents[3] / "compat" / "rocm.yaml"
+    if not path.is_file():
+        return None
+    c = yaml.safe_load(path.read_text()) or {}
+    p = (c.get("platforms") or {}).get(env.get("MAD_PLATFORM") or c.get("default_platform")) or {}
+    return p.get("gpus_per_node")
+
+
 def first_positive(*values):
     for v in values:
         try:
@@ -181,7 +194,7 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
     nnodes = first_positive(nnodes_override, (card.get("distributed") or {}).get("nnodes"),
                             (card.get("slurm") or {}).get("nodes")) or 1
     gpus = first_positive(k8s.get("gpu_count"), (card.get("slurm") or {}).get("gpus_per_node"),
-                          card.get("n_gpus"))
+                          card.get("n_gpus"), platform_gpus(dict(card.get("env_vars") or {}, **env_overrides)))
     if not gpus:
         die("GPUs per pod unknown: set gpu_count (the card has no slurm.gpus_per_node)")
     name = run_name(card["name"], nnodes)
