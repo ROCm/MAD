@@ -4,6 +4,7 @@
       "Bash(madengine discover *)",
       "Bash(madengine run *)",
       "Bash(madengine build *)",
+      "Bash(madengine nan *)",
       "Bash(madengine report tracelens *)",
       "Bash(madengine report tracelens-compare *)",
       "Bash(bash scripts/Primus/primus-cli *)",
