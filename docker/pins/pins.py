@@ -110,9 +110,35 @@ def problems(spec, strict=False):
                 pending.append(f"{n}: pip {p['name']} unpinned ({p['pending']})")
         elif not re.match(r"^[0-9][0-9A-Za-z.+!-]*$", str(p["version"])):
             err.append(f"{n}: pip {p.get('name')} version {p['version']!r} is not exact")
+    err += catalog_problems(spec)
     if strict:
         err += pending
     return err, pending
+
+
+CATALOG = os.path.join(HERE, "..", "..", "compat", "rocm.yaml")
+
+
+def catalog_problems(spec):
+    """A pin set against the capability catalog (compat/rocm.yaml), when the catalog is at hand
+    (the repository; not a Docker build, which copies only docker/pins): each of its architectures
+    must be a catalog accelerator and listed for its build under `kernels`, or a recipe could not
+    be checked against an image built from it."""
+    if not os.path.isfile(CATALOG):
+        return []
+    import yaml
+    with open(CATALOG) as f:
+        cat = yaml.safe_load(f) or {}
+    n, build = spec.get("name"), f"{spec.get('engine')}@{spec.get('name')}"
+    per = (cat.get("kernels") or {}).get(build) or {}
+    out = []
+    for arch in spec.get("gpu_archs") or []:
+        if arch not in (cat.get("accelerators") or {}):
+            out.append(f"{n}: {arch} is not an accelerator in compat/rocm.yaml")
+        elif arch not in per:
+            out.append(f"{n}: compat/rocm.yaml kernels.{build} lists nothing for {arch} (what an image of "
+                       "this set runs there: weights, activations, KV cache formats)")
+    return out
 
 
 def validate(spec, strict=False):

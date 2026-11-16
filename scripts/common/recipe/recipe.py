@@ -30,6 +30,7 @@ CLI (from the MAD root):
                     [--roles R,..]
   recipe.py explain ... (same arguments): the resolution of every role, as JSON
   recipe.py validate                      : the catalog's own references
+  recipe.py bringup --arch ARCH            : what stands between an accelerator and a run
 """
 import argparse
 import copy
@@ -324,6 +325,36 @@ def validate(catalog):
     return bad
 
 
+def bringup(catalog, arch, pins_dir=None):
+    """What stands between an accelerator and a run: its compiler target, the pin sets that build
+    for it (and the components they pin there), the engine builds the catalog lists for it.
+    {"arch", "target", "pin_sets": {name: [components]}, "builds": [...], "missing": [...]}"""
+    import glob as _glob
+    pins_dir = pins_dir or os.path.join(MAD_ROOT, "docker", "pins")
+    acc = (catalog.get("accelerators") or {}).get(arch)
+    out = {"arch": arch, "target": None, "pin_sets": {}, "builds": [], "missing": []}
+    if acc is None:
+        out["missing"].append(f"{arch} is not an accelerator in compat/rocm.yaml")
+        return out
+    out["target"] = acc.get("target", arch)
+    if out["target"] == "tbd":
+        out["missing"].append("compiler target not yet published (target: tbd)")
+    for f in sorted(_glob.glob(os.path.join(pins_dir, "*.json"))):
+        with open(f) as fh:
+            ps = json.load(fh)
+        if arch in (ps.get("gpu_archs") or []):
+            comps = [c for c, d in (ps.get("components") or {}).items()
+                     if isinstance(d, dict) and d.get("enabled") is not False
+                     and (not d.get("archs") or arch in d["archs"])]
+            out["pin_sets"][ps["name"]] = comps
+    out["builds"] = [b for b, per in (catalog.get("kernels") or {}).items() if arch in (per or {})]
+    if not out["pin_sets"]:
+        out["missing"].append("no pin set builds an image for it (docker/pins gpu_archs)")
+    if not out["builds"]:
+        out["missing"].append("no engine build lists what it runs there (compat/rocm.yaml kernels)")
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -343,8 +374,21 @@ def main(argv=None):
                                          "engine arguments to add) to this file when it resolves")
     v = sub.add_parser("validate")
     v.add_argument("--catalog", default=CATALOG)
+    b = sub.add_parser("bringup", help="what stands between an accelerator and a run")
+    b.add_argument("--arch", required=True)
+    b.add_argument("--catalog", default=CATALOG)
     a = ap.parse_args(argv)
     catalog = load_catalog(a.catalog)
+    if a.cmd == "bringup":
+        r = bringup(catalog, a.arch)
+        print(f"{a.arch}: target {r['target']}")
+        for name, comps in r["pin_sets"].items():
+            print(f"  pin set {name}: {', '.join(comps)}")
+        for b in r["builds"]:
+            print(f"  engine build {b}")
+        for m in r["missing"]:
+            print(f"  missing: {m}")
+        return 1 if r["missing"] else 0
     if a.cmd == "validate":
         bad = validate(catalog)
         for b in bad:

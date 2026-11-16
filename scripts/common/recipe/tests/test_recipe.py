@@ -178,6 +178,19 @@ class KimiRecipes(unittest.TestCase):
 
 
 
+class BringUp(unittest.TestCase):
+    def test_cdna5_lists_every_gap(self):
+        r = R.bringup(CAT, "cdna5")
+        self.assertEqual((r["pin_sets"], r["builds"]), ({}, []))
+        self.assertEqual(len(r["missing"]), 3)          # target, pin set, engine build
+
+    def test_gfx950_is_ready(self):
+        r = R.bringup(CAT, "gfx950")
+        self.assertEqual(r["missing"], [])
+        self.assertIn("vllm-kimi-k3", r["pin_sets"])
+        self.assertIn("sglang@sglang-disagg", r["builds"])
+
+
 class Refusals(unittest.TestCase):
     def test_unknown_accelerator(self):
         _, problems = R.check(CAT, DQ, "gfx999")

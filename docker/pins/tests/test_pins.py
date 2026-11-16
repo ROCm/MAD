@@ -125,6 +125,17 @@ class Validate(unittest.TestCase):
             err, _ = pins.problems(s)
             self.assertTrue(any(needle in e for e in err), (needle, err))
 
+    def test_every_arch_has_a_capability_entry(self):
+        spec = pins.load("vllm-glm51")
+        spec["gpu_archs"] = ["gfx942", "gfx950"]
+        spec["base_image"]["gfx950"] = spec["base_image"]["gfx942"]
+        err, _ = pins.problems(spec)
+        self.assertTrue(any("kernels.vllm@vllm-glm51 lists nothing for gfx950" in e for e in err), err)
+        spec["gpu_archs"] = ["gfx999"]
+        spec["base_image"] = {"gfx999": spec["base_image"]["gfx942"]}
+        err, _ = pins.problems(spec)
+        self.assertTrue(any("gfx999 is not an accelerator" in e for e in err), err)
+
     def test_build_args_refuse_another_arch_or_base(self):
         with self.assertRaises(pins.PinError):
             pins.build_args(pins.load("vllm-mori121"), "gfx950")
