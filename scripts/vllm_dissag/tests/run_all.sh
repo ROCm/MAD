@@ -24,5 +24,11 @@ echo ""
 echo "############### test_socket_barrier.py ###############"
 python3 "$ROOT/tests/test_socket_barrier.py" || rc=1
 echo ""
+for t in test_tcp_listen.py test_wideep_dryrun.py test_regrade_niah.py \
+         test_niah_helpers.py test_models_yaml_dsv4.py; do
+  echo "############### $t ###############"
+  python3 "$ROOT/tests/$t" || rc=1
+  echo ""
+done
 [[ "$rc" == "0" ]] && echo "ALL OFFLINE SUITES PASSED ✅" || echo "SOME SUITES FAILED ❌"
 exit $rc
