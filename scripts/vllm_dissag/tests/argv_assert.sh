@@ -33,6 +33,14 @@ _argv_off() { # connector wide_ep ep_backend model model_path kv_offload [backen
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
+# emit argv for one node of a multi-node (2P2D) cell
+_argv_node() { # connector wide_ep ep_backend model model_path xP yD node_rank
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK="$8" xP="$6" yD="$7" CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
+    MODEL_NAME="$4" MODEL_PATH="$5" MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
 _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
 _count() { local n; n="$(grep -cF -- "$2" <<<"$1")"; [[ "$n" == "$3" ]] && { printf "  PASS  %s (=%s)\n" "$4" "$n"; pass=$((pass+1)); } || { printf "  FAIL  %s (got %s want %s)\n" "$4" "$n" "$3"; fail=$((fail+1)); }; }
@@ -149,6 +157,21 @@ PY
 _has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
 _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+
+echo ""
+echo "=== moriio + wideEP 2P2D (multi-node): peer hosts in kv_connector_extra_config ==="
+P0="$(_argv_node moriio 1 mori DeepSeek-V3 /m/DSV3 2 2 0)"
+P1="$(_argv_node moriio 1 mori DeepSeek-V3 /m/DSV3 2 2 1)"
+D2="$(_argv_node moriio 1 mori DeepSeek-V3 /m/DSV3 2 2 2)"
+B1="$(_argv moriio 1 mori DeepSeek-V3 /m/DSV3)"
+_has    "$P0" '"remote_hosts":["10.0.0.3","10.0.0.4"]' "prefill master: remote_hosts = decode nodes"
+_has    "$P0" '"remote_dp_size_local":8' "prefill master: remote_dp_size_local = GPUs per node"
+_has    "$P1" "--headless" "prefill child: headless"
+_has    "$P1" '"proxy_ip":""' "prefill child: does not register with the router"
+_has    "$P1" '"remote_hosts":["10.0.0.3","10.0.0.4"]' "prefill child: remote_hosts = decode nodes"
+_has    "$D2" '"remote_hosts":["10.0.0.1","10.0.0.2"]' "decode master: remote_hosts = prefill nodes"
+_hasnot "$B1" "remote_hosts" "1P1D wideEP: no remote_hosts"
+_has "$(cat "$SLURM")" '${MORI_PROXY_PING_PORT:+-e MORI_PROXY_PING_PORT=' "slurm forwards MORI_PROXY_PING_PORT"
 
 echo ""
 echo "======================================================"

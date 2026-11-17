@@ -22,7 +22,9 @@ connector_init() {
     SERVE_PORT="${MORI_SERVE_PORT:-20005}"
     KV_PORT="${MORI_KV_PORT:-9711}"
     PROXY_PORT="${MORI_PROXY_PORT:-10001}"
-    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-36367}"
+    # Router discovery port, kept below the ephemeral range (32768-60999): the router starts after the
+    # vLLM servers, whose random TCP listeners can otherwise take it ("Failed to bind ZMQ socket").
+    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-26367}"
     LOCAL_PING_PORT="${MORI_LOCAL_PING_PORT:-61555}"
     HANDSHAKE_PORT="${MORI_HANDSHAKE_PORT:-8405}"
     NOTIFY_PORT="${MORI_NOTIFY_PORT:-61005}"
@@ -136,9 +138,9 @@ connector_setup_env() {
 }
 
 # Multi-node wideEP role (xP>1 or yD>1): each role is ONE DP group spanning nodes behind its
-# master's URL. Child nodes get the MoRI-IO connector and the router is given every node's IP plus
-# the full rank range (connector_start_proxy), so DP ranks on every node serve. 1P1D is unchanged.
-# The router needs the --moriio-* flags from vllm-project/router PR #458.
+# master's URL. Child nodes get the MoRI-IO connector, and every node's connector config carries the
+# peer role's node IPs (_moriio_build_kv_transfer_config), so the router can dispatch to DP ranks on
+# every node. Needs vLLM with PR #65098 (nightly from 2026-11-15). 1P1D is unchanged.
 _moriio_multi_node() {
     parallelism_is_wide_ep && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
 }
@@ -147,7 +149,19 @@ _moriio_build_kv_transfer_config() {
     local kv_role="$1"
     local read_mode_val="false"
     [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && read_mode_val="true"
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"read_mode":'"${read_mode_val}"',"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"}}'
+    # Multi-node roles: give the connector the peer role's node IPs (DP-rank order, master
+    # first) and the DP ranks per node. vLLM from 2026-11-14 on (PR #65098) copies them into a
+    # request's kv_transfer_params when the router sends no remote_hosts, so DP ranks on child
+    # nodes are reachable with a stock router. Values the router stamps into a request win. Older
+    # images ignore the keys and hang on child-node ranks. MORIIO_CONFIG_PEER_HOSTS=0 disables them.
+    local peer_json=""
+    if _moriio_multi_node && [[ "${MORIIO_CONFIG_PEER_HOSTS:-1}" == "1" ]]; then
+        local -a peers
+        if [[ "${kv_role}" == "kv_producer" ]]; then peers=("${IP_ARRAY[@]:xP:yD}"); else peers=("${IP_ARRAY[@]:0:xP}"); fi
+        local hosts; hosts=$(printf '"%s",' "${peers[@]}")
+        peer_json=',"remote_hosts":['"${hosts%,}"'],"remote_dp_size_local":'"${DP_PARALLEL_SIZE_LOCAL}"
+    fi
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"read_mode":'"${read_mode_val}"',"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${peer_json}"'}}'
 }
 
 connector_runtime_patch() {
@@ -537,27 +551,18 @@ connector_start_proxy() {
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
 
-        # Multi-node roles: give the router every node's IP (--moriio-*) and the full rank range, so
-        # it stamps each leg with the peer role's node IPs and DP ranks on every node serve. The
-        # router pins the decode leg to the prefill rank (one range for both), so with xP != yD the
-        # larger role's extra nodes stay idle. Falls back to master-node ranks only (as before) if
-        # the router lacks --moriio-* or in READ mode (the connector's READ eager handshake ignores
-        # per-node hosts). ROUTER_INTRA_NODE_DP overrides the range.
-        local _router_dp_default="${DP_PARALLEL_SIZE_LOCAL}" _router_multipod_args=() _router_help
+        # Multi-node roles: the router expands each discovered worker per DP rank from its registered
+        # dp_size (vllm-project/router #386), and the connector reaches DP ranks on child nodes through
+        # the peer hosts in kv_connector_extra_config (_moriio_build_kv_transfer_config). So the router
+        # needs no per-node flags; --intra-node-data-parallel-size stays the per-node size (it only
+        # matters for static URLs). READ mode: the connector's READ handshake ignores per-node hosts,
+        # so only master-node DP ranks can serve. ROUTER_INTRA_NODE_DP overrides the range.
+        local _router_dp_default="${DP_PARALLEL_SIZE_LOCAL}"
         if _moriio_multi_node; then
-            _router_help=$("${ROUTER_BIN}" --help 2>&1 || true)
             if [[ "${MORIIO_READ_MODE:-0}" == "1" ]]; then
                 echo "WARN: multi-node MoRIIO in READ mode: only master-node DP ranks serve"
-            elif [[ "${_router_help}" != *--moriio-prefill-hosts* ]]; then
-                echo "WARN: ${ROUTER_BIN} lacks --moriio-prefill-hosts: only master-node DP ranks serve"
             else
-                _router_dp_default=$(( PREFILL_DP_SIZE < DECODE_DP_SIZE ? PREFILL_DP_SIZE : DECODE_DP_SIZE ))
-                _router_multipod_args=(
-                    --moriio-dp-size-local "${DP_PARALLEL_SIZE_LOCAL}"
-                    --moriio-prefill-hosts "${IP_ARRAY[@]:0:xP}"
-                    --moriio-decode-hosts "${IP_ARRAY[@]:xP:yD}"
-                )
-                echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD}"
+                echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD} (peer hosts via kv_connector_extra_config; needs vLLM PR #65098)"
             fi
         fi
         local _router_dp_local="${ROUTER_INTRA_NODE_DP:-${_router_dp_default}}"
@@ -575,7 +580,6 @@ connector_start_proxy() {
             --decode "${DECODE_URL}" \
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
-            ${_router_multipod_args[@]+"${_router_multipod_args[@]}"} \
             --policy "${ROUTER_POLICY:-round_robin}" \
             --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}" \
             --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
@@ -623,7 +627,16 @@ connector_start_proxy() {
             fi
             sleep 5; _waited=$((_waited + 5))
         done
-        [ "${_waited}" -ge "${_REG_TIMEOUT}" ] && echo "WARNING: router registration not confirmed in ${_REG_TIMEOUT}s; proceeding."
+        if [ "${_waited}" -ge "${_REG_TIMEOUT}" ]; then
+            # Without registration every request 503s, so fail here instead of running the benchmark.
+            if [[ "${ROUTER_REGISTER_REQUIRED:-1}" == "1" ]]; then
+                echo "ERROR: prefill+decode did not register with the router in ${_REG_TIMEOUT}s (check ${_ROUTER_LOG}, e.g. 'Failed to bind'); aborting. ROUTER_REGISTER_REQUIRED=0 proceeds anyway." \
+                    | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
+                kill "${proxy_pid}" 2>/dev/null || true   # closes the proxy port so the other nodes tear down
+                exit 1
+            fi
+            echo "WARNING: router registration not confirmed in ${_REG_TIMEOUT}s; proceeding."
+        fi
     else
         sleep 20
     fi

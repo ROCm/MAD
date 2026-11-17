@@ -226,11 +226,22 @@ once the images you use ship the upstream fix:
 The MLA broadcast fix only matters when `save_only_first_rank` is on (default for MLA models) and DP > 1.
 Setting `LMCACHE_EXTRA_CONFIG='{"save_only_first_rank":false}'` also avoids it, as it skips that path.
 
-**Multi-node roles (e.g. 2P2D EP16).** The router must be built from
-[vllm-project/router #458](https://github.com/vllm-project/router/pull/458) (`--moriio-dp-size-local`,
-`--moriio-prefill-hosts`, `--moriio-decode-hosts`). A stock `vllm-router` lacks these flags: the
-launcher then warns and only the master node's DP ranks 0-7 of each role serve. The PR is open; point
-`ROUTER_BINARY` at a binary built from it.
+**Multi-node roles (e.g. 2P2D EP16).** Each role is one DP group spanning its nodes; only the master
+registers with the router, and the router dispatches to every DP rank of the registered `dp_size`
+([vllm-project/router #386](https://github.com/vllm-project/router/pull/386)). For the MoRI-IO
+connector to reach DP ranks on the child nodes, the launcher gives every node's connector config the
+peer role's node IPs (`remote_hosts`, DP-rank order) and `remote_dp_size_local` (GPUs per node); the
+connector copies them into each request when the router sends none
+([vLLM #65098](https://github.com/vllm-project/vllm/pull/65098), merged 2026-11-14). This needs a
+vLLM image with that PR (`vllm/vllm-openai-rocm:nightly` from 2026-11-15 on). Older images cannot
+serve child-node ranks and the request hangs on the KV handshake. A stock `vllm-router` works; no
+router flags or runtime patch are involved. `MORIIO_CONFIG_PEER_HOSTS=0` drops the keys. READ mode
+is unsupported for multi-node roles (the connector's READ handshake ignores per-node hosts).
+
+The router discovery port defaults to 26367 (`MORI_PROXY_PING_PORT`), below the ephemeral range,
+because the router starts after the vLLM servers and a random vLLM listener can otherwise take the
+port; the launcher then aborts with "did not register with the router" (`ROUTER_REGISTER_REQUIRED=0`
+to proceed anyway).
 
 ### Back-compat
 
