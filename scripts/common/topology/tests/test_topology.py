@@ -184,12 +184,12 @@ class RouterNode(unittest.TestCase):
         sys.path.insert(0, str(SCRIPTS / "common" / "tests" / "snapshot"))
         import snapshot as S
         card = next(c for c in json.loads((SCRIPTS / catalog / "models.json").read_text()) if c["name"] == name)
-        gold = json.loads((GOLDEN / catalog / f"{name}.json").read_text())
+        gold = S._as_parsed(json.loads((GOLDEN / catalog / f"{name}.json").read_text()))
         card = json.loads(json.dumps(card))
         card["env_vars"].update(env, ROUTER_NODE="1")
         n = S.node_count(card) + 1 if "yD" not in env else int(card["env_vars"]["xP"]) + int(env["yD"]) + 1
         card["slurm"]["nodes"] = card["distributed"]["nnodes"] = n
-        got = S.snapshot_card(catalog, card)
+        got = S._as_parsed(S.snapshot_card(catalog, card))
         self.assertEqual(got["exit_code"], 0, got.get("stderr_tail"))
         self.assertEqual(len(got["ranks"]), n)
         router_ip = f"10.0.0.{n}"

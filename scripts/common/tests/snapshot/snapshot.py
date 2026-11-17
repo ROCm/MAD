@@ -17,6 +17,8 @@ compared with golden/<catalog>/<card>.json; any difference fails.
 
 A refactor of the launchers must leave every snapshot unchanged, or change it
 on purpose: rerun with --update and review the golden diff in the commit.
+SGLang server commands are compared as argparse reads them: option order is
+free, and an option given twice counts once, with its last value.
 
 Each card runs in its own temporary directory, on a copy of scripts/, with HOME,
 LOG_PATH, NVME_ROOT, SHARED_MOUNT and the JIT cache pointed inside it, so a run
@@ -288,10 +290,11 @@ def main():
             if a.card not in card["name"]:
                 continue
             checked += 1
-            got = json.dumps(snapshot_card(catalog, card), indent=1) + "\n"
+            snap = snapshot_card(catalog, card)
+            got = json.dumps(snap, indent=1) + "\n"
             gold = GOLDEN / catalog / f"{card['name']}.json"
             want = gold.read_text() if gold.exists() else ""
-            if got == want:
+            if got == want or (want and _as_parsed(snap) == _as_parsed(json.loads(want))):
                 continue
             if a.update:
                 gold.parent.mkdir(parents=True, exist_ok=True)
@@ -318,6 +321,26 @@ TOPOLOGY_SETTINGS = {"xP", "yD", "ROUTER_NODE", "WIDE_EP", "EP_TP_SIZE", "DP_MOD
                      "TP_SIZE", "PP_SIZE", "ENABLE_EP", "ALL2ALL_BACKEND", "MAD_TOPOLOGY", "MAD_TOPOLOGY_NNODES"}
 
 
+def _as_parsed(snap):
+    """`snap` with each SGLang server's argv as argparse reads it: options sorted,
+    a repeated option once with its last value."""
+    out = json.loads(json.dumps(snap))
+    for r in out.get("ranks", []):
+        for b in (r.get("engine") or {}).get("blocks", []):
+            argv = b.get("argv") or []
+            if argv[:3] != ["python3", "-m", "sglang.launch_server"]:
+                continue
+            opts, cur = {}, None
+            for tok in argv[3:]:
+                if tok.startswith("--"):
+                    cur = tok
+                    opts[cur] = []
+                elif cur is not None:
+                    opts[cur].append(tok)
+            b["argv"] = argv[:3] + [t for k in sorted(opts) for t in [k, *opts[k]]]
+    return out
+
+
 def _without_settings(ranks):
     out = json.loads(json.dumps(ranks))
     for r in out:
@@ -337,7 +360,7 @@ def spec_file_equivalence(a):
             if a.card not in card["name"]:
                 continue
             checked += 1
-            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
+            gold = _as_parsed(json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text()))
             env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
             env["SLURM_NNODES"] = str(node_count(card))
             spec = topology.from_env(env, catalog)
@@ -348,7 +371,7 @@ def spec_file_equivalence(a):
                                      if k not in TOPOLOGY_SETTINGS}
             spec_card["env_vars"]["MAD_TOPOLOGY"] = f.name
             try:
-                got = snapshot_card(catalog, spec_card)
+                got = _as_parsed(snapshot_card(catalog, spec_card))
             finally:
                 os.unlink(f.name)
             problems = []
@@ -378,8 +401,8 @@ def equivalence(a):
             if a.card not in card["name"]:
                 continue
             checked += 1
-            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
-            got = snapshot_card(catalog, card, a.equivalence or "slurm-srun", a.spooled)
+            gold = _as_parsed(json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text()))
+            got = _as_parsed(snapshot_card(catalog, card, a.equivalence or "slurm-srun", a.spooled))
             problems = []
             if got["exit_code"] != gold["exit_code"]:
                 problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
