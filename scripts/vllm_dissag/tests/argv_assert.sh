@@ -151,14 +151,14 @@ _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
 
 # MoRIIO READ mode must stay opt-in: the kv-transfer-config is built for every moriio model,
-# so the default JSON has to be unchanged. GLM-5.3-Flash opts in via its models.yaml env:.
+# so the default has to stay WRITE mode. GLM-5.3-Flash opts in via its models.yaml env:.
 echo ""
 echo "=== MoRIIO read_mode is opt-in, not default-on ==="
 C="$(cat "$DIR/connectors/moriio.sh")"
 _has "$C" '${MORIIO_READ_MODE:-0}' "moriio.sh: read_mode gate defaults OFF"
 _kv() { env "$@" bash -c 'source "$1"; KV_PORT=1 MASTER_ADDR=h PROXY_PORT=1 PROXY_PING_PORT=1 SERVE_PORT=1 LOCAL_PING_PORT=1 HANDSHAKE_PORT=1 NOTIFY_PORT=1 _moriio_build_kv_transfer_config kv_producer' _ "$DIR/connectors/moriio.sh"; }
-_hasnot "$(_kv)" 'read_mode' "moriio.sh: default kv-transfer-config has no read_mode"
-_has "$(_kv MORIIO_READ_MODE=1)" '"read_mode":"true"' "moriio.sh: MORIIO_READ_MODE=1 adds read_mode"
+_has "$(_kv)" '"read_mode":false' "moriio.sh: default kv-transfer-config is WRITE mode"
+_has "$(_kv MORIIO_READ_MODE=1)" '"read_mode":true' "moriio.sh: MORIIO_READ_MODE=1 sets read_mode"
 _OPTIN_RM="$(python3 - "$DIR/models.yaml" <<'PY'
 import sys, yaml
 y = yaml.safe_load(open(sys.argv[1])) or {}
