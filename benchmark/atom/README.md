@@ -91,23 +91,64 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 
 #### Available models
 
-| model_name                 | Model                                    | Notes                                  |
-| -------------------------- | ---------------------------------------- | -------------------------------------- |
-| pyt_atom_llama-3.3-70b_fp8 | amd/Llama-3.3-70B-Instruct-FP8-KV        |                                        |
-| pyt_atom_llama-3.3-70b_fp4 | amd/Llama-3.3-70B-Instruct-MXFP4-Preview | gfx950 only                            |
-| pyt_atom_kimi-k3           | moonshotai/Kimi-K3                       | gfx950 only; see the note below        |
+| model_name                       | Model                                     | Notes                           |
+| -------------------------------- | ----------------------------------------- | ------------------------------- |
+| pyt_atom_llama-3.3-70b_fp8       | amd/Llama-3.3-70B-Instruct-FP8-KV         |                                 |
+| pyt_atom_llama-3.3-70b_fp4       | amd/Llama-3.3-70B-Instruct-MXFP4-Preview  | gfx950 only                     |
+| pyt_atom_gpt-oss-120b            | openai/gpt-oss-120b                       |                                 |
+| pyt_atom_gpt-oss-120b_w4a8       | amd/gpt-oss-120b-w-mxfp4-a-fp8            | gfx950 only                     |
+| pyt_atom_kimi-k2.5_fp4           | amd/Kimi-K2.5-MXFP4                       | gfx950 only                     |
+| pyt_atom_kimi-k2.6_fp4           | amd/Kimi-K2.6-MXFP4                       | gfx950 only                     |
+| pyt_atom_llama-3.1-405b_fp8      | amd/Llama-3.1-405B-Instruct-FP8-KV        |                                 |
+| pyt_atom_llama-3.1-405b_fp4      | amd/Llama-3.1-405B-Instruct-MXFP4-Preview | gfx950 only                     |
+| pyt_atom_llama-3.3-70b           | meta-llama/Llama-3.3-70B-Instruct         |                                 |
+| pyt_atom_deepseek-r1             | deepseek-ai/DeepSeek-R1-0528              |                                 |
+| pyt_atom_deepseek-r1_fp4         | amd/DeepSeek-R1-0528-MXFP4                | gfx950 only                     |
+| pyt_atom_deepseek-r1_fp4_mtp     | amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4     | gfx950 only                     |
+| pyt_atom_qwen3-235b-thinking_fp8 | Qwen/Qwen3-235B-A22B-Thinking-2507-FP8    |                                 |
+| pyt_atom_qwen3-235b-thinking     | Qwen/Qwen3-235B-A22B-Thinking-2507        |                                 |
+| pyt_atom_qwen3-next-80b          | Qwen/Qwen3-Next-80B-A3B-Instruct          |                                 |
+| pyt_atom_glm-5_fp8               | zai-org/GLM-5-FP8                         |                                 |
+| pyt_atom_minimax-m2.5_fp8        | MiniMaxAI/MiniMax-M2.5                    |                                 |
+| pyt_atom_deepseek-v4-pro         | deepseek-ai/DeepSeek-V4-Pro               | gfx950 only                     |
+| pyt_atom_deepseek-v4-flash       | deepseek-ai/DeepSeek-V4-Flash             | gfx950 only                     |
+| pyt_atom_kimi-k2.5               | moonshotai/Kimi-K2.5                      | gfx950 only                     |
+| pyt_atom_kimi-k2.6               | moonshotai/Kimi-K2.6                      | gfx950 only                     |
+| pyt_atom_kimi-k3                 | moonshotai/Kimi-K3                        | gfx950 only; see the note below |
 
-All three entries read [scripts/atom/configs/default.yaml](../../scripts/atom/configs/default.yaml) and run online
+All entries read [scripts/atom/configs/default.yaml](../../scripts/atom/configs/default.yaml) and run online
 serving (`atom.entrypoints.openai_server` + `atom.benchmarks.benchmark_serving`) at TP8 with an FP8 KV cache.
 "gfx950 only" means the entry sets `skip_gpu_arch: gfx942`.
 
-| model_name                 | Input / output length | Max concurrency            |
-| -------------------------- | --------------------- | -------------------------- |
-| pyt_atom_llama-3.3-70b_fp8 | 1000, 4000, 10000 / 1000 | 128, 256                |
-| pyt_atom_llama-3.3-70b_fp4 | 1000, 4000, 10000 / 1000 | 64, 128, 256            |
-| pyt_atom_kimi-k3           | 8192 / 1024           | 1, 4, 8, 16, 32, 64, 128, 256 |
+| model_name                       | Input / output length    | Max concurrency               |
+| -------------------------------- | ------------------------ | ----------------------------- |
+| pyt_atom_llama-3.3-70b_fp8       | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_llama-3.3-70b_fp4       | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_gpt-oss-120b            | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_gpt-oss-120b_w4a8       | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_kimi-k2.5_fp4           | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_kimi-k2.6_fp4           | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_llama-3.1-405b_fp8      | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_llama-3.1-405b_fp4      | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_llama-3.3-70b           | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_deepseek-r1             | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_deepseek-r1_fp4         | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_deepseek-r1_fp4_mtp     | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_qwen3-235b-thinking_fp8 | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_qwen3-235b-thinking     | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_qwen3-next-80b          | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_glm-5_fp8               | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_minimax-m2.5_fp8        | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_deepseek-v4-pro         | 1000, 4000, 10000 / 1000 | 64, 128, 256                  |
+| pyt_atom_deepseek-v4-flash       | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_kimi-k2.5               | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_kimi-k2.6               | 1000, 4000, 10000 / 1000 | 128, 256                      |
+| pyt_atom_kimi-k3                 | 8192 / 1024              | 1, 4, 8, 16, 32, 64, 128, 256 |
 
-The two Llama entries also carry the `atom_default` tag, so `madengine run --tags atom_default` runs both of them.
+Every entry except `pyt_atom_kimi-k3` also carries the `atom_default` tag, so `madengine run --tags atom_default`
+runs all of them. That is a large sweep (several checkpoints are 500 GB or more), so make sure `HF_HUB_CACHE` has
+room, or run entries by name. The entries other than `pyt_atom_llama-3.3-70b_fp8`, `pyt_atom_llama-3.3-70b_fp4` and
+`pyt_atom_kimi-k3` were added from their `perf.yaml` entries and have not been run on hardware yet.
 
 >[!NOTE]
 >`pyt_atom_kimi-k3` tracks the AMD day-0 recipe for Kimi-K3 (ROCm/ATOM `recipes/Kimi-K3.md`); its tuned server
@@ -147,7 +188,7 @@ A run config sets the shape of each run (`benchmark`, `hf_pipeline_tag`, `model`
   result is written to `perf_config.yaml` next to the config; the original file is never modified. Pass
   `--no-perf-merge` to skip this step, or `--perf <yaml>` to use a different file.
 - **acc.yaml.** For accuracy runs, the runner first applies the task-level `evaluations` for the config's
-  `hf_pipeline_tag` (for `text-generation`, 0-shot gsm8k through `local-completions`), then deep-merges the
+  `hf_pipeline_tag` (for `text-generation`, 5-shot gsm8k through `local-completions`), then deep-merges the
   model's own overrides on top. The merged result is written to `acc_config.yaml`.
 - **arch_overrides.** A run config can carry an `arch_overrides` map keyed by GPU architecture (for example
   `gfx950`). The block that matches `MAD_SYSTEM_GPU_ARCHITECTURE` is applied to that config.
@@ -265,7 +306,7 @@ python -m atom.entrypoints.openai_server \
     --gpu-memory-utilization 0.9 \
     --max-num-seqs 1024 \
     --max-num-batched-tokens 131072 \
-    --max-model-len 8192
+    --max-model-len 16384
 
     # Wait for model to load and server is ready to accept requests
 ```
@@ -326,10 +367,10 @@ pip install lm-eval[api]
 model=amd/Llama-3.3-70B-Instruct-FP8-KV
 lm_eval --model local-completions \
     --model_args model=$model,max_gen_toks=2048,num_concurrent=64,max_retries=3,base_url=http://localhost:8000/v1/completions,tokenized_requests=False \
-    --tasks gsm8k --num_fewshot 0 --output_path ./tmp
+    --tasks gsm8k --num_fewshot 5 --output_path ./tmp
 ```
 
-Some models override these settings in `acc.yaml`; for example, gpt-oss-120b uses 3-shot and Kimi-K3 uses 5-shot.
+Some models override these settings in `acc.yaml`; for example, gpt-oss-120b uses 3-shot.
 
 #### Kernel profiling
 

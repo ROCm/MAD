@@ -48,7 +48,7 @@
     --gpu-memory-utilization: 0.9
     --max-num-seqs: 1024
     --max-num-batched-tokens: 131072
-    --max-model-len: 8192
+    --max-model-len: 16384
   env: {}
 
 # DeepSeek-R1 MTP variant (must come before base deepseek-r1 for pattern matching)
@@ -61,7 +61,7 @@
   env: {}
 
 # DeepSeek-R1 (base variants)
-- model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-Preview
+- model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4
   extra_args:
     --kv_cache_dtype: fp8
   bench_serving:

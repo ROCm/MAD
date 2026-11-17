@@ -119,6 +119,60 @@ def _format_cli_arg(k, v):
     return f" {k}={v_str}"
 
 
+def _extra_args_to_str(extra):
+    """Serialize an extra_args dict into one CLI fragment."""
+    extra_args_str = ""
+    for k, v in (extra or {}).items():
+        extra_args_str += _format_cli_arg(k, v)
+    return extra_args_str
+
+
+def apply_optional_dcp(extra, dcp):
+    """Add vLLM decode context parallel from --dcp when this test did not set it.
+
+    Returns a new dict. The input dict is not changed.
+    """
+    extra = dict(extra or {})
+    if dcp is None:
+        return extra
+    key = "--decode-context-parallel-size"
+    if key in extra:
+        print(f"Keeping {key} {extra[key]} from the test config")
+        return extra
+    extra[key] = dcp
+    print(f"Applying optional --dcp {dcp}")
+    return extra
+
+
+def require_valid_dcp(dcp, tp, model=None):
+    """Stop before vLLM starts when DCP cannot shard this tensor-parallel size.
+
+    A legal size is a positive whole number that divides ``tp``. For tp 8 the
+    legal values are 1, 2, 4, and 8, so 3 is rejected here.
+    """
+    if dcp is None or dcp == "":
+        return
+    where = f" for {model}" if model else ""
+    try:
+        dcp_size = int(dcp)
+        tp_size = int(tp)
+    except (TypeError, ValueError):
+        print(
+            f"Invalid --dcp {dcp!r}{where}: it must be a positive whole number "
+            f"and tensor parallel size must be a whole number (got tp {tp!r}).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if dcp_size < 1 or tp_size < 1 or tp_size % dcp_size != 0:
+        legal = ", ".join(str(i) for i in range(1, tp_size + 1) if tp_size % i == 0) if tp_size >= 1 else "none"
+        print(
+            f"Invalid --dcp {dcp_size}{where}: it must divide tensor parallel size {tp_size}. "
+            f"Legal values: {legal}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _fill_missing(base, overrides):
     """Return a copy of `base` with keys from `overrides` added only when missing.
 
@@ -340,7 +394,15 @@ def parse_args():
                             action='store_true',
                             help='Profile workload',
                         )
+    parser.add_argument('--dcp',
+                            type=int,
+                            help='Optional decode context parallel size. Used only when the test config does not already set --decode-context-parallel-size.',
+                            required=False,
+                            default=None,
+                        )
     args = parser.parse_args()
+    if args.dcp is not None and args.dcp < 1:
+        parser.error("--dcp must be a positive integer")
     return args
 
 def expand_configs(args, configs: List[Dict]):
@@ -902,6 +964,12 @@ def main():
             config["extra_args_dict"] = extra_args  # Preserve dict for acc.yaml merge
             config["bench_args_dict"] = bench_args  # Preserve dict for acc.yaml merge
 
+            require_valid_dcp(
+                extra_args.get("--decode-context-parallel-size", args.dcp),
+                config.get("tp"),
+                config.get("model"),
+            )
+
             env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
@@ -919,6 +987,9 @@ def main():
                 print(f"\n=== Running serving benchmark for {model} ===")
                 serving_config = dict(config)
                 serving_config["benchmark"] = "serving"
+                serving_config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(serving_config.get("extra_args_dict"), args.dcp)
+                )
                 if not args.profile:
                     serving_results = run_serving(model, serving_config)
                 else:
@@ -1020,6 +1091,14 @@ def main():
                             else:
                                 print(f"  No model-specific entry, using task-level defaults only")
 
+                            acc_extra = apply_optional_dcp(acc_config.get("extra_args_dict"), args.dcp)
+                            require_valid_dcp(
+                                acc_extra.get("--decode-context-parallel-size"),
+                                acc_config.get("tp"),
+                                acc_config.get("model"),
+                            )
+                            acc_config["extra_args_dict"] = acc_extra
+                            acc_config["extra_args"] = _extra_args_to_str(acc_extra)
                             acc_config["benchmark"] = "accuracy"
                             accuracy_results = run_accuracy(model, acc_config)
 
@@ -1037,14 +1116,23 @@ def main():
                     print(f"  Skipping accuracy for {model} (already completed)")
 
             elif benchmark == "latency":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 results = run_latency(model, config)
                 for result in results:
                     writer.writerow(result)
             elif benchmark == "throughput":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 results = run_throughput(model, config)
                 for result in results:
                     writer.writerow(result)
             elif benchmark == "serving":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 if not args.profile:
                     results = run_serving(model, config)
                 else:
@@ -1145,6 +1233,14 @@ def main():
                 else:
                     print(f"  Warning: acc.yaml not found at {acc_path}, running accuracy with base config only")
 
+                acc_extra = apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                require_valid_dcp(
+                    acc_extra.get("--decode-context-parallel-size"),
+                    config.get("tp"),
+                    config.get("model"),
+                )
+                config["extra_args_dict"] = acc_extra
+                config["extra_args"] = _extra_args_to_str(acc_extra)
                 results = run_accuracy(model, config)
                 for result in results:
                     writer.writerow(result)

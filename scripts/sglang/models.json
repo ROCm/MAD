@@ -72,7 +72,7 @@
     },
     {
         "name": "pyt_sglang_deepseek-v4-flash",
-        "dockerfile": "../../docker/pyt_sglang_dsv4",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -91,7 +91,7 @@
     },
     {
         "name": "pyt_sglang_deepseek-v4-pro",
-        "dockerfile": "../../docker/pyt_sglang_dsv4",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -110,7 +110,7 @@
     },
     {
         "name": "pyt_sglang_flux.1-dev",
-        "dockerfile": "../../docker/pyt_sglang_flux",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -129,7 +129,7 @@
     },
     {
         "name": "pyt_sglang_flux.1-dev-throughput",
-        "dockerfile": "../../docker/pyt_sglang_flux",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -148,7 +148,7 @@
     },
     {
         "name": "pyt_sglang_flux.1-dev-latency",
-        "dockerfile": "../../docker/pyt_sglang_flux",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -167,7 +167,7 @@
     },
     {
         "name": "pyt_sglang_flux.2-dev",
-        "dockerfile": "../../docker/pyt_sglang_flux",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run.sh",
         "url": "",
         "data": "huggingface",
@@ -186,7 +186,7 @@
     },
     {
         "name": "pyt_sglang_kimi-k3",
-        "dockerfile": "../../docker/pyt_sglang_kimi_k3",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run_kimi_k3.sh",
         "url": "",
         "data": "huggingface",
@@ -205,7 +205,7 @@
     },
     {
         "name": "pyt_sglang_kimi-k3_dspark",
-        "dockerfile": "../../docker/pyt_sglang_kimi_k3",
+        "dockerfile": "../../docker/pyt_sglang",
         "scripts": "run_kimi_k3.sh",
         "url": "",
         "data": "huggingface",
@@ -311,5 +311,100 @@
         ],
         "timeout": 43200,
         "args": "--model_repo Wan-AI/Wan2.2-T2V-A14B-Diffusers --config configs/default.yaml --benchmark latency"
+    },
+    {
+        "name": "pyt_sglang_qwen3.8-2.4t-a95b_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3.8-2.4T-A95B-Quark-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Qwen3.8-2.4T-A95B-Quark-MXFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-r1_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1-0528-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/DeepSeek-R1-0528-MXFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-v3.1",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.1.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V3.1 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_gpt-oss-120b",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_gpt-oss-120b.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo openai/gpt-oss-120b --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_gpt-oss-120b_w4a8",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_gpt-oss-120b-w-mxfp4-a-fp8.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/gpt-oss-120b-w-mxfp4-a-fp8 --config configs/default.yaml"
     }
 ]

@@ -171,3 +171,51 @@
   tp: 1
   ulysses_degree: 8
   dtype: auto
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+# The DeepSeek rows stay 1k/1k to match the existing DeepSeek-R1 row; gpt-oss-120b has no such sibling here
+# and uses 8192 input / 1024 output.
+
+# amd/Qwen3.8-2.4T-A95B-Quark-MXFP4
+## Qwen3.8-2.4T-A95B MXFP4 (gfx950; validated TP8 8K/1K in #107)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Qwen3.8-2.4T-A95B-Quark-MXFP4
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 4 8 16 32 64
+
+# amd/DeepSeek-R1-0528-MXFP4  [confidence: medium]
+## DeepSeek-R1-0528 MXFP4 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/DeepSeek-R1-0528-MXFP4
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+# deepseek-ai/DeepSeek-V3.1  [confidence: medium]
+## DeepSeek-V3.1 (FP8 checkpoint)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V3.1
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+# openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8  [confidence: medium]
+## gpt-oss-120b (tags skip gfx942: default sglang base is the mi35x image, sgl_kernel is gfx950-only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128

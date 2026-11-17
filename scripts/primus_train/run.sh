@@ -94,9 +94,9 @@ if [[ "$EXP" != /* && ! -f "$PRIMUS_ROOT/$EXP" ]]; then
 fi
 
 # Suite selects `train pretrain` vs `train posttrain`. Read framework from the
-# config rather than guessing from the directory name — examples/moe_package/
-# configs declare framework: megatron. pre_trainer is the usual key; SFT/post-train
-# configs declare framework under post_trainer.
+# config rather than guessing from the directory name — the diffusion configs under
+# examples/megatron/configs/<arch>/diffusion/ declare framework: megatron. pre_trainer is
+# the usual key; SFT/post-train configs declare framework under post_trainer.
 framework_suite="$(cd "$PRIMUS_ROOT" && python3 -c '
 import sys, yaml
 mods = (yaml.safe_load(open(sys.argv[1])) or {}).get("modules") or {}
@@ -118,10 +118,10 @@ if [[ -z "$framework" ]]; then
   launcher="${exp_lower##*examples/}"
   launcher="${launcher%%/*}"
   case "$launcher" in
-    maxtext|maxdiffusion|torchtitan|megatron_bridge|nemo_automodel|diffusion|hummingbirdxt)
+    maxtext|maxdiffusion|torchtitan|megatron_bridge|nemo_automodel|diffusion|hummingbirdxt|worldmirror)
       framework="$launcher" ;;
     *)
-      # megatron, moe_package (framework: megatron), and anything unrecognized
+      # megatron and anything unrecognized
       framework="megatron" ;;
   esac
 fi
