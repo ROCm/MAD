@@ -154,19 +154,19 @@ def test_committed_icons_yaml_is_consistent_with_vendored_assets():
     assert {org for _, org in config["name_patterns"]} <= providers, "name_patterns point at unknown providers"
     for pattern, _ in config["name_patterns"]:
         re.compile(pattern)
-    sources = json.load(open(os.path.join(icons.LOGOS_DIR, "sources.json")))
+    # Third-party logos are fetched, not committed, so they may be absent; when present they must be valid.
     for org in providers:
         path = os.path.join(icons.LOGOS_DIR, "providers", f"{org}.png")
-        assert os.path.getsize(path) > 0, f"logo for {org} missing; run tools/dashboard/fetch_logos.py"
-        assert f"providers/{org}.png" in sources
+        if os.path.exists(path):
+            assert os.path.getsize(path) > 0, f"logo for {org} is empty; run tools/dashboard/fetch_logos.py --force"
     slugs = set()
     for spec in list(config["marks"].values()) + [spec for _, spec in config["frameworks"]]:
         if spec.startswith("simple:"):
             slugs.add(spec.split(":", 1)[1])
     for slug in slugs:
-        text = open(os.path.join(icons.LOGOS_DIR, "simple-icons", f"{slug}.svg")).read()
-        assert re.search(r'<path[^>]*\sd="[^"]+"', text), f"{slug}.svg has no path"
-        assert f"simple-icons/{slug}.svg" in sources
+        path = os.path.join(icons.LOGOS_DIR, "simple-icons", f"{slug}.svg")
+        if os.path.exists(path):
+            assert re.search(r'<path[^>]*\sd="[^"]+"', open(path).read()), f"{slug}.svg has no path"
     for name in ("amd-logo.svg", "favicon.svg"):
         text = open(os.path.join(icons.LOGOS_DIR, "amd", name)).read()
-        assert text.startswith("<svg") and f"amd/{name}" in sources, f"{name} missing; run tools/dashboard/fetch_logos.py"
+        assert text.startswith("<svg"), f"{name} missing; run tools/dashboard/fetch_logos.py"

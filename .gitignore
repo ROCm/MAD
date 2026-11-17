@@ -114,3 +114,10 @@ madengine_build_*
 
 # Kernel-profile run directories (kernel-tools.py --run-dir)
 runs/
+
+# Third-party logos are fetched at build time (tools/dashboard/fetch_logos.py), never committed.
+# The AMD logos (dashboard/logos/amd/, providers/amd.png) are the publisher's own and stay tracked.
+dashboard/logos/providers/*
+!dashboard/logos/providers/amd.png
+dashboard/logos/simple-icons/
+dashboard/logos/sources.json

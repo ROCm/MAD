@@ -261,7 +261,7 @@ models, `docker/` or the dashboard, and publishes it to GitHub Pages from
 | `tools/dashboard/github_roadmap.py` | Roadmap from open issues labeled `new-model` and the PRs that close them |
 | `dashboard/status.yaml` | What the repo cannot derive: framework names and READMEs per registry, `exclude`, `rocm_overrides`, extra roadmap items. **Public.** |
 | `dashboard/priority.yaml` | Order of model pages inside each framework. **Public.** |
-| `dashboard/icons.yaml`, `dashboard/logos/` | Vendored logos (`fetch_logos.py`); `logos: neutral` drops brand marks |
+| `dashboard/icons.yaml`, `dashboard/logos/` | Logo config; third-party logos are fetched at build time (`fetch_logos.py`), gitignored, never committed; `logos: neutral` drops brand marks |
 | `dashboard/templates/*.html.j2` | Jinja2 templates (`.j2`, because `.gitignore` excludes `*.html`) |
 | `dashboard/releases/<version>.json` | Frozen release snapshots; committed, never edited |
 

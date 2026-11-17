@@ -5,7 +5,7 @@
 # publisher's. Set `logos: neutral` to replace every brand mark, the AMD logo included, with a
 # neutral generated monogram, glyph or plain text without touching any code.
 #
-# Assets are vendored under dashboard/logos/ by `python3 tools/dashboard/fetch_logos.py`
+# Third-party assets are fetched into dashboard/logos/ (gitignored, never committed) by `python3 tools/dashboard/fetch_logos.py`
 # (provider avatars: recipes.vllm.ai/providers, falling back to the Hugging Face org avatar;
 # marks: Simple Icons, CC0). See dashboard/logos/NOTICE.md.
 logos: official   # official | neutral

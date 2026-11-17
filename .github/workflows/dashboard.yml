@@ -71,6 +71,14 @@ jobs:
       - name: Install madengine and dashboard dependencies
         run: pip install -r requirements.txt pyyaml jinja2 pytest
 
+      # Third-party logos are not stored in the repo. Fetch them here; if a source is down the
+      # build still succeeds and those logos render as generated monograms.
+      - name: Fetch third-party logos
+        continue-on-error: true
+        run: |
+          pip install pillow
+          python3 tools/dashboard/fetch_logos.py
+
       - name: Unit tests
         run: python3 -m pytest -q tools/dashboard
 
