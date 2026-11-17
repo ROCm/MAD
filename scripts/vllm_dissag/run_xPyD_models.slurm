@@ -212,8 +212,11 @@ elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
   fi
 fi
 
-export CONNECTOR WIDE_EP EP_BACKEND
-echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}) for model '$MODEL_NAME'"
+# Tiered prefix caching overlay (orthogonal axis; default none). Forwarded to the container.
+KV_OFFLOAD="${KV_OFFLOAD:-none}"
+OFFLOAD_BACKEND="${OFFLOAD_BACKEND:-native}"
+export CONNECTOR WIDE_EP EP_BACKEND KV_OFFLOAD OFFLOAD_BACKEND
+echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD} OFFLOAD_BACKEND=${OFFLOAD_BACKEND}) for model '$MODEL_NAME'"
 
 # ---------------------------------------------------------------------------
 # Connector platform env: per-connector <connector>.env holds the ROCm-7.2.3
@@ -440,7 +443,8 @@ case "$BENCHMARK_SCRIPT" in
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah)" >&2; exit 1 ;;
+    multiturn)    BENCHMARK_SCRIPT_FILE="benchmark_multiturn.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, multiturn)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -496,7 +500,13 @@ fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
-docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+if [ "${FORCE_FRESH_IMAGE:-0}" = "1" ]; then
+  echo "[image] FORCE_FRESH_IMAGE=1: pulling latest $DOCKER_IMAGE_NAME on $(hostname), stale cache will NOT be used";
+  docker pull $DOCKER_IMAGE_NAME || { echo "[image] FATAL: docker pull failed; refusing to run on a possibly-stale cached image" >&2; exit 1; };
+  echo "[image] now using $(docker image inspect --format {{.Id}} $DOCKER_IMAGE_NAME 2>/dev/null)";
+else
+  docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+fi
 
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
@@ -522,29 +532,40 @@ else
     _JIT_CACHE_MOUNT="";
 fi
 
-# --- Build host RDMA library mounts ---
+# --- Host RDMA library mounts ---
+# Bind-mount the host rdma-core user libs (libibverbs/librdmacm + the mlx5/ionic/bnxt/efa/hns
+# providers + /etc/libibverbs.d) into the container so its NIC enumeration matches the host.
+# Set DISABLE_HOST_RDMA_MOUNTS=1 to skip this when host and container rdma-core ABI versions
+# differ: a self-consistent container stack (e.g. the matching rdma-core in a v0.26.0 image)
+# would otherwise be shadowed by the host libs and break enumeration.
+# (Keep this block free of apostrophes: it runs inside a single-quoted srun bash -c.)
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
-for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
-done
-for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-done
-
-for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
-    for _vlib in $_LIBDIR/${_pattern}; do
-        # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
-        # matching one of these globs, and docker then bind-mounts a directory onto a
-        # file target -> "not a directory" -> container create exit 125.
+if [ "${DISABLE_HOST_RDMA_MOUNTS:-0}" != "1" ]; then
+    for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+        [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    done
+    for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
+        # Require a regular file (see libmlx5 loop below): a dirty node can have a
+        # stray directory named like a versioned .so (e.g. libibverbs.so.1.14.39.0),
+        # which `-e` accepts and docker then bind-mounts dir-onto-file -> exit 125.
         [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
-done
 
-[ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
-[ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
-echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+    for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
+        for _vlib in $_LIBDIR/${_pattern}; do
+            # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
+            # matching one of these globs, and docker then bind-mounts a directory onto a
+            # file target -> "not a directory" -> container create exit 125.
+            [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        done
+    done
+
+    [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
+    [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+fi
+echo "[host-rdma] mounts: ${_RDMA_MOUNTS:-(none)}"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="${AGENTIC_CONFIG/#$HOME/$HOME}"
 
@@ -628,19 +649,47 @@ docker run --rm \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
     ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
+    ${KV_OFFLOAD:+-e KV_OFFLOAD=$KV_OFFLOAD} \
+    ${OFFLOAD_BACKEND:+-e OFFLOAD_BACKEND=$OFFLOAD_BACKEND} \
+    ${OFFLOAD_CPU_BYTES_PER_NODE:+-e OFFLOAD_CPU_BYTES_PER_NODE=$OFFLOAD_CPU_BYTES_PER_NODE} \
+    ${LMCACHE_MAX_LOCAL_CPU_SIZE:+-e LMCACHE_MAX_LOCAL_CPU_SIZE=$LMCACHE_MAX_LOCAL_CPU_SIZE} \
+    ${OFFLOAD_DISK_PATH:+-e OFFLOAD_DISK_PATH=$OFFLOAD_DISK_PATH} \
+    ${LMCACHE_MAX_LOCAL_DISK_SIZE:+-e LMCACHE_MAX_LOCAL_DISK_SIZE=$LMCACHE_MAX_LOCAL_DISK_SIZE} \
+    ${PYTHONHASHSEED:+-e PYTHONHASHSEED=$PYTHONHASHSEED} \
+    ${PROMETHEUS_MULTIPROC_DIR:+-e PROMETHEUS_MULTIPROC_DIR=$PROMETHEUS_MULTIPROC_DIR} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
+    ${ROUTER_POLICY:+-e ROUTER_POLICY=$ROUTER_POLICY} \
+    ${ROUTER_PREFILL_POLICY:+-e ROUTER_PREFILL_POLICY=$ROUTER_PREFILL_POLICY} \
+    ${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=$ROUTER_DECODE_POLICY} \
+    ${ROUTER_INTRA_NODE_DP:+-e ROUTER_INTRA_NODE_DP=$ROUTER_INTRA_NODE_DP} \
+    ${PREFILL_EXTRA_FLAGS:+-e PREFILL_EXTRA_FLAGS="$PREFILL_EXTRA_FLAGS"} \
+    ${DECODE_EXTRA_FLAGS:+-e DECODE_EXTRA_FLAGS="$DECODE_EXTRA_FLAGS"} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
-    ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
+    -e KV_CACHE_MEMORY_BYTES="${KV_CACHE_MEMORY_BYTES:-}" \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${ENABLE_PREFIX_CACHING:+-e ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${MT_SWEEP:+-e MT_SWEEP="$MT_SWEEP"} \
+    ${MT_PREFIX_LEN:+-e MT_PREFIX_LEN=$MT_PREFIX_LEN} \
+    ${MT_PREFIX_LEN_LIST:+-e MT_PREFIX_LEN_LIST=$MT_PREFIX_LEN_LIST} \
+    ${MT_CON_LIST:+-e MT_CON_LIST=$MT_CON_LIST} \
+    ${MT_Q1_LEN:+-e MT_Q1_LEN=$MT_Q1_LEN} \
+    ${MT_Q2_LEN:+-e MT_Q2_LEN=$MT_Q2_LEN} \
+    ${MT_OSL1:+-e MT_OSL1=$MT_OSL1} \
+    ${MT_OSL2:+-e MT_OSL2=$MT_OSL2} \
+    ${MT_NUM_PROMPTS:+-e MT_NUM_PROMPTS=$MT_NUM_PROMPTS} \
+    ${MT_SEED:+-e MT_SEED=$MT_SEED} \
+    ${MT_DRYRUN:+-e MT_DRYRUN=$MT_DRYRUN} \
     ${NIAH_WORDS:+-e NIAH_WORDS=$NIAH_WORDS} \
     ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
     ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
@@ -689,6 +738,7 @@ docker run --rm \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
+    ${VLLM_LOGGING_LEVEL:+-e VLLM_LOGGING_LEVEL=$VLLM_LOGGING_LEVEL} \
     ${CONNECTOR_ENV_ARGS} \
     ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
