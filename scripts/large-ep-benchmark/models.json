@@ -8,6 +8,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -42,6 +43,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -76,6 +78,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -110,6 +113,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -144,6 +148,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
