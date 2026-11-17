@@ -4,8 +4,8 @@
 #     on a node's non-zero exit, on missing results, or on any FAILURE row.
 #   - run_multinode.slurm, run against stand-in srun / docker / hostname / fuser: the
 #     container's exit status reaches the job, the teardown runs on a cancel during the
-#     run, the barrier port is per job, the PP default is the node count, and the MoRI
-#     and fabric env reach the container.
+#     run, the barrier port is per job, the PP default is the node count, the MoRI
+#     and fabric env reach the container, and a MAD_CONFIG-only card is refused.
 # No cluster, no GPUs, no docker.
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -101,6 +101,10 @@ _is "$(_colo STUB_DOCKER_RC=3)" "3" "a container that exits 3 fails the job with
 _has "$(cat "$TMP/run/perf_M.csv" 2>/dev/null)" "SUCCESS" "...and its CSV is still published"
 _is "$(_colo STUB_CSV="$CSV_FAIL")" "1" "a FAILURE row fails the job"
 _is "$(_colo STUB_CSV=)" "1" "no results fails the job"
+
+_is "$(_colo MODEL_NAME= MAD_CONFIG=mad-config.kimi-k3.yaml)" "1" "a MAD_CONFIG card without MODEL_NAME stops at once"
+_has "$(cat "$TMP/run/out.txt")" "madengine layered config" "...and says the file needs madengine"
+_hasnot "$(_stub)" "docker run" "...before any container starts"
 
 _colo ALL2ALL_BACKEND=mori_low_latency PYTORCH_ALLOC_CONF=custom NCCL_SOCKET_IFNAME=ens3 >/dev/null
 _has "$(_stub)" "-e PYTORCH_HIP_ALLOC_CONF=expandable_segments:False " "MoRI backend: moriio.env reaches the container"

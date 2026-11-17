@@ -1,0 +1,59 @@
+# vLLM accuracy overrides — merged into client-perf-hub's accuracy config at runtime.
+#
+# Structure:
+# 1. Task-level defaults (entries with hf_pipeline_tag, no model field)
+# 2. Model-level overrides (entries with model field)
+#
+# Merge behavior: Model-level evaluation parameters are deep-merged into
+# task-level evaluations, so you only need to specify what differs.
+
+# ── Task-level defaults (by hf_pipeline_tag) ──
+- hf_pipeline_tag: text-generation
+  evaluations:
+    - framework: lm_eval
+      task: gsm8k
+      apply_chat_template: false
+      num_fewshot: 0
+      base_url: http://localhost:8000/v1/completions
+      lm_eval_model: local-completions
+      num_concurrent: 64
+      max_gen_toks: 2048
+
+# TODO: Add defaults for other pipeline tags when needed:
+# - hf_pipeline_tag: text-to-image
+#   evaluations:
+#     - framework: compute_clip_score
+# - hf_pipeline_tag: text-to-video
+#   evaluations:
+#     - framework: vbench
+
+# ── Model-level overrides ──
+# Only specify what differs from task defaults
+
+# Models needing --trust-remote-code
+- model: >
+    moonshotai/Kimi-K2.5
+    moonshotai/Kimi-K2-Thinking
+    moonshotai/Kimi-K3
+    stepfun-ai/Step-3.5-Flash
+  extra_args:
+    --trust-remote-code: true
+  evaluations:
+    - trust_remote_code: true
+
+# Instruct models needing apply_chat_template + chat-completions endpoint
+- model: >
+    Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+  evaluations:
+    - apply_chat_template: true
+      lm_eval_model: local-chat-completions
+      base_url: http://localhost:8000/v1/chat/completions
+
+# Base models: override num_fewshot to 3 (inherits framework and other params from task defaults)
+- model: >
+    openai/gpt-oss-120b
+    amd/gpt-oss-120b-w-mxfp4-a-fp8
+    meta-llama/Llama-3.1-405B
+    deepseek-ai/DeepSeek-V3.1-Base
+  evaluations:
+    - num_fewshot: 3

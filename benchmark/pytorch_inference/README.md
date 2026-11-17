@@ -40,7 +40,7 @@ The following command pulls the Docker image from Docker Hub.
 
 
 ```sh
-docker pull rocm/pytorch​:latest
+docker pull rocm/pytorch:latest
 ```
 
 ### MAD-integrated benchmarking
@@ -70,16 +70,16 @@ ROCm MAD launches a Docker container with the name `container_ci-pyt_chai1_infer
 | pyt_chai1_inference|
 | pyt_clip_inference (ViT-B-32, laion2b_s34b_b79k)|
 | pyt_wan2.1_inference (Wan2.1-T2V-14B)|
-| pyt_janus_pro_inference (Janus-Pro-7B) |
 | pyt_hy_video|
 
 ### Enable Tunable Operator ⚙️
 
-To collect performance data using PyTorch’s Tunable Operators feature, include the `--tunableop on` argument in your run.
+To collect performance data using PyTorch’s Tunable Operators feature, pass `--tunableop on` to a model that supports it. Only `pyt_clip_inference` and `pyt_mochi_video_inference` accept the flag; the other models ignore it.
 
-By default, `pyt_clip_inference` and `pyt_janus_pro_inference` models already include `--tunableop off` in their configurations. To customize the behavior, edit the `models.json`, find `pyt_clip_inference` or `pyt_janus_pro_inference` config, respectively, and modify the `args` field to `--tunableop on` accordingly.
+Both models ship with `--tunableop off` in their `models.json` `args`. To enable it, edit the model's entry (`scripts/pyt_clip_inference/models.json` or `scripts/mochi/models.json`) and change the `args` field to `--tunableop on`.
 
- This triggers a two-pass run: a warm-up followed by a performance-collection run, generating a `gemm_result_<dataset>.csv` file for analysis.
+- `pyt_clip_inference` then does a two-pass run: a warm-up followed by a performance-collection run, generating a `gemm_result_<dataset>.csv` file for analysis.
+- `pyt_mochi_video_inference` sets `PYTORCH_TUNABLEOP_ENABLED=1` for its single run.
 
 ```sh
 madengine run --tags [model tag] --keep-model-dir --live-output --timeout 28800

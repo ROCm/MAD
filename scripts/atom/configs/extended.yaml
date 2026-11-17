@@ -1,0 +1,13 @@
+# 1k ISL, 1k OSL, mc1
+
+## Single-GPU models
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    meta-llama/Llama-3.1-8B-Instruct
+    amd/Llama-3.1-8B-Instruct-FP8-KV
+  tp: 1
+  inp: 1024
+  out: 1024
+  kv_cache_dtype: fp8
+  max_concurrency: 1

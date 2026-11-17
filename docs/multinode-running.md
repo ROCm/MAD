@@ -565,6 +565,24 @@ Each job writes one directory, `$LOG_PATH/<SLURM job id>/`. Inside the container
 defaults to `/shared_inference/$USER/model_blog_logs`, from `cluster.sh`. The directory
 is shared, so every node's logs land together.
 
+### Log file names are a contract
+
+Other tools parse these files by name (RCCL CI reads the per-node logs), so the names and
+the directory do not change with the launcher's internals. Every launcher and every
+dispatcher (`srun`, `spur-array`, `k8s-indexed`) writes:
+
+- `$LOG_PATH/<job>/` on the host, `/run_logs/<job>/` in the container, where `<job>` is
+  the SLURM job id (the array job id for `spur-array`, the run id for `k8s-indexed`);
+- `<role>_NODE<rank>.log`, where `<rank>` is the node's rank `0..n-1` (`SLURM_PROCID`,
+  passed into the container as `NODE_RANK`) and `<role>` is one of the names in the
+  tables below: `pd_vllm_bench`, `prefill`, `decode`, `proxy`, `vllm_router`,
+  `agentic_models_shim` (vLLM disaggregated); `pd_sglang_bench_serving.sh`, `prefill`,
+  `decode`, `proxy` (SGLang disaggregated); `colocated_bench`, `colocated` (vLLM colocated).
+
+`scripts/common/tests/log_names_assert.sh` pins them, from the snapshot goldens and the role
+scripts. A change it reports is a change to that contract: make it only on purpose, and
+tell the consumers.
+
 ### vLLM disaggregated
 
 | File | Written by | Content |
@@ -743,6 +761,7 @@ python3 scripts/common/tests/snapshot/snapshot.py     # every card's docker run 
 python3 scripts/common/tests/snapshot/snapshot.py --equivalence spur-array  # the same, run as a job array
 python3 scripts/common/tests/snapshot/snapshot.py --equivalence k8s-indexed # the same, run as Kubernetes pods
 bash scripts/common/tests/launcher_verdict_assert.sh  # job verdict, exit status, cancel, ports, env
+bash scripts/common/tests/log_names_assert.sh         # /run_logs/<job>/<role>_NODE<rank>.log names (a contract)
 bash scripts/common/tests/node_lib_assert.sh          # the per-node library (mounts, JIT cache, run/trap)
 bash scripts/common/tests/dispatch_assert.sh          # dispatch selection, failing nodes, missing tasks
 bash scripts/common/tests/launcher_lib_assert.sh      # node selection, addresses, node program, verdict

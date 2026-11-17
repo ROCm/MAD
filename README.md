@@ -16,11 +16,11 @@ Below are blueprints of supported models along with their documentation.
 |-----------|-------------|--------|
 | [**Kimi-K3 inference (vLLM / SGLang / ATOM)**](benchmark/kimi_k3/README.md) | Kimi-K3 (2.8T) day-0 inference on MI350X/MI355X across three frameworks | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
 | [**xDiT diffusion inference**](benchmark/xdit/README.md) | Diffusion Transformer inference using xDiT | FLUX.1, FLUX.1 Kontext, FLUX.2, FLUX.2 Klein, HunyuanVideo, HunyuanVideo 1.5, LTX-2, Stable Diffusion 3.5, Wan 2.1, Wan 2.2, Z-Image Turbo |
-| [**JAX MaxText training**](benchmark/jax_maxtext/README.md) | Train LLMs on AMD Instinct GPUs using JAX MaxText | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Mixtral-8x7B |
+| [**JAX training (MaxText + MaxDiffusion)**](benchmark/jax_maxtext/README.md) | Train LLMs and diffusion models on AMD Instinct GPUs using JAX, via Primus | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.1 405B, Llama 3.3 70B, DeepSeek-V2-lite 16B, Gemma4 26B/31B, Mixtral-8x7B, Qwen3 14B/30B-A3B, FLUX.1-dev, WAN 2.1 1.3B/14B |
 | [**vLLM inference**](benchmark/vllm/README.md) | LLM Inference with vLLM on AMD Instinct GPUs | DeepSeek-R1, gpt-oss-20b/120b, Kimi-K3, Llama-2-70b, Llama-3.1-8b/405b, Llama-3.3-70b, Llama-4-Scout/Maverick, Mixtral-8x7b/8x22b, Phi-4, Qwen3-8b/32b/30b-a3b/235b-a22b |
 | [**SGLang inference**](benchmark/sglang/README.md) | LLM Inference with SGLang on AMD Instinct GPUs | DeepSeek-R1-Distill-Qwen-32B, Kimi-K3 |
 | [**PyTorch training**](benchmark/pytorch_train/README.md) | Train LLMs on AMD Instinct GPUs using AMD's Primus | Llama 2/3/3.1/3.2/3.3/4, GPT-OSS 20B/120B, Qwen2/2.5/3, Flux, SDXL, DLRM, and others |
-| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, Janus-Pro-7B, HunyuanVideo |
+| [**PyTorch inference**](benchmark/pytorch_inference/README.md) | Inference recipes for Multimodal, video and vision transformer models | Mochi video, Chai-1, CLIP (ViT-B-32), Wan2.1, HunyuanVideo |
 | [**Megatron-LM training**](benchmark/megatron_lm/README.md) | Train LLMs on AMD Instinct GPUs using ROCm Megatron-LM | Llama 2 7B/70B, Llama 3/3.1 8B/70B, Llama 3.3 70B, DeepSeek-V2-lite, DeepSeek-V3, Mixtral 8x7B/8x22B, Qwen 2.5 7B/72B |
 | [**MPT-30B training (llm-foundry)**](benchmark/llm-foundry/mpt-30b/README.md) | LLM Training for Mosaic Pretrained Transformer (MPT) models using llm-foundry | MPT-30B |
 | [**PyTorch PEFT/FSDP fine-tuning**](scripts/pytorch_train/HF_PEFT_FSDP/README.md) | Finetuning a HF model with LoRA approach & FSDP strategy | Llama-2-70b-chat-hf |
@@ -39,6 +39,7 @@ Below are blueprints of supported models along with their documentation.
   - [Tag Functionality](#tag-functionality)
   - [Timeout Configuration](#timeout-configuration)
   - [Debugging Options](#debugging-options)
+- [Claude Code Integration](#claude-code-integration)
 - [Contributing](#contributing)
   - [Adding New Models](#adding-new-models)
   - [Model Configuration](#model-configuration)
@@ -77,7 +78,7 @@ Below are blueprints of supported models along with their documentation.
 
 ### Running Models
 
-The madengine CLI [ROCm/madengine](https://github.com/ROCm/madengine/) provides a simple interface for running models locally. All models defined in `models.json` can be executed on a Docker host to collect performance results.
+The madengine CLI [ROCm/madengine](https://github.com/ROCm/madengine/) provides a simple interface for running models locally. All models registered in the `scripts/**/models.json` registries can be executed on a Docker host to collect performance results.
 
 **Please note that support of running models using tools/run_models.py is no longer recommended, and tools/run_models.py will be removed from MAD repo soon.**
 
@@ -140,7 +141,7 @@ Configure execution timeouts at multiple levels:
 2. **Model-specific**: Set `timeout` field in `models.json`
 3. **Runtime override**: Use `--timeout` command line option
 
-> **Note**: Setting timeout to `0` disables the timeout entirely.
+> **Note**: Setting timeout to `-1` disables the timeout entirely.
 
 ### Debugging Options
 
@@ -159,9 +160,33 @@ madengine run --tags model_name --clean-docker-cache
 
 > ⚠️ **Warning**: When using `--keep-alive`, you must manually stop and remove the container before running the same model again.
 
+## Claude Code Integration
+
+MAD ships agent skills for [Claude Code](https://claude.ai/code), Cursor and Codex CLI that cover benchmarking, profiling, tuning, adding models, reporting, and validation. `AGENTS.md` holds the shared conventions; `CLAUDE.md` adds the Claude Code specifics; [`.claude/README.md`](.claude/README.md) explains how the skills are shared across the three tools.
+
+| Skill | Invocation | What it does |
+|-------|-----------|--------------|
+| `/mad-benchmark <tag>[,<tag>...]` | Explicit | Build and run a madengine benchmark on AMD GPUs |
+| `/mad-profile <tag> [operator\|dispatch\|kernel\|assembly\|pc_sampling\|thread_trace]` | Explicit | Profile at the operator (TraceLens), dispatch (rocm-trace-lite), kernel (rocprofv3 counters and a kernel card), assembly (code-object summary), PC-sampling, or thread-trace (rocprofv3 `--att`) depth |
+| `/mad-tune <tag>` | Explicit | Measure-change-measure tuning loop for training or inference |
+| `/primus-projection <tag>` | Explicit | Projected memory fit and tokens/s for a Primus training tag |
+| `/mad-add-model` | Explicit | Guided model addition: per-directory `models.json` entry, Dockerfile, run.sh, validation |
+| `/mad-generate-dockerfile` | Explicit | Render a MAD Dockerfile from a framework template |
+| `/mad-report [csv]` | Auto | Summarize or compare benchmark results |
+| `/mad-validate-model [model]` | Auto | GPU-free lint of every model registry, its files, and the output contract |
+
+Explicit skills run only when you invoke them (`/name` in Claude Code and Cursor, `$name` in Codex). Long runs go through `.claude/skills/mad-common/mad-run.sh`, which detaches each run and serializes runs on one host with a GPU lock.
+
+Claude Code also has three workflows for larger fan-out jobs (Cursor and Codex users can pass several tags to `/mad-benchmark` instead): `mad-benchmark-sweep` (a matrix across tags), `mad-tune-search` (operator → dispatch → kernel → assembly, then clean measurements repeated `--repeats` times, 3 by default), and `mad-optimize` (one model, a dispatch profile and a kernel card, then GEAK `kernel_workflow`, kept only when the latency gate passes; see `docs/mad-optimize.md`). `mad-tune-search` and `mad-optimize` stop a counter run that stalls with the GPU idle and retry it once with `--serialize`. All three plan by default and only run on GPUs with `--execute`. Pass `--expect` on `mad-tune-search` to attach Primus projection numbers for a Primus training model; that step stays off otherwise.
+
 ## Contributing
 
 ### Adding New Models
+
+The fastest way to add a model is the `mad-add-model` agent skill (works in
+Claude Code, Cursor and Codex CLI) — see
+[`.claude/README.md`](.claude/README.md) for the available skills, or follow
+the manual steps below.
 
 Follow these steps to add a new model to the MAD repository:
 
@@ -176,51 +201,61 @@ Follow the naming convention: `{framework}_{project}_{workload}`
 
 #### Step 2: Model Configuration
 
-Add an entry to `models.json`:
+Models are registered **per directory**: add the entry to the `models.json` in
+the model's script directory, `scripts/<dir>/models.json` (create
+`scripts/<name>/models.json` for a model with its own run script, or add to an
+existing one such as `scripts/vllm/models.json` when reusing its runner). The
+root `models.json` stays `[]`; madengine only requires it to exist. Paths in an
+entry are relative to the directory holding that `models.json`:
 
 ```json
 {
-  "name": "tf2_bert_large",
-  "url": "https://github.com/ROCmSoftwarePlatform/bert",
-  "dockerfile": "docker/tf2_bert_large",
-  "scripts": "scripts/tf2_bert_large",
-  "n_gpus": "4",
-  "owner": "john.doe@amd.com",
-  "training_precision": "fp32",
+  "name": "pyt_huggingface_bert",
+  "url": "https://github.com/huggingface/transformers",
+  "dockerfile": "../../docker/pyt_huggingface",
+  "scripts": "run.sh",
+  "n_gpus": "-1",
+  "owner": "mad.support@amd.com",
+  "training_precision": "",
   "tags": [
-    "per_commit",
-    "tf2",
-    "bert",
-    "fp32"
+    "pyt",
+    "bert"
   ],
   "args": ""
 }
 ```
 
+madengine names it `<dir>/<name>` (e.g. `huggingface_bert/pyt_huggingface_bert`),
+which is also the `model` value in `perf.csv`. This is the real entry in
+`scripts/huggingface_bert/models.json`. Names must be unique across all
+directories.
+
 #### Configuration Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | ✅ | Unique model identifier |
-| `url` | ✅ | Repository URL to clone |
-| `dockerfile` | ✅ | Path to Dockerfile |
-| `scripts` | ✅ | Path to script directory |
-| `n_gpus` | ✅ | Number of GPUs (`-1` for all available) |
+| `name` | ✅ | Unique model identifier, `{framework}_{project}_{workload}` |
+| `dockerfile` | ✅ | Dockerfile path prefix relative to the registry directory; `.ubuntu.amd.Dockerfile` is appended |
+| `scripts` | ✅ | Run script relative to the registry directory (e.g. `run.sh`) |
+| `n_gpus` | ✅ | Number of GPUs as a string (`"-1"` for all available) |
 | `owner` | ✅ | Contact email |
-| `training_precision` | ✅ | Precision level (fp16, fp32, etc.) |
 | `tags` | ✅ | List of tags for categorization |
+| `args` | ✅ | Additional script arguments (may be `""`) |
+| `url` | ❌ | Repository URL cloned into the container (`""` if none) |
+| `training_precision` | ❌ | Precision level (fp16, bf16, fp32, etc.) |
 | `data` | ❌ | Optional data path |
-| `timeout` | ❌ | Model-specific timeout override |
+| `timeout` | ❌ | Model-specific timeout override in seconds |
 | `multiple_results` | ❌ | CSV file for multiple results |
-| `args` | ❌ | Additional script arguments |
 
 #### Step 3: Docker Setup
 
-Create a Dockerfile in the `docker/` directory:
+Create `docker/<name>.ubuntu.amd.Dockerfile` (reuse an existing Dockerfile of
+the same stack when you can). The `# CONTEXT` header must be the first line:
 
 ```dockerfile
 # CONTEXT {'gpu_vendor': 'AMD', 'guest_os': 'UBUNTU'}
-FROM rocm/tensorflow:latest
+ARG BASE_DOCKER=rocm/pytorch:latest
+FROM $BASE_DOCKER
 
 # Install system dependencies
 RUN apt update && apt install -y \
@@ -246,7 +281,9 @@ WORKDIR /workspace
 
 #### Step 4: Script Implementation
 
-Create a script directory in `scripts/` with a `run.sh` file:
+Create `run.sh` in the model's script directory (`scripts/<dir>/`). Only that
+directory is copied into the container, so everything the script calls must
+live in it:
 
 ```bash
 #!/bin/bash
@@ -297,6 +334,16 @@ Create a CSV file with columns: `models,performance,metric`
 models,performance,metric
 model_1,156.7,examples/sec
 model_2,89.3,tokens/sec
+```
+
+#### Step 5: Validate
+
+GPU-free checks, then a real run on a GPU host:
+
+```bash
+python3 tools/validation/model_config_validator.py --model <name>
+madengine discover --tags <name>          # must list <dir>/<name>
+madengine run --tags <name> --live-output
 ```
 
 ## Environment Variables

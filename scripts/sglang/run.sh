@@ -26,70 +26,104 @@
 #################################################################################
 set -ex
 
-if [[ "$MAD_SYSTEM_GPU_ARCHITECTURE" != *"gfx94"* ]]; then 
-    echo "Unsuported GPU arch detected, please use supported MI300X GPUs \n"
-    exit 1
-fi
+# Preliminary setup
+export HF_HUB_CACHE="/myworkspace"
+MAD_MODEL_NAME=$(echo $MAD_MODEL_NAME | tr "/" "_")
 
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
-
-DATASET="random"
-
-# Parse named arguments
+PERF_ARGS=""
+PROFILE=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --model_repo) MODEL_NAME="$2"; shift ;;
-        --test_option) TEST_OPTION="$2"; shift ;;
-        --num_gpu) N_GPUS="$2"; shift ;;
-        --datatype) DTYPE="$2"; shift ;;
-        --dataset) DATASET="$2"; shift ;;
-        --batch_size) BATCH_SIZE="$2"; shift ;;
-        --lat_input_output_len) LAT_INPUT_OUTPUT_LEN="$2"; shift ;;
-        --req_input_output_len) REQ_INPUT_OUTPUT_LEN="$2"; shift ;;
-        *) echo "Unknown parameter passed: $1"; usage ;;
+        --model_repo) MODEL="$2"; shift ;;
+        --config) CONFIG_ARG="$2"; shift ;;
+        --benchmark) BENCHMARK_ARG="$2"; shift ;;
+        --output_csv) OUTPUT_CSV="$2"; shift ;;
+        --perf) PERF_ARGS="$PERF_ARGS --perf $2"; shift ;;
+        --perf-output) PERF_ARGS="$PERF_ARGS --perf-output $2"; shift ;;
+        --no-perf-merge) PERF_ARGS="$PERF_ARGS --no-perf-merge" ;;
+        --profile) PROFILE=true ;;
+        *)
+            echo "Unknown parameter passed: $1" >&2
+            echo "Usage: run.sh --model_repo <repo> [--config <yaml>] [--benchmark <name>] [--output_csv <csv>] [--perf <yaml>] [--perf-output <yaml>] [--no-perf-merge]" >&2
+            exit 1
+            ;;
     esac
     shift
 done
 
-TEST_OPTION_SP=""
-for i in $(echo $TEST_OPTION | tr "," "\n")
-do
-  TEST_OPTION_SP="$TEST_OPTION_SP $i"
-done
+MODEL_NAME=$(basename $MODEL)
 
-DTYPE_SP=""
-for i in $(echo $DTYPE | tr "," "\n")
-do
-  DTYPE_SP="$DTYPE_SP $i"
-done
-
-SWEEP_PARAM=""
-if [[ -n "$BATCH_SIZE" ]]; then
-    SWEEP_PARAM="-b $BATCH_SIZE"
+# By default run all benchmarks in configs/default.yaml; accept either CLI or env variable overrides
+if [[ -z "$BENCHMARK" ]]; then
+    # Infer benchmark from tag name if not explicitly set
+    if [[ "$MAD_MODEL_NAME" == *"-accuracy"* ]]; then
+        BENCHMARK=${BENCHMARK_ARG:-"accuracy"}
+    elif [[ "$MAD_MODEL_NAME" == *"-perf"* ]]; then
+        BENCHMARK=${BENCHMARK_ARG:-"serving"}
+    else
+        BENCHMARK=${BENCHMARK_ARG:-"all"}
+    fi
+fi
+# CONFIG is always provided via --config flag from madengine or models.json
+# If somehow not provided, use default.yaml as fallback
+if [[ -z "$CONFIG" ]]; then
+    CONFIG=${CONFIG_ARG:-"configs/default.yaml"}
 fi
 
-if [[ -n "$LAT_INPUT_OUTPUT_LEN" ]]; then
-    SWEEP_PARAM="$SWEEP_PARAM -l $LAT_INPUT_OUTPUT_LEN"
+OUTPUT_CSV="perf_${MODEL_NAME}.csv"
+if [[ ! -z "$MAD_OUTPUT_CSV" ]]; then
+    OUTPUT_CSV="$MAD_OUTPUT_CSV"
 fi
-
-if [[ -n "$REQ_INPUT_OUTPUT_LEN" ]]; then
-    SWEEP_PARAM="$SWEEP_PARAM -r $REQ_INPUT_OUTPUT_LEN"
-fi
-
-export HF_HUB_CACHE="/myworkspace"
 
 echo "=hyper params start="
-echo $MODEL_NAME
-echo $TEST_OPTION_SP
-echo $DTYPE_SP
-echo $DATASET
-echo $BATCH_SIZE
-echo $LAT_INPUT_OUTPUT_LEN
-echo $REQ_INPUT_OUTPUT_LEN
+echo "MODEL=$MODEL"
+echo "CONFIG=$CONFIG"
+echo "BENCHMARK=$BENCHMARK"
 echo "=hyper params end="
 
-for scenario in $TEST_OPTION_SP; do
-    for dtype in $DTYPE_SP; do
-        ./sglang_benchmark_report.sh -s $scenario -m $MODEL_NAME -g $N_GPUS -d $dtype -a $DATASET $SWEEP_PARAM
-    done
-done
+# install lm-eval for accuracy testing
+pip install -qqq lm-eval[api] hf-transfer
+
+# In older SGLang images (e.g. v0.5.10.post1, before upstream commit a392ae8879)
+# the metrics code has an unguarded comparison. When the server reports
+# peak_memory_mb: null (None in Python), the o.peak_memory_mb > 0 check throws an error.
+# This patch fixes the issue by adding a check for None.
+BENCH_SERVING=$(find / -path "*/multimodal_gen/benchmarks/bench_serving.py" 2>/dev/null | head -1)
+if [[ -n "$BENCH_SERVING" ]]; then
+    sed -i 's/if o\.peak_memory_mb > 0/if o.peak_memory_mb is not None and o.peak_memory_mb > 0/g' "$BENCH_SERVING"
+fi
+
+# install profiling dependencies (rocm-trace-lite) only when profiling; mirrors scripts/vllm/run.sh
+if $PROFILE; then
+    # Activate the profiling-only ROCR 7.2.3 runtime that the Dockerfile STAGED under /opt/rocr723:
+    # copy the fixed libhsa-runtime64.so over the active ROCm lib so `rtl trace --mode full` does not
+    # SEGFAULT on cuda-graph replay (rocm-systems 559d48b1). Scoped to --profile so benchmark/accuracy
+    # runs keep the untouched base 7.2.0 runtime. Must run BEFORE building rtl, which links the active
+    # runtime. No network fetch here — the .so was downloaded once at image build.
+    if [ -e /opt/rocr723/libhsa-runtime64.so.1 ]; then
+        ROCR_DEST="$(readlink -f /opt/rocm)/lib"
+        cp -avf /opt/rocr723/libhsa-runtime64.so* "$ROCR_DEST/"
+        ldconfig
+        ls -l "$ROCR_DEST"/libhsa-runtime64.so.1
+    fi
+    apt install libsqlite3-dev g++
+    git clone https://github.com/amathews-amd/rocm-trace-lite.git
+    cd rocm-trace-lite
+    git checkout amathews-amd/sig_handle
+    sed -i 's/sys.exit(result.returncode if result is not None else 0)/sys.exit(getattr(result, "returncode", 0) if "result" in dir() else 0)/g' rocm_trace_lite/cmd_trace.py
+    sed -i 's/    _generate_perfetto(output, json_file)/    pass  # perfetto JSON export disabled: 300+ GB penalty, unused (kernels read from the .db)/' rocm_trace_lite/cmd_trace.py
+    make -j
+    make install
+    pip install -e .
+    cd ..
+fi
+
+# Run benchmark; use -u to make python prints unbuffered
+python3 -u run_sglang.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $PERF_ARGS
+
+# Move the output csv to parent directory (absent in --profile mode; guard the move)
+if [ -f "perf_${MODEL_NAME}.csv" ]; then
+    mv "perf_${MODEL_NAME}.csv" ../$OUTPUT_CSV
+else
+    echo "No perf_${MODEL_NAME}.csv to move (expected in --profile mode); skipping."
+fi
