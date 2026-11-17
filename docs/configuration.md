@@ -139,7 +139,7 @@ The SGLang recipe has a layered `--flag: value` format instead; see [SGLang reci
 | `experimental_flags` | Both roles, both modes | Optional extra flags appended last. Use for try-outs independent of the mode. |
 | `env:` | vLLM only | Per-model environment. See below. |
 
-The mode is `PARALLEL_MODE`, which each launcher derives from one switch:
+The mode is `PARALLEL_MODE`, which the launcher derives from one switch:
 
 | Launcher | Switch | `tp` mode | `dp` mode |
 |---|---|---|---|
@@ -152,9 +152,7 @@ base_flags + <mode>_flags + <role>.<mode> + experimental_flags
 ```
 
 vLLM composes it in [`vllm_disagg.sh`](../scripts/vllm_dissag/vllm_disagg.sh) into
-`MODEL_CONFIG_PREFILL` and `MODEL_CONFIG_DECODE`. SGLang composes it into
-`PREFILL_MODEL_CONFIG` and `DECODE_MODEL_CONFIG`, then appends
-`--disaggregation-transfer-backend <mori|mooncake>`.
+`MODEL_CONFIG_PREFILL` and `MODEL_CONFIG_DECODE`.
 
 ### What does not go in a recipe
 
@@ -163,7 +161,8 @@ in `models.yaml`:
 
 - vLLM: `--data-parallel-size`, `--enable-expert-parallel`, `--all2all-backend`,
   `--kv-transfer-config`, `--port`, and the transfer backend. The connector emits them.
-- SGLang: `--tp-size` and `--disaggregation-transfer-backend`. The launcher manages them.
+- SGLang: the topology and transport flags listed in the `models.yaml` header, which `render.py`
+  refuses in a recipe. The transfer backend's flag comes from its `backends` section.
 
 One exception: vLLM `tp:` blocks do carry `--tensor-parallel-size`, because the rixl+TP path
 takes the degree from the recipe. The moriio+TP path emits its own `--tensor-parallel-size` and

@@ -22,7 +22,7 @@ docker run --rm \
     --group-add video \
     --cap-add SYS_PTRACE \
     --security-opt seccomp=unconfined \
-    ${CONTAINER_PRIVILEGE_ARGS} \
+    ${CONTAINER_PRIVILEGE_ARGS---privileged} \
     -v $HOME:$HOME \
     ${_SITE_MOUNTS} \
     -v $HOME/.ssh:/root/.ssh \

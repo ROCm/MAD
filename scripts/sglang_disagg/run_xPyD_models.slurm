@@ -153,9 +153,8 @@ done
 export SGLANG_FABRIC_ENV_ARGS
 echo "[fabric] ${CLUSTER_ARCHETYPE:-unknown}; forwarded to the container:${SGLANG_FABRIC_ENV_ARGS:- none (container defaults)}"
 
-# The model, its parallel mode, the KV backend and the node counts, against models.yaml
-# (render.py), before any node is touched. Needs PyYAML on this host; without it the
-# container makes the same check before any server starts.
+# The run against models.yaml before any node is touched. Without PyYAML on this host,
+# the container makes the same check before any server starts.
 if python3 -c 'import yaml' 2>/dev/null; then
     MODEL_NAME="${MODEL_NAME:-}" xP="$xP" yD="$yD" DP_MODE="$DP_MODE" ROUTER_NODE="${ROUTER_NODE:-0}" \
         python3 "${SCRIPT_DIR}/render.py" --models "${MODELS_YAML:-${SCRIPT_DIR}/models.yaml}" validate || exit 1

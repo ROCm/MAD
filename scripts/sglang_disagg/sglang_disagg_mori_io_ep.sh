@@ -185,8 +185,8 @@ source "${SCRIPT_DIR}/mori_ep_env.sh"
 
 # A loopback RC round trip on every KV NIC before any server starts. MoRI's start-up only
 # opens the devices, so an RDMA user space that cannot create QPs (rdma-core < 54 on Thor2
-# under the in-kernel bnxt_re driver) otherwise shows up as KV transfers that never
-# complete, behind --watchdog-timeout: one run hung 15 minutes that way.
+# under the in-kernel bnxt_re driver) would otherwise hang the first KV transfer behind
+# --watchdog-timeout.
 _rdma_preflight() {
     local dev out rc try spid port=19400 gid="${MORI_IB_GID_INDEX:-3}" failed=""
     if ! command -v ibv_rc_pingpong >/dev/null 2>&1; then
@@ -298,8 +298,6 @@ _wait_for_tcp() {
     done
 }
 
-# This node's part of the run, from render.py: ranks 0..xP-1 prefill (0 also hosts
-# the router), xP..xP+yD-1 decode, and a router node after them with ROUTER_NODE=1.
 _ROLE="$ROLE"; _ROLE_INDEX="$ROLE_INDEX"
 # Whether this node runs the router and the benchmark client.
 _HOSTS_ROUTER="$RUNS_ROUTER"
@@ -413,8 +411,8 @@ if [[ "$_HOSTS_ROUTER" == 1 ]]; then
     fi
 
     # Launched only after worker logs confirm servers are up (avoids the proxy probing
-    # backends too early). ROUTER_ARGV registers every server's leader (render.py) and
-    # binds 0.0.0.0, so bench_serving (--host 127.0.0.1 in benchmark_xPyD.sh) can connect.
+    # backends too early). Binds 0.0.0.0 so bench_serving (--host 127.0.0.1 in
+    # benchmark_xPyD.sh) can connect.
     _router_cmd=(python3 -m sglang_router.launch_router "${ROUTER_ARGV[@]}")
 
     if _dry_run; then
@@ -604,7 +602,7 @@ elif [[ "$_ROLE" == decode ]]; then
         _dbg "SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD=${SGLANG_MORI_DISPATCH_INTER_KERNEL_SWITCH_THRESHOLD}"
         _dbg "MORI_SHMEM_HEAP_SIZE=${MORI_SHMEM_HEAP_SIZE}"
 
-        # NOTE: do NOT gate DECODE_NODE_RANK>=1 on port 5757 being open.
+        # NOTE: do NOT gate a dp_ep server's later nodes on port 5757 being open.
         # torch init_process_group uses a rendezvous: rank 0 opens the port only
         # AFTER all ranks have joined. Waiting for rank 0's port before launching
         # rank 1 creates a permanent deadlock. All decode nodes must launch concurrently.

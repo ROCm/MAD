@@ -311,12 +311,9 @@ fi
 export FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
 
 # --------------------------------------------------------------- containers
-# What the SGLang node program gives its container in place of a site-specific
-# privilege. --privileged covers the RDMA devices' locked memory and the kernel log
-# the fault capture reads. A Docker daemon whose policy refuses privileged
-# containers needs the capability RDMA uses instead:
+# Replaces --privileged in the SGLang containers. Where Docker refuses privileged
+# containers, RDMA needs only (the fault capture then cannot read dmesg):
 #     CONTAINER_PRIVILEGE_ARGS="--cap-add IPC_LOCK --ulimit memlock=-1:-1"
-# (the fault capture then reports that dmesg is not readable).
 export CONTAINER_PRIVILEGE_ARGS="${CONTAINER_PRIVILEGE_ARGS---privileged}"
 
 # --------------------------------------------------------------- ports

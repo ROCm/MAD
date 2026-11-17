@@ -132,5 +132,4 @@ models:
     roles:
       prefill:
         dp_ep:
-          # R1 runs at the default fraction, unlike V3.
           --mem-fraction-static: null
