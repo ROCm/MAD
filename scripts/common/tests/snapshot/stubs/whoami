@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stand-in whoami: the goldens were recorded as root, and the launchers put the
+# caller's name into the containers' environment (USER_NAME).
+echo root

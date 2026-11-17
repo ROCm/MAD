@@ -1,0 +1,7 @@
+#!/bin/bash
+# Stand-in hostname: node<N> has address 10.0.0.<N>.
+n="${SLURMD_NODENAME:-node1}"
+case "$1" in
+    -I) echo "10.0.0.$(tr -dc 0-9 <<<"$n" | sed 's/^0*//') " ;;
+    *) echo "$n" ;;
+esac

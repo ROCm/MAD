@@ -1,0 +1,10 @@
+{
+  "engine": "sglang",
+  "layout": "disagg",
+  "gpus_per_node": 8,
+  "roles": [
+    {"name": "prefill", "nodes": 2, "parallel": {"mode": "tp", "tp": 8}},
+    {"name": "decode",  "nodes": 2, "parallel": {"mode": "tp", "tp": 8}}
+  ],
+  "router": {"host": "prefill", "index": 0}
+}

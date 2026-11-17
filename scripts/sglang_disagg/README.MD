@@ -21,40 +21,28 @@ This repository contains scripts and documentation to launch PD Disaggregation f
 
 
 ## Building the Docker image
-Access the Dockerfile located at `docker/sglang_disagg_inference.ubuntu.amd.Dockerfile`.
-It uses `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` as the base docker image.
+The cards build `docker/di_sglang.ubuntu.amd.Dockerfile` from the `sglang-disagg` pin set
+(`docker/pins/sglang-disagg.json`): the SGLang release image per GPU architecture, pinned by
+digest, with MoRI `158c7e8` added on gfx942. What a pin set is, and how to change one, is in
+[docker/pins/README.md](../../docker/pins/README.md); the per-model Dockerfile this replaces is
+listed there too.
+
+From the MAD root:
 
 ```bash
-docker build  -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
+docker build -f docker/di_sglang.ubuntu.amd.Dockerfile \
+  $(python3 docker/pins/pins.py build-args sglang-disagg --arch gfx942) \
+  -t <registry>/di-sglang:sglang-disagg-gfx942 .
 ```
 
-### Build arguments
-
-| Arg | Default | Description |
-|-----|---------|-------------|
-| `INSTALL_MORI` | `1` | When `1`, builds and installs MoRI at `MORI_COMMIT`. Set to any other value (e.g. `0`) to skip MoRI installation entirely. |
-| `MORI_COMMIT` | `158c7e8335a0b19b3f1f422ff134d7869252135e` | MoRI commit to check out and install when `INSTALL_MORI=1`. |
-| `BASE_DOCKER` | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | Base SGLang ROCm image. |
-| `GPU_ARCH` | `gfx942` | Target AMD GPU architecture. |
-
-Examples:
-
-```bash
-# Default build: installs MoRI pinned at MORI_COMMIT
-docker build -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-
-# Skip MoRI (e.g. when using Mooncake KV transfer only)
-docker build --build-arg INSTALL_MORI=0 -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-
-# Pin a different MoRI commit
-docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_disagg_inference.ubuntu.amd.Dockerfile .
-```
+Use `--arch gfx950` for MI355X. More in [docs/sglang-disagg.md](../../docs/sglang-disagg.md#building-the-image).
 
 ## Scripts
 
 | File | Description |
 |------|-------------|
-| `run_xPyD_models.slurm` | SLURM script to launch docker containers on all nodes via `sbatch` |
+| `run_xPyD_models.slurm` | SLURM batch script: validates the run, picks the nodes and runs `node.sh` on each through `scripts/common/dispatch/dispatch.sh` |
+| `node.sh` | Per-node program: starts this node's container (shared parts in `scripts/common/node/node_lib.sh`) |
 | `sglang_disagg_mori_io_ep.sh` | Container entrypoint — starts prefill/decode servers, proxy, and benchmark |
 | `models.yaml` | Model-specific CLI flags for all supported models |
 | `mori_ep_env.sh` | RDMA/NCCL/Gloo environment variables |
@@ -62,6 +50,9 @@ docker build --build-arg MORI_COMMIT=<sha> -t sglang_disagg_pd_image -f sglang_d
 | `benchmark_parser.py` | Log parser for CONCURRENCY benchmark logs |
 
 ## Quick Start
+
+To run a card through madengine or with `sbatch` directly, with a cluster's allocation
+defaults, see [docs/multinode-running.md](../../docs/multinode-running.md).
 
 ```bash
 git clone https://github.com/ROCm/MAD.git
@@ -81,7 +72,7 @@ sbatch -N 2 -n 2 --nodelist=<node1,node2> run_xPyD_models.slurm
 
 ### KV Cache Transfer Backend
 
-The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation KV-cache transfer backend (`--disaggregation-transfer-backend`) via `RUN_MORI`. The backend is intentionally kept out of `models.yaml` so model configs stay backend-agnostic, and it applies to all supported models.
+`RUN_MORI` selects the disaggregation KV-cache transfer backend (`KV_TRANSFER_BACKEND`). Its flag (`--disaggregation-transfer-backend`) comes from the `backends` section of `models.yaml`, so the model entries stay backend-agnostic.
 
 | `RUN_MORI` | `KV_TRANSFER_BACKEND` | Backend | Status |
 |------------|-----------------------|---------|--------|
@@ -90,15 +81,16 @@ The unified launcher (`sglang_disagg_mori_io_ep.sh`) selects the disaggregation 
 
 ### WideEP/LargeEP Parallelism Mode (`DP_MODE`)
 
-`PARALLEL_MODE` is derived strictly from `DP_MODE`, which selects the flag set from `models.yaml`.
+`DP_MODE` selects the mode `render.py` renders from `models.yaml`:
 
-| `DP_MODE` | `PARALLEL_MODE` | Flags applied | Supported models |
-|-----------|-----------------|---------------|------------------|
-| `0` (default) | `tp` | `base_flags` + `tp_flags` + `prefill.tp` / `decode.tp` | All models |
-| `1` | `dp` | `base_flags` + `dp_flags` (`--moe-a2a-backend mori`, DP attention) + `prefill.dp` / `decode.dp` | DeepSeek-V3, DeepSeek-R1 only |
+| `DP_MODE` | Mode | Flags applied | Supported models |
+|-----------|------|---------------|------------------|
+| `0` (default) | `tp` | `defaults` and the model, their `tp` blocks | All models |
+| `1` | `dp_ep` | `defaults` and the model, their `dp_ep` blocks (`--moe-a2a-backend mori`, DP attention) | Models with a `modes.dp_ep` block: DeepSeek-V3, DeepSeek-R1 |
 
 - `DP_MODE=1` enables MoRI expert parallelism (EP) with DP attention and currently requires `RUN_MORI=1` (MoRI IO).
-- It is restricted by an allowlist (`MORI_DP_MODE1_ALLOWED_MODELS`) enforced in both `run_xPyD_models.slurm` and `sglang_disagg_mori_io_ep.sh`. Launching any other model with `DP_MODE=1` exits with an error — use `DP_MODE=0` (TP) for all non-DeepSeek models.
+- A model without a `modes.dp_ep` block is refused with `DP_MODE=1` (`render.py validate`, in `run_xPyD_models.slurm` and again in the container). Use `DP_MODE=0` (TP) for all non-DeepSeek models.
+- Preview every node's commands without a job: `MODEL_NAME=<model> xP=1 yD=1 python3 render.py plan`.
 
 ## Log Files
 
@@ -155,7 +147,7 @@ madengine run --tags agentic
 ```bash
 cd scripts/sglang_disagg
 
-export DOCKER_IMAGE_NAME=<mori-sglang-image>          # e.g. rocm/pytorch-private:sglang-...-mori-YYYYMMDD
+export DOCKER_IMAGE_NAME=<mori-sglang-image>          # built from the sglang-disagg pin set
 export BENCHMARK_SCRIPT=agentic                        # selects benchmark_agentic.sh
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000
@@ -217,7 +209,10 @@ Agentic replay works for every model in the recipe allowlist. `DP_MODE=1` (MoRI 
 | amd-Llama-3.3-70B-Instruct-FP8-KV | 0 (TP) | |
 | Llama-3.1-405B-Instruct-FP8-KV | 0 (TP) | Needs larger topology |
 
-Topology is `xP` prefill + `yD` decode + 1 router node (minimum 3 nodes, i.e. 1P/1D).
+Topology is `xP` prefill + `yD` decode nodes, with the router on the first prefill node. With
+`ROUTER_NODE=1` the router and the benchmark client get a node of their own after decode
+(`xP + yD + 1` nodes; 3 for 1P/1D). Without it, the examples below use the first `xP + yD` nodes
+of their 3-node allocation. Roles follow the scheduler's node order, not the order in `--nodelist`.
 
 ### Invocation examples (agentic suite)
 

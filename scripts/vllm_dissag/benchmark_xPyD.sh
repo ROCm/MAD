@@ -1,4 +1,10 @@
 #!/bin/bash
+# This script's own directory: where parse_to_csv.py (and ../common) live. The
+# disagg launcher mounts it as NIXL_COOKBOOK_PATH, but the colocated launcher
+# (vllm_multinode) runs it from the same directory without setting that, and
+# "$NIXL_COOKBOOK_PATH/parse_to_csv.py" became "/parse_to_csv.py": a sweep whose
+# every cell succeeded published no perf.csv.
+_BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 timestamp=$(date "+%Y%m%d_%H%M%S")
 BENCHMARK_PORT="${BENCHMARK_PORT:-2584}"
@@ -18,6 +24,7 @@ WARMUP_OSL="${WARMUP_OSL:-32}"
 echo "Warmup run: ${WARMUP_PROMPTS} prompts @ con=${WARMUP_CON} isl=${WARMUP_ISL} osl=${WARMUP_OSL}" | tee -a ${LOG}_CONCURRENCY.log >/dev/null
 vllm bench serve \
     --model $MODEL_PATH \
+    --served-model-name "${SERVED_MODEL_NAME:-$MODEL_PATH}" \
     --backend vllm \
     --host 127.0.0.1 \
     --port $BENCHMARK_PORT \
@@ -54,6 +61,7 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                | tee -a ${LOG}_CONCURRENCY.log >/dev/null
            timeout "${SHAPE_WARMUP_TIMEOUT:-2400}" vllm bench serve \
                --model $MODEL_PATH \
+               --served-model-name "${SERVED_MODEL_NAME:-$MODEL_PATH}" \
                --backend vllm \
                --host 127.0.0.1 \
                --port $BENCHMARK_PORT \
@@ -68,9 +76,12 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                2>&1 | tee -a ${LOG}_SHAPEWARMUP.log >/dev/null
        fi
        for con in $CON; do
-           p_con=$(($con * 2))
-           if [ "$p_con" -lt 16 ]; then
-               p_con=16
+           # Prompts per cell: con x BENCHMARK_PROMPTS_PER_CON (default 2), at least
+           # BENCHMARK_MIN_PROMPTS (default 16). Raise the multiplier to hold each
+           # concurrency at steady state for more waves of requests.
+           p_con=$(( con * ${BENCHMARK_PROMPTS_PER_CON:-2} ))
+           if [ "$p_con" -lt "${BENCHMARK_MIN_PROMPTS:-16}" ]; then
+               p_con=${BENCHMARK_MIN_PROMPTS:-16}
            fi
            _base_timeout="${STEP_TIMEOUT:-1800}"
            _total_tok=$(( isl + osl ))
@@ -82,6 +93,7 @@ for i in $(seq 1 $BENCHMARK_ITR); do
                | tee -a ${LOG}_CONCURRENCY.log >/dev/null
            timeout $_scaled_timeout vllm bench serve \
            --model $MODEL_PATH \
+           --served-model-name "${SERVED_MODEL_NAME:-$MODEL_PATH}" \
            --backend vllm \
            --host 127.0.0.1 \
            --port $BENCHMARK_PORT \
@@ -104,7 +116,8 @@ for i in $(seq 1 $BENCHMARK_ITR); do
         done
     done
 done
-python3 $NIXL_COOKBOOK_PATH/parse_to_csv.py ${LOG}_CONCURRENCY.log -o ${LOG}_CONCURRENCY.csv \
+python3 "$_BENCH_DIR/parse_to_csv.py" ${LOG}_CONCURRENCY.log -o ${LOG}_CONCURRENCY.csv \
 	--perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
 	--model-name "${MODEL_NAME}" \
+	--kv-logs /run_logs/${SLURM_JOB_ID}/decode_NODE*.log \
 	2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null

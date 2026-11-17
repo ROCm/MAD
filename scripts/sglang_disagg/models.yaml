@@ -1,83 +1,135 @@
-# Model catalog for sglang_disagg_mori_io_ep.sh (disaggregated PD).
-# -----------------------------------------------------------------------------
-# Loaded when MODEL_NAME is set; PARALLEL_MODE is tp or dp from DP_MODE in the shell:
-#   DP_MODE=0 -> PARALLEL_MODE=tp -> tp_flags, prefill.tp, decode.tp (plus base_flags).
-#   DP_MODE=1 -> PARALLEL_MODE=dp -> dp_flags, prefill.dp, decode.dp (plus base_flags).
-# Do not set --tp-size or --disaggregation-transfer-backend here; the launcher manages those.
+# SGLang server flags for the disaggregated P/D recipe, per model.
 #
-# Each model contains:
-# - base_flags: always applied (prefill + decode)
-# - tp_flags / dp_flags: mode-level flags applied to BOTH prefill and decode (omit if empty)
-# - prefill/decode.<tp|dp>: role + mode specific flags
-# - experimental_flags: optional extra CLI flags appended after role/mode flags on BOTH prefill and decode workers.
-#   Use for try-outs that are independent of TP vs DP (PARALLEL_MODE); omit or "" when unused.
+# render.py turns this into each node's `sglang.launch_server` arguments; the
+# role script (sglang_disagg_mori_io_ep.sh) runs them. Sections:
 #
-# Radix prefix cache: base_flags below carry "--disable-radix-cache" for the default
-# xPyD performance sweeps (clean, cache-free throughput). The agentic replay benchmark
-# needs the cache ON, so the launcher (sglang_disagg_mori_io_ep.sh) STRIPS
-# "--disable-radix-cache" from PREFILL/DECODE configs when BENCHMARK_SCRIPT=agentic
-# (or ENABLE_RADIX_CACHE=1). That strip is exercised only by the agentic-tagged
-# models.json entries (BENCHMARK_SCRIPT=agentic), not by any perf-sweep entry. Do not
-# remove it here, or the perf sweeps lose their cache-free baseline.
+#   defaults   flags for every model
+#   models     one entry per MODEL_NAME (an empty entry takes the defaults)
+#   backends   KV transfer (KV_TRANSFER_BACKEND); `modes` lists the parallel
+#              modes each is validated with
+#   overlays   switched on by run settings: radix_cache (BENCHMARK_SCRIPT=agentic
+#              or ENABLE_RADIX_CACHE=1), server_metrics (agentic or
+#              ENABLE_SERVER_METRICS=1)
+#   compat     flags SGLang renamed or removed, applied only when the installed
+#              SGLang no longer accepts the name written here
+#
+# A `defaults` or `models` entry is layered, later keys winning:
+#
+#   base:                       every role and mode
+#   modes: {tp, dp_ep}          one parallel mode (DP_MODE=0 / DP_MODE=1)
+#   roles: {prefill, decode}    one role; `--flag` keys apply to every mode,
+#                               `tp:` / `dp_ep:` sub-blocks to one mode
+#   extends: <model>            start from another model's entry
+#
+# Precedence, lowest first: defaults, the model, the backend's `args`, overlays,
+# EXTRA_SERVER_ARGS / EXTRA_PREFILL_ARGS / EXTRA_DECODE_ARGS. `true` is a bare flag,
+# a list is several values, "A..B" is the integers A to B. `false` or `null` removes
+# a flag; under `extends`, `null` drops the value inherited from the parent.
+#
+# A model runs DP_MODE=1 only if its entry has a `modes.dp_ep` block. The launcher
+# sets the topology and transport flags (--model-path, --disaggregation-mode,
+# --host, --port, --tp-size, --dp-size, --ep-size, --dist-init-addr, --nnodes,
+# --node-rank, --disaggregation-ib-device); do not set them here. The servers'
+# environment (NCCL, MoRI) is not here: mori_ep_env.sh and connectors/mori.env.
 
-# --- Dense Llama / Qwen ---
+defaults:
+  base:
+    --trust-remote-code: true
+    --attention-backend: aiter
+    --watchdog-timeout: 1000000
+    --mem-fraction-static: 0.73
+    --prefill-round-robin-balance: true
+    --decode-log-interval: 1
+    --log-level-http: warning
+  modes:
+    tp:
+      --load-balance-method: round_robin
+    dp_ep:
+      # Pins each request to the DP rank that owns its bootstrap slot; without it
+      # KV transfers land on the wrong rank and requests hang.
+      --load-balance-method: follow_bootstrap_room
+  roles:
+    prefill:
+      tp:
+        --disable-cuda-graph: true
+    decode:
+      tp:
+        # Perf sweeps measure cache-free throughput; the radix_cache overlay turns
+        # the cache back on for the agentic benchmark.
+        --disable-radix-cache: true
+        --cuda-graph-bs: [8, 16, 32, 64, 128, 256, 512]
 
-Llama-3.1-8B-Instruct:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
-  prefill:
-    tp: "--disable-cuda-graph"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+backends:
+  mori:
+    modes: [tp, dp_ep]
+    args:
+      --disaggregation-transfer-backend: mori
+  mooncake:
+    modes: [tp]
+    args:
+      --disaggregation-transfer-backend: mooncake
 
-Qwen3-32B:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
-  prefill:
-    tp: "--disable-cuda-graph"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+overlays:
+  radix_cache:
+    --disable-radix-cache: false
+  server_metrics:
+    --enable-metrics: true
+    --enable-metrics-for-all-schedulers: true
 
-amd-Llama-3.3-70B-Instruct-FP8-KV:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
-  prefill:
-    tp: "--disable-cuda-graph"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+compat:
+  # SGLang 0.5.20 split --cuda-graph-bs into --cuda-graph-bs-decode and
+  # --cuda-graph-bs-prefill and refuses the old name as ambiguous; it sized the
+  # decode graphs.
+  renamed:
+    --cuda-graph-bs: --cuda-graph-bs-decode
+  # SGLang 0.5.20 refuses to start with these.
+  removed:
+    - --prefill-round-robin-balance
 
-Llama-3.1-405B-Instruct-FP8-KV:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
-  prefill:
-    tp: "--disable-cuda-graph --disable-radix-cache"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 8)"
+models:
+  Llama-3.1-8B-Instruct: {}
 
-# --- MoE ---
+  Qwen3-32B: {}
 
-Mixtral-8x7B-Instruct-v0.1:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
-  prefill:
-    tp: "--disable-cuda-graph"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+  Mixtral-8x7B-Instruct-v0.1: {}
 
-DeepSeek-V3:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
-  # --enable-dp-attention-local-control-broadcast on both roles: forces all DP ranks to
-  # step together so idle ranks enter the MoRI EP collective. prefill/decode dp use the
-  # same mode-level flags, so they live in dp_flags (role-specific batch tuning is in prefill.dp/decode.dp).
-  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
-  prefill:
-    tp: "--disable-cuda-graph"
-    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3) --mem-fraction-static 0.65"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
-    dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
+  amd-Llama-3.3-70B-Instruct-FP8-KV:
+    base:
+      --mem-fraction-static: 0.65
 
-DeepSeek-R1:
-  base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
-  dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
-  prefill:
-    tp: "--disable-cuda-graph"
-    dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3)"
-  decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
-    dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
+  Llama-3.1-405B-Instruct-FP8-KV:
+    base:
+      --mem-fraction-static: 0.65
+    roles:
+      prefill:
+        tp:
+          --disable-radix-cache: true
+      decode:
+        tp:
+          --cuda-graph-bs: 1..8
+
+  DeepSeek-V3:
+    modes:
+      dp_ep:
+        --moe-a2a-backend: mori
+        --enable-dp-attention: true
+        --enable-dp-lm-head: true
+        --moe-dense-tp-size: 1
+        # Forces all DP ranks to step together so idle ranks enter the MoRI EP collective.
+        --enable-dp-attention-local-control-broadcast: true
+        --max-running-requests: 8192
+    roles:
+      prefill:
+        dp_ep:
+          --cuda-graph-bs: 1..3
+          --mem-fraction-static: 0.65
+      decode:
+        dp_ep:
+          --cuda-graph-bs: [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128]
+
+  DeepSeek-R1:
+    extends: DeepSeek-V3
+    roles:
+      prefill:
+        dp_ep:
+          --mem-fraction-static: null

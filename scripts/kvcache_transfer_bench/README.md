@@ -181,7 +181,7 @@ sbatch [sbatch options] scripts/run.slurm [benchmark options]
 | `--stop-size`    | 1073741824 (1GB) | Maximum transfer size (bytes)                                                                  |
 | `--backends`     | all              | Comma-separated: `nixl,mori,mori_cpp,mooncake` or `all`                                        |
 | `--model-name`   | pyt_kvcache_transfer_bench_all | `model` column of `perf.csv` (madengine sets it from `BENCH_MODEL_NAME`)         |
-| `--ibdevice`     | mlx5_0           | InfiniBand device                                                                              |
+| `--ibdevice`     | mlx5_0 (see below) | InfiniBand device; on Thor2 / AINIC inside MAD, the first detected rail                      |
 | `--sync-port`    | 9999             | TCP port for target/initiator sync                                                             |
 
 
@@ -219,6 +219,13 @@ cd scripts/kvcache_transfer_bench
 bash scripts/run.slurm --docker-image <your-repo>/kv-cache-unified:latest
 ```
 
+**Fabric and addresses (inside the MAD repo).** The launcher sources `scripts/common/cluster.sh`, as the other multinode launchers do, so one command runs on any fabric:
+
+- `--ibdevice` defaults to `mlx5_0` on CX7 (or an unrecognized fabric) and to the first detected rail on Thor2 (`bnxt_re*`) and AINIC.
+- Fabric settings you set (`NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `GLOO_SOCKET_IFNAME`, `MORI_RDMA_DEVICES`, `MORI_IB_GID_INDEX`, ...) reach the container; on Thor2 and AINIC so do the detected GID, control interface and rails. On CX7 the container keeps its defaults (`eth0`). The `[fabric]` line in the job log lists what was forwarded.
+- Each node is reached at its address on `FABRIC_SUBNET_PREFIX` (default `10.158.`), else its first address. Set it when the nodes' first address is not one their peers can reach, e.g. `FABRIC_SUBNET_PREFIX=10.20. sbatch ...`.
+- The `mori` backend uses `MORI_ROOT`, else the first of `/workspace/mori`, `/sgl-workspace/mori` and `/app/mori` that holds MoRI's IO benchmark, so an image that ships MoRI elsewhere works too.
+- The launcher creates the job's results and `slurm_output/perf_csv` directories writable, so a root-squashed share works.
 
 
 ### 3. Run on Non-Slurm Clusters (e.g. Kubernetes, Bare-Metal)

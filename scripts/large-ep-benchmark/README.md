@@ -106,6 +106,18 @@ sbatch -p <partition> -N <num-nodes> run_benchmark.sbatch
 >[!NOTE]
 > Ensure the partition and account allow the requested number of nodes and that compute nodes have Docker (or the configured container runtime) and access to the built image (e.g., via a registry or shared image path).
 
+### Other fabrics and madengine
+
+Inside the MAD repo the launcher sources `scripts/common/cluster.sh`, as the other multinode launchers do:
+
+- `IBDEVICES` defaults to `mlx5_0` on CX7 (or an unrecognized fabric) and to the first detected rail on Thor2 (`bnxt_re*`) and AINIC.
+- Fabric settings you set (`NCCL_IB_HCA`, `NCCL_IB_GID_INDEX`, `MORI_RDMA_DEVICES`, ...) reach the container; on Thor2 and AINIC so do the detected ones. The `[fabric]` line in the job log lists them.
+- Nodes are addressed on `FABRIC_SUBNET_PREFIX` (default `10.158.`), else their first address; set it when that address is not one the peers can reach.
+- `/shared_inference/models` (`SHARED_MOUNT`) is mounted at `/data` only where it exists, and the job's log directory is made writable for a root-squashed container.
+- The results go to `perf_large_ep_bench.csv` (the cards' `multiple_results`) in the directory you submitted from, and the job fails when a node failed or no benchmark produced a result.
+
+MoRI-EP internode needs the NIC vendor's direct-verbs library in the image (`libmlx5`, `libbnxt_re` or `libionic` with its `*_dv_*` API); without it MoRI reports `... device detected but lib... not available at runtime`.
+
 ## Output and logs
 
 - Slurm stdout/stderr: `ep_bench_slurm_job.out` and `ep_bench_slurm_job.err` in the directory where `sbatch` was run.

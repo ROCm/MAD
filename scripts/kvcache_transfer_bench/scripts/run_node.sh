@@ -67,8 +67,9 @@ JOB_ID=${SLURM_JOB_ID:-${JOB_ID:-unknown}}
 SHARED_FOLDER_BASE="${SHARED_FOLDER:-${KV_CACHE_TEST_PATH}}"
 SHARED_FOLDER="${SHARED_FOLDER_BASE%/}/shared/results_${JOB_ID}"
 
-# UCX/GLOO env for RDMA/ROCm transfers (used by mori, nixl, mooncake)
-export GLOO_SOCKET_IFNAME=eth0
+# UCX/GLOO env for RDMA/ROCm transfers (used by mori, nixl, mooncake). The launcher
+# forwards the control-plane interface the node has (common/cluster.sh) when it differs.
+export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-eth0}"
 export UCX_TLS=rc,sm,self,rocm_copy,rocm_ipc,tcp
 export UCX_NET_DEVICES="${IBDEVICES}:1"
 export UCX_SOCKADDR_TLS_PRIORITY=rdmacm,tcp
@@ -98,10 +99,18 @@ mkdir -p "$SHARED_FOLDER"
 # Resolve current hostname on the fly (hostname command works when $HOSTNAME is unset)
 CURRENT_HOST=$(hostname)
 echo "CURRENT_HOST: $CURRENT_HOST"
+# Roles are decided on short names: the scheduler names nodes short while `hostname`
+# can be fully qualified, and then neither node took the target role.
+_is_target() { [ "${NODE1%%.*}" = "${CURRENT_HOST%%.*}" ]; }
+
+# MoRI's IO benchmark imports prettytable, which not every image that ships MoRI has.
+case " $BENCH_BACKENDS " in
+    *" mori "*) python3 -c "import prettytable" 2>/dev/null || pip install -q prettytable ;;
+esac
 
 for backend in $BENCH_BACKENDS; do
     echo "=== Starting backend: $backend on $(hostname) (NODE1=$NODE1 CURRENT_HOST=$CURRENT_HOST) ==="
-    if [ "$NODE1" = "$CURRENT_HOST" ]; then
+    if _is_target; then
         echo "  Role: TARGET (node matches NODE1)"
         python3 $KV_CACHE_TEST_PATH/backends/$backend/target_bench.py \
             --target_node "$NODE1" \
@@ -124,7 +133,7 @@ for backend in $BENCH_BACKENDS; do
 done
 
 # Merge results and generate report (run only on the initiator node)
-if [ "$NODE1" != "$CURRENT_HOST" ]; then
+if ! _is_target; then
     echo "=== Merging results and generating report ==="
     python3 $KV_CACHE_TEST_PATH/scripts/merge_results.py \
         --input-dir "$SHARED_FOLDER" \

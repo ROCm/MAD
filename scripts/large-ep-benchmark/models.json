@@ -8,6 +8,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -17,7 +18,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 1
         },
         "env_vars": {
             "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
@@ -25,7 +27,12 @@
             "IBDEVICES": "mlx5_0",
             "SKIP_DEEPEP": "0"
         },
-        "args": "-N 1 -n 1"
+        "args": "-N 1 -n 1",
+        "slurm": {
+            "nodes": 1,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_large_ep_bench_1n_mori_only",
@@ -36,6 +43,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -45,7 +53,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 1
         },
         "env_vars": {
             "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
@@ -53,7 +62,12 @@
             "IBDEVICES": "mlx5_0",
             "SKIP_DEEPEP": "1"
         },
-        "args": "-N 1 -n 1"
+        "args": "-N 1 -n 1",
+        "slurm": {
+            "nodes": 1,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_large_ep_bench_2n",
@@ -64,6 +78,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -73,7 +88,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
@@ -81,7 +97,12 @@
             "IBDEVICES": "mlx5_0",
             "SKIP_DEEPEP": "0"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_large_ep_bench_2n_mori_only",
@@ -92,6 +113,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -101,7 +123,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 2
         },
         "env_vars": {
             "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
@@ -109,7 +132,12 @@
             "IBDEVICES": "mlx5_0",
             "SKIP_DEEPEP": "1"
         },
-        "args": "-N 2 -n 2"
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     },
     {
         "name": "pyt_large_ep_bench_4n_mori_only",
@@ -120,6 +148,7 @@
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
+        "multiple_results": "perf_large_ep_bench.csv",
         "tags": [
             "pyt",
             "large_ep",
@@ -129,7 +158,8 @@
         ],
         "timeout": -1,
         "distributed": {
-            "launcher": "slurm_multi"
+            "launcher": "slurm_multi",
+            "nnodes": 4
         },
         "env_vars": {
             "DOCKER_IMAGE": "rocm/pytorch-private:large-ep-benchmark-rocm720-mori-42e89547-20260605",
@@ -137,6 +167,11 @@
             "IBDEVICES": "mlx5_0",
             "SKIP_DEEPEP": "1"
         },
-        "args": "-N 4 -n 4"
+        "args": "-N 4 -n 4",
+        "slurm": {
+            "nodes": 4,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     }
 ]
