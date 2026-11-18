@@ -82,6 +82,14 @@ venv.bak/
 # See benchmark/jax_maxtext/README.md for details.
 scripts/Primus/
 
+# Status dashboard: frozen release snapshots and templates are source, the built site is not.
+# roadmap.internal.yaml holds unreleased plans and must never be committed (the repo is public).
+!dashboard/releases/*.json
+!dashboard/logos/sources.json
+_site/
+_site_internal/
+dashboard/roadmap.internal.yaml
+
 # Local agent planning artifacts
 docs/superpowers/
 
@@ -106,3 +114,10 @@ madengine_build_*
 
 # Kernel-profile run directories (kernel-tools.py --run-dir)
 runs/
+
+# Third-party logos are fetched at build time (tools/dashboard/fetch_logos.py), never committed.
+# The AMD logos (dashboard/logos/amd/, providers/amd.png) are the publisher's own and stay tracked.
+dashboard/logos/providers/*
+!dashboard/logos/providers/amd.png
+dashboard/logos/simple-icons/
+dashboard/logos/sources.json

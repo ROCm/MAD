@@ -1,0 +1,32 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% block title %}ROCm support matrix — MAD Recipes{% endblock %}
+{% block body %}
+<main class="wrap">
+  {{ ui.page_header("ROCm support matrix", "The base image and ROCm version each framework is benchmarked on, and the GPU products its models are registered for. “latest” means the Dockerfile builds from an unpinned latest tag, so its ROCm version changes when the image is republished.", snap, glyph="layers") }}
+  <section>
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th>Framework</th><th>Base image</th><th>ROCm</th>
+          {% for sku in snap.skus %}<th class="mark">{{ sku }}</th>{% endfor %}
+          <th class="num">Configs</th><th>Dockerfile</th>
+        </tr></thead>
+        <tbody>
+        {% for i in snap.images %}
+          <tr>
+            <td>{% for name in i.frameworks %}<div class="with-ico" style="gap:6px">{{ icons.framework(name, 16) }}{% if name in fw_slugs %}<a href="{{ root }}/models/index.html?fw={{ fw_slugs[name] }}">{{ name }}</a>{% else %}{{ name }}{% endif %}</div>{% endfor %}</td>
+            <td><div class="with-ico" style="gap:6px;align-items:flex-start">{{ icons.mark("docker", 16) }}<code>{{ i.image or "?" }}</code></div></td>
+            <td>{% if i.rocm == "unknown" %}<span class="status warning">unknown</span>{% else %}{{ i.rocm }}{% endif %}<div class="faint" style="font-size:12px">{{ i.rocm_source }}</div></td>
+            {% for sku in snap.skus %}<td class="mark">{{ ui.mark(sku in i.skus, sku) }}</td>{% endfor %}
+            <td class="num">{{ i.models }}</td>
+            <td>{% if i.path %}<a href="{{ gh }}/blob/{{ snap.commit or 'develop' }}/{{ i.path }}" title="{{ i.path }}"><code style="white-space:nowrap;overflow-wrap:normal">{{ i.dockerfile }}</code></a>{% else %}<code>{{ i.dockerfile }}</code>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="faint" style="font-size:12.5px">ROCm versions come from <code>rocm_overrides</code> in <code>dashboard/status.yaml</code> where set, otherwise from the image tag where it encodes one, otherwise from the image's registry metadata: a ROCm label, the <code>THE_ROCK_VERSION</code> / <code>ROCM_SDK_VERSION</code> / <code>ROCM_VERSION</code> build argument, or the <code>+rocm</code> version of its PyTorch/JAX wheels.</p>
+  </section>
+</main>
+{% endblock %}

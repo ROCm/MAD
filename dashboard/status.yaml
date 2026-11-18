@@ -1,0 +1,108 @@
+# MAD status dashboard: the facts the repository cannot derive on its own.
+#
+# Everything else (model list, supported GPUs, base images, ROCm versions encoded in
+# image tags) is collected from scripts/*/models.json, scripts/*/get_models_json.py and
+# docker/*.Dockerfile by tools/dashboard/collect.py.
+#
+# THIS FILE IS PUBLIC. It is published on GitHub Pages from ROCm/MAD. Only add roadmap
+# items that are cleared for external disclosure; keep anything else in
+# dashboard/roadmap.internal.yaml (gitignored, used only by `build.py --internal`).
+#
+# Build:   python3 tools/dashboard/build.py --out _site
+# Release: python3 tools/dashboard/build.py --freeze v26.10   (then commit dashboard/releases/)
+
+# Release this snapshot rolls up to (YY.MM, same convention as the docker tags).
+release: v26.10
+
+# Registry directory (scripts/<dir>) -> how it is shown. Order here is display order.
+# workload: inference | training | microbenchmark.
+# by_launcher: split the registry by its launcher tag (tags[1]), e.g. Primus Megatron.
+# readme: guide linked from the recipe pages.
+# one_page: one recipe page for the whole registry, one variant per card (node-count sweeps,
+#   per-backend microbenchmarks).
+# label_prefix: launcher tag -> model name put in front of config names that do not carry one
+#   (Primus worldmirror configs are called stage1-posttrain, stage2-posttrain, ...).
+# k8s: manual -- the readme documents a per-node run outside SLURM (Kubernetes, bare metal).
+frameworks:
+  vllm:                      {name: vLLM, workload: inference, readme: benchmark/vllm/README.md}
+  vllm_dissag:               {name: vLLM disaggregated P/D, workload: inference, readme: scripts/vllm_dissag/README.MD}
+  sglang:                    {name: SGLang, workload: inference, readme: benchmark/sglang/README.md}
+  sglang_disagg:             {name: SGLang disaggregated P/D, workload: inference, readme: scripts/sglang_disagg/README.MD}
+  atom:                      {name: ATOM, workload: inference, readme: benchmark/kimi_k3/README.md}
+  atom_vllm:                 {name: ATOM vLLM plugin, workload: inference, readme: scripts/atom_vllm/README.md}
+  vllm-omni:                 {name: vLLM-Omni diffusion, workload: inference, readme: scripts/vllm-omni/README.md}
+  pyt_xdit:                  {name: xDiT diffusion, workload: inference, readme: benchmark/xdit/README.md}
+  mochi:                     {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
+  pyt_chai1_inference:       {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
+  pyt_clip_inference:        {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
+  pyt_hy_video:              {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
+  pyt_wan2.1_inference:      {name: PyTorch inference, workload: inference, readme: benchmark/pytorch_inference/README.md}
+  primus_train:              {name: Primus, workload: training, by_launcher: true, readme: benchmark/primus/README.md,
+                              label_prefix: {worldmirror: HunyuanWorld-Mirror}}
+  jax-maxtext:               {name: JAX MaxText, workload: training, readme: benchmark/jax_maxtext/README.md}
+  jax-maxdiffusion:          {name: JAX MaxDiffusion, workload: training, readme: benchmark/jax_maxtext/README.md}
+  pytorch_train:             {name: PyTorch training, workload: training}
+  pyt_huggingface_diffusers: {name: PyTorch training, workload: training}
+  huggingface_bert:          {name: PyTorch training, workload: training}
+  huggingface_gpt2:          {name: PyTorch training, workload: training}
+  ncf:                       {name: PyTorch training, workload: training}
+  large-ep-benchmark:        {name: Large EP microbenchmark, workload: microbenchmark, readme: scripts/large-ep-benchmark/README.md, one_page: true}
+  kvcache_transfer_bench:    {name: KV cache transfer microbenchmark, workload: microbenchmark, readme: scripts/kvcache_transfer_bench/README.md, one_page: true, k8s: manual}
+
+# Tags worth a column in the model tables, with the legend shown on the page.
+suite_tags:
+  vllm_default: vLLM default suite
+  vllm_extended: vLLM extended suite
+  agentic: Agentic (multi-turn) workload
+  niah: Needle-in-a-haystack long-context accuracy
+  mori_ep: MoRI expert-parallel transport
+  mori_io: MoRI-IO KV transfer
+  mori_dp: MoRI data-parallel attention
+  mooncake: Mooncake KV transfer
+  nixl: NIXL KV transfer
+  deepep: DeepEP expert-parallel transport
+  large_ep_scaling: Large-EP scaling sweep
+  t2i: Text-to-image
+  ti2i: Text+image-to-image
+  tmi2i: Text+multi-image-to-image
+  t2v: Text-to-video
+  i2v: Image-to-video
+  t2av: Text-to-audio+video
+  lora: LoRA fine-tuning
+
+# Registered entries that are smoke tests or suite runners, not supported models.
+exclude:
+  - dummy/dummy_multi
+  - primus_train/default
+  - jax-maxtext/default
+  - jax-maxdiffusion/default
+  - vllm/vllm-perf
+  - vllm/vllm-accuracy
+
+# ROCm version for images whose tag does not encode one and whose registry metadata does
+# not state one either (labels, ROCM_VERSION-style build args, +rocm wheel versions; see
+# tools/dashboard/image_registry.py), keyed by madengine dockerfile reference. An entry
+# wins over both; the build warns when the registry disagrees with it. Leave a value empty
+# to show "unknown" (build --strict fails on those).
+rocm_overrides:
+  docker/pyt_xdit: "TheRock preview"          # benchmark/xdit/README.md; built from TheRock artifacts, no version in its metadata
+  # TODO(owners): fill in from the image release notes.
+  docker/pytorch_train: ""                    # unifiedtrainingdockers.azurecr.io/utd/ci:primus_the_rock_ci_* (private registry)
+
+# Oncoming models are read from GitHub: open issues labeled `label` (from the "Model
+# onboarding" issue form) are the plan, the PRs that close them -- or PRs carrying the
+# label on their own -- set the status. Merged work leaves the roadmap and shows up under
+# Models. Builds without a GitHub token (or with --offline) use only the list below.
+roadmap_source:
+  repo: ROCm/MAD
+  label: new-model
+
+# Extra roadmap items that have no issue yet. PUBLIC-SAFE ITEMS ONLY (see header).
+# status: planned | in progress | in review | blocked   (in-progress also accepted; default planned)
+roadmap: []
+#  - model: Example-Model-70B
+#    framework: vLLM
+#    target: v26.11
+#    skus: [MI355X]
+#    status: planned
+#    note: optional one-liner

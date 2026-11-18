@@ -1,0 +1,29 @@
+{% extends "base.html.j2" %}
+{% import "macros.html.j2" as ui with context %}
+{% block title %}Releases — MAD Recipes{% endblock %}
+{% block body %}
+<main class="wrap">
+  {{ ui.page_header("Releases", "Each MAD release freezes the whole site: model support, recipes pinned to the release commit, ROCm and roadmap. Frozen pages never change.", snap, glyph="tag") }}
+  <section>
+    <div class="card">
+      <table>
+        <thead><tr><th>Version</th><th>Frozen on</th><th class="num">Models</th><th class="num">Configs</th><th class="num">Added</th><th class="num">Removed</th><th>Commit</th></tr></thead>
+        <tbody>
+        {% for r in release_rows %}
+          <tr>
+            <td><a href="{{ r.href }}">{{ r.label }}</a></td>
+            <td>{{ r.date }}</td>
+            <td class="num">{{ r.families }}</td>
+            <td class="num">{{ r.configs }}</td>
+            <td class="num">{{ r.added if r.added is not none else "–" }}</td>
+            <td class="num">{{ r.removed if r.removed is not none else "–" }}</td>
+            <td>{% if r.commit %}<a href="{{ gh }}/tree/{{ r.commit }}" class="mono">{{ r.commit[:10] }}</a>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="faint" style="font-size:12.5px">Cut a release with <code>python3 tools/dashboard/build.py --freeze {{ snap.release }}</code> and commit <code>dashboard/releases/{{ snap.release }}.json</code>.</p>
+  </section>
+</main>
+{% endblock %}
