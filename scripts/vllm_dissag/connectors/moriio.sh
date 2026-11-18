@@ -313,6 +313,48 @@ open(P, "w").write(src)
 print("[lmcache-broadcast-patch] patched OK: " + P)
 LMCACHE_BROADCAST_PATCH
 
+    # LMCache vs newer vLLM: LMCache <= 0.5.3 build_connector_meta reads CachedRequestData.resumed_req_ids or
+    # .resumed_from_preemption and raises AttributeError("Unable to determine preemption status ...") when neither
+    # exists, which kills the decode engine on its first request. vLLM removed both fields (#31734, Jan 2026) because
+    # a resumed (preempted) request is now re-sent in full like a new one, so a cached request is never resumed and
+    # "not preempted" is the right answer. TEMPORARY: remove once the LMCache in the image handles this. Idempotent;
+    # non-fatal; does nothing on images where either field still exists (the original branches are kept).
+    local _lmcache_adapter
+    _lmcache_adapter="$(python3 -c 'import importlib.util as u, os; s = u.find_spec("lmcache"); print(os.path.join(os.path.dirname(s.origin), "integration/vllm/vllm_v1_adapter.py") if s and s.origin else "")' 2>/dev/null)"
+    if [ -n "$_lmcache_adapter" ] && [ -f "$_lmcache_adapter" ]; then
+        python3 - "$_lmcache_adapter" <<'LMCACHE_PREEMPT_PATCH' || echo "[lmcache-preempt-patch] WARN: patch could not be applied (anchor missing / already fixed upstream?); continuing without it"
+import sys
+
+P = sys.argv[1]
+MARKER = "lmcache-preempt-patch: vLLM no longer reports resumed requests"
+src = open(P).read()
+if MARKER in src:
+    print("[lmcache-preempt-patch] already patched")
+    sys.exit(0)
+
+old = '''            else:
+                # This case should not be reached with supported vLLM versions.
+                # Raising an error is safer than assuming not preempted.
+                raise AttributeError(
+                    f"Unable to determine preemption status for request {req_id}. "
+                    f"This might be due to an unsupported vLLM version."
+                )
+'''
+new = '''            else:
+                # lmcache-preempt-patch: vLLM no longer reports resumed requests
+                # in CachedRequestData (a resumed request is re-sent in full, like a new one).
+                preempted = False
+'''
+if src.count(old) != 1:
+    sys.stderr.write("[lmcache-preempt-patch] PATCH FAILED: anchor not found/unique\n")
+    sys.exit(3)
+src = src.replace(old, new, 1)
+compile(src, P, "exec")
+open(P, "w").write(src)
+print("[lmcache-preempt-patch] patched OK")
+LMCACHE_PREEMPT_PATCH
+    fi
+
     # Per-role execution mode. Ported from #324: NEVER use bare --enforce-eager.
     # On these AITER images an enforce-eager worker (no +quant_fp8 custom op) routes
     # fp8 quant through an AITER op whose signature mismatches the build
