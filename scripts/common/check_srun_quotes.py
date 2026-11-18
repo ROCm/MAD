@@ -24,8 +24,10 @@ version of this checker passed it -- while the body still ended mid-comment,
 with no container output at all.
 
 The real question is what sits BETWEEN a closing apostrophe and the reopening one.
-Exactly one form is deliberate: the splice idiom '"$VAR"' (or '"${VAR}"'), which
+Two forms are deliberate. The splice idiom '"$VAR"' (or '"${VAR}"', '"${VAR:-default}"')
 closes the string to interpolate a value from the submitting shell and reopens it.
+The escaped apostrophe '"'"' closes the string, adds one literal apostrophe and
+reopens it, so the body itself contains an apostrophe, e.g. awk '"'"'{print $1}'"'"'.
 Anything else between a pair is text that has escaped the string.
 
 Usage: python3 scripts/common/check_srun_quotes.py [paths...]
@@ -35,7 +37,9 @@ import re
 import sys
 
 OPEN = re.compile(r"bash\s+-c\s+'\s*$")
-SPLICE = re.compile(r'^"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"$')
+SPLICE = re.compile(r'^"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*(?::?[-=+?][^"\'\s`$]*)?\})"$')
+# '"'"' is one literal apostrophe inside the body; it never splits a word.
+ESCAPED_APOSTROPHE = "'\"'\"'"
 # What actually truncates the body is UNQUOTED WHITESPACE in the escaped text: it
 # splits the shell word, so everything after becomes a separate argument and
 # `bash -c` gets a shorter script. Escaped text with no whitespace merges back into
@@ -55,7 +59,7 @@ def check(path):
             continue
         start, inq, i = i, True, i + 1
         while i < len(lines) and inq:
-            line = lines[i]
+            line = lines[i].replace(ESCAPED_APOSTROPHE, "")
             if "'" in line:
                 # A line whose first non-blank character is the apostrophe is the
                 # deliberate close, with or without trailing args:
