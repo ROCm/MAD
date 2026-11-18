@@ -190,7 +190,15 @@ _hasnot "$(_argv_so 0 0)" "--enable-scale-out" "ENABLE_SCALE_OUT=0: no --enable-
 echo ""
 echo "=== router policy: moriio prefill defaults to cache_aware, decode/global to round_robin; knobs reach the router ==="
 MS="$(cat "$DIR/connectors/moriio.sh")"
-_has "$MS" '--prefill-policy "${ROUTER_PREFILL_POLICY:-cache_aware}"' "moriio: prefill policy defaults to cache_aware"
+_has "$MS" '--prefill-policy "${_prefill_policy}"' "moriio: router prefill policy comes from _moriio_prefill_policy"
+_pp() { # env assignments... -> prefill policy chosen by moriio.sh
+  env -i PATH="$PATH" "$@" bash -c "source '$DIR/connectors/offloading.inc.sh'; $(awk '/^_moriio_prefill_policy\(\)/,/^}/' "$DIR/connectors/moriio.sh"); _moriio_prefill_policy"
+}
+_has "$(_pp KV_OFFLOAD=none)" "round_robin" "prefill policy: round_robin without prefix caching (no offload)"
+_has "$(_pp KV_OFFLOAD=cpu)" "cache_aware" "prefill policy: cache_aware with KV offload"
+_has "$(_pp KV_OFFLOAD=none ENABLE_PREFIX_CACHING=1)" "cache_aware" "prefill policy: cache_aware with ENABLE_PREFIX_CACHING=1"
+_has "$(_pp KV_OFFLOAD=none BENCHMARK_SCRIPT=agentic)" "cache_aware" "prefill policy: cache_aware for the agentic benchmark"
+_has "$(_pp KV_OFFLOAD=cpu ROUTER_PREFILL_POLICY=round_robin)" "round_robin" "prefill policy: ROUTER_PREFILL_POLICY overrides"
 _has "$MS" '--decode-policy "${ROUTER_DECODE_POLICY:-round_robin}"' "moriio: decode policy defaults to round_robin"
 _has "$MS" '--policy "${ROUTER_POLICY:-round_robin}"' "moriio: global policy defaults to round_robin"
 RS="$(cat "$DIR/connectors/rixl.sh")"

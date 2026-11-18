@@ -145,6 +145,15 @@ _moriio_multi_node() {
     parallelism_is_wide_ep && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
 }
 
+# Router prefill policy. ROUTER_PREFILL_POLICY wins. Otherwise cache_aware when the engines run with prefix
+# caching (KV offload, ENABLE_PREFIX_CACHING=1 or the agentic benchmark: see kv_prefix_cache_arg), else
+# round_robin: with prefix caching off a returning conversation gains nothing from landing on the same rank,
+# and cache_aware can skew load across ranks and costs the router a tokenize call per request.
+_moriio_prefill_policy() {
+    if [[ -n "${ROUTER_PREFILL_POLICY:-}" ]]; then echo "${ROUTER_PREFILL_POLICY}"; return 0; fi
+    if [[ "$(kv_prefix_cache_arg)" == "--enable-prefix-caching" ]]; then echo "cache_aware"; else echo "round_robin"; fi
+}
+
 # The router's cache_aware prefill policy builds its prefix keys from token ids. On vLLM builds that have the
 # scale-out API it asks POST /v1/completions/render, which vLLM answers with 403 unless the server runs with
 # --enable-scale-out; the router then has no keys and silently falls back to load balancing, so a conversation's
@@ -156,7 +165,7 @@ _moriio_scale_out_arg() {
     local mode="${ENABLE_SCALE_OUT:-auto}"
     [[ "$mode" == "0" ]] && return 0
     if [[ "$mode" != "1" ]]; then
-        [[ "${ROUTER_PREFILL_POLICY:-cache_aware}" == "round_robin" ]] && return 0
+        [[ "$(_moriio_prefill_policy)" == "round_robin" ]] && return 0
         local _vd
         _vd="$(python3 -c 'import importlib.util as u; s = u.find_spec("vllm"); print(s.submodule_search_locations[0] if s else "")' 2>/dev/null)"
         grep -qs enable_scale_out "${_vd}/entrypoints/common/cli_args.py" || return 0
@@ -628,11 +637,12 @@ connector_start_proxy() {
                 echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD} (peer hosts via kv_connector_extra_config; needs vLLM PR #65098)"
             fi
         fi
-        # Prefill policy defaults to cache_aware: with vllm-router #386 every DP rank is its own worker
-        # (url@rank), so a conversation's next turn goes back to the rank that holds its prefix KV.
-        # The decode leg is pinned to the prefill rank, so the decode policy does not matter.
-        # Needs a router with #386 (v0.1.17+); an older router sees one worker per role, where any
-        # policy is moot. Override with ROUTER_PREFILL_POLICY=round_robin for the old behaviour.
+        # Prefill policy defaults to cache_aware when prefix caching is on (see _moriio_prefill_policy), else
+        # round_robin. With vllm-router #386 every DP rank is its own worker (url@rank), so a conversation's next
+        # turn goes back to the rank that holds its prefix KV. The decode leg is pinned to the prefill rank, so
+        # the decode policy does not matter. Needs a router with #386 (v0.1.17+); an older router sees one worker
+        # per role, where any policy is moot. ROUTER_PREFILL_POLICY overrides.
+        local _prefill_policy; _prefill_policy="$(_moriio_prefill_policy)"
         local _router_dp_local="${ROUTER_INTRA_NODE_DP:-${_router_dp_default}}"
         parallelism_is_wide_ep || _router_dp_local=1
 
@@ -649,7 +659,7 @@ connector_start_proxy() {
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
             --policy "${ROUTER_POLICY:-round_robin}" \
-            --prefill-policy "${ROUTER_PREFILL_POLICY:-cache_aware}" \
+            --prefill-policy "${_prefill_policy}" \
             --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
             --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}" \
             --prometheus-port "${_PROMETHEUS_PORT}" \
