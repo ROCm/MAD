@@ -4,9 +4,7 @@
 # 1. Task-level defaults (entries with hf_pipeline_tag, no model field)
 # 2. Model-level overrides (entries with model field)
 #
-# NOTE: apply_chat_template=true requires serving on /v1/chat/completions.
-# Until run_accuracy() supports endpoint switching, apply_chat_template
-# stays false to avoid HTTP 422.
+# apply_chat_template works from here but scores worse than completions; left off.
 
 # ── Task-level defaults (by hf_pipeline_tag) ──
 - hf_pipeline_tag: text-generation
@@ -14,7 +12,8 @@
     - framework: lm_eval
       task: gsm8k
       apply_chat_template: false
-      num_fewshot: 0
+      # 5-shot: at 0-shot the answer marker is never shown, so strict-match scores ~0.
+      num_fewshot: 5
       base_url: http://localhost:8000/v1/completions
       lm_eval_model: local-completions
       num_concurrent: 64
@@ -59,6 +58,13 @@
     amd/DeepSeek-R1-0528-MXFP4
     amd/DeepSeek-V3.1-MXFP4-ASQ
 
+# Qwen3_5MoeForCausalLM needs trust_remote_code for the architecture and tokenizer.
+- model: amd/Qwen3.8-2.4T-A95B-Quark-MXFP4
+  extra_args:
+    --trust-remote-code: true
+  evaluations:
+    - trust_remote_code: true
+
 - model: >
     amd/Kimi-K2.5-MXFP4
     amd/Kimi-K2.6-MXFP4
@@ -71,6 +77,7 @@
 - model: xai-org/grok-2
 
 # --- Base models ---
+# num_fewshot 3 predates the 5-shot default; kept so this model's numbers do not move.
 - model: openai/gpt-oss-120b
   evaluations:
     - num_fewshot: 3

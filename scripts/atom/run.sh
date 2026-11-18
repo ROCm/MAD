@@ -33,6 +33,7 @@ fi
 MAD_MODEL_NAME=$(echo $MAD_MODEL_NAME | tr "/" "_")
 
 PERF_ARGS=""
+DCP_ARGS=""
 PROFILE=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -43,10 +44,11 @@ while [[ "$#" -gt 0 ]]; do
         --perf) PERF_ARGS="$PERF_ARGS --perf $2"; shift ;;
         --perf-output) PERF_ARGS="$PERF_ARGS --perf-output $2"; shift ;;
         --no-perf-merge) PERF_ARGS="$PERF_ARGS --no-perf-merge" ;;
+        --dcp) DCP_ARGS="--dcp $2"; shift ;;
         --profile) PROFILE=true ;;
         *)
             echo "Unknown parameter passed: $1" >&2
-            echo "Usage: run.sh --model_repo <repo> [--config <yaml>] [--benchmark <name>] [--output_csv <csv>] [--perf <yaml>] [--perf-output <yaml>] [--no-perf-merge]" >&2
+            echo "Usage: run.sh --model_repo <repo> [--config <yaml>] [--benchmark <name>] [--output_csv <csv>] [--perf <yaml>] [--perf-output <yaml>] [--no-perf-merge] [--dcp <n>] [--profile]" >&2
             exit 1
             ;;
     esac
@@ -106,7 +108,7 @@ if $PROFILE; then
 fi
 
 # Run benchmark; use -u to make python prints unbuffered
-python3 -u run_atom.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $PERF_ARGS
+python3 -u run_atom.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $DCP_ARGS $PERF_ARGS
 
 # move the output csv to parent directory
 mv "perf_${MODEL_NAME}.csv" ../$OUTPUT_CSV

@@ -39,8 +39,8 @@
 # produce numbers that cannot be compared against the tracking issue.
 #
 # random_range_ratio: 1.0 keeps every request at exactly inp/out tokens, as in
-# the issue. Without it the runner uses its default of 0.8, which samples
-# lengths from [0.8 * len, len] and shifts throughput and latency.
+# the issue. The runner default is now also 1.0; the explicit value is kept so
+# this config stays pinned to the issue's methodology if the default changes.
 #
 # max_concurrency is the shared K3 sweep used for vLLM/SGLang/ATOM as well
 # (1/4/8/16/32/64/128/256). It is a superset of the issue's rows except for

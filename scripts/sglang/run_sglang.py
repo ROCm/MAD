@@ -27,14 +27,17 @@
 import os
 import re
 import csv
+import copy
 import glob
 import json
 import time
 import yaml
+import shlex
 import psutil
 import shutil
 import signal
 import argparse
+import functools
 import itertools
 import sys
 import subprocess
@@ -143,6 +146,87 @@ def _fill_missing(base, overrides):
     return out
 
 
+# ---------------------------------------------------------------------------
+# Architecture-specific overrides.
+#
+# A perf.yaml entry or a base config entry may carry an `arch_overrides` block
+# keyed by the GPU architecture madengine reports in
+# MAD_SYSTEM_GPU_ARCHITECTURE (`gfx950`, `gfx1250`, ...). The matching section
+# is overlaid onto the entry's common settings, so one entry can serve machines
+# whose tuned recipes genuinely conflict: DeepSeek-V4-Pro needs
+# SGLANG_HACK_FLASHMLA_BACKEND=unified_kv_triton on gfx950 and =triton on
+# gfx1250, which a single flat dict cannot express.
+# ---------------------------------------------------------------------------
+
+ARCH_OVERRIDES_KEY = 'arch_overrides'
+# Dict-valued sections are merged key-by-key; every other key is replaced whole
+# (`tp`, `inp`, ... are scalars, so replacing is what you want there).
+ARCH_MERGE_SECTIONS = ('env', 'extra_args', 'bench_args')
+
+
+@functools.lru_cache(maxsize=1)
+def _detect_arch():
+    """Ask ROCm for the local gfx target; '' when it cannot be determined."""
+    try:
+        out = subprocess.run(['rocm_agent_enumerator'], capture_output=True,
+                             text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ''
+    # gfx000 is the CPU agent and is always listed; ignore it.
+    targets = [t for t in out.stdout.split() if t.startswith('gfx') and t != 'gfx000']
+    return targets[0] if targets else ''
+
+
+def current_arch():
+    """GPU architecture for this host, e.g. 'gfx950'; 'unknown' if undetermined.
+
+    madengine exports MAD_SYSTEM_GPU_ARCHITECTURE, but these scripts are also
+    run by hand, so fall back to probing ROCm directly rather than silently
+    matching no arch_overrides block and dropping the tuning.
+    """
+    return os.environ.get('MAD_SYSTEM_GPU_ARCHITECTURE') or _detect_arch() or 'unknown'
+
+
+def _overlay(common, override):
+    """Return `common` with `override` applied on top — override wins.
+
+    This is the inverse of `_fill_missing`: inside one entry the
+    architecture-specific block is the more specific statement, so it takes
+    precedence over the common block. A null (YAML `~`) value deletes the key,
+    which is the only way to say "do not pass this flag on this arch" — a
+    `false` value still renders as a bare flag downstream. Inputs are not
+    mutated.
+    """
+    out = dict(common or {})
+    for k, v in (override or {}).items():
+        if v is None:
+            out.pop(k, None)
+        else:
+            out[k] = v
+    return out
+
+
+def apply_arch_overrides(entry, arch):
+    """Resolve `entry`'s `arch_overrides` block against `arch`.
+
+    Returns `(resolved_entry, applied)` where `applied` maps each touched
+    section to the keys it contributed, for logging. `arch_overrides` is always
+    stripped, so nothing downstream has to know about it even when no section
+    matched. Inputs are not mutated.
+    """
+    resolved = dict(entry or {})
+    sections = resolved.pop(ARCH_OVERRIDES_KEY, None) or {}
+    applied = {}
+    for key, value in (sections.get(arch) or {}).items():
+        if key in ARCH_MERGE_SECTIONS:
+            resolved[key] = _overlay(resolved.get(key) or {}, value)
+            applied[key] = sorted(value or {})
+        else:
+            resolved[key] = value
+            applied[key] = value
+    return resolved, applied
+
+
 def deep_merge_evaluations(base_evals, model_evals):
     """Index-based merge: model evals override into corresponding base evals."""
     merged = []
@@ -249,18 +333,30 @@ def load_perf_entries(perf_path):
 
     Returns an empty list when the file is missing or empty; each entry is
     `{'models': set[str], 'extra_args': dict, 'env': dict}`.
+
+    Any `arch_overrides` block is resolved here, against the current GPU
+    architecture, so what comes back is already machine-specific and
+    `apply_perf_overrides` stays a plain gap-fill. Resolving at load time also
+    means the materialized perf_config.yaml records the values that actually
+    ran rather than an unresolved template.
     """
     if not perf_path or not os.path.exists(perf_path):
         return []
     with open(perf_path, 'r') as f:
         raw = yaml.safe_load(f) or []
+    arch = current_arch()
     entries = []
     for e in raw:
+        resolved, applied = apply_arch_overrides(e, arch)
+        if applied:
+            print(f"perf.yaml: applied {arch} overrides for model="
+                  f"{resolved.get('model')}: {applied}")
         entries.append({
-            'models': _tokens(e.get('model')),
-            'extra_args': e.get('extra_args', {}) or {},
-            'env': e.get('env', {}) or {},
-            'bench_args': e.get('bench_args', {}) or {},
+            'models': _tokens(resolved.get('model')),
+            'extra_args': resolved.get('extra_args', {}) or {},
+            'env': resolved.get('env', {}) or {},
+            'bench_args': resolved.get('bench_args', {}) or {},
+            'docker_base': resolved.get('docker_base'),
         })
     return entries
 
@@ -485,16 +581,16 @@ def parse_args():
     return args
 
 def expand_configs(args, configs: List[Dict]):
-    # Apply architecture specific overrides to config
+    # Apply architecture specific overrides to config. This runs after the
+    # perf.yaml merge, so env / extra_args / bench_args are merged key-by-key
+    # rather than replaced -- a wholesale replace here would discard everything
+    # perf.yaml just filled in.
     cfgs = []
-    arch = os.environ.get('MAD_SYSTEM_GPU_ARCHITECTURE', 'unknown')
+    arch = current_arch()
     for config in configs:
-        cfg = config.copy()
-        # pop all architecture specific overrides from config
-        arch_overrides = cfg.pop('arch_overrides', {})
-        if arch_override := arch_overrides.get(arch, {}):
-            print(f"Detected {arch} architecture, applying override {arch_override} to config {cfg}")
-            cfg.update(arch_override)
+        cfg, applied = apply_arch_overrides(config, arch)
+        if applied:
+            print(f"Detected {arch} architecture, applied override {applied} to config {cfg}")
         cfgs.append(cfg)
     
     # Expand combinations from SUPPORTED_LIST_ARGS
@@ -715,7 +811,7 @@ def run_serving(model, config):
             f"--model {model} "
             f"--dataset-name random "
             f"--request-rate inf "
-            f"--random-range-ratio {config.get('random_range_ratio', 0.8)} "
+            f"--random-range-ratio {config.get('random_range_ratio', 1.0)} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -776,6 +872,213 @@ def run_serving(model, config):
         _ = server.communicate()
         del server
 
+AGENTIC_PORT = 8000
+AGENTIC_BACKEND = 'sglang_single'
+
+
+def _agentic_common_dir():
+    """Absolute path to the scripts/common directory holding the agentic hook.
+
+    Two layouts have to work. Run directly from a checkout, common/ is a sibling
+    of scripts/sglang. Under madengine the script tree is COPIED flat into
+    /myworkspace/run_directory, so the sibling does not exist -- but the repo
+    itself is bind-mounted at /myworkspace, so scripts/common is reachable from
+    the mount root instead. AGENTIC_COMMON_DIR overrides both.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.environ.get('AGENTIC_COMMON_DIR'),
+        os.path.join(here, os.pardir, 'common'),              # scripts/sglang/../common
+        os.path.join(here, os.pardir, 'scripts', 'common'),   # run_directory/../scripts/common
+        '/myworkspace/scripts/common',                        # madengine bind mount
+    ]
+    for cand in candidates:
+        if cand and os.path.isfile(os.path.join(cand, 'benchmark_agentic.sh')):
+            return os.path.abspath(cand)
+    raise FileNotFoundError(
+        "scripts/common/benchmark_agentic.sh not found; tried "
+        + ", ".join(repr(c) for c in candidates if c)
+        + " (set AGENTIC_COMMON_DIR)"
+    )
+
+
+def _write_agentic_suite_config(config, dest):
+    """Materialize the `agentic:` block of a MAD entry as an AgentX suite config.
+
+    The MAD entry carries serving/run/workloads inline so one file describes the
+    whole run; the suite driver (scripts/common/benchmark_agentic_suite.sh) wants
+    its own file. Only the fields the driver needs are defaulted here -- the rest
+    is passed through verbatim so the AgentX schema stays the single source of
+    truth for what a workload may contain.
+    """
+    block = copy.deepcopy(config.get('agentic') or {})
+    if not block.get('workloads'):
+        raise ValueError(
+            "benchmark: agentic requires an 'agentic.workloads' list "
+            "(see scripts/common/agentx/agentic.example.yaml)"
+        )
+    serving = block.setdefault('serving', {})
+    serving.setdefault('model', 'auto')           # resolve the served id from /v1/models
+    serving.setdefault('port', AGENTIC_PORT)
+    # 'auto' leaves AGENTIC_SERVER_METRICS unset, which is what a monolith server
+    # wants: no prefill worker to probe, so the front-end /v1/models auto-detect
+    # in the library is used instead.
+    serving.setdefault('server_metrics', 'auto')
+    with open(dest, 'w') as f:
+        yaml.safe_dump(block, f, sort_keys=False, default_flow_style=False)
+    return block
+
+
+def _collect_agentic_results(result_dir, config):
+    """Turn the suite's aggregate JSONs into perf.csv rows (one set per point).
+
+    Latencies in the aggregate JSON are seconds (the aggregator divides the raw
+    ms by 1000); throughputs are tokens/sec.
+    """
+    results = []
+    for agg_path in sorted(glob.glob(os.path.join(result_dir, '**', '*.json'), recursive=True)):
+        base = os.path.basename(agg_path)
+        if base in ('suite_summary.json', 'RUN_INVALID.json'):
+            continue
+        try:
+            with open(agg_path) as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        rm = doc.get('request_metrics') or {}
+        if not rm.get('throughput'):
+            continue      # not an aggregate JSON (aiperf writes other json too)
+        tput = rm.get('throughput') or {}
+        lat = rm.get('latency') or {}
+        cache = rm.get('cache') or {}
+        srv_cache = (doc.get('server_metrics') or {}).get('cache') or {}
+        # Concurrency is encoded in the result path (.../<workload>/conc<N>/).
+        conc = ''
+        for part in os.path.normpath(agg_path).split(os.sep):
+            if part.startswith('conc') and part[4:].isdigit():
+                conc = part[4:]
+        metrics = {
+            'throughput_tot': ((tput.get('total') or {}).get('tokens_per_second'), 'tok/sec'),
+            'throughput_gen': ((tput.get('output') or {}).get('tokens_per_second'), 'tok/sec'),
+            'median_ttft': ((lat.get('ttft') or {}).get('p50'), 'sec'),
+            'median_tpot': ((lat.get('tpot') or {}).get('p50'), 'sec'),
+            'median_itl': ((lat.get('itl') or {}).get('p50'), 'sec'),
+            'median_e2el': ((lat.get('e2el') or {}).get('p50'), 'sec'),
+            'gpu_cache_hit_rate': (srv_cache.get('gpu_cache_hit_rate'), 'ratio'),
+            'theoretical_cache_hit_rate': (cache.get('theoretical_cache_hit_rate'), 'ratio'),
+        }
+        row_cfg = {k: v for k, v in config.items() if k != 'agentic'}
+        if conc:
+            row_cfg['max_concurrency'] = conc
+        for metric, (perf, unit) in metrics.items():
+            if perf is None:
+                continue
+            results.append({
+                'performance': str(perf),
+                'metric': metric,
+                'unit': unit,
+                **row_cfg,
+            })
+    return results
+
+
+def run_agentic(model, config):
+    """AgentX agentic trace replay against a monolith (single-node) sglang server.
+
+    Differs from run_serving in three ways that matter:
+
+    1. The radix prefix cache stays ON. AgentX replays real Claude Code sessions
+       whose premise is KV prefix reuse (~90% hit rate), so the cache-free
+       baseline that the perf sweeps want would make these numbers meaningless.
+    2. Metrics are enabled so the server reports gpu_cache_hit_rate, which is the
+       signal that (1) actually took effect.
+    3. ONE server serves the whole concurrency sweep. An AgentX point is a long
+       measured window (900s minimum, 1h for a valid submission), so the suite
+       driver sweeps internally rather than reloading the model per point.
+    """
+    # Resolve the hook and the suite config BEFORE the server starts: loading
+    # DSV4-Pro takes ~20 minutes, so a bad path should fail in seconds, not after.
+    hook = os.path.join(_agentic_common_dir(), 'benchmark_agentic.sh')
+    print(f"AGENTIC: using hook {hook}", flush=True)
+    suite_cfg_path = os.path.abspath(f"agentic_{config['model'].replace('/', '_')}.yaml")
+    _write_agentic_suite_config(config, suite_cfg_path)
+    result_dir = os.path.abspath(config.get('result_dir') or f"agentx_results_{os.path.basename(model)}")
+    os.makedirs(result_dir, exist_ok=True)
+
+    server_cmd = (
+        "python -m sglang.launch_server "
+        f"--model-path {model} "
+        + resolve_tokenizer_arg(model)
+        + f"--dtype {config['dtype']} "
+        + (f"--quantization {config['quantization']} " if config.get('quantization') else "")
+        + (f"--kv-cache-dtype {config['kv_cache_dtype']} " if config.get('kv_cache_dtype') else "")
+        + f"--tensor-parallel-size {config['tp']} "
+        f"--host 0.0.0.0 "
+        f"--port {AGENTIC_PORT} "
+        # No --disable-radix-cache here, deliberately: see docstring.
+        f"--enable-metrics --enable-metrics-for-all-schedulers "
+    )
+    env = config.pop('env', "")
+    extra_args = config.pop('extra_args', "")
+    config.pop('bench_args', None)   # bench_serving-only; the replay driver has its own flags
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    config['cmd'] = server_cmd
+
+    print(server_cmd, flush=True)
+    server = subprocess.Popen(server_cmd, shell=True)
+
+    try:
+        if not wait_for_server(server, f"http://localhost:{AGENTIC_PORT}/v1/models", timeout=5400):
+            print("Server failed to start")
+            return [config]
+        print(f"Server at {server.pid} contacted successfully", flush=True)
+
+        hook_env = dict(os.environ)
+        hook_env.update({
+            'MODEL_PATH': str(model),
+            'AGENTIC_CONFIG': suite_cfg_path,
+            'RESULT_DIR': result_dir,
+            'AGENTIC_PORT': str(AGENTIC_PORT),
+            'MODEL_NAME': os.path.basename(str(model)),
+            # Persist generated/filtered corpora across runs on this node.
+            'SUITE_CORPUS_DIR': hook_env.get('SUITE_CORPUS_DIR', '/myworkspace/.agentx_corpora'),
+            # Labelling only: the result aggregator reads these from the
+            # environment to name the run. Without them a tp=8 server is
+            # recorded as tp=1 with blank framework/precision.
+            'TP_SIZE': str(config['tp']),
+            'FRAMEWORK': 'sglang',
+            'PRECISION': str(config.get('kv_cache_dtype') or config.get('quantization') or config['dtype']),
+            'MODEL_PREFIX': os.path.basename(str(model)),
+            'RUNNER_TYPE': current_arch(),
+        })
+        if config.get('agentic_harness'):
+            hook_env['AGENTIC_HARNESS'] = str(config['agentic_harness'])
+
+        bench_cmd = f"bash {shlex.quote(hook)} --backend {AGENTIC_BACKEND}"
+        config['cmd'] = f"{server_cmd};{bench_cmd}"
+        print(bench_cmd, flush=True)
+        rc = subprocess.run(bench_cmd, shell=True, env=hook_env).returncode
+
+        results = _collect_agentic_results(result_dir, config)
+        if rc != 0:
+            # The suite already marks failed points with RUN_INVALID.json and
+            # writes whatever it got; surface the failure without discarding it.
+            print(f"AGENTIC: suite exited {rc}; {len(results)} result rows collected", flush=True)
+        if not results:
+            print(f"AGENTIC: no aggregate JSON found under {result_dir}", flush=True)
+            return [config]
+        return results
+
+    finally:
+        # kill server and children
+        parent = psutil.Process(server.pid)
+        for child in parent.children(recursive=True):
+            child.send_signal(signal.SIGKILL)
+        server.send_signal(signal.SIGKILL)
+        _ = server.communicate()
+        del server
+
+
 def run_serving_profile(model, config):
     """Single-pass profiling for the serving benchmark (Component 5, kernel breakdown).
 
@@ -831,7 +1134,7 @@ def run_serving_profile(model, config):
             f"--model {model} "
             f"--dataset-name random "
             f"--request-rate inf "
-            f"--random-range-ratio {config.get('random_range_ratio', 0.8)} "
+            f"--random-range-ratio {config.get('random_range_ratio', 1.0)} "
             f"--max-concurrency {config['max_concurrency']} "
             f"--num-prompts {config['num_prompts']} "
             f"--random-input-len {config['inp']} "
@@ -1932,6 +2235,8 @@ def main():
                     results = run_throughput(model, config)
                 elif benchmark == "serving":
                     results = run_serving(model, config)
+                elif benchmark == "agentic":
+                    results = run_agentic(model, config)
                 elif benchmark == "accuracy":
                     # Note: acc.yaml merge already happened at line 1705 for benchmark:all mode
                     # Config already has merged evaluations from task defaults + model overrides
