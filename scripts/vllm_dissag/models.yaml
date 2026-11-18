@@ -332,10 +332,10 @@ GLM-5.3-Flash-FP8-gfx942:
     dp: "--max-model-len 760000 --max-num-batched-tokens 16384 --max-num-seqs 64 --speculative-config '{\"method\":\"mtp\",\"num_speculative_tokens\":1}'"
 
 GLM-5.3-Flash-MXFP4-gfx942:
-  # GLM-5.3-Flash-MXFP4 (AMD Quark export, 173 GB vs 306 GB FP8) on gfx942, same EP8 1P/1D recipe and image
-  # as GLM-5.3-Flash-FP8-gfx942. gfx942 has no FP4 matrix math: every MXFP4 expert converts exactly to FP8
-  # 128x128 blocks (all 37,152 expert matrices checked), so prefill runs them on the FP8 block MoE path, and
-  # decode keeps them 4-bit (FlyDSL W4A16, exact e2m1 decode) for 15-17% more KV cache per GPU on MI325X.
+  # GLM-5.3-Flash-MXFP4 (AMD Quark export) on gfx942, same EP8 1P/1D recipe and image as
+  # GLM-5.3-Flash-FP8-gfx942. gfx942 has no FP4 matrix math: MXFP4 experts convert to FP8 128x128
+  # blocks at load, so prefill runs them on the FP8 block MoE path and decode keeps them 4-bit
+  # (FlyDSL W4A16, exact e2m1 decode).
   env:
     # Server HTTP keep-alive above the router's 50 s idle-pool timeout: otherwise the router can reuse a
     # connection the server is closing and the request fails "connection closed before message completed".
