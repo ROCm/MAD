@@ -107,8 +107,8 @@ docker build --ulimit nofile=1048576:1048576 -t <your-registry>/vllm-disagg:glmv
   -f docker/vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile .
 ```
 
-Its `models.yaml` entry runs MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-in in
-`connectors/moriio.sh`), MTP on both legs, and routes both legs with `consistent_hash`
+Their `models.yaml` entries run MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-in in
+`connectors/moriio.sh`), MTP on both legs, and route both legs with `consistent_hash`
 (`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; the default is `round_robin`,
 and both can be overridden at submit time) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
 sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID`.

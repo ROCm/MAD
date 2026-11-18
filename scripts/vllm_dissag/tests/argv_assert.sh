@@ -204,6 +204,18 @@ _has "$(cat "$SLURM")" '${DECODE_EXTRA_ENV+-e DECODE_EXTRA_ENV=' "slurm forwards
 # Long-context runner exports the same CSV as the sweep, with the parser's [RUNNING] header.
 _has "$(cat "$DIR/benchmark_long_context.sh")" 'parse_to_csv.py' "long-context runner writes perf.csv via parse_to_csv.py"
 _has "$(cat "$DIR/benchmark_long_context.sh")" '[RUNNING] prompts ${n_prompts} isl ${isl} osl ${osl} con ${con}' "long-context [RUNNING] header matches the parser format"
+# A cell that fails before its result block must not take the next cell's throughput.
+_PCSV_DIR="$(mktemp -d)"
+printf '%s\n' 'Running the benchserving script for iter: 1' \
+  '[RUNNING] prompts 2 isl 262144 osl 1024 con 1 (warmups=1, timeout 1800s)' 'request failed' \
+  '[RUNNING] prompts 16 isl 262144 osl 1024 con 8 (warmups=1, timeout 1800s)' \
+  '============ Serving Benchmark Result ============' 'Total token throughput (tok/s):          5000.00' \
+  > "$_PCSV_DIR/log"
+python3 "$DIR/parse_to_csv.py" "$_PCSV_DIR/log" -o "$_PCSV_DIR/out.csv" >/dev/null 2>&1
+_PCSV="$(cat "$_PCSV_DIR/out.csv" 2>/dev/null)"
+_has "$_PCSV" "8,262144,1024,5000.00" "parse_to_csv: the result is filed under its own cell (con 8)"
+_hasnot "$_PCSV" "1,262144,1024," "parse_to_csv: a failed cell's header does not claim the next result"
+rm -rf "$_PCSV_DIR"
 _has "$(cat "$SLURM")" '${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=' "slurm forwards ROUTER_DECODE_POLICY override"
 
 # The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block
@@ -262,6 +274,13 @@ _hasnot "$FP$FD" "===LEGENV" "GLM-5.3 FP8: no per-leg env"
 _eq "$(_argv_of <<<"$MP")" "$(_argv_of <<<"$FP")" "GLM-5.3 MXFP4 prefill argv == FP8 prefill argv"
 _eq "$(_argv_of <<<"$MD")" "$(_argv_of <<<"$FD")" "GLM-5.3 MXFP4 decode argv == FP8 decode argv"
 _has "$C" 'PREFILL_EXTRA_ENV:-' "moriio.sh: per-leg env is opt-in (empty default)"
+# Run the hook itself: each leg exports only its own list, and values are not glob-expanded.
+_LEGHOOK="$(awk '/# Per-leg env, opt-in/{f=1} f; /===LEGENV/{exit}' "$DIR/connectors/moriio.sh")"
+_leg() { (cd "$DIR" && env -i PATH="$PATH" PREFILL_EXTRA_ENV='LA=1 LB=*' DECODE_EXTRA_ENV='LC=2' log_prefix="$1" \
+  bash -c "f() { $_LEGHOOK
+}; f; echo \"LA=\${LA-} LB=\${LB-} LC=\${LC-}\""); }
+_eq "$(_leg prefill)" "LA=1 LB=* LC=" "per-leg env: prefill exports PREFILL_EXTRA_ENV only, no glob expansion"
+_eq "$(_leg decode)" "LA= LB= LC=2" "per-leg env: decode exports DECODE_EXTRA_ENV only"
 _OPTIN_LEG="$(python3 - "$DIR/models.yaml" <<'PY'
 import sys, yaml
 y = yaml.safe_load(open(sys.argv[1])) or {}

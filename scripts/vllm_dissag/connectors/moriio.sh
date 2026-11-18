@@ -160,13 +160,13 @@ connector_launch_worker() {
 
     connector_setup_env "${EP_BACKEND:-mori}"
 
-    # Per-leg env, opt-in via models.yaml env: PREFILL_EXTRA_ENV / DECODE_EXTRA_ENV = "KEY=VAL KEY=VAL",
-    # exported only on that leg (unset for every other model). GLM-5.3-Flash-MXFP4 converts its
-    # experts to FP8 blocks on prefill only; decode keeps them 4-bit.
+    # Per-leg env, opt-in via models.yaml env (or submit time): PREFILL_EXTRA_ENV / DECODE_EXTRA_ENV =
+    # "KEY=VAL KEY=VAL", whitespace-separated (values cannot contain spaces), exported only on that leg.
     local _leg_env="${PREFILL_EXTRA_ENV:-}"
     [[ "$log_prefix" == "decode" ]] && _leg_env="${DECODE_EXTRA_ENV:-}"
-    local _kv
-    for _kv in ${_leg_env}; do export "$_kv"; done
+    local _kv _leg_kvs=()
+    read -ra _leg_kvs <<<"${_leg_env}"
+    for _kv in "${_leg_kvs[@]}"; do export "$_kv"; done
     [[ "${DRY_RUN:-0}" == "1" && -n "${_leg_env}" ]] && echo "===LEGENV log_prefix=${log_prefix} ${_leg_env}==="
 
     # Patch PyTorch default_pg_timeout (DP Gloo groups) — wideEP only.

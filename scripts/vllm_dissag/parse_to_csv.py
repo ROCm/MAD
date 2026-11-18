@@ -49,10 +49,15 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
             prev_section = sections[i-1]
 
             # vllm format: [RUNNING] prompts <N> isl <ISL> osl <OSL> con <CON>
-            config_match = re.search(
+            # Use the last header: earlier ones belong to cells that failed before printing a result.
+            config_matches = re.findall(
                 r'\[RUNNING\]\s+prompts\s+\d+\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)',
                 prev_section
             )
+            config_match = None
+            if config_matches:
+                last = config_matches[-1]
+                config_match = type('Match', (), {'group': lambda self, n: [None, *last][n]})()
             # Fallback: extract from Namespace(...) in vllm bench serve output
             if not config_match:
                 isl_m = re.search(r'random_input_len=(\d+)', prev_section)
