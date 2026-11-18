@@ -565,6 +565,11 @@ connector_start_proxy() {
                 echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD} (peer hosts via kv_connector_extra_config; needs vLLM PR #65098)"
             fi
         fi
+        # Prefill policy defaults to cache_aware: with vllm-router #386 every DP rank is its own worker
+        # (url@rank), so a conversation's next turn goes back to the rank that holds its prefix KV.
+        # The decode leg is pinned to the prefill rank, so the decode policy does not matter.
+        # Needs a router with #386 (v0.1.17+); an older router sees one worker per role, where any
+        # policy is moot. Override with ROUTER_PREFILL_POLICY=round_robin for the old behaviour.
         local _router_dp_local="${ROUTER_INTRA_NODE_DP:-${_router_dp_default}}"
         parallelism_is_wide_ep || _router_dp_local=1
 
@@ -581,7 +586,7 @@ connector_start_proxy() {
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
             --intra-node-data-parallel-size "${_router_dp_local}" \
             --policy "${ROUTER_POLICY:-round_robin}" \
-            --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}" \
+            --prefill-policy "${ROUTER_PREFILL_POLICY:-cache_aware}" \
             --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
             --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}" \
             --prometheus-port "${_PROMETHEUS_PORT}" \

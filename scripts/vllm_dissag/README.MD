@@ -238,6 +238,15 @@ serve child-node ranks and the request hangs on the KV handshake. A stock `vllm-
 router flags or runtime patch are involved. `MORIIO_CONFIG_PEER_HOSTS=0` drops the keys. READ mode
 is unsupported for multi-node roles (the connector's READ handshake ignores per-node hosts).
 
+**Router policy.** For MoRI-IO the router's prefill policy defaults to `cache_aware` (global and decode
+policies stay `round_robin`; override with `ROUTER_PREFILL_POLICY`, `ROUTER_POLICY`, `ROUTER_DECODE_POLICY`).
+With [vllm-project/router #386](https://github.com/vllm-project/router/pull/386) (v0.1.17+) each DP rank is
+its own worker, so a conversation's next turn returns to the rank that holds its prefix KV; the decode
+leg is pinned to the prefill rank. This needs a router with #386: an older router sees one worker per
+role and the policy has no effect. On 1P1D EP8/DP8 (DeepSeek-V3, 64 prompts) `cache_aware` gave a 94%
+prefill cache hit against 41% for `round_robin`. NIXL (`rixl.sh`) honours the same variables but keeps
+`round_robin` as its default.
+
 The router discovery port defaults to 26367 (`MORI_PROXY_PING_PORT`), below the ephemeral range,
 because the router starts after the vLLM servers and a random vLLM listener can otherwise take the
 port; the launcher then aborts with "did not register with the router" (`ROUTER_REGISTER_REQUIRED=0`

@@ -432,14 +432,14 @@ connector_start_proxy() {
             UCX_TLS=tcp,self,shm VLLM_USE_V1=1 \
             "${ROUTER_BIN}" --host 0.0.0.0 --port "${ROUTER_PORT}" --vllm-pd-disaggregation \
                 $PREFILL_URLS $DECODE_URLS \
-                --policy round_robin --prefill-policy round_robin --decode-policy round_robin \
+                --policy "${ROUTER_POLICY:-round_robin}" --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}" --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
                 --intra-node-data-parallel-size 1 \
                 2>&1 | tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null &
         else
             UCX_TLS=tcp,self,shm VLLM_USE_V1=1 \
             "${ROUTER_BIN}" --host 0.0.0.0 --port $ROUTER_PORT --vllm-pd-disaggregation \
                 $PREFILL_URLS $DECODE_URLS \
-                --policy round_robin --prefill-policy round_robin --decode-policy round_robin \
+                --policy "${ROUTER_POLICY:-round_robin}" --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}" --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}" \
                 --intra-node-data-parallel-size 1 --retry-max-retries 3 --prometheus-port 29000 \
                 2>&1 | tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null &
         fi
