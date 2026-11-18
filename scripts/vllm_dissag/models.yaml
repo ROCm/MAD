@@ -66,6 +66,15 @@ Llama-3.1-405B-Instruct-FP8-KV:
 amd-Llama-3.3-70B-Instruct-FP8-KV:
   env:
     VLLM_USE_V1: "1"
+    # --disable-custom-all-reduce (below) sends every TP all-reduce through RCCL, and on
+    # MI300X RCCL takes its MSCCL path for them. During vLLM's compile/warmup MSCCL
+    # allocated a 20 MiB scratch buffer per all-reduce and kept every one (msccl_setup.cc
+    # :550, 1721 of them, 38.31 GiB on one GPU) until the GPU was full: "HIP failure: out
+    # of memory" / "NCCL error: unhandled cuda error" on the first all-reduce, whatever
+    # GPU_MEMORY_UTILIZATION was, in three runs. RCCL's standard
+    # algorithms do not do this. The other TP recipes keep vLLM's custom all-reduce and
+    # never reach this path.
+    RCCL_MSCCL_ENABLE: "0"
     VLLM_V1_USE_PREFILL_DECODE_ATTENTION: "1"
     AMDGCN_USE_BUFFER_OPS: "1"
     VLLM_ROCM_USE_AITER: "1"
@@ -281,3 +290,233 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+# ============================ Kimi-K3 (MXFP4) on MI300X / gfx942 ============================
+# wideEP-only, and the first entry that needs TP>1 on the wideEP path.
+#
+# WHY TP2. K3 is ~2.8T params / 896 experts with a hybrid MLA + Kimi-Delta-Attention
+# stack. On MI300X (192 GB/GPU) the REPLICATED (attn + shared-expert) weight is
+# 106.5 GiB. At TP1/DP16 that lands 190.7 GiB/GPU before KV cache or the MoRI heap
+# -> does not fit. TP2 shards it to 53.3 GiB/GPU; with 84.2 GiB of expert shard that
+# is 137.5 GiB + 16 GiB MoRI heap, leaving room for KV. So the pool is TP2 x DP8 =
+# EP16 over 16 GPUs (2 nodes), i.e. xP=2 yD=2 EP_TP_SIZE=2.
+#
+# gfx942 specifics:
+#   - VLLM_ROCM_USE_AITER_MLA=0 is REQUIRED: the AITER MLA kernel is gfx950-only.
+#   - gfx942 has no scaled-MXFP4 MFMA and the a16w4 SiTUv2 heuristic FlyDSL kernel
+#     cannot codegen there, so the MoE is requantized to packed-int4 and run through
+#     SiTUv2 (AITER_SITUV2_A8W4=1 + the --quantization-config below).
+#   - MAX_NUM_BATCHED_TOKENS stays at 2048: 8192 corrupts generation on this stack,
+#     and the giant profiling shape at 16384 crashes LLVM codegen in the heuristic
+#     FlyDSL kernel.
+#   - KV_CACHE_MEMORY_BYTES=40e9 gives a 2.84M-token GPU KV cache, required for
+#     single requests beyond ~600K tokens. It also skips the boot profiling forward.
+_kimi_k3_recipe_env: &kimi_k3_recipe_env
+  EP_TP_SIZE: "2"                       # TP2 x DP8 per pool (see WHY TP2 above)
+  GPU_ARCHS: "gfx942"                   # int4 requant + MLA-off are gfx942 workarounds
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_MLA: "0"          # REQUIRED on gfx942 (AITER MLA is gfx950-only)
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  AITER_SITUV2_A8W4: "1"                # a8w4 (fp8-act x int4-wt) SiTU MoE path
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"      # KDA (Kimi-Delta-Attention) conv state layout
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "40000000000"  # 2.84M-token KV cache; needed for >600K ctx
+  GPU_MEMORY_UTILIZATION: "0.88"        # 0.88 leaves the 16 GiB MoRI shmem heap
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+  MORI_NUM_QP_PER_PE: "8"
+  VLLM_MORIIO_QP_PER_TRANSFER: "2"
+  VLLM_MORIIO_NUM_WORKERS: "4"
+  VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+  DISTRIBUTED_TIMEOUT_SECONDS: "7200"
+
+# Serve flags the connector does not already emit. --max-model-len 1000000 is K3's
+# full native context; drop it to 10240 for a quick smoke run.
+#
+# NOTE: these strings are split with shell-style quoting (shlex, in
+# _model_config_to_array), so any value containing JSON must carry its OWN
+# quotes - otherwise quote-removal strips the JSON's double quotes and vLLM gets
+# invalid JSON.
+_kimi_k3_dp_flags: &kimi_k3_dp_flags >-
+  --reasoning-parser kimi_k3
+  --mm-encoder-tp-mode data
+  --safetensors-load-strategy prefetch
+  --max-model-len 1000000
+  --max-num-seqs 8
+  --max-num-batched-tokens 2048
+  --quantization-config '{"moe":{"weight":"int4_per_group_32"}}'
+
+Kimi-K3:
+  env: *kimi_k3_recipe_env
+  prefill:
+    dp: *kimi_k3_dp_flags
+  decode:
+    dp: *kimi_k3_dp_flags
+
+# Kimi-K3-MXFP4 (MI300X gfx942 wideEP disagg). Recipe knobs proven by the PR#241
+# standalone Kimi-K3 launcher (out of tree); vLLM connector fixes live in the
+# disagg image (the PR#241-proven v4 build; the recipe's vLLM/MoRIIO connector fixes are folded into that image's vLLM source).
+_kimik3_recipe_env: &kimik3_recipe_env
+  # TP size within each EP pool (TP2xDP8 -> EP16). Unset/1 = plain wideEP.
+  EP_TP_SIZE: "2"
+  # MI300X-only: the MoE is requantized to int4 because gfx942 has no scaled-MXFP4
+  # MFMA, and the image is built for gfx942. Native MXFP4 on MI355X is its own recipe.
+  GPU_ARCHS: "gfx942"
+  VLLM_USE_V1: "1"
+  NCCL_DEBUG: "WARN"
+  NCCL_DEBUG_SUBSYS: "INIT,NET"
+  # No fabric settings here (rail list, GID index, socket interface): they are facts
+  # about the cluster, not the model. scripts/common/cluster.sh derives them from the
+  # adapters present, connectors/moriio.env and moriio.sh fill the rest, and any of
+  # them can be exported at submit time. A model recipe that pins them wins over all
+  # of that and silently breaks on a different fabric.
+  NCCL_IB_DISABLE: "0"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MLA: "0"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  AITER_SITUV2_A8W4: "1"
+  VLLM_ROCM_USE_AITER_MOE_SITUV2_A8W4: "1"
+  VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "64"
+  K3_MLA_SINGLE_SPLIT: "1"
+  K3_MLA_FULL_PREFILL: "1"
+  K3_GROUP_ROUTING: "1"
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "8000000000"
+  # 0.68 is the PR#241 (435641)-validated value on the con1fix v4 image; confirmed via /proc on
+  # the live 435862 run (12/12 NIAH 50K-280K). Higher util starves decode warmup activation.
+  GPU_MEMORY_UTILIZATION: "0.68"
+  MAX_NUM_BATCHED_TOKENS: "2048"
+  MAX_MODEL_LEN: "320000"
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  # Decode: FULL_AND_PIECEWISE -- the PR#241 (435641)-validated launch captures decode cudagraphs
+  # on the con1fix v4 image (perf/number parity). Prefill stays NONE. Confirmed via /proc on 435862.
+  DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+  VLLM_ALL2ALL_BACKEND: "mori_low_latency"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "8589934592"
+  # Deterministic RDMA read-after-write barrier: forces written KV globally visible in
+  # the receiver's HBM before write_done (moriio_engine.py). Fixes the P->D write-race
+  # seen as "unmap MISS table_size=0" / "missing remote notify address" on repeat requests
+  # (KV blocks then leak on prefill -> stall). Lives in connectors/moriio.env, which the
+  # interactive drive_cell.sh path does NOT source, so it must be in the recipe env to
+  # propagate. Verified unset in the EngineCore process env on the failing run.
+  # NOTE: readback RE-ENABLED on the v4 image. The v3-era libmori BatchRead binding bug
+  # (scalar-arg read_remote_data() threw "k3-readback failed ... continuing" every request,
+  # so the read-after-write fence never ran) is fixed in the v4 image; the deterministic RDMA
+  # read-after-write barrier now works and is the PR#241-proven path. The sleep fence
+  # (K3_WRITE_FENCE) + device sync (K3_WRITE_DEVSYNC) are therefore OFF (readback supersedes them).
+  K3_WRITE_READBACK: "1"
+  K3_WRITE_READBACK_BYTES: "8"
+  K3_WRITE_FENCE: "0"
+  K3_WRITE_DEVSYNC: "0"
+  # --- PR241 parity additions ---
+  # These vars previously lived only in connectors/moriio.env or moriio.sh defaults and did
+  # not reach the container on the interactive drive_cell.sh path (moriio.env is only sourced
+  # by run_xPyD_models.slurm). Set here so the interactive path matches PR241's validated env.
+  # NCCL reliability + watchdog (PR241 docker -e block):
+  NCCL_IB_TIMEOUT: "22"
+  TORCH_NCCL_ENABLE_MONITORING: "0"
+  TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: "1800"
+  TORCH_NCCL_DUMP_ON_TIMEOUT: "0"
+  TORCH_NCCL_BLOCKING_WAIT: "0"
+  TORCH_NCCL_ASYNC_ERROR_HANDLING: "1"
+  # AITER MHA (PR241 sets =1 explicitly; moriio.sh does not set it):
+  VLLM_ROCM_USE_AITER_MHA: "1"
+  # MoRI RDMA knobs (moriio.env-only -> did not propagate interactively):
+  MORI_IB_ENABLE_RELAXED_ORDERING: "1"
+  MORI_IO_SL: "1"
+  # MoRI QP counts: moriio.sh defaults (4) are BELOW PR241; pin to PR241 values:
+  MORI_NUM_QP_PER_PE: "8"
+  VLLM_MORIIO_QP_PER_TRANSFER: "2"
+  # K3 gate knob:
+  K3_CHUNK_GATE_SLACK: "2"
+  # Sleep-fence duration; INERT now that K3_WRITE_FENCE=0 (readback is the active path on v4). Kept for reference.
+  K3_WRITE_FENCE_MS: "20"
+
+Kimi-K3-MXFP4:
+  env: *kimik3_recipe_env
+  prefill:
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
+
+  decode:
+    dp: '--served-model-name kimi-k3 --reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 320000 --max-num-seqs 8 --quantization-config ''{"moe":{"weight":"int4_per_group_32"}}'''
+
+
+# ============================ Kimi-K3 native MXFP4 on MI355X / gfx950 ============================
+# BRING-UP RECIPE, NOT VALIDATED. MoRIIO disagg with Kimi-K3 has only run on MI300X; see
+# docker/vllm_kimi_k3.ubuntu.amd.Dockerfile STATUS for what a first gfx950 run may hit.
+# The launcher refuses it on any GPU but gfx950 (GPU_ARCHS), as the MI300X recipes refuse gfx950.
+#
+# What changes from the MI300X recipes, and why:
+#   - No --quantization-config: gfx950 has scaled-MXFP4 MFMA, and the vLLM fork picks the
+#     native path itself there. The int4 requant is a gfx942 workaround.
+#   - AITER MLA on (moriio.sh default): it is gfx950-only, which is why MI300X turns it off.
+#   - EP_TP_SIZE=1: MI355X has 288 GB. TP1/DP16 per GPU is 106.5 GiB replicated + 84.2 GiB
+#     expert shard + 16 GiB MoRI heap = 206.7 GiB, ~81 GiB left for KV and activations - about
+#     twice the MI300X TP2 headroom. MLA's latent KV is replicated across TP anyway, so TP1
+#     costs no KV per token. TP1/DP16 is also the reference MoRIIO topology and what upstream's
+#     MI355X prefill/decode recipe uses. EP_TP_SIZE=2 remains a one-knob fallback.
+#   - --max-num-batched-tokens 4096 (the single-node MI355X card's value): the MI300X 2048 cap
+#     works around gfx942 codegen and corruption bugs.
+# Everything else is the MI300X Kimi-K3 recipe, marked where the single-node MI355X card
+# (scripts/vllm/configs/default.yaml) is the source instead.
+_kimi_k3_mi355x_recipe_env: &kimi_k3_mi355x_recipe_env
+  EP_TP_SIZE: "1"
+  GPU_ARCHS: "gfx950"
+  VLLM_USE_V1: "1"
+  VLLM_ROCM_USE_AITER: "1"
+  VLLM_ROCM_USE_AITER_MOE: "1"
+  VLLM_ROCM_USE_AITER_MLA: "1"
+  VLLM_ROCM_USE_AITER_RMSNORM: "1"
+  VLLM_ROCM_USE_AITER_FUSION_SHARED_EXPERTS: "0"
+  VLLM_USE_AITER_TRITON_SILU_MUL: "0"
+  AITER_SITUV2_A8W4: "1"                # a8w4 MoE on the native MXFP4 weights (single-node card)
+  AITER_BF16_FP8_MOE_BOUND: "0"         # single-node card
+  SAFETENSORS_FAST_GPU: "1"             # single-node card
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "0"     # single-node card
+  VLLM_SSM_CONV_STATE_LAYOUT: "DS"      # KDA conv state layout
+  KV_BLOCK_SIZE: "16"
+  KV_CACHE_DTYPE: "fp8"
+  KV_CACHE_MEMORY_BYTES: "40000000000"
+  GPU_MEMORY_UTILIZATION: "0.88"        # budget above: needs >= ~0.82, leaves the 16 GiB heap
+  PREFILL_CUDAGRAPH_MODE: "NONE"
+  DECODE_CUDAGRAPH_MODE: "PIECEWISE"
+  VLLM_ALL2ALL_BACKEND: "mori_high_throughput"
+  PREFILL_MORI_BACKEND: "mori_high_throughput"
+  DECODE_MORI_BACKEND: "mori_low_latency"
+  MORI_SHMEM_HEAP_SIZE: "17179869184"
+  MORI_NUM_QP_PER_PE: "8"
+  VLLM_MORIIO_QP_PER_TRANSFER: "2"
+  VLLM_MORIIO_NUM_WORKERS: "4"
+  VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+  DISTRIBUTED_TIMEOUT_SECONDS: "7200"
+
+_kimi_k3_mi355x_dp_flags: &kimi_k3_mi355x_dp_flags >-
+  --reasoning-parser kimi_k3
+  --mm-encoder-tp-mode data
+  --safetensors-load-strategy prefetch
+  --max-model-len 320000
+  --max-num-seqs 8
+  --max-num-batched-tokens 4096
+
+Kimi-K3-MXFP4-MI355X:
+  env: *kimi_k3_mi355x_recipe_env
+  prefill:
+    dp: *kimi_k3_mi355x_dp_flags
+  decode:
+    dp: *kimi_k3_mi355x_dp_flags
