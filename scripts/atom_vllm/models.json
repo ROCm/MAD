@@ -72,5 +72,334 @@
         ],
         "timeout": -1,
         "args": "--model_repo meta-llama/Llama-3.3-70B-Instruct --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_llama-3.1-8b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-8B-Instruct-FP8-KV.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo amd/Llama-3.1-8B-Instruct-FP8-KV --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_kimi-k2.5_fp4",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K2.5-MXFP4-AttnFP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Kimi-K2.5-MXFP4-AttnFP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_kimi-k2-thinking_fp4",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K2-Thinking-MXFP4-AttnFP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Kimi-K2-Thinking-MXFP4-AttnFP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_deepseek-r1",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1-0528.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo deepseek-ai/DeepSeek-R1-0528 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_deepseek-r1_fp4",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-R1-0528-MXFP4-MTP-MoEFP4.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_deepseek-v3.2",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V3.2.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo deepseek-ai/DeepSeek-V3.2 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_deepseek-v4-pro",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Pro.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V4-Pro --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_deepseek-v4-flash",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Flash.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V4-Flash --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_glm-4.7_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_GLM-4.7-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo zai-org/GLM-4.7-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_glm-5.1_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_GLM-5.1-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo zai-org/GLM-5.1-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_gpt-oss-120b",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_gpt-oss-120b.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo openai/gpt-oss-120b --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_minimax-m2.5",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_MiniMax-M2.5.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo MiniMaxAI/MiniMax-M2.5 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_qwen3-235b-a22b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3-235B-A22B-Instruct-2507-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_qwen3.5-397b-a17b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3.5-397B-A17B-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo Qwen/Qwen3.5-397B-A17B-FP8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_qwen3.5-397b-a17b",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3.5-397B-A17B.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo Qwen/Qwen3.5-397B-A17B --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_qwen3.5-397b-a17b_fp4",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3.5-397B-A17B-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Qwen3.5-397B-A17B-MXFP4 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_atom_vllm_qwen3-next-80b_fp8",
+        "url": "",
+        "dockerfile": "../../docker/atom_vllm",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3-Next-80B-A3B-Instruct-FP8.csv",
+        "tags": [
+            "pyt",
+            "atom_vllm",
+            "atom_vllm_default",
+            "inference"
+        ],
+        "timeout": -1,
+        "args": "--model_repo Qwen/Qwen3-Next-80B-A3B-Instruct-FP8 --config configs/default.yaml"
     }
 ]

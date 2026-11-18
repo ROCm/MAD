@@ -1,17 +1,26 @@
 # ATOM vLLM Plugin - Default serving benchmarks
-# 1k 1k mc1 mc8 mc32 mc128
+# Llama: 1k 1k mc1 mc8 mc32 mc128; other models: 8k 1k
 
 ## Llama 3.1 models with ATOM vLLM plugin
 - benchmark: serving
-  model: meta-llama/Llama-3.1-8B-Instruct
+  model: meta-llama/Llama-3.1-8B-Instruct amd/Llama-3.1-8B-Instruct-FP8-KV
   tp: 1
   inp: 1024
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32
 
+## Split so each model matches its own perf.yaml entry (overrides are matched per base entry)
 - benchmark: serving
-  model: meta-llama/Llama-3.1-405B-Instruct meta-llama/Llama-3.1-405B-Instruct-FP8
+  model: meta-llama/Llama-3.1-405B-Instruct
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  model: meta-llama/Llama-3.1-405B-Instruct-FP8
   tp: 8
   inp: 1024
   out: 1024
@@ -25,3 +34,146 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+# These rows use 8192 input / 1024 output: no model of the same family has an existing 1k/1k row in this file.
+
+# amd/Kimi-K2.5-MXFP4-AttnFP8
+- benchmark: serving
+  model: amd/Kimi-K2.5-MXFP4-AttnFP8
+  tp: "4 8"
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# amd/Kimi-K2-Thinking-MXFP4-AttnFP8  [confidence: medium]
+# the ATOM recipe uses the AttnFP8 checkpoint (at TP4)
+- benchmark: serving
+  model: amd/Kimi-K2-Thinking-MXFP4-AttnFP8
+  tp: "4 8"
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# deepseek-ai/DeepSeek-R1-0528
+- benchmark: serving
+  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# deepseek-ai/DeepSeek-V3.2
+- benchmark: serving
+  model: deepseek-ai/DeepSeek-V3.2
+  tp: "4 8"
+  arch_overrides:
+    gfx942:
+      tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# deepseek-ai/DeepSeek-V4-Pro
+- benchmark: serving
+  model: deepseek-ai/DeepSeek-V4-Pro
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# deepseek-ai/DeepSeek-V4-Flash
+# own row and perf.yaml entry: ROCm/ATOM CI runs Flash at TP4
+- benchmark: serving
+  model: deepseek-ai/DeepSeek-V4-Flash
+  tp: 4
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# zai-org/GLM-4.7-FP8
+- benchmark: serving
+  model: zai-org/GLM-4.7-FP8
+  tp: "4 8"
+  arch_overrides:
+    gfx942:
+      tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# zai-org/GLM-5.1-FP8
+- benchmark: serving
+  model: zai-org/GLM-5.1-FP8
+  tp: "4 8"
+  arch_overrides:
+    gfx942:
+      tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# openai/gpt-oss-120b
+- benchmark: serving
+  model: openai/gpt-oss-120b
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# MiniMaxAI/MiniMax-M2.5
+- benchmark: serving
+  model: MiniMaxAI/MiniMax-M2.5
+  tp: "4 8"
+  arch_overrides:
+    gfx942:
+      tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# Qwen/Qwen3-235B-A22B-Instruct-2507-FP8  [confidence: medium]
+- benchmark: serving
+  model: Qwen/Qwen3-235B-A22B-Instruct-2507-FP8
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# Qwen/Qwen3.5-397B-A17B-FP8 Qwen/Qwen3.5-397B-A17B
+- benchmark: serving
+  model: Qwen/Qwen3.5-397B-A17B-FP8 Qwen/Qwen3.5-397B-A17B
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# amd/Qwen3.5-397B-A17B-MXFP4  [confidence: medium]
+- benchmark: serving
+  model: amd/Qwen3.5-397B-A17B-MXFP4
+  tp: "4 8"
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"
+
+# Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+- benchmark: serving
+  model: Qwen/Qwen3-Next-80B-A3B-Instruct-FP8
+  tp: "1 4"
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: "1 8 32 128"

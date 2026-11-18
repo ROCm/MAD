@@ -8,8 +8,8 @@ MAD supports Kimi-K3 day-0 inference across **three** serving frameworks on AMD 
 
 | Framework | MAD tag | Docker image | Recipe |
 |-----------|---------|-------------|--------|
-| **vLLM** | `pyt_vllm_kimi-k3` | `vllm/vllm-openai-rocm:v0.29.0` | [recipes.vllm.ai](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x) |
-| **SGLang** | `pyt_sglang_kimi-k3`, `pyt_sglang_kimi-k3_dspark` | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` | [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3) |
+| **vLLM** | `pyt_vllm_kimi-k3` | `vllm/vllm-openai-rocm:v0.33.0` | [recipes.vllm.ai](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x) |
+| **SGLang** | `pyt_sglang_kimi-k3`, `pyt_sglang_kimi-k3_dspark` | `lmsysorg/sglang:v0.5.22-rocm10-mi35x` | [SGLang cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3) |
 | **ATOM** | `pyt_atom_kimi-k3` | `rocm/atom-dev:latest` | ROCm ATOM |
 
 ## Hardware requirements
@@ -52,7 +52,7 @@ For benchmark results and enablement details, see the framework-specific blog po
 ### vLLM
 
 - **Tag**: `pyt_vllm_kimi-k3`
-- **Image**: [`vllm/vllm-openai-rocm:v0.29.0`](https://hub.docker.com/r/vllm/vllm-openai-rocm) (the shared vLLM image)
+- **Image**: [`vllm/vllm-openai-rocm:v0.33.0`](https://hub.docker.com/r/vllm/vllm-openai-rocm) (the shared vLLM image)
 - **Dockerfile**: [docker/pyt_vllm.ubuntu.amd.Dockerfile](../../docker/pyt_vllm.ubuntu.amd.Dockerfile)
 - **Config**: [scripts/vllm/configs/default.yaml](../../scripts/vllm/configs/default.yaml) (Kimi-K3 block); server flags and env come from the Kimi-K3 entry in [scripts/vllm/configs/perf.yaml](../../scripts/vllm/configs/perf.yaml)
 - **Benchmark**: Online serving at concurrency 1 / 8 / 32 / 128, input 1024, output 1024
@@ -60,8 +60,8 @@ For benchmark results and enablement details, see the framework-specific blog po
 ### SGLang
 
 - **Tags**: `pyt_sglang_kimi-k3` (no speculative decoding), `pyt_sglang_kimi-k3_dspark` (DSpark draft model; also records accept length)
-- **Image**: [`lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727`](https://hub.docker.com/r/lmsysorg/sglang-rocm)
-- **Dockerfile**: [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile)
+- **Image**: [`lmsysorg/sglang:v0.5.22-rocm10-mi35x`](https://hub.docker.com/r/lmsysorg/sglang) (the shared SGLang image)
+- **Dockerfile**: [docker/pyt_sglang.ubuntu.amd.Dockerfile](../../docker/pyt_sglang.ubuntu.amd.Dockerfile)
 - **Config**: [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml)
 - **Benchmark**: Online serving (`sglang.launch_server` + `sglang.bench_serving` via `run_kimi_k3.sh --variant nospec|dspark`) at concurrency 1 / 4 / 8 / 16 / 32 / 64 / 128 / 256, input 8192, output 1024, random range ratio 1.0
 
@@ -82,7 +82,7 @@ Users can also run the serving benchmarks directly inside a Docker container wit
 #### 1. Launch container
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.29.0
+docker pull vllm/vllm-openai-rocm:v0.33.0
 
 docker run -it --device=/dev/kfd --device=/dev/dri \
   --group-add video --shm-size 16G --network host \
@@ -92,7 +92,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri \
   --env VLLM_ROCM_USE_AITER=1 --env SAFETENSORS_FAST_GPU=1 \
   --env VLLM_ROCM_USE_AITER_MOE_SITUV2_A8W4=1 --env AITER_BF16_FP8_MOE_BOUND=0 \
   --env VLLM_USE_BREAKABLE_CUDAGRAPH=0 \
-  --entrypoint bash vllm/vllm-openai-rocm:v0.29.0
+  --entrypoint bash vllm/vllm-openai-rocm:v0.33.0
 ```
 
 #### 2. Start the server
@@ -137,7 +137,7 @@ vllm bench serve --model /model_weights \
 #### 1. Launch container
 
 ```sh
-docker pull lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727
+docker pull lmsysorg/sglang:v0.5.22-rocm10-mi35x
 
 docker run -it --device=/dev/kfd --device=/dev/dri \
   --group-add video --shm-size 16G --network host \
@@ -146,7 +146,7 @@ docker run -it --device=/dev/kfd --device=/dev/dri \
   -v /path/to/Kimi-K3:/model_weights \
   --env SGLANG_USE_AITER=1 --env SGLANG_AITER_K3_OPT=1 \
   --env AITER_FLYDSL_FORCE=1 --env AITER_SITUV2_A8W4=1 \
-  --entrypoint bash lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727
+  --entrypoint bash lmsysorg/sglang:v0.5.22-rocm10-mi35x
 ```
 
 #### 2. Start the server
