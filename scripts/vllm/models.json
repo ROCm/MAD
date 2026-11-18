@@ -1027,6 +1027,8 @@
         "training_precision": "",
         "multiple_results": "perf_Llama-3.1-8B-Instruct.csv",
         "tags": [
+            "pyt",
+            "vllm",
             "image_spec",
             "vllm_image_spec"
         ],
