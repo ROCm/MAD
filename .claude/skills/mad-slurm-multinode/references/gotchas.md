@@ -515,7 +515,7 @@ moe_router_num_groups null no group routing.
   and the global batch size when the line carries none, so such a run still yields
   a perf row; check it against the reference above before trusting it. The v26.5
   run additionally SIGSEGVed at teardown (`destroy_process_group() was not called
-  before program exit`). The templates are on `v26.8`, where neither symptom has
+  before program exit`). The templates are on `v26.9`, where neither symptom has
   been re-checked for Scout yet.
 
 ## pyt_mlperf_training (MLPerf Llama-3.1)

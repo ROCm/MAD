@@ -37,7 +37,7 @@ bash tools/fetch_primus.sh
 
 Avoid `git submodule update --init scripts/Primus` for the JAX models. The submodule is pinned to Primus `release/v26.9` for the `primus_train` (PyTorch) stack, which does not match the `rocm/jax-training:maxtext-v26.7` image these models run on.
 
-`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `release/v26.9`, the branch that matches `rocm/jax-training:maxtext-v26.9`. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
+`tools/fetch_primus.sh` is idempotent. It clones (or syncs an existing checkout to) Primus `v26.9.0`, the tag that matches `rocm/jax-training:maxtext-v26.9`. A tag and not the `release/v26.9` branch, because upstream deletes release branches. Override `PRIMUS_URL`, `PRIMUS_REF`, or `PRIMUS_DIR` for a fork, another branch or commit, or another location.
 
 Cloning MAD with `--recursive` is **not** required. Primus `third_party/` submodules are not used for MAD builds: the base image ships `/workspace/maxtext` and `/workspace/maxdiffusion`, and each `run.sh` pins `MAXTEXT_PATH` / `MAXDIFFUSION_PATH` at those paths so a mismatched `third_party` copy cannot be picked up.
 

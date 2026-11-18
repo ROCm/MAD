@@ -30,8 +30,11 @@
 # to enumerate models, and both primus_* dockerfiles COPY the tree into the image. Without
 # it, discovery reports zero models instead of a missing prerequisite.
 #
-# Default pin is release/v26.9, matching docker/primus_maxtext's
+# Default pin is the v26.9.0 tag, matching docker/primus_maxtext's
 # rocm/jax-training:maxtext-v26.9 base (MaxText release/v26.9 + JAX 0.11 MaxDiffusion fixes).
+# A tag rather than the release/v26.9 branch: upstream deletes release branches (it deleted
+# jax-maxtext-v26.7), which turns the default into a fetch failure and, through discovery,
+# into "zero JAX models" with no clue as to why.
 # Override PRIMUS_REF for another branch or commit.
 #
 # Run on the host, from anywhere:
@@ -42,7 +45,7 @@
 set -uo pipefail
 
 PRIMUS_URL="${PRIMUS_URL:-https://github.com/AMD-AGI/Primus}"
-PRIMUS_REF="${PRIMUS_REF:-release/v26.9}"
+PRIMUS_REF="${PRIMUS_REF:-v26.9.0}"
 
 MAD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRIMUS_DIR="${PRIMUS_DIR:-$MAD_ROOT/scripts/Primus}"

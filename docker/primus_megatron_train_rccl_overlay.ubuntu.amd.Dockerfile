@@ -2,7 +2,7 @@
 #
 # Primus megatron-lm training image with a candidate RCCL built from source.
 #
-#   base : rocm/primus:v26.8
+#   base : rocm/primus:v26.9
 #   +    : Primus from the scripts/Primus submodule (replaces the base image's copy)
 #   +    : RCCL built from ${RCCL_REPO}@${RCCL_BRANCH}[/${RCCL_COMMIT}] for
 #          ${BUILD_GPU_TARGETS} (gfx942=MI300X/MI325X, gfx950=MI350X/MI355X)
@@ -33,7 +33,7 @@
 #   docker build -f docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile .
 # madengine picks "." by itself for any dockerfile path containing "primus".
 #
-ARG BASE_DOCKER=rocm/primus:v26.8
+ARG BASE_DOCKER=rocm/primus:v26.9
 
 # ---- shared base: apt mirror hygiene (so both stages resolve the same) ------
 FROM ${BASE_DOCKER} AS apt-base
@@ -178,7 +178,7 @@ RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update && \
 # present, so re-running never appends duplicates) and FAILS the build if
 # patchelf cannot apply it -- `import torch` depends on this resolving rsmi_init.
 # It is a no-op for a librccl with no undefined rsmi_* symbols: RCCL built
-# against amd-smi (rocm/primus:v26.8 ships libamd_smi.so.27 and no
+# against amd-smi (rocm/primus:v26.9 ships libamd_smi.so.27 and no
 # librocm_smi64 at all) would otherwise gain a NEEDED entry nothing provides,
 # and `import torch` fails to dlopen it.
 RUN set -e && \

@@ -2,9 +2,9 @@
   "built_images": {
     "rocm-primus-llama31-8b-overlay": {
       "model": "primus_train/megatron_MI355X_llama3.1_8B-BF16-pretrain",
-      "docker_image": "rocm/primus:v26.8-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
+      "docker_image": "rocm/primus:v26.9-<FILL_RCCL_TAG e.g. rccl-develop-<sha7>>",
       "dockerfile": "docker/primus_megatron_train_rccl_overlay.ubuntu.amd.Dockerfile",
-      "base_docker": "rocm/primus:v26.8",
+      "base_docker": "rocm/primus:v26.9",
       "build_duration": 0,
       "local_image": true,
       "registry_image": null,
@@ -54,7 +54,7 @@
       "/dev/infiniband": "/dev/infiniband"
     },
     "docker_build_arg": {
-      "BASE_DOCKER": "rocm/primus:v26.8",
+      "BASE_DOCKER": "rocm/primus:v26.9",
       "BUILD_GPU_TARGETS": "<FILL_GPU_TARGETS  gfx942=MI300X/MI325X, gfx950=MI350X/MI355X>",
       "RCCL_REPO": "https://github.com/ROCm/rocm-systems.git",
       "RCCL_BRANCH": "",

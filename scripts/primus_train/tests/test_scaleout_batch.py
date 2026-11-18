@@ -95,7 +95,7 @@ def test_cli_override_ignores_values_of_other_flags():
     assert _mod.cli_overrides(args) == {}
 
 
-# v26.8 gpt_oss_120B-BF16 on MI355X: MBS 8, GBS 2048, TP 1, PP 2, VPP 2 (interleaved schedule).
+# v26.9 gpt_oss_120B-BF16 on MI355X: MBS 8, GBS 2048, TP 1, PP 2, VPP 2 (interleaved schedule).
 GPT_OSS = {
     "micro_batch_size": 8,
     "global_batch_size": 2048,
