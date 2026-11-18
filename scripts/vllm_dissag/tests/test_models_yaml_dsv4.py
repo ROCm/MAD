@@ -47,7 +47,7 @@ def yaml_env(model, **pre):
 def main():
     y = yaml.safe_load((SRC / "models.yaml").read_text())
     slurm = (SRC / "run_xPyD_models.slurm").read_text()
-    wrapper = (SRC / "run_wideep_bench.sh").read_text()
+    wrapper = (SRC / "run_wideep.sh").read_text()
     ladder = re.search(r'NIAH_WORDS="\$\{NIAH_WORDS:-([\d,]+)\}"', wrapper).group(1)
     top_rung = max(int(w) for w in ladder.split(","))
 

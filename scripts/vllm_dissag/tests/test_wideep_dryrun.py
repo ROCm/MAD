@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""run_wideep_bench.sh --dry-run: the knobs it derives from BENCH + MODEL + TOPO.
+"""run_wideep.sh --dry-run: the knobs it derives from BENCH + MODEL + TOPO.
 
 Every DSV4 cell goes through this wrapper, and a wrong derived value does not
 fail at submit -- it runs for hours and produces a row that is not comparable
@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-WRAPPER = Path(__file__).resolve().parent.parent / "run_wideep_bench.sh"
+WRAPPER = Path(__file__).resolve().parent.parent / "run_wideep.sh"
 FAILED = []
 
 
