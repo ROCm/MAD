@@ -274,13 +274,15 @@ _hasnot "$FP$FD" "===LEGENV" "GLM-5.3 FP8: no per-leg env"
 _eq "$(_argv_of <<<"$MP")" "$(_argv_of <<<"$FP")" "GLM-5.3 MXFP4 prefill argv == FP8 prefill argv"
 _eq "$(_argv_of <<<"$MD")" "$(_argv_of <<<"$FD")" "GLM-5.3 MXFP4 decode argv == FP8 decode argv"
 _has "$C" 'PREFILL_EXTRA_ENV:-' "moriio.sh: per-leg env is opt-in (empty default)"
-# Run the hook itself: each leg exports only its own list, and values are not glob-expanded.
+# Run the hook itself: a child started inside the launcher function sees only its leg's list (no glob
+# expansion); the caller (router/benchmark on the same node) sees none of it.
 _LEGHOOK="$(awk '/# Per-leg env, opt-in/{f=1} f; /===LEGENV/{exit}' "$DIR/connectors/moriio.sh")"
 _leg() { (cd "$DIR" && env -i PATH="$PATH" PREFILL_EXTRA_ENV='LA=1 LB=*' DECODE_EXTRA_ENV='LC=2' log_prefix="$1" \
   bash -c "f() { $_LEGHOOK
-}; f; echo \"LA=\${LA-} LB=\${LB-} LC=\${LC-}\""); }
-_eq "$(_leg prefill)" "LA=1 LB=* LC=" "per-leg env: prefill exports PREFILL_EXTRA_ENV only, no glob expansion"
-_eq "$(_leg decode)" "LA= LB= LC=2" "per-leg env: decode exports DECODE_EXTRA_ENV only"
+  bash -c 'echo \"child LA=\${LA-} LB=\${LB-} LC=\${LC-}\"'
+}; f; echo \"caller LA=\${LA-} LB=\${LB-} LC=\${LC-}\"" | tr '\n' ' '); }
+_eq "$(_leg prefill)" "child LA=1 LB=* LC= caller LA= LB= LC= " "per-leg env: prefill child gets PREFILL_EXTRA_ENV only (no glob), caller gets nothing"
+_eq "$(_leg decode)" "child LA= LB= LC=2 caller LA= LB= LC= " "per-leg env: decode child gets DECODE_EXTRA_ENV only, caller gets nothing"
 _OPTIN_LEG="$(python3 - "$DIR/models.yaml" <<'PY'
 import sys, yaml
 y = yaml.safe_load(open(sys.argv[1])) or {}
