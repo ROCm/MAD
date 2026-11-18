@@ -161,6 +161,8 @@ PY
 _has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
 _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+# An always-forwarded empty -e KV_CACHE_MEMORY_BYTES= shadows the models.yaml env: value.
+_has "$(cat "$SLURM")" '${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=' "slurm forwards KV_CACHE_MEMORY_BYTES only when set"
 
 echo ""
 echo "======================================================"
