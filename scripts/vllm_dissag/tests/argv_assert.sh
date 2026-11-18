@@ -174,6 +174,20 @@ _hasnot "$B1" "remote_hosts" "1P1D wideEP: no remote_hosts"
 _has "$(cat "$SLURM")" '${MORI_PROXY_PING_PORT:+-e MORI_PROXY_PING_PORT=' "slurm forwards MORI_PROXY_PING_PORT"
 
 echo ""
+echo "=== wideEP master gets --enable-scale-out when asked (cache_aware token keys); child and ENABLE_SCALE_OUT=0 do not ==="
+_argv_so() { # node_rank enable_scale_out
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" ENABLE_SCALE_OUT="$2" \
+    DRY_RUN=1 NODE_RANK="$1" xP=2 yD=2 CONNECTOR=moriio WIDE_EP=1 EP_BACKEND=mori \
+    MODEL_NAME=DeepSeek-V3 MODEL_PATH=/m/DSV3 MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+_has    "$(_argv_so 0 1)" "--enable-scale-out" "prefill master: --enable-scale-out with ENABLE_SCALE_OUT=1"
+_has    "$(_argv_so 2 1)" "--enable-scale-out" "decode master: --enable-scale-out with ENABLE_SCALE_OUT=1"
+_hasnot "$(_argv_so 1 1)" "--enable-scale-out" "prefill child (headless): no --enable-scale-out"
+_hasnot "$(_argv_so 0 0)" "--enable-scale-out" "ENABLE_SCALE_OUT=0: no --enable-scale-out"
+
+echo ""
 echo "=== router policy: moriio prefill defaults to cache_aware, decode/global to round_robin; knobs reach the router ==="
 MS="$(cat "$DIR/connectors/moriio.sh")"
 _has "$MS" '--prefill-policy "${ROUTER_PREFILL_POLICY:-cache_aware}"' "moriio: prefill policy defaults to cache_aware"

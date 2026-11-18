@@ -145,6 +145,25 @@ _moriio_multi_node() {
     parallelism_is_wide_ep && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
 }
 
+# The router's cache_aware prefill policy builds its prefix keys from token ids. On vLLM builds that have the
+# scale-out API it asks POST /v1/completions/render, which vLLM answers with 403 unless the server runs with
+# --enable-scale-out; the router then has no keys and silently falls back to load balancing, so a conversation's
+# next turn lands on another DP rank and misses its prefix cache (Exp4: 6% GPU hit at np64 against 94% when keys
+# work). Older vLLM (e.g. 0.30.1) answers 404 and the router falls back to POST /tokenize, which works.
+# ENABLE_SCALE_OUT=1 forces the flag, =0 never adds it; default auto: add it when the prefill policy is not
+# round_robin and this vLLM has the option. Master servers only (a headless child serves no HTTP).
+_moriio_scale_out_arg() {
+    local mode="${ENABLE_SCALE_OUT:-auto}"
+    [[ "$mode" == "0" ]] && return 0
+    if [[ "$mode" != "1" ]]; then
+        [[ "${ROUTER_PREFILL_POLICY:-cache_aware}" == "round_robin" ]] && return 0
+        local _vd
+        _vd="$(python3 -c 'import importlib.util as u; s = u.find_spec("vllm"); print(s.submodule_search_locations[0] if s else "")' 2>/dev/null)"
+        grep -qs enable_scale_out "${_vd}/entrypoints/common/cli_args.py" || return 0
+    fi
+    echo "--enable-scale-out"
+}
+
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
     local read_mode_val="false"
@@ -398,6 +417,8 @@ LMCACHE_PREEMPT_PATCH
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then
             extra_args+=(--api-server-count=${_GPUS_PER_NODE})
+            local _so_arg; _so_arg="$(_moriio_scale_out_arg)"
+            [[ -n "${_so_arg}" ]] && extra_args+=("${_so_arg}")
             local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
             # KV_OFFLOAD wrap; wideEP is tp1 per DP rank, so the pool is split per rank.
             local _OFFLOAD_TP_WORLD=1
