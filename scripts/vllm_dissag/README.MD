@@ -114,11 +114,11 @@ sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_C
 `..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. The checkpoint
 directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards set
 `MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
-`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0` (per the recipe author; not re-validated
-here). The harness defaults match ConnectX-7 hosts.
+`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0` (not validated on these cards). The harness
+defaults match ConnectX-7 hosts.
 Short prompts (under ~2K tokens) need vLLM `6a0cb9395797` or later on the fork branch: earlier pins zeroed the decode
 leg's freshly allocated KV blocks after the MoRIIO READ had already filled them, so short requests looped or
-answered wrongly (GSM8K 6.4%; 96.4% with the fix). Long-context results are unchanged.
+answered wrongly. Long-context results are unchanged.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
