@@ -198,6 +198,12 @@ PY
 )"
 _has "$_OPTIN_RP" "[GLM-5.3-Flash-FP8-gfx942,GLM-5.3-Flash-MXFP4-gfx942]" "models.yaml: the GLM-5.3-Flash gfx942 cards are the ONLY router-policy opt-ins"
 _has "$(cat "$SLURM")" '${ROUTER_PREFILL_POLICY:+-e ROUTER_PREFILL_POLICY=' "slurm forwards ROUTER_PREFILL_POLICY override"
+# Per-leg env overrides are forwarded even when set empty (${VAR+...}), so an empty submit-time value beats models.yaml.
+_has "$(cat "$SLURM")" '${PREFILL_EXTRA_ENV+-e PREFILL_EXTRA_ENV=' "slurm forwards PREFILL_EXTRA_ENV override (set-but-empty too)"
+_has "$(cat "$SLURM")" '${DECODE_EXTRA_ENV+-e DECODE_EXTRA_ENV=' "slurm forwards DECODE_EXTRA_ENV override (set-but-empty too)"
+# Long-context runner exports the same CSV as the sweep, with the parser's [RUNNING] header.
+_has "$(cat "$DIR/benchmark_long_context.sh")" 'parse_to_csv.py' "long-context runner writes perf.csv via parse_to_csv.py"
+_has "$(cat "$DIR/benchmark_long_context.sh")" '[RUNNING] prompts ${n_prompts} isl ${isl} osl ${osl} con ${con}' "long-context [RUNNING] header matches the parser format"
 _has "$(cat "$SLURM")" '${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=' "slurm forwards ROUTER_DECODE_POLICY override"
 
 # The slurm probes <root>/$MODEL_WEIGHTS_NAME (default MODEL_NAME). Run its real probe block

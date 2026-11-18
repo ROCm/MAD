@@ -52,7 +52,7 @@ for combo in "${COMBINATIONS[@]}"; do
         _scaled_timeout=$(( _base_timeout * _total_tok / 2048 ))
         [ "$_scaled_timeout" -lt "$_base_timeout" ] && _scaled_timeout=$_base_timeout
 
-        echo "[RUNNING] isl=$isl osl=$osl con=$con warmups=$WARMUPS prompts=$n_prompts (timeout ${_scaled_timeout}s)" \
+        echo "[RUNNING] prompts ${n_prompts} isl ${isl} osl ${osl} con ${con} (warmups=${WARMUPS}, timeout ${_scaled_timeout}s)" \
             | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
         timeout "$_scaled_timeout" vllm bench serve \
             --model "$MODEL_PATH" \
@@ -78,3 +78,9 @@ for combo in "${COMBINATIONS[@]}"; do
     done
 done
 echo "==== Long-context benchmark complete ====" | tee -a "${LOG}_CONCURRENCY.log" >/dev/null
+
+# Same CSV export as benchmark_xPyD.sh: the [RUNNING] header above is the parser's cell key.
+python3 $NIXL_COOKBOOK_PATH/parse_to_csv.py ${LOG}_CONCURRENCY.log -o ${LOG}_CONCURRENCY.csv \
+    --perf-csv /run_logs/${SLURM_JOB_ID}/perf.csv \
+    --model-name "${MODEL_NAME}" \
+    2>&1 | tee -a ${LOG}_CONCURRENCY.log >/dev/null
