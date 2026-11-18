@@ -24,7 +24,14 @@
 # SOFTWARE.
 #
 #################################################################################
-ARG BASE_DOCKER=lmsysorg/sglang:v0.4.5-rocm630
+# NOTE (arch dependency): the sglang base image is arch-specific. The default below is the MI35X
+# (gfx950) build -- its sgl_kernel custom ops are AOT-compiled for gfx950 ONLY (GPU_ARCH_LIST=gfx950),
+# so running it on gfx942 (MI300X) segfaults the moment SGLang invokes an sgl_kernel op (verified:
+# torch is multi-arch and base matmul works, but sgl_kernel .so contains gfx950 code only). For a
+# gfx942 target, override BASE_DOCKER with the matching MI30X base, e.g.:
+#   --build-arg BASE_DOCKER=<lmsysorg/sglang mi30x image of the same SGLang version as the default>
+# Builds should select the base by the target runner arch (MI300X vs MI355X).
+ARG BASE_DOCKER=lmsysorg/sglang:v0.5.22-rocm10-mi35x
 
 FROM $BASE_DOCKER
 
@@ -32,6 +39,12 @@ USER root
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
+# huggingface_hub 1.x CLI uses `suggest_commands` which requires typer>=0.17.0;
+# the base image ships with typer 0.16.1 causing `hf` to crash on import.
+RUN pip install "typer>=0.17.0"
+
+# FID accuracy benchmark dependencies (pytorch-fid, pillow)
+RUN pip install --no-cache-dir pytorch-fid pillow
 
 # record configuration for posterity
 RUN pip3 list

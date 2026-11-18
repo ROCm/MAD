@@ -89,7 +89,6 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
 
     return results
 
-
 def cell_failed(data: Dict) -> bool:
     """A sweep cell failed if it stalled, printed no result, lost any request, or measured no
     throughput."""
