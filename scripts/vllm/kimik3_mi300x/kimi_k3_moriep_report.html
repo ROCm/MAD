@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi-K3 MXFP4 — MoRI-EP Wide-EP Serving on Thor2 / MI325X</title>
+<style>
+  :root{
+    color-scheme: light;
+    --plane:#f9f9f7; --surface-1:#fcfcfb; --surface-2:#f4f3f0;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+    --series-1:#2a78d6; --series-1-soft:#cde2fb;
+    --good:#0ca30c; --good-ink:#006300; --warning:#fab219;
+    --accent-2:#1baf7a;
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --plane:#0d0d0d; --surface-1:#1a1a19; --surface-2:#222220;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --series-1:#3987e5; --series-1-soft:#184f95;
+    --good:#0ca30c; --good-ink:#0ca30c; --warning:#fab219;
+    --accent-2:#199e70;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --plane:#0d0d0d; --surface-1:#1a1a19; --surface-2:#222220;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+      --series-1:#3987e5; --series-1-soft:#184f95;
+      --good-ink:#0ca30c; --accent-2:#199e70;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--plane); color:var(--text-primary);
+    font-family: system-ui,-apple-system,"Segoe UI",sans-serif;
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:40px 28px 80px}
+  header.top{display:flex; align-items:flex-start; justify-content:space-between; gap:24px; flex-wrap:wrap}
+  h1{font-size:26px; line-height:1.25; margin:0 0 6px; letter-spacing:-0.01em}
+  .sub{color:var(--text-secondary); font-size:15px; margin:0}
+  .toggle{border:1px solid var(--border); background:var(--surface-1); color:var(--text-secondary);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; font-family:inherit}
+  .toggle:hover{color:var(--text-primary)}
+  h2{font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted);
+    margin:44px 0 14px; font-weight:600}
+  h3{font-size:16px; margin:22px 0 8px}
+  p{margin:0 0 12px; color:var(--text-secondary); font-size:14.5px}
+  code{font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px;
+    background:var(--surface-2); padding:1px 6px; border-radius:5px; color:var(--text-primary)}
+  .card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:22px 24px; margin-bottom:16px}
+  /* stat tiles */
+  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:6px 0 8px}
+  .tile{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:16px 18px}
+  .tile .k{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:7px}
+  .tile .v{font-size:26px; font-weight:600; letter-spacing:-0.01em; line-height:1}
+  .tile .u{font-size:13px; color:var(--text-secondary); margin-top:5px}
+  /* tables */
+  table{width:100%; border-collapse:collapse; font-size:13.5px; margin:4px 0}
+  th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--grid)}
+  th{color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.03em}
+  td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+  tbody tr:last-child td{border-bottom:none}
+  .pill{display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
+    padding:2px 9px; border-radius:999px; border:1px solid transparent}
+  .pill.pass{color:var(--good-ink); background:color-mix(in srgb,var(--good) 14%,transparent); border-color:color-mix(in srgb,var(--good) 34%,transparent)}
+  .pill.pass::before{content:"✓"}
+  .two{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media (max-width:720px){ .two{grid-template-columns:1fr} }
+  ul.tight{margin:2px 0 14px; padding-left:20px}
+  ul.tight li{color:var(--text-secondary); font-size:14.5px; margin-bottom:6px}
+  ul.tight li b{color:var(--text-primary); font-weight:600}
+  .delta{color:var(--good-ink); font-weight:600}
+  /* chart */
+  .chart-card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:22px 20px 12px}
+  .chart-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px}
+  .chart-title{font-size:15px; font-weight:600}
+  .chart-note{font-size:12.5px; color:var(--muted)}
+  svg{display:block; width:100%; height:auto; overflow:visible}
+  .axis-label{fill:var(--muted); font-size:11px; font-variant-numeric:tabular-nums}
+  .grid-line{stroke:var(--grid); stroke-width:1}
+  .baseline{stroke:var(--axis); stroke-width:1}
+  .lat-line{fill:none; stroke:var(--series-1); stroke-width:2}
+  .lat-dot{fill:var(--series-1); stroke:var(--surface-1); stroke-width:2}
+  .lat-val{fill:var(--text-secondary); font-size:11px; font-variant-numeric:tabular-nums}
+  .diagram{width:100%; border:1px solid var(--border); border-radius:12px; background:var(--surface-1); padding:8px}
+  .foot{color:var(--muted); font-size:12.5px; margin-top:36px; border-top:1px solid var(--grid); padding-top:16px}
+  .callout{border-left:3px solid var(--series-1); background:var(--surface-2); padding:12px 16px; border-radius:0 8px 8px 0; margin:10px 0 16px}
+  .callout p{margin:0; color:var(--text-secondary); font-size:14px}
+  .mono-block{background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:14px 16px;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12px; color:var(--text-primary);
+    overflow-x:auto; white-space:pre; line-height:1.6; margin:6px 0 14px}
+  .tag{display:inline-block; font-size:11px; font-weight:600; color:var(--accent-2);
+    border:1px solid color-mix(in srgb,var(--accent-2) 40%,transparent); border-radius:6px; padding:1px 7px; margin-left:6px;
+    vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Kimi-K3 (MXFP4) — MoRI-EP Wide Expert-Parallel Serving</h1>
+      <p class="sub">Colocated PP2 × TP8 = 16 GPUs (MoE runs EP8 within each node) · 2× nodes AMD Instinct MI325X (gfx942) · Broadcom Thor2 400G RoCE</p>
+    </div>
+    <button class="toggle" id="themeToggle" aria-label="Toggle dark mode">◐ Theme</button>
+  </header>
+
+  <div class="callout">
+    <p><b>Result in one line:</b> Kimi-K3 (~2.8T-param MoE, 896 experts, MXFP4) served with <b>MoRI-EP</b> (<code>mori_low_latency</code>) expert all-to-all — <b>21/21 needle-in-a-haystack tests passed from 20K up to 800K tokens</b>, with expert parallelism active (<code>-ep-</code> in fingerprint).</p>
+  </div>
+
+  <div class="callout" style="border-left-color:var(--warning)">
+    <p><b>Topology note (read this):</b> the GPU count is <b>PP2 × TP8 = 16 GPUs</b> (DP=1) — EP is <b>not</b> a separate multiplicative axis. Within each 8-GPU pipeline stage the <em>same</em> 8 GPUs are used two ways: dense/attention layers run <b>TP8</b>, and MoE layers run <b>EP8</b> over those same 8 GPUs (896 experts ÷ 8 = 112/GPU). vLLM derives EP size = TP × DP = 8. So <b>MoRI-EP all-to-all runs intra-node</b> (across a node's 8 GPUs); the only cross-node traffic is the pipeline-stage hand-off, over <b>NCCL</b>, not MoRI-EP. This config does <b>not</b> exercise MoRI-EP cross-node scale-out (validated separately, see below). Both "EP16" and reading "PP2×TP8×EP8" as a product (which would imply 128 GPUs) are wrong — it's 16 GPUs, EP8 overlaying TP8 per node.</p>
+  </div>
+
+  <!-- ===================== HEADLINE TILES ===================== -->
+  <div class="tiles">
+    <div class="tile"><div class="k">Model</div><div class="v">Kimi-K3</div><div class="u">MXFP4 · ~2.8T MoE</div></div>
+    <div class="tile"><div class="k">Experts</div><div class="v">896</div><div class="u">112 / GPU · EP8 per node</div></div>
+    <div class="tile"><div class="k">Parallelism</div><div class="v">PP2 × TP8</div><div class="u">16 GPUs · EP8 overlays TP per node</div></div>
+    <div class="tile"><div class="k">All-to-all</div><div class="v">MoRI-EP</div><div class="u">mori_low_latency · intra-node</div></div>
+    <div class="tile"><div class="k">Max context tested</div><div class="v">800K</div><div class="u">786,713 tokens · PASS</div></div>
+    <div class="tile"><div class="k">NIAH accuracy</div><div class="v" style="color:var(--good-ink)">21/21</div><div class="u">7 sizes × 3 depths</div></div>
+  </div>
+
+  <!-- ===================== LATENCY CHART ===================== -->
+  <h2>Long-context retrieval — latency vs. context length</h2>
+  <div class="chart-card">
+    <div class="chart-head">
+      <div class="chart-title">End-to-end latency per request <span class="tag">single request</span></div>
+      <div class="chart-note">NIAH · needle retrieval · all depths PASS</div>
+    </div>
+    <!-- one series → single hue, no legend; direct value labels -->
+    <svg id="latChart" viewBox="0 0 920 340" role="img"
+         aria-label="Latency rises roughly linearly with context: 4.1s at 20K tokens to 120s at 800K tokens; every point passed retrieval.">
+    </svg>
+    <div class="chart-note" style="padding:6px 4px 4px">Context in prompt tokens (log scale) · latency in seconds · every point retrieved the needle correctly at depths 0.1 / 0.5 / 0.9.</div>
+  </div>
+
+  <!-- ===================== FULL RESULTS TABLE ===================== -->
+  <h2>Full NIAH results</h2>
+  <div class="card" style="padding:8px 10px">
+    <table>
+      <thead>
+        <tr>
+          <th>Target</th><th class="num">Prompt tokens</th>
+          <th>Depth 0.1</th><th>Depth 0.5</th><th>Depth 0.9</th>
+          <th class="num">Latency</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+  </div>
+
+  <!-- ===================== HOW MoRI-EP WAS USED ===================== -->
+  <h2>How MoRI-EP was used for the 896-expert MoE (EP8, intra-node)</h2>
+  <div class="card">
+    <p>Kimi-K3 has <b>896 experts</b>. The <b>GPU count is PP2 × TP8 = 16</b> (DP=1). EP is <b>not</b> a third multiplicative factor — it reuses the tensor-parallel GPUs:</p>
+    <ul class="tight">
+      <li><b>PP2</b> (pipeline): the model's layers are split into 2 stages, one per node — for weight fit. <b>Cross-node</b> (this is the only inter-node axis).</li>
+      <li><b>TP8</b> (tensor): within a node, each dense/attention layer's math is split across the 8 GPUs. Intra-node.</li>
+      <li><b>EP8</b> (expert): for MoE layers, those <em>same</em> 8 GPUs instead hold <b>112 experts each</b> (896 ÷ 8). vLLM sets EP size = TP × DP = 8. Intra-node — EP8 overlays TP8, it does not add GPUs.</li>
+    </ul>
+    <p>The runtime confirms it: <code>[EP Rank 0/8]</code>, <code>Local/global experts 112/896</code> (896 ÷ 112 = <b>8</b>), <code>world_size=16</code>. The 8-way expert split is <b>replicated on each pipeline stage</b> — node A holds experts 0–895 for stage-0 layers, node B holds experts 0–895 again for stage-1 layers. So a GPU is TP-rank-N for dense layers and EP-rank-N for MoE layers — same GPU, two roles.</p>
+    <p>So the <b>MoRI-EP</b> dispatch/combine all-to-all (<code>--all2all-backend mori_low_latency</code>) runs <b>within each node's 8-GPU EP group</b>. The <em>only</em> cross-node traffic is the PP activation hand-off (stage 0 → stage 1), which uses <b>NCCL over the Thor2 rails — not MoRI-EP</b>.</p>
+    <div class="mono-block">                 NODE A  (PP stage 0)              NODE B  (PP stage 1)
+      ┌───────────────────────────────┐   ┌───────────────────────────────┐
+      │ GPU0..GPU7   EP0..EP7          │   │ GPU0..GPU7   EP0..EP7         │
+      │ 112 experts each (896 total)   │   │ 112 experts each (896 total)  │
+      │  ▲ MoRI-EP all2all (intra-node)│   │  ▲ MoRI-EP all2all (intra-node)│
+      └───────────────┬───────────────┘   └───────────────┬───────────────┘
+                      │        PP activations (NCCL over Thor2 RDMA)
+                      └───────────────►───────────────────┘
+   token ─► router (top-16 of 896) ─► MoRI-EP DISPATCH (within node) ─► experts
+                                  ─► MoRI-EP COMBINE  (within node) ─► next layer</div>
+    <p style="margin-bottom:0">Fabric knobs (set so MoRI-EP <em>can</em> use the Thor2 rails; here the EP group is intra-node so they govern on-node dispatch): <code>MORI_RDMA_DEVICES=rdma0..rdma7</code>, <code>MORI_IB_GID_INDEX=3</code> (RoCEv2), <code>MORI_NUM_QP_PER_PE=8</code>, <code>MORI_IB_ENABLE_RELAXED_ORDERING=1</code>, <code>MORI_GPU_ARCHS=gfx942</code>.</p>
+  </div>
+
+  <div class="card" style="border-left:3px solid var(--accent-2)">
+    <h3 style="margin-top:2px">MoRI-EP cross-node scale-out — validated separately</h3>
+    <p style="margin-bottom:0">Because this serve keeps EP intra-node, it does <b>not</b> put MoRI-EP's cross-node scale-out on the critical path. That path <em>was</em> validated independently on this cluster with the standalone MoRI internode test (<code>test_dispatch_combine_internode.py</code>): <b>cross-node MoRI-EP dispatch/combine over Thor2 RDMA, 500/500 rounds, 0 errors</b>, on both the <code>v1</code> (VRAM-atomics) and <code>async_ll</code> kernels, across multiple node pairs. To make cross-node MoRI-EP the load-bearing path of a live serve, an EP-group-spans-nodes config is needed (e.g. DP-across-nodes wide-EP) rather than PP2-for-weight-fit with EP nested inside each node.</p>
+  </div>
+
+  <!-- ===================== DELTAS OVER THE PR RECIPE ===================== -->
+  <h2>Everything added over the ROCm/MAD PR recipe</h2>
+  <p>The base recipe is <b>ROCm/MAD PR #193</b> → <code>wideep_int4_moriep</code> (recipe 3 of 3). The PR ships Mellanox/mlx5 fabric defaults; this cluster is Broadcom Thor2. Below is the <b>complete</b> set of things that had to exist or change beyond the PR — split into fabric adaptation (in the run script) and the cluster groundwork the recipe silently assumes.</p>
+
+  <div class="two">
+    <div class="card">
+      <h3 style="margin-top:2px">A · Fabric adaptation <span class="tag">in run.sh</span></h3>
+      <p style="margin-bottom:10px">The only edits to the recipe itself — all cluster-specific env the PR README says to override:</p>
+      <table>
+        <thead><tr><th>Setting</th><th>PR default</th><th>This cluster</th></tr></thead>
+        <tbody>
+          <tr><td>Boot / OOB NIC</td><td><code>eth0</code></td><td><code>eno0</code></td></tr>
+          <tr><td><code>NCCL_IB_HCA</code></td><td><code>mlx5_0,2..9</code></td><td><code>rdma0..rdma7</code></td></tr>
+          <tr><td><code>MORI_RDMA_DEVICES</code></td><td>—</td><td><code>rdma0..rdma7</code></td></tr>
+          <tr><td><code>MORI_SOCKET_IFNAME</code></td><td>—</td><td><code>eno0</code></td></tr>
+          <tr><td>Model mount</td><td>local NVMe</td><td><code>-v /it-share-prj2-1</code> (WekaFS)</td></tr>
+          <tr><td>GID index</td><td><code>3</code></td><td><code>3</code> (already matched)</td></tr>
+        </tbody>
+      </table>
+      <p style="margin:8px 0 0"><b>Unchanged</b> (kept exactly as PR): the whole <code>vllm serve</code> line — <code>TP8 / PP2 / --enable-expert-parallel / --all2all-backend mori_low_latency / --trust-remote-code / --reasoning-parser kimi_k3 / --mm-encoder-tp-mode data / --safetensors-load-strategy prefetch</code> — and every gfx942/MoRI/AITER knob (<code>VLLM_ROCM_USE_AITER_MLA=0</code>, <code>AITER_SITUV2_A8W4=1</code>, <code>MORI_GPU_ARCHS=gfx942</code>, <code>MORI_NUM_QP_PER_PE=8</code>).</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:2px">B · Cluster groundwork <span class="tag">prerequisites</span></h3>
+      <p style="margin-bottom:10px">The recipe silently assumes a healthy MoRI-capable cluster. Getting there took work the PR does not cover:</p>
+      <ul class="tight">
+        <li><b>NIC firmware/driver:</b> brought all Thor2 NICs to <b>fw 237.1.148.0 / bnxt_re 237.1.137.0</b> and confirmed MoRI-EP works natively on it (no 235 downgrade — the older PR#191 workaround does <em>not</em> apply to this newer Thor2).</li>
+        <li><b>MoRI-EP + MoRI-IO validation:</b> both <code>v1</code> (VRAM atomics) and <code>async_ll</code> EP kernels pass across the fabric; MoRI-IO ~48.5 GB/s; RDMA mesh 347–382 Gb/s on all pairs.</li>
+        <li><b>Docker daemon fix (worker node):</b> a rogue snap dockerd was shadowing the system daemon with an AppArmor-confined data-root → caused the MoRI symmetric-memory illegal-access. Restored system docker (<code>/var/lib/docker</code>).</li>
+        <li><b>GPU recovery (g32):</b> a GPU that fell off the PCI bus recovered via BMC hard reboot → back to 8/8.</li>
+        <li><b>Model staging:</b> Kimi-K3-MXFP4 (1.5 TB, 96 shards) downloaded to WekaFS <code>/it-share-prj2-1</code>, readable ~1.5 GB/s/node, mounted into the serve container.</li>
+        <li><b>Context raise:</b> relaunched at <code>--max-model-len 900000</code> (recipe default 10240) to enable the long-context sweep.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================== SYSTEM / SOFTWARE ===================== -->
+  <h2>System &amp; software stack</h2>
+  <div class="two">
+    <div class="card">
+      <h3 style="margin-top:2px">Hardware &amp; fabric</h3>
+      <table>
+        <tbody>
+          <tr><td>Nodes</td><td>2 (head + worker), 16 GPU</td></tr>
+          <tr><td>GPU</td><td>AMD Instinct <b>MI325X</b> (gfx942)</td></tr>
+          <tr><td>GPU memory</td><td>256 GB/GPU (~192 usable band)</td></tr>
+          <tr><td>NIC</td><td>Broadcom <b>BCM57608 "Thor2"</b> 400G</td></tr>
+          <tr><td>NIC firmware</td><td>237.1.148.0</td></tr>
+          <tr><td>RDMA driver</td><td>bnxt_re 237.1.137.0</td></tr>
+          <tr><td>Transport</td><td>RoCE v2 · GID 3 · 8 rails</td></tr>
+          <tr><td>Shared FS</td><td>WekaFS (<code>/it-share-prj2-1</code>)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:2px">Software</h3>
+      <table>
+        <tbody>
+          <tr><td>Image</td><td><code>amdsiloai/vllm:kimi-k3-mi325x-release-v2</code></td></tr>
+          <tr><td>vLLM</td><td>0.1.dev19253+g5f76ae224</td></tr>
+          <tr><td>ROCm</td><td>7.2.3</td></tr>
+          <tr><td>PyTorch</td><td>2.11.0</td></tr>
+          <tr><td>Quantization</td><td>MXFP4 · a8w4 MoE (SiTU)</td></tr>
+          <tr><td>Attention</td><td>MLA + Kimi-Delta (DSA), AITER_MLA=0</td></tr>
+          <tr><td>KV cache</td><td>8.4M tokens (9.33× @ 900K)</td></tr>
+          <tr><td>Model native max</td><td>1,048,576 tokens</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== REPRO ===================== -->
+  <h2>Reproduce</h2>
+  <div class="card">
+    <p>Adapted recipe <code>run.sh</code> on the head node. Launch <b>worker first, then head</b>:</p>
+    <div class="mono-block"># worker (rank 1) on node B — FIRST
+MODEL_DIR=/it-share-prj2-1/models/Kimi-K3-MXFP4 ROLE=worker \
+  MASTER=&lt;head eno0 IP&gt; MAX_MODEL_LEN=900000 bash run_k3_thor2.sh
+
+# head (rank 0, serves API :8000) on node A
+MODEL_DIR=/it-share-prj2-1/models/Kimi-K3-MXFP4 ROLE=head \
+  MASTER=&lt;head eno0 IP&gt; MAX_MODEL_LEN=900000 bash run_k3_thor2.sh
+
+# verify — fingerprint contains -ep- when expert parallelism is live
+curl http://&lt;head IP&gt;:8000/v1/models
+python3 niah_sweep.py --url http://&lt;head IP&gt;:8000 --model kimi-k3 \
+  --tokens 20000,100000,200000,500000,600000,750000,800000 --depths 0.1,0.5,0.9</div>
+    <p style="margin-bottom:0">Bring-up: ~18 min to load 1.5 TB (96 shards) + ~2 min AITER JIT compile (a8w4 MoE + MoRI-EP dispatch). AITER kernels cache after first run.</p>
+  </div>
+
+  <div class="foot">
+    Generated on an MI325X + Thor2 cluster · Kimi-K3 MXFP4 wide-EP via MoRI-EP · base recipe ROCm/MAD PR #193 (<code>wideep_int4_moriep</code>). All figures measured on the live serve; NIAH needle <code>HELIOTROPE-7492</code>, greedy decode.
+  </div>
+
+</div>
+
+<script>
+/* ---------- data ---------- */
+const results = [
+  {t:"20K",  tok:19744,  d1:1,d5:1,d9:1, lat:4.1},
+  {t:"100K", tok:98408,  d1:1,d5:1,d9:1, lat:10.7},
+  {t:"200K", tok:196737, d1:1,d5:1,d9:1, lat:20.6},
+  {t:"500K", tok:491725, d1:1,d5:1,d9:1, lat:62.0},
+  {t:"600K", tok:590055, d1:1,d5:1,d9:1, lat:79.6},
+  {t:"750K", tok:737549, d1:1,d5:1,d9:1, lat:109.3},
+  {t:"800K", tok:786713, d1:1,d5:1,d9:1, lat:120.1},
+];
+
+/* ---------- results table ---------- */
+const pill = ok => ok ? '<span class="pill pass">PASS</span>' : '<span class="pill">FAIL</span>';
+document.getElementById('resultsBody').innerHTML = results.map(r =>
+  `<tr><td><b>${r.t}</b></td><td class="num">${r.tok.toLocaleString()}</td>
+   <td>${pill(r.d1)}</td><td>${pill(r.d5)}</td><td>${pill(r.d9)}</td>
+   <td class="num">${r.lat.toFixed(1)} s</td></tr>`).join('');
+
+/* ---------- latency line chart (log-x) ---------- */
+(function(){
+  const W=920,H=340, m={l:56,r:28,t:22,b:46};
+  const iw=W-m.l-m.r, ih=H-m.t-m.b;
+  const xs=results.map(r=>r.tok), ys=results.map(r=>r.lat);
+  const xmin=Math.log10(15000), xmax=Math.log10(900000);
+  const ymax=130;
+  const X = v => m.l + (Math.log10(v)-xmin)/(xmax-xmin)*iw;
+  const Y = v => m.t + ih - (v/ymax)*ih;
+  const svg=document.getElementById('latChart');
+  const NS='http://www.w3.org/2000/svg';
+  const el=(n,a)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);return e;};
+
+  // y gridlines
+  [0,25,50,75,100,125].forEach(v=>{
+    svg.appendChild(el('line',{class:'grid-line',x1:m.l,y1:Y(v),x2:m.l+iw,y2:Y(v)}));
+    const t=el('text',{class:'axis-label',x:m.l-10,y:Y(v)+4,'text-anchor':'end'}); t.textContent=v+'s'; svg.appendChild(t);
+  });
+  // x ticks at each data point
+  const xticks=[[20000,'20K'],[100000,'100K'],[200000,'200K'],[500000,'500K'],[800000,'800K']];
+  xticks.forEach(([v,lab])=>{
+    const t=el('text',{class:'axis-label',x:X(v),y:m.t+ih+22,'text-anchor':'middle'}); t.textContent=lab; svg.appendChild(t);
+  });
+  // baseline
+  svg.appendChild(el('line',{class:'baseline',x1:m.l,y1:m.t+ih,x2:m.l+iw,y2:m.t+ih}));
+  // area under (soft)
+  let dArea=`M ${X(xs[0])} ${Y(0)} `;
+  results.forEach(r=>dArea+=`L ${X(r.tok)} ${Y(r.lat)} `);
+  dArea+=`L ${X(xs[xs.length-1])} ${Y(0)} Z`;
+  svg.appendChild(el('path',{d:dArea, fill:'var(--series-1-soft)', opacity:0.35}));
+  // line
+  let d='M '+results.map(r=>`${X(r.tok)} ${Y(r.lat)}`).join(' L ');
+  svg.appendChild(el('path',{class:'lat-line',d}));
+  // dots + value labels
+  results.forEach(r=>{
+    svg.appendChild(el('circle',{class:'lat-dot',cx:X(r.tok),cy:Y(r.lat),r:5}));
+    const lab=el('text',{class:'lat-val',x:X(r.tok),y:Y(r.lat)-11,'text-anchor':'middle'});
+    lab.textContent=r.lat.toFixed(0)+'s'; svg.appendChild(lab);
+  });
+  // axis titles
+  const xt=el('text',{class:'axis-label',x:m.l+iw/2,y:H-6,'text-anchor':'middle'}); xt.textContent='Context length (prompt tokens, log scale)'; svg.appendChild(xt);
+})();
+
+/* ---------- theme toggle ---------- */
+document.getElementById('themeToggle').addEventListener('click',()=>{
+  const r=document.documentElement;
+  const cur=r.getAttribute('data-theme');
+  const next = cur==='dark' ? 'light' : (cur==='light' ? 'dark' :
+     (matchMedia('(prefers-color-scheme: dark)').matches ? 'light':'dark'));
+  r.setAttribute('data-theme',next);
+});
+</script>
+</body>
+</html>
