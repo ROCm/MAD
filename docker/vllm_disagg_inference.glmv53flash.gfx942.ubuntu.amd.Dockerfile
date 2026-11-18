@@ -27,9 +27,9 @@
 #                                DP KV-notify) = glm53-flash-gfx942 9b2146ec, then ROUTER_DECODE_DP_PIN=0 (off by
 #                                default)
 #
-# Self-contained (no COPY), so it builds from any directory:
+# Self-contained (no COPY); build from the repository root:
 #   docker build --ulimit nofile=1048576:1048576 \
-#     -f vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile -t <image> .
+#     -f docker/vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile -t <image> .
 # Serving is launched by the MAD vllm_disagg harness (models.yaml entry GLM-5.3-Flash-FP8-gfx942).
 # =============================================================================
 
