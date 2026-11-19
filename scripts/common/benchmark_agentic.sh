@@ -1,10 +1,12 @@
 #!/bin/bash
-# Shared agentic trace-replay benchmark hook for disaggregated P/D launchers.
+# Shared agentic trace-replay benchmark hook.
 #
-# Backend-parameterized (--backend sglang|vllm, or AGENTIC_BACKEND) single source
-# of truth for what used to be two byte-identical-except-three-axes hooks. Thin
-# per-backend shims (scripts/<backend>_disagg/benchmark_agentic.sh) exec this
-# script with the right --backend. Drop-in alternative to benchmark_xPyD.sh:
+# Backend-parameterized (--backend sglang|vllm|sglang_single, or AGENTIC_BACKEND)
+# single source of truth for what used to be two byte-identical-except-three-axes
+# hooks. Thin per-backend shims (scripts/<backend>_disagg/benchmark_agentic.sh) exec
+# this script with the right --backend; the monolith single-node path
+# (sglang_single) is invoked directly by scripts/sglang/run_sglang.py, which owns
+# the server lifecycle. Drop-in alternative to benchmark_xPyD.sh:
 # instead of the random ISL/OSL concurrency sweep, it replays real Claude Code
 # agentic traces via aiperf's inferencex-agentx-mvp scenario against the backend
 # router/proxy and writes aiperf artifacts + an aggregate JSON + plots. Selected
@@ -27,8 +29,8 @@ while [[ $# -gt 0 ]]; do
 done
 backend="${backend:-${AGENTIC_BACKEND:-}}"
 case "$backend" in
-    sglang|vllm) : ;;
-    "") echo "[agentic][ERROR] --backend or AGENTIC_BACKEND required (sglang|vllm)" >&2; exit 2;;
+    sglang|vllm|sglang_single) : ;;
+    "") echo "[agentic][ERROR] --backend or AGENTIC_BACKEND required (sglang|vllm|sglang_single)" >&2; exit 2;;
     *) echo "[agentic][ERROR] unknown backend '$backend'" >&2; exit 2;;
 esac
 
@@ -73,6 +75,10 @@ case "$backend" in
         : "${AGENTIC_PORT:=${BENCHMARK_PORT:-${PROXY_PORT:-8000}}}"  # vLLM router/proxy port (BENCHMARK_PORT at runtime)
         ctx_endpoints=("/v1/models|models")
         ;;
+    sglang_single)
+        : "${AGENTIC_PORT:=8000}"   # monolith sglang.launch_server port (scripts/sglang/run_sglang.py)
+        ctx_endpoints=("/v1/models|models" "/get_server_info|serverinfo")
+        ;;
 esac
 RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 # MODEL_PREFIX feeds the trace-loader default; derive from MODEL_NAME if unset.
@@ -84,7 +90,11 @@ RESULT_DIR="${RESULT_DIR:-/run_logs/${SLURM_JOB_ID:-0}}"
 # Skipped when pinned (>0) or DRY_RUN; non-disagg (no AGENTIC_SERVER_METRICS)
 # falls through to existing auto-detect.
 if [ "${DRY_RUN:-0}" != "1" ] && ! { [ -n "${MAX_MODEL_LEN:-}" ] && [ "${MAX_MODEL_LEN}" -gt 0 ] 2>/dev/null; }; then
-    _worker="${AGENTIC_SERVER_METRICS%% *}"
+    # :- guard is required: this script runs under `set -u`, and a monolith
+    # backend legitimately leaves AGENTIC_SERVER_METRICS unset, which the empty
+    # check just below is written to handle.
+    _worker="${AGENTIC_SERVER_METRICS:-}"
+    _worker="${_worker%% *}"
     if [ -z "$_worker" ]; then
         agentic_log "AGENTIC_SERVER_METRICS unset (non-disagg); skipping worker max_model_len auto-detect"
     else

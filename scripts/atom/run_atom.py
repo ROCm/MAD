@@ -313,7 +313,15 @@ def parse_args():
                             action='store_true',
                             help='Kernel-profiling run: serve under rtl trace + roctx markers and aggregate a kernel payload',
                         )
+    parser.add_argument('--dcp',
+                            type=int,
+                            help='Optional decode context parallel size. Used only when the test config does not already set -dcp.',
+                            required=False,
+                            default=None,
+                        )
     args = parser.parse_args()
+    if args.dcp is not None and args.dcp < 1:
+        parser.error("--dcp must be a positive integer")
     return args
 
 def dict_to_args(args_dict: Dict) -> str:
@@ -380,6 +388,20 @@ def expand_configs(args, configs: List[Dict]):
         filtered_configs = [cfg for cfg in filtered_configs if cfg["benchmark"] == args.benchmark]
 
     return filtered_configs
+
+def apply_optional_dcp(config, dcp):
+    """Add -dcp from the optional CLI flag when this test did not set it."""
+    if dcp is None:
+        return
+    extra = config.get('extra_args')
+    if not isinstance(extra, dict):
+        extra = {}
+        config['extra_args'] = extra
+    if '-dcp' in extra:
+        print(f"Keeping -dcp {extra['-dcp']} from the test config")
+        return
+    extra['-dcp'] = dcp
+    print(f"Applying optional --dcp {dcp}")
 
 def adjust_glm_batched_tokens(config):
     """Adjust max-num-batched-tokens for GLM-5.x models with large ISL.
@@ -954,9 +976,10 @@ def main():
             # Adjust max-num-batched-tokens for GLM-5.x models if needed
             adjust_glm_batched_tokens(config)
 
-            # Keep dict forms for potential acc.yaml merge (for benchmark: all)
-            env_vars = config.get("env", {})
-            extra_args = config.get("extra_args", {})
+            # Keep dict forms for potential acc.yaml merge (for benchmark: all).
+            # Copies so a -dcp fallback applied to serving cannot leak into accuracy.
+            env_vars = dict(config.get("env") or {})
+            extra_args = dict(config.get("extra_args") or {})
 
             config["env_dict"] = env_vars  # Preserve dict for acc.yaml merge
             config["extra_args_dict"] = extra_args  # Preserve dict for acc.yaml merge
@@ -970,6 +993,9 @@ def main():
                 print(f"\n=== Running serving benchmark for {model} ===")
                 serving_config = dict(config)
                 serving_config["benchmark"] = "serving"
+                serving_config["extra_args"] = dict(extra_args)
+                serving_config["env"] = dict(env_vars)
+                apply_optional_dcp(serving_config, args.dcp)
                 serving_results = run_serving_profile(model, serving_config) if profile else run_serving(model, serving_config)
 
                 # Write serving results
@@ -980,6 +1006,10 @@ def main():
                 print(f"\n=== Running accuracy benchmark for {model} ===")
                 acc_config = dict(config)
                 acc_config["benchmark"] = "accuracy"
+                acc_config["extra_args"] = dict(extra_args)
+                acc_config["extra_args_dict"] = dict(extra_args)
+                acc_config["env"] = dict(env_vars)
+                acc_config["env_dict"] = dict(env_vars)
 
                 # Load and merge acc.yaml for accuracy run
                 config_dir = os.path.dirname(os.path.abspath(args.config))
@@ -1043,10 +1073,13 @@ def main():
                     acc_config['extra_args'] = acc_config.get('extra_args_dict', {})
                     acc_config['env'] = acc_config.get('env_dict', {})
 
+                apply_optional_dcp(acc_config, args.dcp)
                 results = run_accuracy(model, acc_config)
             elif benchmark == "serving":
+                apply_optional_dcp(config, args.dcp)
                 results = run_serving_profile(model, config) if profile else run_serving(model, config)
             elif benchmark == "accuracy":
+                apply_optional_dcp(config, args.dcp)
                 results = run_accuracy(model, config)
             else:
                 raise ValueError(f"Unknown benchmark: {benchmark}")

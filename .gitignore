@@ -107,6 +107,9 @@ scripts/kvcache_transfer_bench/shared/
 madengine_build_*
 .madengine_session_start
 
+# madengine generated build files (image_spec stacks)
+.madengine/
+
 # madengine runs started by .claude/skills/mad-common/mad-run.sh
 .mad-runs/
 

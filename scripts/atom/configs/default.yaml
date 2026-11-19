@@ -29,3 +29,191 @@
   out: 1024
   kv_cache_dtype: fp8
   max_concurrency: 1 4 8 16 32 64 128 256
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+
+# openai/gpt-oss-120b  [confidence: medium]
+## GPT-OSS-120B (MXFP4 native) TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: openai/gpt-oss-120b
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# amd/gpt-oss-120b-w-mxfp4-a-fp8  [confidence: medium]
+## GPT-OSS-120B W-MXFP4 A-FP8 TP8 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/gpt-oss-120b-w-mxfp4-a-fp8
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# amd/Kimi-K2.5-MXFP4, amd/Kimi-K2.6-MXFP4
+## Kimi-K2.5 / K2.6 MXFP4 TP8 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Kimi-K2.5-MXFP4 amd/Kimi-K2.6-MXFP4
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# amd/Llama-3.1-405B-Instruct-FP8-KV
+## Llama 3.1 405B FP8-KV
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Llama-3.1-405B-Instruct-FP8-KV
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+## Llama 3.1 405B MXFP4 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Llama-3.1-405B-Instruct-MXFP4-Preview
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# meta-llama/Llama-3.3-70B-Instruct
+## Llama 3.3 70B BF16
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: meta-llama/Llama-3.3-70B-Instruct
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# deepseek-ai/DeepSeek-R1-0528
+## DeepSeek-R1-0528 FP8 TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-R1-0528
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# amd/DeepSeek-R1-0528-MXFP4
+## DeepSeek-R1-0528 MXFP4 TP8 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/DeepSeek-R1-0528-MXFP4
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4
+## DeepSeek-R1-0528 MXFP4 + MTP TP8 (gfx950 only) -- keep as its own row
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/DeepSeek-R1-0528-MXFP4-MTP-MoEFP4
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+## Qwen3-235B-A22B Thinking-2507 FP8 TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# Qwen/Qwen3-235B-A22B-Thinking-2507  [confidence: medium]
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: Qwen/Qwen3-235B-A22B-Thinking-2507
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# Qwen/Qwen3-Next-80B-A3B-Instruct  [confidence: medium]
+## Qwen3-Next-80B-A3B TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: Qwen/Qwen3-Next-80B-A3B-Instruct
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# zai-org/GLM-5-FP8
+## GLM-5 FP8 TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: zai-org/GLM-5-FP8
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# MiniMaxAI/MiniMax-M2.5  [confidence: medium]
+## MiniMax-M2.5 FP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: MiniMaxAI/MiniMax-M2.5
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# deepseek-ai/DeepSeek-V4-Pro
+## DeepSeek-V4-Pro TP8 (gfx950 only)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4-Pro
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 64 128 256
+
+# deepseek-ai/DeepSeek-V4-Flash  [confidence: low]
+## DeepSeek-V4-Flash TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4-Flash
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
+
+# moonshotai/Kimi-K2.5, moonshotai/Kimi-K2.6
+## Kimi-K2.5 / K2.6 (native INT4) TP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: moonshotai/Kimi-K2.5 moonshotai/Kimi-K2.6
+  tp: 8
+  inp: 1000 4000 10000
+  out: 1000
+  kv_cache_dtype: fp8
+  max_concurrency: 128 256
