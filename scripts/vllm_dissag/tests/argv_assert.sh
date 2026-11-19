@@ -58,6 +58,18 @@ _count  "$B" "--compilation-config" 1 "exactly one --compilation-config"
 _hasnot "$B" "--tensor-parallel-size" "no --tensor-parallel-size (uses -tp 1)"
 
 echo ""
+echo "=== moriio + TP (Muse Spark, sliding-window hybrid) ==="
+M="$(_argv moriio 0 '' Muse-Spark-Open-816B-A42B-Quark-MXFP4 /m/Muse)"
+_has    "$M" "--disable-hybrid-kv-cache-manager" "has --disable-hybrid-kv-cache-manager (MoRIIO WRITE + SWA)"
+_has    "$M" '"read_mode":false' "MoRIIO WRITE mode"
+_has    "$M" "--language-model-only" "text only"
+_count  "$M" "--tensor-parallel-size" 1 "exactly one --tensor-parallel-size"
+_count  "$M" "--block-size" 1 "exactly one --block-size"
+_has    "$M" "--kv-cache-memory-bytes" "has --kv-cache-memory-bytes"
+_count  "$M" "--compilation-config" 1 "exactly one --compilation-config"
+_hasnot "$M" "--data-parallel-size" "no --data-parallel-size (ROCm Muse MoE requires DP1)"
+
+echo ""
 echo "=== KV_OFFLOAD=cpu, default backend = OffloadingConnector (moriio wideEP DSV3) ==="
 O="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 cpu)"
 _has    "$O" "MultiConnector" "wraps in MultiConnector"
@@ -149,6 +161,8 @@ PY
 _has "$_OPTIN" "[GLM-5.1-FP8]" "models.yaml: GLM-5.1-FP8 is the ONLY warmup opt-in"
 _has "$(cat "$SLURM")" '${SHAPE_WARMUP:+-e SHAPE_WARMUP=' "slurm forwards SHAPE_WARMUP override"
 _has "$(cat "$SLURM")" '${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=' "slurm forwards IGP override"
+# An always-forwarded empty -e KV_CACHE_MEMORY_BYTES= shadows the models.yaml env: value.
+_has "$(cat "$SLURM")" '${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=' "slurm forwards KV_CACHE_MEMORY_BYTES only when set"
 
 echo ""
 echo "======================================================"
