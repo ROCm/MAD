@@ -37,6 +37,8 @@ _has "$out" "server weights=int4_g32" "the colocated launcher's server role"
 
 out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=vllm-kimi-k3)"
 _has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_PIN_SET names the image's build (as madengine sets it)"
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_IMAGE_COMPONENTS=mori=x,vllm=9a7ae4b8+cd0d2656@vllm-kimi-k3)"
+_has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_IMAGE_COMPONENTS (an image built from its spec) names its engine build"
 
 echo ""
 echo "=== refuses ==="

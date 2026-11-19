@@ -46,7 +46,8 @@ for path in sorted(glob.glob(os.path.join(golden, "*", "*.json"))):
             problems.append(f"{name}: tees to {sorted(logs)}, want {want}")
         for b in (r.get("engine") or {}).get("blocks", []):
             h = b.get("header", "")
-            if f"NODE_RANK={rank}=" not in h:
+            # A replica server's header names its node as node=<rank> (REPLICAS=1).
+            if f"NODE_RANK={rank}=" not in h and not re.search(rf"\bnode={rank}\b", h):
                 problems.append(f"{name}: role script runs as another rank ({h})")
             m = re.search(r"log_prefix=(\S+)", h)
             if m and m.group(1) not in ("prefill", "decode"):

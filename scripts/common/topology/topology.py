@@ -67,7 +67,7 @@ def gpus_per_node(spec, env=None):
         v = _int(os.environ, "GPUS_PER_NODE", None)
     if v is None:
         raise TopologyError("gpus_per_node unknown: give it in the spec, or GPUS_PER_NODE "
-                            "(the launchers set it from the platform, compat/rocm.yaml platforms)")
+                            "(the launchers set it from the platform, compat/hardware.yaml platforms)")
     return v
 
 
@@ -115,7 +115,7 @@ def from_env(env, launcher):
 
 
 # ---------------------------------------------------------------- topology v2
-# A spec may also say what it runs on and how it is placed (compat/rocm.yaml platforms):
+# A spec may also say what it runs on and how it is placed (compat/hardware.yaml platforms):
 #   "platform": "mi455x-helios-tray"      GPUs per node and the scale-up domain from the catalog
 #   "partition": "CPX"                    logical GPUs: the platform's GPUs x the mode's size
 #   role "gpus": 72                       instead of nodes (must fill whole nodes)
@@ -127,7 +127,7 @@ def from_env(env, launcher):
 #   parallel {"mode": "replicas", "tp": 8} independent TP-8 copies over the role's GPUs (multi-tenant)
 # A spec using none of these resolves exactly as before.
 KINDS = ("prefill", "decode", "router", "server", "draft", "encoder", "embedding", "kv_cache")
-CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "compat", "rocm.yaml")
+CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "compat")   # dir or one file
 _CATALOG = None
 
 
@@ -137,8 +137,9 @@ def catalog():
         import yaml
         path = os.environ.get("MAD_CATALOG") or CATALOG
         try:
-            with open(path) as f:
-                _CATALOG = yaml.safe_load(f) or {}
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+            import catalog as _catalog
+            _CATALOG = _catalog.load(path)
         except OSError as e:
             raise TopologyError(f"the capability catalog is needed for platforms and domains: {e}")
     return _CATALOG
@@ -147,7 +148,7 @@ def catalog():
 def _platform(name, where):
     p = (catalog().get("platforms") or {}).get(name)
     if p is None:
-        raise TopologyError(f"{where}: unknown platform {name!r} (compat/rocm.yaml platforms: "
+        raise TopologyError(f"{where}: unknown platform {name!r} (compat/hardware.yaml platforms: "
                             f"{', '.join(sorted(catalog().get('platforms') or {}))})")
     return p
 
@@ -166,7 +167,7 @@ def normalize(spec):
             factor = sizes.get(spec["partition"])
             if not factor:
                 raise TopologyError(f"partition {spec['partition']!r}: its size on {plat['accelerator']} is not "
-                                    f"known (compat/rocm.yaml accelerators.{plat['accelerator']}.partitions)")
+                                    f"known (compat/hardware.yaml accelerators.{plat['accelerator']}.partitions)")
             per = per * factor
         if spec.get("gpus_per_node") not in (None, per):
             raise TopologyError(f"gpus_per_node={spec['gpus_per_node']} disagrees with platform "

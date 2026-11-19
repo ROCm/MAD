@@ -14,7 +14,7 @@ import sys
 import unittest
 from pathlib import Path
 
-# These tests describe today's 8-GPU nodes (compat/rocm.yaml default_platform); the launchers
+# These tests describe today's 8-GPU nodes (compat/hardware.yaml default_platform); the launchers
 # set GPUS_PER_NODE from the run's platform, and nothing assumes it.
 os.environ.setdefault("GPUS_PER_NODE", "8")
 

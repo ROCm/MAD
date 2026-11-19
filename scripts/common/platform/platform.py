@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The node platform a run uses, from the capability catalog (compat/rocm.yaml `platforms`).
+"""The node platform a run uses, from the capability catalog (compat/hardware.yaml `platforms`).
 
     platform.py shell [--catalog PATH]
     platform.py cluster [--catalog PATH]      the site profile (MAD_CLUSTER / MAD_CLUSTER_FILE)
@@ -17,7 +17,10 @@ import sys
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CATALOG = os.path.join(HERE, "..", "..", "..", "compat", "rocm.yaml")
+CATALOG = os.path.join(HERE, "..", "..", "..", "compat")     # the compat/ directory (or one file)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import catalog as _catalog  # noqa: E402  (scripts/common/catalog.py: compat/ as one dict)
+
 
 
 def cluster_shell(catalog):
@@ -32,7 +35,7 @@ def cluster_shell(catalog):
         where = path
     else:
         c = (catalog.get("clusters") or {}).get(name)
-        where = f"compat/rocm.yaml clusters.{name}"
+        where = f"compat/sites/{name}.yaml"
         if c is None:
             print(f"unknown cluster {name!r}; the catalog has: {', '.join(sorted(catalog.get('clusters') or {}))}",
                   file=sys.stderr)
@@ -57,8 +60,7 @@ def main(argv=None):
     ap.add_argument("cmd", choices=["shell", "cluster"])
     ap.add_argument("--catalog", default=os.environ.get("MAD_CATALOG") or CATALOG)
     a = ap.parse_args(argv)
-    with open(a.catalog) as f:
-        catalog = yaml.safe_load(f) or {}
+    catalog = _catalog.load(a.catalog)
     if a.cmd == "cluster":
         return cluster_shell(catalog)
     platforms = catalog.get("platforms") or {}

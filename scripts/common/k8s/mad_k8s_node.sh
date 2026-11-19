@@ -89,12 +89,16 @@ cd "$(dirname "$script")"
 echo "[mad-k8s] node ${idx} (${MAD_K8S_SELF}): running $(basename "$script") ${MAD_K8S_ARGS:-} as its own node of ${SLURM_JOB_NODELIST}"
 # Kubernetes stops a pod with TERM to this process. Bash runs a trap only once a
 # foreground child has returned, so the launcher runs in the background and the TERM
-# is passed on to it at once: its own teardown (stopping its containers, the
-# verdict) runs as it does on scancel.
+# is passed on to it at once. Like scancel, it goes to the launcher's whole process
+# group (monitor mode makes the launcher a group leader), so the processes it
+# started see it too: its own teardown (stopping its containers, the verdict) runs
+# as it does on scancel.
+set -m
 # shellcheck disable=SC2086
 bash "$(basename "$script")" ${MAD_K8S_ARGS:-} &
 launcher=$!
-trap 'kill -TERM "$launcher" 2>/dev/null' TERM INT
+set +m
+trap 'kill -TERM -- -"$launcher" 2>/dev/null' TERM INT
 while :; do
     wait "$launcher"; rc=$?
     kill -0 "$launcher" 2>/dev/null || break   # a trap ended the wait, not the launcher

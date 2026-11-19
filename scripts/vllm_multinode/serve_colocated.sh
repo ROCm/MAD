@@ -47,7 +47,7 @@ MASTER_ADDR="${MASTER_ADDR:-localhost}"
 MASTER_PORT="${MASTER_PORT:-29500}"
 IPADDRS="${IPADDRS:-localhost}"
 SERVE_PORT="${SERVE_PORT:-8000}"
-GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/rocm.yaml platforms)}"
+GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/hardware.yaml platforms)}"
 
 # Parallelism. Default is the natural colocated shape: TP within a node, PP across
 # nodes (PP_SIZE = NNODES). Expert parallelism is opt-in; when on, the EP group is

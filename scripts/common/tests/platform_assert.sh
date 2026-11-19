@@ -1,5 +1,5 @@
 #!/bin/bash
-# Offline checks of the platform layer (compat/rocm.yaml platforms, scripts/common/platform/
+# Offline checks of the platform layer (compat/hardware.yaml platforms, scripts/common/platform/
 # platform.py): cluster.sh takes GPUS_PER_NODE from the run's platform, and the GPU probe verifies
 # a named platform rather than deciding it.
 set -u

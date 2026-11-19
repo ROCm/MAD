@@ -40,7 +40,7 @@
 # =============================================================================
 
 # --------------------------------------------------------------- site profile
-# MAD_CLUSTER (compat/rocm.yaml clusters) or MAD_CLUSTER_FILE (a site's own file of that shape):
+# MAD_CLUSTER (compat/sites) or MAD_CLUSTER_FILE (a site's own file of that shape):
 # the site's platform, fabric family and defaults, set here only where the run passed nothing.
 if [ -n "${MAD_CLUSTER:-}${MAD_CLUSTER_FILE:-}" ]; then
     if _cluster_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/platform.py" cluster 2>&1)"; then
@@ -185,7 +185,7 @@ cluster_job_verdict() {
 }
 # --------------------------------------------------------------- topology
 # GPUs per node: what the run passed, else its platform's (MAD_PLATFORM, else the catalog's
-# default_platform -- compat/rocm.yaml `platforms`). A named platform is also verified against
+# default_platform -- compat/hardware.yaml `platforms`). A named platform is also verified against
 # the nodes by cluster_require_gpu_arch (accelerator, GPU count).
 if _platform_out="$(python3 "$(dirname "${BASH_SOURCE[0]}")/platform/platform.py" shell 2>&1)"; then
     eval "${_platform_out}"
@@ -216,7 +216,7 @@ export TP_SIZE="${TP_SIZE:-${GPUS_PER_NODE}}"
 # explicitly to override, or set any individual variable below -- everything here
 # is ${VAR:-default}, so an explicit value always wins over the archetype.
 #
-# The families (cx7, ainic, thor2 today) and their values are in compat/rocm.yaml `fabrics`.
+# The families (cx7, ainic, thor2 today) and their values are in compat/hardware.yaml `fabrics`.
 #
 # Where the node lists its RDMA devices and network interfaces. Parameters only so
 # the offline tests can point detection at a fake tree.
@@ -232,7 +232,7 @@ cluster_socket_ifname() {
     echo "${dflt:-$want}"
 }
 
-# The family and its fallback values are data: compat/rocm.yaml `fabrics`, settled for this node
+# The family and its fallback values are data: compat/hardware.yaml `fabrics`, settled for this node
 # by scripts/common/platform/fabric.py (detected from the RDMA devices and drivers unless
 # CLUSTER_ARCHETYPE names the family). A new NIC family is a catalog entry, not a code branch.
 _arch_gid=3; _arch_iface=eth0; _arch_drivers=mlx5; _arch_kv_nic=mlx5_1; _arch_rails=""; _arch_env=()
@@ -635,14 +635,14 @@ cluster_gpu_arch_for_recipe() {
 # (models.yaml `roles:`) against this allocation's GPU and the image's engine build -- named by
 # MAD_ENGINE_BUILD (ENGINE@PINSET), else by MAD_PIN_SET, which madengine and the pipeline set
 # from the card's PINS build arg -- using scripts/common/recipe/recipe.py with the
-# capability catalog in compat/rocm.yaml. A recipe that declares no roles passes. A refusal
+# capability catalog in compat/ (scripts/common/catalog.py). A recipe that declares no roles passes. A refusal
 # names what the hardware or build lacks. FLAGS: the engine flags of roles the recipe holds no
 # flags for (colocated serving: the card's COLOCATED_EXTRA_ARGS). RECIPE_CHECK=0 skips it. The resolution is recorded
 # in config.resolved.json as MAD_RECIPE_ROLES.
 cluster_check_recipe() {
     local yaml="$1" model="$2" engine="$3" roles="${4:-}" flags="${5-}" out rc exports
     local tool="${MAD_SCRIPTS_DIR:-$(dirname "${BASH_SOURCE[0]}")/..}/common/recipe/recipe.py"
-    local catalog="${MAD_CATALOG:-$(dirname "$tool")/../../../compat/rocm.yaml}"
+    local catalog="${MAD_CATALOG:-$(dirname "$tool")/../../../compat}"   # compat/ (or one catalog file)
     if [ "${RECIPE_CHECK:-1}" = "0" ]; then
         echo "RECIPE_CHECK=0: not resolving ${model}'s roles (nor adding the engine arguments or"
         echo "  per-role artifacts they would give)"; return 0
@@ -651,7 +651,7 @@ cluster_check_recipe() {
         echo "WARN: GPU arch unknown: ${model}'s roles are NOT resolved (no added engine arguments)" >&2
         return 0
     fi
-    if [ ! -f "$tool" ] || [ ! -f "$catalog" ]; then
+    if [ ! -f "$tool" ] || [ ! -e "$catalog" ]; then
         echo "WARN: no capability catalog (${catalog}); ${model}'s roles are NOT being checked" >&2
         return 0
     fi
@@ -679,7 +679,7 @@ cluster_check_recipe() {
         return 0
     fi
     rm -f "$exports"
-    echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}}${MAD_PIN_SET:+ (pin set ${MAD_PIN_SET})} (above)." >&2
+    echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}}${MAD_PIN_SET:+ (pin set ${MAD_PIN_SET})}${MAD_IMAGE_COMPONENTS:+ (image builds ${MAD_IMAGE_COMPONENTS})} (above)." >&2
     echo "  Use the model's recipe for this GPU, or RECIPE_CHECK=0 to run it anyway." >&2
     return 1
 }
@@ -778,7 +778,7 @@ cluster_verify_platform() {
     fi
     if [ -n "${MAD_GPU_COUNT:-}" ] && [ "${MAD_GPU_COUNT}" -lt "${GPUS_PER_NODE}" ]; then
         echo "x The run uses ${GPUS_PER_NODE} GPUs per node, but a node has ${MAD_GPU_COUNT}." >&2
-        echo "  Set GPUS_PER_NODE, or MAD_PLATFORM to this node type (compat/rocm.yaml platforms)." >&2
+        echo "  Set GPUS_PER_NODE, or MAD_PLATFORM to this node type (compat/hardware.yaml platforms)." >&2
         return 1
     fi
     [ -n "${MAD_PLATFORM:-}" ] && echo "+ platform ${MAD_PLATFORM}: ${MAD_GPU_ARCH:-arch unknown}, ${GPUS_PER_NODE} GPUs per node"

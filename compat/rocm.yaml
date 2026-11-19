@@ -171,6 +171,20 @@ components:
           upstream: not yet proposed upstream
       note: vLLM for GLM-5.1 disaggregated serving. Carried as a patch on upstream.
       fork_commit: 094820b5deeb1b93733586ca8942589e385a25dc
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          placement:
+          - hbm
+          evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
     9a7ae4b8+cd0d2656@vllm-kimi-k3:
       source:
         repo: https://github.com/vllm-project/vllm.git
@@ -191,6 +205,38 @@ components:
           upstream: not yet proposed upstream
       note: vLLM for Kimi-K3. Carried as a patch on upstream.
       fork_commit: 862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          - int4_g32
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          convert:
+            mxfp4: int4_g32
+          placement:
+          - hbm
+          evidence: Kimi-K3 / Kimi-K3-MXFP4 2P2D on MI300X (MoE requantized to int4 for SiTUv2)
+        gfx950:
+          weights:
+          - bf16
+          - fp8_e4m3
+          - mxfp4
+          activations:
+          - bf16
+          - fp8_e4m3
+          - mxfp4
+          kv_cache:
+          - bf16
+          - fp8_e4m3
+          placement:
+          - hbm
+          evidence: Kimi-K3-MXFP4-MI355X (bring-up recipe, not validated)
     dccb412e+5ebb40fa@vllm-mori121:
       source:
         repo: https://github.com/vllm-project/vllm.git
@@ -210,6 +256,20 @@ components:
           upstream: not yet proposed upstream
       note: 'Wide-EP multi-pod PD WRITE mode with the MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native. Branch tip on 2026-11-03 (last commit 2026-06-26). Carried as a patch on upstream until it is merged there.'
       fork_commit: 1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          placement:
+          - hbm
+          evidence: DeepSeek-V3/R1 and Llama FP8 disagg cards on MI300X
 
   # KV-cache transfer backends, built from source on the SGLang ROCm 10 image
   # (see scripts/kvcache_transfer_bench/image_spec.yaml).
@@ -453,100 +513,13 @@ components:
 # its evidence: a recipe that runs on it, a document, or a source the engine build carries.
 # ---------------------------------------------------------------------------------------
 
-# Number formats, by what they are, not by who named them.
-formats:
-  bf16:          {bits: 16, family: bf16}
-  fp16:          {bits: 16, family: fp16}
-  fp8_e4m3:      {bits: 8, family: fp8, note: OCP FP8 E4M3 (e4m3fn)}
-  fp8_e4m3fnuz:  {bits: 8, family: fp8, note: FP8 E4M3 with no negative zero; CDNA 3 native}
-  fp8_e5m2:      {bits: 8, family: fp8}
-  mxfp8:         {bits: 8, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
-  mxfp6:         {bits: 6, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
-  mxfp4:         {bits: 4, family: mx, block: 32, scale: e8m0, note: OCP microscaling}
-  nvfp4:         {bits: 4, family: fp4, block: 16, scale: fp8_e4m3, note: NVIDIA FP4 with FP8 block scales}
-  int4_g32:      {bits: 4, family: int, block: 32, scale: fp16, weight_only: true, note: packed int4 per group of 32 ("int4_per_group_32")}
-  int8:          {bits: 8, family: int}
-  lut3:          {bits: 3, family: lut, weight_only: true, note: codebook (non-uniform) weights}
-  lut2:          {bits: 2, family: lut, weight_only: true, note: codebook (non-uniform) weights}
-
-# A format family a recipe may name instead of an exact format: the run takes the
-# accelerator's native member of the family ("fp8" is e4m3fnuz on CDNA 3, e4m3 on CDNA 4).
-format_families: [bf16, fp16, fp8, mx, fp4, int, lut]
-
-# GPU architectures, by compiler target. `matmul` is what the matrix cores compute on
-# natively; anything else needs a conversion an engine build must provide (kernels below).
-accelerators:
-  gfx942:
-    generation: CDNA 3
-    products: {MI300X: {hbm_gb: 192, hbm_tbps: 5.3}, MI325X: {hbm_gb: 256, hbm_tbps: 6.0}}
-    # Peak dense matrix TFLOPS per GPU (vendor figures; the performance model is calibrated on runs).
-    peak_tflops: {bf16: 1307, fp8: 2615}
-    wave_size: 64
-    matmul: [bf16, fp16, fp8_e4m3fnuz, fp8_e5m2, int8]
-    # logical GPUs per package in each compute-partition mode (8 XCDs)
-    partitions: {SPX: 1, DPX: 2, QPX: 4, CPX: 8}
-    evidence: >-
-      scripts/vllm_dissag/models.yaml (Kimi-K3 on MI300X): "gfx942 has no scaled-MXFP4 MFMA",
-      FP8 KV cache in every MI300X disagg recipe.
-  gfx950:
-    generation: CDNA 4
-    products: {MI350X: {hbm_gb: 288, hbm_tbps: 8.0}, MI355X: {hbm_gb: 288, hbm_tbps: 8.0}}
-    peak_tflops: {bf16: 2500, fp8: 5000, mxfp4: 10000}   # MI355X; vendor peak, to calibrate
-    wave_size: 64
-    matmul: [bf16, fp16, fp8_e4m3, fp8_e5m2, mxfp8, mxfp6, mxfp4, int8]
-    # logical GPUs per package in each compute-partition mode (8 XCDs)
-    partitions: {SPX: 1, DPX: 2, QPX: 4, CPX: 8}
-    evidence: >-
-      scripts/vllm_dissag/models.yaml (Kimi-K3-MXFP4-MI355X): "gfx950 has scaled-MXFP4 MFMA";
-      AMD CDNA 5 white paper (MI355X memory 288 GB HBM3E, 8 TB/s).
-  cdna5:
-    generation: CDNA 5
-    target: tbd                     # no compiler target in the catalog yet; resolution works on this key
-    products: {MI455X: {hbm_gb: 432, hbm_tbps: 23.3}}
-    peak_tflops: {fp8: 20000, mxfp4: 40000}   # vendor peak per GPU (rounded down); to calibrate
-    wave_size: 32
-    matmul: [bf16, fp16, fp8_e4m3, mxfp8, mxfp6, mxfp4]
-    mx_block_sizes: [16, 32]
-    mx_fractional_scale: true
-    # modes named in the white paper; logical GPUs per mode not stated, so not assumed
-    partitions: {SPX: 1, DPX: null, QPX: null, CPX: null}
-    coherent_host_link_gbps: 256
-    scale_up: {fabric: UALoE, gpus_per_domain: 72, tbps_per_gpu: 3.6}
-    evidence: AMD CDNA 5 white paper (2026). NVFP4 is not listed as native; it is not assumed.
-
 # What an engine build supports per target: weight, activation and KV-cache formats, where
 # weights can live, and conversions it performs (a format the target cannot compute on,
-# requantized to one it can). Keyed by engine and build (today: the pin set it is built from,
-# docker/pins/<name>.json).
+# requantized to one it can). An engine the image builds states this on its build above
+# (components.<engine>.<key>.capabilities); recipe.py names it <engine>@<image> after the named
+# spec that selects it (compat/images/<image>.yaml), or <engine>=<key>. Here: engines an image's
+# base provides, keyed <engine>@<image>.
 kernels:
-  vllm@vllm-kimi-k3:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz, int4_g32]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      convert: {mxfp4: int4_g32}
-      placement: [hbm]
-      evidence: Kimi-K3 / Kimi-K3-MXFP4 2P2D on MI300X (MoE requantized to int4 for SiTUv2)
-    gfx950:
-      weights: [bf16, fp8_e4m3, mxfp4]
-      activations: [bf16, fp8_e4m3, mxfp4]
-      kv_cache: [bf16, fp8_e4m3]
-      placement: [hbm]
-      evidence: Kimi-K3-MXFP4-MI355X (bring-up recipe, not validated)
-  vllm@vllm-mori121:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      placement: [hbm]
-      evidence: DeepSeek-V3/R1 and Llama FP8 disagg cards on MI300X
-  vllm@vllm-glm51:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      placement: [hbm]
-      evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
   sglang@sglang-disagg:
     gfx942:
       weights: [bf16, fp8_e4m3fnuz]
@@ -594,110 +567,3 @@ engines:
       modules: --lora-paths
       max_loras: --max-loras-per-batch
       max_rank: --max-lora-rank
-
-# ----------------------------------------------------------------------------------------------
-# Fabrics: the scale-out NIC families a site may have, as data. scripts/common/cluster.sh fills
-# what a run does not pass from the family it detects (scripts/common/platform/fabric.py); an
-# explicit value always wins. `match`: substrings of RDMA device or driver names that identify the
-# family, tried in fabric_detection.order. `rails`: the driver whose devices are the GPU rails
-# (found on the node), and the names to use when the node cannot be read; none: the connectors
-# keep their own choice.
-fabric_detection:
-  order: [thor2, ainic, cx7]
-  unknown: cx7          # a node nothing matches behaves as before the families existed
-fabrics:
-  cx7:
-    description: NVIDIA (Mellanox) ConnectX-7, RoCE
-    match: [mlx5]
-    gid_index: 3
-    socket_ifname: eth0
-    rdma_drivers: mlx5
-    kv_nic: mlx5_1        # the management NIC: cross-rail safe for KV transfer
-    # The rails of the CX7 site the connectors were validated on; on cx7 the connectors choose
-    # (rixl.sh probes ibstat first), so cluster.sh passes these as MAD_FABRIC_RAILS only.
-    rails: {default: [mlx5_0, mlx5_2, mlx5_3, mlx5_4, mlx5_5, mlx5_7, mlx5_8, mlx5_9], connectors_choose: true}
-    rdma_qos: {tc: 41, sl: 0}   # RoCE DSCP for lossless RDMA, as every family ran with so far; set per site
-  ainic:
-    description: AMD AI NIC (Pollara), RoCE
-    match: [rdma, ionic]
-    gid_index: 1
-    socket_ifname: eno0
-    rdma_drivers: ionic
-    kv_nic: rdma0
-    rails: {driver: ionic, default: [rdma0, rdma1, rdma2, rdma3, rdma4, rdma5, rdma6, rdma7]}
-    env: {RCCL_AINIC_ROCE: "1"}     # without it the AINIC path falls back to verbs/sockets silently
-    rdma_qos: {tc: 41, sl: 0}
-  thor2:
-    description: Broadcom Thor2, RoCE
-    match: [bnxt_re, bnxt_en]
-    gid_index: 3
-    socket_ifname: fenic0
-    rdma_drivers: bnxt_re
-    kv_nic: bnxt_re0
-    rails: {driver: bnxt_en, default: [bnxt_re0, bnxt_re1, bnxt_re2, bnxt_re3, bnxt_re4, bnxt_re5, bnxt_re6, bnxt_re7]}
-    rdma_qos: {tc: 41, sl: 0}
-
-# Scale-up fabrics: the domain inside which tensor/expert-parallel traffic belongs.
-scale_up_fabrics:
-  xgmi:
-    description: Infinity Fabric links between the GPUs of one node
-    scope: node
-  ualoe:
-    description: UALink over Ethernet, switched across a rack (CDNA 5 white paper)
-    scope: rack
-    switched: true
-
-# Platforms: a node type -- its accelerator, GPUs per node, NICs and their GPU affinity, scale-up.
-# nics_per_gpu counts the scale-out NICs serving each GPU (rails), each nic_gbps (Gb/s); scale_up
-# gbps_per_gpu is GB/s. Link speeds are vendor figures for the performance model. A run names its platform with
-# MAD_PLATFORM (scripts/common/platform/platform.py); cluster.sh then takes GPUS_PER_NODE from it
-# and the GPU probe verifies the accelerator and the GPU count. default_platform: the shape a run
-# that names none gets (not verified: it says only how many GPUs to use per node).
-default_platform: mi300x-oam-8
-platforms:
-  mi300x-oam-8:
-    accelerator: gfx942
-    product: MI300X
-    gpus_per_node: 8
-    scale_up: {fabric: xgmi, gpus_per_domain: 8, gbps_per_gpu: 896}   # GB/s, peer links per GPU
-    nics_per_gpu: 1
-    nic_gbps: 400
-  mi325x-oam-8:
-    accelerator: gfx942
-    product: MI325X
-    gpus_per_node: 8
-    scale_up: {fabric: xgmi, gpus_per_domain: 8, gbps_per_gpu: 896}
-    nics_per_gpu: 1
-    nic_gbps: 400
-  mi355x-ubb-8:
-    accelerator: gfx950
-    product: MI355X
-    gpus_per_node: 8
-    scale_up: {fabric: xgmi, gpus_per_domain: 8, gbps_per_gpu: 1075}
-    nics_per_gpu: 1
-    nic_gbps: 400
-  mi455x-helios-tray:
-    accelerator: cdna5
-    product: MI455X
-    gpus_per_node: 4
-    scale_up: {fabric: ualoe, gpus_per_domain: 72, gbps_per_gpu: 3600}
-    nics_per_gpu: 3
-    nic_gbps: 800
-    coherent_host_link: true
-    evidence: CDNA 5 white paper (Helios rack); not yet available to run on
-
-# Clusters: a site -- its platform, fabric family, and the site defaults a run gets when it passes
-# none (storage roots, subnet). A run names one with MAD_CLUSTER (an entry here) or MAD_CLUSTER_FILE
-# (a file of the same shape, kept with the site rather than in this public repository); cluster.sh
-# applies it before its own fallbacks, and anything the run passes wins. These entries are examples.
-clusters:
-  example-slurm-mi300x-cx7:
-    scheduler: slurm
-    platform: mi300x-oam-8
-    fabric: cx7
-    env: {SHARED_MOUNT: /shared_inference, NVME_ROOT: /mnt/nvme}
-  example-slurm-mi355x-ainic:
-    scheduler: slurm
-    platform: mi355x-ubb-8
-    fabric: ainic
-    env: {SHARED_MOUNT: /shared, NVME_ROOT: /mnt/nvme}

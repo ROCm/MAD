@@ -103,7 +103,7 @@ _is "$(_colo STUB_CSV="$CSV_FAIL")" "1" "a FAILURE row fails the job"
 _is "$(_colo STUB_CSV=)" "1" "no results fails the job"
 
 _is "$(_colo MODEL_NAME= MAD_CONFIG=mad-config.kimi-k3.yaml)" "1" "a MAD_CONFIG card without MODEL_NAME stops at once"
-_has "$(cat "$TMP/run/out.txt")" "madengine layered config" "...and says the file needs madengine"
+_has "$(cat "$TMP/run/out.txt")" "MODEL_NAME is empty" "...and says what is missing"
 _hasnot "$(_stub)" "docker run" "...before any container starts"
 
 _colo ALL2ALL_BACKEND=mori_low_latency PYTORCH_ALLOC_CONF=custom NCCL_SOCKET_IFNAME=ens3 >/dev/null

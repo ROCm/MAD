@@ -174,7 +174,7 @@ _FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAM
 _FABRIC_PASSED=""
 for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
 # Node shape the container sizes its servers from (sglang_disagg_mori_io_ep.sh). GPUS_PER_NODE
-# always: cluster.sh takes it from the run's platform (compat/rocm.yaml platforms), and the
+# always: cluster.sh takes it from the run's platform (compat/hardware.yaml platforms), and the
 # container no longer assumes 8. GENERIC_TP_SIZE (TP mode; the container defaults it to
 # GPUS_PER_NODE) when the caller set it.
 _SHAPE_PASSED="GPUS_PER_NODE"

@@ -179,10 +179,10 @@ def has_best_records(name, env=None):
 
 
 def _catalog_platforms():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "compat", "rocm.yaml")
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    import catalog
     try:
-        with open(path) as f:
-            return (yaml.safe_load(f) or {}).get("platforms") or {}
+        return catalog.load(catalog.COMPAT).get("platforms") or {}
     except FileNotFoundError:
         return {}
 

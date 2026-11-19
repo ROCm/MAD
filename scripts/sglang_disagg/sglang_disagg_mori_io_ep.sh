@@ -229,7 +229,7 @@ fi
 # DP_MODE=0: CLI --tp-size is IO_EP_TP_SIZE (default 8) on every worker; PREFILL_EP_SIZE/DECODE_EP_SIZE
 # still scale with xP/yD×GPUS_PER_NODE for MoRI env (not passed as CLI unless DP_MODE=1).
 # DP_MODE=1: --tp-size scales with cluster; --dp-size/--ep-size on CLI (same total degree as Nnodes×GPUS_PER_NODE).
-GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/rocm.yaml platforms)}"
+GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/hardware.yaml platforms)}"
 GENERIC_TP_SIZE="${GENERIC_TP_SIZE:-${GPUS_PER_NODE}}"
 
 if [[ "$DP_MODE" == "1" ]]; then
@@ -475,7 +475,7 @@ fi
 unset PREFILL_CMD DECODE_CMD ROUTER_CMD 2>/dev/null || true
 
 setup_sglang_worker_env() {
-    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}}}"
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}}}"
     export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${IFNAME:-${MAD_FABRIC_IFACE}}}"
     export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
     export SGLANG_MORI_FP8_DISP="${SGLANG_MORI_FP8_DISP:-True}"

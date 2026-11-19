@@ -118,7 +118,7 @@ node_topology() {
 # environment, so engine arguments with quotes or JSON pass intact): every exported
 # MAD_ROLE_MODEL_PATH_<ROLE> and MAD_ROLE_ENGINE_ARGS_<ROLE> (cluster_check_recipe,
 # cluster_resolve_role_artifacts), MAD_RECIPE_FILE (layers.sh config_recipe_file) and the
-# fabric's MAD_FABRIC_* (cluster.sh, from compat/rocm.yaml fabrics). Absent ones are skipped.
+# fabric's MAD_FABRIC_* (cluster.sh, from compat/hardware.yaml fabrics). Absent ones are skipped.
 node_mad_env_args() {
     local v
     for v in $(compgen -e); do

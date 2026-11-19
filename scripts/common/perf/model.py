@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A first-order performance model, to rank layouts before spending GPU hours on them.
 
-Roofline per GPU from the capability catalog (compat/rocm.yaml: peak dense TFLOPS per format, HBM
+Roofline per GPU from the capability catalog (compat/hardware.yaml: peak dense TFLOPS per format, HBM
 bandwidth, scale-up and scale-out link speeds) and a model's architecture (perf/models.yaml):
 
   prefill  tokens/s/GPU = efficiency x peak / (2 x active params)                 (compute bound)
@@ -29,7 +29,9 @@ import sys
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CATALOG = os.path.join(HERE, "..", "..", "..", "compat", "rocm.yaml")
+CATALOG = os.path.join(HERE, "..", "..", "..", "compat")     # the compat/ directory (or one file)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import catalog as _catalog  # noqa: E402  (scripts/common/catalog.py: compat/ as one dict)
 
 
 def _load(p):
@@ -69,7 +71,7 @@ def estimate(catalog, model, platform, weights="fp8_e4m3", compute="fp8_e4m3", k
     prod = catalog["accelerators"][acc]["products"][plat["product"]]
     pk = peak(catalog, acc, compute)
     if pk is None:
-        raise ValueError(f"{platform}: no peak TFLOPS for {compute} (compat/rocm.yaml accelerators.{acc}.peak_tflops)")
+        raise ValueError(f"{platform}: no peak TFLOPS for {compute} (compat/hardware.yaml accelerators.{acc}.peak_tflops)")
     flops_per_s = pk * 1e12 * efficiency
     hbm = prod["hbm_tbps"] * 1e12
     act, total = model["active_params_b"] * 1e9, model["total_params_b"] * 1e9
@@ -160,7 +162,7 @@ def main(argv=None):
         p.add_argument("--model", required=True)
         p.add_argument("--catalog", default=CATALOG)
     a = ap.parse_args(argv)
-    catalog = _load(a.catalog)
+    catalog = _catalog.load(a.catalog)
     model = _load(os.path.join(HERE, "models.yaml"))[a.model]
     if a.cmd == "estimate":
         print(json.dumps(estimate(catalog, model, a.platform, a.weights, a.compute, a.kv, a.gpus, a.batch,

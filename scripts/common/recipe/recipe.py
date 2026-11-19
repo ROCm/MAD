@@ -18,10 +18,10 @@ Per role: `artifact` (a checkpoint other than the model's own), `quantization.we
 `quantization.activations`, `kv_cache`, `placement` (hbm, host or nvme_stream), `speculative`
 ({method, model, num_speculative_tokens}: the engine's speculative-decoding arguments), `lora`
 ({modules: {name: path}, max_loras, max_rank}: adapters served beside the base model). A format is
-an exact name from compat/rocm.yaml `formats`, or a family (`fp8`, `mx`, ...) meaning the
+an exact name from compat/hardware.yaml `formats`, or a family (`fp8`, `mx`, ...) meaning the
 accelerator's native member of it.
 
-Resolving a role for an accelerator and an engine build (compat/rocm.yaml `accelerators`,
+Resolving a role for an accelerator and an engine build (compat/hardware.yaml `accelerators`,
 `kernels`) gives the formats it will really use -- converted where the build converts one
 the hardware cannot compute on -- and the engine arguments that say so; or a refusal that
 names every need nothing meets. Nothing is guessed: a capability the catalog does not list
@@ -47,14 +47,63 @@ import models  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAD_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-CATALOG = os.path.join(MAD_ROOT, "compat", "rocm.yaml")
+CATALOG = os.path.join(MAD_ROOT, "compat")     # the compat/ directory (or one file: a whole catalog)
 ROLES = ("prefill", "decode", "server")
 NEEDS = ("weights", "activations", "kv_cache")
 
 
+IMAGES_KEY = "__images__"      # the named image specs (compat/images), as catalog.py loads them
+
+
 def load_catalog(path=CATALOG):
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+    """compat/ as one dict (scripts/common/catalog.py); a file is read as the whole catalog."""
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    import catalog
+    return catalog.load(path)
+
+
+def engine_builds(catalog):
+    """{build: {arch: capabilities}}: every engine build that states what it runs.
+
+    An image built from a named spec (compat/images/<image>.yaml) that selects an engine build
+    with `capabilities` in the matrix is <engine>@<image> (e.g. vllm@vllm-kimi-k3, as its pin set
+    was named); a matrix build with capabilities that no named spec selects is <component>=<key>;
+    an engine the image's base provides keeps its entry in `kernels` (<engine>@<image>)."""
+    out = dict(catalog.get("kernels") or {})
+    comps = catalog.get("components") or {}
+    used = set()
+    for image, spec in (catalog.get(IMAGES_KEY) or {}).items():
+        for comp, key in ((spec or {}).get("components") or {}).items():
+            caps = ((comps.get(comp) or {}).get(str(key)) or {}).get("capabilities")
+            if caps:
+                out[f"{comp}@{image}"] = caps
+                used.add((comp, str(key)))
+    for comp, builds in comps.items():
+        for key, entry in (builds or {}).items():
+            if isinstance(entry, dict) and entry.get("capabilities") and (comp, key) not in used:
+                out[f"{comp}={key}"] = entry["capabilities"]
+    return out
+
+
+def engine_of(build):
+    """The engine a build id names: vllm@vllm-kimi-k3 and vllm=<key> are vllm builds."""
+    return build.replace("=", "@", 1).split("@", 1)[0]
+
+
+def build_of_components(catalog, components, engine):
+    """The engine build an image holds, from its component builds (MAD_IMAGE_COMPONENTS:
+    name=key,...; madengine passes them for an image built from a spec), or None."""
+    builds = engine_builds(catalog)
+    for pair in (components or "").split(","):
+        name, _, key = pair.strip().partition("=")
+        if name != engine or not key:
+            continue
+        for image, spec in (catalog.get(IMAGES_KEY) or {}).items():
+            if str(((spec or {}).get("components") or {}).get(name)) == key and f"{name}@{image}" in builds:
+                return f"{name}@{image}"
+        if f"{name}={key}" in builds:
+            return f"{name}={key}"
+    return None
 
 
 def _merge(base, over):
@@ -96,7 +145,7 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
     out = {"role": role, "accelerator": arch, "build": build, "engine_args": [], "notes": [], "problems": []}
     acc = (catalog.get("accelerators") or {}).get(arch)
     if acc is None:
-        out["problems"].append(f"accelerator {arch!r} is not in the catalog (compat/rocm.yaml accelerators)")
+        out["problems"].append(f"accelerator {arch!r} is not in the catalog (compat/hardware.yaml accelerators)")
         return out
     spec = role_spec(recipe, role, arch, platform)
     q = spec.get("quantization") or {}
@@ -104,9 +153,10 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
     matmul = acc.get("matmul") or []
     kernels = None
     if build:
-        kernels = ((catalog.get("kernels") or {}).get(build) or {}).get(arch)
+        kernels = (engine_builds(catalog).get(build) or {}).get(arch)
         if kernels is None:
-            out["problems"].append(f"engine build {build!r} lists no support for {arch} (compat/rocm.yaml kernels)")
+            out["problems"].append(f"engine build {build!r} lists no support for {arch} "
+                                   "(compat/rocm.yaml: the build's capabilities, or kernels)")
             return out
     else:
         out["notes"].append("no engine build given: checked against the accelerator only")
@@ -205,15 +255,15 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
 
 
 def build_of_pin_set(catalog, pin_set):
-    """The catalog build (<engine>@<pin set>) of a pin set, or None if it has no entry."""
-    found = [b for b in (catalog.get("kernels") or {}) if b.split("@", 1)[-1] == pin_set]
+    """The engine build (<engine>@<image>) of an image named by its pin set / spec name, or None."""
+    found = [b for b in engine_builds(catalog) if "@" in b and b.split("@", 1)[-1] == pin_set
+             and "=" not in b]
     return found[0] if len(found) == 1 else None
 
 
 def builds_for(catalog, arch, engine):
     """The engine builds the catalog lists for an accelerator."""
-    return [b for b, per in (catalog.get("kernels") or {}).items()
-            if b.split("@", 1)[0] == engine and arch in (per or {})]
+    return [b for b, per in engine_builds(catalog).items() if engine_of(b) == engine and arch in (per or {})]
 
 
 def resolve(catalog, recipe, arch, build=None, roles=None, engine="vllm", platform=None):
@@ -363,7 +413,7 @@ def validate(catalog):
     bad = []
     for name, acc in (catalog.get("accelerators") or {}).items():
         bad += [f"accelerators.{name}.matmul: unknown format {f!r}" for f in acc.get("matmul") or [] if f not in fmts]
-    for build, per in (catalog.get("kernels") or {}).items():
+    for build, per in engine_builds(catalog).items():
         for arch, k in per.items():
             if arch not in (catalog.get("accelerators") or {}):
                 bad.append(f"kernels.{build}: unknown accelerator {arch!r}")
@@ -412,7 +462,7 @@ def bringup(catalog, arch, pins_dir=None):
     acc = (catalog.get("accelerators") or {}).get(arch)
     out = {"arch": arch, "target": None, "pin_sets": {}, "builds": [], "missing": []}
     if acc is None:
-        out["missing"].append(f"{arch} is not an accelerator in compat/rocm.yaml")
+        out["missing"].append(f"{arch} is not an accelerator in compat/hardware.yaml")
         return out
     out["target"] = acc.get("target", arch)
     if out["target"] == "tbd":
@@ -425,7 +475,7 @@ def bringup(catalog, arch, pins_dir=None):
                      if isinstance(d, dict) and d.get("enabled") is not False
                      and (not d.get("archs") or arch in d["archs"])]
             out["pin_sets"][ps["name"]] = comps
-    out["builds"] = [b for b, per in (catalog.get("kernels") or {}).items() if arch in (per or {})]
+    out["builds"] = [b for b, per in engine_builds(catalog).items() if arch in (per or {})]
     if not out["pin_sets"]:
         out["missing"].append("no pin set builds an image for it (docker/pins gpu_archs)")
     if not out["builds"]:
@@ -445,7 +495,9 @@ def main(argv=None):
         p.add_argument("--platform", default=os.environ.get("MAD_PLATFORM") or None,
                        help="the run's platform (MAD_PLATFORM): platform variants and memory requirements")
         p.add_argument("--build", help="ENGINE@BUILD, e.g. vllm@vllm-kimi-k3")
-        p.add_argument("--pin-set", help="the image's pin set (docker/pins/<name>.json): its catalog build")
+        p.add_argument("--pin-set", help="the image's pin set / named spec (compat/images/<name>.yaml): its engine build")
+        p.add_argument("--image-components", default=os.environ.get("MAD_IMAGE_COMPONENTS") or None,
+                       help="the image's component builds (name=key,...; MAD_IMAGE_COMPONENTS): its engine build")
         p.add_argument("--roles", help="comma-separated (default: the roles the recipe declares)")
         p.add_argument("--flags", help="engine flags of roles whose flags are not in the recipe "
                                        "(colocated serving: the card's COLOCATED_EXTRA_ARGS)")
@@ -486,13 +538,15 @@ def main(argv=None):
     if not recipe.get("roles"):
         print(f"{a.model}: declares no roles; nothing to resolve")
         return 0
+    if a.image_components and not a.build:
+        a.build = build_of_components(catalog, a.image_components, a.engine)
     if a.pin_set and not a.build:
         a.build = build_of_pin_set(catalog, a.pin_set)
         if a.build is None:
             print(f"ERROR: {a.model}: the image's pin set {a.pin_set!r} has no entry in the capability "
                   f"catalog (compat/rocm.yaml kernels), so what it can run is unknown", file=sys.stderr)
             return 1
-    engine = a.build.split("@", 1)[0] if a.build else a.engine
+    engine = engine_of(a.build) if a.build else a.engine
     if a.build and engine != a.engine:
         print(f"ERROR: {a.model}: the image's build {a.build} is not a {a.engine} build", file=sys.stderr)
         return 1

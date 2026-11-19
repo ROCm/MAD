@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import model as M  # noqa: E402
 import registry as R  # noqa: E402
 
-CAT = M._load(M.CATALOG)
+CAT = M._catalog.load(M.CATALOG)
 MODELS = M._load(os.path.join(os.path.dirname(HERE), "models.yaml"))
 DSV3 = MODELS["DeepSeek-V3"]
 

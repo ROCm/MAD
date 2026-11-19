@@ -148,7 +148,7 @@ export EP_TP_SIZE="${EP_TP_SIZE:-1}"
 #
 # Only the wideEP path has DP ranks to size; the TP path takes its degree from
 # the model's tp: flags in models.yaml.
-_GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/rocm.yaml platforms)}"
+_GPUS_PER_NODE="${GPUS_PER_NODE:?GPUS_PER_NODE must be set: set by the launcher from the run platform (compat/hardware.yaml platforms)}"
 if ! [[ "$EP_TP_SIZE" =~ ^[0-9]+$ ]] || [ "$EP_TP_SIZE" -lt 1 ]; then
     echo "Error: invalid EP_TP_SIZE='${EP_TP_SIZE}' (expected a positive integer)." >&2; exit 1
 fi

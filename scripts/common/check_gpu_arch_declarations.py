@@ -32,8 +32,10 @@ import models  # noqa: E402  (aliases and per-accelerator variants)
 # The architectures multinode cards are run on: the catalog's accelerators with a compiler
 # target (compat/rocm.yaml; not one still `target: tbd`). A new one is a catalog entry, and
 # rule 2 then makes every restricted card say whether it supports it.
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "compat", "rocm.yaml")) as _f:
-    KNOWN_ARCHS = tuple(sorted(a for a, d in (yaml.safe_load(_f).get("accelerators") or {}).items()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import catalog as _catalog  # noqa: E402
+if True:
+    KNOWN_ARCHS = tuple(sorted(a for a, d in (_catalog.load(_catalog.COMPAT).get("accelerators") or {}).items()
                                if (d or {}).get("target", a) != "tbd"))
 
 

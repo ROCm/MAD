@@ -10,12 +10,12 @@
 USE_CX7_NICS="${USE_CX7_NICS:-1}"
 
 # The NICs: the fabric's rails, or its KV NIC (the management NIC on cx7), from the launcher
-# (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics).
+# (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics).
 if [[ "$USE_CX7_NICS" == "1" ]]; then
-    _DEFAULT_IB="${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}"
+    _DEFAULT_IB="${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}"
     echo "[mori_ep_env] NIC mode: multi-rail (${_DEFAULT_IB}) — same-rail nodes required"
 else
-    _DEFAULT_IB="${MAD_FABRIC_KV_NIC:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/rocm.yaml fabrics)}"
+    _DEFAULT_IB="${MAD_FABRIC_KV_NIC:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}"
     echo "[mori_ep_env] NIC mode: ${_DEFAULT_IB} (one NIC) — cross-rail safe"
 fi
 

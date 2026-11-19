@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The scale-out fabric of this node, from the capability catalog (compat/rocm.yaml `fabrics`).
+"""The scale-out fabric of this node, from the capability catalog (compat/hardware.yaml `fabrics`).
 
 scripts/common/cluster.sh evals `fabric.py shell`: it names the fabric family (detected from the
 node's RDMA devices and their drivers, unless CLUSTER_ARCHETYPE names it) and the values the run
@@ -20,12 +20,13 @@ import sys
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CATALOG = os.path.join(HERE, "..", "..", "..", "compat", "rocm.yaml")
+CATALOG = os.path.join(HERE, "..", "..", "..", "compat")     # the compat/ directory (or one file)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import catalog as _catalog  # noqa: E402  (scripts/common/catalog.py: compat/ as one dict)
 
 
 def load(path):
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+    return _catalog.load(path)
 
 
 def _driver(ib_root, dev):

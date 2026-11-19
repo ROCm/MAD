@@ -127,14 +127,24 @@ def catalog_problems(spec):
     if not os.path.isfile(CATALOG):
         return []
     import yaml
-    with open(CATALOG) as f:
-        cat = yaml.safe_load(f) or {}
+    cat = {}
+    for part in ("rocm.yaml", "hardware.yaml"):          # the software matrix and the hardware
+        p = os.path.join(os.path.dirname(CATALOG), part)
+        if os.path.isfile(p):
+            with open(p) as f:
+                cat.update(yaml.safe_load(f) or {})
     n, build = spec.get("name"), f"{spec.get('engine')}@{spec.get('name')}"
     per = (cat.get("kernels") or {}).get(build) or {}
+    # An engine the image builds states its capabilities on its matrix build (compat/images/<name>.yaml).
+    image = os.path.join(os.path.dirname(CATALOG), "images", f"{n}.yaml")
+    if not per and os.path.isfile(image):
+        with open(image) as f:
+            key = ((yaml.safe_load(f) or {}).get("components") or {}).get(spec.get("engine"))
+        per = (((cat.get("components") or {}).get(spec.get("engine")) or {}).get(str(key)) or {}).get("capabilities") or {}
     out = []
     for arch in spec.get("gpu_archs") or []:
         if arch not in (cat.get("accelerators") or {}):
-            out.append(f"{n}: {arch} is not an accelerator in compat/rocm.yaml")
+            out.append(f"{n}: {arch} is not an accelerator in compat/hardware.yaml")
         elif arch not in per:
             out.append(f"{n}: compat/rocm.yaml kernels.{build} lists nothing for {arch} (what an image of "
                        "this set runs there: weights, activations, KV cache formats)")

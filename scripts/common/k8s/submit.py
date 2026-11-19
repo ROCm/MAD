@@ -107,14 +107,15 @@ def run_timeout(card, cli_timeout=None):
 
 
 def platform_gpus(env):
-    """GPUs per node of the run's platform (MAD_PLATFORM, else default_platform; compat/rocm.yaml),
+    """GPUs per node of the run's platform (MAD_PLATFORM, else default_platform; compat/hardware.yaml),
     as the launchers take it -- for a card that states no GPU count. As madengine's
     slurm_multi_env.platform_gpus_per_node."""
-    import yaml
-    path = Path(__file__).resolve().parents[3] / "compat" / "rocm.yaml"
-    if not path.is_file():
+    compat = Path(__file__).resolve().parents[3] / "compat"
+    if not compat.is_dir():
         return None
-    c = yaml.safe_load(path.read_text()) or {}
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import catalog
+    c = catalog.load(str(compat))
     p = (c.get("platforms") or {}).get(env.get("MAD_PLATFORM") or c.get("default_platform")) or {}
     return p.get("gpus_per_node")
 

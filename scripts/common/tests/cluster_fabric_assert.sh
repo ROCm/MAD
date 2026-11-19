@@ -86,9 +86,11 @@ _is "$(_fab cx7)" "rails=mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9
 _is "$(_fab ainic)" "rails=$R8 gid=1 if=eno0 kv=rdma0 tc=41 sl=0 derived=1 hca=$R8" "ainic: rails found on the node, set and passed"
 
 echo "=== a new NIC family is a catalog entry ==="
-python3 - "$DIR/../../compat/rocm.yaml" "$TMP/catalog.yaml" <<'PY'
+python3 - "$DIR" "$TMP/catalog.yaml" <<'PY'
 import sys, yaml
-c = yaml.safe_load(open(sys.argv[1]))
+sys.path.insert(0, sys.argv[1])
+import catalog
+c = catalog.load(catalog.COMPAT)         # compat/ as one dict; the fixture is one file of it
 c["fabrics"]["newnic"] = {"match": ["vnic"], "gid_index": 5, "socket_ifname": "enx0", "rdma_drivers": "vnic",
                           "kv_nic": "vnic0", "rails": {"driver": "vnic_drv", "default": ["vnic0", "vnic1"]}}
 c["fabric_detection"]["order"].insert(0, "newnic")

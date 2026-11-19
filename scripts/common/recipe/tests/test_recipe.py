@@ -68,11 +68,36 @@ class Catalog(unittest.TestCase):
 
     def test_validate_names_a_bad_reference(self):
         bad = copy.deepcopy(CAT)
-        bad["kernels"][KIMI_BUILD]["gfx942"]["weights"].append("fp5_imaginary")
+        key = bad[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]      # its capabilities: on its build
+        bad["components"]["vllm"][key]["capabilities"]["gfx942"]["weights"].append("fp5_imaginary")
         bad["kernels"]["vllm@x"] = {"gfx000": {}}
         problems = R.validate(bad)
         self.assertTrue(any("fp5_imaginary" in p for p in problems), problems)
         self.assertTrue(any("gfx000" in p for p in problems), problems)
+
+
+class EngineBuilds(unittest.TestCase):
+    """What an image's engine runs: on the matrix build its named spec selects."""
+
+    def test_an_images_build_keeps_its_name(self):
+        builds = R.engine_builds(CAT)
+        key = CAT[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]
+        self.assertIs(builds[KIMI_BUILD], CAT["components"]["vllm"][key]["capabilities"])
+        self.assertIn("sglang@sglang-disagg", builds)              # an engine the base image provides
+        self.assertEqual(R.build_of_pin_set(CAT, "vllm-kimi-k3"), KIMI_BUILD)
+
+    def test_the_image_components_name_the_build(self):
+        key = CAT[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]
+        self.assertEqual(R.build_of_components(CAT, f"mori=x@y,vllm={key}", "vllm"), KIMI_BUILD)
+        self.assertIsNone(R.build_of_components(CAT, "vllm=unknown@x", "vllm"))
+        self.assertIsNone(R.build_of_components(CAT, f"vllm={key}", "sglang"))
+
+    def test_a_build_no_named_spec_selects_is_named_by_its_key(self):
+        cat = copy.deepcopy(CAT)
+        cat["components"]["vllm"]["1.0@x"] = {"source": {}, "capabilities": {"gfx942": {"weights": ["bf16"]}}}
+        self.assertIn("vllm=1.0@x", R.engine_builds(cat))
+        self.assertEqual(R.build_of_components(cat, "vllm=1.0@x", "vllm"), "vllm=1.0@x")
+        self.assertEqual(R.engine_of("vllm=1.0@x"), "vllm")
 
 
 class KimiRecipes(unittest.TestCase):

@@ -113,8 +113,8 @@ done
 # them from config_apply_workload above. Say so when the file does not name the model, rather
 # than failing on MODEL_NAME alone.
 if [ -n "${MAD_CONFIG:-}" ] && [ -z "${MODEL_NAME:-}" ]; then
-    echo "Error: the workload file MAD_CONFIG=${MAD_CONFIG} sets no MODEL_NAME, and the run gave none." >&2
-    echo "       Set model.env.MODEL_NAME in the file, or MODEL_NAME at submit (docs/configuration.md)." >&2
+    echo "Error: MODEL_NAME is empty: the run set it empty, or the workload file MAD_CONFIG=${MAD_CONFIG} names no model." >&2
+    echo "       Set MODEL_NAME at submit, or model.env.MODEL_NAME in the file (docs/configuration.md)." >&2
     exit 1
 fi
 : "${DOCKER_IMAGE_NAME:?set DOCKER_IMAGE_NAME to the vLLM image to run}"

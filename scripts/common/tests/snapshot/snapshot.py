@@ -79,11 +79,16 @@ def launch_env(card, catalog, arch=None):
     return env
 
 
+def _compat():
+    """compat/ as one dict (scripts/common/catalog.py)."""
+    sys.path.insert(0, str(SCRIPTS / "common"))
+    import catalog
+    return catalog.load(str(COMPAT))
+
+
 def gpu_memory_bytes(arch):
     """One GPU's memory for an arch: its first product in the catalog (what the probe would read)."""
-    import yaml
-    with open(COMPAT / "rocm.yaml") as f:
-        prods = (yaml.safe_load(f)["accelerators"].get(arch) or {}).get("products") or {}
+    prods = (_compat()["accelerators"].get(arch) or {}).get("products") or {}
     return int(next(iter(prods.values()))["hbm_gb"] * 1e9) if prods else 0
 
 
@@ -119,9 +124,7 @@ def resolved_env(card, catalog):
 
 def default_gpus_per_node():
     """GPUs per node of the catalog's default platform: what cluster.sh gives a run naming none."""
-    import yaml
-    with open(COMPAT / "rocm.yaml") as f:
-        c = yaml.safe_load(f)
+    c = _compat()
     return c["platforms"][c["default_platform"]]["gpus_per_node"]
 
 

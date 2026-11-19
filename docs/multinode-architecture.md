@@ -143,11 +143,16 @@ by an accelerator or by a platform (`MAD_PLATFORM`; the more specific). A recipe
 `requires: {min_gpu_memory_gb: N}` (checked against the platform's product, else the
 accelerator's largest) and `accuracy:` records (`task`, `score`, `date`, optional `pins`).
 
-`compat/rocm.yaml` holds what the roles are checked against: `formats`; `accelerators` (what
-each GPU's matrix cores compute on, memory, wave size, scale-up domain); `kernels` (per
-engine build and GPU: the weight, activation and KV-cache formats it runs, the conversions
-it makes, where weights may live); and `engines` (the arguments and variables that select a
-format). Nothing absent from the catalog is assumed.
+The capability catalog is `compat/` (read as one by `scripts/common/catalog.py`):
+
+| File | Holds |
+|---|---|
+| `compat/rocm.yaml` | the image-spec matrix (#295): ROCm releases, indexes, authorized component builds -- an engine build with the `capabilities` it has per GPU (the weight, activation and KV-cache formats it runs, the conversions it makes, where weights may live); `kernels` for engines an image's base provides; `engines` (the arguments and variables that select a format) |
+| `compat/hardware.yaml` | `formats`; `accelerators` (what each GPU's matrix cores compute on, memory, wave size, scale-up domain); fabrics; scale-up fabrics; platforms |
+| `compat/images/*.yaml` | named image specs (the DI stacks); the recipe check names an image's engine build `<engine>@<image>` |
+| `compat/sites/*.yaml` | example site profiles (`MAD_CLUSTER`) |
+
+Nothing absent from the catalog is assumed.
 
 `scripts/common/recipe/recipe.py` resolves each role: the formats it will really use, any
 conversion (MXFP4 weights become packed int4 on gfx942, which has no MXFP4 matrix
@@ -274,7 +279,7 @@ none of this resolves exactly as before. Examples: `scripts/common/topology/spec
 
 | Field | Meaning |
 |---|---|
-| `platform` | GPUs per node and the scale-up domain from `compat/rocm.yaml platforms` |
+| `platform` | GPUs per node and the scale-up domain from `compat/hardware.yaml platforms` |
 | `partition` | logical GPUs: the platform's GPUs x the mode's size (sizes not stated for a GPU are refused) |
 | role `gpus` | a role sized in GPUs; must fill whole nodes |
 | role `platform` | a role on another node type (heterogeneous pools; resolved, not yet run by a launcher) |
@@ -367,7 +372,7 @@ Each is a data change plus the check that proves it; no launcher or role script 
 
 | To add | Change | Proves it |
 |---|---|---|
-| An accelerator (GPU generation) | `compat/rocm.yaml accelerators`: target, products (HBM), matmul formats, peak TFLOPS, partition sizes | `recipe.py validate`; `recipe.py bringup --arch X` lists what is still missing |
+| An accelerator (GPU generation) | `compat/hardware.yaml accelerators`: target, products (HBM), matmul formats, peak TFLOPS, partition sizes | `recipe.py validate`; `recipe.py bringup --arch X` lists what is still missing |
 | An engine build for it | a pin set's `gpu_archs` + base image (`docker/pins`), and `kernels.<engine>@<pin set>.<arch>` (formats it runs, conversions, placements) | `pins.py validate` (refuses an arch without a kernels entry); recipe tests |
 | A node type | `platforms`: accelerator, product, GPUs per node, scale-up domain, NICs per GPU and speeds | `recipe.py validate`; `platform_assert.sh`; `MAD_PLATFORM=<name>` on a run |
 | A NIC family | `fabrics`: match names, GID, interface, drivers, KV NIC, rails, RDMA QoS, own settings; add it to `fabric_detection.order` | `cluster_fabric_assert.sh` with a fake sysfs tree of that node |
