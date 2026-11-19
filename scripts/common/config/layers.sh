@@ -94,7 +94,7 @@ config_apply_recipe() {
         k="${line%%=*}"; v="${line#*=}"
         _CONFIG_RECIPE[$k]="$v"
         case "$(config_source "$k")" in
-            submit|submit:*|topology)
+            submit|submit:*|workload|topology)       # workload: submit level, as madengine submits it
                 [[ "${!k}" != "$v" ]] && echo "[config] ${k}=${!k} ($(config_source "$k")) over the recipe's ${v}"
                 continue ;;
         esac

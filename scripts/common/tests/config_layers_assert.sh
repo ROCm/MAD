@@ -117,6 +117,11 @@ _is "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"]["F
     "workload" "the record names the workload layer"
 _has "$(wl MAD_CONFIG=sub/card.yaml BENCHMARK_SCRIPT=sweep)" "WORDS=sweep" "the run's benchmark kind selects its entries"
 _has "$(wl)" "FROM_BASE=<unset>" "no MAD_CONFIG and no mad-config.yaml: nothing applied"
+printf 'M:\n  env: {OVERRIDDEN: recipe, ONLY_RECIPE: recipe}\n' > "$TMP/wl/models.yaml"
+_rw="$(env -i PATH="$PATH" HOME="$TMP" MAD_CONFIG=sub/card.yaml bash -c '
+    . "$0"; config_begin; config_apply_workload "$1/wl"; config_apply_recipe "$1/wl/models.yaml" M
+    echo "OVERRIDDEN=$OVERRIDDEN"' "$LIB" "$TMP" 2>&1)"
+_has "$_rw" "OVERRIDDEN=card" "a workload value beats the recipe, as it does when madengine submits it"
 cp "$TMP/wl/sub/card.yaml" "$TMP/wl/mad-config.yaml"; sed -i 's#\.\./base#base#' "$TMP/wl/mad-config.yaml"
 _has "$(wl)" "OVERRIDDEN=card" "a mad-config.yaml beside the launcher is read, as madengine does"
 rm -f "$TMP/wl/mad-config.yaml"
