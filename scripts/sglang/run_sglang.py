@@ -566,6 +566,11 @@ def parse_args():
                             required=False,
                             default=None,
                         )
+    parser.add_argument('--warmup',
+                            action='store_true',
+                            help='Enable pre-benchmark warmup: sends 1×concurrency requests with '
+                                 'OSL=1 to trigger Triton JIT compilation before measurement',
+                        )
     parser.add_argument('--profile',
                             action='store_true',
                             help='Kernel-profiling run: serve under rtl trace + roctx markers and '
@@ -765,6 +770,55 @@ def read_last_json_line(path: str):
         raise Exception(f"No benchmark results found in {path}")
     return json.loads(lines[-1])
 
+
+def _warmup(model, config):
+    """Send 1×concurrency prefill-only requests (OSL=1) to trigger Triton JIT compilation."""
+    concurrency = int(config['max_concurrency'])
+    inp = int(config['inp'])
+    num_warmups = concurrency
+    print(f"Warmup: sending {num_warmups} prefill-only requests "
+          f"(ISL={inp}, OSL=1, concurrency={concurrency})...")
+    warmup_script = (
+        "import asyncio, aiohttp, random, string, sys, time\n"
+        "VOCAB = [c + d for c in string.ascii_lowercase for d in string.ascii_lowercase]\n"
+        "failed = 0\n"
+        "async def send_one(session, model, inp):\n"
+        "    global failed\n"
+        "    words = ' '.join(random.choices(VOCAB, k=max(1, inp // 4)))\n"
+        "    payload = {'model': model, 'prompt': words, 'max_tokens': 1, 'temperature': 0, 'stream': False}\n"
+        "    try:\n"
+        "        async with session.post('http://localhost:8000/v1/completions', json=payload,\n"
+        "                                timeout=aiohttp.ClientTimeout(total=600)) as r:\n"
+        "            if r.status != 200:\n"
+        "                failed += 1\n"
+        "                body = await r.text()\n"
+        "                print(f'Warmup request failed (HTTP {r.status}): {body[:200]}', flush=True)\n"
+        "            else:\n"
+        "                await r.read()\n"
+        "    except Exception as e:\n"
+        "        failed += 1\n"
+        "        print(f'Warmup request exception: {e}', flush=True)\n"
+        "async def main():\n"
+        f"    conn = aiohttp.TCPConnector(limit={concurrency})\n"
+        "    async with aiohttp.ClientSession(connector=conn) as session:\n"
+        "        start = time.time()\n"
+        f"        tasks = [asyncio.create_task(send_one(session, '{model}', {inp})) for _ in range({num_warmups})]\n"
+        "        await asyncio.gather(*tasks, return_exceptions=True)\n"
+        f"        elapsed = time.time()-start\n"
+        f"        if failed == {num_warmups}:\n"
+        f"            print(f'WARNING: All {num_warmups} warmup requests failed — benchmark may measure cold performance', flush=True)\n"
+        f"            sys.exit(1)\n"
+        f"        elif failed > 0:\n"
+        f"            print(f'Warmup done with {{failed}}/{num_warmups} failures in {{elapsed:.1f}}s', flush=True)\n"
+        f"        else:\n"
+        f"            print(f'Warmup complete: {num_warmups} requests in {{elapsed:.1f}}s', flush=True)\n"
+        "asyncio.run(main())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", warmup_script], check=False)
+    if result.returncode != 0:
+        print("WARNING: Warmup subprocess failed — proceeding with benchmark anyway")
+
+
 def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
@@ -802,6 +856,10 @@ def run_serving(model, config):
             print("Server failed to start")
             return [config]
         print(f"Server at {server.pid} contacted successfully", flush=True)
+
+        # warmup
+        if config.pop('warmup', False):
+            _warmup(model, config)
 
         # run benchmark
         bench_cmd = (
@@ -2165,7 +2223,9 @@ def main():
                     extra_args_str += f" {k} {v}"
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
-            
+            if getattr(args, 'warmup', False):
+                config["warmup"] = True
+
             # run benchmark
             results = []
             if hf_pipeline_tag in ("text-to-image", "image-to-image"):
