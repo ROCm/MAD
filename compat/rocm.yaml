@@ -12,6 +12,16 @@
 # becomes the target (TheRock "device-all" when unknown). Shell variables in
 # source steps are written $VAR, or \${VAR:-default}: ${...} is interpolation.
 #
+# A source build may carry patches (files under docker/patches/, each with its
+# sha256 and upstream status), applied after the checkout: a stack pinned to
+# upstream commits plus changes not merged yet. A build may also say what it
+# runs on each GPU (capabilities: formats run and converted), which MAD's recipe
+# check reads, and the fork commit its patches reproduce (fork_commit).
+#
+# Specs several workloads share are named: compat/images/<name>.yaml, reached
+# from a card as ${images.<name>} (madengine), e.g.
+#   "image_spec": {"extends": "${images.vllm-kimi-k3}", "gpu_arch": "gfx950"}
+#
 # Index locations: https://github.com/ROCm/TheRock/blob/main/RELEASES.md and
 # docs/packaging/legacy_multi_arch_releases.md; frameworks wheels from
 # https://rocm.frameworks.amd.com/whl-multi-arch/ (madengine stack harvest).
