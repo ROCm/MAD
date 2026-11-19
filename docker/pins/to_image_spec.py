@@ -325,11 +325,21 @@ def _insert_builds(text, builds):
     section of the file)."""
     lines = text.rstrip("\n").split("\n")
     start = next(i for i, l in enumerate(lines) if l.rstrip() == "components:")
+
+    def section_end():
+        """The line after components:'s last entry (before the next top-level key or its comments)."""
+        nxt = next((i for i in range(start + 1, len(lines)) if lines[i] and not lines[i][0].isspace()
+                    and not lines[i].startswith("#")), len(lines))
+        while nxt > start + 1 and (not lines[nxt - 1].strip() or lines[nxt - 1].startswith("#")):
+            nxt -= 1
+        return nxt
+
     for comp, entries in builds.items():
         block = yaml.safe_dump(entries, sort_keys=False, width=1 << 16).rstrip("\n").split("\n")
-        head = next((i for i in range(start + 1, len(lines)) if lines[i].rstrip() == f"  {comp}:"), None)
+        head = next((i for i in range(start + 1, section_end()) if lines[i].rstrip() == f"  {comp}:"), None)
         if head is None:
-            lines += ["", f"  {comp}:"] + ["    " + l for l in block]
+            end = section_end()
+            lines[end:end] = ["", f"  {comp}:"] + ["    " + l for l in block]
             continue
         end = head + 1
         while end < len(lines) and (not lines[end].strip() or lines[end].startswith("    ")
