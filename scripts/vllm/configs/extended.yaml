@@ -42,13 +42,25 @@
     gfx942:
       dtype: float16
 
-## Qwen 235B / 3.5 397B require --enable-expert-parallel with tp 8 (see perf.yaml)
-# Keep Qwen in bf16 on gfx942; Qwen 3.5 exceeds fp16 boundaries and breaks accuracy
+## Qwen 235B requires --enable-expert-parallel with tp 8
 - benchmark: serving
   hf_pipeline_tag: text-generation
   model:
     Qwen/Qwen3-235B-A22B-Thinking-2507
     Qwen/Qwen3-235B-A22B-Thinking-2507-FP8
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1
+  arch_overrides:
+    gfx942:
+      dtype: float16
+
+# Keep Qwen 3.5 in bf16 on gfx942; it exceeds fp16 boundaries and breaks accuracy
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
     Qwen/Qwen3.5-397B-A17B
     Qwen/Qwen3.5-397B-A17B-FP8
   tp: 8

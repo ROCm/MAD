@@ -97,6 +97,8 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_sglang_deepseek-v3.1                | deepseek-ai/DeepSeek-V3.1                | gfx950 only                            |
 | pyt_sglang_gpt-oss-120b                 | openai/gpt-oss-120b                      | gfx950 only                            |
 | pyt_sglang_gpt-oss-120b_w4a8            | amd/gpt-oss-120b-w-mxfp4-a-fp8           | gfx950 only                            |
+| pyt_sglang_deepseek-v4.1-flash          | deepseek-ai/DeepSeek-V4.1-Flash          | gfx950 only                            |
+| pyt_sglang_muse-spark-open-816b-a42b_fp4 | amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4 | gfx950 only; own image (`docker/pyt_sglang_muse-spark`) |
 | pyt_sglang_flux.1-dev                   | black-forest-labs/FLUX.1-dev             | gfx950 only; `-throughput` and `-latency` variants run those benchmarks instead of serving |
 | pyt_sglang_flux.2-dev                   | black-forest-labs/FLUX.2-dev             | gfx950 only                            |
 | pyt_sglang_wan2.2-t2v-a14b              | Wan-AI/Wan2.2-T2V-A14B-Diffusers         | `-throughput` and `-latency` variants run those benchmarks instead of serving |
@@ -207,6 +209,11 @@ is the wrapper that MAD calls; it also installs `lm-eval` and moves the CSV up o
 |              | serving                                 | Measure online serving (`sglang.launch_server` + `sglang.bench_serving`) |
 |              | accuracy                                | Run the accuracy evaluation (see `configs/acc.yaml`) |
 |              | all                                     | Run every benchmark the config defines for the model |
+
+**Warmup.** `run.sh` (the MAD-integrated path) passes `--warmup` to `run_sglang.py` by default; pass `--no-warmup` to `run.sh` to skip it.
+With `--warmup`, each LLM `serving` config first sends `max_concurrency` prefill-only requests (a prompt of roughly the configured input length, 1 output token)
+so Triton kernels are compiled before measurement. `run_sglang.py` run directly does not warm up unless `--warmup` is given. `--profile` runs, the other
+benchmark types, diffusion serving and the Kimi-K3 tags (`run_kimi_k3.sh`) do not warm up.
 
 #### Run the benchmark tests 🏃
 

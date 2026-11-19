@@ -250,6 +250,10 @@ is the wrapper that MAD calls; it also installs `lm-eval` and moves the CSV up o
 | filters      | `--tp`, `--inp`, `--out`, `--num_prompts`, `--max_concurrency` | Keep only the combinations that match |
 | --profile    |                                         | Kernel-profiling run; see [Kernel profiling](#kernel-profiling) |
 
+**Warmup.** `run.sh` (the MAD-integrated path) passes `--warmup` to `run_atom.py` by default; pass `--no-warmup` to `run.sh` to skip it.
+With `--warmup`, each `serving` config first sends `max_concurrency` prefill-only requests (a prompt of roughly the configured input length, 1 output token)
+so Triton kernels are compiled before measurement. `run_atom.py` run directly does not warm up unless `--warmup` is given. `--profile` and accuracy runs do not warm up.
+
 #### Run the benchmark tests 🏃
 
 Here are some examples:
