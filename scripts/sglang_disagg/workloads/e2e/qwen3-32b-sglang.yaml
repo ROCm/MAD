@@ -1,0 +1,6 @@
+# Reproduction of pyt_sglang_disagg_mori_io_qwen3-32b: the same engine commands (a test holds them
+# equal), written as a MoRI-IO serving layer and the sweep benchmark.
+version: 2
+defaults: [../../../common/workloads/serve/sglang-disagg-mori-io.yaml, ../../../common/workloads/bench/sweep.yaml]
+model:
+  env: {MODEL_NAME: Qwen3-32B, xP: "1", yD: "1", USE_CX7_NICS: "1", BENCHMARK_COMBINATIONS: "1024/1024"}

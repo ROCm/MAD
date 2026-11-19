@@ -521,6 +521,10 @@ python3 scripts/common/check_gpu_arch_declarations.py
 
 ## Adding a multinode card
 
+For the recommended way to configure a multinode inference model -- one card for every GPU, its
+whole configuration in one file, shared layers -- see
+[Configuring a distributed-inference model](configuring-a-model.md).
+
 A multinode card runs one workload across several nodes of a SLURM cluster. Read
 [Multinode overview](multinode-overview.md) first for the concepts, and
 [Running multinode workloads](multinode-running.md) for how to run one.

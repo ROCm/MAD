@@ -98,6 +98,42 @@ class SameAsMadengine(unittest.TestCase):
                     self.assertEqual(mad_env(c, d, runtime), theirs)
 
 
+# Each reproduction and the existing card it reproduces: the same engine commands on every rank.
+REPRODUCES = {
+    ("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah"): ("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4"),
+    ("vllm_dissag", "pyt_e2e_llama-3.1-405b_disagg"): ("vllm_dissag", "pyt_vllm_disagg_nixl_llama-3.1-405b-fp8"),
+    ("sglang_disagg", "pyt_e2e_deepseek-r1_sglang"): ("sglang_disagg", "pyt_sglang_disagg_mori_dp_deepseek-r1"),
+    ("sglang_disagg", "pyt_e2e_qwen3-32b_sglang"): ("sglang_disagg", "pyt_sglang_disagg_mori_io_qwen3-32b"),
+}
+GOLDEN = HERE / "snapshot" / "golden"
+
+
+def engine_commands(catalog, name):
+    g = json.loads((GOLDEN / catalog / f"{name}.json").read_text())
+    return g["inputs"]["gpu_arch"], [[b["argv"] for b in (r.get("engine") or {}).get("blocks", [])] for r in g["ranks"]]
+
+
+class Reproductions(unittest.TestCase):
+    """An example marked `reproduction` runs exactly what an existing card runs; one marked `demo`
+    shows a mechanism. Every example is one or the other."""
+
+    def test_every_example_is_a_reproduction_or_a_demo(self):
+        for d, c in example_cards():
+            with self.subTest(card=c["name"]):
+                kinds = {"reproduction", "demo"} & set(c["tags"])
+                self.assertEqual(len(kinds), 1, c["tags"])
+                self.assertEqual("reproduction" in kinds, (d, c["name"]) in REPRODUCES)
+
+    def test_each_reproduction_runs_the_engine_commands_of_its_card(self):
+        for (d, name), (sd, source) in REPRODUCES.items():
+            with self.subTest(example=name, source=source):
+                arch, got = engine_commands(d, name)
+                src_arch, want = engine_commands(sd, source)
+                self.assertEqual(arch, src_arch)
+                self.assertTrue(want and any(want), "the source card runs nothing")
+                self.assertEqual(got, want)
+
+
 class Examples(unittest.TestCase):
     def test_kimi_k3_runs_each_gpus_variant_with_its_best_known_configuration(self):
         c = card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah")
@@ -151,13 +187,6 @@ class Examples(unittest.TestCase):
         self.assertIn("GPUS_PER_NODE=4 xP=18 yD=18", out)                    # the topology spec, the platform's GPUs
         self.assertIn("+ platform mi455x-helios-tray: cdna5, 4 GPUs per node", out)
         self.assertIn("supports only: gfx942", out)        # no CDNA 5 variant yet: the default one's GPU_ARCHS
-
-    def test_llama_405b_colocated_gets_the_kv_format_its_flags_lack(self):
-        got = run("vllm_multinode", on(card("vllm_multinode", "pyt_e2e_llama-3.1-405b_colocated"), "gfx942"))
-        self.assertEqual(got["exit_code"], 0)
-        words = argv(got, 0)
-        self.assertEqual((value(words, "--tensor-parallel-size"), value(words, "--pipeline-parallel-size")), ("8", "2"))
-        self.assertEqual(value(words, "--kv-cache-dtype"), "fp8")
 
     def test_qwen3_replicas_serve_lora_adapters_on_every_gpu(self):
         c = card("vllm_multinode", "pyt_e2e_qwen3-32b_replicas_lora")

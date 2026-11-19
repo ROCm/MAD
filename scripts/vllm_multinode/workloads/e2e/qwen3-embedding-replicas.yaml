@@ -1,3 +1,4 @@
+# Demo: shows embedding replicas; not run yet.
 # An embedding model: TP-1 pooling servers on every GPU behind a router, embeddings throughput and
 # latency per concurrency.
 version: 2

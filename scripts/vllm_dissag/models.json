@@ -938,6 +938,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "reproduction",
             "any_gpu",
             "vllm_disagg"
         ],
@@ -973,6 +974,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "demo",
             "any_gpu",
             "vllm_disagg"
         ],
@@ -1008,6 +1010,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "demo",
             "any_gpu",
             "vllm_disagg"
         ],
@@ -1043,6 +1046,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "demo",
             "any_gpu",
             "vllm_disagg"
         ],
@@ -1060,5 +1064,42 @@
             "MAD_CONFIG": "workloads/e2e/kimi-k3-helios.yaml"
         },
         "args": ""
+    },
+    {
+        "name": "pyt_e2e_llama-3.1-405b_disagg",
+        "dockerfile": "../../docker/di_vllm",
+        "dockercontext": ".",
+        "docker_build_arg": {
+            "PINS": "vllm-mori121",
+            "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"
+        },
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8-KV.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "reproduction",
+            "vllm_disagg"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/llama-405b-disagg.yaml"
+        },
+        "args": "-N 2 -n 2",
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        }
     }
 ]

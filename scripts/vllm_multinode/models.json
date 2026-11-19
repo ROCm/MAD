@@ -305,41 +305,6 @@
         "args": ""
     },
     {
-        "name": "pyt_e2e_llama-3.1-405b_colocated",
-        "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "scripts": "run_multinode.slurm",
-        "data": "huggingface",
-        "n_gpus": "-1",
-        "owner": "mad.support@amd.com",
-        "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
-        "multiple_results": "perf_Llama-3.1-405B-Instruct-FP8-KV.csv",
-        "tags": [
-            "pyt",
-            "e2e_example",
-            "any_gpu",
-            "vllm_multinode"
-        ],
-        "timeout": -1,
-        "distributed": {
-            "launcher": "slurm_multi",
-            "nnodes": 2
-        },
-        "slurm": {
-            "nodes": 2,
-            "time": "06:00:00"
-        },
-        "env_vars": {
-            "DOCKER_IMAGE_NAME": "<supply-your-image>",
-            "MAD_CONFIG": "workloads/e2e/llama-405b-colocated.yaml"
-        },
-        "args": ""
-    },
-    {
         "name": "pyt_e2e_qwen3-32b_replicas_lora",
         "url": "",
         "dockerfile": "../../docker/di_vllm",
@@ -356,6 +321,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "demo",
             "any_gpu",
             "vllm_multinode"
         ],
@@ -391,6 +357,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "demo",
             "any_gpu",
             "vllm_multinode"
         ],

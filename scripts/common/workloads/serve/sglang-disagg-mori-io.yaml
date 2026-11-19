@@ -1,0 +1,5 @@
+# SGLang prefill/decode disaggregation, tensor parallel, KV over MoRI-IO.
+version: 2
+defaults: [../base.yaml]
+model:
+  env: {DP_MODE: "0", RUN_MORI: "1"}

@@ -24,6 +24,7 @@ learning path and stop when you have what you need.
 |---|---|
 | Run one model on one GPU host | [Getting started](getting-started.md) |
 | Add a model, a Dockerfile or a script | [Adding a model](adding-a-model.md) |
+| Add or tune a multinode inference model: one card for every GPU, its whole configuration in one file | [Configuring a distributed-inference model](configuring-a-model.md) |
 | Understand multinode inference (disaggregated prefill/decode, colocated) | [Multinode overview](multinode-overview.md) |
 | Find the code behind each step of a multinode run | [Multinode architecture](multinode-architecture.md) |
 | Run a multinode card on a SLURM cluster | [Running multinode workloads](multinode-running.md) |
@@ -60,6 +61,7 @@ learning path and stop when you have what you need.
 |---|---|
 | [README.md](README.md) | This page: what MAD is, the learning path, the glossary and the index. |
 | [getting-started.md](getting-started.md) | Prerequisites, installation, running models, tags, timeouts, debugging, model discovery, build versus run, and where results go. |
+| [configuring-a-model.md](configuring-a-model.md) | Adding or tuning a multinode inference model: the card and recipe, what a run will do and why, the generated configuration, and when to use variants, roles, shared layers and image specs. |
 | [adding-a-model.md](adding-a-model.md) | Every model-card field, Dockerfile resolution, the GPU architecture build argument, run scripts, the performance reporting contract, and multinode cards. |
 | [multinode-overview.md](multinode-overview.md) | Concepts: disaggregated prefill/decode versus colocated multinode, launchers, KV connectors, EP backends, topology, architecture diagrams. |
 | [multinode-architecture.md](multinode-architecture.md) | The code a multinode run goes through, layer by layer (launcher, configuration layers, topology, node selection, dispatcher, `node.sh`, container, verdict) and how an image is built from a pin set, with the file behind each step. |

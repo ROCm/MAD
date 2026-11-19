@@ -125,3 +125,12 @@ class RunsFromTheFile(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Advice(unittest.TestCase):
+    def test_advice_never_fails_and_names_what_a_card_could_gain(self):
+        import subprocess
+        p = subprocess.run([sys.executable, str(HERE.parent / "advise.py")], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0)
+        self.assertIn("has a GPU-agnostic twin, pyt_vllm_disagg_mori_kimi-k3-mxfp4_auto", p.stdout)
+        self.assertNotIn("_kimi_k3_recipe_env", p.stdout)          # anchors are not recipes

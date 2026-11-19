@@ -1,3 +1,5 @@
+# Demo: shows the mechanism (per-role checkpoints and formats). The checkpoint names are
+# placeholders for checkpoints you provide; nothing here has been run.
 # Disaggregated quantization: FP4 W4A4 prefill and weight-only decode from separate checkpoints
 # (per-role artifacts). Needs FP4 matrix compute: on gfx942 the launcher refuses before anything
 # runs, naming the FP4 activations; on gfx950 each role serves its own checkpoint.

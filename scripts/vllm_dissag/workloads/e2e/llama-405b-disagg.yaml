@@ -1,0 +1,6 @@
+# Reproduction of pyt_vllm_disagg_nixl_llama-3.1-405b-fp8: the same engine commands (a test holds
+# them equal), written as a NIXL serving layer and the sweep benchmark.
+version: 2
+defaults: [../../../common/workloads/serve/vllm-disagg-nixl.yaml, ../../../common/workloads/bench/sweep.yaml]
+model:
+  env: {MODEL_NAME: Llama-3.1-405B-Instruct-FP8-KV, xP: "1", yD: "1", BENCHMARK_COMBINATIONS: "1024/1024"}

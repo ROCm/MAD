@@ -1,8 +1,12 @@
 # End-to-end examples
 
-Eight workloads, five model families, two engines, every serving type MAD runs and the next GPU
-generation, each written as a few lines on shared layers. They show the features working together,
-and their tests run each one through the real launchers on each GPU it targets.
+Nine workloads, five model families, two engines, every serving type MAD runs and the next GPU
+generation, each written as a few lines on shared layers. Each is either a **reproduction** -- it
+runs exactly the engine commands of an existing card, and a test holds them equal -- or a **demo**
+of a mechanism, with no invented setting presented as tuned. Their tests run each one through the
+real launchers on each GPU it targets.
+
+How to configure a model this way, step by step: [configuring-a-model.md](configuring-a-model.md).
 
 ## Contents
 
@@ -27,7 +31,8 @@ result, and anything passed through config at submit time wins over every layer.
 scripts/common/workloads/
   base.yaml                     RECIPE_CHECK=1, MAD_BEST_CONFIG=1 -- the root of every workload
   serve/vllm-disagg-wide-ep.yaml   MoRI-IO disaggregation, wide EP
-  serve/vllm-colocated.yaml        one TP x PP server over several nodes
+  serve/vllm-disagg-nixl.yaml      rixl connector (NIXL), tensor parallel
+  serve/sglang-disagg-mori-io.yaml SGLang disaggregation, tensor parallel, KV over MoRI-IO
   serve/replicas.yaml              independent servers per node behind a router (PERF_TAGS by interpolation)
   serve/sglang-disagg-dp-ep.yaml   SGLang disaggregation, DP attention + EP
   bench/{sweep,niah,accuracy,embeddings,lora}.yaml   what is measured
@@ -40,18 +45,19 @@ context, `MAD_PLATFORM`), so one workload runs on every site.
 
 ## The examples
 
-| Card | Model, type | Workload (inherits) | Runs on |
-|---|---|---|---|
-| `pyt_e2e_kimi-k3_disagg_niah` | Kimi-K3, MoE MXFP4, 2P2D | family/kimi-k3 + bench/niah | gfx942, gfx950 |
-| `pyt_e2e_deepseek-v3_disagg_mtp` | DeepSeek-V3, MoE FP8, 1P1D | family/deepseek-v3 + bench/accuracy | gfx942, gfx950 |
-| `pyt_e2e_deepseek-v3_dq` | DeepSeek-V3, disaggregated quantization | family/deepseek-v3 + bench/accuracy | gfx950 (refused on gfx942) |
-| `pyt_e2e_kimi-k3_helios` | Kimi-K3 on Helios, 72-GPU pools | family/kimi-k3 + bench/sweep | CDNA 5 once brought up (refused today) |
-| `pyt_e2e_llama-3.1-405b_colocated` | Llama-3.1-405B, dense FP8, TP8 x PP2 | serve/vllm-colocated + bench/accuracy | gfx942, gfx950 |
-| `pyt_e2e_qwen3-32b_replicas_lora` | Qwen3-32B, dense BF16, replicas + LoRA | serve/replicas + bench/lora | gfx942, gfx950 |
-| `pyt_e2e_qwen3-embedding_replicas` | Qwen3-Embedding-8B, embeddings | serve/replicas + bench/embeddings | gfx942, gfx950 |
-| `pyt_e2e_deepseek-r1_sglang` | DeepSeek-R1 on SGLang, DP + EP | serve/sglang-disagg-dp-ep + bench/sweep | gfx942, gfx950 |
+| Card | Model, type | Workload (inherits) | Runs on | Status |
+|---|---|---|---|---|
+| `pyt_e2e_kimi-k3_disagg_niah` | Kimi-K3, MoE MXFP4, 2P2D | family/kimi-k3 + bench/niah | gfx942, gfx950 | reproduction of `pyt_vllm_disagg_mori_kimi-k3-mxfp4` (and its MI355X twin) |
+| `pyt_e2e_llama-3.1-405b_disagg` | Llama-3.1-405B, dense FP8, 1P1D | serve/vllm-disagg-nixl + bench/sweep | gfx942 | reproduction of `pyt_vllm_disagg_nixl_llama-3.1-405b-fp8` |
+| `pyt_e2e_deepseek-r1_sglang` | DeepSeek-R1 on SGLang, DP + EP | serve/sglang-disagg-dp-ep + bench/sweep | gfx942, gfx950 | reproduction of `pyt_sglang_disagg_mori_dp_deepseek-r1` |
+| `pyt_e2e_qwen3-32b_sglang` | Qwen3-32B on SGLang, dense BF16, TP | serve/sglang-disagg-mori-io + bench/sweep | gfx942, gfx950 | reproduction of `pyt_sglang_disagg_mori_io_qwen3-32b` |
+| `pyt_e2e_deepseek-v3_disagg_mtp` | DeepSeek-V3, MoE FP8, 1P1D | family/deepseek-v3 + bench/accuracy | gfx942, gfx950 | demo (validated base recipe; MTP not run yet) |
+| `pyt_e2e_deepseek-v3_dq` | DeepSeek-V3, disaggregated quantization | family/deepseek-v3 + bench/accuracy | gfx950 (refused on gfx942) | demo (placeholder checkpoints) |
+| `pyt_e2e_kimi-k3_helios` | Kimi-K3 on Helios, 72-GPU pools | family/kimi-k3 + bench/sweep | CDNA 5 once brought up (refused today) | demo |
+| `pyt_e2e_qwen3-32b_replicas_lora` | Qwen3-32B, dense BF16, replicas + LoRA | serve/replicas + bench/lora | gfx942, gfx950 | demo (placeholder adapters) |
+| `pyt_e2e_qwen3-embedding_replicas` | Qwen3-Embedding-8B, embeddings | serve/replicas + bench/embeddings | gfx942, gfx950 | demo |
 
-The cards (tags `e2e_example`, `any_gpu`) hold only what registers a run -- name, image, node
+The cards (tags `e2e_example`, `reproduction` or `demo`, and `any_gpu` where they run on any GPU) hold only what registers a run -- name, image, node
 count, `MAD_CONFIG`; no GPU name or GPU fact. The example recipes in
 `scripts/vllm_dissag/models.yaml` (`DeepSeek-V3-MTP`, `DeepSeek-V3-DQ`, `Qwen3-32B-LoRA`,
 `Qwen3-Embedding-8B`) are aliases: each inherits a validated recipe and changes only what it shows.
@@ -78,8 +84,12 @@ tray, 18 trays per 72-GPU rack), places each pool in its own rack (`--segment=18
 affinity on Kubernetes) and verifies the nodes are CDNA 5. Until a pin set and engine build exist
 for CDNA 5 the run is refused with what is missing (`recipe.py bringup --arch cdna5`).
 
-**Llama-3.1-405B, colocated.** A dense model over two nodes as one TP8 x PP2 server; the recipe's
-roles add the FP8 KV-cache argument its server flags lack.
+**Llama-3.1-405B, disaggregated.** The existing NIXL card's run, written as a serving layer
+(`serve/vllm-disagg-nixl.yaml`) and the sweep: the same engine commands as
+`pyt_vllm_disagg_nixl_llama-3.1-405b-fp8`.
+
+**Qwen3-32B on SGLang.** The existing MoRI-IO card's run on the SGLang layers: the same engine
+commands as `pyt_sglang_disagg_mori_io_qwen3-32b`.
 
 **Qwen3-32B, replicas with LoRA.** Eight TP-1 servers per node behind a router, each serving two
 adapters beside the base model; the LoRA benchmark spreads requests over the adapters.
@@ -125,7 +135,9 @@ Anything can be overridden for one run without editing a file -- submit-time val
 
 ## How they are tested
 
-`scripts/common/tests/test_e2e_examples.py` needs no madengine: it resolves every workload with
+`scripts/common/tests/test_e2e_examples.py` holds every example to its label -- a reproduction's
+engine commands equal its source card's on every rank, every example is a reproduction or a demo --
+and needs no madengine: it resolves every workload with
 MAD's reader (and, when madengine is importable, checks madengine's reader agrees), and runs it
 through the real launchers and role scripts (the snapshot harness's stand-ins for SLURM, Docker and
 the GPUs), on each GPU it targets, asserting what it claims: the int4 conversion on gfx942 only,

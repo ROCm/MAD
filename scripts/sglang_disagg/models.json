@@ -758,6 +758,7 @@
         "tags": [
             "pyt",
             "e2e_example",
+            "reproduction",
             "any_gpu",
             "sglang_disagg"
         ],
@@ -773,6 +774,42 @@
         "env_vars": {
             "DOCKER_IMAGE_NAME": "<supply-your-image>",
             "MAD_CONFIG": "workloads/e2e/deepseek-r1-sglang.yaml"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_e2e_qwen3-32b_sglang",
+        "url": "",
+        "dockerfile": "../../docker/di_sglang",
+        "dockercontext": ".",
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "docker_build_arg": {
+            "PINS": "sglang-disagg"
+        },
+        "multiple_results": "perf_Qwen3-32B.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "reproduction",
+            "any_gpu",
+            "sglang_disagg"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "time": "06:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/qwen3-32b-sglang.yaml"
         },
         "args": ""
     }

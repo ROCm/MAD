@@ -1,3 +1,4 @@
+# Demo: refused until the GPU is brought up (recipe.py bringup); shows rack-scale placement.
 # Kimi-K3 on Helios (CDNA 5): 72-GPU wide-EP pools, one per rack, KV over scale-out -- the topology
 # spec (scheduler placement: --segment / pod affinity) and the platform (4 GPUs per tray). Until a
 # pin set and engine build list CDNA 5, the gate refuses with what is missing (recipe.py bringup).

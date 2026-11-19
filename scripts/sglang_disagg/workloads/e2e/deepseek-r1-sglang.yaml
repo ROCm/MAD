@@ -1,3 +1,4 @@
+# Reproduction of pyt_sglang_disagg_mori_dp_deepseek-r1: the same engine commands (a test holds them equal).
 # DeepSeek-R1 on SGLang: 1 prefill + 1 decode node, DP attention + MoRI EP, the throughput sweep --
 # the same layers, the second engine.
 version: 2

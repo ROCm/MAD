@@ -1,3 +1,5 @@
+# Demo: shows the mechanism (speculative decoding as a role need, KV sized from the GPU); its base
+# recipe is validated, these settings have not been run yet.
 # DeepSeek-V3 (MoE, FP8), 1 prefill + 1 decode node: multi-token-prediction speculative decoding
 # on decode (a recipe-role need turned into vLLM's --speculative-config), the KV budget as a tenth
 # of GPU memory (probed per node), and the accuracy harness.

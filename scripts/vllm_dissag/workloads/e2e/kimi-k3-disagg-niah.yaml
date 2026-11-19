@@ -1,3 +1,5 @@
+# Reproduction of pyt_vllm_disagg_mori_kimi-k3-mxfp4 (MI300X) and its MI355X twin: the same engine
+# commands on each GPU (a test holds them equal).
 # Kimi-K3 (MoE, MXFP4), 2 prefill + 2 decode nodes, wide EP, on whatever GPU the job lands on: the
 # recipe's gfx942 variant (int4 conversion added by its roles) or gfx950 variant (native MXFP4).
 # Measures long-context retrieval (NIAH). The example's own best-known registry shows a measured
