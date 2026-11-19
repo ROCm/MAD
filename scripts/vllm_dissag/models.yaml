@@ -610,7 +610,7 @@ DeepSeek-V3-MTP:
   roles:
     decode: {speculative: {method: deepseek_mtp, num_speculative_tokens: 1}}
 
-# Disaggregated quantization (arXiv 2609.26333): compute-bound prefill in FP4 W4A4 from its own
+# Disaggregated quantization: compute-bound prefill in FP4 W4A4 from its own
 # checkpoint, memory-bound decode weight-only 4-bit with 16-bit activations from another. Needs FP4
 # matrix compute: resolves on gfx950, refused on gfx942 naming the FP4 activations.
 DeepSeek-V3-DQ:

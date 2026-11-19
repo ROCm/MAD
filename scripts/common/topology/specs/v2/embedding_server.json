@@ -1,0 +1,3 @@
+{"engine": "vllm", "layout": "colocated", "platform": "mi300x-oam-8",
+ "about": "Embeddings / reranking: a non-generative server role, one TP-1 replica per GPU; expressible, not yet runnable",
+ "roles": [{"name": "embed", "kind": "embedding", "nodes": 1, "parallel": {"mode": "replicas", "tp": 1}}]}

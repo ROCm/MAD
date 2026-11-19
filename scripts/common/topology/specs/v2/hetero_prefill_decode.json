@@ -1,0 +1,6 @@
+{"engine": "vllm", "layout": "disagg", "platform": "mi355x-ubb-8",
+ "about": "Compute-rich prefill on MI355X, memory-rich decode on Helios trays; the KV format agreed at the boundary",
+ "roles": [{"name": "prefill", "nodes": 2, "parallel": {"mode": "wide_ep", "ep_tp": 1}, "kv_format": "fp8"},
+           {"name": "decode", "platform": "mi455x-helios-tray", "gpus": 8, "parallel": {"mode": "wide_ep", "ep_tp": 1},
+            "kv_format": "fp8"}],
+ "router": {"host": "prefill", "index": 0}}

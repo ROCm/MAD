@@ -416,7 +416,7 @@ def bringup(catalog, arch, pins_dir=None):
         return out
     out["target"] = acc.get("target", arch)
     if out["target"] == "tbd":
-        out["missing"].append("compiler target not yet published (target: tbd)")
+        out["missing"].append("no compiler target in the catalog yet (target: tbd)")
     for f in sorted(_glob.glob(os.path.join(pins_dir, "*.json"))):
         with open(f) as fh:
             ps = json.load(fh)

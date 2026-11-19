@@ -98,15 +98,15 @@ export MAD_CONFIG=workloads/e2e/deepseek-v3-mtp.yaml MODEL_NAME=... DOCKER_IMAGE
 sbatch -N 2 scripts/vllm_dissag/run_xPyD_models.slurm          # or scripts/common/k8s/submit.py --card ...
 ```
 
-Through madengine (either Jenkins mode resolves the same workload):
+Through madengine:
 
 ```bash
 madengine build --tags pyt_e2e_deepseek-v3_disagg_mtp --additional-context-file <site context>
 madengine run --manifest-file build_manifest.json --additional-context-file <site context>
 ```
 
-From the pipeline, per site (`rocAutomation/.../ci_trigger.sh`, `SITES="oci-mi300x crs-spur"`), or
-`EXECUTION_MODE=STANDALONE` for the same run without madengine at run time.
+A CI pipeline can run either way, per site, and gets the same run: the launcher resolves the
+workload itself when madengine did not.
 
 Anything can be overridden for one run without editing a file -- submit-time values win:
 

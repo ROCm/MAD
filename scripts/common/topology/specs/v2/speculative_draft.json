@@ -1,0 +1,4 @@
+{"engine": "vllm", "layout": "colocated", "platform": "mi355x-ubb-8",
+ "about": "A target server and a draft-model role (speculative decoding): expressible, not yet runnable",
+ "roles": [{"name": "server", "nodes": 1, "parallel": {"mode": "tp_pp", "tp": 8, "pp": 1}},
+           {"name": "draft", "nodes": 1, "parallel": {"mode": "tp_pp", "tp": 8, "pp": 1}}]}

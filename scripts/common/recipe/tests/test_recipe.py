@@ -30,7 +30,7 @@ with open(VLLM_RECIPES) as _f:
     _RAW = yaml.safe_load(_f)
 RECIPES = {name: R.models.effective(_RAW, name) for name in _RAW}   # as the launchers read them
 
-# A disaggregated-quantization recipe in the shape of arXiv 2609.26333: prefill is compute
+# A disaggregated-quantization recipe: prefill is compute
 # bound and runs W4A4 FP4 from its own checkpoint; decode is bandwidth bound and runs
 # weight-only 4-bit with 16-bit activations from another. The KV cache both share is fp8.
 DQ = {

@@ -228,9 +228,9 @@ accelerators:
       AMD CDNA 5 white paper (MI355X memory 288 GB HBM3E, 8 TB/s).
   cdna5:
     generation: CDNA 5
-    target: tbd                     # compiler target not published yet; resolution works on this key
+    target: tbd                     # no compiler target in the catalog yet; resolution works on this key
     products: {MI455X: {hbm_gb: 432, hbm_tbps: 23.3}}
-    peak_tflops: {fp8: 20000, mxfp4: 40000}   # from the Helios rack figures / 72; vendor peak, to calibrate
+    peak_tflops: {fp8: 20000, mxfp4: 40000}   # vendor peak per GPU (rounded down); to calibrate
     wave_size: 32
     matmul: [bf16, fp16, fp8_e4m3, mxfp8, mxfp6, mxfp4]
     mx_block_sizes: [16, 32]

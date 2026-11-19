@@ -1,0 +1,4 @@
+{"engine": "vllm", "layout": "colocated", "platform": "mi455x-helios-tray", "strict": true,
+ "about": "Helios: a TP-8 server over two trays inside one rack's scale-up domain",
+ "roles": [{"name": "server", "gpus": 8, "parallel": {"mode": "tp_pp", "tp": 8, "pp": 1}}],
+ "placement": [{"same_domain": ["server"]}]}
