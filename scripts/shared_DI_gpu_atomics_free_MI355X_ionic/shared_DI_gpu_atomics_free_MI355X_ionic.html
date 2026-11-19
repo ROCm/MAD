@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Shared DI: MoRI atomic-free, GLM-5.3-Flash and Kimi K3 disaggregated serving on MI355X</title>
+<style>
+  body { font-family: 'Segoe UI', Tahoma, sans-serif; margin: 36px auto; background: #f5f7fa; color: #222; max-width: 1250px; padding: 0 20px; }
+  h1 { color: #1a237e; border-bottom: 3px solid #1a237e; padding-bottom: 8px; }
+  h2 { color: #283593; margin-top: 36px; border-bottom: 1px solid #c5cae9; padding-bottom: 4px; }
+  h3 { color: #3949ab; margin-top: 22px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 14px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.1); font-size: .93em; }
+  th { background: #1a237e; color: #fff; padding: 7px 9px; text-align: left; font-weight: 600; }
+  td { padding: 6px 9px; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8f8f8; }
+  .pass { color: #2e7d32; font-weight: 700; }
+  .hang { color: #c62828; font-weight: 700; }
+  .warn { color: #e65100; font-weight: 700; }
+  .muted { color: #777; }
+  .box { background: #e8f5e9; border-left: 5px solid #2e7d32; padding: 12px 18px; margin: 16px 0; }
+  .note { background: #fff3e0; border-left: 5px solid #e65100; padding: 12px 18px; margin: 16px 0; }
+  .info { background: #e3f2fd; border-left: 5px solid #1565c0; padding: 12px 18px; margin: 16px 0; }
+  code, pre { background: #eceff1; border-radius: 3px; font-size: .88em; }
+  code { padding: 1px 5px; }
+  pre { padding: 10px 12px; overflow-x: auto; line-height: 1.35; }
+  .meta span { display: inline-block; margin-right: 24px; }
+  nav a { margin-right: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Shared DI: MoRI GPU-atomic-free, GLM-5.3-Flash and Kimi K3 disaggregated serving on MI355X</h1>
+<div class="meta">
+  <span><b>Date:</b> 2026-11-01</span>
+  <span><b>Platform:</b> KVM virtual machines, 8 × MI355X + 8 × AMD Pensando AI NIC (ionic) per node, ACS enabled by the hypervisor</span>
+</div>
+<nav><b>Sections:</b>
+  <a href="#summary">1 Summary</a><a href="#platform">2 Platform and drivers</a><a href="#mori">3 MoRI atomic-free</a>
+  <a href="#test">4 How to test MoRI-EP EP16 / EP32</a><a href="#glm">5 GLM-5.3-Flash</a><a href="#k3">6 Kimi K3</a>
+  <a href="#ep16">7 When EP16 pays off</a><a href="#issues">8 Open issues</a>
+</nav>
+
+<h2 id="summary">1. Summary</h2>
+<div class="box">
+<ul>
+<li><b>MoRI-EP must run GPU-atomic-free on these nodes.</b> The hypervisor enables ACS, so RDMA atomics from the NIC to GPU memory never complete: the atomic build hangs at warm-up round 0 on every ACS-on node. The atomic-free build (PR #736, now in upstream <code>ROCm/mori</code> main from <code>6731ee1</code>) passes EP16 and EP32 bench, accuracy (2,000/2,000 rounds) and 500K-round stress, and is as fast as the atomic build (within ~2 %).</li>
+<li><b>GLM-5.3-Flash-MXFP4 is prefill-bound:</b> scale it with independent EP8 instances, not wider EP. Per-node 2P/2D delivers 172K tok/s at AgentX 512k c64 (TTFT p50 14 s), 1.54× 1P/1D and 1.86× EP16 2P/2D. EP16 is 7–28 % slower than 1P/1D everywhere, with KV usage only 23–30 %.</li>
+<li><b>Kimi K3 MXFP4: disaggregation is what makes long-context agents interactive.</b> One TP8 + DCP8 node (the published recipe) serves every context length but decodes at 0.3–0.6 s per token from 512k up. Every disaggregated layout stays at 9–35 ms. TEP8 1P/1D (TP8 attention + EP8, 16 GPUs) is the best expert-parallel recipe at 256k / 512k and at 750k up to c16.</li>
+<li><b>EP16 earns its place only where context × concurrency outgrows an EP8 decode node.</b> At 750k c32 TEP8's TTFT p50 reaches 23 minutes. On 128K-in / 8K-out at c64 TEP8 collapses to 126 tok/s with 186 ms TPOT, while EP16 keeps 51–56 ms TPOT at 468–517 tok/s (3.7–4×). EP16 is also the only DP-attention layout that can start at 800K context. But one TP8 + DCP8 node (35.2M-token DCP-sharded cache) still beats EP16 per GPU at every point measured.</li>
+<li><b>EP16 over MoRI-EP (atomic-free) is correct at the model level for both models</b> once the configuration rules in sections 3.2 and 8 are followed. GLM-5.3-Flash EP16 2P/2D scores GSM8K in the same 0.887–0.913 band as every EP8 layout and completed its full static and AgentX matrix (prefill batch 4096, GPU util 0.4 / 0.35 with a 16 GiB MoRI heap, <code>--dp-sync-interval 1</code>). Kimi K3 EP16 2P/2D scores 0.938–0.948 (single-node reference 0.940) and serves 750K-token contexts (8 GiB heap, util 0.60). The caveats are settings and throughput, not accuracy.</li>
+<li><b>EP16 stability:</b> its prefill deadlocked under long-context load (5 occurrences; GPUs spinning, workers idle). Turning off the ionic CCQE path (<code>MORI_DISABLE_IONIC_CCQE=1</code>) removed it in a direct replica at the same settings. Halving the prefill batch to 4096 is a second workaround (≈ 12 % throughput cost).</li>
+</ul>
+</div>
+
+<h2 id="platform">2. Platform and drivers</h2>
+<table>
+<tr><th>Item</th><th>Value</th></tr>
+<tr><td>Nodes</td><td>KVM virtual machines, 8 × AMD Instinct MI355X (gfx950, 288 GB HBM) each, 236 CPUs, 2.5 TB RAM. Model serving used 4–5 nodes; MoRI tests used 2- and 4-node sets with ACS on and off</td></tr>
+<tr><td>Host OS / kernel</td><td>Ubuntu 24.04, kernel 6.8.12 (cloud-provider build)</td></tr>
+<tr><td>GPU driver</td><td><code>amdgpu-dkms 1:6.16.13.30300400</code> (module 6.16.13), host ROCm 7.2.0 (<code>rocm-core 7.2.0.70200</code>)</td></tr>
+<tr><td>NIC driver / firmware</td><td>AMD Pensando AI NIC (ionic), 8 × 400 Gb/s per node (one per GPU, rail-only fabric). Driver <b><code>ionic 26.08.18.001.51.g8be56c6</code></b> (DKMS, survives reboot), firmware <code>1.117.5-a-196</code>. 26.08.17 rejects MoRI's GPU-side CQs (IBGDA); 26.08.18 is required for GPU-initiated RDMA</td></tr>
+<tr><td>Container RDMA library</td><td>libionic GDA build matching the image's rdma-core: <code>50.0.26.04.9.001.77.gd3eaeeb</code> (Ubuntu 24.04 images) / <code>39.0.26.04.9.001.77.gd3eaeeb</code> (Ubuntu 22.04 vLLM images); must export <code>ionic_dv_pd_set_dmabuf_alloc</code></td></tr>
+<tr><td>Platform facts</td><td>ACS enabled by the hypervisor (cannot be read from the guest; the atomic bench is the probe). No GPU peer memory: RDMA registers GPU memory through dma-buf (<code>MORI_ENABLE_DMABUF_REG=1</code>). Cross-node RCCL works only over TCP (<code>NCCL_IB_DISABLE=1</code>), so no cross-node TP. MTU resets to 1500 at boot; set 9000 per job (active_mtu 4096). RDMA GID index 1, SL 3, TC 40</td></tr>
+<tr><td>Serving images</td><td>GLM: ROCm 7.2.3 base, vLLM with the GLM-5.3-Flash patches (MAD PR #288 recipe), MoRI <code>amirakb89/mori@e8e412be</code> (PR #736). Kimi K3: base <code>vllm/vllm-openai-rocm:nightly-edad8b03c5285a1c12e7e4f83c1af709b319a01b</code> (ROCm SDK 7.15, torch 2.13) + MoRI rebuilt from <code>ROCm/mori@6731ee1</code> + libionic GDA + MoRIIO port-stride patch. Reference: <code>vllm/vllm-openai-rocm:nightly-rocm100-df6603f0</code></td></tr>
+</table>
+
+<h2 id="mori">3. MoRI GPU-atomic-free (PR #736)</h2>
+<h3>3.1 What changes</h3>
+<ul>
+<li>Upstream MoRI-EP's inter-node dispatch / combine kernels signal completion to remote GPUs with <b>RDMA atomic operations</b> on counters in GPU memory. PR #736 (<code>amirakb89/mori</code>, branch <code>feat/ep-v1-rdma-atomic-free</code>) adds a mode that signals with <b>RDMA WRITE chunk flags</b> instead, selected at runtime by <code>MORI_EP_DISABLE_RDMA_ATOMICS=1</code> (default off = atomics).</li>
+<li><b>Prerequisites (needed by both modes on hosts without a GPU peer-memory client):</b>
+  <ul>
+  <li><a href="https://github.com/ROCm/mori/pull/649">ROCm/mori#649</a> registers the Ionic CQ / SQ / RQ rings and the atomic buffer through dma-buf (merged as <code>15dfb3e0</code>). Without it MoRI-EP cannot create its Ionic queues.</li>
+  <li><a href="https://github.com/ROCm/mori/pull/591">ROCm/mori#591</a> adds <code>MORI_ENABLE_RAIL_ONLY=1</code>, which keeps every RDMA QP on its own rail (ionic_N only reaches ionic_N on other nodes, no cross-rail path).</li>
+  <li>An ionic host driver with dma-buf support (26.08.18 in this work) and the matching libionic GDA userspace provider inside the container (exports <code>ionic_dv_pd_set_dmabuf_alloc</code>).</li>
+  </ul>
+  All three PRs (#591, #649, #736) are in <code>ROCm/mori</code> main at <code>6731ee1</code>.</li>
+<li><b>Alternative for the atomic build:</b> NIC firmware <code>1.117.5-a-196</code> plus PCIe ACS disabled makes RDMA atomics complete under KVM (the original firmware 5a-77 fails even with ACS off). That needs a hypervisor change; the atomic-free mode needs neither firmware nor ACS changes.</li>
+<li>Why it matters here: with ACS on, NIC→GPU traffic goes through the root complex / IOMMU / VM passthrough. Posted writes survive that path; PCIe AtomicOps do not, so a kernel waiting on an atomically updated counter spins forever. Measured on 13 nodes without exception: on every ACS-off node atomics complete; on every ACS-on node they hang.</li>
+<li>Cost: none measurable. On ACS-off nodes atomic-free dispatch was ~2 % <i>faster</i> than atomic at 4096 tokens; combine identical (table 3.3).</li>
+</ul>
+<h3>3.2 How to activate it (upstream)</h3>
+<ol>
+<li><b>Build MoRI from upstream <code>ROCm/mori</code> main at or after <code>6731ee1</code></b>, which contains PR #736. Released wheels and the stock vLLM ROCm nightly images do not have it (the df6603f0 image ships <code>amd_mori 1.2.3.post1</code>, 2026-09-09), so rebuild MoRI inside the serving image:
+<pre>git clone https://github.com/ROCm/mori.git /tmp/mori-src &amp;&amp; cd /tmp/mori-src
+git checkout 6731ee1            # or newer main
+git submodule update --init --recursive
+pip install -r requirements-build.txt cython
+MORI_GPU_ARCHS=gfx950 BUILD_TESTS=OFF BUILD_UMBP=OFF pip install . --no-build-isolation
+grep -rqs MORI_EP_DISABLE_RDMA_ATOMICS src &amp;&amp; echo "atomic-free mode present"</pre></li>
+<li><b>Install the libionic GDA build in the image</b> (section 2) so MoRI can create GPU-side queues over dma-buf.</li>
+<li><b>Runtime environment</b> (every rank):
+<pre>MORI_EP_DISABLE_RDMA_ATOMICS=1          # the atomic-free mode
+MORI_ENABLE_DMABUF_REG=1  MORI_ENABLE_RAIL_ONLY=1
+MORI_RDMA_DEVICES=ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7
+MORI_IB_GID_INDEX=1  MORI_RDMA_SL=3  MORI_RDMA_TC=40  MORI_SOCKET_IFNAME=&lt;bootstrap NIC&gt;  GLOO_SOCKET_IFNAME=&lt;bootstrap NIC&gt;
+MORI_SHMEM_HEAP_SIZE=8589934592         # 8 GiB; larger heaps starve HIP's free-memory accounting (section 8)
+MORI_DISABLE_IONIC_CCQE=1               # recommended for inter-node EP serving (EP16 deadlock, section 6.4)
+NCCL_IB_DISABLE=1  HSA_NO_SCRATCH_RECLAIM=1</pre></li>
+<li><b>In vLLM</b>: <code>--enable-expert-parallel --data-parallel-size N</code> with <code>--all2all-backend mori_high_throughput</code> on prefill and <code>mori_low_latency</code> on decode. Keep tokens-per-rank × EP ranks × hidden × 2 B below 2 GiB (larger MoRI-EP inter-node buffers corrupt output); for GLM-5.3-Flash at EP16 that means <code>--max-num-batched-tokens 4096</code>.</li>
+<li>Older driver (ionic 26.08.17): GPU CQ creation fails; use the CPU host proxy instead (<code>MORI_ENABLE_HOST_PROXY=1 MORI_DISABLE_IONIC_CCQE=1</code>, within 0–8 % of IBGDA in serving).</li>
+</ol>
+<h3>3.3 Measured (MoRI dispatch / combine bench, bf16, hidden 7168, top-8, 256 experts, v1 kernel, 4096 tokens, rank-0 averages)</h3>
+<table>
+<tr><th>Config</th><th>Build</th><th>Dispatch</th><th>Combine</th><th>E2E (CUDA graph)</th><th>Accuracy / stress</th></tr>
+<tr><td>EP16 (2 nodes), ACS off</td><td>atomic-free</td><td>64.6 GB/s, 1,813 µs</td><td>69.8 GB/s, 1,681 µs</td><td>3,503 µs</td><td class="pass">stress 500K + 500K graph, 0 errors (358.7 rounds/s)</td></tr>
+<tr><td>EP16, ACS off</td><td>atomic</td><td>63.2 GB/s, 1,859 µs</td><td>70.0 GB/s, 1,680 µs</td><td>3,547 µs</td><td class="pass">stress PASS</td></tr>
+<tr><td>EP16, ACS on (3 node pairs)</td><td>atomic-free</td><td>64.4 GB/s, 1,822 µs</td><td>69.5 GB/s, 1,687 µs</td><td>3,499 µs</td><td class="pass">stress PASS</td></tr>
+<tr><td>EP16, ACS on (3 node pairs)</td><td>atomic</td><td colspan="3" class="hang">HANG at warm-up round 0 (QPs connect, nothing completes)</td><td class="hang">HANG</td></tr>
+<tr><td>EP32 (4 nodes), ACS on</td><td>atomic-free</td><td>46.2 GB/s, 4,588 µs</td><td>55.0 GB/s, 3,859 µs</td><td>8,447 µs</td><td class="pass">accuracy 2,000/2,000 (v1 and v1_ll, 32 ranks)</td></tr>
+<tr><td>EP32, ACS on</td><td>atomic</td><td colspan="3" class="hang">HANG at warm-up round 0</td><td class="hang">HANG, 0 rounds</td></tr>
+<tr><td>Reference MoRI-EP report, EP16 / EP32</td><td>atomic-free</td><td>64.5 / 46.4 GB/s</td><td>69.8 / 54.8 GB/s</td><td>3,500 / 8,434 µs</td><td class="muted">bare-metal CI EP16: 65.7 / 70.4 GB/s, 3,447 µs</td></tr>
+</table>
+<p class="muted">MoRI-IO (KV transfer engine) on the same nodes: 8-pair aggregate 384 GB/s write / 386 GB/s read at 1 MiB, byte-exact validation; identical between builds.</p>
+
+<h2 id="test">4. How to test MoRI-EP EP16 and EP32</h2>
+<ol>
+<li><b>Host prep on every node</b> (after every reboot):
+<pre>cat /sys/module/ionic/version            # 26.08.18.001.51.g8be56c6
+for d in /sys/class/infiniband/ionic_*; do sudo ip link set "$(ls $d/device/net)" mtu 9000; done
+for i in 0 1 2 3 4 5 6 7; do ibv_devinfo -d ionic_$i | grep -E "state|active_mtu"; done   # PORT_ACTIVE, 4096
+rocm-smi --showmeminfo vram                # every GPU should be (nearly) empty before a run</pre></li>
+<li><b>Image</b>: base <code>rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0</code> + libionic GDA <code>50.0.26.04.9.001.77.gd3eaeeb</code> + MoRI PR #736 @ <code>amirakb89/mori@e8e412be</code> (or upstream <code>ROCm/mori</code> ≥ <code>6731ee1</code>). Atomic comparison: same base + <code>ROCm/mori@15dfb3e0</code>. Both are built with <code>MORI_GPU_ARCHS=gfx950 BUILD_TESTS=OFF BUILD_UMBP=OFF pip install . --no-build-isolation</code> on the rocm/pytorch base plus the libionic GDA packages.</li>
+<li><b>Container</b> (one per node; <code>--privileged</code> is blocked by docker-authz):
+<pre>docker run -d --name mori_af --init --network=host --ipc=host \
+  --device=/dev/kfd --device=/dev/dri --device=/dev/infiniband \
+  --group-add video --group-add $(getent group render | cut -d: -f3) --cap-add=IPC_LOCK \
+  --ulimit memlock=-1:-1 --ulimit nproc=100000:100000 --pids-limit=-1 --shm-size=64g \
+  &lt;mori-atomic-free image&gt; sleep infinity</pre></li>
+<li><b>Environment per rank</b> (WORLD_SIZE 2 = EP16, 4 = EP32; start the highest rank first):
+<pre>RANK=&lt;node index&gt; WORLD_SIZE=&lt;2|4&gt; GPU_PER_NODE=8 MASTER_ADDR=&lt;rank-0 bootstrap IP&gt; MASTER_PORT=&lt;new per run&gt;
+GLOO_SOCKET_IFNAME=&lt;bootstrap NIC&gt; MORI_SOCKET_IFNAME=&lt;bootstrap NIC&gt;
+MORI_RDMA_DEVICES=ionic_0,ionic_1,ionic_2,ionic_3,ionic_4,ionic_5,ionic_6,ionic_7
+MORI_ENABLE_RAIL_ONLY=1 MORI_ENABLE_DMABUF_REG=1 MORI_RDMA_SL=3 MORI_RDMA_TC=40
+MORI_INTERNODE_TIMEOUT=300 HSA_NO_SCRATCH_RECLAIM=1 PYTHONUNBUFFERED=1
+MORI_EP_DISABLE_RDMA_ATOMICS=1        # atomic-free; unset for the atomic build</pre></li>
+<li><b>Tests</b> (inside the container, <code>/workspace/mori</code>, all ranks):
+<pre>S=examples/ops/dispatch_combine/test_dispatch_combine_internode.py
+# bandwidth / latency sweep: kernels v1 and v1_ll, tokens 64 128 1024 2048 4096
+python $S --cmd bench  --kernel-type v1    --max-tokens 4096 --num-qp 2
+python $S --cmd bench  --kernel-type v1_ll --max-tokens 4096 --num-qp 2
+# accuracy: 500 rounds, dispatch bit-exact, combine allclose
+python $S --cmd test   --kernel-type v1    --max-tokens 128  --num-qp 2
+# stress (2 nodes): 500K eager + 500K CUDA-graph rounds (needs the report's loop-count edit, stress_patch.py)
+MORI_STRESS_ROUNDS=500000 python $S --cmd stress --kernel-type v1 --max-tokens 4096 --num-qp 2</pre></li>
+<li><b>Pass criteria</b>: bench within 5 % of section 3.3 (EP16 v1 4096 ≈ 64.5 / 69.8 GB/s, 3.5 ms; EP32 ≈ 46.3 / 54.9 GB/s, 8.45 ms); accuracy 500 "Dispatch Pass" + 500 "Combine Pass" per node; stress exits 0 on all ranks. On ACS-on nodes the atomic build is expected to hang at "WarmUp Round 0 begin"; use a 600–900 s timeout.</li>
+<li><b>Orchestration</b>: one job per node, ranks meeting at a shared-filesystem barrier before and after every configuration so a failure on one node cannot desynchronise the others; rank 0 publishes its IP as master; restart the container after any timeout so no rank keeps running.</li>
+</ol>
+
+<h2 id="glm">5. GLM-5.3-Flash-MXFP4 (recipe: ROCm/MAD PR #288 ported to gfx950)</h2>
+<table>
+<tr><th>Metric</th><th>1P/1D EP8 (16 GPUs)</th><th>EP16 2P/2D, wide EP (32)</th><th>Per-node 2P/2D, 2 × EP8 per leg (32)</th></tr>
+<tr><td>GSM8K strict (5-shot, n = 1,319)</td><td colspan="3">0.887–0.913 across 14 boots of all layouts (no layout effect)</td></tr>
+<tr><td>Static 100K/1K c128: output tok/s / mean TTFT</td><td>886 / 92.5 s</td><td>693 / 112.0 s</td><td class="pass">1,586 / 43.1 s</td></tr>
+<tr><td>AgentX conformance_256k c64: total tok/s</td><td>115,374</td><td>92,323</td><td class="pass">142,799</td></tr>
+<tr><td>AgentX conformance_512k c64: total tok/s / TTFT p50</td><td>111,778 / 31.4 s</td><td>92,866 / 39.8 s</td><td class="pass">172,397 / 14.4 s</td></tr>
+<tr><td>KV usage at 512k c64–c128</td><td colspan="3">23–30 % in every layout (EP16 adds only ≈ 20 % KV per GPU: 4.35M vs 3.62M tokens per DP rank)</td></tr>
+</table>
+<ul>
+<li>GLM-5.3-Flash on MI355X is <b>prefill-bound, not KV-bound</b>: EP16 pays an inter-node all-to-all on every MoE layer (7–28 % slower than 1P/1D) for KV it does not need. Scale it with more independent EP8 prefill instances (per-node mode).</li>
+<li>Known GLM-stack defect, layout-independent: NIAH retrieval collapses on 8–11 of 60 32K-word prompts (0 % at 8K, 30 % at 128K words), also with no KV transfer. Kimi K3 on the newer vLLM stack had 0 of 90.</li>
+<li>Recipe musts: <code>--dp-sync-interval 1</code> (vLLM DP desync hang), <code>--max-num-batched-tokens 4096</code> (MoRI 2 GiB buffer limit), GPU util 0.35 for AgentX (HIP free-memory accounting), MoRIIO READ mode with rail affinity.</li>
+</ul>
+
+<h2 id="k3">6. Kimi K3 MXFP4 (2.8T parameters, 896 experts top-16, hybrid KDA + MLA, 1M context)</h2>
+<h3>6.1 Layouts</h3>
+<table>
+<tr><th>Layout</th><th>GPUs</th><th>Definition</th><th>Decode KV capacity</th><th>GSM8K (n = 1,319)</th></tr>
+<tr><td>TP8 + DCP8, 1 node</td><td>8</td><td>Published vLLM / InferenceX single-node recipe (TP8 attention, MLA cache sharded 8 ways by decode context parallelism, no EP)</td><td>35.2M tokens per node</td><td>0.940</td></tr>
+<tr><td>TEP8 1P/1D</td><td>16</td><td>Prefill node + decode node, each TP8 attention with EP8 experts over the TP group (no MoRI-EP); KV over MoRIIO READ</td><td>≈ 2.7M per decode node</td><td>0.926–0.928</td></tr>
+<tr><td>DEP8 1P/1D / per-node 2P/2D</td><td>16 / 32</td><td>DP2×TP4 attention + EP8 over MoRI-EP IntraNode per node</td><td>≈ 4.1M per decode node; 0.3–0.7M per DP rank</td><td>0.921–0.940</td></tr>
+<tr><td>EP16 2P/2D</td><td>32</td><td>Each leg DP4×TP4 attention across 2 nodes, EP16 over MoRI-EP InterNode (atomic-free)</td><td>16.9M per decode leg (4.2M per rank)</td><td>0.938–0.948</td></tr>
+</table>
+<h3>6.2 AgentX capability matrix (total tok/s / TTFT p50 / TPOT; interactivity target TPOT ≤ 50 ms)</h3>
+<table>
+<tr><th>Layout</th><th>conformance_256k (ISL p50 74K)</th><th>conformance_512k (p99 500K)</th><th>conformance_750k (p50 450K, p99 750K)</th></tr>
+<tr><td>TP8 + DCP8 (8 GPUs)</td><td>c8 15.3K / 3.5 s / 45 ms; c32 18.5K / 6.3 s / <span class="warn">93 ms</span>; c64 19.3K / 30 s / <span class="warn">292 ms</span></td><td>c8 15.5K / 6.2 s / <span class="warn">70 ms</span>; c32 20.5K / 20 s / <span class="warn">267 ms</span>; c64 15.0K / 130 s / <span class="warn">438 ms</span></td><td>c8 12.4K / 122 s / <span class="warn">512 ms</span>; c16 9.3K / 403 s / <span class="warn">619 ms</span>; c32 10.1K / 259 s / <span class="warn">604 ms</span> (DSpark K4: c8 14.5K, 411 ms)</td></tr>
+<tr><td><b>TEP8 1P/1D (16 GPUs)</b></td><td class="pass">c8 19.3K / 8.6 s / 15 ms; c16 22.9K / 22 s / 18 ms; c32 17.4K / 110 s / 17 ms</td><td class="pass">c8 18.1K / 25 s / 11 ms; c16 18.7K / 64 s / 12 ms</td><td>c8 10.2K / 361 s / 12 ms; c16 10.6K / 642 s / 10 ms; <span class="warn">c32 10.6K / 1,377 s / 11 ms</span> (prefix hit 1–7 % of 53–58 % possible)</td></tr>
+<tr><td>DEP8 1P/1D (16 GPUs)</td><td>c16 11.2K / 53 s / 29 ms; c32 10.0K / 177 s / 30 ms (prefill-bound)</td><td>c8 8.8K / 69 s / 24 ms</td><td class="hang">cannot start (800K context needs more KV than a DP rank holds)</td></tr>
+<tr><td>Per-node DEP8 2P/2D + prefill CPU KV offload (32)</td><td class="pass">c32 24.6K / 40 s / 32 ms; c64 25.1K / 150 s / 30 ms</td><td>c8 15.8K / 20 s / 23 ms</td><td class="hang">cannot start</td></tr>
+<tr><td><b>EP16 2P/2D (32 GPUs)</b></td><td>c8 8.1K / 22 s / 27 ms; c16 11.4K / 61 s / 26 ms</td><td class="muted">not measured (prefill hang, before the CCQE fix)</td><td class="pass">c8 9.4K / 335 s / 26 ms; c16 6.5–7.0K / 291–890 s / 21–24 ms; c32 6.2K / 1,798 s / 22 ms (prefix hit 39 % at c8)</td></tr>
+</table>
+<h3>6.3 Decode-KV-bound static test: 131,072 in / 8,192 out (ignore EOS), 2 × c prompts — output tok/s / TTFT p50 / TPOT</h3>
+<table>
+<tr><th>Layout</th><th>Sessions that fit in decode KV</th><th>c16</th><th>c32</th><th>c64</th></tr>
+<tr><td>TP8 + DCP8 (8 GPUs)</td><td>≈ 250</td><td>388 / 34 s / 33 ms</td><td>714 / 7.5 s / 36 ms</td><td class="pass">934 / 11.6 s / 52 ms</td></tr>
+<tr><td>TEP8 1P/1D (16 GPUs)</td><td>≈ 19</td><td>443 / 8.4 s / 29 ms</td><td>277 / 133 s / 79 ms</td><td class="hang">126 / 2,823 s / 186 ms</td></tr>
+<tr><td>EP16 2P/2D, CCQE off (32 GPUs)</td><td>≈ 120</td><td>250 / 43 s / 47 ms</td><td>410 / 113 s / 52 ms</td><td class="pass">517 / 347 s / 56 ms (128/128)</td></tr>
+</table>
+<h3>6.4 EP16 stability: prefill deadlock and fix</h3>
+<ul>
+<li>Symptom (5 times, AgentX 750k c16 / c32, 256k c32–c64, static c64): a prefill step never completes (<code>RPC call to sample_tokens timed out</code> after 1,200 s). py-spy: every Python worker idle while all 16 GPUs report 100 % busy, i.e. a device-side spin in the MoRI-EP InterNode kernels. DEP8 (MoRI IntraNode) never hung.</li>
+<li><b>Fix: <code>MORI_DISABLE_IONIC_CCQE=1</code>.</b> A replica of the run that hung (128K/8K c16 → c32 → c64, prefill batch 8192) completed all cells with CCQE off; 750k c16 also completed, and c32 was running cleanly when the test window ended.</li>
+<li>Alternative: prefill <code>--max-num-batched-tokens 4096</code> — 750k c16 + c32 ran ≈ 4.5 h without a hang (16384 hung at c16, 8192 at c32), at ≈ 12 % throughput cost.</li>
+</ul>
+
+<h2 id="ep16">7. When EP16 pays off (and when it does not)</h2>
+<table>
+<tr><th>Regime</th><th>Best layout measured</th><th>EP16</th></tr>
+<tr><td>Moderate context, any concurrency (GLM all; Kimi K3 256k / 512k)</td><td>TEP8 1P/1D (K3), per-node EP8 instances (GLM)</td><td>Slower: inter-node all-to-all on every MoE layer for KV that is not needed</td></tr>
+<tr><td>Long context, low concurrency (K3 750k c8–c16)</td><td>TEP8 1P/1D (≈ 10.5K tok/s, 10–12 ms TPOT, 16 GPUs)</td><td>Runs (only DP-attention layout that can start at 800K), 21–26 ms TPOT, better prefix reuse and somewhat lower TTFT at c16, but 30–40 % less throughput on twice the GPUs</td></tr>
+<tr><td><b>Context × concurrency beyond an EP8 decode node</b> (K3 750k c32; 128K/8K c32–c64)</td><td>TP8 + DCP8 single node on throughput per GPU</td><td class="pass">Keeps TPOT at 22–56 ms where TEP8 degrades to 23-minute TTFT (750k c32) or collapses (126 tok/s, 186 ms TPOT at 128K/8K c64); 3.7–4× TEP8's output rate at c64</td></tr>
+</table>
+<p><b>Reading:</b> EP16 is a capacity tier. Its value grows with context length × concurrent sessions, because its decode pool holds 4–6× what an EP8 decode node holds. On this stack its prefill is limited to TP4 attention per DP rank: the two routes to TP8 prefill (DP2×TP8 per leg; TP8 prefill servers feeding an EP16 decode group) are both blocked in MoRIIO. So EP16's TTFT stays high, and the single TP8 + DCP8 node (35.2M-token DCP-sharded cache) remains the per-GPU leader in every cell measured. EP16 becomes the scale-out choice for agentic long-context fleets once a TP8 prefill can feed it.</p>
+
+<h2 id="issues">8. Open issues and upstream asks</h2>
+<p>Items 1–3 were found under vLLM disaggregated serving load (long contexts, CUDA graphs, high concurrency), beyond the reference MoRI-EP report, which covers the microbenchmarks (bench, accuracy, stress), MoRI-IO and a correctness-under-load check of DeepSeek-R1 EP16.</p>
+<table>
+<tr><th>#</th><th>Issue</th><th>Status</th></tr>
+<tr><td>1</td><td>MoRI-EP InterNode prefill deadlock under load with ionic CCQE on (GPUs spinning)</td><td class="warn">Workaround <code>MORI_DISABLE_IONIC_CCQE=1</code>; report to MoRI with py-spy dumps</td></tr>
+<tr><td>2</td><td>MoRI-EP inter-node buffers ≥ 2 GiB corrupt output</td><td class="warn">Keep tokens/rank × EP × hidden × 2 B &lt; 2 GiB; report to MoRI</td></tr>
+<tr><td>3</td><td>HIP free-memory accounting counts the MoRI symmetric heap and its peer mappings (≈ 7 × heap); at 16 GiB, runtime kernel loads fail as HIP error 209 "no kernel image" / "invalid resource handle"</td><td class="pass">MoRI heap 8 GiB, lower GPU utilization (K3: 0.60 EP16, 0.75–0.80 TEP8; GLM AgentX 0.35)</td></tr>
+<tr><td>4</td><td>MoRIIO: with one DP rank per node the decode handshake fails (<code>KeyError …_dp1</code>); heterogeneous-TP KDA state transfer not implemented</td><td class="hang">Open; blocks TP8 prefill for EP16</td></tr>
+<tr><td>5</td><td>MoRIIO <code>get_port_offset</code> ignores TP size with TP inside DP (port collisions)</td><td class="pass">Image patch (<code>MORIIO_PORT_TP_STRIDE</code>); upstream candidate</td></tr>
+<tr><td>6</td><td>vLLM DP desync hang on zero-token KV-connector steps</td><td class="pass"><code>--dp-sync-interval 1</code>; upstream fix needed</td></tr>
+<tr><td>7</td><td>Kimi K3 expert parallelism numerically broken on vLLM nightly c50aca14 (AITER a16w4 SiTUv2 had no EP expert mask)</td><td class="pass">Fixed in nightly edad8b03; on edad TP8 + DCP8 refuses to start (masking check), so the reference stays on df6603f0</td></tr>
+</table>
+
+
+</body>
+</html>
