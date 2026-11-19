@@ -1,0 +1,7 @@
+# Requests spread over the LoRA adapters a server holds (benchmark_lora.py); the adapters come from
+# the recipe's lora: (LORA_ADAPTERS), or set them here or at submit time.
+version: 2
+model:
+  env: {BENCHMARK_SCRIPT: lora}
+benchmark:
+  lora: {env: {LORA_CONCURRENCY: "1,8,32"}}

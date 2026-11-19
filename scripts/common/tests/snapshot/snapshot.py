@@ -68,7 +68,7 @@ def launch_env(card, catalog, arch=None):
     import yaml
     sys.path.insert(0, str(SCRIPTS / "common" / "recipe"))
     import models
-    env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+    env = submitted_env(card, catalog)
     recipes = SCRIPTS / ("vllm_dissag" if catalog in ("vllm_dissag", "vllm_multinode") else catalog) / "models.yaml"
     name = env.get("MODEL_NAME")
     if name and recipes.is_file():
@@ -77,6 +77,58 @@ def launch_env(card, catalog, arch=None):
             if k in (r.get("env") or {}):
                 env.setdefault(k, str(r["env"][k]))
     return env
+
+
+def gpu_memory_bytes(arch):
+    """One GPU's memory for an arch: its first product in the catalog (what the probe would read)."""
+    import yaml
+    with open(COMPAT / "rocm.yaml") as f:
+        prods = (yaml.safe_load(f)["accelerators"].get(arch) or {}).get("products") or {}
+    return int(next(iter(prods.values()))["hbm_gb"] * 1e9) if prods else 0
+
+
+class NeedsMadengine(RuntimeError):
+    """A workload card (MAD_CONFIG) cannot be resolved without madengine."""
+
+
+def needs_madengine(card):
+    """Whether this card's workload file needs madengine and madengine is not importable."""
+    if not (card.get("env_vars") or {}).get("MAD_CONFIG"):
+        return False
+    try:
+        import madengine.deployment.layered_config  # noqa: F401
+        return False
+    except ImportError:
+        return True
+
+
+def cards_of(catalog, a):
+    """The catalog's cards this run checks; workload cards are skipped, and said so, without
+    madengine (which resolves their workload files)."""
+    for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
+        if a.card not in card["name"]:
+            continue
+        if needs_madengine(card):
+            print(f"  SKIP  {catalog}/{card['name']}: workload file needs madengine on PYTHONPATH")
+            continue
+        yield card
+
+
+def submitted_env(card, catalog):
+    """The card's env as a launcher receives it: its workload file (MAD_CONFIG, madengine's layered
+    config -- the code both Jenkins modes use) under its env_vars. A workload card needs madengine
+    importable (PYTHONPATH); refused otherwise rather than run with half its settings."""
+    env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
+    if not env.get("MAD_CONFIG"):
+        return env
+    try:
+        from madengine.deployment.layered_config import resolve_for_model
+    except ImportError:
+        raise NeedsMadengine(f"{card['name']}: its workload file ({env['MAD_CONFIG']}) is resolved by "
+                             "madengine; put madengine's src on PYTHONPATH")
+    layered, _ = resolve_for_model(card, SCRIPTS / catalog)
+    pins = (card.get("docker_build_arg") or {}).get("PINS")       # as madengine's submit env sets it
+    return {**({"MAD_PIN_SET": pins} if pins else {}), **layered, **env}
 
 
 def default_gpus_per_node():
@@ -227,7 +279,7 @@ def run_as_tasks(script, env, nodes, mode, cwd=None):
     return procs[0].returncode, outs[0]
 
 
-def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
+def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_output=False):
     work = Path(tempfile.mkdtemp(prefix="madsnap."))
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
@@ -253,7 +305,8 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
             "SHARED_MOUNT": str(work / "shared"),
             "JIT_CACHE_HOST": str(work / "jit"),
         }
-        env.update({k: str(v) for k, v in (card.get("env_vars") or {}).items()})
+        env.update(submitted_env(card, catalog))
+        env.setdefault("MAD_GPU_MEMORY_BYTES", str(gpu_memory_bytes(env["MAD_GPU_ARCH"])))   # as the probe would
         env["DOCKER_IMAGE_NAME"] = "img:snapshot"
         script = work / "scripts" / catalog / card["scripts"]
         # From the launcher's own directory, as documented (`cd scripts/<dir> &&
@@ -294,7 +347,10 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False):
         }
         if rc != 0:
             snap["stderr_tail"] = output.splitlines()[-5:]
-        return normalize(snap, work)
+        out = normalize(snap, work)
+        if keep_output:              # for tests that read what the launcher said; never in a golden
+            out["output"] = output
+        return out
     finally:
         shutil.rmtree(work)
 
@@ -324,9 +380,7 @@ def main():
     for catalog in CATALOGS:
         if a.catalog and catalog != a.catalog:
             continue
-        for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
-            if a.card not in card["name"]:
-                continue
+        for card in cards_of(catalog, a):
             checked += 1
             got = json.dumps(snapshot_card(catalog, card), indent=1) + "\n"
             gold = GOLDEN / catalog / f"{card['name']}.json"
@@ -373,9 +427,7 @@ def spec_file_equivalence(a):
     for catalog in CATALOGS:
         if a.catalog and catalog != a.catalog:
             continue
-        for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
-            if a.card not in card["name"]:
-                continue
+        for card in cards_of(catalog, a):
             checked += 1
             gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
             env = launch_env(card, catalog)
@@ -415,9 +467,7 @@ def equivalence(a):
     for catalog in CATALOGS:
         if a.catalog and catalog != a.catalog:
             continue
-        for card in json.loads((SCRIPTS / catalog / "models.json").read_text()):
-            if a.card not in card["name"]:
-                continue
+        for card in cards_of(catalog, a):
             checked += 1
             gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
             got = snapshot_card(catalog, card, a.equivalence or "slurm-srun", a.spooled)

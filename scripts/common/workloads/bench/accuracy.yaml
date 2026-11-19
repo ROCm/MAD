@@ -1,0 +1,7 @@
+# Accuracy on task sets (benchmark_accuracy.py): ACC_TASKS lists JSONL files; the arithmetic smoke
+# set beside the benchmark is the default. Override ACC_TASKS per model or at submit time.
+version: 2
+model:
+  env: {BENCHMARK_SCRIPT: accuracy}
+benchmark:
+  accuracy: {env: {ACC_CONCURRENCY: "8", ACC_MAX_TOKENS: "64"}}

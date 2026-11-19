@@ -104,11 +104,18 @@ DEEPEP_VALID_MODELS=( \
 )
 
 
+# A recipe that is an alias of another (models.yaml `alias:`, e.g. the e2e examples) is allowed
+# wherever the recipe it inherits is: the lists below name base recipes.
+_MODEL_LIST_NAME="$(python3 "${MAD_SCRIPTS_DIR}/common/recipe/models.py" "${SCRIPT_DIR}/models.yaml" \
+    "${MODEL_NAME}" --base 2>/dev/null || echo "${MODEL_NAME}")"
+[ -f "${SCRIPT_DIR}/models.yaml" ] || _MODEL_LIST_NAME="${MODEL_NAME}"
+[ "${_MODEL_LIST_NAME}" != "${MODEL_NAME}" ] && echo "MODEL_NAME '${MODEL_NAME}' inherits recipe '${_MODEL_LIST_NAME}'"
+
 validate_model_name() {
   local is_valid_model=false
 
   for model in "${VALID_MODELS[@]}"; do
-    if [[ "$MODEL_NAME" == "$model" ]]; then
+    if [[ "$_MODEL_LIST_NAME" == "$model" ]]; then
       is_valid_model=true
       break
     fi
@@ -199,19 +206,19 @@ model_is_wide_ep_only() {
 # allowlists; TP uses the global VALID_MODELS (already validated above) minus the
 # wideEP-only models.
 if [[ "$WIDE_EP" == "0" ]]; then
-  if model_is_wide_ep_only "$MODEL_NAME"; then
+  if model_is_wide_ep_only "$_MODEL_LIST_NAME"; then
     echo "Error: MODEL_NAME '$MODEL_NAME' is wideEP-only (set WIDE_EP=1). TP mode is not supported for it." >&2
     printf "wideEP-only models:\n"; for m in "${WIDE_EP_ONLY_MODELS[@]}"; do printf "  - %s\n" "$m"; done
     exit 1
   fi
 elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "moriio" ]]; then
-  if ! model_allows_mori_ep "$MODEL_NAME"; then
+  if ! model_allows_mori_ep "$_MODEL_LIST_NAME"; then
     echo "Error: CONNECTOR=moriio WIDE_EP=1 but MODEL_NAME '$MODEL_NAME' is not in MORI_EP_VALID_MODELS" >&2
     printf "MoRI EP allowed models:\n"; for m in "${MORI_EP_VALID_MODELS[@]}"; do printf "  - %s\n" "$m"; done
     exit 1
   fi
 elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
-  if ! model_allows_deepep "$MODEL_NAME"; then
+  if ! model_allows_deepep "$_MODEL_LIST_NAME"; then
     echo "Error: CONNECTOR=rixl WIDE_EP=1 (deepep) but MODEL_NAME '$MODEL_NAME' is not in DEEPEP_VALID_MODELS" >&2
     printf "DeepEP allowed models:\n"; for m in "${DEEPEP_VALID_MODELS[@]}"; do printf "  - %s\n" "$m"; done
     exit 1

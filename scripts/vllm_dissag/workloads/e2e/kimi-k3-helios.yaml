@@ -1,0 +1,10 @@
+# Kimi-K3 on Helios (CDNA 5): 72-GPU wide-EP pools, one per rack, KV over scale-out -- the topology
+# spec (scheduler placement: --segment / pod affinity) and the platform (4 GPUs per tray). Until a
+# pin set and engine build list CDNA 5, the gate refuses with what is missing (recipe.py bringup).
+version: 2
+defaults: [../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/sweep.yaml]
+model:
+  env:
+    MODEL_NAME: Kimi-K3-MXFP4
+    MAD_PLATFORM: mi455x-helios-tray
+    MAD_TOPOLOGY: common/topology/specs/v2/helios_wide_ep72.json

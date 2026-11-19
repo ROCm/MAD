@@ -1,0 +1,7 @@
+# Qwen3-32B (dense, BF16): one TP-1 server per GPU behind a router (multi-tenant replicas), each
+# serving two LoRA adapters beside the base model (the recipe's lora:), measured by spreading
+# requests over the adapters.
+version: 2
+defaults: [../../../common/workloads/serve/replicas.yaml, ../../../common/workloads/bench/lora.yaml]
+model:
+  env: {MODEL_NAME: Qwen3-32B-LoRA, MODEL_WEIGHTS_NAME: Qwen3-32B, COLOCATED_EXTRA_ARGS: "--max-model-len 8192"}

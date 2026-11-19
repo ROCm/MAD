@@ -1,0 +1,6 @@
+# Embeddings throughput and latency per concurrency (benchmark_embeddings.py).
+version: 2
+model:
+  env: {BENCHMARK_SCRIPT: embeddings}
+benchmark:
+  embeddings: {env: {EMB_CONCURRENCY: "1,8,32", EMB_BATCH: "8", EMB_WORDS: "128"}}

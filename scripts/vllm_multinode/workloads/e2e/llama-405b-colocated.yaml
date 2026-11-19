@@ -1,0 +1,8 @@
+# Llama-3.1-405B (dense, FP8) on 2 nodes as one TP8 x PP2 server. The recipe's roles add the FP8
+# KV-cache argument the server flags lack. Accuracy harness.
+version: 2
+defaults: [../../../common/workloads/serve/vllm-colocated.yaml, ../../../common/workloads/bench/accuracy.yaml]
+model:
+  env:
+    MODEL_NAME: Llama-3.1-405B-Instruct-FP8-KV
+    COLOCATED_EXTRA_ARGS: "--max-model-len 32768 --max-num-seqs 64"

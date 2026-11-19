@@ -79,6 +79,8 @@ def from_env(env, launcher):
         tp = _int(env, "TP_SIZE", gpus)
         pp = _int(env, "PP_SIZE", nnodes)
         parallel = {"mode": "tp_pp", "tp": tp, "pp": pp}
+        if env.get("REPLICAS", "0") == "1":          # independent TP_SIZE-GPU servers on every node
+            parallel = {"mode": "replicas", "tp": tp}
         if env.get("ENABLE_EP", "0") == "1":
             parallel["ep"] = True
             if env.get("ALL2ALL_BACKEND"):
@@ -133,8 +135,12 @@ def catalog():
     global _CATALOG
     if _CATALOG is None:
         import yaml
-        with open(os.environ.get("MAD_CATALOG") or CATALOG) as f:
-            _CATALOG = yaml.safe_load(f) or {}
+        path = os.environ.get("MAD_CATALOG") or CATALOG
+        try:
+            with open(path) as f:
+                _CATALOG = yaml.safe_load(f) or {}
+        except OSError as e:
+            raise TopologyError(f"the capability catalog is needed for platforms and domains: {e}")
     return _CATALOG
 
 

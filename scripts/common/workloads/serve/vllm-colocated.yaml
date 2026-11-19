@@ -1,0 +1,5 @@
+# vLLM colocated serving over several nodes: one server, tensor x pipeline parallel.
+version: 2
+defaults: [../base.yaml]
+model:
+  env: {TP_SIZE: "8", PP_SIZE: "2", ENABLE_EP: "0"}

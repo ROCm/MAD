@@ -35,5 +35,19 @@ class Quotes(unittest.TestCase):
                 self.assertTrue(problems(body))
 
 
+class PythonBodies(unittest.TestCase):
+    def check(self, body):
+        with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as f:
+            f.write("x=$(python3 -c '\n" + body + "\n')\n")
+        try:
+            return C.check(f.name)
+        finally:
+            os.unlink(f.name)
+
+    def test_any_apostrophe_in_a_python_body_is_caught(self):
+        self.assertTrue(self.check('print(f"{os.environ[\'MODEL_NAME\']}")'))   # the bug this caught
+        self.assertEqual(self.check('print(os.environ["MODEL_NAME"])'), [])
+
+
 if __name__ == "__main__":
     unittest.main()

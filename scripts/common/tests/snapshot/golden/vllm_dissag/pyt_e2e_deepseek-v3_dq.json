@@ -1,0 +1,18 @@
+{
+ "card": "pyt_e2e_deepseek-v3_dq",
+ "catalog": "vllm_dissag",
+ "inputs": {
+  "nodes": 2,
+  "gpu_arch": "gfx942"
+ },
+ "exit_code": 1,
+ "calls": [],
+ "ranks": [],
+ "stderr_tail": [
+  "[recipe] DeepSeek-V3-DQ decode: mxfp4 weights are converted to int4_g32 by vllm@vllm-kimi-k3 on gfx942",
+  "[recipe] DeepSeek-V3-DQ prefill: serves its own artifact DeepSeek-V3-MXFP4-W4A4",
+  "[recipe] DeepSeek-V3-DQ decode: serves its own artifact DeepSeek-V3-MXFP4-W4A16",
+  "x DeepSeek-V3-DQ's roles do not resolve on gfx942 (pin set vllm-kimi-k3) (above).",
+  "  Use the model's recipe for this GPU, or RECIPE_CHECK=0 to run it anyway."
+ ]
+}

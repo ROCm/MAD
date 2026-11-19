@@ -1,0 +1,5 @@
+# SGLang prefill/decode disaggregation, DP attention + expert parallelism (MoRI EP).
+version: 2
+defaults: [../base.yaml]
+model:
+  env: {DP_MODE: "1", RUN_MORI: "1"}

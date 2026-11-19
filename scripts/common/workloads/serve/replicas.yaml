@@ -1,0 +1,11 @@
+# Independent servers per node behind a router (multi-tenant / high throughput): GPUS_PER_NODE /
+# TP_SIZE of them on every node. The tag names the shape from the values below (interpolation).
+version: 2
+defaults: [../base.yaml]
+model:
+  env:
+    REPLICAS: "1"
+    TP_SIZE: "1"
+    PP_SIZE: "1"
+    ENABLE_EP: "0"
+    PERF_TAGS: "vllm_multinode,replicas,tp${model.env.TP_SIZE}"

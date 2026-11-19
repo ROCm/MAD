@@ -596,3 +596,38 @@ Kimi-K3-MXFP4:
 Kimi-K3-MXFP4-MI355X:                   # the gfx950 variant, by name for its card
   alias: Kimi-K3-MXFP4
   arch: gfx950
+
+# ============================ End-to-end examples (docs/e2e-examples.md) ============================
+# Each inherits a validated recipe (alias) and changes only what the example demonstrates; the
+# base recipes above are untouched.
+
+# DeepSeek-V3 with multi-token-prediction speculative decoding on the decode role, and its KV
+# budget written as a fraction of GPU memory instead of 20 GB for one GPU (null drops the byte count).
+DeepSeek-V3-MTP:
+  alias: DeepSeek-V3
+  env: {KV_CACHE_MEMORY_BYTES: null}
+  memory: {KV_CACHE_MEMORY_BYTES: {fraction: 0.1}}
+  roles:
+    decode: {speculative: {method: deepseek_mtp, num_speculative_tokens: 1}}
+
+# Disaggregated quantization (arXiv 2609.26333): compute-bound prefill in FP4 W4A4 from its own
+# checkpoint, memory-bound decode weight-only 4-bit with 16-bit activations from another. Needs FP4
+# matrix compute: resolves on gfx950, refused on gfx942 naming the FP4 activations.
+DeepSeek-V3-DQ:
+  alias: DeepSeek-V3
+  roles:
+    prefill: {artifact: DeepSeek-V3-MXFP4-W4A4, quantization: {weights: mxfp4, activations: mxfp4}}
+    decode: {artifact: DeepSeek-V3-MXFP4-W4A16, quantization: {weights: mxfp4, activations: bf16}}
+
+# Qwen3-32B serving LoRA adapters beside the base model.
+Qwen3-32B-LoRA:
+  alias: Qwen3-32B
+  roles:
+    default:
+      lora: {modules: {sql: /adapters/qwen3-32b-sql, support: /adapters/qwen3-32b-support}, max_loras: 4, max_rank: 64}
+
+# An embedding model: a pooling server (its flags come from the workload), BF16, any GPU.
+Qwen3-Embedding-8B:
+  roles:
+    default: {quantization: {weights: bf16, activations: bf16}}
+    server: {}

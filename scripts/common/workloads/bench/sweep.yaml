@@ -1,0 +1,4 @@
+# The throughput/latency sweep over concurrencies (benchmark_xPyD.sh).
+version: 2
+benchmark:
+  sweep: {env: {BENCHMARK_SCRIPT: sweep}}

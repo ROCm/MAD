@@ -1,0 +1,6 @@
+# Needle in a haystack: retrieval accuracy per context length (benchmark_niah.sh).
+version: 2
+model:
+  env: {BENCHMARK_SCRIPT: niah}
+benchmark:
+  niah: {env: {NIAH_WORDS: "10000,50000,100000,200000"}}

@@ -159,7 +159,7 @@ if [[ "${REPLICAS:-0}" == "1" ]]; then
     _rep_devs() { seq -s, $(( $1 * TP_SIZE )) $(( ($1 + 1) * TP_SIZE - 1 )); }
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         for i in $(seq 0 $(( _per_node - 1 ))); do
-            echo "===DRYRUN replica ${i} node=${NODE_RANK} devices=$(_rep_devs "$i")"
+            echo "===DRYRUN replica ${i} node=${NODE_RANK} role=$([[ "$_HEAD" == 1 ]] && echo head || echo worker) devices=$(_rep_devs "$i")"
             printf '%s\n' vllm serve "${MODEL_PATH}" "${_rep_args[@]}" --port "$(_rep_port "$i")"
             echo "===END"
         done

@@ -1,0 +1,8 @@
+# The root of every workload (madengine layered config, version 2: OmegaConf `defaults` inheritance).
+# A workload file says what to run and measure; the site (platform, fabric, storage) comes from the
+# run's context, and anything passed through config at submit time wins over every layer here.
+version: 2
+model:
+  env:
+    RECIPE_CHECK: "1"        # resolve the recipe's roles against the GPU and the image before allocating
+    MAD_BEST_CONFIG: "1"     # run the best-known configuration for this model/platform/shape when one exists

@@ -113,16 +113,19 @@ config_apply_recipe() {
 import os, sys, yaml
 import models  # scripts/common/recipe/models.py: aliases and per-accelerator variants
 m = yaml.safe_load(open(os.environ["MODELS_YAML"])) or {}
+name = os.environ["MODEL_NAME"]
 try:
-    r, best = models.for_job(m, os.environ["MODEL_NAME"], os.environ.get("MAD_GPU_ARCH") or None)
+    r, best = models.for_job(m, name, os.environ.get("MAD_GPU_ARCH") or None)
     r = models.with_memory(r, models.hbm_from_env())
 except ValueError as e:
-    sys.exit(f"[config] {os.environ['MODEL_NAME']}: {e}")
+    sys.exit("[config] %s: %s" % (name, e))
 if best:
-    print(f"[config] best-known configuration for {os.environ['MODEL_NAME']} on {best.get('platform')} "
-          f"({best.get('date', 'undated')}, {best.get('throughput')} tok/s/GPU): over the recipe; "
-          "MAD_BEST_CONFIG=0 runs the recipe as written", file=sys.stderr)
-    sys.stdout.write(f"MAD_BEST_KNOWN={best.get('platform')}:{best.get('date', '')}\0")
+    # (No single quotes in this program: it is a single-quoted shell argument.)
+    plat, date = best.get("platform"), best.get("date", "undated")
+    print("[config] best-known configuration for %s on %s (%s, %s tok/s/GPU): over the recipe; "
+          "MAD_BEST_CONFIG=0 runs the recipe as written" % (name, plat, date, best.get("throughput")),
+          file=sys.stderr)
+    sys.stdout.write("MAD_BEST_KNOWN=%s:%s\0" % (plat, date))
 for k, v in ((r or {}).get("env") or {}).items():
     sys.stdout.write(f"{k}={v}\0")
 ')

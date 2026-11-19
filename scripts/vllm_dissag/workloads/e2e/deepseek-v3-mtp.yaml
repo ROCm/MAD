@@ -1,0 +1,7 @@
+# DeepSeek-V3 (MoE, FP8), 1 prefill + 1 decode node: multi-token-prediction speculative decoding
+# on decode (a recipe-role need turned into vLLM's --speculative-config), the KV budget as a tenth
+# of GPU memory (probed per node), and the accuracy harness.
+version: 2
+defaults: [../../../common/workloads/family/deepseek-v3.yaml, ../../../common/workloads/bench/accuracy.yaml]
+model:
+  env: {MODEL_NAME: DeepSeek-V3-MTP, MODEL_WEIGHTS_NAME: DeepSeek-V3}

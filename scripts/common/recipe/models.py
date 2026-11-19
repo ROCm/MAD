@@ -74,8 +74,10 @@ def effective(models, name, arch=None, _seen=()):
             raise ValueError(f"recipe {name!r} is an alias of {target!r}, which does not exist")
         extra = {k: v for k, v in recipe.items() if k not in META}
         return _overlay(out, extra)
-    arch = arch or recipe.get("default_arch")
-    variant = ((recipe.get("variants") or {}).get(arch) or {}) if arch else {}
+    variants = recipe.get("variants") or {}
+    # The GPU's variant; a GPU the recipe has none for gets the default one, whose GPU_ARCHS then
+    # refuses it -- never the bare base, which would run with none of the GPU-specific settings.
+    variant = variants.get(arch) or variants.get(recipe.get("default_arch")) or {}
     out = {k: v for k, v in recipe.items() if k not in META}
     return _overlay(out, variant)
 
@@ -121,6 +123,15 @@ BEST_KNOWN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "per
 SHAPE_KEYS = ("xP", "yD", "NNODES", "TP_SIZE", "PP_SIZE", "EP_TP_SIZE", "WIDE_EP", "DP_MODE")
 
 
+def _registry_path(env):
+    """MAD_BEST_REGISTRY (a relative path is taken from scripts/, as topology specs are), else the
+    repository's perf/best_known.jsonl."""
+    p = env.get("MAD_BEST_REGISTRY")
+    if not p:
+        return BEST_KNOWN
+    return p if os.path.isabs(p) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", p)
+
+
 def best_record(name, env=None):
     """The best-known configuration for this run of NAME, or None: a record of the registry
     (MAD_BEST_REGISTRY, default perf/best_known.jsonl) for this model and launcher (MAD_LAUNCHER),
@@ -130,7 +141,7 @@ def best_record(name, env=None):
     env = os.environ if env is None else env
     if env.get("MAD_BEST_CONFIG", "1") == "0" or not name:
         return None
-    path = env.get("MAD_BEST_REGISTRY") or BEST_KNOWN
+    path = _registry_path(env)
     try:
         with open(path) as f:
             rows = [json.loads(line) for line in f if line.strip() and not line.lstrip().startswith("#")]
@@ -160,7 +171,7 @@ def has_best_records(name, env=None):
     if env.get("MAD_BEST_CONFIG", "1") == "0":
         return False
     try:
-        with open(env.get("MAD_BEST_REGISTRY") or BEST_KNOWN) as f:
+        with open(_registry_path(env)) as f:
             return any(json.loads(l).get("model") == name and json.loads(l).get("launcher") == env.get("MAD_LAUNCHER")
                        for l in f if l.strip() and not l.lstrip().startswith("#"))
     except FileNotFoundError:
@@ -214,6 +225,8 @@ def main(argv=None):
                     help="the GPU whose variant applies (default: MAD_GPU_ARCH; an alias pins its own)")
     ap.add_argument("--write")
     ap.add_argument("--uses-variants", action="store_true")
+    ap.add_argument("--base", action="store_true",
+                    help="print the recipe NAME is an alias of, followed to the end (else NAME)")
     ap.add_argument("--picks-variant", action="store_true",
                     help="exit 0 when what NAME runs depends on the GPU (variants, or best-known records)")
     ap.add_argument("--needs-memory", action="store_true",
@@ -225,6 +238,13 @@ def main(argv=None):
         models = yaml.safe_load(f) or {}
     if a.uses_variants:
         return 0 if uses_variants(models, a.name) else 1
+    if a.base:
+        name, seen = a.name, set()
+        while isinstance(models.get(name), dict) and "alias" in models[name] and name not in seen:
+            seen.add(name)
+            name = models[name]["alias"]
+        print(name)
+        return 0
     if a.picks_variant:
         r = models.get(a.name)
         return 0 if (isinstance(r, dict) and "alias" not in r and r.get("variants")) or has_best_records(a.name) else 1

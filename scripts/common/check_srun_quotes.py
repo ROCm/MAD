@@ -35,7 +35,7 @@ import glob
 import re
 import sys
 
-OPEN = re.compile(r"bash\s+-c\s+'\s*$")
+OPEN = re.compile(r"(bash|python3?)\s+-c\s+'\s*$")   # a shell or Python program in one single-quoted argument
 SPLICE = re.compile(r'^"\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*(?::?[-+=?][^"\s}]*)?\})"$')
 # '"'"' closes the string, adds a literal apostrophe in double quotes, and reopens it: the
 # body receives one apostrophe and stays one word. Taken out before pairing.
@@ -57,6 +57,7 @@ def check(path):
         if not OPEN.search(lines[i]):
             i += 1
             continue
+        python = "python" in lines[i]
         start, inq, i = i, True, i + 1
         while i < len(lines) and inq:
             line = lines[i]
@@ -76,7 +77,9 @@ def check(path):
                 else:
                     for a, b in zip(cols[0::2], cols[1::2]):
                         inner = line[a + 1:b]
-                        if not SPLICE.match(inner) and DANGEROUS.search(inner):
+                        # In a Python body any apostrophe changes the program (['KEY'] becomes
+                        # [KEY]), not only one that splits a shell word.
+                        if not SPLICE.match(inner) and (python or DANGEROUS.search(inner)):
                             problems.append(
                                 (i + 1, start + 1,
                                  "escaped text splits the word: %r" % inner[:32],
