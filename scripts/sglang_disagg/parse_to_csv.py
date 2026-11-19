@@ -12,6 +12,7 @@ throughput is retained (all metrics come from that single best run, so they
 stay mutually consistent).
 """
 
+import os
 import re
 import csv
 from pathlib import Path
@@ -33,6 +34,9 @@ def _extract(pattern: str, text: str):
     """Return the first capture group as float (commas stripped), else None."""
     m = re.search(pattern, text)
     return float(m.group(1).replace(",", "")) if m else None
+
+
+MAX_REQUEST_FAILURE_RATE = float(os.environ.get("MAX_REQUEST_FAILURE_RATE", "0.10"))
 
 
 def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
@@ -63,9 +67,13 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
         prev_section = sections[i - 1]
 
         # Config emitted by benchmark_xPyD.sh: "RUNNING: prompts  isl X osl Y con Z"
-        config_match = re.search(
+        # The section before a result can hold several attempts (one that
+        # exited without printing a result, then the next point); the result
+        # belongs to the LAST one, so take its config as well as its counts.
+        config_matches = list(re.finditer(
             r"RUNNING: prompts\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)", prev_section
-        )
+        ))
+        config_match = config_matches[-1] if config_matches else None
         if config_match:
             current_isl = int(config_match.group(1))
             current_osl = int(config_match.group(2))
@@ -97,12 +105,64 @@ def parse_benchmark_log(log_file: str) -> Dict[Tuple[int, int, int], Dict]:
             "mean_itl_ms": _extract(r"Mean ITL \(ms\):\s+([\d,\.]+)", section),
         }
 
+        # A client can exit 0 with most requests failed and still print a
+        # throughput. Compare the completed count with the prompts it was
+        # asked for (its own argument dump precedes the result) and mark the
+        # run failed above MAX_REQUEST_FAILURE_RATE (default 10%).
+        completed = _extract(r"Successful requests:\s+([\d,]+)", section)
+        # The section can hold several attempts (a client that exited without
+        # printing a result is followed by the next one); the result belongs
+        # to the last argument dump.
+        # Counts from the same final attempt: everything after its
+        # "INFO ... prompts=" marker (which precedes its RUNNING line).
+        attempt = prev_section
+        infos = list(re.finditer(r"INFO: model=.*?\bprompts=(\d+)", prev_section))
+        if infos:
+            attempt = prev_section[infos[-1].start():]
+        asked_all = re.findall(r"num_prompts=(\d+)", attempt)
+        if not asked_all and infos:
+            # Fall back to the launcher's own marker for the attempt.
+            asked_all = [infos[-1].group(1)]
+        asked = float(asked_all[-1]) if asked_all else None
+        row["completed"], row["requested"] = completed, asked
+        # A run whose counts cannot be established is not verified, so it is
+        # treated as failed: it can neither pass nor displace a checked run.
+        row["unverified"] = completed is None or not asked
+        row["failed"] = bool(
+            row["unverified"]
+            or completed < asked * (1 - MAX_REQUEST_FAILURE_RATE))
+
         config_key = (current_isl, current_osl, current_con)
         best = results.get(config_key)
-        if best is None or total_throughput > best["total_token_throughput_tok_s"]:
+        # Keep the best run that did not fail; a failed run is kept only when
+        # it is all there is, so the failure is reported, not hidden.
+        if (best is None
+                or (best["failed"] and not row["failed"])
+                or (best["failed"] == row["failed"]
+                    and total_throughput > best["total_token_throughput_tok_s"])):
             results[config_key] = row
 
     return results
+
+
+def launched_configs(log_file: str):
+    """(isl, osl, con) of every point the launcher started after warmup.
+
+    A client can exit 0 without printing a result section, and then the
+    level never reaches parse_benchmark_log at all. Comparing what was
+    launched with what was parsed catches that; retries of one level count
+    once.
+    """
+    with open(log_file, "r") as f:
+        content = f.read()
+    m = re.search(r"RUNNING: the benchserving script for iter: 1", content)
+    if m:
+        content = content[m.start():]
+    return {
+        (int(a), int(b), int(c))
+        for a, b, c in re.findall(
+            r"RUNNING: prompts\s+isl\s+(\d+)\s+osl\s+(\d+)\s+con\s+(\d+)", content)
+    }
 
 
 def _sorted_results(results: Dict[Tuple[int, int, int], Dict]):
@@ -241,7 +301,7 @@ def save_perf_csv(
                     "model": config_key,
                     "performance": f"{value:.2f}",
                     "metric": metric_name,
-                    "status": "SUCCESS",
+                    "status": "FAILURE" if data.get("failed") else "SUCCESS",
                 }
                 row.update(meta)
                 # model_name (catalog key) is prepended by madengine; keep the
@@ -299,6 +359,24 @@ def main():
     print(f"\nSummary:")
     print(f"  Total unique configurations: {len(results)}")
     print(f"  Output file: {output_file}")
+
+    missing = sorted(launched_configs(log_file) - set(results))
+    for isl, osl, con in missing:
+        print(f"Error: isl={isl} osl={osl} con={con} was launched but produced no "
+              "benchmark result")
+
+    failed = [r for r in results.values() if r.get("failed")]
+    for r in failed:
+        if r.get("unverified"):
+            print(f"Error: isl={r['isl']} osl={r['osl']} con={r['con']}: the "
+                  "completed or requested request count is missing from the log, "
+                  "so the failure rate cannot be checked")
+        else:
+            print(f"Error: isl={r['isl']} osl={r['osl']} con={r['con']}: "
+                  f"{int(r['completed'])} of {int(r['requested'])} requests completed "
+                  f"(more than {MAX_REQUEST_FAILURE_RATE:.0%} failed)")
+    if failed or missing:
+        sys.exit(2)
 
 
 if __name__ == "__main__":
