@@ -1,0 +1,20 @@
+# Case-B conformance profile with a 900k ISL tail (preset: conformance_512k).
+# Serve with max-model-len >= 956000 (isl clamp + osl clamp): aiperf drops
+# whole sessions whose peak ISL + max_tokens exceeds --max-context-length.
+name: conformance_900k
+preset: conformance_512k
+id_prefix: case900k
+
+isl_p:   [540000, 768000, 900000]
+
+# Sampling clamps (lo, hi). Replaced whole by the preset merge, so osl/delay are restated.
+clamps:
+  isl:   [1200, 936000]
+  osl:   [8, 20000]
+  delay: [1, 600]
+
+# Verifier targets. Replaced whole by the preset merge, so 512k's ISL P99
+# band_override is dropped and default bands apply.
+verify:
+  turns_p: [5, 82, 144]
+  cache_target: 89

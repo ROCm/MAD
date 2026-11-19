@@ -285,6 +285,27 @@ else
     echo "$pm_out" | sed 's/^/        /'
 fi
 
+# 7.6 --emit-json resolves a profile's preset: chain like the suite path does.
+cat > "$TMP/preset_suite.yaml" <<YAML
+serving:
+  model: auto
+  max_model_len: 800000
+workloads:
+  - name: conformance_750k
+    source: profile
+    preset: conformance_750k
+YAML
+"$PY" "$AGENTX_DIR/agentx_config.py" --config "$TMP/preset_suite.yaml" --workload conformance_750k \
+    --profile-out "$TMP/c750_suite.json" --emit-workload-shell >/dev/null 2>&1 || true
+"$PY" "$AGENTX_DIR/agentx_config.py" --profile "$AGENTX_DIR/profiles/conformance_750k.yaml" \
+    --emit-json > "$TMP/c750_emit.json" 2>/dev/null || true
+if "$PY" -c 'import json,sys; a,b=(json.load(open(p)) for p in sys.argv[1:]); sys.exit(not a or a!=b)' \
+        "$TMP/c750_suite.json" "$TMP/c750_emit.json" 2>/dev/null; then
+    _pass "--emit-json resolves preset (matches suite resolution)"
+else
+    _fail "--emit-json resolves preset (matches suite resolution)"
+fi
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 echo ""

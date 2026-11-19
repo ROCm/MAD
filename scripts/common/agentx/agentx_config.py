@@ -28,7 +28,8 @@ Design notes:
 
 CLI:
   agentx_config.py --profile <file> --emit-json
-       Resolve a single profile file (yaml/json) and print it as JSON.
+       Resolve a single profile file (yaml/json), following its `preset:` chain,
+       and print it as JSON.
   agentx_config.py --config <file> --emit-config-shell
        Print SUITE_* globals + SUITE_WORKLOAD_NAMES (eval-able in bash).
   agentx_config.py --config <file> --workload <name> [--profile-out P] --emit-workload-shell
@@ -559,7 +560,7 @@ def main(argv):
         if not profile_path:
             sys.stderr.write("--emit-json requires --profile\n")
             return 2
-        prof = _load_file(profile_path)
+        prof = _merge_preset(_load_file(profile_path) or {}, set())
         json.dump(prof, sys.stdout)
         sys.stdout.write("\n")
         return 0
