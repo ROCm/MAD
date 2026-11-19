@@ -1,17 +1,27 @@
 # 1k 1k mc1 mc8 mc32 mc128
 
+## Split so each model matches its own perf.yaml entry (overrides are matched per base entry)
 - benchmark: serving
-  model: deepseek-ai/DeepSeek-R1-0528 amd/DeepSeek-R1-0528-MXFP4
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-R1-0528
   tp: 8
   inp: 1024
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
 
 - benchmark: serving
-  model: moonshotai/Kimi-K2.6 amd/Kimi-K2.6-MXFP4
+  hf_pipeline_tag: text-generation
+  model: amd/DeepSeek-R1-0528-MXFP4
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: moonshotai/Kimi-K2.6
   tp: 4 8
   inp: 1024
   out: 1024
@@ -25,31 +35,8 @@
       tp: 8
 
 - benchmark: serving
-  model: moonshotai/Kimi-K3
-  tp: 8
-  inp: 1024
-  out: 1024
-  dtype: auto
-  max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
-  extra_args:
-    --reasoning-parser: kimi_k3
-    --language-model-only: true
-  bench_args:
-    # gsm8k runs over /v1/completions, where the always-on reasoning is inline and
-    # exhausts the hardcoded max_gen_toks=2048 budget, so the score is meaningless
-    --run_accuracy: False
-
-- benchmark: serving
-  model:
-    deepseek-ai/DeepSeek-V3.2
-    amd/DeepSeek-V3.2-MXFP4
-    zai-org/GLM-5.1-FP8
-    amd/GLM-5.1-MXFP4
-    zai-org/GLM-5.2-FP8
-    amd/GLM-5.2-MXFP4
+  hf_pipeline_tag: text-generation
+  model: amd/Kimi-K2.6-MXFP4
   tp: 4 8
   inp: 1024
   out: 1024
@@ -57,16 +44,63 @@
   max_concurrency: 1 8 32 128
   env:
     VLLM_ROCM_USE_AITER: 1
-  extra_args:
-    # GLM 5.2 has a context window of 1M tokens, which OOMs with bf16 KV cache
-    --max-model-len: 101372
-    --kv-cache-dtype: fp8
   arch_overrides:
-    # MI300 cannot fit FP8 TP4, override to TP8 only
+    # MI300 cannot fit TP4, override to TP8 only
+    gfx942:
+      tp: 8
+
+## Kimi K3 is natively MXFP4 (QAT), TP8 only
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: moonshotai/Kimi-K3
+  tp: 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+## Split so each group matches its own perf.yaml entry (overrides are matched per base entry)
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V3.2
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
     gfx942:
       tp: 8
 
 - benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: zai-org/GLM-5.1-FP8 amd/GLM-5.1-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
+    gfx942:
+      tp: 8
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model:
+    amd/DeepSeek-V3.2-MXFP4
+    zai-org/GLM-5.2-FP8
+    amd/GLM-5.2-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
+    gfx942:
+      tp: 8
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
   model:
     deepseek-ai/DeepSeek-V4-Flash
     deepseek-ai/DeepSeek-V4-Pro
@@ -75,50 +109,44 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
-  extra_args:
-    --kv-cache-dtype: fp8
-    --max-num-batched-tokens: 8192
 
 - benchmark: serving
-  model:
-    MiniMaxAI/MiniMax-M3-MXFP8
-    amd/MiniMax-M3-MXFP4
+  hf_pipeline_tag: text-generation
+  model: MiniMaxAI/MiniMax-M3-MXFP8
   tp: 4 8
   inp: 1024
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-    VLLM_USE_BREAKABLE_CUDAGRAPH: 0
-    VLLM_ROCM_SHUFFLE_KV_CACHE_LAYOUT: 1
-  extra_args:
-    --block-size: 128
-    --kv-cache-dtype: fp8
-    --attention-backend: TRITON_ATTN
   arch_overrides:
-    # No native MXFP8 MOE for MI300, can't fit 
+    gfx942:
+      tp: 8
+
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/MiniMax-M3-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
     gfx942:
       tp: 8
 
 ## gpt-oss w4a8 is gfx950 only
-- benchmark: serving
-  model: openai/gpt-oss-120b amd/gpt-oss120b-w-mxfp4-a-fp8
+- benchmark: all
+  hf_pipeline_tag: text-generation
+  model: openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8
   tp: 8
   inp: 1024
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
-  bench_args:
-    --lmeval_apply_chat_template: True
 
 ## For LLama, Mixtral, etc. on gfx942, use float16 for better GEMM perf
 - benchmark: serving
+  hf_pipeline_tag: text-generation
   model:
     meta-llama/Llama-3.1-405B-Instruct
     amd/Llama-3.1-405B-Instruct-FP8-KV
@@ -131,13 +159,12 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
   arch_overrides:
     gfx942:
       dtype: float16
 
 - benchmark: serving
+  hf_pipeline_tag: text-generation
   model:
     mistralai/Mixtral-8x22B-Instruct-v0.1
     amd/Mixtral-8x22B-Instruct-v0.1-FP8-KV
@@ -146,8 +173,96 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
-  env:
-    VLLM_ROCM_USE_AITER: 1
   arch_overrides:
     gfx942:
       dtype: float16
+
+# --- POC (perf.yaml-without-default.yaml audit): proposed rows, not yet validated ---
+# Rows here are 1k/1k where a model of the same family already has a 1k/1k row in this file or extended.yaml;
+# Step-3.5-Flash and MiMo-V2.6 have none, so they use 8192 input / 1024 output.
+
+# moonshotai/Kimi-K2.5
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: moonshotai/Kimi-K2.5
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+  arch_overrides:
+    # MI300 cannot fit TP4, override to TP8 only
+    gfx942:
+      tp: 8
+
+# amd/Kimi-K2.5-MXFP4
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Kimi-K2.5-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+# amd/Kimi-K2-Thinking-MXFP4  [confidence: medium]
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Kimi-K2-Thinking-MXFP4
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  env:
+    VLLM_ROCM_USE_AITER: 1
+
+# stepfun-ai/Step-3.5-Flash
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: stepfun-ai/Step-3.5-Flash
+  tp: 4 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
+    gfx942:
+      tp: 8
+
+# zai-org/GLM-5-FP8  [confidence: medium]
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: zai-org/GLM-5-FP8
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+  arch_overrides:
+    gfx942:
+      tp: 8
+
+# zai-org/GLM-4.7-FP8
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: zai-org/GLM-4.7-FP8
+  tp: 4 8
+  inp: 1024
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128
+
+# XiaomiMiMo/MiMo-V2.6-Pro-MOPD, XiaomiMiMo/MiMo-V2.6-Pro-RL  [confidence: medium]
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: XiaomiMiMo/MiMo-V2.6-Pro-MOPD XiaomiMiMo/MiMo-V2.6-Pro-RL
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128

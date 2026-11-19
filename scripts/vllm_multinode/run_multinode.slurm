@@ -109,6 +109,14 @@ for f in "${REQUIRED_FILES[@]}"; do
     [[ -f "$f" ]] || { echo "Error: required file missing: $f" >&2; exit 1; }
 done
 
+# A card whose values are in its workload file (env_vars.MAD_CONFIG, e.g. the _way4 twin) got
+# them from config_apply_workload above. Say so when the file does not name the model, rather
+# than failing on MODEL_NAME alone.
+if [ -n "${MAD_CONFIG:-}" ] && [ -z "${MODEL_NAME:-}" ]; then
+    echo "Error: the workload file MAD_CONFIG=${MAD_CONFIG} sets no MODEL_NAME, and the run gave none." >&2
+    echo "       Set model.env.MODEL_NAME in the file, or MODEL_NAME at submit (docs/configuration.md)." >&2
+    exit 1
+fi
 : "${DOCKER_IMAGE_NAME:?set DOCKER_IMAGE_NAME to the vLLM image to run}"
 MODEL_NAME="${MODEL_NAME:?set MODEL_NAME (key into scripts/vllm_dissag/models.yaml)}"
 # Site config: filesystem roots, partition, fabric device, ports, timeouts.
