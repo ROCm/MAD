@@ -79,20 +79,7 @@ model_allows_mori_ep() {
     done
     return 1
 }
-
-# ---------------------------------------------------------------------------
-# Run file: always use sglang_disagg_mori_io_ep.sh (unified launcher).
-# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake).
-# RUN_MORI=1: uses mori IO (default).
-# ---------------------------------------------------------------------------
-RUN_FILE="sglang_disagg_mori_io_ep.sh"
-_run_mori="${RUN_MORI:-0}"
-if [[ "$_run_mori" == "1" ]]; then
-    echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
-else
-    export KV_TRANSFER_BACKEND="mooncake"
-    echo "RUN_MORI=0: using $RUN_FILE with Mooncake (KV_TRANSFER_BACKEND=mooncake)"
-fi
+RUN_FILE="sglang_disagg_mori_io_ep.sh"          # the one role script (backend chosen below)
 if [[ ! -f "$RUN_FILE" ]]; then
     echo "Error: '$RUN_FILE' not found in $(pwd)." >&2
     exit 1
@@ -129,6 +116,23 @@ config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
 export MAD_LAUNCHER="${MAD_LAUNCHER:-sglang_disagg}"   # which launcher (best-known records name it)
+# The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
+# runs the same without madengine (common/config/workload.py).
+config_apply_workload "${SCRIPT_DIR}" || exit 1
+
+# Transfer backend, from RUN_MORI -- after the workload file, which may set it.
+# ---------------------------------------------------------------------------
+# Run file: always sglang_disagg_mori_io_ep.sh (unified launcher, set above).
+# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake).
+# RUN_MORI=1: uses mori IO (default).
+# ---------------------------------------------------------------------------
+_run_mori="${RUN_MORI:-0}"
+if [[ "$_run_mori" == "1" ]]; then
+    echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
+else
+    export KV_TRANSFER_BACKEND="mooncake"
+    echo "RUN_MORI=0: using $RUN_FILE with Mooncake (KV_TRANSFER_BACKEND=mooncake)"
+fi
 . "${MOONCAKE_REPO_DIR}/../common/topology/apply.sh" sglang_disagg
 config_layer topology
 xP="${xP:-1}" #-> Number of Prefill Servers

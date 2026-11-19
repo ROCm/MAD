@@ -155,6 +155,34 @@ config_recipe_file() {
     echo "[config] ${model}: the recipe as this job uses it -> ${dir}/recipe.yaml"
 }
 
+# config_apply_workload SCRIPT_DIR: the card's workload file -- MAD_CONFIG (relative to the card's
+# script directory), else a mad-config.yaml beside the launcher, as madengine locates it -- read by
+# config/workload.py, MAD's own reader of madengine's layered config, so a card runs the same with or
+# without madengine. Its values go in at submit level, as madengine puts them: only names the run did
+# not set (madengine already set them when it submitted the card, to the same values), labelled
+# "workload". A MAD_CONFIG that names a missing or invalid file stops the run.
+config_apply_workload() {
+    local dir="$1" here file out line k v
+    here="$(dirname "${BASH_SOURCE[0]}")"
+    file="$(python3 "$here/workload.py" find "${MAD_CONFIG:-}" "$dir")" || return 1
+    [[ -n "$file" ]] || return 0
+    if [[ ! -f "$file" ]]; then
+        echo "ERROR: MAD_CONFIG=${MAD_CONFIG}: no such workload file (${file})" >&2
+        return 1
+    fi
+    out="$(set -o pipefail; python3 "$here/workload.py" env "$file" --kind "${BENCHMARK_SCRIPT:-}" | tr '\0' '\n')" \
+        || { echo "ERROR: workload file ${file} cannot be used (above)" >&2; return 1; }
+    config_layer launcher                              # what came before is not the workload's
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        k="${line%%=*}"; v="${line#*=}"
+        [[ -v "$k" ]] && continue                      # set at submit (or by madengine): it wins
+        export "$k=$v"
+    done <<<"$out"
+    config_layer workload
+    echo "[config] workload ${MAD_CONFIG:-$(basename "$file")}: $(grep -c . <<<"$out") value(s) (submitted ones kept)"
+}
+
 # config_recipe KEY: the recipe's value for KEY (after config_apply_recipe), or empty --
 # for a launcher step that needs a recipe value on the batch node whichever layer won.
 config_recipe() { [[ -v "_CONFIG_RECIPE[$1]" ]] && printf '%s\n' "${_CONFIG_RECIPE[$1]}"; return 0; }
@@ -187,7 +215,7 @@ for n, (label, value) in notes.items():
 for n in env:
     if secret.search(n):
         env[n]["value"] = "<set>"
-json.dump({"order": ["container-default", "site", "connector-env", "recipe", "topology", "submit"],
+json.dump({"order": ["container-default", "site", "connector-env", "recipe", "topology", "workload", "submit"],
            "note": "the launcher\x27s environment; only the names it forwards reach the containers",
            "env": env},
           open(sys.argv[1], "w"), indent=1, sort_keys=True)

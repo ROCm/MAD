@@ -181,10 +181,10 @@ def submit_environment(card, env_overrides, distributed):
     """The environment the card's script starts with, and where each value came from.
 
     With madengine installed this is madengine's own slurm_multi_env.submit_env -- the
-    function its SLURM, Spur and Kubernetes paths use -- so the card's layered config
-    (mad-config.yaml) applies and the sources match a madengine run exactly. Without it:
-    the card's env_vars, then the overrides; a card with a layered config is refused, since
-    resolving that is madengine's code. Returns (env, sources)."""
+    function its SLURM, Spur and Kubernetes paths use -- so the sources match a madengine run
+    exactly. Without it, the same layers from MAD's own code: the card's workload file
+    (MAD_CONFIG or mad-config.yaml, read by config/workload.py), the card's env_vars, the
+    overrides. Returns (env, sources)."""
     script_dir = Path(card["scripts"]).parent
     try:
         from madengine.deployment.slurm_multi_env import submit_env
@@ -195,10 +195,20 @@ def submit_environment(card, env_overrides, distributed):
         for w in warnings:
             print(f"warning: {w}", file=sys.stderr)
         return dict(sub.env), dict(sub.sources)
-    if (card.get("env_vars") or {}).get("MAD_CONFIG") or (script_dir / "mad-config.yaml").is_file():
-        die(f"{card['name']} has a layered config (mad-config.yaml); resolving it needs madengine "
-            "installed (pip install madengine), as a madengine run would")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "config"))
+    import workload
     env, sources = {}, {}
+    path = workload.find((card.get("env_vars") or {}).get("MAD_CONFIG"), str(script_dir))
+    if path:
+        if not os.path.isfile(path):
+            die(f"{card['name']}: MAD_CONFIG names no file ({path})")
+        kind = env_overrides.get("BENCHMARK_SCRIPT") or (card.get("env_vars") or {}).get("BENCHMARK_SCRIPT")
+        try:
+            layer = workload.env_of(workload.load(path), str(kind) if kind else None)
+        except workload.WorkloadError as e:
+            die(f"{card['name']}: {e}")
+        for k, v in layer.items():
+            env[k], sources[k] = v, "mad-config"
     for k, v in (card.get("env_vars") or {}).items():
         env[k], sources[k] = str(v), "card"
     for k, v in env_overrides.items():

@@ -39,6 +39,9 @@ config_begin
 # A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
 # before the defaults below; see common/topology/apply.sh.
 export MAD_LAUNCHER="${MAD_LAUNCHER:-vllm_dissag}"   # which launcher (best-known records name it)
+# The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
+# runs the same without madengine (common/config/workload.py).
+config_apply_workload "${SCRIPT_DIR}" || exit 1
 . "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_dissag
 config_layer topology
 if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then

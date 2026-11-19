@@ -73,7 +73,7 @@ _is "$(_src A_BOOL)"      "recipe:True"        "values as the container's reader
 _is "$(_src CONN_ONLY)"   "connector-env:connector" "a connector .env value passed only as -e is recorded"
 _is "$(_src HF_TOKEN)"    "recipe:<set>"       "a secret-looking name's value is not written"
 _is "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["order"])' "$J")" \
-    "['container-default', 'site', 'connector-env', 'recipe', 'topology', 'submit']" "the order is stated in the record"
+    "['container-default', 'site', 'connector-env', 'recipe', 'topology', 'workload', 'submit']" "the order is stated in the record"
 
 echo ""
 echo "=== madengine's sources (MAD_ENV_SOURCES) ==="
@@ -83,6 +83,46 @@ _is "$(_src SUBMITTED)" "submit:card:submitted" "the record names madengine's so
 _is "$(_src SPEC)" "topology:spec" "a later layer that changed the value still owns it"
 _is "$(_src SITE)" "recipe:recipe" "word splitting of later layers is unaffected"
 _is "$(_src A)" "submit:1" "a submitted name madengine did not list stays plain submit"
+
+echo ""
+echo "=== the workload file (MAD_CONFIG), read by MAD itself ==="
+mkdir -p "$TMP/wl/sub"
+cat > "$TMP/wl/base.yaml" <<'EOF'
+version: 2
+model: {env: {FROM_BASE: base, OVERRIDDEN: base, TP_SIZE: "4"}}
+EOF
+cat > "$TMP/wl/sub/card.yaml" <<'EOF'
+version: 2
+defaults: [../base.yaml]
+model: {env: {OVERRIDDEN: card, TAG: "tp${model.env.TP_SIZE}", SUBMITTED: workload, BENCHMARK_SCRIPT: niah}}
+benchmark:
+  niah: {env: {WORDS: "50"}}
+  sweep: {env: {WORDS: "sweep"}}
+EOF
+wl() {
+    env -i PATH="$PATH" HOME="$TMP" SUBMITTED=submitted "$@" bash -c '
+        . "$0"; config_begin
+        config_apply_workload "$1/wl" || { echo "EXIT=1"; exit 0; }
+        for k in FROM_BASE OVERRIDDEN TAG SUBMITTED WORDS; do echo "$k=${!k-<unset>}"; done
+        config_write "$1/wl/out.json" >/dev/null
+    ' "$LIB" "$TMP" 2>&1
+}
+out="$(wl MAD_CONFIG=sub/card.yaml)"
+_has "$out" "FROM_BASE=base"   "a value inherited through defaults:"
+_has "$out" "OVERRIDDEN=card"  "the file beats its base"
+_has "$out" "TAG=tp4"          "interpolation resolved after the merge"
+_has "$out" "SUBMITTED=submitted" "a submitted value beats the workload file"
+_has "$out" "WORDS=50"         "the file's own benchmark kind selected"
+_is "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"]["FROM_BASE"]["source"])' "$TMP/wl/out.json")" \
+    "workload" "the record names the workload layer"
+_has "$(wl MAD_CONFIG=sub/card.yaml BENCHMARK_SCRIPT=sweep)" "WORDS=sweep" "the run's benchmark kind selects its entries"
+_has "$(wl)" "FROM_BASE=<unset>" "no MAD_CONFIG and no mad-config.yaml: nothing applied"
+cp "$TMP/wl/sub/card.yaml" "$TMP/wl/mad-config.yaml"; sed -i 's#\.\./base#base#' "$TMP/wl/mad-config.yaml"
+_has "$(wl)" "OVERRIDDEN=card" "a mad-config.yaml beside the launcher is read, as madengine does"
+rm -f "$TMP/wl/mad-config.yaml"
+_has "$(wl MAD_CONFIG=missing.yaml)" "EXIT=1" "a MAD_CONFIG naming no file stops the run"
+printf 'version: 2\ndefaults: [nowhere.yaml]\n' > "$TMP/wl/bad.yaml"
+_has "$(wl MAD_CONFIG=bad.yaml)" "EXIT=1" "an unusable workload file stops the run"
 
 echo ""
 echo "======================================================"

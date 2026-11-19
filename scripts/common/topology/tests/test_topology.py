@@ -50,8 +50,8 @@ class GoldenRoles(unittest.TestCase):
         for launcher in T.LAUNCHERS:
             for card in json.loads((SCRIPTS / launcher / "models.json").read_text()):
                 gold = json.loads((GOLDEN / launcher / f"{card['name']}.json").read_text())
-                if gold["exit_code"] != 0 or S.needs_madengine(card):
-                    continue        # stops before any node runs, or its workload file needs madengine
+                if gold["exit_code"] != 0:
+                    continue        # stops before any node runs
                 env = S.launch_env(card, launcher, gold["inputs"]["gpu_arch"])   # card over its recipe
                 env["SLURM_NNODES"] = str(gold["inputs"]["nodes"])
                 spec = T.from_env(env, launcher)

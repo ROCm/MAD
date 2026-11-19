@@ -1,4 +1,4 @@
-"""Offline checks for scripts/common/k8s/submit.py (no cluster, no madengine).
+"""Offline checks for scripts/common/k8s/submit.py (no cluster; madengine optional).
 
 Run from the MAD repo root:  python3 -m unittest discover -s scripts/common/k8s/tests -v
 """
@@ -137,17 +137,35 @@ class TestSameAsMadengine(unittest.TestCase):
         self.assertEqual((term["labelSelector"]["matchLabels"], term["namespaceSelector"], term["topologyKey"]),
                          ({label: "true"}, {}, "kubernetes.io/hostname"))
 
-    def test_a_layered_config_card_needs_madengine(self):
+    def _way4(self, hide_madengine):
+        """The pod environment of the card with a layered config (MAD_CONFIG), with or without madengine."""
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ)
+            if hide_madengine:
+                Path(d, "madengine.py").write_text("raise ImportError('hidden by the test')\n")
+                env["PYTHONPATH"] = os.pathsep.join([d] + [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p])
+            cmd = [sys.executable, str(SUBMIT), "--card", "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+                   "--image", "img:t", "--dry-run", "--env", "BENCHMARK_ITR=3"]
+            r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        job = next(o for o in json.loads(r.stdout)["objects"] if o["kind"] == "Job")
+        return {e["name"]: e["value"] for e in job["spec"]["template"]["spec"]["containers"][0]["env"]}
+
+    def test_a_layered_config_card_resolves_without_madengine(self):
+        env = self._way4(hide_madengine=True)
+        src = dict(p.split("=", 1) for p in env["MAD_ENV_SOURCES"].split(","))
+        self.assertIn("mad-config", src.values())                      # the workload file applied
+        self.assertEqual(src["BENCHMARK_ITR"], "additional-context")
+
+    def test_a_layered_config_card_resolves_as_madengine_does(self):
         try:
             import madengine.deployment.slurm_multi_env  # noqa: F401
-            self.skipTest("madengine is installed: the card's mad-config.yaml is resolved by it")
         except ImportError:
-            pass
-        cmd = [sys.executable, str(SUBMIT), "--card", "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
-               "--image", "img:t", "--dry-run"]
-        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("needs madengine", r.stderr)
+            self.skipTest("madengine not importable (optional)")
+        drop = ("MAD_K8S_JOB_ID", "MAD_K8S_NODE_PREFIX")              # per run
+        mad, theirs = self._way4(True), self._way4(False)
+        self.assertEqual({k: v for k, v in mad.items() if k not in drop},
+                         {k: v for k, v in theirs.items() if k not in drop})
 
 
 class TestVerdict(unittest.TestCase):

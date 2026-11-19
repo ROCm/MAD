@@ -32,7 +32,7 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 | madengine SLURM presets | `madengine/deployment/presets/slurm/defaults.json`, `profiles/*.json` | Allocation defaults | madengine | Before submit |
 | Additional context | `--additional-context`, `--additional-context-file` | Per-site and per-run overrides of anything madengine handles | madengine | Before submit |
 | Model card | `scripts/<dir>/models.json`, root `models.json` | Image, launcher, node count, topology env | madengine; you, under plain `sbatch` | Before submit |
-| Layered config | `mad-config.yaml` (or a file named by `MAD_CONFIG`) | A model's env and its benchmark env, by layer | madengine | Before submit |
+| Layered config | `mad-config.yaml` (or a file named by `MAD_CONFIG`) | A model's env and its benchmark env, by layer | madengine at submit; the launcher otherwise (`config/workload.py`) | Before submit / launcher start |
 | Topology spec | A JSON file named by `MAD_TOPOLOGY` | The run's roles, node counts and parallelism, in place of `xP` / `yD` / ... | The launcher (`scripts/common/topology/apply.sh`) | In the batch script, before `cluster.sh` |
 | Site facts | `scripts/common/cluster.sh` | Weight roots, fabric, ports, timeouts, partition default for hand runs | The launcher | In the batch script, before `docker run` |
 | Connector env files | `scripts/vllm_dissag/connectors/*.env` | Platform env each connector must have at container start | `scripts/vllm_dissag/run_xPyD_models.slurm` | Before `docker run`, forwarded with `-e` |
@@ -719,14 +719,17 @@ are recipe knobs in `models.yaml`, not build steps.
 
 ## 9. `mad-config.yaml`: a model's env and its measurement, by layer
 
-`mad-config.yaml` is a madengine format. It holds the two things that travel with a model: how it
-is served (`model:`) and what is measured (`benchmark:`). madengine resolves it into exactly the
-`env_vars` a card already carries; no launcher needs to know it exists. The card suffix `way4`
+`mad-config.yaml` is madengine's layered-config format. It holds the two things that travel with a
+model: how it is served (`model:`) and what is measured (`benchmark:`), and resolves into exactly
+the `env_vars` a card already carries. madengine resolves it at submit; without madengine the
+launcher resolves it itself (`config_apply_workload`, with MAD's own reader
+`scripts/common/config/workload.py` -- standard library and PyYAML), so MAD needs no madengine to
+run a card that has one. A test holds the two readers to the same result. The card suffix `way4`
 refers to it (it was once the fourth of several numbered configuration methods).
 
 Where it is found: a sibling `mad-config.yaml` in the card's script directory, or an explicit path
-in the card's `env_vars.MAD_CONFIG`. No file means nothing changes. It is only available on the
-madengine path; plain `sbatch` does not read it.
+in the card's `env_vars.MAD_CONFIG`. No file means nothing changes. Both madengine and the
+launchers (plain `sbatch`, STANDALONE, `k8s/submit.py`) read it, the same way.
 
 A file named `mad-config.yaml` is picked up by every card in that directory. A file meant for one
 card must use another name and be named by `MAD_CONFIG`. That is why the Kimi-K3 file is
@@ -822,7 +825,8 @@ One order for every launcher, weakest first. The strongest layer that sets a nam
 5. **Topology spec**: what a `MAD_TOPOLOGY` file sets (`xP`, `yD`, `EP_TP_SIZE`, ...). A name
    also given at submit time must agree with it, or the launcher stops.
 6. **Submit time**: everything in the environment when the launcher starts. Within it, weakest
-   first: `mad-config.yaml` `model:` then `benchmark:` (madengine), `docker_env_vars` from the
+   first: `mad-config.yaml` `model:` then `benchmark:` (by madengine at submit, or by the
+   launcher for the names nothing submitted -- labelled `workload`), `docker_env_vars` from the
    additional context (madengine), the card's `env_vars`, then `env_vars` from
    `--additional-context` (madengine) or your own `export` (plain `sbatch`).
 
@@ -842,7 +846,8 @@ effect there. madengine preset `env_vars` are not passed to `slurm_multi` cards.
 Each run writes `config.resolved.json` into its log directory (`$LOG_PATH/<job id>/`): every
 name in the launcher's environment with its value and the layer that set it:
 `container-default` (SGLang's `connectors/mori.env`, for names nothing else set), `site`,
-`connector-env`, `recipe`, `topology`, `submit`, or `launcher` for values the launcher derives,
+`connector-env`, `recipe`, `topology`, `workload` (the workload file, read by the launcher),
+`submit`, or `launcher` for values the launcher derives,
 such as node lists. Under madengine the submit layer says where each value came from:
 `submit:mad-config`, `submit:docker-env-vars`, `submit:card`, `submit:additional-context`,
 `submit:distributed` (`xP`/`yD` from the card's `sglang_disagg` block) or `submit:madengine`

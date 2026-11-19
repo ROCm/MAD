@@ -1,9 +1,9 @@
 """The end-to-end examples (docs/e2e-examples.md), each run through the real launcher and role
-scripts on each GPU it targets, with its workload file resolved by madengine's layered config --
-the code both Jenkins modes use. What each example claims, its engine commands show.
+scripts on each GPU it targets -- the launcher applies the card's workload file itself
+(common/config/workload.py), so no madengine is needed. What each example claims, its engine
+commands show. When madengine is importable, its reader of the same files is checked to agree.
 
-Needs madengine's src on PYTHONPATH (it resolves the workload files):
-    PYTHONPATH=<madengine>/src python3 -m unittest scripts/common/tests/test_e2e_examples.py -v
+    python3 -m unittest scripts/common/tests/test_e2e_examples.py -v
 """
 import json
 import os
@@ -18,10 +18,28 @@ SCRIPTS = HERE.parents[1]
 sys.path.insert(0, str(HERE / "snapshot"))
 import snapshot as S  # noqa: E402
 
+sys.path.insert(0, str(SCRIPTS / "common" / "config"))
+import workload as W  # noqa: E402
+
 try:
     from madengine.deployment.layered_config import resolve_for_model
-except ImportError:  # pragma: no cover
+except ImportError:  # madengine is optional: MAD runs without it
     resolve_for_model = None
+
+
+def example_cards():
+    for d in ("vllm_dissag", "vllm_multinode", "sglang_disagg"):
+        for c in json.loads((SCRIPTS / d / "models.json").read_text()):
+            if "e2e_example" in c.get("tags", []):
+                yield d, c
+
+
+def mad_env(c, d, runtime=None):
+    """The card's environment as MAD's launcher builds it: workload file < card env_vars < runtime."""
+    data = W.load(W.find(c["env_vars"]["MAD_CONFIG"], str(SCRIPTS / d)))
+    card_env = {k: str(v) for k, v in c["env_vars"].items()}
+    kind = (runtime or {}).get("BENCHMARK_SCRIPT") or card_env.get("BENCHMARK_SCRIPT")
+    return {**W.env_of(data, kind), **card_env, **(runtime or {})}
 
 
 def card(catalog, name):
@@ -47,33 +65,39 @@ def value(words, flag):
     return words[words.index(flag) + 1]
 
 
-@unittest.skipIf(resolve_for_model is None, "needs madengine's src on PYTHONPATH")
 class Inheritance(unittest.TestCase):
     """The workloads are a few lines each on shared layers (OmegaConf defaults)."""
 
     def test_every_example_is_inherited_and_resolves(self):
-        for d in ("vllm_dissag", "vllm_multinode", "sglang_disagg"):
-            for c in json.loads((SCRIPTS / d / "models.json").read_text()):
-                if "e2e_example" not in c.get("tags", []):
-                    continue
-                with self.subTest(card=c["name"]):
-                    text = (SCRIPTS / d / c["env_vars"]["MAD_CONFIG"]).read_text()
-                    self.assertIn("defaults:", text)
-                    env, _ = resolve_for_model(c, SCRIPTS / d)
-                    self.assertEqual((env["RECIPE_CHECK"], env["MAD_BEST_CONFIG"]), ("1", "1"))   # from base.yaml
-                    self.assertTrue(env.get("MODEL_NAME"))
+        for d, c in example_cards():
+            with self.subTest(card=c["name"]):
+                self.assertIn("defaults:", (SCRIPTS / d / c["env_vars"]["MAD_CONFIG"]).read_text())
+                env = mad_env(c, d)
+                self.assertEqual((env["RECIPE_CHECK"], env["MAD_BEST_CONFIG"]), ("1", "1"))   # from base.yaml
+                self.assertTrue(env.get("MODEL_NAME"))
 
     def test_interpolation_names_the_shape(self):
-        env, _ = resolve_for_model(card("vllm_multinode", "pyt_e2e_qwen3-32b_replicas_lora"), SCRIPTS / "vllm_multinode")
+        env = mad_env(card("vllm_multinode", "pyt_e2e_qwen3-32b_replicas_lora"), "vllm_multinode")
         self.assertEqual(env["PERF_TAGS"], "vllm_multinode,replicas,tp1")
 
     def test_submit_time_config_wins_over_every_layer(self):
-        env, _ = resolve_for_model(card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah"), SCRIPTS / "vllm_dissag",
-                                   runtime_env={"NIAH_WORDS": "2000", "MAD_BEST_CONFIG": "0"})
+        env = mad_env(card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah"), "vllm_dissag",
+                      {"NIAH_WORDS": "2000", "MAD_BEST_CONFIG": "0"})
         self.assertEqual((env["NIAH_WORDS"], env["MAD_BEST_CONFIG"]), ("2000", "0"))
 
 
-@unittest.skipIf(resolve_for_model is None, "needs madengine's src on PYTHONPATH")
+@unittest.skipIf(resolve_for_model is None, "madengine not importable (optional)")
+class SameAsMadengine(unittest.TestCase):
+    """madengine reads the same workload files at submit time; both readers must agree."""
+
+    def test_every_example_resolves_the_same(self):
+        for d, c in example_cards():
+            for runtime in ({}, {"BENCHMARK_SCRIPT": "accuracy", "NIAH_WORDS": "7"}):
+                with self.subTest(card=c["name"], runtime=runtime):
+                    theirs, _ = resolve_for_model(c, SCRIPTS / d, runtime_env=runtime)
+                    self.assertEqual(mad_env(c, d, runtime), theirs)
+
+
 class Examples(unittest.TestCase):
     def test_kimi_k3_runs_each_gpus_variant_with_its_best_known_configuration(self):
         c = card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah")

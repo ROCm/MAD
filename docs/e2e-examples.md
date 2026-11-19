@@ -18,8 +18,10 @@ and their tests run each one through the real launchers on each GPU it targets.
 A workload file says what to run and what to measure. It is madengine's layered config
 (`MAD_CONFIG`, version 2), whose `defaults:` list inherits other files with OmegaConf: mappings
 merge in order, the file itself on top, and `${...}` interpolations resolve after the merge
-(`${model.env.TP_SIZE}`, `${oc.env:NAME,default}`). Both Jenkins modes resolve it with the same
-madengine code, and anything passed through config at submit time wins over every layer.
+(`${model.env.TP_SIZE}`, `${oc.env:NAME,default}`). madengine resolves it at submit; without
+madengine the launcher resolves it itself (`scripts/common/config/workload.py`, standard library
+and PyYAML), so MAD runs every example on its own. A test holds the two readers to the same
+result, and anything passed through config at submit time wins over every layer.
 
 ```
 scripts/common/workloads/
@@ -89,6 +91,13 @@ concurrency.
 
 ## Running them
 
+Without madengine -- the launcher reads the card's `MAD_CONFIG` itself:
+
+```bash
+export MAD_CONFIG=workloads/e2e/deepseek-v3-mtp.yaml MODEL_NAME=... DOCKER_IMAGE_NAME=...
+sbatch -N 2 scripts/vllm_dissag/run_xPyD_models.slurm          # or scripts/common/k8s/submit.py --card ...
+```
+
 Through madengine (either Jenkins mode resolves the same workload):
 
 ```bash
@@ -116,7 +125,8 @@ Anything can be overridden for one run without editing a file -- submit-time val
 
 ## How they are tested
 
-`scripts/common/tests/test_e2e_examples.py` resolves every workload with madengine and runs it
+`scripts/common/tests/test_e2e_examples.py` needs no madengine: it resolves every workload with
+MAD's reader (and, when madengine is importable, checks madengine's reader agrees), and runs it
 through the real launchers and role scripts (the snapshot harness's stand-ins for SLURM, Docker and
 the GPUs), on each GPU it targets, asserting what it claims: the int4 conversion on gfx942 only,
 the best-known record applied and switched off, MTP on decode only, the KV budget per GPU, the DQ
