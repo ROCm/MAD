@@ -118,7 +118,7 @@ config_begin
 export MAD_LAUNCHER="${MAD_LAUNCHER:-sglang_disagg}"   # which launcher (best-known records name it)
 # The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
 # runs the same without madengine (common/config/workload.py).
-config_apply_workload "${SCRIPT_DIR}" || exit 1
+config_apply_workload "${SCRIPT_DIR}" || exit 1   # sets RECIPES_YAML, CONNECTORS_DIR
 
 # Transfer backend, from RUN_MORI -- after the workload file, which may set it.
 # ---------------------------------------------------------------------------
@@ -330,8 +330,8 @@ select_same_rail_nodes
 # Detects the allocation's GPU arch (and enforces GPU_ARCHS when the card sets it),
 # before the weights probe. See cluster_require_gpu_arch in cluster.sh.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
-config_recipe_file "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" || exit 1
-cluster_check_recipe "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" sglang || exit 1
+config_recipe_file "${RECIPES_YAML}" "${MODEL_NAME}" || exit 1
+cluster_check_recipe "${RECIPES_YAML}" "${MODEL_NAME}" sglang || exit 1
 cluster_resolve_model_path || exit 1
 cluster_resolve_role_artifacts || exit 1
 
@@ -406,12 +406,27 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 
 
 # The container's own defaults (connectors/mori.env, applied by mori_ep_env.sh to names
-# it was not given), for the record.
+# it was not given), for the record. A workload file's connector env (CONNECTORS_DIR, from its
+# `connectors:` section) reaches the container as -e for each value that differs from the
+# container's own file; the rest the container applies itself, the same.
+declare -A _mori_default=()
+while IFS= read -r _line; do
+    [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && _mori_default[${_line%%=*}]="${_line#*=}"
+done < "${MOONCAKE_REPO_DIR}/connectors/mori.env"
+SGLANG_CONNECTOR_ENV_ARGS=""
 while IFS= read -r _line; do
     [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
-    _k="${_line%%=*}"
-    [[ -n "${!_k:-}" ]] || config_note "$_k" "${_line#*=}" container-default
-done < "${MOONCAKE_REPO_DIR}/connectors/mori.env"
+    _k="${_line%%=*}"; _v="${_line#*=}"
+    [[ -n "${!_k:-}" ]] && continue
+    if [[ ! -v "_mori_default[$_k]" || "${_mori_default[$_k]}" != "$_v" ]]; then
+        SGLANG_CONNECTOR_ENV_ARGS+=" -e ${_k}=${_v}"
+        config_note "$_k" "$_v" connector-env
+    else
+        config_note "$_k" "$_v" container-default
+    fi
+done < "${CONNECTORS_DIR}/mori.env"
+export SGLANG_CONNECTOR_ENV_ARGS
+unset _mori_default
 # Every selected node runs node.sh, then the containers are removed; rank 0 gives the
 # job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict). SKIP_BENCHMARK=1
 # serves without benchmarking, so it has no results to require.

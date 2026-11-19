@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A card's workload file (MAD_CONFIG): MAD's own reader, so MAD runs without madengine.
+r"""A card's workload file (MAD_CONFIG): MAD's own reader, so MAD runs without madengine.
 
 The format is madengine's layered config (docs: madengine distributed-config.md); madengine reads
 it at submit time, MAD's launchers read it here, and a test holds the two to the same result.
@@ -19,13 +19,29 @@ it at submit time, MAD's launchers read it here, and a test holds the two to the
   map by kind (`default`: every one).
 - Version 1: no inheritance, no interpolation.
 
+A file may also carry the layers a launcher otherwise reads from its directory, so one file
+holds a card's whole configuration (config/emit.py writes such files from existing cards):
+
+    recipes:                   # replaces the launcher's models.yaml: the card's recipe (MODEL_NAME)
+      Kimi-K3-MXFP4: {...}     # and any recipe it is an alias of, written as in models.yaml
+    connectors:                # replaces connectors/<name>.env: KEY: VALUE per connector
+      moriio: {PYTORCH_ALLOC_CONF: "expandable_segments:False", ...}
+    topology: common/topology/specs/v2/x.json    # as MAD_TOPOLOGY (a path; relative to scripts/)
+    card: {...}                # what the file was generated from (informational)
+    image: {...}               # the card's image (informational to the launcher; for the build)
+
+`\${` is a literal `${` (as in OmegaConf).
+
 The environment it gives, lowest first: model.env, the benchmark entries without a kind, the
 entries of the selected kind (BENCHMARK_SCRIPT: the run's, else the file's). The launcher applies
 it under everything set at submit time (config/layers.sh config_apply_workload).
 
-    workload.py env FILE [--kind KIND]     NAME=VALUE\\0 ...
+    workload.py env FILE [--kind KIND]     NAME=VALUE\0 ...
     workload.py show FILE                  the merged, resolved file as JSON
     workload.py find MAD_CONFIG DIR        the file a card with MAD_CONFIG (may be empty) in DIR reads
+    workload.py sections FILE --out DIR    write its recipes (DIR/models.yaml) and connectors
+                                           (DIR/connectors/NAME.env); print recipes=, connectors=,
+                                           topology= for those present (NUL-separated)
 Standard library and PyYAML only.
 """
 import argparse
@@ -37,7 +53,8 @@ import sys
 import yaml
 
 VERSIONS = (1, 2)
-REF = re.compile(r"\$\{([^${}]+)\}")
+REF = re.compile(r"(?<!\\)\$\{([^${}]+)\}")
+ESCAPED = "\\${"
 
 
 class WorkloadError(ValueError):
@@ -99,6 +116,8 @@ def _resolve(root, value, where, depth=0):
         return [_resolve(root, v, where, depth) for v in value]
     if not isinstance(value, str) or "${" not in value:
         return value
+    if not REF.search(value):
+        return value.replace(ESCAPED, "${")
     if depth > 20:
         raise WorkloadError(f"{where}: interpolation loop")
 
@@ -117,7 +136,7 @@ def _resolve(root, value, where, depth=0):
     whole = REF.fullmatch(value)
     if whole and not whole.group(1).startswith("oc.env:"):
         return _resolve(root, _lookup(root, whole.group(1).strip(), where), where, depth + 1)
-    return REF.sub(one, value)
+    return REF.sub(one, value).replace(ESCAPED, "${")
 
 
 def load(path):
@@ -132,6 +151,13 @@ def load(path):
             data["benchmark"] = [dict(v or {}, **({} if k == "default" else {"kind": k})) for k, v in bench.items()]
     if data.get("site"):
         raise WorkloadError(f"{path}: 'site:' is not read -- site facts belong to the run (site profile, context)")
+    if data.get("recipes") is not None and not isinstance(data["recipes"], dict):
+        raise WorkloadError(f"{path}: recipes: is a map of recipe name to recipe (as models.yaml)")
+    conns = data.get("connectors")
+    if conns is not None and not (isinstance(conns, dict) and all(isinstance(v, dict) for v in conns.values())):
+        raise WorkloadError(f"{path}: connectors: is a map of connector name to KEY: VALUE")
+    if data.get("topology") is not None and not isinstance(data["topology"], str):
+        raise WorkloadError(f"{path}: topology: is a spec file path (as MAD_TOPOLOGY), relative to scripts/")
     if (data.get("model") or {}).get("serve"):
         raise WorkloadError(f"{path}: model.serve is not applied by any launcher; put flags in models.yaml")
     return data
@@ -154,6 +180,29 @@ def env_of(data, kind=None):
     return {str(k): str(v) for k, v in out.items()}
 
 
+def write_sections(data, out):
+    """Write the file's recipes and connectors where a launcher reads them; {name: value} of
+    those present: recipes (a models.yaml path), connectors (a directory), topology."""
+    got = {}
+    if data.get("recipes"):
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, "models.yaml")
+        with open(path, "w") as f:
+            yaml.safe_dump(data["recipes"], f, sort_keys=False, width=1 << 16)
+        got["recipes"] = path
+    if data.get("connectors"):
+        d = os.path.join(out, "connectors")
+        os.makedirs(d, exist_ok=True)
+        for name, env in data["connectors"].items():
+            with open(os.path.join(d, f"{name}.env"), "w") as f:
+                for k, v in env.items():
+                    f.write(f"{k}={'' if v is None else v}\n")
+        got["connectors"] = d
+    if data.get("topology"):
+        got["topology"] = data["topology"]
+    return got
+
+
 DEFAULT_FILENAME = "mad-config.yaml"
 
 
@@ -168,10 +217,11 @@ def find(mad_config, script_dir):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["env", "show", "find"])
+    ap.add_argument("cmd", choices=["env", "show", "find", "sections"])
     ap.add_argument("file", help="the workload file (find: the card's MAD_CONFIG, may be empty)")
     ap.add_argument("dir", nargs="?", default=".", help="find: the card's script directory")
     ap.add_argument("--kind", default=None, help="the benchmark selected (BENCHMARK_SCRIPT) when the run set one")
+    ap.add_argument("--out", help="sections: where to write them")
     a = ap.parse_args(argv)
     if a.cmd == "find":
         path = find(a.file, a.dir)
@@ -185,6 +235,12 @@ def main(argv=None):
         return 1
     if a.cmd == "show":
         print(json.dumps(data, indent=1))
+    elif a.cmd == "sections":
+        if not a.out:
+            print("workload: sections needs --out", file=sys.stderr)
+            return 2
+        for k, v in write_sections(data, a.out).items():
+            sys.stdout.write(f"{k}={v}\0")
     else:
         for k, v in env_of(data, a.kind or None).items():
             sys.stdout.write(f"{k}={v}\0")

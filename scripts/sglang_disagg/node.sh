@@ -54,6 +54,7 @@ docker run --rm \
     -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
     -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
     ${SGLANG_FABRIC_ENV_ARGS} \
+    ${SGLANG_CONNECTOR_ENV_ARGS} \
     $(node_mad_env_args) \
     ${PERF_GPU_ARCH:+-e PERF_GPU_ARCH=$PERF_GPU_ARCH} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \

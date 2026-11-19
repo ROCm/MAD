@@ -41,7 +41,7 @@ config_begin
 export MAD_LAUNCHER="${MAD_LAUNCHER:-vllm_dissag}"   # which launcher (best-known records name it)
 # The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
 # runs the same without madengine (common/config/workload.py).
-config_apply_workload "${SCRIPT_DIR}" || exit 1
+config_apply_workload "${SCRIPT_DIR}" || exit 1   # sets RECIPES_YAML, CONNECTORS_DIR
 . "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_dissag
 config_layer topology
 if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
@@ -109,9 +109,9 @@ DEEPEP_VALID_MODELS=( \
 
 # A recipe that is an alias of another (models.yaml `alias:`, e.g. the e2e examples) is allowed
 # wherever the recipe it inherits is: the lists below name base recipes.
-_MODEL_LIST_NAME="$(python3 "${MAD_SCRIPTS_DIR}/common/recipe/models.py" "${SCRIPT_DIR}/models.yaml" \
+_MODEL_LIST_NAME="$(python3 "${MAD_SCRIPTS_DIR}/common/recipe/models.py" "${RECIPES_YAML}" \
     "${MODEL_NAME}" --base 2>/dev/null || echo "${MODEL_NAME}")"
-[ -f "${SCRIPT_DIR}/models.yaml" ] || _MODEL_LIST_NAME="${MODEL_NAME}"
+[ -f "${RECIPES_YAML}" ] || _MODEL_LIST_NAME="${MODEL_NAME}"
 [ "${_MODEL_LIST_NAME}" != "${MODEL_NAME}" ] && echo "MODEL_NAME '${MODEL_NAME}' inherits recipe '${_MODEL_LIST_NAME}'"
 
 validate_model_name() {
@@ -241,11 +241,11 @@ echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND
 # The recipe's env: block first, over site and connector defaults and under what was
 # submitted or set by the topology spec (common/config/layers.sh).
 # Memory sizes the recipe derives from the GPU (models.yaml memory:) need its size first.
-cluster_gpu_memory_for_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" || exit 1
+cluster_gpu_memory_for_recipe "${RECIPES_YAML}" "$MODEL_NAME" || exit 1
 # A recipe with per-accelerator variants runs the one of the GPU it lands on.
-cluster_gpu_arch_for_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" || exit 1
-config_apply_recipe "${SCRIPT_DIR}/models.yaml" "$MODEL_NAME" "${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
-CONNECTOR_ENV_FILE="${SCRIPT_DIR}/connectors/${CONNECTOR}.env"
+cluster_gpu_arch_for_recipe "${RECIPES_YAML}" "$MODEL_NAME" || exit 1
+config_apply_recipe "${RECIPES_YAML}" "$MODEL_NAME" "${CONNECTORS_DIR}/${CONNECTOR}.env"
+CONNECTOR_ENV_FILE="${CONNECTORS_DIR}/${CONNECTOR}.env"
 CONNECTOR_ENV_ARGS=""
 if [[ -f "$CONNECTOR_ENV_FILE" ]]; then
   echo "Loading connector platform env: $CONNECTOR_ENV_FILE"
@@ -330,8 +330,8 @@ echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
 # Before the weights probe: the wrong GPU should cost seconds, not a checkpoint read.
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS}" || exit 1
-config_recipe_file "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" || exit 1
-cluster_check_recipe "${SCRIPT_DIR}/models.yaml" "${MODEL_NAME}" vllm || exit 1
+config_recipe_file "${RECIPES_YAML}" "${MODEL_NAME}" || exit 1
+cluster_check_recipe "${RECIPES_YAML}" "${MODEL_NAME}" vllm || exit 1
 cluster_report_rdma_rails
 # MoRI JIT-compiles its EP kernels for MORI_GPU_ARCHS. connectors/moriio.env pins it to
 # gfx942, which on MI355X builds kernels for the wrong GPU. Follow the detected arch

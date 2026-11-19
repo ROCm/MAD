@@ -265,7 +265,7 @@ def run_as_tasks(script, env, nodes, mode, cwd=None):
     return procs[0].returncode, outs[0]
 
 
-def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_output=False):
+def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_output=False, submit_env=None):
     work = Path(tempfile.mkdtemp(prefix="madsnap."))
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
@@ -291,7 +291,7 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_outp
             "SHARED_MOUNT": str(work / "shared"),
             "JIT_CACHE_HOST": str(work / "jit"),
         }
-        env.update(submitted_env(card, catalog))
+        env.update(submitted_env(card, catalog) if submit_env is None else submit_env)
         env.setdefault("MAD_GPU_MEMORY_BYTES", str(gpu_memory_bytes(env["MAD_GPU_ARCH"])))   # as the probe would
         env["DOCKER_IMAGE_NAME"] = "img:snapshot"
         script = work / "scripts" / catalog / card["scripts"]
@@ -353,6 +353,11 @@ def main():
                     help="run each launcher as sbatch does: a copy in a spool directory, "
                          "started in the submit directory (with --equivalence: under that "
                          "dispatch); require the same run as the goldens")
+    ap.add_argument("--from-emitted", action="store_true",
+                    help="run every card from its generated configuration (config/emit.py: the card's "
+                         "MAD_CONFIG pointing at it, nothing else submitted) and require the same run "
+                         "as the goldens, on the card's GPU and on every other GPU its recipe has a "
+                         "variant for")
     ap.add_argument("--equivalence", choices=("spur-array", "k8s-indexed"),
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
@@ -360,6 +365,8 @@ def main():
     a = ap.parse_args()
     if a.spec_file:
         return spec_file_equivalence(a)
+    if a.from_emitted:
+        return emitted_equivalence(a)
     if a.equivalence or a.spooled:
         return equivalence(a)
     changed, checked = [], 0
@@ -444,6 +451,75 @@ def spec_file_equivalence(a):
                 for pr in problems:
                     print("   " + pr.replace("\n", "\n   "))
     print(f"spec-file equivalence: {checked} card(s) checked, {len(bad)} differ")
+    return 1 if bad else 0
+
+
+# Bookkeeping a run from a generated file adds: which file, and the job's recipe copy it always
+# writes (the containers read that instead of the repository's models.yaml -- the same recipe).
+EMITTED_BOOKKEEPING = {"MAD_CONFIG", "MAD_RECIPE_FILE"}
+
+
+def _without_bookkeeping(ranks):
+    out = json.loads(json.dumps(ranks))
+    for r in out:
+        r["docker"]["env"] = [e for e in r["docker"]["env"] if e.split("=", 1)[0] not in EMITTED_BOOKKEEPING]
+    return out
+
+
+def _recipe_archs(catalog, card):
+    """The GPUs a card's recipe has a variant for (the card's own first)."""
+    import yaml
+    archs = [gpu_arch(card)]
+    name = resolved_env(card, catalog).get("MODEL_NAME")
+    path = SCRIPTS / ("vllm_dissag" if catalog == "vllm_multinode" else catalog) / "models.yaml"
+    if name and path.is_file():
+        recipes = yaml.safe_load(path.read_text()) or {}
+        while isinstance(recipes.get(name), dict) and "alias" in recipes[name]:
+            name = recipes[name]["alias"]
+        for arch in ((recipes.get(name) or {}).get("variants") or {}):
+            if arch.startswith("gfx") and arch not in archs:
+                archs.append(arch)
+    return archs
+
+
+def emitted_equivalence(a):
+    """Each card run from its generated configuration: the same as running the card itself."""
+    sys.path.insert(0, str(SCRIPTS / "common" / "config"))
+    import emit
+    bad, checked = [], 0
+    for catalog in CATALOGS:
+        if a.catalog and catalog != a.catalog:
+            continue
+        for card in cards_of(catalog, a):
+            with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+                f.write(emit.dump(emit.compose(catalog, card)))
+            try:
+                for arch in _recipe_archs(catalog, card):
+                    checked += 1
+                    on = json.loads(json.dumps(card))
+                    on["env_vars"] = dict(on.get("env_vars") or {}, MAD_GPU_ARCH=arch)
+                    want = snapshot_card(catalog, on)
+                    sub = {"MAD_CONFIG": f.name, "MAD_GPU_ARCH": arch}
+                    pins = submitted_env(card, catalog).get("MAD_PIN_SET")
+                    if pins:                       # as the card itself was submitted
+                        sub["MAD_PIN_SET"] = pins
+                    got = snapshot_card(catalog, on, submit_env=sub)
+                    problems = []
+                    if got["exit_code"] != want["exit_code"]:
+                        problems.append(f"exit {got['exit_code']} (card {want['exit_code']}): {got.get('stderr_tail')}")
+                    g, w = _without_bookkeeping(got["ranks"]), _without_bookkeeping(want["ranks"])
+                    if g != w:
+                        diff = difflib.unified_diff(json.dumps(w, indent=1).splitlines(),
+                                                    json.dumps(g, indent=1).splitlines(), lineterm="", n=1)
+                        problems.append("ranks differ:\n" + "\n".join(list(diff)[:30]))
+                    if problems:
+                        bad.append(f"{catalog}/{card['name']} on {arch}")
+                        print(f"DIFF  {catalog}/{card['name']} on {arch}")
+                        for pr in problems:
+                            print("   " + pr.replace("\n", "\n   "))
+            finally:
+                os.unlink(f.name)
+    print(f"emitted equivalence: {checked} card x GPU run(s) checked, {len(bad)} differ")
     return 1 if bad else 0
 
 

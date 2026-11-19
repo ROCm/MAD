@@ -143,7 +143,10 @@ config_recipe_file() {
     if [[ -n "${MAD_RECIPE_FILE:-}" ]]; then                 # a recipe file passed through config wins
         echo "[config] ${model}: the recipe file given, ${MAD_RECIPE_FILE}"; return 0
     fi
-    PYTHONPATH="${_CONFIG_RECIPE_LIB}" python3 -m models "$yaml" "$model" --uses-variants || return 0
+    # A recipe from the workload file is always written: the containers' default is the
+    # repository's models.yaml, not the file's.
+    [[ "${_CONFIG_RECIPES_FROM_WORKLOAD:-0}" == 1 ]] \
+        || PYTHONPATH="${_CONFIG_RECIPE_LIB}" python3 -m models "$yaml" "$model" --uses-variants || return 0
     dir="${LOG_PATH}/${SLURM_JOB_ID}"
     mkdir -p "$dir" || return 1
     # Written whole, then renamed: every node of a job array writes the same file.
@@ -155,14 +158,21 @@ config_recipe_file() {
     echo "[config] ${model}: the recipe as this job uses it -> ${dir}/recipe.yaml"
 }
 
-# config_apply_workload SCRIPT_DIR: the card's workload file -- MAD_CONFIG (relative to the card's
-# script directory), else a mad-config.yaml beside the launcher, as madengine locates it -- read by
-# config/workload.py, MAD's own reader of madengine's layered config, so a card runs the same with or
-# without madengine. Its values go in at submit level, as madengine puts them: only names the run did
-# not set (madengine already set them when it submitted the card, to the same values), labelled
-# "workload". A MAD_CONFIG that names a missing or invalid file stops the run.
+# config_apply_workload SCRIPT_DIR [RECIPES CONNECTORS_DIR]: the card's workload file -- MAD_CONFIG
+# (relative to the card's script directory), else a mad-config.yaml beside the launcher, as madengine
+# locates it -- read by config/workload.py, MAD's own reader of madengine's layered config, so a card
+# runs the same with or without madengine. Its values go in at submit level, as madengine puts them:
+# only names the run did not set (madengine already set them when it submitted the card, to the same
+# values), labelled "workload". A MAD_CONFIG that names a missing or invalid file stops the run.
+#
+# It also sets where this run reads its recipes and connector env: RECIPES_YAML (default RECIPES,
+# the launcher's models.yaml) and CONNECTORS_DIR (default CONNECTORS_DIR, its connectors/), replaced
+# by the file's `recipes:` and `connectors:` sections when it has them; and MAD_TOPOLOGY from its
+# `topology:` when the run did not set one.
 config_apply_workload() {
     local dir="$1" here file out line k v
+    RECIPES_YAML="${2:-${dir}/models.yaml}"; CONNECTORS_DIR="${3:-${dir}/connectors}"
+    _CONFIG_RECIPES_FROM_WORKLOAD=0
     here="$(dirname "${BASH_SOURCE[0]}")"
     file="$(python3 "$here/workload.py" find "${MAD_CONFIG:-}" "$dir")" || return 1
     [[ -n "$file" ]] || return 0
@@ -181,6 +191,23 @@ config_apply_workload() {
     done <<<"$out"
     config_layer workload
     echo "[config] workload ${MAD_CONFIG:-$(basename "$file")}: $(grep -c . <<<"$out") value(s) (submitted ones kept)"
+    # Its recipes, connectors and topology, when it carries them.
+    _CONFIG_WL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mad_workload.XXXXXX")" || return 1
+    out="$(set -o pipefail; python3 "$here/workload.py" sections "$file" --out "$_CONFIG_WL_DIR" | tr '\0' '\n')" \
+        || { echo "ERROR: workload file ${file}: its sections cannot be written (above)" >&2; return 1; }
+    while IFS= read -r line; do
+        k="${line%%=*}"; v="${line#*=}"
+        case "$k" in
+            recipes)    RECIPES_YAML="$v"; _CONFIG_RECIPES_FROM_WORKLOAD=1
+                        echo "[config] workload: recipes from the file (not ${2:-${dir}/models.yaml})" ;;
+            connectors) CONNECTORS_DIR="$v"
+                        echo "[config] workload: connector env from the file" ;;
+            topology)   if [[ -z "${MAD_TOPOLOGY:-}" ]]; then
+                            export MAD_TOPOLOGY="$v"; _CONFIG_SRC[MAD_TOPOLOGY]=workload
+                        fi ;;
+        esac
+    done <<<"$out"
+    _config_snapshot
 }
 
 # config_recipe KEY: the recipe's value for KEY (after config_apply_recipe), or empty --

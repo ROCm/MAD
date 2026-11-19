@@ -786,6 +786,40 @@ additional_context.env_vars             --additional-context (highest)
 Layers merge; a key set only in `model` survives a `benchmark` section that does not mention it.
 The madengine document is `docs/distributed-config.md` in the madengine repository.
 
+### A card's whole configuration in one file
+
+A workload file may also carry what the launcher otherwise reads from its own directory, so one
+file holds everything a card runs with:
+
+| Section | Replaces | Note |
+|---|---|---|
+| `recipes:` | the launcher's `models.yaml` | the card's recipe (`MODEL_NAME`) and any recipe it is an alias of, written as in `models.yaml`: per-GPU `variants:`, `memory:` fractions and `roles:` kept, so one file runs on every GPU |
+| `connectors:` | `connectors/<name>.env` | `KEY: VALUE` per connector; the launcher uses the one it selects |
+| `topology:` | `MAD_TOPOLOGY` | a spec file path (relative to `scripts/`), used when the run sets none |
+| `card:`, `image:` | | what the file was generated from; the image is for the build |
+
+Nothing existing changes: a card without these sections reads `models.yaml`, the connector
+`.env` files and `MAD_TOPOLOGY` as before. A recipe from the file reaches the containers through
+the job's recipe copy (`MAD_RECIPE_FILE`); connector env reaches them as before (vLLM forwards
+the file's values; SGLang forwards each value that differs from the container's own `mori.env`).
+
+**Generating it.** Every multinode card's file can be generated from what it uses today:
+
+```bash
+python3 scripts/common/config/emit.py vllm_dissag pyt_vllm_disagg_mori_kimi-k3-mxfp4 -o kimi.yaml
+python3 scripts/common/config/emit.py --all -o generated/      # every card
+madengine build --tags <tags> --emit-config run_configs/ ...   # the build writes each card's, and
+                                                              # records it in the manifest
+```
+
+The pipeline writes it in both modes (`run_configs/<catalog>/<card>.yaml`, archived with the
+run): madengine's build in MADENGINE mode, the same code in STANDALONE mode, and its equivalence
+check requires the two files to be identical. To use one, point the card's `MAD_CONFIG` at it (or
+commit it beside the card and reduce the card to `MAD_CONFIG`); everything in it can be edited
+and inherited like any workload file. `snapshot.py --from-emitted` runs every card from its
+generated file, on each GPU its recipe has a variant for, and requires the same engine commands
+and container environment as the card itself.
+
 ## Precedence
 
 ### (a) The allocation

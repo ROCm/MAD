@@ -91,7 +91,8 @@ config_begin
 export MAD_LAUNCHER="${MAD_LAUNCHER:-vllm_multinode}"   # which launcher (best-known records name it)
 # The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
 # runs the same without madengine (common/config/workload.py).
-config_apply_workload "${SCRIPT_DIR}" || exit 1
+config_apply_workload "${SCRIPT_DIR}" "${MAD_SCRIPTS_DIR}/vllm_dissag/models.yaml" \
+    "${MAD_SCRIPTS_DIR}/vllm_dissag/connectors" || exit 1   # sets RECIPES_YAML, CONNECTORS_DIR
 . "${MAD_SCRIPTS_DIR}/common/topology/apply.sh" vllm_multinode
 config_layer topology
 SHARED_DIR="${MAD_SCRIPTS_DIR}/vllm_dissag"
@@ -129,10 +130,10 @@ config_layer site
 # The recipe's env: block over site defaults, under what was submitted
 # (common/config/layers.sh); serve_colocated.sh applies the rest in the container.
 # Memory sizes the recipe derives from the GPU (models.yaml memory:) need its size first.
-cluster_gpu_memory_for_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME" || exit 1
+cluster_gpu_memory_for_recipe "${RECIPES_YAML}" "$MODEL_NAME" || exit 1
 # A recipe with per-accelerator variants runs the one of the GPU it lands on.
-cluster_gpu_arch_for_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME" || exit 1
-config_apply_recipe "${SHARED_DIR}/models.yaml" "$MODEL_NAME"
+cluster_gpu_arch_for_recipe "${RECIPES_YAML}" "$MODEL_NAME" || exit 1
+config_apply_recipe "${RECIPES_YAML}" "$MODEL_NAME"
 USER_NAME="${USER:-$(id -un)}"
 LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER_NAME}/model_blog_logs}"
 GPUS_PER_NODE="${GPUS_PER_NODE:?cluster.sh sets it from the run platform}"
@@ -198,8 +199,8 @@ launcher_node_ips
 # The card's GPU_ARCHS names the GPUs this recipe is written for; checked before the
 # weights probe so the wrong GPU costs seconds (cluster_require_gpu_arch, cluster.sh).
 cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
-config_recipe_file "${SHARED_DIR}/models.yaml" "${MODEL_NAME}" || exit 1
-cluster_check_recipe "${SHARED_DIR}/models.yaml" "${MODEL_NAME}" vllm server "${COLOCATED_EXTRA_ARGS:-}" || exit 1
+config_recipe_file "${RECIPES_YAML}" "${MODEL_NAME}" || exit 1
+cluster_check_recipe "${RECIPES_YAML}" "${MODEL_NAME}" vllm server "${COLOCATED_EXTRA_ARGS:-}" || exit 1
 cluster_report_rdma_rails
 
 cluster_resolve_model_path || exit 1
@@ -254,7 +255,7 @@ for _v in ${COLOCATED_FORWARD_ENV//,/ }; do export "$_v" 2>/dev/null || true; do
 COLOCATED_ENV_ARGS=""
 case "${ALL2ALL_BACKEND}" in
     mori*)
-        _MORI_ENV_FILE="${SHARED_DIR}/connectors/moriio.env"
+        _MORI_ENV_FILE="${CONNECTORS_DIR}/moriio.env"
         echo "Loading MoRI platform env: ${_MORI_ENV_FILE}"
         while IFS= read -r _line; do
             [[ "$_line" =~ ^[[:space:]]*# || -z "${_line// }" ]] && continue
