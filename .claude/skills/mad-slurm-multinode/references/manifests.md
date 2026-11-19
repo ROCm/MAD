@@ -126,7 +126,7 @@ differ, the host path belongs on the value side.
   For another precision pick the matching config (`llama3.1_8B-FP8-pretrain`,
   `-MXFP8-`, `-MXFP4-`, ...). `scripts` = `scripts/primus_train/run.sh`,
   `launcher: primus` (no torchrun wrap: `primus-cli direct` runs torchrun inside
-  the container), image = the `rccl_overlay` Dockerfile on `rocm/primus:v26.8`
+  the container), image = the `rccl_overlay` Dockerfile on `rocm/primus:v26.9`
   with the submodule's Primus baked in, `dockercontext` = `.`.
   `multiple_results` = `primus_perf_output.csv`, one row per metric
   (`tokens_per_second`, `tflops`, `model_flops_utilization`) with `mode`,
@@ -187,7 +187,7 @@ differ, the host path belongs on the value side.
   earlier `c67fbe4956` hung in the MoE all-to-all). Reproduced on the old
   template: 2749.5 tok/s/GPU, 276.8 TFLOP/s/GPU, 48/48 parsed iterations, 0 RCCL
   errors. On `v26.5` the run printed no throughput at all (see
-  [gotchas.md](gotchas.md#primus_megatron-training)); `v26.8` is not re-measured
+  [gotchas.md](gotchas.md#primus_megatron-training)); `v26.9` is not re-measured
   yet.
 - **sglang_disagg** (`sglang-disagg-deepseek-r1-overlay`): disaggregated
   prefill/decode serving of DeepSeek-R1 on SGLang.

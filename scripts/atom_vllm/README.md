@@ -19,7 +19,7 @@ atom_vllm/
 │   ├── roctx_phase_markers.py     # roctx prefill/decode/mixed markers for the vLLM worker
 │   └── sitecustomize.py           # Installs the markers in vLLM's spawned processes
 └── configs/             # Benchmark configuration files
-    ├── default.yaml     # Standard serving benchmarks (1k/1k, mc1-128)
+    ├── default.yaml     # Standard serving benchmarks (1k/1k for Llama, 8k/1k for other models, mc1-128)
     ├── accuracy.yaml    # Accuracy validation (GSM8K)
     ├── unittest.yaml    # Unit test configurations
     ├── extended.yaml    # Extended benchmarks with multiple I/O lengths
@@ -102,9 +102,10 @@ GSM8K accuracy validation using `lm_eval` with the vLLM server.
 
 ### default.yaml
 Standard serving benchmarks with:
-- Input/output length: 1024/1024
-- Concurrency levels: 1, 8, 32 (8B); 1, 8, 32, 128 (70B, 405B)
-- Models: Llama 3.1/3.3 (8B, 70B, 405B BF16 and FP8)
+- Input/output length: 1024/1024 (Llama); 8192/1024 (all other models)
+- Concurrency levels: 1, 8, 32 (8B); 1, 8, 32, 128 (all other models)
+- Models: Llama 3.1/3.3 (8B BF16 and FP8-KV, 70B, 405B BF16 and FP8), Kimi-K2.5/K2-Thinking (MXFP4), DeepSeek-R1-0528/V3.2/V4, GLM-4.7/5.1, gpt-oss-120b, MiniMax-M2.5, Qwen3/Qwen3.5/Qwen3-Next
+- TP varies per model; `arch_overrides` adjust TP per GPU arch where needed. See the file for the per-model values.
 
 Rows only define the run shape (model, tp, lengths, concurrency). Server flags
 and env vars come from `perf.yaml`.

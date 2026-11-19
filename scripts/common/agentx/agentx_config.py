@@ -403,7 +403,15 @@ def resolve_config(config):
     serving.setdefault("server_metrics", "auto")
     run.setdefault("concurrency", 16)
     run.setdefault("duration", 900)
-    run.setdefault("scenario", "inferencex-agentx-mvp")
+    # Default scenario tracks the replay driver (AGENTIC_HARNESS in
+    # scripts/common/agentic_lib.sh). The released agentx-harness wheel
+    # registers an `agentx` scenario locking the published v1.0 invariants
+    # (1h default window, 0.25/0.75 trajectory, seed 42, 393 entries); the
+    # pinned source build predates that name and only has the MVP scenario.
+    run.setdefault(
+        "scenario",
+        "agentx" if env.get("AGENTIC_HARNESS") == "agentx" else "inferencex-agentx-mvp",
+    )
 
     workloads = []
     for entry in config.get("workloads", []) or []:

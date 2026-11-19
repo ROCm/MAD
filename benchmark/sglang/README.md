@@ -6,19 +6,10 @@
 SGLang is a large language model (LLM) inference and serving engine. 
 
 MAD builds its SGLang image from [docker/pyt_sglang.ubuntu.amd.Dockerfile](../../docker/pyt_sglang.ubuntu.amd.Dockerfile)
-on top of `lmsysorg/sglang:v0.5.18-rocm720-mi35x`, which includes:
+on top of `lmsysorg/sglang:v0.5.22-rocm10-mi35x`, which includes:
 
--   ✅ ROCm™ 7.2.0
--   ✅ SGLang 0.5.18
-
-Three model families build from their own Dockerfiles instead, because their support landed in a
-different SGLang ROCm build:
-
-| Models | Dockerfile | Base image |
-| ------ | ---------- | ---------- |
-| DeepSeek-V4 (`pyt_sglang_deepseek-v4-*`) | [docker/pyt_sglang_dsv4.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_dsv4.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:v0.5.13-rocm720-mi35x-20260612` |
-| FLUX (`pyt_sglang_flux.*`) | [docker/pyt_sglang_flux.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_flux.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712` |
-| Kimi-K3 (`pyt_sglang_kimi-k3*`) | [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile) | `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` |
+-   ✅ ROCm™ 10
+-   ✅ SGLang 0.5.22
 
 >[!IMPORTANT]
 >The default base is the MI350X/MI355X (gfx950) build. Its `sgl_kernel` ops are compiled for gfx950
@@ -56,11 +47,10 @@ cat /proc/sys/kernel/numa_balancing
 
 ### Download the Docker image 🐳
 
-The following command pulls the default Docker image from Docker Hub. For the DeepSeek-V4, FLUX and
-Kimi-K3 models, pull the base image listed in the [Overview](#overview-) instead.
+The following command pulls the Docker image from Docker Hub. Every SGLang entry builds on it.
 
 ```sh
-docker pull lmsysorg/sglang:v0.5.18-rocm720-mi35x
+docker pull lmsysorg/sglang:v0.5.22-rocm10-mi35x
 ```
 
 ### MAD-integrated benchmarking
@@ -102,6 +92,11 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_sglang_deepseek-v4-pro              | deepseek-ai/DeepSeek-V4-Pro              | gfx950 only                            |
 | pyt_sglang_llama-3.3-70b                | meta-llama/Llama-3.3-70B-Instruct        |                                        |
 | pyt_sglang_llama-3.3-70b_fp8            | amd/Llama-3.3-70B-Instruct-FP8-KV        |                                        |
+| pyt_sglang_qwen3.8-2.4t-a95b_fp4        | amd/Qwen3.8-2.4T-A95B-Quark-MXFP4        | gfx950 only                            |
+| pyt_sglang_deepseek-r1_fp4              | amd/DeepSeek-R1-0528-MXFP4               | gfx950 only                            |
+| pyt_sglang_deepseek-v3.1                | deepseek-ai/DeepSeek-V3.1                | gfx950 only                            |
+| pyt_sglang_gpt-oss-120b                 | openai/gpt-oss-120b                      | gfx950 only                            |
+| pyt_sglang_gpt-oss-120b_w4a8            | amd/gpt-oss-120b-w-mxfp4-a-fp8           | gfx950 only                            |
 | pyt_sglang_flux.1-dev                   | black-forest-labs/FLUX.1-dev             | gfx950 only; `-throughput` and `-latency` variants run those benchmarks instead of serving |
 | pyt_sglang_flux.2-dev                   | black-forest-labs/FLUX.2-dev             | gfx950 only                            |
 | pyt_sglang_wan2.2-t2v-a14b              | Wan-AI/Wan2.2-T2V-A14B-Diffusers         | `-throughput` and `-latency` variants run those benchmarks instead of serving |
@@ -109,8 +104,8 @@ users can also change the benchmarking parameters. Refer to the [Standalone benc
 | pyt_sglang_kimi-k3_dspark               | moonshotai/Kimi-K3                       | gfx950 only; see the note below        |
 
 All entries except the Kimi-K3 ones read [scripts/sglang/configs/default.yaml](../../scripts/sglang/configs/default.yaml).
-"gfx950 only" means the entry sets `skip_gpu_arch: gfx942`. The DeepSeek-V4 and FLUX entries build from
-their own images; see the [Overview](#overview-).
+"gfx950 only" means the entry sets `skip_gpu_arch: gfx942`. Every entry, including DeepSeek-V4, FLUX
+and Kimi-K3, uses `docker/pyt_sglang`.
 
 >[!NOTE]
 >`models.json` also defines two generic entries, `sglang-perf` and `sglang-accuracy`. They have empty `args` and
@@ -124,12 +119,8 @@ their own images; see the [Overview](#overview-).
 >AMD day-0 recipes in [sgl-project/sglang#32548](https://github.com/sgl-project/sglang/issues/32548)
 >(day-0 support: [#32541](https://github.com/sgl-project/sglang/pull/32541), see also the
 >[SGLang K3 cookbook](https://docs.sglang.io/cookbook/autoregressive/Moonshotai/Kimi-K3)) and differ in
->four ways:
+>three ways (they use the shared image; K3 support from #32541 is in SGLang v0.5.22):
 >
->- **Image.** They build from `lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727` via
->  [docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile](../../docker/pyt_sglang_kimi_k3.ubuntu.amd.Dockerfile),
->  not the shared `lmsysorg/sglang:v0.5.18-rocm720-mi35x` above. K3 support is not in a versioned
->  SGLang ROCm release yet.
 >- **Benchmark.** They measure *online serving* only (`sglang.launch_server` + `sglang.bench_serving`)
 >  through [scripts/sglang/run_kimi_k3.sh](../../scripts/sglang/run_kimi_k3.sh) and
 >  [scripts/sglang/configs/kimi_k3.yaml](../../scripts/sglang/configs/kimi_k3.yaml). Each entry
@@ -147,8 +138,8 @@ their own images; see the [Overview](#overview-).
 >```
 >
 >The sweep is 8192-token input / 1024-token output at concurrency 1/4/8/16/32/64/128/256, with
->`--random-range-ratio 1.0` so every request has exactly those lengths (other SGLang configs use the
->runner default of 0.8). The sweep covers the issue's rows except concurrency 2. The issue does not state
+>`--random-range-ratio 1.0` so every request has exactly those lengths (the runner default is also 1.0;
+>the config sets it explicitly). The sweep covers the issue's rows except concurrency 2. The issue does not state
 >its input and output lengths; they were recovered from its own tables, where
 >`(E2EL - TTFT) / TPOT + 1` lands on ~1024 output tokens on every row and
 >`concurrency x (inp + out) / E2EL` reproduces the reported total throughput only at 8192 input tokens.
@@ -169,8 +160,8 @@ their own images; see the [Overview](#overview-).
 Users also can run the benchmark tool after they launch a Docker container.
 
 ```sh
-docker pull lmsysorg/sglang:v0.5.18-rocm720-mi35x
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HF_HUB_CACHE=/workspace --name test lmsysorg/sglang:v0.5.18-rocm720-mi35x
+docker pull lmsysorg/sglang:v0.5.22-rocm10-mi35x
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env HF_HUB_CACHE=/workspace --name test lmsysorg/sglang:v0.5.22-rocm10-mi35x
 ```
 
 Now clone the ROCm MAD repository inside the Docker image and move to the benchmark scripts directory at *~/MAD/scripts/sglang*. 

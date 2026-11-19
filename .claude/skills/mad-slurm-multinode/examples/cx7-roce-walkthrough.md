@@ -60,7 +60,7 @@ Edits applied to `run_manifest_primus_8b.json`:
   `deployment_config.env_vars`
 - `NCCL_SOCKET_IFNAME=eth0`, `GLOO_SOCKET_IFNAME=eth0`, `NCCL_IB_GID_INDEX=3`
 - `RDMAV_DRIVERS=mlx5`, `IBV_DRIVERS=mlx5`, deleted the `RCCL_AINIC_ROCE` key
-- `docker_image=rocm/primus:v26.8-rccl-<branch>-<sha7>`
+- `docker_image=rocm/primus:v26.9-rccl-<branch>-<sha7>`
 ```bash
 python3 -m json.tool run_manifest_primus_8b.json >/dev/null && echo "manifest valid"
 ```

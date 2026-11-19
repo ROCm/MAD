@@ -1,5 +1,4 @@
 - model: xai-org/grok-2
-  docker_base: lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712
   env:
     SGLANG_USE_AITER: 1
   extra_args:
@@ -21,16 +20,22 @@
   env:
     SGLANG_USE_AITER_ROPE: 1
 
-- model: deepseek-ai/DeepSeek-V4-Flash deepseek-ai/DeepSeek-V4-Pro
-  docker_base: lmsysorg/sglang-rocm:v0.5.13-rocm720-mi35x-20260612
+- model: deepseek-ai/DeepSeek-V4-Flash
   env:
     SGLANG_DEFAULT_THINKING: 1
-    SGLANG_DSV4_REASONING_EFFORT: max
-    SGLANG_OPT_DEEPGEMM_HC_PRENORM: "false"
+    SGLANG_DSV4_REASONING_EFFORT: high
     SGLANG_USE_AITER: 1
     SGLANG_USE_ROCM700A: 0
-    SGLANG_OPT_USE_FUSED_COMPRESS: "true"
+    AITER_BF16_FP8_MOE_BOUND: 0
+    SGLANG_OPT_USE_AITER_BATCHED_GEMM: 1
+    SGLANG_ENABLE_UNIFIED_RADIX_TREE: 1
     SGLANG_HACK_FLASHMLA_BACKEND: unified_kv_triton
+    TORCH_BLAS_PREFER_HIPBLASLT: 1
+    GPU_MAX_HW_QUEUES: 2
+    SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS: 1
+    SGLANG_OPT_DEEPGEMM_HC_PRENORM: "false"
+    SGLANG_OPT_USE_FUSED_COMPRESS: "true"
+    SGLANG_OPT_USE_FUSED_COMPRESS_TRITON: "true"
     SGLANG_OPT_FP8_WO_A_GEMM: "false"
     SGLANG_OPT_USE_JIT_INDEXER_METADATA: "false"
     SGLANG_OPT_USE_TOPK_V2: "false"
@@ -39,8 +44,6 @@
     SGLANG_OPT_USE_TILELANG_MHC_PRE: "false"
     SGLANG_OPT_USE_TILELANG_MHC_POST: "false"
     SGLANG_FP8_PAGED_MQA_LOGITS_TORCH: 1
-    SGLANG_OPT_USE_FUSED_COMPRESS_TRITON: "true"
-    AITER_BF16_FP8_MOE_BOUND: 0
     SGLANG_EAGER_INPUT_NO_COPY: "true"
     SGLANG_OPT_USE_MULTI_STREAM_OVERLAP: "false"
     SGLANG_ROCM_USE_MULTI_STREAM: "false"
@@ -48,14 +51,103 @@
     --trust-remote-code: true
     --attention-backend: dsv4
     --mem-fraction-static: 0.90
-    --swa-full-tokens-ratio: 0.15
+    --swa-full-tokens-ratio: 0.1
     --page-size: 256
     --chunked-prefill-size: 8192
-    --disable-shared-experts-fusion: true
+    --enforce-shared-experts-fusion: true
+    --enable-deepseek-v4-fp4-indexer: true
+    --tool-call-parser: deepseekv4
+    --reasoning-parser: deepseek-v4
     --watchdog-timeout: 1800
 
+- model: deepseek-ai/DeepSeek-V4-Pro
+  env:
+    SGLANG_DEFAULT_THINKING: 1
+    SGLANG_USE_AITER: 1
+    SGLANG_USE_ROCM700A: 0
+    AITER_BF16_FP8_MOE_BOUND: 0
+    SGLANG_OPT_USE_AITER_BATCHED_GEMM: 1
+    SGLANG_ENABLE_UNIFIED_RADIX_TREE: 1
+  extra_args:
+    --trust-remote-code: true
+    --attention-backend: dsv4
+    --page-size: 256
+    --kv-cache-dtype: fp8_e4m3
+    --enforce-shared-experts-fusion: true
+    --swa-full-tokens-ratio: 0.1
+    --tool-call-parser: deepseekv4
+    --reasoning-parser: deepseek-v4
+  arch_overrides:
+    # MI350X / MI355X
+    gfx950:
+      env:
+        SGLANG_DSV4_REASONING_EFFORT: high
+        SGLANG_HACK_FLASHMLA_BACKEND: unified_kv_triton
+        SGLANG_DSV4_UNIFIED_KV_FP8: 1
+        TORCH_BLAS_PREFER_HIPBLASLT: 1
+        GPU_MAX_HW_QUEUES: 2
+        SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS: 1
+        SGLANG_OPT_DEEPGEMM_HC_PRENORM: "false"
+        SGLANG_OPT_USE_FUSED_COMPRESS: "true"
+        SGLANG_OPT_USE_FUSED_COMPRESS_TRITON: "true"
+        SGLANG_OPT_FP8_WO_A_GEMM: "false"
+        SGLANG_OPT_USE_JIT_INDEXER_METADATA: "false"
+        SGLANG_OPT_USE_TOPK_V2: "false"
+        SGLANG_OPT_USE_AITER_INDEXER: "true"
+        SGLANG_OPT_USE_TILELANG_INDEXER: "false"
+        SGLANG_OPT_USE_TILELANG_MHC_PRE: "false"
+        SGLANG_OPT_USE_TILELANG_MHC_POST: "false"
+        SGLANG_FP8_PAGED_MQA_LOGITS_TORCH: 1
+        SGLANG_EAGER_INPUT_NO_COPY: "true"
+        SGLANG_OPT_USE_MULTI_STREAM_OVERLAP: "false"
+        SGLANG_ROCM_USE_MULTI_STREAM: "false"
+      extra_args:
+        --chunked-prefill-size: 16384
+        --mem-fraction-static: 0.86
+        --enable-deepseek-v4-fp4-indexer: true
+        --prefill-decode-interval: 20
+        --watchdog-timeout: 3600
+    # MI455
+    gfx1250:
+      # Informational only: run_sglang.py records docker_base but nothing builds from it.
+      # Build MI455 images with --build-arg BASE_DOCKER=<mi45x image> on docker/pyt_sglang.
+      docker_base: rocm/sgl-dev:v0.5.20-rocm10-mi45x
+      env:
+        # Differs from gfx950: a single flat env block cannot hold both.
+        SGLANG_HACK_FLASHMLA_BACKEND: triton
+        SGLANG_DSV4_REASONING_EFFORT: high
+        AITER_FORCE_A8W4: 1
+        ENABLE_CK: 0
+        SGLANG_ROCM_FUSED_DECODE_MLA: 0
+        SGLANG_OPT_USE_TILELANG_MHC_PRE: 0
+        SGLANG_OPT_USE_TILELANG_MHC_POST: 0
+        SGLANG_OPT_FUSE_MHC_POST_PRE: 0
+        SGLANG_OPT_UNIFIED_CACHE_FREE_OUT_OF_WINDOW_SLOTS: 1
+        SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN: 1
+        SGLANG_MOE_PADDING: 1
+        SGLANG_SET_CPU_AFFINITY: 1
+        PYTORCH_ROCM_ARCH: gfx1250
+        ROCM_QUICK_REDUCE_QUANTIZATION: INT8
+        NCCL_MIN_NCHANNELS: 112
+        HSA_NO_SCRATCH_RECLAIM: 1
+        HSA_ENABLE_SDMA: 0
+        HIP_FORCE_DEV_KERNARG: 1
+      extra_args:
+        # CustomAllreduce tops out at 16 MiB; 1024 tokens x 7168 x 2 B = 14.7 MB
+        # fits, anything larger falls back to RCCL and regresses on gfx1250.
+        --chunked-prefill-size: 1024
+        --mem-fraction-static: 0.80
+        --moe-runner-backend: aiter
+        --max-running-requests: 128
+        --context-length: 262144
+        --cuda-graph-max-bs-decode: 128
+        --cuda-graph-backend-prefill: disabled
+        --watchdog-timeout: 1800
+        # indexer.wq_b is F8_E4M3 on this build, so the fp4 indexer asserts.
+        # Null removes the key in case it ever moves into the common block.
+        --enable-deepseek-v4-fp4-indexer: ~
+
 - model: black-forest-labs/FLUX.2-dev black-forest-labs/FLUX.1-dev
-  docker_base: lmsysorg/sglang-rocm:v0.5.15-rocm720-mi35x-20260712
   extra_args:
     --attention-backend: aiter
     --performance-mode: speed
@@ -73,3 +165,25 @@
     --cuda-graph-max-bs-decode: 256
     --reasoning-parser: kimi_k3
     --tool-call-parser: kimi_k3
+
+
+## gpt-oss-120b
+- model: openai/gpt-oss-120b amd/gpt-oss-120b-w-mxfp4-a-fp8
+  extra_args:
+    --prefill-attention-backend: triton
+    --decode-attention-backend: aiter
+    --page-size: 64
+
+- model: amd/Qwen3.8-2.4T-A95B-Quark-MXFP4
+  # Qwen3.5-family hybrid MoE: 92 layers = 69 Gated-DeltaNet (linear attention)
+  # + 23 GQA full-attention, all 92 MoE (512 experts, top-10) + shared expert.
+  # Quark MXFP4. Arch class is Qwen3_5MoeForCausalLM, which needs SGLang >= 0.5.20;
+  # the docker/pyt_sglang default (v0.5.22) satisfies this, so no docker_base pin.
+  env:
+    SGLANG_USE_AITER: 1
+  extra_args:
+    --trust-remote-code: true
+    --attention-backend: aiter
+    --mem-fraction-static: 0.9
+    --reasoning-parser: qwen3
+    --tool-call-parser: qwen3_coder
