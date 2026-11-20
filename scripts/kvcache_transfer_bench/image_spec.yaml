@@ -19,3 +19,4 @@ components:
   mori: "1.2.3.post1@kvcache"
   mooncake: "0.3.13.post1@kvcache"
   nixl: "1.4.1+pr2191@kvcache"
+  ucx: "da3fac2a@rocm"          # nixl's UCX: the matrix has two builds of that commit (this one, /sgl-workspace)
