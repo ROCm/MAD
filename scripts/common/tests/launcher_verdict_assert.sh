@@ -129,9 +129,14 @@ _has "$(_stub)" "docker stop colocated_M_4242" "TERM during the run stops the co
 pkill -xf "sleep ${_LONG_SLEEP}" 2>/dev/null
 
 echo ""
-echo "=== the NIAH wrapper leaves max_tokens to benchmark_niah.py ==="
-_hasnot "$(grep -v '^ *#' "$DIR/vllm_dissag/benchmark_niah.sh")" "NIAH_MAXTOK=" "benchmark_niah.sh does not override NIAH_MAXTOK"
-_has "$(grep '^MAXTOK' "$DIR/vllm_dissag/benchmark_niah.py")" '"8192"' "benchmark_niah.py defaults to 8192"
+echo "=== a NIAH run's max_tokens comes from the card when it sets one ==="
+# A reasoning model needs room for its trace before the answer: Kimi-K3 at 2048 scored 1/10
+# on two of four context lengths, the answer cut off mid-trace. Its NIAH cards say so.
+_has "$(grep -v '^ *#' "$DIR/vllm_dissag/benchmark_niah.sh")" 'NIAH_MAXTOK="${NIAH_MAXTOK:-' "benchmark_niah.sh keeps a NIAH_MAXTOK the run gives"
+_has "$(grep -o 'NIAH_MAXTOK:+-e NIAH_MAXTOK' "$DIR/vllm_dissag/run_xPyD_models.slurm")" "NIAH_MAXTOK" "the launcher forwards NIAH_MAXTOK to the container"
+_k3="$(python3 -c 'import json,sys; print(" ".join(c["env_vars"].get("NIAH_MAXTOK","-") for c in json.load(open(sys.argv[1])) if c["name"].startswith("pyt_vllm_disagg_mori_kimi-k3")))' "$DIR/vllm_dissag/models.json")"
+_has "$_k3" "8192 8192 8192" "the Kimi-K3 NIAH cards set NIAH_MAXTOK=8192"
+_hasnot "$_k3" "-" "every Kimi-K3 NIAH card sets it"
 
 echo "======================================================"
 echo "  launcher_verdict_assert: ${pass} passed, ${fail} failed"

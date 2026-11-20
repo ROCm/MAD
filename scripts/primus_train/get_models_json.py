@@ -2,7 +2,7 @@
 Discover Primus example configs as madengine models (optional).
 
 Convention-based: globs examples/*/configs/**/*.yaml from the Primus submodule (scripts/Primus),
-so all launchers (megatron, megatron_bridge, torchtitan, maxtext, moe_package, etc.) are
+so all launchers (megatron, megatron_bridge, torchtitan, maxtext, worldmirror, etc.) are
 discovered. New launchers added under examples/<name>/configs/ are picked up automatically.
 All discovered models use the same dockerfile and run.sh; args pass --config_path <relpath>.
 For SLURM/K8s, supply distributed (launcher, nnodes, primus.config_path) via additional_context.
@@ -60,6 +60,8 @@ def list_models():
             owner="mad.support@amd.com",
             tags=["training", "primus", "megatron", "pretrain"],
             args="",
+            # run.sh writes this CSV and prints no performance: line.
+            multiple_results="primus_perf_output.csv",
         )
     ]
     if not os.path.isdir(PRIMUS_ROOT):

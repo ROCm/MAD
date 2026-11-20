@@ -704,6 +704,7 @@
             "WIDE_EP": "1",
             "BENCHMARK_SCRIPT": "niah",
             "NIAH_WORDS": "10000,50000,100000,200000",
+            "NIAH_MAXTOK": "8192",
             "REQUIRE_LOCAL_WEIGHTS": "1"
         },
         "args": ""
@@ -746,6 +747,7 @@
             "WIDE_EP": "1",
             "BENCHMARK_SCRIPT": "niah",
             "NIAH_WORDS": "10000,50000,100000,200000",
+            "NIAH_MAXTOK": "8192",
             "REQUIRE_LOCAL_WEIGHTS": "1"
         },
         "args": ""
@@ -789,6 +791,7 @@
             "WIDE_EP": "1",
             "BENCHMARK_SCRIPT": "niah",
             "NIAH_WORDS": "10000,50000,100000,200000",
+            "NIAH_MAXTOK": "8192",
             "REQUIRE_LOCAL_WEIGHTS": "1"
         },
         "args": ""
