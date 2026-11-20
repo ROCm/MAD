@@ -37,6 +37,16 @@ _argv() { # connector wide_ep ep_backend model model_path
     bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
 }
 
+# emit argv for a cell with a KV_OFFLOAD tier set
+_argv_off() { # connector wide_ep ep_backend model model_path kv_offload [backend] [disk_path]
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+    DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
+    MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} ${8:+OFFLOAD_DISK_PATH="$8"} \
+    MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
+    GPUS_PER_NODE=8 SLURM_JOB_ID=ASSERT PROXY_TYPE=vllm_router ROUTER_PORT=30000 \
+    bash "$DIR/vllm_disagg.sh" 2>/dev/null | awk '/^===DRYRUN/{f=1;next} /^===END===/{f=0} f'
+}
+
 _has()   { grep -qF -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasre() { grep -qE -- "$2" <<<"$1" && { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); } || { printf "  FAIL  %s (missing: %s)\n" "$3" "$2"; fail=$((fail+1)); }; }
 _hasnot(){ grep -qF -- "$2" <<<"$1" && { printf "  FAIL  %s (unexpected: %s)\n" "$3" "$2"; fail=$((fail+1)); } || { printf "  PASS  %s\n" "$3"; pass=$((pass+1)); }; }
@@ -149,6 +159,7 @@ _has    "$C" "--api-server-count=8" "K3 api-server-count=dp_size"
 _has    "$C" "--reasoning-parser" "K3 reasoning parser flag"
 _has    "$C" "kimi_k3" "K3 reasoning parser value"
 _hasnot "$C" "-tp 1" "K3 not -tp 1"
+_count  "$C" "--max-model-len" 1 "K3 --max-model-len once (recipe flag; MAX_MODEL_LEN not added again)"
 
 echo ""
 echo "=== -e EP_TP_SIZE=1 override beats the recipe (K3 falls back to plain wideEP -tp 1) ==="
@@ -178,8 +189,8 @@ echo ""
 echo ""
 echo "=== non-K3 wideEP: EP_TP_SIZE dormant (plain -tp 1, no role split) ==="
 # emit argv for an explicit rank/topology cell
-_argv_rank() { # connector wide ep model rank xP yD
-  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+_argv_rank() { # connector wide ep model rank xP yD   (_ARGV_EXTRA="NAME=VALUE ...": more env)
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" ${_ARGV_EXTRA:-} \
     DRY_RUN=1 NODE_RANK="$5" xP="$6" yD="$7" CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH=/m/M MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -196,6 +207,23 @@ _has    "$Dm" "--api-server-count" "DSV3 wideEP -> has --api-server-count"
 Dh="$(_argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
 _has    "$Dh" "--headless" "DSV3 wideEP headless child -> --headless"
 _hasnot "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> no --kv-transfer-config"
+
+echo ""
+echo "=== multi-node layout: DeepSeek-V4 (develop's), or any model on request ==="
+# Child ranks carry the connector with proxy_ip emptied (the prefill side handshakes with every
+# remote DP rank; an empty proxy_ip keeps them from registering with the router as workers).
+V4h="$(_argv_rank moriio 1 mori DeepSeek-V4-Flash-FP8 1 2 2)"
+_has    "$V4h" "--kv-transfer-config" "DSV4 wideEP headless child -> --kv-transfer-config"
+_has    "$V4h" '"proxy_ip":""' "DSV4 wideEP headless child -> proxy_ip emptied"
+DhOn="$(_ARGV_EXTRA="MORIIO_MULTINODE=1" _argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
+_has    "$DhOn" '"proxy_ip":""' "MORIIO_MULTINODE=1 -> DSV3 child takes the multi-node layout"
+_has    "$(cat "$SLURM" "$DIR/node.sh" 2>/dev/null)" 'MORIIO_MULTINODE:+-e MORIIO_MULTINODE=' "the launcher forwards MORIIO_MULTINODE to the container"
+
+echo ""
+echo "=== MoRI-IO read_mode only when asked for ==="
+_hasnot "$Dm" "read_mode" "default config has no read_mode (connector default WRITE)"
+Rm="$(_ARGV_EXTRA="MORIIO_READ_MODE=1" _argv_rank moriio 1 mori DeepSeek-V3 0 2 2)"
+_has    "$Rm" '"read_mode":true' "MORIIO_READ_MODE=1 -> read_mode true"
 
 echo ""
 echo "=== EP_TP_SIZE>1 needs equal pools ==="
@@ -254,6 +282,47 @@ for M in DeepSeek-V3 Kimi-K3-MXFP4; do
   _guard_rejects "$M" 3
 done
 
+echo "=== KV_OFFLOAD=cpu, default backend = OffloadingConnector (moriio wideEP DSV3) ==="
+O="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 cpu)"
+_has    "$O" "MultiConnector" "wraps in MultiConnector"
+_has    "$O" "OffloadingConnector" "default backend adds OffloadingConnector (native)"
+_hasnot "$O" "SimpleCPUOffloadConnector" "SimpleCPU not used unless selected"
+_has    "$O" "cpu_bytes_to_use" "OffloadingConnector has cpu_bytes_to_use"
+_has    "$O" "MoRIIOConnector" "base MoRIIOConnector preserved inside MultiConnector"
+_has    "$O" "--enable-prefix-caching" "prefix caching enabled under offload"
+_hasnot "$O" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu, OFFLOAD_BACKEND=SimpleCPUOffloadConnector (moriio wideEP DSV3) ==="
+OS="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 cpu SimpleCPUOffloadConnector)"
+_has    "$OS" "SimpleCPUOffloadConnector" "explicit SimpleCPUOffloadConnector selected"
+_has    "$OS" "cpu_bytes_to_use" "SimpleCPUOffloadConnector has cpu_bytes_to_use"
+_hasnot "$OS" "TieringOffloadingSpec" "SimpleCPU has no fs tier"
+
+echo ""
+echo "=== KV_OFFLOAD=fs, default backend = OffloadingConnector + TieringOffloadingSpec ==="
+OF="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 fs OffloadingConnector /mnt/nvme)"
+_has    "$OF" "OffloadingConnector" "fs tier uses OffloadingConnector"
+_has    "$OF" "TieringOffloadingSpec" "fs tier adds TieringOffloadingSpec"
+_has    "$OF" "secondary_tiers" "fs tier adds secondary_tiers"
+
+echo ""
+echo "=== KV_OFFLOAD=cpu (tiered prefix cache; rixl deepep DSV3) ==="
+OD="$(_argv_off rixl 1 deepep DeepSeek-V3 /m/DSV3 cpu)"
+_has    "$OD" "MultiConnector" "wraps in MultiConnector"
+_has    "$OD" "OffloadingConnector" "default backend adds OffloadingConnector (native)"
+_has    "$OD" "NixlConnector" "base NixlConnector preserved inside MultiConnector"
+_has    "$OD" "--enable-prefix-caching" "prefix caching enabled under offload"
+_hasnot "$OD" "--no-enable-prefix-caching" "no --no-enable-prefix-caching under offload"
+
+echo ""
+echo "=== KV_OFFLOAD=none is unchanged (no MultiConnector; disagg recipe intact) ==="
+N="$(_argv_off moriio 1 mori DeepSeek-V3 /m/DSV3 none)"
+_hasnot "$N" "MultiConnector" "no MultiConnector when offload disabled"
+_hasnot "$N" "OffloadingConnector" "no offload connector when offload disabled"
+_has    "$N" "--no-enable-prefix-caching" "prefix caching stays off (base recipe)"
+
+echo ""
 echo "=== connector platform env files carry the RDMA-fix env ==="
 # The ROCm-7.2.3 GPU-RDMA env now lives in per-connector .env files; the slurm
 # sources connectors/<CONNECTOR>.env and forwards each var via docker -e.

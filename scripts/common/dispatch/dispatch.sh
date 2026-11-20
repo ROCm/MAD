@@ -123,7 +123,8 @@ dispatch_run() {  # STEP NODELIST CMD...
             done
             return "$worst"
             ;;
-        *) srun --nodelist="$nodelist" "$@" ;;
+        # DISPATCH_SRUN_ARGS: extra srun options a launcher asks for (e.g. --kill-on-bad-exit=1).
+        *) srun ${DISPATCH_SRUN_ARGS:-} --nodelist="$nodelist" "$@" ;;
     esac
 }
 

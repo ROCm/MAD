@@ -86,6 +86,8 @@ VALID_MODELS=( \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
     "Kimi-K3-MXFP4-MI355X" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -97,6 +99,8 @@ MORI_EP_VALID_MODELS=( \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
     "Kimi-K3-MXFP4-MI355X" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -190,7 +194,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
 # Kimi-K3 and Kimi-K3-MXFP4 are wideEP-only as well (see their models.yaml blocks).
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" "DeepSeek-V4-Flash-FP8" "DeepSeek-V4-Pro-FP8" )
 # The exception: the DeepSeek family also runs TP on the moriio connector, from the tp:
 # blocks in models.yaml (the TP baseline next to wideEP). Their TP flags are written for
 # that connector, which emits the one --compilation-config with +quant_fp8 itself; rixl
@@ -228,8 +232,11 @@ elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
   fi
 fi
 
-export CONNECTOR WIDE_EP EP_BACKEND
-echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}) for model '$MODEL_NAME'"
+# Tiered prefix caching overlay (orthogonal axis; default none). Forwarded to the container.
+KV_OFFLOAD="${KV_OFFLOAD:-none}"
+OFFLOAD_BACKEND="${OFFLOAD_BACKEND:-native}"
+export CONNECTOR WIDE_EP EP_BACKEND KV_OFFLOAD OFFLOAD_BACKEND
+echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD} OFFLOAD_BACKEND=${OFFLOAD_BACKEND}) for model '$MODEL_NAME'"
 
 # ---------------------------------------------------------------------------
 # Connector platform env: per-connector <connector>.env holds the ROCm-7.2.3
@@ -391,6 +398,7 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # The launcher/connectors auto-enable prefix caching + server /metrics when
 # BENCHMARK_SCRIPT=agentic.
 #   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
+#   validate               -> benchmark_validate.sh     (niah then smoke; curl already ran)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
@@ -399,7 +407,9 @@ case "$BENCHMARK_SCRIPT" in
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
     accuracy)     BENCHMARK_SCRIPT_FILE="benchmark_accuracy.sh" ;;
     lora)         BENCHMARK_SCRIPT_FILE="benchmark_lora.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, accuracy, lora)" >&2; exit 1 ;;
+    validate)     BENCHMARK_SCRIPT_FILE="benchmark_validate.sh" ;;
+    multiturn)    BENCHMARK_SCRIPT_FILE="benchmark_multiturn.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, accuracy, lora, validate, multiturn)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -453,7 +463,11 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 
 # Every selected node runs node.sh, then the containers are removed; rank 0 gives the
 # job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict).
-launcher_run_nodes "${SCRIPT_DIR}/node.sh" \
+# A node whose worker dies during boot writes BOOT_FATAL (vllm_disagg.sh) and exits 3
+# (node_lib.sh); --kill-on-bad-exit then takes the step down instead of the other nodes
+# waiting in their barriers until the wall, and the cleanup below stops every container.
+rm -f "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL"
+DISPATCH_SRUN_ARGS="--kill-on-bad-exit=1" launcher_run_nodes "${SCRIPT_DIR}/node.sh" \
     'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 launcher_verdict || exit $?
 

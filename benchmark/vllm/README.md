@@ -53,6 +53,8 @@ For the experimental features and known issues concerning ROCm optimization effo
 
 To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [YAML configs](../../scripts/vllm/configs/)
 
+`run.sh` passes `--warmup` to `run_vllm.py` by default; pass `--no-warmup` to `run.sh` to skip it. With `--warmup`, each `serving` config first sends `max_concurrency` prefill-only requests (a prompt of roughly the configured input length, 1 output token) so Triton kernels are compiled before measurement. `run_vllm.py` run directly does not warm up unless `--warmup` is given. `--profile` runs and the latency, throughput and accuracy benchmarks do not warm up.
+
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.

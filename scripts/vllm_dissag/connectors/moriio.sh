@@ -11,6 +11,10 @@
 # Per-model FLAGS come from models.yaml via the driver ($MODEL_CONFIG_<ROLE>).
 # Per-model ENV is exported by the driver (yaml env:) BEFORE connector_setup_env,
 # so the ${VAR:-default} fallbacks below yield to any model/site override.
+#
+# Optional env overrides:
+#   MORIIO_READ_MODE=1   Enable MoRIIO READ mode (decode pulls KV from prefill).
+#                        Default: 0 (WRITE mode, prefill pushes to decode).
 # =============================================================================
 
 connector_init() {
@@ -18,7 +22,7 @@ connector_init() {
     SERVE_PORT="${MORI_SERVE_PORT:-20005}"
     KV_PORT="${MORI_KV_PORT:-9711}"
     PROXY_PORT="${MORI_PROXY_PORT:-10001}"
-    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-36367}"
+    PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-31367}"
     LOCAL_PING_PORT="${MORI_LOCAL_PING_PORT:-61555}"
     HANDSHAKE_PORT="${MORI_HANDSHAKE_PORT:-8405}"
     NOTIFY_PORT="${MORI_NOTIFY_PORT:-61005}"
@@ -56,7 +60,7 @@ connector_setup_env() {
     export VLLM_ROCM_USE_AITER_PAGED_ATTN=0
     export VLLM_USE_AITER_TRITON_SILU_MUL=0
 
-    export VLLM_LOGGING_LEVEL=INFO
+    export VLLM_LOGGING_LEVEL=${VLLM_LOGGING_LEVEL:-INFO}
     export VLLM_USE_V1=1
     export VLLM_ALL2ALL_BACKEND=mori
 
@@ -88,10 +92,12 @@ connector_setup_env() {
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
     export VLLM_HANDSHAKE_TIMEOUT_MINS="${VLLM_HANDSHAKE_TIMEOUT_MINS:-30}"
 
-    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/vllm_cache/triton}"
-    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/tmp/vllm_cache/vllm}"
-    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/tmp/vllm_cache/comgr}"
-    export AITER_JIT_DIR="${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"
+    # JIT caches default to the image-keyed /opt/vllm_cache, not the world-shared /tmp/vllm_cache
+    # (poisoned by other users' newer-toolchain JIT builds, which aborts every worker).
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/opt/vllm_cache/triton}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/opt/vllm_cache/vllm}"
+    export COMGR_CACHE_DIR="${COMGR_CACHE_DIR:-/opt/vllm_cache/comgr}"
+    export AITER_JIT_DIR="${AITER_JIT_DIR:-/opt/vllm_cache/aiter_jit}"
     mkdir -p "${TRITON_CACHE_DIR}" "${VLLM_CACHE_ROOT}" "${COMGR_CACHE_DIR}" "${AITER_JIT_DIR}" 2>/dev/null || true
 
     if [[ "${VLLM_ROCM_USE_AITER:-1}" == "1" ]]; then
@@ -101,6 +107,17 @@ connector_setup_env() {
             mkdir -p "${_aiter_cfgs}"
             cp "${_aiter_src}"/*.csv "${_aiter_cfgs}/" 2>/dev/null || true
         fi
+    fi
+
+    # Clear baton locks orphaned by a prior killed job (they deadlock workers for 3600s).
+    # Safe because jobs run --exclusive; set CLEAN_STALE_JIT_LOCKS=0 on a shared node.
+    if [[ "${CLEAN_STALE_JIT_LOCKS:-1}" == "1" ]]; then
+        # aiter/triton leave lock_*, bare `lock` and *.lock batons across several roots.
+        for _lk_root in "${AITER_JIT_DIR}" "${TRITON_CACHE_DIR}" "${COMGR_CACHE_DIR}" \
+                        "${VLLM_CACHE_ROOT}" /root/.aiter /tmp/aiter_configs; do
+            [[ -d "${_lk_root}" ]] || continue
+            find "${_lk_root}" -type f \( -name 'lock' -o -name 'lock_*' -o -name '*.lock' \) -delete 2>/dev/null || true
+        done
     fi
 
     export GPU_MAX_HW_QUEUES="${GPU_MAX_HW_QUEUES:-2}"
@@ -120,8 +137,33 @@ connector_setup_env() {
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
+# Multi-node wideEP role (xP>1 or yD>1), the layout DeepSeek-V4 runs (MORIIO_MULTINODE=1 asks for it
+# with any model; =0 turns it off): each role is ONE DP group spanning nodes behind its
+# master's URL. Child nodes get the MoRI-IO connector and the router is given every node's IP plus
+# the full rank range (connector_start_proxy), so DP ranks on every node serve. 1P1D is unchanged.
+# The router needs the --moriio-* flags from vllm-project/router PR #458. TP-within-EP
+# (EP_TP_SIZE>1) reaches its nodes through the connector's pod-host list and --moriio-dp-size
+# instead (connector_start_proxy), so it is not this layout.
+_moriio_multi_node() {
+    local _want="${MORIIO_MULTINODE:-}"
+    [[ -z "${_want}" ]] && case "${MODEL_NAME:-}" in DeepSeek-V4-*) _want=1 ;; *) _want=0 ;; esac
+    [[ "${_want}" == "1" ]] && parallelism_is_wide_ep && (( ${EP_TP_SIZE:-1} <= 1 )) \
+        && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
+}
+
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
+    # MORIIO_READ_MODE=1 selects the connector's READ mode; otherwise the key is left out and
+    # the connector runs its default (WRITE), as every config did before the key existed.
+    local _read_mode=""
+    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read_mode='"read_mode":true,'
+    # DeepSeek-V4 images ignore the VLLM_MORIIO_* environment, so its transfer tuning has
+    # defaults here (4 QPs, 4 workers, unbatched posts); any model can set them.
+    if [ "${MODEL_NAME:-}" = "DeepSeek-V4-Flash-FP8" ] || [ "${MODEL_NAME:-}" = "DeepSeek-V4-Pro-FP8" ]; then
+        local VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
+        local VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+        local VLLM_MORIIO_POST_BATCH_SIZE="${VLLM_MORIIO_POST_BATCH_SIZE:--1}"
+    fi
     # Peer-pool node list. A kv_producer (prefill) handshakes the DECODE pool, a
     # kv_consumer (decode) notifies the PREFILL pool. The driver fills them only
     # when EP_TP_SIZE>1 (see vllm_disagg.sh); otherwise the key is omitted and the
@@ -142,17 +184,154 @@ _moriio_build_kv_transfer_config() {
         [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
         _tune+=',"'"${_k#*:}"'":'"${_v}"
     done
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"proxy_ip":"'"${ROUTER_ADDR:-${MASTER_ADDR}}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${_read_mode}"'"proxy_ip":"'"${ROUTER_ADDR:-${MASTER_ADDR}}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
+}
+
+# The DSV4 image bakes /usr/local/bin/vllm-router. ROUTER_BOOT_INSTALL is an
+# override for an image without it or a newer SHA. Unset = use the image binary.
+# Git+cargo still overlaps engine load when the override is set. pip lags main.
+_ROUTER_BOOT_PID=""
+_router_boot_log() {
+    echo "/run_logs/${SLURM_JOB_ID}/vllm_router_install_NODE${NODE_RANK}.log"
+}
+
+_kick_vllm_router_boot_install() {
+    [ "${NODE_RANK:-0}" = "0" ] || return 0
+    [ "${PROXY_TYPE:-}" = "vllm_router" ] || return 0
+    local method="${ROUTER_BOOT_INSTALL:-}"
+    [ -n "$method" ] && [ "$method" != "0" ] || return 0
+    [ "$method" = "1" ] && method=git
+    local log; log="$(_router_boot_log)"
+    mkdir -p "$(dirname "$log")"
+    echo "[router-boot] starting method=${method} repo=${ROUTER_REPO:-https://github.com/vllm-project/router.git} ref=${ROUTER_REF:-main}" | tee -a "$log"
+    _install_vllm_router_at_boot "$method" >>"$log" 2>&1 &
+    _ROUTER_BOOT_PID=$!
+    echo "[router-boot] pid=${_ROUTER_BOOT_PID} log=${log}"
+}
+
+_wait_vllm_router_boot_install() {
+    [ -n "${_ROUTER_BOOT_PID:-}" ] || return 0
+    echo "[router-boot] waiting for pid=${_ROUTER_BOOT_PID} (overlaps engine boot)"
+    if ! wait "${_ROUTER_BOOT_PID}"; then
+        echo "Error: vllm-router boot install failed. See $(_router_boot_log)" >&2
+        tail -n 80 "$(_router_boot_log)" >&2 || true
+        exit 1
+    fi
+    echo "[router-boot] install complete"
+}
+
+_install_vllm_router_at_boot() {
+    local method="$1"
+    local dest="/usr/local/bin/vllm-router"
+    case "$method" in
+        pip)
+            echo "[router-boot] pip install -U vllm-router"
+            pip install -U vllm-router
+            local pip_bin
+            pip_bin="$(command -v vllm-router 2>/dev/null || true)"
+            if [ -z "$pip_bin" ]; then
+                echo "Error: pip install vllm-router left no vllm-router on PATH" >&2
+                return 1
+            fi
+            if [ "$pip_bin" != "$dest" ]; then
+                install -m 755 "$pip_bin" "$dest"
+            fi
+            ;;
+        git)
+            local repo="${ROUTER_REPO:-https://github.com/vllm-project/router.git}"
+            local ref="${ROUTER_REF:-main}"
+            local rust="${RUST_TOOLCHAIN:-1.88.0}"
+            local src="/tmp/vllm-router-src"
+            echo "[router-boot] git ${repo} @ ${ref} (cargo release, rustc ${rust})"
+            if ! command -v git >/dev/null 2>&1 || ! command -v pkg-config >/dev/null 2>&1; then
+                apt-get update
+                apt-get install -y --no-install-recommends \
+                    git build-essential pkg-config libssl-dev curl ca-certificates
+            fi
+            if ! command -v cargo >/dev/null 2>&1; then
+                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+                    | sh -s -- -y --default-toolchain "${rust}"
+            fi
+            # shellcheck disable=SC1091
+            [ -f /root/.cargo/env ] && . /root/.cargo/env
+            rustup default "${rust}" >/dev/null 2>&1 || rustup toolchain install "${rust}"
+            rm -rf "$src"
+            git clone --filter=blob:none "$repo" "$src"
+            git -C "$src" checkout "$ref"
+            local sha
+            sha="$(git -C "$src" rev-parse HEAD)"
+            echo "[router-boot] SHA=${sha}"
+            ( cd "$src" && cargo build --release )
+            install -m 755 "$src/target/release/vllm-router" "$dest"
+            echo "VLLM_ROUTER_BOOT=${repo}@${ref}@${sha}" >> /app/versions.txt
+            echo "[router-boot] installed ${dest} (${sha})"
+            ;;
+        *)
+            echo "Error: ROUTER_BOOT_INSTALL=${method} (expected git|pip|1)" >&2
+            return 1
+            ;;
+    esac
+    if ! "$dest" --help 2>&1 | grep -q moriio; then
+        echo "Error: ${dest} has no --kv-connector moriio (wrong package or too old)" >&2
+        "$dest" --help 2>&1 | head -n 40 >&2 || true
+        return 1
+    fi
+    export ROUTER_BINARY="$dest"
+}
+
+# Patch roster: one line per patch named in the image's DSV4_PATCHES_BAKED
+# stamp. Status is also exported as DSV4_PATCH_<NAME>.
+_dsv4_patch_note() {
+    local name="$1" status="$2" path="$3"
+    echo "[dsv4-patch] name=${name} status=${status} path=${path}"
+    export "DSV4_PATCH_${name}=${status}"
+}
+
+_dsv4_patch_roster_dump() {
+    local _baked _p
+    _baked="$(sed -n 's/^DSV4_PATCHES_BAKED=//p' /app/versions.txt 2>/dev/null | tail -n 1)"
+    for _p in ${_baked//,/ }; do
+        _dsv4_patch_note "$(tr '[:lower:]' '[:upper:]' <<<"${_p}")" BAKED image
+    done
+    echo "[dsv4-patch-roster] baked=${_baked} n=$(wc -w <<<"${_baked//,/ }") eager=${DSV4_EAGER:-0} hma=${DSV4_ENABLE_HMA:-0}"
 }
 
 connector_runtime_patch() {
-    # No-op: the MoRIIO multi-node disagg fixes (vLLM PR#39276 notify-path, #41751 LL
-    # split, DP-rank hash-failsafe) are committed in-source in the vLLM the image is
-    # built from (see the Dockerfile VLLM_REF). There is no runtime .py patcher — that
-    # would be a drifting duplicate of fixes that already live upstream in the fork.
-    # If you ever run an image WITHOUT these fixes baked, use an image that has them
-    # (rebuild from the pinned VLLM_REF) rather than patching a stock image at runtime.
-    return 0
+    # Overlap cargo with engine boot (NODE0 / vllm_router only).
+    _kick_vllm_router_boot_install
+    # GLM / DSV3 / dense: no-op (fixes are in-source on develop images).
+    # DSV4 Flash/Pro: patches are baked into the image at build.
+    if [ "${MODEL_NAME:-}" != "DeepSeek-V4-Flash-FP8" ] && [ "${MODEL_NAME:-}" != "DeepSeek-V4-Pro-FP8" ]; then
+        return 0
+    fi
+    if [ "${SKIP_RUNTIME_PATCH:-1}" != "1" ]; then
+        echo "Error: DSV4 patches are baked into the image; runtime apply_*.py is gone." >&2
+        echo "Error: unset SKIP_RUNTIME_PATCH or set it to 1." >&2
+        exit 1
+    fi
+    echo "[dsv4] patches=BAKED SKIP_RUNTIME_PATCH=${SKIP_RUNTIME_PATCH:-1}"
+    if [ "${MORI_JIT_SCRUB:-1}" = "1" ]; then
+        echo "[mori-scrub] removing stale MoRI JIT locks/state (/root/.mori, /tmp/mori_jit_*)"
+        find /root/.mori -name '*.lock' -delete 2>/dev/null || true
+        rm -rf /root/.mori /tmp/mori_jit_* 2>/dev/null || true
+    fi
+    if [ "${AITER_JIT_SCRUB:-1}" = "1" ]; then
+        echo "[aiter-scrub] removing stale AITER JIT cache (${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit})"
+        rm -rf "${AITER_JIT_DIR:-/tmp/vllm_cache/aiter_jit}"/* 2>/dev/null || true
+    fi
+    # bake.sh verifies the patches at build and only then writes this stamp.
+    if ! grep -q '^DSV4_PATCHES_BAKED=' /app/versions.txt 2>/dev/null; then
+        echo "Error: [dsv4] /app/versions.txt has no DSV4_PATCHES_BAKED stamp; image is not DSV4-baked." >&2
+        echo "Error: rebuild from docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile." >&2
+        exit 1
+    fi
+    echo "[dsv4] $(grep -E '^DSV4_PATCHES_(BAKED|SRC)=' /app/versions.txt | tr '\n' ' ')"
+    # HMA is always off: the baked patch set is the HMA-off arm.
+    if [ "${DSV4_ENABLE_HMA:-0}" != "0" ]; then
+        echo "[dsv4-hma] WARN: DSV4_ENABLE_HMA=${DSV4_ENABLE_HMA} is not supported; forcing 0"
+    fi
+    export DSV4_ENABLE_HMA=0
+    _dsv4_patch_roster_dump
 }
 
 # connector_launch_worker <role> <dp_size> <dp_addr> <kv_role> <log_prefix> [dp_start_rank]
@@ -170,6 +349,136 @@ connector_launch_worker() {
         fi
     fi
 
+    # MoRIIO sideline fix (MultiConnector + KV_OFFLOAD): when MoRIIO is the non-chosen
+    # connector, num_external_tokens == 0 but WRITE-mode decode still sends an EMPTY
+    # remote_blocks notify, which kills the producer's notify-listener thread. Gate the
+    # send on num_external_tokens>0 and release the deferred prefill blocks otherwise.
+    # TEMPORARY: superseded by vLLM PR #57705 (in v0.33.0+ images, where this is a no-op);
+    # remove once older images are no longer supported. Idempotent;
+    # if the anchor is missing it logs "could not be applied" and the launch continues.
+    local _moriio_conn="/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py"
+    if [ -f "$_moriio_conn" ]; then
+        python3 - "$_moriio_conn" <<'MORIIO_SIDELINE_PATCH' || echo "[moriio-sideline-patch] WARN: patch could not be applied (anchor missing / PR #57705 already in image?); continuing without it"
+import sys
+
+P = sys.argv[1]
+MARKER = "MoRIIO sideline fix"
+
+src = open(P).read()
+if MARKER in src:
+    print("[moriio-sideline-patch] already patched")
+    sys.exit(0)
+
+old = '''                    block_notify_list = (
+                        blocks.get_block_ids()[0] if num_external_tokens > 0 else []
+                    )'''
+
+new = '''                    # num_external_tokens == 0: this connector has no KV to pull
+                    # for the request (MultiConnector chose another connector, or
+                    # it was a full local cache hit). An empty block_notify_list
+                    # makes the producer reject the handshake and hold its
+                    # deferred write-prefill blocks until timeout, exhausting the
+                    # pool under warm concurrency. Release them and skip the
+                    # notify instead.
+                    if num_external_tokens == 0:
+                        self._release_write_prefill_blocks(
+                            request.request_id, params
+                        )
+                        params["do_remote_prefill"] = False
+                        return
+                    block_notify_list = blocks.get_block_ids()[0]'''
+
+if old not in src:
+    sys.stderr.write("[moriio-sideline-patch] PATCH FAILED: anchor block not found\n")
+    sys.exit(3)
+
+src = src.replace(old, new, 1)
+open(P, "w").write(src)
+print("[moriio-sideline-patch] patched OK")
+MORIIO_SIDELINE_PATCH
+    fi
+
+    # LMCache device-binding fix: gpu_connector uses metadata.local_worker_id (always 0 per
+    # DP rank) as the device index; use torch.cuda.current_device() instead.
+    # TEMPORARY: https://github.com/LMCache/LMCache/pull/5501 (LMCache v0.5.6+); vLLM v0.33.0
+    # images bundle LMCache 0.5.3, so remove once they bump it. Idempotent; non-fatal if the anchor is missing.
+    local _lmcache_gpu
+    _lmcache_gpu="$(python3 -c 'import importlib.util as u, os; s = u.find_spec("lmcache"); print(os.path.join(os.path.dirname(s.origin), "v1/gpu_connector/__init__.py") if s and s.origin else "")' 2>/dev/null)"
+    if [ -n "$_lmcache_gpu" ] && [ -f "$_lmcache_gpu" ]; then
+        python3 - "$_lmcache_gpu" <<'LMCACHE_DEVICE_PATCH' || echo "[lmcache-device-patch] WARN: patch could not be applied (anchor missing / LMCache PR #5501 already in image?); continuing without it"
+import sys
+
+P = sys.argv[1]
+MARKER = "LMCache PR#5501 vLLM branch"
+
+src = open(P).read()
+if MARKER in src:
+    print("[lmcache-device-patch] already patched")
+    sys.exit(0)
+
+# Anchor is the vLLM branch — preceded by EngineType.VLLM import block.
+# The same two lines also appear in the SGLang and TRTLLM branches; we
+# only fix the VLLM one (the engine we actually run).
+old = ("elif engine == EngineType.VLLM:\n"
+       "        _validate_vllm_device_features(config)\n\n"
+       "        # First Party\n"
+       "        from lmcache.v1.gpu_connector.gpu_connectors import (\n"
+       "            VLLMBufferLayerwiseGPUConnector,\n"
+       "            VLLMPagedMemGPUConnectorV2,\n"
+       "            VLLMPagedMemGPUConnectorV3,\n"
+       "            VLLMPagedMemLayerwiseGPUConnector,\n"
+       "        )\n\n"
+       "        local_worker_id = metadata.local_worker_id\n"
+       "        torch_dev.set_device(local_worker_id)")
+new = ("elif engine == EngineType.VLLM:\n"
+       "        _validate_vllm_device_features(config)\n\n"
+       "        # First Party\n"
+       "        from lmcache.v1.gpu_connector.gpu_connectors import (\n"
+       "            VLLMBufferLayerwiseGPUConnector,\n"
+       "            VLLMPagedMemGPUConnectorV2,\n"
+       "            VLLMPagedMemGPUConnectorV3,\n"
+       "            VLLMPagedMemLayerwiseGPUConnector,\n"
+       "        )\n\n"
+       "        # LMCache PR#5501 vLLM branch: local_worker_id is always 0 per DP rank, not a device index.\n"
+       "        local_worker_id = torch_dev.current_device()")
+
+if old not in src:
+    sys.stderr.write("[lmcache-device-patch] PATCH FAILED: anchor not found\n")
+    sys.exit(3)
+
+open(P, "w").write(src.replace(old, new, 1))
+print("[lmcache-device-patch] patched OK")
+LMCACHE_DEVICE_PATCH
+    fi
+
+    # LMCache MLA broadcast device fix: the retrieve broadcast copies KV chunks to cuda:{worker_id}, and
+    # worker_id is 0 on every DP rank, so every rank copies to GPU 0 and faults reading it. Use the current
+    # device. LMCache PR #6109 (supersedes #5515). TEMPORARY: remove once LMCache ships it. Idempotent; non-fatal.
+    python3 - <<'LMCACHE_BROADCAST_PATCH' || echo "[lmcache-broadcast-patch] WARN: patch could not be applied (anchor missing / already fixed upstream?); continuing without it"
+import importlib.util, os, sys
+
+spec = importlib.util.find_spec("lmcache")
+d = os.path.dirname(spec.origin) if spec and spec.origin else ""
+P = next((p for p in (d + "/v1/cache_engine.py", d + "/inprocess/v1/cache_engine.py") if os.path.exists(p)), None)
+if P is None:
+    sys.exit("[lmcache-broadcast-patch] cache_engine.py not found")
+
+src = open(P).read()
+R = [('f"{torch_device_type}:{self.metadata.worker_id}"', 'f"{torch_device_type}:{torch_dev.current_device()}"'),
+     ("local_rank = self.metadata.worker_id % torch_dev.device_count()", "local_rank = torch_dev.current_device()")]
+if all(new in src for _, new in R):
+    print("[lmcache-broadcast-patch] already patched: " + P)
+    sys.exit(0)
+for old, _ in R:
+    if src.count(old) != 1:
+        sys.exit("[lmcache-broadcast-patch] PATCH FAILED: anchor not found/unique: " + old)
+for old, new in R:
+    src = src.replace(old, new)
+compile(src, P, "exec")
+open(P, "w").write(src)
+print("[lmcache-broadcast-patch] patched OK: " + P)
+LMCACHE_BROADCAST_PATCH
+
     # Per-role execution mode. Ported from #324: NEVER use bare --enforce-eager.
     # On these AITER images an enforce-eager worker (no +quant_fp8 custom op) routes
     # fp8 quant through an AITER op whose signature mismatches the build
@@ -181,6 +490,10 @@ connector_launch_worker() {
     local _cudagraph_mode="${VLLM_CUDAGRAPH_MODE:-}"
     if [[ "$log_prefix" == "decode" ]]; then
         _cudagraph_mode="${DECODE_CUDAGRAPH_MODE:-$_cudagraph_mode}"
+        if [[ "${DSV4_EAGER:-0}" == "1" ]]; then
+            _cudagraph_mode=NONE
+            echo "[dsv4-cg] DSV4_EAGER=1 -> decode cudagraph_mode=NONE +quant_fp8 (never --enforce-eager)"
+        fi
     else
         _cudagraph_mode="${PREFILL_CUDAGRAPH_MODE:-$_cudagraph_mode}"
     fi
@@ -202,16 +515,6 @@ connector_launch_worker() {
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
     _model_config_to_array "$_mc" model_args
-
-    # Agentic gating: the default sweep keeps prefix caching OFF (clean, cache-free
-    # throughput) via the hardcoded --no-enable-prefix-caching below. The agentic
-    # trace-replay path (BENCHMARK_SCRIPT_FILE=benchmark_agentic.sh) — or an explicit
-    # ENABLE_PREFIX_CACHE=1 — STRIPS that flag so prefix caching is ON. Gated so the
-    # default (non-agentic) sweep argv is byte-for-byte unchanged.
-    local _prefix_cache_flag="--no-enable-prefix-caching"
-    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_PREFIX_CACHE:-0}" == "1" ]]; then
-        _prefix_cache_flag=""
-    fi
 
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
@@ -241,12 +544,29 @@ connector_launch_worker() {
             local _api_servers="${_GPUS_PER_NODE}"
             [ "${dp_size}" -lt "${_api_servers}" ] && _api_servers="${dp_size}"
             extra_args+=(--api-server-count=${_api_servers})
-            kv_args+=(--kv-transfer-config "${kv_config}")
+            # KV_OFFLOAD wrap; the offload pool is split per DP rank of EP_TP_SIZE GPUs.
+            local _OFFLOAD_TP_WORLD="${_ep_tp}"
+            kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${kv_config}")")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
-            # TP-within-EP headless workers host real DP ranks; they MUST carry kv-transfer-config.
-            (( _ep_tp > 1 )) && kv_args+=(--kv-transfer-config "${kv_config}")
+            # TP-within-EP (EP_TP_SIZE>1) headless workers host real DP ranks that the router
+            # addresses through the pod-host list, so they carry the master's config. In the
+            # multi-node layout (_moriio_multi_node: DeepSeek-V4, or MORIIO_MULTINODE=1) child ranks
+            # carry it too -- the prefill side handshakes with EVERY remote DP rank and only sets
+            # write_ready_flags once all complete -- with proxy_ip emptied so they do NOT
+            # heartbeat-register with the router (no HTTP server; a phantom worker would get
+            # requests). Otherwise the router targets master-node ranks only and children carry none.
+            local _child_kv=""
+            if (( _ep_tp > 1 )); then
+                _child_kv="${kv_config}"
+            elif _moriio_multi_node; then
+                _child_kv="$(sed -E 's/"proxy_ip":"[^"]*"/"proxy_ip":""/' <<<"${kv_config}")"
+            fi
+            local _OFFLOAD_TP_WORLD="${_ep_tp}"
+            [[ -n "${_child_kv}" ]] && kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${_child_kv}")")
         fi
+
+        local _prefix_cache_arg; _prefix_cache_arg="$(kv_prefix_cache_arg)"
 
         # Recipe knobs (overridable via env / models.yaml). DeepSeek-V3 on AITER
         # needs block=16 + MLA off (the block=1 + AITER-MLA fp8 decode kernel
@@ -259,6 +579,12 @@ connector_launch_worker() {
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
         local _max_batched=()
         [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]] && _max_batched=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
+        # Optional context cap. Only emitted when a model recipe / submit sets it;
+        # the connector stays model-agnostic (no default). Needed for MLA models
+        # whose default max_model_len makes the TritonMLA attn-logits workspace OOM.
+        local mml_args=()
+        [[ -n "${MAX_MODEL_LEN:-}" ]] && ! _recipe_sets_flag --max-model-len "${log_prefix}" \
+        && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
@@ -274,8 +600,9 @@ connector_launch_worker() {
                     "${mem_args[@]}" \
                     --kv-cache-dtype "${_kvdtype}" \
                     --block-size "${_block}" \
-                    ${_prefix_cache_flag} \
+                    "${_prefix_cache_arg}" \
                     --all2all-backend "${_all2all}" \
+                    "${mml_args[@]}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
                     "${_max_batched[@]}" \
@@ -295,8 +622,9 @@ connector_launch_worker() {
             "${mem_args[@]}" \
             --kv-cache-dtype "${_kvdtype}" \
             --block-size "${_block}" \
-            ${_prefix_cache_flag} \
+            "${_prefix_cache_arg}" \
             --all2all-backend "${_all2all}" \
+            "${mml_args[@]}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
             "${_max_batched[@]}" \
@@ -315,6 +643,15 @@ connector_launch_worker() {
     # master/child split). kv-cache-dtype/block-size come from models.yaml.
     local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
     local _tp_size="${IO_TP_SIZE:-${GENERIC_TP_SIZE:-${GPUS_PER_NODE}}}"
+
+    # KV_OFFLOAD wrap; one TP engine spans _tp_size ranks. (moriio+TP offload: not yet validated.)
+    local _OFFLOAD_TP_WORLD="${_tp_size}"
+    kv_config=$(kv_offload_wrap "${kv_config}")
+    local _pc_arg=()
+    kv_offload_enabled && _pc_arg=(--enable-prefix-caching)
+    # Per-rank HBM KV cap (forces eviction into the offload tier); same knob as the rixl TP path.
+    local mem_args=()
+    [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
     # The connector owns the parallelism *degree* (--tensor-parallel-size) for the
     # moriio+TP path, so strip any --tensor-parallel-size N that a models.yaml entry
@@ -338,6 +675,8 @@ connector_launch_worker() {
                 --trust-remote-code \
                 --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
                 --kv-transfer-config "${kv_config}" \
+                "${mem_args[@]}" \
+                "${_pc_arg[@]}" \
                 "${exec_args[@]}" "${model_args[@]}"
         WORKER_PID=0; return 0
     fi
@@ -349,6 +688,8 @@ connector_launch_worker() {
         --trust-remote-code \
         --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
         --kv-transfer-config "${kv_config}" \
+        "${mem_args[@]}" \
+        "${_pc_arg[@]}" \
         "${exec_args[@]}" \
         "${model_args[@]}" \
         2>&1 | tee /run_logs/${SLURM_JOB_ID}/${log_prefix}_NODE${NODE_RANK}.log >/dev/null &
@@ -358,7 +699,9 @@ connector_launch_worker() {
 connector_wait_workers_ready() {
     echo "Waiting for prefill & decode servers to be ready..."
     sleep 20
-    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-4000}"
+    # 4000s is too short for EP16 NFS load + MoRI JIT.
+    # Override still wins; wrapper forces 10800 so a leaked 4000 cannot.
+    local TIMEOUT_SECONDS="${LOG_WAIT_TIMEOUT_SECONDS:-10800}"
     local SLEEP_SECONDS=10
     local SEARCH_SIGNAL="Application startup complete."
     local PREFILL_LOG=/run_logs/${SLURM_JOB_ID}/prefill_NODE0.log
@@ -379,9 +722,14 @@ connector_start_proxy() {
     # for prefill+decode masters so it can scrape gpu cache-hit / throughput. Gated on
     # the agentic path so the default sweep is unaffected. Consumed by
     # scripts/common/agentic_lib.sh (build_replay_cmd -> aiperf --server-metrics).
-    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
+    if [[ "${BENCHMARK_SCRIPT:-}" == "agentic" || "${BENCHMARK_SCRIPT:-}" == "multiturn" || "${ENABLE_SERVER_METRICS:-0}" == "1" ]]; then
         export AGENTIC_SERVER_METRICS="${AGENTIC_SERVER_METRICS:-${PREFILL_MASTER_ADDR}:${SERVE_PORT} ${DECODE_MASTER_ADDR}:${SERVE_PORT}}"
         echo "[metrics] AGENTIC_SERVER_METRICS=${AGENTIC_SERVER_METRICS}"
+        # Prefill /metrics for benchmark_multiturn.sh's hit-rate instrumentation.
+        export PREFILL_METRICS_URL="${PREFILL_METRICS_URL:-http://${PREFILL_MASTER_ADDR}:${SERVE_PORT}/metrics}"
+        echo "[metrics] PREFILL_METRICS_URL=${PREFILL_METRICS_URL}"
+        export DECODE_METRICS_URL="${DECODE_METRICS_URL:-http://${DECODE_MASTER_ADDR}:${SERVE_PORT}/metrics}"
+        echo "[metrics] DECODE_METRICS_URL=${DECODE_METRICS_URL}"
     fi
     sleep 10
     if [ "$PROXY_TYPE" == "vllm_router" ]; then
@@ -392,43 +740,76 @@ connector_start_proxy() {
         # single unit -> 1. Passing 8 on the TP path makes the router round-robin
         # to DP ranks 0..7 while the TP server only has rank 0 -> every non-rank-0
         # request fails "data_parallel_rank N out of range [0,1)" (7/8 -> 500).
-        local _router_dp_local="${DP_PARALLEL_SIZE_LOCAL}"
-        local _router_moriio_dp=""
-        parallelism_is_wide_ep || _router_dp_local=1
-        # TP-within-EP: DP_PARALLEL_SIZE_LOCAL is already GPUS_PER_NODE/EP_TP_SIZE, and
-        # the router must be told the prefill pool's DP width explicitly, since it can
-        # no longer infer it as nodes x GPUS_PER_NODE. Taken from the driver's
-        # PREFILL_DP_SIZE rather than recomputed, so it follows xP and EP_TP_SIZE.
-        (( ${EP_TP_SIZE:-1} > 1 )) && _router_moriio_dp="${PREFILL_DP_SIZE}"
-        echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
-        echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
+        _wait_vllm_router_boot_install
         [ -f /root/.cargo/env ] && source /root/.cargo/env
-
         local ROUTER_BIN="${ROUTER_BINARY:-$(command -v vllm-router 2>/dev/null || true)}"
+        [ -z "${ROUTER_BIN}" ] && [ -x /usr/local/bin/vllm-router ] && ROUTER_BIN=/usr/local/bin/vllm-router
         if [ -z "${ROUTER_BIN}" ] || [ ! -x "${ROUTER_BIN}" ]; then
-            echo "Error: vllm-router not found. Set ROUTER_BINARY=<path>, or PROXY_TYPE=moriio_toy to use the in-image toy proxy." \
+            echo "Error: vllm-router not found. Set ROUTER_BOOT_INSTALL=git (cargo from git), ROUTER_BINARY=<path>, or PROXY_TYPE=moriio_toy." \
                 | tee -a /run_logs/${SLURM_JOB_ID}/proxy_NODE${NODE_RANK}.log
             exit 1
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
+
+        # Multi-node roles: give the router every node's IP (--moriio-*) and the full rank range, so
+        # it stamps each leg with the peer role's node IPs and DP ranks on every node serve. The
+        # router pins the decode leg to the prefill rank (one range for both), so with xP != yD the
+        # larger role's extra nodes stay idle. Falls back to master-node ranks only (as before) if
+        # the router lacks --moriio-* or in READ mode (the connector's READ eager handshake ignores
+        # per-node hosts). ROUTER_INTRA_NODE_DP overrides the range.
+        local _router_dp_default="${DP_PARALLEL_SIZE_LOCAL}" _router_multipod_args=() _router_help
+        if _moriio_multi_node; then
+            _router_help=$("${ROUTER_BIN}" --help 2>&1 || true)
+            if [[ "${MORIIO_READ_MODE:-0}" == "1" ]]; then
+                echo "WARN: multi-node MoRIIO in READ mode: only master-node DP ranks serve"
+            elif [[ "${_router_help}" != *--moriio-prefill-hosts* ]]; then
+                echo "WARN: ${ROUTER_BIN} lacks --moriio-prefill-hosts: only master-node DP ranks serve"
+            else
+                _router_dp_default=$(( PREFILL_DP_SIZE < DECODE_DP_SIZE ? PREFILL_DP_SIZE : DECODE_DP_SIZE ))
+                _router_multipod_args=(
+                    --moriio-dp-size-local "${DP_PARALLEL_SIZE_LOCAL}"
+                    --moriio-prefill-hosts "${IP_ARRAY[@]:0:xP}"
+                    --moriio-decode-hosts "${IP_ARRAY[@]:xP:yD}"
+                )
+                echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD}"
+            fi
+        fi
+        local _router_dp_local="${ROUTER_INTRA_NODE_DP:-${_router_dp_default}}"
+        parallelism_is_wide_ep || _router_dp_local=1
+
+        echo "Starting vllm-router (MoRIIO): HTTP ${ROUTER_PORT}"
+        echo "  prefill=${PREFILL_URL}  decode=${DECODE_URL}  dp_local=${_router_dp_local}"
         local _PROMETHEUS_PORT="${VLLM_ROUTER_PROMETHEUS_PORT:-29000}"
-        local _router_extra=()
-        [[ -n "$_router_moriio_dp" ]] && _router_extra+=(--moriio-dp-size "${_router_moriio_dp}")
-        "${ROUTER_BIN}" \
-            --host 0.0.0.0 \
-            --port "${ROUTER_PORT}" \
-            --vllm-pd-disaggregation \
-            --kv-connector moriio \
-            --prefill "${PREFILL_URL}" \
-            --decode "${DECODE_URL}" \
-            --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}" \
-            --intra-node-data-parallel-size "${_router_dp_local}" \
-            "${_router_extra[@]}" \
-            --policy round_robin \
-            --prefill-policy round_robin \
-            --decode-policy round_robin \
-            --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}" \
-            --prometheus-port "${_PROMETHEUS_PORT}" \
+        local -a _router_args=(
+            --host 0.0.0.0
+            --port "${ROUTER_PORT}"
+            --vllm-pd-disaggregation
+            --kv-connector moriio
+            --prefill "${PREFILL_URL}"
+            --decode "${DECODE_URL}"
+            --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}"
+            --intra-node-data-parallel-size "${_router_dp_local}"
+            ${_router_multipod_args[@]+"${_router_multipod_args[@]}"}
+            --policy "${ROUTER_POLICY:-round_robin}"
+            --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}"
+            --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}"
+            --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}"
+            --prometheus-port "${_PROMETHEUS_PORT}"
+        )
+        # TP-within-EP (EP_TP_SIZE>1): the router must be told the prefill pool's DP width,
+        # which it can no longer infer as nodes x GPUS_PER_NODE (taken from the driver's
+        # PREFILL_DP_SIZE, so it follows xP and EP_TP_SIZE). Otherwise --moriio-dp-size is
+        # opt-in (ROUTER_SKIP_MORIIO_DP_SIZE=0): latest upstream may have folded it into
+        # discovery, so it is passed only if the binary has it.
+        if (( ${EP_TP_SIZE:-1} > 1 )); then
+            _router_args+=(--moriio-dp-size "${PREFILL_DP_SIZE}")
+            echo "  --moriio-dp-size ${PREFILL_DP_SIZE} (TP-within-EP)"
+        elif [[ "${ROUTER_SKIP_MORIIO_DP_SIZE:-1}" != "1" ]] && \
+           "${ROUTER_BIN}" --help 2>&1 | grep -q -- '--moriio-dp-size'; then
+            _router_args+=(--moriio-dp-size "${PREFILL_DP_SIZE}")
+            echo "  --moriio-dp-size ${PREFILL_DP_SIZE}"
+        fi
+        "${ROUTER_BIN}" "${_router_args[@]}" \
             > >(tee /run_logs/${SLURM_JOB_ID}/vllm_router_NODE${NODE_RANK}.log >/dev/null) 2>&1 &
         proxy_pid=$!
         BENCHMARK_PORT=${ROUTER_PORT}
@@ -469,18 +850,88 @@ connector_start_proxy() {
                grep -qa "Add Decode"  "${_ROUTER_LOG}" 2>/dev/null; then
                 echo "Router registration complete after ${_waited}s."; break
             fi
+            if grep -qa "Failed to bind ZMQ socket" "${_ROUTER_LOG}" 2>/dev/null; then
+                echo "ERROR: vllm-router could not bind discovery port ${PROXY_PING_PORT}; set MORI_PROXY_PING_PORT to a free port." >&2
+                grep -a "Failed to bind ZMQ socket" "${_ROUTER_LOG}" | head -1 >&2
+                source "${SCRIPT_DIR}/tcp_listen.sh"
+                tcp_listen_dump_port "${PROXY_PING_PORT}" >&2 || true
+                _mark_boot_fatal "router could not bind ${PROXY_PING_PORT}"
+                exit 1
+            fi
             sleep 5; _waited=$((_waited + 5))
         done
-        [ "${_waited}" -ge "${_REG_TIMEOUT}" ] && echo "WARNING: router registration not confirmed in ${_REG_TIMEOUT}s; proceeding."
+        if [ "${_waited}" -ge "${_REG_TIMEOUT}" ]; then
+            echo "ERROR: prefill+decode did not register with the router in ${_REG_TIMEOUT}s; see ${_ROUTER_LOG}." >&2
+            _mark_boot_fatal "router registration timeout"
+            exit 1
+        fi
     else
         sleep 20
     fi
 
-    curl -X POST http://127.0.0.1:${BENCHMARK_PORT}/v1/completions -H "Content-Type: application/json" -d '{
-        "prompt": "Who is AMD CEO?",
+    # Always run, including NIAH. Chat QA on /v1/chat/completions — a bare
+    # /v1/completions stem continues OpenAI JSON dumps. NIAH stays
+    # /v1/completions + product stem. Do not abort the bench if a reply
+    # fails. Non-stream smoke: one JSON body per probe, verdict + reply in
+    # curl_*.log (stream=true dumped ~200 SSE blobs/probe).
+    # Serve registers MODEL_PATH (the bare model name 404s).
+    local _CURL_LOG="/run_logs/${SLURM_JOB_ID}/curl_${SLURM_JOB_ID}_xP${xP}_yD${yD}_${MODEL_NAME}.log"
+    echo "===== smoke curl: 3 chat QA -> ${_CURL_LOG} ====="
+    python3 - "$BENCHMARK_PORT" "$_CURL_LOG" "${MODEL_PATH}" <<'PY'
+import json, sys, time, urllib.request
+port, log_path, model = sys.argv[1], sys.argv[2], sys.argv[3]
+url = f"http://127.0.0.1:{port}/v1/chat/completions"
+probes = (
+    ("amd", "Who is the CEO of AMD? Answer in one sentence.", "lisa"),
+    ("france", "What is the capital of France? Answer in one sentence.", "paris"),
+    ("uk", "What is the capital of the United Kingdom? Answer in one sentence.", "london"),
+)
+n_ok = 0
+lines = [f"===== smoke curl: 3 chat QA port={port} model={model} ====="]
+for tag, question, expect in probes:
+    payload = {
+        "model": model,
         "temperature": 0,
-        "max_tokens" : 10,
-        "top_k": 1
-    }'
+        "max_tokens": 200,
+        "top_k": 1,
+        "messages": [{"role": "user", "content": question}],
+    }
+    lines.append(f"===== curl[{tag}] =====")
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=240) as resp:
+            obj = json.loads(resp.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        rec = f"[curl] FAIL[{tag}] {exc}"
+        lines.append(rec)
+        print(rec, flush=True)
+        continue
+    elapsed = time.monotonic() - t0
+    ch = (obj.get("choices") or [{}])[0]
+    msg = ch.get("message") or {}
+    text = (msg.get("content") or ch.get("text") or "").strip()
+    finish = ch.get("finish_reason")
+    rec = f"[curl] [{tag}] wall={elapsed:.1f}s finish={finish} chars={len(text)}"
+    lines.append(rec)
+    print(rec, flush=True)
+    answered = expect in text.lower() and len(text) >= 8
+    verdict = "ANSWERED" if answered else "NO_ANSWER"
+    if answered:
+        n_ok += 1
+    rec = f"[curl] {verdict}[{tag}] expect={expect!r} reply={text[:400]!r}"
+    lines.append(rec)
+    print(rec, flush=True)
+summary = f"[curl] summary {n_ok}/3 ANSWERED"
+lines.append(summary)
+print(summary, flush=True)
+with open(log_path, "w", encoding="utf-8") as fh:
+    fh.write("\n".join(lines) + "\n")
+print(f"[curl] log={log_path}", flush=True)
+PY
     sleep 20
 }
