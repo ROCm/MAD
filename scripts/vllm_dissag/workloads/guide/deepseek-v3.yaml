@@ -1,7 +1,0 @@
-# Developer guide baseline (docs/context_as_code_developer_guide.md): DeepSeek-V3 on vLLM, 1 prefill
-# + 1 decode node, MoRI wide expert parallelism, the throughput sweep. Every other guide file
-# inherits this one and changes one thing.
-version: 2
-defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/deepseek-v3.yaml, ../../../common/workloads/bench/sweep.yaml]
-model:
-  env: {xP: "1", yD: "1", BENCHMARK_COMBINATIONS: "1024/1024"}

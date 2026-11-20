@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""docs/context_as_code_developer_guide.md, "Change anything, see what the run does": each change
-the guide makes to the DeepSeek-V3 baseline (scripts/vllm_dissag/workloads/guide/), run through the
-real launchers (the snapshot harness's stand-ins for SLURM, Docker and the GPUs), with the effect
-the guide shows. Standard library and PyYAML; madengine optional."""
-import json
+"""What the context-as-code guides (docs/context_as_code_user_guide.md,
+docs/context_as_code_developer_guide.md) show, on the real cards: switching a run's cluster and
+recipe, the DeepSeek-V3 MTP card built by inheritance, values that follow a submitted one -- each run
+through the real launchers (the snapshot harness's stand-ins for SLURM, Docker and the GPUs) -- and
+every `snapshot.py --show` command the guides give runs as written. Standard library and PyYAML."""
 import os
+import re
+import shlex
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,23 +17,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import test_e2e_examples as T  # noqa: E402
 
-GUIDE = T.SCRIPTS / "vllm_dissag" / "workloads" / "guide"
-BASE_CARD = T.card("vllm_dissag", "pyt_e2e_deepseek-v3_disagg_mtp")    # a DeepSeek-V3 card on vllm-per-gpu
+MAD = T.SCRIPTS.parent
+KIMI = T.card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah")
+MTP = T.card("vllm_dissag", "pyt_e2e_deepseek-v3_disagg_mtp")
 
 
-def go(name, arch="gfx942", nodes=None, **env):
-    c = T.on(BASE_CARD, arch, MAD_CONFIG=str(GUIDE / name), **env)
-    if nodes:
-        c["slurm"]["nodes"] = c["distributed"]["nnodes"] = nodes
-    return T.run("vllm_dissag", c)
+def go(card, arch, catalog="vllm_dissag", **env):
+    return T.run(catalog, T.on(card, arch, **env))
 
 
 def env(got, rank=0):
     return dict(e.split("=", 1) for e in got["ranks"][rank]["docker"]["env"] if "=" in e)
-
-
-def roles(got):
-    return [env(got, i).get("MAD_TOPO_ROLE") for i in range(len(got["ranks"]))]
 
 
 def flag(got, rank, name):
@@ -38,88 +36,98 @@ def flag(got, rank, name):
 
 
 def recipe_line(got):
-    return next(line for line in got["output"].splitlines() if line.startswith("[recipe]"))
+    return next(line for line in got["output"].splitlines() if line.startswith("[recipe]") and "resolves" in line)
 
 
-class Baseline(unittest.TestCase):
-    def test_one_prefill_and_one_decode_node_over_moriio(self):
-        got = go("deepseek-v3.yaml")
-        self.assertEqual((got["exit_code"], roles(got)), (0, ["prefill", "decode"]))
-        self.assertIn("MoRIIOConnector", flag(got, 0, "--kv-transfer-config"))
+class SwitchTheCluster(unittest.TestCase):
+    def test_the_kimi_k3_card_on_the_two_example_sites(self):
+        cx7 = go(KIMI, "gfx942", MAD_CLUSTER="example-slurm-mi300x-cx7")
+        self.assertEqual((env(cx7)["EP_TP_SIZE"], env(cx7)["NCCL_IB_GID_INDEX"], env(cx7)["NCCL_SOCKET_IFNAME"]),
+                         ("2", "3", "eth0"))
+        self.assertEqual(flag(cx7, 0, "--data-parallel-size"), "8")
+        self.assertIn('"int4_per_group_32"', flag(cx7, 0, "--quantization-config"))
+        self.assertIn("best-known configuration for Kimi-K3-MXFP4 on mi300x-oam-8", cx7["output"])
+        ainic = go(KIMI, "gfx950", MAD_CLUSTER="example-slurm-mi355x-ainic")
+        self.assertEqual((env(ainic)["EP_TP_SIZE"], env(ainic)["NCCL_IB_HCA"], env(ainic)["NCCL_IB_GID_INDEX"],
+                          env(ainic)["NCCL_SOCKET_IFNAME"]), ("1", ",".join(f"rdma{i}" for i in range(8)), "1", "eno0"))
+        self.assertEqual((flag(ainic, 0, "--data-parallel-size"), flag(ainic, 0, "--max-num-batched-tokens")), ("16", "4096"))
+        self.assertIsNone(flag(ainic, 0, "--quantization-config"))                      # native MXFP4
+        self.assertNotIn("best-known configuration", ainic["output"])
+
+    def test_your_own_site_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("scheduler: slurm\nplatform: mi325x-oam-8\nfabric: thor2\n"
+                    "env: {SHARED_MOUNT: /shared, NVME_ROOT: /mnt/nvme}\n")
+        try:
+            got = go(KIMI, "gfx942", MAD_CLUSTER_FILE=f.name)
+        finally:
+            os.unlink(f.name)
+        self.assertEqual((env(got)["NCCL_IB_HCA"], env(got)["NCCL_SOCKET_IFNAME"]),
+                         (",".join(f"bnxt_re{i}" for i in range(8)), "fenic0"))
+        self.assertNotIn("best-known configuration", got["output"])                     # recorded for mi300x-oam-8
+
+
+class SwitchTheRecipe(unittest.TestCase):
+    def test_another_recipe_of_the_same_model(self):
+        base, other = go(KIMI, "gfx942"), go(KIMI, "gfx942", MODEL_NAME="Kimi-K3")
+        self.assertEqual((flag(base, 0, "--kv-cache-memory-bytes"), flag(other, 0, "--kv-cache-memory-bytes")),
+                         ("8000000000", "40000000000"))
+        self.assertEqual(flag(other, 0, "--max-model-len"), "1000000")
+        self.assertIn("Kimi-K3 resolves on gfx942 with vllm@vllm-kimi-k3", recipe_line(other))
+
+    def test_one_recipe_value_at_submit(self):
+        got = go(KIMI, "gfx950", EP_TP_SIZE="2")
+        self.assertIn("[config] EP_TP_SIZE=2 (submit) over the recipe's 1", got["output"])
+        self.assertEqual(flag(got, 0, "--data-parallel-size"), "8")
+
+    def test_the_base_recipe_instead_of_its_variant(self):
+        got = go(MTP, "gfx942", MODEL_NAME="DeepSeek-V3")
+        self.assertIsNone(flag(got, 1, "--speculative-config"))
         self.assertEqual(flag(got, 0, "--kv-cache-memory-bytes"), "20000000000")
 
 
-class ChangeTheServingCluster(unittest.TestCase):
-    def test_2p2d_needs_its_four_nodes_and_says_so_before_anything_runs(self):
-        refused = go("scale-2p2d.yaml")
-        self.assertEqual((refused["exit_code"], refused["ranks"]), (1, []))
-        self.assertIn("topology needs 4 nodes but the allocation has 2", refused["output"])
-        got = go("scale-2p2d.yaml", nodes=4)
-        self.assertEqual(roles(got), ["prefill", "prefill", "decode", "decode"])
-        self.assertEqual(flag(got, 0, "--data-parallel-size"), "16")             # 8 -> 16: two nodes per pool
-        for rank in (1, 3):                                                       # each pool's second node
-            self.assertEqual(flag(got, rank, "--data-parallel-start-rank"), "8")
-            self.assertIn("--headless", T.argv(got, rank))
-
-    def test_another_serving_layer_moves_the_kv_cache_over_nixl(self):
-        got = go("serve-nixl.yaml")
-        self.assertEqual(got["exit_code"], 0)
-        self.assertIn("NixlConnector", flag(got, 0, "--kv-transfer-config"))
-        self.assertEqual(env(got)["CONNECTOR"], "rixl")
-        self.assertNotIn("MORI_IO_SL", env(got))                                  # MoRI-IO's env is gone
+class AModelCardBuiltByInheritance(unittest.TestCase):
+    def test_deepseek_v3_mtp_on_each_gpu(self):
+        for arch, build, kv in (("gfx942", "vllm@vllm-mori121", "19200000000"),
+                                ("gfx950", "vllm@vllm-kimi-k3", "28800000000")):
+            with self.subTest(arch=arch):
+                got = go(MTP, arch)
+                self.assertIn(f"DeepSeek-V3-MTP resolves on {arch} with {build}", recipe_line(got))
+                self.assertEqual((flag(got, 0, "--kv-cache-memory-bytes"), flag(got, 1, "--kv-cache-memory-bytes")), (kv, kv))
+                self.assertIsNone(flag(got, 0, "--speculative-config"))
+                self.assertIn('"deepseek_mtp"', flag(got, 1, "--speculative-config"))
 
 
-class TieValuesTogether(unittest.TestCase):
-    def test_one_knob_sizes_both_pools_and_names_the_run(self):
-        self.assertEqual(roles(go("tied.yaml", nodes=4)), ["prefill", "prefill", "decode", "decode"])
-        self.assertEqual(roles(go("tied.yaml", POOL="1")), ["prefill", "decode"])      # set at submit
-        data = T.W.load(str(GUIDE / "tied.yaml"), {"POOL": "1"})
-        self.assertEqual(T.W.env_of(data)["PERF_TAGS"], "deepseek-v3,1p1d,sweep")
+class ValuesFollowASubmittedOne(unittest.TestCase):
+    def test_the_replicas_layer_names_the_run_from_tp_size(self):
+        f = T.SCRIPTS / "vllm_multinode" / "workloads" / "e2e" / "qwen3-32b-replicas-lora.yaml"
+        self.assertEqual(T.W.env_of(T.W.load(str(f)))["PERF_TAGS"], "vllm_multinode,replicas,tp1")
+        self.assertEqual(T.W.env_of(T.W.load(str(f), {"TP_SIZE": "2"}))["PERF_TAGS"], "vllm_multinode,replicas,tp2")
 
     @unittest.skipIf(T.resolve_for_model is None, "madengine not importable (optional)")
-    def test_madengine_ties_them_the_same_way(self):
-        c = {"name": "guide", "env_vars": {"MAD_CONFIG": "workloads/guide/tied.yaml"}}
-        for runtime in ({}, {"POOL": "1"}, {"xP": "3"}):
+    def test_madengine_resolves_it_the_same_way(self):
+        c = T.card("vllm_multinode", "pyt_e2e_qwen3-32b_replicas_lora")
+        for runtime in ({}, {"TP_SIZE": "2"}):
             with self.subTest(runtime=runtime):
-                theirs, _ = T.resolve_for_model(c, T.SCRIPTS / "vllm_dissag", runtime_env=runtime)
-                self.assertEqual(T.mad_env(c, "vllm_dissag", runtime), theirs)
+                theirs, _ = T.resolve_for_model(c, T.SCRIPTS / "vllm_multinode", runtime_env=runtime)
+                self.assertEqual(T.mad_env(c, "vllm_multinode", runtime), theirs)
 
 
-class AddAModelByChangingItsRecipe(unittest.TestCase):
-    def test_the_new_recipe_changes_only_what_it_says_on_each_gpu(self):
-        for arch, kv in (("gfx942", "48000000000"), ("gfx950", "72000000000")):  # a quarter of 192 / 288 GB
-            with self.subTest(arch=arch):
-                got = go("new-model.yaml", arch=arch)
-                self.assertEqual(got["exit_code"], 0, got["output"][-800:])
-                self.assertIn("DeepSeek-V3-LongCtx resolves", recipe_line(got))   # its alias's roles
-                for rank in (0, 1):
-                    self.assertEqual(flag(got, rank, "--max-model-len"), "131072")
-                    self.assertEqual(flag(got, rank, "--kv-cache-memory-bytes"), kv)
-                self.assertIsNone(flag(got, 0, "--max-num-seqs"))                 # decode only
-                self.assertEqual(flag(got, 1, "--max-num-seqs"), "64")
+class TheGuidesCommandsRun(unittest.TestCase):
+    """Every `snapshot.py --show` command in the two guides runs as written, from the MAD root."""
 
-
-class ChangeTheGpuAndTheSite(unittest.TestCase):
-    def test_each_gpu_gets_its_formats_and_its_stack(self):
-        self.assertIn("on gfx942 with vllm@vllm-mori121: prefill weights=fp8_e4m3fnuz",
-                      recipe_line(go("deepseek-v3.yaml")))
-        self.assertIn("on gfx950 with vllm@vllm-kimi-k3: prefill weights=fp8_e4m3,",
-                      recipe_line(go("deepseek-v3.yaml", arch="gfx950")))
-
-    def test_a_site_profile_changes_the_fabric_not_the_engine(self):
-        cx7 = go("deepseek-v3.yaml", MAD_CLUSTER="example-slurm-mi300x-cx7")
-        ainic = go("deepseek-v3.yaml", arch="gfx950", MAD_CLUSTER="example-slurm-mi355x-ainic")
-        self.assertEqual(T.argv(ainic), T.argv(cx7))                              # the same engine commands
-        self.assertEqual(env(ainic)["NCCL_IB_HCA"], ",".join(f"rdma{i}" for i in range(8)))
-        self.assertEqual((env(cx7)["NCCL_IB_GID_INDEX"], env(ainic)["NCCL_IB_GID_INDEX"]), ("3", "1"))
-        self.assertEqual((env(cx7)["NCCL_SOCKET_IFNAME"], env(ainic)["NCCL_SOCKET_IFNAME"]), ("eth0", "eno0"))
-
-
-class OverrideOneRun(unittest.TestCase):
-    def test_a_submit_time_value_wins_and_nothing_else_moves(self):
-        base, got = go("deepseek-v3.yaml"), go("deepseek-v3.yaml", BENCHMARK_COMBINATIONS="8192/1024")
-        self.assertEqual(env(got)["BENCHMARK_COMBINATIONS"], "8192/1024")
-        self.assertEqual(T.argv(got), T.argv(base))
+    def test_every_show_command_runs(self):
+        commands = []
+        for doc in ("context_as_code_developer_guide.md", "context_as_code_user_guide.md"):
+            text = (MAD / "docs" / doc).read_text().replace("\\\n", " ")
+            commands += [c.strip() for c in re.findall(r"(python3 scripts/common/tests/snapshot/snapshot.py --show [^`\n]*)", text)
+                         if "<" not in c and "[" not in c]                         # not a usage line
+        self.assertGreaterEqual(len(commands), 10)
+        for cmd in sorted(set(commands)):
+            with self.subTest(cmd=cmd):
+                p = subprocess.run(shlex.split(cmd), cwd=MAD, capture_output=True, text=True, timeout=600)
+                self.assertEqual(p.returncode, 0, p.stderr[-800:])
+                self.assertIn(": exit 0", p.stdout)
 
 
 if __name__ == "__main__":

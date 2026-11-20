@@ -1,5 +1,0 @@
-# Scale the serving cluster: 2 prefill + 2 decode nodes. Nothing else changes.
-version: 2
-defaults: [deepseek-v3.yaml]
-model:
-  env: {xP: "2", yD: "2"}

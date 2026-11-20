@@ -347,6 +347,39 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_outp
         shutil.rmtree(work)
 
 
+def show(a):
+    """Run each matching card as given and print what every node does."""
+    extra = dict(e.split("=", 1) for e in a.env)
+    shown = 0
+    for catalog in CATALOGS:
+        if a.catalog and catalog != a.catalog:
+            continue
+        for card in cards_of(catalog, a):
+            card = json.loads(json.dumps(card))
+            card["env_vars"] = dict(card.get("env_vars") or {}, **extra)
+            if a.nodes:
+                card.setdefault("slurm", {})["nodes"] = a.nodes
+                card.setdefault("distributed", {})["nnodes"] = a.nodes
+            got = snapshot_card(catalog, card, keep_output=True)
+            shown += 1
+            print(f"== {catalog}/{card['name']} on {got['inputs']['gpu_arch']}, {got['inputs']['nodes']} node(s): "
+                  f"exit {got['exit_code']}")
+            for line in got["output"].splitlines():
+                if line.startswith(("[recipe]", "[config]", "ERROR", "Error")):
+                    print("  " + line)
+            for r in got["ranks"]:
+                env = dict(e.split("=", 1) for e in r["docker"]["env"] if "=" in e)
+                print(f"  node {r['rank']} ({env.get('MAD_TOPO_ROLE', '?')}):")
+                for name in filter(None, a.print_env.split(",")):
+                    print(f"    {name}={env.get(name, '<not set>')}")
+                for b in (r.get("engine") or {}).get("blocks", []):
+                    print("    " + " ".join(b["argv"]))
+    if not shown:
+        print("snapshot: no card matches", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--update", action="store_true", help="rewrite the golden files")
@@ -368,7 +401,18 @@ def main():
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
                          "goldens (recorded under slurm-srun); no srun may be called")
+    ap.add_argument("--show", action="store_true",
+                    help="run the matching card(s) and print what each node does (its role and engine "
+                         "command; --env/--nodes change the run), instead of comparing with the goldens")
+    ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
+                    help="with --show: set NAME for the run, as at submit time (e.g. MAD_CONFIG=workloads/guide/"
+                         "tied.yaml, MAD_GPU_ARCH=gfx950, MAD_CLUSTER=<site>); repeatable")
+    ap.add_argument("--nodes", type=int, help="with --show: the nodes allocated (default: the card's)")
+    ap.add_argument("--print-env", default="", metavar="NAME,...",
+                    help="with --show: also print these names from each node's container environment")
     a = ap.parse_args()
+    if a.show:
+        return show(a)
     if a.spec_file:
         return spec_file_equivalence(a)
     if a.from_emitted:
