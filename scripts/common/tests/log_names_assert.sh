@@ -2,12 +2,12 @@
 # The per-node log files are a contract: RCCL CI and other consumers parse
 # /run_logs/<job>/<role>_NODE<rank>.log (host: $LOG_PATH/<job>/...). This pins every
 # name and where it is written, so a change to one shows up here and is made on purpose.
-#   1. From the snapshot goldens (scripts/common/tests/snapshot): on every rank of
-#      every card, LOG_PATH is mounted at /run_logs, the container gets
+#   1. From the snapshot cases (scripts/common/tests/snapshot/cases: one per path through the
+#      launcher code): on every rank, LOG_PATH is mounted at /run_logs, the container gets
 #      SLURM_JOB_ID=<job> and NODE_RANK=<rank>, and the node program tees to
 #      /run_logs/<job>/<launcher log>_NODE<rank>.log. snapshot.py --equivalence
-#      spur-array / k8s-indexed / --spooled / --spec-file compare those dispatchers
-#      against the same goldens, so the names hold for every dispatcher.
+#      spur-array / k8s-indexed / --spooled / --spec-file compare every card under those
+#      dispatchers with its slurm-srun run, so the names hold for every dispatcher.
 #   2. In the role scripts, which run inside the container, the exact expressions
 #      that name the role logs, as on ROCm/MAD develop (vllm_dissag, sglang_disagg)
 #      and as the colocated launcher was added (vllm_multinode).
@@ -19,17 +19,17 @@ pass=0; fail=0
 _ok()  { printf "  PASS  %s\n" "$1"; pass=$((pass+1)); }
 _bad() { printf "  FAIL  %s\n" "$1"; fail=$((fail+1)); }
 
-echo "=== launcher logs, per rank, from the snapshot goldens ==="
-out="$(python3 - "$S/common/tests/snapshot/golden" <<'PY'
+echo "=== launcher logs, per rank, from the snapshot cases ==="
+out="$(python3 - "$S/common/tests/snapshot/cases" <<'PY'
 import glob, json, os, re, sys
 # The log each node program tees its container's output to, per catalog.
 LAUNCHER_LOG = {"vllm_dissag": "pd_vllm_bench", "sglang_disagg": "pd_sglang_bench_serving.sh",
                 "vllm_multinode": "colocated_bench"}
-golden = sys.argv[1]
+cases = sys.argv[1]
 cards, problems = {}, []
-for path in sorted(glob.glob(os.path.join(golden, "*", "*.json"))):
+for path in sorted(glob.glob(os.path.join(cases, "*", "*.json"))):
     catalog = os.path.basename(os.path.dirname(path))
-    d = json.load(open(path))
+    d = json.load(open(path))["snapshot"]
     if not d.get("ranks"):
         continue                                   # a card that stops before any node runs
     cards[catalog] = cards.get(catalog, 0) + 1
@@ -59,7 +59,7 @@ PY
 )"
 for c in vllm_dissag sglang_disagg vllm_multinode; do
     n="$(sed -n "s/^cards $c //p" <<<"$out")"
-    [ "${n:-0}" -gt 0 ] && _ok "$c: $n card(s) checked" || _bad "$c: no card checked (goldens missing?)"
+    [ "${n:-0}" -gt 0 ] && _ok "$c: $n card(s) checked" || _bad "$c: no card checked (cases missing?)"
 done
 if grep -q '^problem ' <<<"$out"; then
     while IFS= read -r p; do _bad "${p#problem }"; done < <(grep '^problem ' <<<"$out")

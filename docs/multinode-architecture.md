@@ -119,7 +119,7 @@ None of these need GPUs; run them from the MAD root. The full list is in
 
 | Layer | Check |
 |---|---|
-| Whole run, per card | `python3 scripts/common/tests/snapshot/snapshot.py`: each node's `docker run` and engine command against the goldens. `--spooled` runs each launcher from a spool copy as `sbatch` does; `--equivalence spur-array` and `--equivalence k8s-indexed` require the same per node under those dispatchers; `--spec-file` runs every card from a topology spec; `--update` rewrites the goldens. |
+| Whole run, per card | `python3 scripts/common/tests/snapshot/snapshot.py`: every card runs; each path through the launcher code (a case, `snapshot/cases/`) is compared node by node, `docker run` and engine command, with its recorded case, and every card's path must be a case's. `--spooled` runs each launcher from a spool copy as `sbatch` does; `--equivalence spur-array` and `--equivalence k8s-indexed` require the same per node under those dispatchers; `--spec-file` runs every card from a topology spec; `--update` records the cases (new paths added, unused ones removed). |
 | Configuration layers | `bash scripts/common/tests/config_layers_assert.sh`; `python3 -m unittest discover -s scripts/common/config/tests` |
 | Topology | `python3 -m unittest discover -s scripts/common/topology/tests` |
 | Node selection, verdict | `bash scripts/common/tests/launcher_lib_assert.sh`, `bash scripts/common/tests/launcher_verdict_assert.sh` |

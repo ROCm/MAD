@@ -2,7 +2,7 @@
 
 For every card in the multi-node catalogs, the spec built from the card's settings
 (topology.from_env) must resolve each node rank to the role that rank's role script
-takes in the snapshot goldens (scripts/common/tests/snapshot/golden): prefill or
+takes when the card runs (scripts/common/tests/snapshot, live): prefill or
 decode master/child and the router host for the disagg launchers, head or worker for
 the colocated one, and for vLLM wide-EP the DP size and start rank in its vllm serve
 argv. Run from the MAD repo root:
@@ -18,7 +18,8 @@ sys.path.insert(0, str(HERE.parent))
 import topology as T  # noqa: E402
 
 SCRIPTS = HERE.parents[2]
-GOLDEN = SCRIPTS / "common" / "tests" / "snapshot" / "golden"
+sys.path.insert(0, str(SCRIPTS / "common" / "tests" / "snapshot"))
+import snapshot as S  # noqa: E402
 
 
 def _arg(argv, flag):
@@ -30,7 +31,7 @@ class GoldenRoles(unittest.TestCase):
         checked = 0
         for launcher in T.LAUNCHERS:
             for card in json.loads((SCRIPTS / launcher / "models.json").read_text()):
-                gold = json.loads((GOLDEN / launcher / f"{card['name']}.json").read_text())
+                gold = S.snapshot_card(launcher, card)
                 if gold["exit_code"] != 0:
                     continue        # stops before any node runs (madengine-only card)
                 env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
@@ -183,7 +184,7 @@ class RouterNode(unittest.TestCase):
         sys.path.insert(0, str(SCRIPTS / "common" / "tests" / "snapshot"))
         import snapshot as S
         card = next(c for c in json.loads((SCRIPTS / catalog / "models.json").read_text()) if c["name"] == name)
-        gold = json.loads((GOLDEN / catalog / f"{name}.json").read_text())
+        gold = S.snapshot_card(catalog, card)          # the card as it runs without a router node
         card = json.loads(json.dumps(card))
         card["env_vars"].update(env, ROUTER_NODE="1")
         n = S.node_count(card) + 1 if "yD" not in env else int(card["env_vars"]["xP"]) + int(env["yD"]) + 1

@@ -30,7 +30,7 @@ class RecipeLayer(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.scripts = Path(self._tmp.name) / "scripts"
-        shutil.copytree(SCRIPTS, self.scripts, ignore=shutil.ignore_patterns("__pycache__", "golden"))
+        shutil.copytree(SCRIPTS, self.scripts, ignore=shutil.ignore_patterns("__pycache__", "cases"))
         self.card = next(c for c in json.loads((SCRIPTS / "vllm_dissag" / "models.json").read_text())
                          if c["name"] == CARD)
         self.model = self.card["env_vars"]["MODEL_NAME"]

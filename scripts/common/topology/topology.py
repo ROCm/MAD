@@ -25,8 +25,8 @@ and this node's first DP rank.
 
 Today the launchers take the same decisions from xP / yD / WIDE_EP / EP_TP_SIZE /
 TP_SIZE / PP_SIZE, in shell; from_env() states those settings as a spec, and the
-snapshot goldens check that the spec resolves to the role every rank's script
-actually takes (tests/test_topology.py).
+topology tests run every card and check that the spec resolves to the role every
+rank's script actually takes (tests/test_topology.py).
 
 A spec can also be the input: MAD_TOPOLOGY names a spec file, and legacy_env() turns
 it into the launcher's own settings (apply.sh, sourced by each launcher before its

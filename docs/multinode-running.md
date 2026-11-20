@@ -586,7 +586,7 @@ dispatcher (`srun`, `spur-array`, `k8s-indexed`) writes:
   `agentic_models_shim` (vLLM disaggregated); `pd_sglang_bench_serving.sh`, `prefill`,
   `decode`, `proxy` (SGLang disaggregated); `colocated_bench`, `colocated` (vLLM colocated).
 
-`scripts/common/tests/log_names_assert.sh` pins them, from the snapshot goldens and the role
+`scripts/common/tests/log_names_assert.sh` pins them, from the snapshot cases and the role
 scripts. A change it reports is a change to that contract: make it only on purpose, and
 tell the consumers.
 
@@ -764,9 +764,9 @@ bash scripts/vllm_dissag/tests/parse_to_csv_assert.sh # perf.csv rows and FAILUR
 python3 scripts/common/check_srun_quotes.py           # no apostrophe truncates an srun body
 python3 scripts/common/check_continuations.py         # no comment inside a backslash continuation
 python3 scripts/common/check_gpu_arch_declarations.py # cards and recipes agree on GPUs
-python3 scripts/common/tests/snapshot/snapshot.py     # every card's docker run and engine command per node, against the goldens
-python3 scripts/common/tests/snapshot/snapshot.py --equivalence spur-array  # the same, run as a job array
-python3 scripts/common/tests/snapshot/snapshot.py --equivalence k8s-indexed # the same, run as Kubernetes pods
+python3 scripts/common/tests/snapshot/snapshot.py     # every card runs; each path's docker run and engine command per node, against its case
+python3 scripts/common/tests/snapshot/snapshot.py --equivalence spur-array  # every card as a job array = its srun run
+python3 scripts/common/tests/snapshot/snapshot.py --equivalence k8s-indexed # every card as Kubernetes pods = its srun run
 bash scripts/common/tests/launcher_verdict_assert.sh  # job verdict, exit status, cancel, ports, env
 bash scripts/common/tests/log_names_assert.sh         # /run_logs/<job>/<role>_NODE<rank>.log names (a contract)
 bash scripts/common/tests/node_lib_assert.sh          # the per-node library (mounts, JIT cache, run/trap)
@@ -783,8 +783,11 @@ madengine build --tags <card> --explain \
   --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'   # the card's image spec composes
 ```
 
-A change that alters what a node runs on purpose shows up as a snapshot difference:
-review it, then record it with `snapshot.py --update` and commit the goldens with it.
+What is recorded is one snapshot per case, a distinct path through the launcher code
+(`scripts/common/tests/snapshot/cases/`), not one per card: cards on the same path differ only
+in recipe data. A change that alters what a node runs on purpose shows up as a case
+difference: review it, then record it with `snapshot.py --update` and commit the cases with it.
+A card on a path no case records fails with `NEW PATH` until it is recorded the same way.
 
 Run them from the repository root. The two shell-hygiene checkers take file paths, or
 scan every `scripts/**/*.slurm` and `scripts/**/*.sh` when given none. What each vLLM
