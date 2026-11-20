@@ -10,6 +10,11 @@ parser.add_argument("--local-port", type=int, required=False, help="Port number 
 parser.add_argument("--enable-port", action="store_true", help="Enable opening and closing of local port.")
 parser.add_argument("--node-ips", required=True, help="Comma-separated list of node IPs.")
 parser.add_argument("--node-ports", required=True, help="Comma-separated list of ports to check.")
+parser.add_argument("--timeout", type=float, default=0,
+                    help="Give up after N seconds and exit 1, naming the peers that never "
+                         "opened. Default 0 waits forever (the historical behaviour).")
+parser.add_argument("--report-every", type=float, default=60,
+                    help="Seconds between listing the peers still missing.")
 args = parser.parse_args()
 
 # Parse node IPs and ports from command-line arguments
@@ -24,6 +29,8 @@ elif len(NODE_PORTS) != len(NODE_IPS):
     exit(1)
 
 server_socket = None  # Global server socket reference
+_bound_ok = threading.Event()
+_bound_error = []
 
 def is_port_open(ip, port):
     """Check if a given IP and port are accessible."""
@@ -32,25 +39,56 @@ def is_port_open(ip, port):
         return s.connect_ex((ip, port)) == 0
 
 def wait_for_all_ports():
-    """Wait until all nodes have opened the specified ports."""
+    """Wait until all nodes have opened the specified ports.
+
+    A node whose container never starts cannot open its port, so without a
+    deadline one dead node holds the whole allocation until walltime with no
+    indication of which node it was (one node never launched, the other
+    seven printed "Waiting for nodes. . ." until cancelled). --timeout turns
+    that into a fast, named failure.
+    """
+    start = time.monotonic()
+    last_report = 0.0
     while True:
-        all_open = all(is_port_open(ip, port) for ip, port in zip(NODE_IPS, NODE_PORTS))
-        if all_open:
-            break
+        missing = [f"{ip}:{port}" for ip, port in zip(NODE_IPS, NODE_PORTS)
+                   if not is_port_open(ip, port)]
+        if not missing:
+            return
         print("Waiting for nodes. . .", flush=True)
+        waited = time.monotonic() - start
+        if waited - last_report >= args.report_every:
+            last_report = waited
+            print(f"  still waiting after {waited:.0f}s on {len(missing)}/"
+                  f"{len(NODE_IPS)}: {', '.join(missing)}", flush=True)
+        if args.timeout and waited >= args.timeout:
+            print(f"Error: barrier timed out after {waited:.0f}s. "
+                  f"{len(missing)}/{len(NODE_IPS)} peers never opened their port: "
+                  f"{', '.join(missing)}", flush=True)
+            exit(1)
         time.sleep(5)
 
 def open_port():
-    """Open a listening socket on the current node."""
+    """Open a listening socket on the current node.
+
+    Bind failure is fatal. A stale leftover on this port would otherwise
+    make is_port_open() report ready while this process never owned it.
+    """
     global server_socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((args.local_ip, args.local_port))
-    server_socket.listen(5)
-    print(f"Port {args.local_port} is now open on {args.local_ip}.")
-    while True:
-        conn, addr = server_socket.accept()
-        conn.close()
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind((args.local_ip, args.local_port))
+        server_socket.listen(5)
+        print(f"Port {args.local_port} is now open on {args.local_ip}.", flush=True)
+        _bound_ok.set()
+        while True:
+            conn, addr = server_socket.accept()
+            conn.close()
+    except Exception as e:
+        _bound_error.append(e)
+        print(f"Error: failed to bind local barrier port "
+              f"{args.local_ip}:{args.local_port}: {e}", flush=True)
+        _bound_ok.set()
 
 def close_port():
     """Close the opened port."""
@@ -66,6 +104,11 @@ if __name__ == "__main__":
 
     if args.enable_port:
         threading.Thread(target=open_port, daemon=True).start()
+        if not _bound_ok.wait(timeout=5):
+            print("Error: local barrier port bind did not complete.", flush=True)
+            exit(1)
+        if _bound_error:
+            exit(1)
 
     wait_for_all_ports()
 

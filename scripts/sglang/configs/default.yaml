@@ -219,3 +219,28 @@
   out: 1024
   dtype: auto
   max_concurrency: 1 8 32 128
+
+# deepseek-ai/DeepSeek-V4.1-Flash
+## DeepSeek-V4.1-Flash (gfx950; validated TP8 8K/1K, concurrency 1-256, in #149)
+## Runs on the default docker/pyt_sglang (same SGLang v0.5.22 as the image #149 validated on).
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4.1-Flash
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128 256
+
+# amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4  [confidence: medium]
+## Muse-Spark-Open-816B-A42B MXFP4 (gfx950; TP8/EP8 8K/1K, concurrency 1-256, as requested in #170)
+## perf.yaml --ep-size 8 must track tp. Tag builds docker/pyt_sglang_muse-spark (perf.yaml
+## docker_base pin; the docker/pyt_sglang default image fails at model load).
+- benchmark: serving
+  hf_pipeline_tag: text-generation
+  model: amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4
+  tp: 8
+  inp: 8192
+  out: 1024
+  dtype: auto
+  max_concurrency: 1 8 32 128 256
