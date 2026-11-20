@@ -136,21 +136,26 @@ connector_setup_env() {
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
-# Multi-node wideEP role (xP>1 or yD>1): each role is ONE DP group spanning nodes behind its
+# Multi-node wideEP role (xP>1 or yD>1), the layout DeepSeek-V4 runs (MORIIO_MULTINODE=1 asks for it
+# with any model; =0 turns it off): each role is ONE DP group spanning nodes behind its
 # master's URL. Child nodes get the MoRI-IO connector and the router is given every node's IP plus
 # the full rank range (connector_start_proxy), so DP ranks on every node serve. 1P1D is unchanged.
 # The router needs the --moriio-* flags from vllm-project/router PR #458. TP-within-EP
 # (EP_TP_SIZE>1) reaches its nodes through the connector's pod-host list and --moriio-dp-size
 # instead (connector_start_proxy), so it is not this layout.
 _moriio_multi_node() {
-    parallelism_is_wide_ep && (( ${EP_TP_SIZE:-1} <= 1 )) && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
+    local _want="${MORIIO_MULTINODE:-}"
+    [[ -z "${_want}" ]] && case "${MODEL_NAME:-}" in DeepSeek-V4-*) _want=1 ;; *) _want=0 ;; esac
+    [[ "${_want}" == "1" ]] && parallelism_is_wide_ep && (( ${EP_TP_SIZE:-1} <= 1 )) \
+        && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
 }
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    # MORIIO_READ_MODE=1 selects the connector's READ mode (default WRITE).
-    local _read_mode="false"
-    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read_mode="true"
+    # MORIIO_READ_MODE=1 selects the connector's READ mode; otherwise the key is left out and
+    # the connector runs its default (WRITE), as every config did before the key existed.
+    local _read_mode=""
+    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read_mode='"read_mode":true,'
     # DeepSeek-V4 images ignore the VLLM_MORIIO_* environment, so its transfer tuning has
     # defaults here (4 QPs, 4 workers, unbatched posts); any model can set them.
     if [ "${MODEL_NAME:-}" = "DeepSeek-V4-Flash-FP8" ] || [ "${MODEL_NAME:-}" = "DeepSeek-V4-Pro-FP8" ]; then
@@ -178,7 +183,7 @@ _moriio_build_kv_transfer_config() {
         [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
         _tune+=',"'"${_k#*:}"'":'"${_v}"
     done
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{"read_mode":'"${_read_mode}"',"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${_read_mode}"'"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
 }
 
 # The DSV4 image bakes /usr/local/bin/vllm-router. ROUTER_BOOT_INSTALL is an
@@ -543,17 +548,21 @@ LMCACHE_BROADCAST_PATCH
             kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${kv_config}")")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
-            # Child ranks need the connector too: the prefill side handshakes with EVERY remote DP
-            # rank (range(remote_dp_size)) and only sets write_ready_flags once all complete. Without a
-            # connector on this node, ranks >= GPUS_PER_NODE never answer and the first write wedges
-            # (write_ready_flags timeout). At EP_TP_SIZE=1 proxy_ip is emptied so these ranks do NOT
-            # heartbeat-register with the router (the child has no HTTP server; a phantom worker would
-            # get requests). TP-within-EP (EP_TP_SIZE>1) headless workers host real DP ranks that the
-            # router addresses through the pod-host list, so they carry the master's config.
-            local _child_kv="${kv_config}"
-            (( _ep_tp > 1 )) || _child_kv="$(sed -E 's/"proxy_ip":"[^"]*"/"proxy_ip":""/' <<<"${kv_config}")"
+            # TP-within-EP (EP_TP_SIZE>1) headless workers host real DP ranks that the router
+            # addresses through the pod-host list, so they carry the master's config. In the
+            # multi-node layout (_moriio_multi_node: DeepSeek-V4, or MORIIO_MULTINODE=1) child ranks
+            # carry it too -- the prefill side handshakes with EVERY remote DP rank and only sets
+            # write_ready_flags once all complete -- with proxy_ip emptied so they do NOT
+            # heartbeat-register with the router (no HTTP server; a phantom worker would get
+            # requests). Otherwise the router targets master-node ranks only and children carry none.
+            local _child_kv=""
+            if (( _ep_tp > 1 )); then
+                _child_kv="${kv_config}"
+            elif _moriio_multi_node; then
+                _child_kv="$(sed -E 's/"proxy_ip":"[^"]*"/"proxy_ip":""/' <<<"${kv_config}")"
+            fi
             local _OFFLOAD_TP_WORLD="${_ep_tp}"
-            kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${_child_kv}")")
+            [[ -n "${_child_kv}" ]] && kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${_child_kv}")")
         fi
 
         local _prefix_cache_arg; _prefix_cache_arg="$(kv_prefix_cache_arg)"

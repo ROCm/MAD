@@ -183,8 +183,8 @@ echo ""
 echo ""
 echo "=== non-K3 wideEP: EP_TP_SIZE dormant (plain -tp 1, no role split) ==="
 # emit argv for an explicit rank/topology cell
-_argv_rank() { # connector wide ep model rank xP yD
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+_argv_rank() { # connector wide ep model rank xP yD   (_ARGV_EXTRA="NAME=VALUE ...": more env)
+  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" ${_ARGV_EXTRA:-} \
     DRY_RUN=1 NODE_RANK="$5" xP="$6" yD="$7" CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH=/m/M MASTER_ADDR=10.0.0.1 \
     IPADDRS=10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4 \
@@ -200,10 +200,23 @@ _hasnot "$Dm" "moriio_pod_hosts" "DSV3 wideEP 2P/2D -> no pod-hosts (EP_TP_SIZE=
 _has    "$Dm" "--api-server-count" "DSV3 wideEP -> has --api-server-count"
 Dh="$(_argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
 _has    "$Dh" "--headless" "DSV3 wideEP headless child -> --headless"
-# Child ranks carry the connector (the prefill side handshakes with every remote DP rank), with
-# proxy_ip emptied so they do not register with the router as workers.
-_has    "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> --kv-transfer-config"
-_has    "$Dh" '"proxy_ip":""' "DSV3 wideEP headless child -> proxy_ip emptied (no router registration)"
+_hasnot "$Dh" "--kv-transfer-config" "DSV3 wideEP headless child -> no --kv-transfer-config"
+
+echo ""
+echo "=== multi-node layout: DeepSeek-V4 (develop's), or any model on request ==="
+# Child ranks carry the connector with proxy_ip emptied (the prefill side handshakes with every
+# remote DP rank; an empty proxy_ip keeps them from registering with the router as workers).
+V4h="$(_argv_rank moriio 1 mori DeepSeek-V4-Flash-FP8 1 2 2)"
+_has    "$V4h" "--kv-transfer-config" "DSV4 wideEP headless child -> --kv-transfer-config"
+_has    "$V4h" '"proxy_ip":""' "DSV4 wideEP headless child -> proxy_ip emptied"
+DhOn="$(_ARGV_EXTRA="MORIIO_MULTINODE=1" _argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
+_has    "$DhOn" '"proxy_ip":""' "MORIIO_MULTINODE=1 -> DSV3 child takes the multi-node layout"
+
+echo ""
+echo "=== MoRI-IO read_mode only when asked for ==="
+_hasnot "$Dm" "read_mode" "default config has no read_mode (connector default WRITE)"
+Rm="$(_ARGV_EXTRA="MORIIO_READ_MODE=1" _argv_rank moriio 1 mori DeepSeek-V3 0 2 2)"
+_has    "$Rm" '"read_mode":true' "MORIIO_READ_MODE=1 -> read_mode true"
 
 echo ""
 echo "=== EP_TP_SIZE>1 needs equal pools ==="
