@@ -46,7 +46,7 @@ path).
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
-| `amd-Llama-3.3-70B-Instruct-FP8-KV` | dense | 1, 2 (TP) | validated serving (moriio+TP) |
+| `amd-Llama-3.3-70B-Instruct-FP8-KV` | dense | 1, 2 (TP) | validated serving (moriio+TP) on the `dsv4` image; the shared image returns incorrect output |
 | `Llama-3.1-405B-Instruct-FP8-KV` | dense | 1, 2 (TP) | |
 | `Qwen3-32B` | dense | 1, 2 (TP) | validated serving (MoRIIO + TP) |
 | `gpt-oss-120b` | MoE | 1, 2 (TP) | |
@@ -54,6 +54,8 @@ path).
 | `DeepSeek-V3` | MoE | 3, 4 (wideEP only) | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 3, 4 (wideEP only) | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 3, 4 (wideEP only) | needs a co-versioned AITER image (see Caveats) |
+| `DeepSeek-V4-Flash-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
+| `DeepSeek-V4-Pro-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 
 ## Prerequisites
@@ -77,9 +79,11 @@ docker build -t <your-registry>/vllm-disagg:local \
 ```
 
 That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`. `WITH_NIXL=1` (default) builds every transport (moriio TP/wideEP + rixl
-NIXL TP + DeepEP wideEP); add `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image
-(moriio + deepep-from-base, faster build).
+`GLM-5.1-FP8`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and benchmarks
+on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
+builds every transport (moriio TP/wideEP + rixl NIXL TP + DeepEP wideEP); add
+`--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio + deepep-from-base,
+faster build).
 
 `GLM-5.1-FP8` needs its own per-model image, because its vLLM/AITER/MoRI pins differ
 from the DeepSeek-V3/R1 stack the shared Dockerfile is pinned to:
@@ -95,6 +99,58 @@ for model fixes (the only patches are the two temporary, non-fatal KV-offload on
 `KV_OFFLOAD` below), so every GLM DSA fix has to be in-source in that image. Add a
 `vllm_disagg_inference.<model>.ubuntu.amd.Dockerfile` per future model that needs its
 own pins rather than repinning the shared one.
+
+`DeepSeek-V4-Flash-FP8` / `DeepSeek-V4-Pro-FP8` need their own image for the same
+reason, and follow the same per-model naming:
+
+```bash
+docker build -t <your-registry>/vllm-disagg:dsv4 \
+  -f docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile .
+```
+
+The DSV4 source patches are applied at image build, so nothing patches at job
+start; `connectors/moriio.sh` only checks that `/app/versions.txt` carries
+`DSV4_PATCHES_BAKED=`.
+
+The same image is the one to use for `amd-Llama-3.3-70B-Instruct-FP8-KV` on
+moriio + TP. On its newer vLLM, Llama answers the smoke curl correctly at
+2P/2D, where the shared image returns repetitive, off-topic text. Submit it the
+usual way, pointing at that image:
+
+```bash
+export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4
+export CONNECTOR=moriio WIDE_EP=0 MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV
+```
+
+### Launching DSV4 jobs
+
+DSV4 submits through `./run_wideep.sh <bench> <model> <topology>`, which
+derives every dependent knob from those three arguments. Set the image with
+`DOCKER_IMAGE_NAME` or `--image`:
+
+```bash
+cd MAD/scripts/vllm_dissag
+export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4
+
+# curl + NIAH ladder + concurrency sweep in one allocation (the usual first run)
+./run_wideep.sh validate dsv4fls ep16
+
+# a single bench
+./run_wideep.sh niah  dsv4pro 2p2d
+./run_wideep.sh smoke dsv4fls 1p1d
+
+# print the sbatch line without submitting
+./run_wideep.sh validate dsv4fls ep32 --dry-run
+```
+
+`dsv4fls` / `dsv4pro` are shorthand for the two `MODEL_NAME` values; topology is
+`xPyD` (`2p2d`) or an EP width (`ep16`, `ep32`). Useful flags: `--time HH:MM:SS`,
+`--exclude <nodelist>`, `--after JOBID` to queue behind a running job. Site
+settings come from the environment: `PARTITION`, `ACCOUNT`, `QOS`.
+
+Prompt defaults are handled per model and should not be set by hand — the Flash
+NIAH branch primes the answer stem (`NIAH_LIST_PRIME=1.`) and the Pro branch runs
+unprimed. The MoRI dispatch trim and `DSV4_ENABLE_HMA=0` are hardcoded and cannot be overridden.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -249,10 +305,10 @@ role and the policy has no effect. On 1P1D EP8/DP8 (DeepSeek-V3, 64 prompts) `ca
 prefill cache hit against 41% for `round_robin`. NIXL (`rixl.sh`) honours the same variables but keeps
 `round_robin` as its default.
 
-The router discovery port defaults to 26367 (`MORI_PROXY_PING_PORT`), below the ephemeral range,
+The router discovery port defaults to 31367 (`MORI_PROXY_PING_PORT`), below the ephemeral range,
 because the router starts after the vLLM servers and a random vLLM listener can otherwise take the
-port; the launcher then aborts with "did not register with the router" (`ROUTER_REGISTER_REQUIRED=0`
-to proceed anyway).
+port. If the router cannot bind it, or prefill and decode do not register in time, the launcher
+aborts the run instead of benchmarking into 503s.
 
 ### Back-compat
 
@@ -335,7 +391,7 @@ but each combo also needs the connector's transport built into the image:
 
 | Combo | Live-validated | Image requirement |
 |-------|----------------|-------------------|
-| moriio + TP | ✅ | MoRI (mori121 image) |
+| moriio + TP | ✅ | MoRI (`dsv4` image for Llama-3.3-70B; the mori121 image answers incorrectly) |
 | moriio + wideEP (mori) | ✅ 1P/1D + 2P/2D | MoRI (mori121 image) |
 | rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
