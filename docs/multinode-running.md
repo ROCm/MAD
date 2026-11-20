@@ -52,7 +52,7 @@ path set, so a card runs the same either way.
 |---|---|
 | The card: launcher, node count, image recipe, environment | `scripts/<dir>/models.json` |
 | The recipe: serve flags and env per model (vLLM disagg; the colocated launcher reads its `env:` block) | [`scripts/vllm_dissag/models.yaml`](../scripts/vllm_dissag/models.yaml) |
-| The image | `docker/di_vllm.ubuntu.amd.Dockerfile` or `docker/di_sglang.ubuntu.amd.Dockerfile`, built from the pin set the card names (`docker_build_arg.PINS`, a file in [`docker/pins/`](../docker/pins/README.md)) |
+| The image | The image spec the card names (`"image_spec": "${images.<stack>}"`, a file in [`compat/images/`](../compat/images/README.md)) over the compatibility matrix [`compat/rocm.yaml`](../compat/rocm.yaml); madengine generates the Dockerfile from it |
 | The allocation defaults: partition, GPUs per node, exclusive | madengine's SLURM presets (`amd-rccl`, 8, exclusive); override in `--additional-context` |
 | The cluster's in-job facts: weights, fabric, ports | [`scripts/common/cluster.sh`](../scripts/common/cluster.sh) |
 
@@ -553,8 +553,15 @@ container with the same engine command on every node (checked by
   `docker save` to shared storage, then `docker load` on each node. That works and
   needs no registry.
 
-Every distributed-inference image is built from a pin set; how to build one by hand is in
-[`docker/pins/README.md`](../docker/pins/README.md), and per launcher in
+Every distributed-inference image is built from an image spec in
+[`compat/images/`](../compat/images/README.md). To build one by hand, from the MAD root:
+
+```bash
+madengine build --tags <card> --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags <card> --explain ...     # print the generated Dockerfile and the resolved plan, without building
+```
+
+Per launcher, see
 [vllm-disagg.md](vllm-disagg.md#building-the-docker-image),
 [sglang-disagg.md](sglang-disagg.md#building-the-image) and [kimi-k3.md](kimi-k3.md#the-image).
 
@@ -702,7 +709,7 @@ which. Run a card at one of those shapes before suspecting the recipe.
 | `OSError: libibverbs.so.1: version IBVERBS_PRIVATE_57 not found (required by libmlx5.so.1)`, about ten seconds into start-up | Only the versioned host `libibverbs` was mounted, so the image copy was still loaded while the host `libmlx5` needed the host one. | Fixed: the launchers mount the SONAME files and the versioned files. |
 | `RuntimeError: The memory capacity is unbalanced. Some GPUs may be occupied by other processes.` | A previous job's container still holds GPU memory. | Fixed going forward (cancelled jobs stop their containers). On an affected node, stop the leftover container. |
 | `LLVM ERROR: Do not know how to expand this operator's operand!` in `determine_available_memory`, with `quantization_config=None` | gfx942 cannot codegen the a16w4 SiTUv2 heuristic kernel; the MoE must be requantised to int4. | All Kimi-K3 gfx942 cards set `AITER_SITUV2_A8W4=1` and `--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'`. See [kimi-k3.md](kimi-k3.md). |
-| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (setuptools 80 or later). | The pin set's `build.pip_constraints`, applied as `PIP_CONSTRAINT`. See [kimi-k3.md](kimi-k3.md#the-image). |
+| `AssertionError: run() must precede build_extension()` building `amd_mori` | Unpinned build toolchain (setuptools 80 or later). | The spec's `setup` writes `setuptools<80` to `/etc/pip-constraints.txt`, applied as `PIP_CONSTRAINT` (as `vllm-kimi-k3` does). See [kimi-k3.md](kimi-k3.md#the-image). |
 | Engine init fails with a `module_gemm_common` import error, or `device_gemm ... does not support this GEMM problem` | A MoE model on an image whose AITER is not co-versioned for its MoE GEMM path. | Use the purpose-built MoRI-EP image for MoE serving. Dense models serve on the standard image. |
 | Every request returns 500 after the first disagg write; MoRI `RegisterRdmaMemoryRegion` fails with EFAULT (errno 14) | ROCm 7.2.3 cannot dmabuf-export HIP-VMM memory, and `expandable_segments` was on. | `connectors/<connector>.env` sets `expandable_segments:False` on both allocators and forwards it at container start. Do not override it. |
 | `Error: vllm-router not found` | The image has no router on `PATH`. | Set `ROUTER_BINARY=<path>` to a built `vllm-router` on a shared mount, or use the toy proxy (`PROXY_TYPE`). |
@@ -773,8 +780,9 @@ python3 scripts/common/tests/snapshot/snapshot.py --spec-file  # every card run 
 python3 -m unittest discover -s scripts/common/topology/tests -v
 python3 -m unittest discover -s scripts/common/config/tests -v
 python3 -m unittest discover -s scripts/common/k8s/tests -v
-python3 -m unittest discover -s docker/pins/tests -v           # the pin sets
-python3 scripts/common/recipe/recipe.py validate               # the capability catalog in compat/rocm.yaml
+madengine build --tags <card> --explain \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'   # the card's image spec composes
+python3 scripts/common/recipe/recipe.py validate               # the capability catalog in compat/
 python3 -m unittest discover -s scripts/common/recipe/tests -v  # recipe roles against GPUs and engine builds
 bash scripts/common/tests/recipe_check_assert.sh               # the launchers' recipe gate
 python3 scripts/common/tests/test_check_srun_quotes.py         # the srun quoting checker itself

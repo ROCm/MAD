@@ -21,21 +21,23 @@ This repository contains scripts and documentation to launch PD Disaggregation f
 
 
 ## Building the Docker image
-The cards build `docker/di_sglang.ubuntu.amd.Dockerfile` from the `sglang-disagg` pin set
-(`docker/pins/sglang-disagg.json`): the SGLang release image per GPU architecture, pinned by
-digest, with MoRI `158c7e8` added on gfx942. What a pin set is, and how to change one, is in
-[docker/pins/README.md](../../docker/pins/README.md); the per-model Dockerfile this replaces is
-listed there too.
+The cards name the `sglang-disagg` image spec (`"image_spec": "${images.sglang-disagg}"`,
+[compat/images/sglang-disagg.yaml](../../compat/images/sglang-disagg.yaml)), and madengine
+generates the Dockerfile from it: the SGLang release image per GPU architecture, pinned by
+digest, its pip extras (sglang-router, py-spy, flask, pyyaml), and MoRI `158c7e8` added on gfx942
+only (gfx950's image ships its own). The component builds are authorized in the compatibility
+matrix [compat/rocm.yaml](../../compat/rocm.yaml); to change one, add the build there (or reuse
+one) and select it in the spec.
 
 From the MAD root:
 
 ```bash
-docker build -f docker/di_sglang.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args sglang-disagg --arch gfx942) \
-  -t <registry>/di-sglang:sglang-disagg-gfx942 .
+madengine build --tags pyt_sglang_disagg_mori_io_llama-3.1-8b \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags pyt_sglang_disagg_mori_io_llama-3.1-8b --explain ...   # print the generated Dockerfile and the resolved plan, without building
 ```
 
-Use `--arch gfx950` for MI355X. More in [docs/sglang-disagg.md](../../docs/sglang-disagg.md#building-the-image).
+Use `"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx950"` for MI355X. More in [docs/sglang-disagg.md](../../docs/sglang-disagg.md#building-the-image).
 
 ## Scripts
 
@@ -146,7 +148,7 @@ madengine run --tags agentic
 ```bash
 cd scripts/sglang_disagg
 
-export DOCKER_IMAGE_NAME=<mori-sglang-image>          # built from the sglang-disagg pin set
+export DOCKER_IMAGE_NAME=<mori-sglang-image>          # built from the sglang-disagg image spec
 export BENCHMARK_SCRIPT=agentic                        # selects benchmark_agentic.sh
 export RUN_MORI=1 DP_MODE=1 xP=1 yD=1 MODEL_NAME=DeepSeek-V3
 export DURATION=900 AGENTIC_CONC=16 AGENTIC_CACHE_WARMUP_DURATION=300 MAX_MODEL_LEN=160000

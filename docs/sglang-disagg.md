@@ -55,22 +55,24 @@ the valid ones:
 
 ## Building the image
 
-The cards build [`docker/di_sglang.ubuntu.amd.Dockerfile`](../docker/di_sglang.ubuntu.amd.Dockerfile)
-from the `sglang-disagg` pin set ([`docker/pins/sglang-disagg.json`](../docker/pins/sglang-disagg.json)):
+The cards build the `sglang-disagg` image spec
+([`compat/images/sglang-disagg.yaml`](../compat/images/sglang-disagg.yaml)); madengine generates
+the Dockerfile from it:
 
 ```json
-"dockerfile": "../../docker/di_sglang",
-"dockercontext": ".",
-"docker_build_arg": {"PINS": "sglang-disagg"}
+"image_spec": "${images.sglang-disagg}",
 ```
 
-[`docker/pins/README.md`](../docker/pins/README.md) is the reference for pin sets. The set picks the
-stack by `MAD_SYSTEM_GPU_ARCHITECTURE` (default `gfx942`), which madengine passes along with the
-set's base image for that architecture:
+The spec's component builds are authorized in the compatibility matrix
+[`compat/rocm.yaml`](../compat/rocm.yaml). The spec picks the stack by
+`MAD_SYSTEM_GPU_ARCHITECTURE`; the cards do not name it, so madengine needs it from the build host
+or from you (see
+[configuration.md](configuration.md#8-mad_system_gpu_architecture-for-images-built-per-gpu)).
+madengine takes the spec's base image for that architecture:
 
 | Architecture | Base image (pinned by digest) | MoRI |
 |---|---|---|
-| `gfx942` (MI300X) | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | built at the set's commit `158c7e8` |
+| `gfx942` (MI300X) | `lmsysorg/sglang:v0.5.12.post1-rocm720-mi30x` | built at the stack's commit `158c7e8` |
 | `gfx950` (MI355X) | `rocm/sgl-dev:v0.5.20-rocm720-mi35x-20260924` (sglang 0.5.20) | the base image's, v1.2.3 |
 
 MoRI before v1.2.2 registers GPU memory with `ibv_reg_mr` only, which fails (`errno 22`) on nodes
@@ -80,16 +82,20 @@ dma-buf. The launchers adapt the recipes' flags to sglang 0.5.20 (`sglang_compat
 By hand, from the repository root:
 
 ```bash
-docker build -f docker/di_sglang.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args sglang-disagg --arch gfx942) \
-  -t <registry>/di-sglang:sglang-disagg-gfx942 .
+madengine build --tags pyt_sglang_disagg_mori_io_llama-3.1-8b \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags pyt_sglang_disagg_mori_io_llama-3.1-8b --explain ...   # print the generated Dockerfile and the resolved plan, without building
 ```
 
-To change what is built (another MoRI commit, another base), change the pin set; the build stops
-on an architecture the set is not for or a base image other than the set's.
+The image records its installed stack in `/opt/mad/build_info.json`, and the build ends with a
+smoke check that imports `sglang` and `mori`.
 
-The set also installs `sglang-router`, `py-spy`, `flask` and `pyyaml`; their versions are not
-pinned yet (`python3 docker/pins/pins.py validate` lists them as pending). The launcher expects
+To change what is built (another MoRI commit, another base), add the build to `compat/rocm.yaml`
+(or reuse one) and select it in `compat/images/sglang-disagg.yaml`; the build stops on an
+architecture the spec has no base for.
+
+The spec also installs `sglang-router` (0.3.2), `py-spy` (0.4.2), `flask` (3.1.3) and `pyyaml`
+(6.0.1), pinned in the matrix. The launcher expects
 `py-spy`, `flask` and `pyyaml` in the image. It installs any that is missing, so an image supplied
 through `DOCKER_IMAGE_NAME` still works, but a MAD-built image does no work at start-up.
 
@@ -440,7 +446,7 @@ caught at once, not after `ROUTER_READY_TIMEOUT_SECONDS`.
 ## Model cards
 
 [`models.json`](../scripts/sglang_disagg/models.json) has one card per backend, mode and model.
-Every card uses `docker/di_sglang` with pin set `sglang-disagg`, launcher `run_xPyD_models.slurm`,
+Every card uses `image_spec` `${images.sglang-disagg}`, launcher `run_xPyD_models.slurm`,
 `distributed.launcher: slurm_multi` with `nnodes: 2`, `slurm: {nodes: 2, gpus_per_node: 8, time: 24:00:00}`,
 `args: "-N 2 -n 2"`, and `env_vars` with `xP=1`, `yD=1`.
 

@@ -217,16 +217,18 @@ Conventions MAD's Dockerfiles follow:
     --additional-context '{"docker_build_arg": {"BASE_DOCKER": "rocm/pytorch:rocm6.1_ubuntu22.04_py3.10"}}'
   ```
 
-- **Pin sources to commits.** The distributed-inference images go further: what they are built
-  from is data, a pin set in [`docker/pins/`](../docker/pins/README.md) that names every source
-  by full commit and the base image by digest, built by one Dockerfile per engine
-  ([`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile),
-  [`docker/di_sglang.ubuntu.amd.Dockerfile`](../docker/di_sglang.ubuntu.amd.Dockerfile)). A pin
-  set can also carry pip constraints, applied as a global `PIP_CONSTRAINT`, because pip resolves
-  build dependencies such as setuptools from PyPI in an isolated environment, and a plain
+- **Pin sources to commits.** The distributed-inference images go further: they have no
+  hand-written Dockerfile. What they are built from is data, an image spec in
+  [`compat/images/`](../compat/images/README.md) that gives the base image per GPU architecture
+  by digest and selects component builds authorized in the compatibility matrix
+  [`compat/rocm.yaml`](../compat/rocm.yaml), each at a full commit; madengine generates the
+  Dockerfile from it. A spec can also pin the build toolchain: its `setup` writes
+  `/etc/pip-constraints.txt`, applied as a global `PIP_CONSTRAINT`, because pip resolves build
+  dependencies such as setuptools from PyPI in an isolated environment, and a plain
   `pip install setuptools==X` does not reach that environment. A newer setuptools (80 and later)
-  broke the MoRI wheel build that way while every pinned source was unchanged. A new
-  distributed-inference model that needs other sources gets a new pin set, not a new Dockerfile.
+  broke the MoRI wheel build that way while every pinned source was unchanged (`vllm-kimi-k3`
+  writes `setuptools<80` there). A new distributed-inference model that needs other sources gets
+  a new spec (usually a few lines extending `di-vllm`), not a new Dockerfile.
 
 ## How the Dockerfile is found
 
@@ -297,32 +299,32 @@ gives one, madengine prints a warning that names the cards and Dockerfiles affec
 A declaration with a non-empty default (`ARG MAD_SYSTEM_GPU_ARCHITECTURE=gfx942`) does not need
 it.
 
-**Example: images built for exactly one architecture.**
-[`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile) builds the
-vLLM distributed-inference images from a pin set. It declares the argument with no default, on
-purpose: an image built for the wrong architecture fails at runtime, so the build refuses to
-guess. The pin set lists the architectures it may be built for and a base image for each, and the
-build stops on an architecture the set is not for or on another base image. Some cards name the
-architecture in `docker_build_arg` (the `vllm-mori121` and `vllm-glm51` cards say `gfx942`); the
-Kimi-K3 cards, whose set is built for `gfx942` or `gfx950`, do not. Build those through madengine
-with the architecture of the nodes they will run on:
+**Example: images built for exactly one architecture.** The vLLM distributed-inference images
+are built from image specs in [`compat/images/`](../compat/images/README.md). A spec gives a base
+image per GPU architecture (`base: {gfx942: ..., gfx950: ...}`) and nothing else, on purpose: an
+image built for the wrong architecture fails at runtime, so the build refuses to guess, and it
+stops on an architecture the spec has no base for. Some cards name the architecture in
+`docker_build_arg` (the `vllm-mori121` and `vllm-glm51` cards say `gfx942`); the Kimi-K3 cards,
+whose spec has a base for `gfx942` and `gfx950`, do not. Build those through madengine with the
+architecture of the nodes they will run on:
 
 ```bash
 madengine build --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --registry <registry> \
   --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 ```
 
-madengine adds the set's base image for that architecture. By hand, from the repository root,
-`pins.py build-args` prints the pin set, base image and architecture arguments:
+madengine composes the spec from the matrix, takes its base image for that architecture and
+generates the Dockerfile (under `.madengine/build/`, one layer per component in dependency order,
+build context `./docker`). To see what it would build without building, from the repository root:
 
 ```bash
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
-  -t <registry>/di-vllm:vllm-kimi-k3-gfx942 .
+madengine build --tags pyt_vllm_kimi-k3_mi300x_pp2xtp8 --explain \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 ```
 
-Pin sets are described in [`docker/pins/README.md`](../docker/pins/README.md); the Kimi-K3 image
-in [kimi-k3.md](kimi-k3.md#the-image).
+This prints the generated Dockerfile and the resolved plan. The image-spec format is described in
+madengine's `docs/configuration.md` (section "Declarative Image Spec (image_spec)"); the Kimi-K3
+image in [kimi-k3.md](kimi-k3.md#the-image).
 
 ## Step 4: write the script
 
@@ -554,12 +556,8 @@ From [`scripts/vllm_dissag/models.json`](../scripts/vllm_dissag/models.json):
 ```json
 {
   "name": "pyt_vllm_disagg_nixl_deepseek-v3",
-  "dockerfile": "../../docker/di_vllm",
-  "dockercontext": ".",
-  "docker_build_arg": {
-    "PINS": "vllm-mori121",
-    "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"
-  },
+  "image_spec": "${images.vllm-mori121}",
+  "docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
   "scripts": "run_xPyD_models.slurm",
   "url": "",
   "data": "huggingface",
@@ -655,10 +653,11 @@ connector `.env` file (vLLM disaggregated), the recipe in `models.yaml`, a topol
 (madengine `env_vars` in `--additional-context`, or the exported environment under `sbatch`). The
 full rules and every knob are in [configuration.md](configuration.md#precedence).
 
-The image for a distributed-inference card is not a new Dockerfile: point the card at
-`../../docker/di_vllm` or `../../docker/di_sglang` with `"dockercontext": "."`, and name an
-existing pin set in `docker_build_arg.PINS`, or add one (see
-[`docker/pins/README.md`](../docker/pins/README.md)).
+The image for a distributed-inference card is not a new Dockerfile: name an existing stack with
+`"image_spec": "${images.<stack>}"` (the stacks are in [`compat/images/`](../compat/images/README.md)),
+or add one. A new stack selects component builds authorized in
+[`compat/rocm.yaml`](../compat/rocm.yaml) (add a build there if the one you need is missing); a
+vLLM stack is usually a few lines that extend `${images.di-vllm}`.
 
 ### Offline checks
 
@@ -669,7 +668,8 @@ bash scripts/vllm_dissag/tests/argv_assert.sh           # the serve argv per con
 python3 scripts/common/check_srun_quotes.py             # no apostrophe truncates an srun body
 python3 scripts/common/check_gpu_arch_declarations.py   # cards and recipes agree on GPUs
 python3 scripts/common/tests/snapshot/snapshot.py --card <name>  # each node's docker run and engine command
-python3 docker/pins/pins.py validate                    # the pin sets, if you added or changed one
+madengine build --tags <name> --explain \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'   # the image spec composes against the matrix
 ```
 
 A new card has no golden yet: review its snapshot, then record it with

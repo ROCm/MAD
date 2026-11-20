@@ -1,0 +1,18 @@
+# The vllm-glm51 stack: a card selects it with "image_spec": "${images.vllm-glm51}".
+# GLM-5.1-FP8 disaggregated stack: MoRI 624002c, AITER with the ROCm/aiter#4957 gqa64 fix, vLLM
+# for GLM-5.1, vllm-router; MoRI-EP only by default.
+extends: ${images.di-vllm}
+base:
+  gfx942: rocm/vllm-dev:ci_base-dedbf6be8b1afa17a6220473b9c8c98242ac1c03@sha256:c513ec5e374842bc85b6757dac120385303cad7cbf1882907eb26f2d33b66d56
+components:
+  mori: 624002c8@di
+  amd-aiter: 1d872fa0+a511bf4b@di
+  flydsl: 0.3.1@di
+  vllm: d626108b+e055be85@di
+  vllm-router: 1d10e71f+0cc1c443@di
+order:
+- mori
+- amd-aiter
+- flydsl
+- vllm
+- vllm-router

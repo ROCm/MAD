@@ -51,7 +51,7 @@ verdict  launcher_verdict -> cluster_job_verdict (cluster.sh), on rank 0
 
 | Step | What happens | Implemented in | Details |
 |---|---|---|---|
-| Card and environment | The card names the launcher, node count, image (Dockerfile and pin set) and `env_vars`. madengine generates a wrapper that exports them and runs the launcher with `bash`; under plain `sbatch` you export them yourself. | `scripts/<launcher>/models.json` | [multinode-overview.md](multinode-overview.md#how-madengine-runs-a-launcher-slurm_multi), [configuration.md](configuration.md#1-the-model-card) |
+| Card and environment | The card names the launcher, node count, image (its image spec) and `env_vars`. madengine generates a wrapper that exports them and runs the launcher with `bash`; under plain `sbatch` you export them yourself. | `scripts/<launcher>/models.json` | [multinode-overview.md](multinode-overview.md#how-madengine-runs-a-launcher-slurm_multi), [configuration.md](configuration.md#1-the-model-card) |
 | Launcher | One batch script per workload. It finds its own directory (also when `sbatch` runs a spooled copy), validates the model and topology, and drives the steps below. | `scripts/vllm_dissag/run_xPyD_models.slurm`, `scripts/sglang_disagg/run_xPyD_models.slurm`, `scripts/vllm_multinode/run_multinode.slurm` | [vllm-disagg.md](vllm-disagg.md#architecture-at-a-glance), [sglang-disagg.md](sglang-disagg.md#how-a-run-works) |
 | Configuration layers | `config_begin` records every name set at submit time before anything else runs; each later layer is labelled as it is applied. Order, weakest first: site (`cluster.sh`) < connector `.env` < recipe (`models.yaml` `env:`) < topology spec < workload file (`MAD_CONFIG`, read by MAD itself when madengine did not) < submit time. A workload file may also replace the recipe file, the connector `.env` files and the topology spec (`recipes:`, `connectors:`, `topology:`), so one file holds a card's whole configuration; `config/emit.py` generates it from any card. madengine says where each submitted value came from in `MAD_ENV_SOURCES`. | `scripts/common/config/layers.sh` | [configuration.md](configuration.md#precedence) |
 | Topology spec | With `MAD_TOPOLOGY` naming a JSON spec, the launcher's own settings (`xP`, `yD`, `WIDE_EP`, `EP_TP_SIZE`, `TP_SIZE`, `PP_SIZE`, `ROUTER_NODE`, ...) are set from it before the defaults; a setting also given directly must agree. A `router` role (`ROUTER_NODE=1`) puts the router and the benchmark client on a node of their own after decode. | `scripts/common/topology/apply.sh`, `scripts/common/topology/topology.py`, examples in `scripts/common/topology/specs/` | [configuration.md](configuration.md#topology-spec-files) |
@@ -81,38 +81,44 @@ launcher applies no recipe `env:` block (SGLang recipes have none); its containe
 
 ## How an image is built
 
-Each engine has one Dockerfile, and a **pin set** says what it builds:
+The distributed-inference images have no hand-written Dockerfile. Each stack is a named **image spec** over the compatibility
+matrix, and madengine generates the Dockerfile from it:
 
 ```
-card: "dockerfile": "../../docker/di_vllm", "dockercontext": ".", "docker_build_arg": {"PINS": "<set>"}
-  |  madengine adds the set's base image for the build's GPU architecture
-  |  (by hand: python3 docker/pins/pins.py build-args <set> --arch <gfx>)
+card: "image_spec": "${images.<stack>}"   (optionally docker_build_arg.MAD_SYSTEM_GPU_ARCHITECTURE)
+  |  compat/images/<stack>.yaml: a base per GPU architecture (by digest) and the component builds
+  |  it selects; the vLLM stacks extend compat/images/di-vllm.yaml
   v
-docker/di_vllm.ubuntu.amd.Dockerfile | docker/di_sglang.ubuntu.amd.Dockerfile
-  |  pins.py env: the set resolved for this architecture and base; stops on any other
-  |  each component checked out at its pinned upstream commit, patches from docker/patches/ applied
+compat/rocm.yaml (components:): each selected build authorized at its upstream commit, with its
+  |  patches from docker/patches/ (digest-checked when applied); a build missing there stops
+  |  the build before it starts
   v
-image  /app/pins.json, /app/versions.txt (every component's commit), checked against the set
+.madengine/build/ generated Dockerfile: the spec's base for this architecture, one layer per
+  |  component in dependency order, build context ./docker; ends with the spec's smoke check (finish)
+  v
+image  /opt/mad/build_info.json (the installed stack); the build manifest records build_plan
 ```
 
-| Pin set | Dockerfile | Used by |
+| Stack | Spec | Used by |
 |---|---|---|
-| `vllm-mori121` | `di_vllm` | The vLLM disaggregated cards except GLM-5.1 and Kimi-K3 |
-| `vllm-glm51` | `di_vllm` | The GLM-5.1 cards |
-| `vllm-kimi-k3` | `di_vllm` | Every Kimi-K3 vLLM multinode card, disaggregated and colocated |
-| `sglang-disagg` | `di_sglang` | The SGLang disaggregated cards |
+| `vllm-mori121` | [`compat/images/vllm-mori121.yaml`](../compat/images/vllm-mori121.yaml) | The vLLM disaggregated cards except GLM-5.1 and Kimi-K3 |
+| `vllm-glm51` | [`compat/images/vllm-glm51.yaml`](../compat/images/vllm-glm51.yaml) | The GLM-5.1 cards |
+| `vllm-kimi-k3` | [`compat/images/vllm-kimi-k3.yaml`](../compat/images/vllm-kimi-k3.yaml) | Every Kimi-K3 vLLM multinode card, disaggregated and colocated |
+| `sglang-disagg` | [`compat/images/sglang-disagg.yaml`](../compat/images/sglang-disagg.yaml) | The SGLang disaggregated cards |
 
 Build by hand, from the MAD root:
 
 ```bash
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-mori121 --arch gfx942) -t <tag> .
+madengine build --tags <card> --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags <card> --explain ...     # print the generated Dockerfile and the resolved plan, without building
 ```
 
 The image carries no recipe, tuning or platform environment: those are applied at launch from
-`models.yaml` and the connector `.env` files. [`docker/pins/README.md`](../docker/pins/README.md)
-is the reference: what each set pins and why, the patches and the upstream changes they wait on,
-the rules, and the per-model Dockerfiles the sets replace.
+`models.yaml` and the connector `.env` files. To change what a stack builds (another MoRI or vLLM
+commit, another base), add the build to `compat/rocm.yaml` (or reuse one) and select it in the
+stack's `compat/images/<stack>.yaml`. The matrix's header comment documents its keys, and each
+build carries a note on why it is pinned and what its patches wait on upstream; the spec format
+is in madengine's `docs/configuration.md` (section "Declarative Image Spec (image_spec)").
 
 ## What a recipe needs from the hardware
 
@@ -396,6 +402,6 @@ None of these need GPUs; run them from the MAD root. The full list is in
 | Node program | `bash scripts/common/tests/node_lib_assert.sh` |
 | Site fabric, platform | `bash scripts/common/tests/cluster_fabric_assert.sh`, `bash scripts/common/tests/platform_assert.sh` |
 | Kubernetes | `python3 -m unittest discover -s scripts/common/k8s/tests` |
-| Pin sets | `python3 docker/pins/pins.py validate`; `python3 -m unittest discover -s docker/pins/tests` |
+| Image specs | `madengine build --tags <card> --explain`: the spec composes against the matrix |
 | Performance model, registry | `python3 -m unittest discover -s scripts/common/perf/tests` |
 | Recipe roles, variants, capability catalog | `python3 scripts/common/recipe/recipe.py validate`; `python3 -m unittest discover -s scripts/common/recipe/tests`; `bash scripts/common/tests/recipe_check_assert.sh` |

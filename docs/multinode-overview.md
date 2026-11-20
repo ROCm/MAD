@@ -130,7 +130,7 @@ nodes joined by the MoRIIO connector. See [kimi-k3.md](kimi-k3.md) for the model
 ## The three launchers
 
 Each workload directory holds **model cards** in its `models.json`. A card names the
-launcher script, the node count, the Dockerfile and pin set, and the environment. The
+launcher script, the node count, the image spec, and the environment. The
 launcher is one SLURM batch script; on every node it runs that directory's `node.sh`,
 which starts the node's container.
 

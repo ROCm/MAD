@@ -61,7 +61,7 @@ path). The DeepSeek family is wideEP plus moriio+TP (`MORIIO_TP_MODELS`), the TP
 | `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | needs a co-versioned AITER image (see Caveats) |
-| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own pin set (`vllm-glm51`); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own stack (`vllm-glm51`); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
 | `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | **MI355X gfx950, bring-up (not yet run)**; native MXFP4, TP1×DP16 (`EP_TP_SIZE=1`); `vllm-kimi-k3` image (built for gfx950); card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x` |
@@ -70,16 +70,16 @@ Standalone reference launcher (debug / OCI): the Kimi-K3 disagg recipe in PR#241
 
 See [ARCHITECTURE.md — Kimi-K3 worker taxonomy](ARCHITECTURE.md#5-kimi-k3-mxfp4-worker-taxonomy-w1w5) for W1–W5 ↔ `NODE_RANK` mapping.
 
-**Docker image:** every Kimi-K3 card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from the
-`vllm-kimi-k3` pin set, for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950).
-The vLLM, AITER and connector fixes are pinned in the set by commit, with patches on upstream
-(see [docker/pins/README.md](../../docker/pins/README.md)).
+**Docker image:** every Kimi-K3 card builds the `vllm-kimi-k3` image spec
+([compat/images/vllm-kimi-k3.yaml](../../compat/images/vllm-kimi-k3.yaml)), for the GPU given as
+`MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950). The vLLM, AITER and connector fixes are builds
+authorized by commit in [compat/rocm.yaml](../../compat/rocm.yaml), with patches on upstream.
 
 ```bash
-# Build (once per cluster / after the pin set moves), from the MAD repo root:
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
-  -t kimik3-wideep-disagg:latest .
+# Build (once per cluster / after the stack moves), from the MAD repo root, then tag the
+# image as kimik3-wideep-disagg:latest (or push it where the nodes can pull it):
+madengine build --tags pyt_vllm_disagg_mori_kimi-k3 \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 
 # Run via unified launcher (sbatch options, --export included, go BEFORE the script;
 # anything after it is passed to the script as an argument and silently ignored):
@@ -114,26 +114,34 @@ come from `scripts/common/cluster.sh`, which detects the fabric from the adapter
 
 ## Building the Docker image
 
-No public prebuilt image ships. Every card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from
-the pin set it names in `docker_build_arg.PINS`:
+No public prebuilt image ships. Every card names an image spec (a stack) and madengine
+generates the Dockerfile from it:
 
-| Pin set | Models | Transport stack (rixl, DeepEP) |
-|---------|--------|--------------------------------|
-| `vllm-mori121` | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | on |
-| `vllm-glm51` | `GLM-5.1-FP8` | off (MoRI-EP only) |
-| `vllm-kimi-k3` | the Kimi-K3 models | on |
+```json
+"image_spec": "${images.vllm-mori121}",
+"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
+```
+
+| Stack | Spec | Models | Transport stack (rixl, DeepEP) |
+|-------|------|--------|--------------------------------|
+| `vllm-mori121` | [compat/images/vllm-mori121.yaml](../../compat/images/vllm-mori121.yaml) | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | on |
+| `vllm-glm51` | [compat/images/vllm-glm51.yaml](../../compat/images/vllm-glm51.yaml) | `GLM-5.1-FP8` | off (MoRI-EP only) |
+| `vllm-kimi-k3` | [compat/images/vllm-kimi-k3.yaml](../../compat/images/vllm-kimi-k3.yaml) | the Kimi-K3 models | on |
 
 From the MAD root:
 
 ```bash
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-mori121 --arch gfx942) \
-  -t <your-registry>/di-vllm:vllm-mori121-gfx942 .
+madengine build --tags <card> --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags <card> --explain ...     # print the generated Dockerfile and the resolved plan, without building
 ```
 
-What each set pins, the patches it carries and the per-model Dockerfiles they replace are in
-[docker/pins/README.md](../../docker/pins/README.md). MAD ships no runtime patchers, so every
-fix a model needs is in its pin set; a future model that needs its own pins gets its own set.
+The three specs extend [compat/images/di-vllm.yaml](../../compat/images/di-vllm.yaml) (build
+prerequisites, env, cache locations, the smoke check) and select component builds authorized in
+[compat/rocm.yaml](../../compat/rocm.yaml), where each build's commit, patches and notes are kept.
+MAD ships no runtime patchers, so every fix a model needs is in its stack's builds. To change what
+a stack builds, add the build to `compat/rocm.yaml` (or reuse one) and select it in the stack's
+spec; a future model that needs other sources gets its own spec (usually a few lines extending
+`di-vllm`), not a new Dockerfile.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -269,8 +277,8 @@ but each combo also needs the connector's transport built into the image:
 | rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
 
-rixl/DeepEP combos need an image whose pin set turns the transport stack on (`vllm-mori121`,
-`vllm-kimi-k3`); the pin sets' notes say the moriio paths are the validated ones.
+rixl/DeepEP combos need an image whose stack builds the transport stack (`vllm-mori121`,
+`vllm-kimi-k3`); the moriio paths are the validated ones.
 
 ## DeepEP options (optional)
 

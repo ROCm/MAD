@@ -44,19 +44,18 @@ REFERENCE_DOCKERFILES = {
     "vllm": "docker/pyt_vllm.ubuntu.amd.Dockerfile",
     "xdit": "docker/pyt_xdit.ubuntu.amd.Dockerfile",
 }
-# The distributed-inference images are built from pin sets (docker/pins/README.md)
-# by one Dockerfile per engine, whose BASE_IMAGE has no default: the pin set names
-# the base per architecture. The default `base_image` is the set's gfx942 base, the
-# architecture these templates were modeled on.
-REFERENCE_PIN_SETS = {
-    "sglang_disagg": "docker/pins/sglang-disagg.json",
-    "vllm_disagg": "docker/pins/vllm-mori121.json",
+# The distributed-inference images are image specs over the compatibility matrix
+# (compat/images/<stack>.yaml), which name their base per architecture. The default
+# `base_image` is the spec's gfx942 base, the architecture these templates were modeled on.
+REFERENCE_SPECS = {
+    "sglang_disagg": "compat/images/sglang-disagg.yaml",
+    "vllm_disagg": "compat/images/vllm-mori121.yaml",
 }
 
 
 def reference_source(framework: str) -> str:
     """Where the framework's default base image is read from."""
-    return REFERENCE_PIN_SETS.get(framework) or REFERENCE_DOCKERFILES.get(framework, "-")
+    return REFERENCE_SPECS.get(framework) or REFERENCE_DOCKERFILES.get(framework, "-")
 
 
 def available_frameworks() -> List[str]:
@@ -92,14 +91,15 @@ def template_variables(env, framework: str) -> List[str]:
 
 
 def reference_base_image(framework: str) -> Optional[str]:
-    """Return the base image of the framework's reference Dockerfile or pin set, or None."""
-    if framework in REFERENCE_PIN_SETS:
+    """Return the base image of the framework's reference Dockerfile or image spec, or None."""
+    if framework in REFERENCE_SPECS:
+        import yaml
         try:
-            with open(os.path.join(REPO_ROOT, REFERENCE_PIN_SETS[framework])) as f:
-                bases = json.load(f).get("base_image") or {}
-        except (OSError, ValueError):
+            with open(os.path.join(REPO_ROOT, REFERENCE_SPECS[framework])) as f:
+                base = (yaml.safe_load(f) or {}).get("base") or {}
+        except (OSError, yaml.YAMLError):
             return None
-        return bases.get("gfx942") or None
+        return (base.get("gfx942") if isinstance(base, dict) else base) or None
     path = os.path.join(REPO_ROOT, REFERENCE_DOCKERFILES.get(framework, ""))
     try:
         with open(path) as f:

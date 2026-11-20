@@ -1,0 +1,45 @@
+# The vllm-kimi-k3 stack: a card selects it with "image_spec": "${images.vllm-kimi-k3}".
+# Kimi-K3 stack for gfx942 and gfx950: MoRI fe12a11, AITER 68e42f5f from source, vLLM for Kimi-K3,
+# vllm-router, and the rixl transport stack.
+extends: ${images.di-vllm}
+base:
+  gfx942: rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298
+  gfx950: rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298
+components:
+  mori: fe12a11a@di
+  amd-aiter: 68e42f5f@di
+  flydsl: 0.2.4@di
+  vllm: 9a7ae4b8+cd0d2656@di
+  vllm-router: 1d10e71f+0cc1c443@di
+  ucx: da3fac2a@di
+  googletest: 1.14.0@di
+  rixl: f33a5599@di
+  rocshmem: 9c43b232@di
+  deepep: 0f63d3e9@di-cx7
+order:
+- mori
+- amd-aiter
+- flydsl
+- vllm
+- vllm-router
+- ucx
+- googletest
+- rixl
+- rocshmem
+- deepep
+env:
+  NVCC_THREADS: '8'
+  LD_LIBRARY_PATH: /usr/local/ucx/lib:/usr/local/lib:/usr/local/RIXL/install/lib:$LD_LIBRARY_PATH
+  PATH: /usr/local/ucx/bin:$PATH
+setup:
+- sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true
+- sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true
+- printf '%s\n' 'setuptools<80' > /etc/pip-constraints.txt
+- pip install meson==0.64.0 'pybind11[global]' tqdm prettytable
+finish:
+- pip install pyyaml
+- python3 -c 'import aiter.ops.triton.conv'
+- test -x /usr/local/ucx/bin/ucx_info
+- 'python3 -c ''import mori, mori.io, mori.ops, aiter, vllm; print("stack OK: vllm", vllm.__version__)'''
+- vllm-router --help 2>&1 | grep -q moriio
+- rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori
