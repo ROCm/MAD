@@ -211,6 +211,7 @@ _has    "$V4h" "--kv-transfer-config" "DSV4 wideEP headless child -> --kv-transf
 _has    "$V4h" '"proxy_ip":""' "DSV4 wideEP headless child -> proxy_ip emptied"
 DhOn="$(_ARGV_EXTRA="MORIIO_MULTINODE=1" _argv_rank moriio 1 mori DeepSeek-V3 1 2 2)"
 _has    "$DhOn" '"proxy_ip":""' "MORIIO_MULTINODE=1 -> DSV3 child takes the multi-node layout"
+_has    "$(cat "$SLURM")" 'MORIIO_MULTINODE:+-e MORIIO_MULTINODE=' "the launcher forwards MORIIO_MULTINODE to the container"
 
 echo ""
 echo "=== MoRI-IO read_mode only when asked for ==="
