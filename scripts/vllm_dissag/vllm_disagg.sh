@@ -481,6 +481,13 @@ fi
 [[ -n "${PREFILL_EXTRA_FLAGS:-}" ]] && MODEL_CONFIG_PREFILL="${MODEL_CONFIG_PREFILL} ${PREFILL_EXTRA_FLAGS}"
 [[ -n "${DECODE_EXTRA_FLAGS:-}" ]] && MODEL_CONFIG_DECODE="${MODEL_CONFIG_DECODE} ${DECODE_EXTRA_FLAGS}"
 export MODEL_CONFIG_PREFILL MODEL_CONFIG_DECODE
+# Whether the recipe's flags for ROLE (prefill|decode) already carry FLAG, so a setting
+# that also has an env form (MAX_MODEL_LEN) is not passed twice.
+_recipe_sets_flag() {  # FLAG ROLE
+    local _mc="${MODEL_CONFIG_PREFILL:-}"
+    [[ "$2" == "decode" ]] && _mc="${MODEL_CONFIG_DECODE:-}"
+    [[ " ${_mc} " == *" $1 "* || " ${_mc} " == *" $1="* ]]
+}
 
 # The name clients must request is the one the servers register: the recipe's
 # --served-model-name when its flags set one, else vLLM's default, MODEL_PATH. The NIAH
