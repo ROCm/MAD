@@ -87,6 +87,39 @@ components:
       python: ["3.14"]
       requires: ["torch==2.13.0+rocm10.1.0"]
       note: Torch extension; the wheel does not declare torch, the frameworks vllm stack builds it against 2.13.0+rocm10.1.0.
+    68e42f5f@di:
+      source:
+        repo: https://github.com/ROCm/aiter.git
+        commit: 68e42f5f461556596ae294200f1a3f13378c8582
+        path: /tmp/aiter-src
+        steps:
+        - pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true
+        - export GPU_ARCHS={gpu_arch}
+        - pip install --no-build-isolation --no-deps -v .
+        - cd / && rm -rf /tmp/aiter-src /opt/vllm_cache/aiter_jit /root/.aiter
+      note: needs aiter.ops.triton.conv
+    0.1.16.post3@aiter-release:
+      run:
+      - pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true
+      - curl -fL --retry 3 --retry-delay 2 -o /tmp/amd_aiter-0.1.16.post3+rocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl https://github.com/ROCm/aiter/releases/download/v0.1.16.post3/amd_aiter-0.1.16.post3%2Brocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      - pip install --no-deps /tmp/amd_aiter-0.1.16.post3+rocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl && rm -f /tmp/amd_aiter-0.1.16.post3+rocm7.2.manylinux.2.28-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+      - rm -rf /opt/vllm_cache/aiter_jit /root/.aiter
+      note: the AITER release wheel
+    1d872fa0+a511bf4b@di:
+      source:
+        repo: https://github.com/ROCm/aiter.git
+        commit: 1d872fa07aadfcbb199851fe17e6822efaceca61
+        path: /tmp/aiter-src
+        steps:
+        - pip uninstall -y amd_aiter amd-aiter aiter 2>/dev/null || true
+        - pip install --no-build-isolation --no-deps -v .
+        - cd / && rm -rf /tmp/aiter-src /opt/vllm_cache/aiter_jit /root/.aiter
+        patches:
+        - file: aiter/gqa64.patch
+          sha256: a5b9c3e4b2c823c21fb24ee81ff7f1993571b52ad88b15d02124264687b85b5f
+          upstream: ROCm/aiter#4957
+      note: AITER with ROCm/aiter#4957 (gqa64). Carried as a patch on upstream until it is merged there.
+      fork_commit: 624e43586bbdb33617812ff1de5abce83d42db65
 
   flash-attn:
     "2.8.3@frameworks-vllm":
@@ -108,6 +141,60 @@ components:
       exclude:
         - name: amd-quark
           reason: vllm pins amd-quark==0.12.post1, whose only build requires python <3.14, and this vllm exists only for cp314; Quark-quantized models fail until a 3.14-compatible amd-quark is published
+    9a7ae4b8+cd0d2656@di:
+      source:
+        repo: https://github.com/vllm-project/vllm.git
+        commit: 9a7ae4b80866a322678ece31ca2854d9a174ab8d
+        path: /tmp/vllm-src
+        patches:
+        - file: vllm/kimi-k3.patch
+          sha256: 182bb4361cdf38c2558283a8d6f47bdc6d43cf3c7ee5913b1ddd46612d65ce30
+          upstream: not yet proposed upstream
+        steps:
+        - pip uninstall -y vllm 2>/dev/null || true
+        - pip install --no-deps --no-build-isolation -v .
+        - cd / && rm -rf /tmp/vllm-src
+      requires:
+      - mori
+      - amd-aiter
+      note: vLLM for Kimi-K3. Carried as a patch on upstream.
+      fork_commit: 862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543
+    dccb412e+5ebb40fa@di:
+      source:
+        repo: https://github.com/vllm-project/vllm.git
+        commit: dccb412e2c72a0c147166c14b25c01f045a74163
+        path: /tmp/vllm-src
+        patches:
+        - file: vllm/wide-ep-write-0629.patch
+          sha256: a0d954ff0af8b229251cbe1967e5ca2f94e6d4063cf2ecf5142007f294d2c729
+          upstream: not yet proposed upstream
+        steps:
+        - pip uninstall -y vllm 2>/dev/null || true
+        - pip install --no-deps --no-build-isolation -v .
+        - cd / && rm -rf /tmp/vllm-src
+      requires:
+      - mori
+      - amd-aiter
+      note: 'Wide-EP multi-pod PD WRITE mode with the MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native. Branch tip on 2026-11-03 (last commit 2026-06-26). Carried as a patch on upstream until it is merged there.'
+      fork_commit: 1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31
+    d626108b+e055be85@di:
+      source:
+        repo: https://github.com/vllm-project/vllm.git
+        commit: d626108b1841888ec90aced33367149a6bbc7e4b
+        path: /tmp/vllm-src
+        patches:
+        - file: vllm/glm51.patch
+          sha256: 589467a471532a9750a7eccbc488cdb02d71649a463d4a29fe64923af9586bc5
+          upstream: not yet proposed upstream
+        steps:
+        - pip uninstall -y vllm 2>/dev/null || true
+        - pip install --no-deps --no-build-isolation -v .
+        - cd / && rm -rf /tmp/vllm-src
+      requires:
+      - mori
+      - amd-aiter
+      note: vLLM for GLM-5.1 disaggregated serving. Carried as a patch on upstream.
+      fork_commit: 094820b5deeb1b93733586ca8942589e385a25dc
 
   # KV-cache transfer backends, built from source on the SGLang ROCm 10 image
   # (see scripts/kvcache_transfer_bench/image_spec.yaml).
@@ -125,6 +212,47 @@ components:
           - $MORI_IO_BENCH_ENGINE_BIN --help > /dev/null
       system_packages: [ibverbs-utils, libibverbs-dev, openmpi-bin, libopenmpi-dev, libpci-dev, libdw1, locales, libgrpc-dev, libgrpc++-dev, libprotobuf-dev, protobuf-compiler-grpc, cmake, libdrm-dev]
       note: Python package and the MoRI-IO C++ bench_engine from one checkout.
+    fe12a11a@di:
+      source:
+        repo: https://github.com/ROCm/mori.git
+        commit: fe12a11a7d6c6acd0771b772366ed9ed5e0d3d44
+        path: /tmp/mori-src
+        steps:
+        - pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true
+        - BUILD_UMBP=OFF pip install .
+        - cd / && rm -rf /tmp/mori-src
+      note: 'MoRI at the commit, replacing the base image''s (UMBP off: it needs gRPC, unrelated to EP)'
+    e31d426a@di:
+      source:
+        repo: https://github.com/ROCm/mori.git
+        commit: e31d426a13e96e1cbff96a1c904d291aefe8c46a
+        path: /tmp/mori-src
+        steps:
+        - pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true
+        - BUILD_UMBP=OFF pip install .
+        - cd / && rm -rf /tmp/mori-src
+      note: 'MoRI at the commit, replacing the base image''s (UMBP off: it needs gRPC, unrelated to EP)'
+    624002c8@di:
+      source:
+        repo: https://github.com/ROCm/mori.git
+        commit: 624002c897a30928ec04c14fc167bf2b8a93f6ce
+        path: /tmp/mori-src
+        steps:
+        - pip uninstall -y amd_mori amd-mori amd-mori-nightly mori 2>/dev/null || true
+        - BUILD_UMBP=OFF pip install .
+        - cd / && rm -rf /tmp/mori-src
+      note: 'MoRI at the commit, replacing the base image''s (UMBP off: it needs gRPC, unrelated to EP)'
+    158c7e83@sglang:
+      source:
+        repo: https://github.com/ROCm/mori.git
+        commit: 158c7e8335a0b19b3f1f422ff134d7869252135e
+        path: /sgl-workspace/mori
+        steps:
+        - pip install -r requirements-build.txt
+        - pip install -e .
+      gpu_arch:
+      - gfx942
+      note: MoRI editable in the SGLang image's /sgl-workspace/mori (gfx942; gfx950's image ships its own)
 
   mooncake:
     "0.3.13.post1@kvcache":
@@ -156,6 +284,43 @@ components:
           - if dpkg -s libabsl-dev >/dev/null 2>&1; then apt-get remove -y libabsl-dev; fi
           - ./autogen.sh
           - mkdir build && cd build && ../configure --prefix=$UCX_HOME --enable-shared --disable-static --disable-doxygen-doc --enable-optimizations --enable-devel-headers --with-rocm=/opt/rocm --with-verbs --with-dm --enable-mt --without-go && make -j && make install
+    da3fac2a@di:
+      source:
+        repo: https://github.com/ROCm/ucx.git
+        commit: da3fac2afcb55df7605f619ee19b37f4505bd4e4
+        path: /tmp/ucx
+        steps:
+        - ./autogen.sh
+        - mkdir -p build && cd build
+        - ../configure --prefix=/usr/local/ucx/ --with-rocm=/opt/rocm --disable-go --disable-java --disable-assertions --enable-mt
+        - make -j && make install
+        - cd / && rm -rf /tmp/ucx
+      system_packages:
+      - autoconf
+      - automake
+      - libtool
+      - autogen
+      - m4
+      - gcc
+      - make
+      - librdmacm-dev
+      - rdmacm-utils
+      - infiniband-diags
+      - ibverbs-utils
+      - perftest
+      - ethtool
+      - libibverbs-dev
+      - rdma-core
+      - strace
+      - libgflags-dev
+      - libaio-dev
+      - liburing-dev
+      - libcpprest-dev
+      - libgrpc-dev
+      - libgrpc++-dev
+      - libprotobuf-dev
+      - protobuf-compiler-grpc
+      note: UCX for the rixl connector (NIXL)
 
   nixl:
     "1.4.1+pr2191@kvcache":
@@ -178,3 +343,106 @@ components:
           - wget -q https://github.com/etcd-io/etcd/releases/download/v3.6.0-rc.5/etcd-v3.6.0-rc.5-linux-amd64.tar.gz -O /tmp/etcd.tar.gz
           - mkdir -p /usr/local/bin/etcd && tar -xf /tmp/etcd.tar.gz -C /usr/local/bin/etcd --strip-components=1 && rm /tmp/etcd.tar.gz
       note: v1.4.1 plus ai-dynamo/nixl#2191 (ROCm fix, not in v1.4.1). Replaces any NIXL the base ships.
+
+  flydsl:
+    0.2.4@di:
+      run:
+      - pip install --no-deps --force-reinstall flydsl==0.2.4
+      note: flydsl as AITER's builds expect it (installed after AITER)
+    0.2.2@di:
+      run:
+      - pip install flydsl==0.2.2
+      note: flydsl as AITER's builds expect it (installed after AITER)
+    0.3.1@di:
+      run:
+      - pip install --no-deps -U flydsl==0.3.1
+      note: flydsl as AITER's builds expect it (installed after AITER)
+
+  vllm-router:
+    1d10e71f+0cc1c443@di:
+      source:
+        repo: https://github.com/vllm-project/router.git
+        commit: 1d10e71fb7bb4c0adc9f2c16ec77bf5dd4aa1586
+        path: /tmp/vllm-router-src
+        patches:
+        - file: router/dp-rank-kv-notify.patch
+          sha256: 4c8531f15317601e25cf72b5a2bef6790a1fcfd49f9d9ca606adaa6db0c19ed0
+          upstream: vllm-project/router#181
+        steps:
+        - command -v cargo >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
+        - export PATH=/root/.cargo/bin:$PATH
+        - cargo build --release
+        - install -m 755 target/release/vllm-router /usr/local/bin/vllm-router
+        - cd / && rm -rf /tmp/vllm-router-src
+      note: vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Carried as a patch on upstream until it is merged there.
+      fork_commit: 82dc9811af17412e6e24b5942a5486bc502df23a
+
+  googletest:
+    1.14.0@di:
+      run:
+      - cd /tmp && wget -q -O googletest.tar.gz https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+      - mkdir -p googletest && tar -xzf googletest.tar.gz -C googletest --strip-components=1
+      - cd googletest && mkdir -p build && cd build && cmake -DBUILD_SHARED_LIBS=on .. && make -j && make install
+      - rm -rf /tmp/googletest /tmp/googletest.tar.gz
+
+  rixl:
+    f33a5599@di:
+      source:
+        repo: https://github.com/ROCm/RIXL.git
+        commit: f33a5599400eb8da47ecdad20111ccb35b41a709
+        path: /tmp/RIXL
+        steps:
+        - meson setup build/ --prefix=/usr/local/RIXL/install -Ducx_path=/usr/local/ucx/ -Ddisable_gds_backend=true -Dcudapath_inc=/opt/rocm/include -Dcudapath_lib=/opt/rocm/lib
+        - cd build && ninja && ninja install && cd /tmp/RIXL
+        - pip install --config-settings=setup-args=-Dcudapath_inc=/opt/rocm/include --config-settings=setup-args=-Dcudapath_lib=/opt/rocm/lib --config-settings=setup-args=-Ducx_path=/usr/local/ucx/ --config-settings=setup-args=-Ddisable_gds_backend=true .
+      requires:
+      - ucx
+      - googletest
+
+  rocshmem:
+    9c43b232@di:
+      source:
+        repo: https://github.com/ROCm/rocm-systems.git
+        commit: 9c43b23229cf2f835b838f72c0d1af3d4876167c
+        path: /tmp/rocm-systems
+        sparse:
+        - projects/rocshmem
+        steps:
+        - mkdir -p /tmp/rocshmem-build && cd /tmp/rocshmem-build
+        - /tmp/rocm-systems/projects/rocshmem/scripts/build_configs/all_backends -DUSE_EXTERNAL_MPI=OFF -DGPU_TARGETS={gpu_arch}
+        - rm -rf /tmp/rocm-systems /tmp/rocshmem-build
+
+  deepep:
+    0f63d3e9@di-cx7:
+      source:
+        repo: https://github.com/ROCm/DeepEP.git
+        commit: 0f63d3e97f0e43b47926179d7f3f304b3bc9554e
+        path: /tmp/DeepEP
+        steps:
+        - PYTORCH_ROCM_ARCH={gpu_arch} CFLAGS='-O3 -fPIC' CXXFLAGS='-O3 -fPIC --offload-arch={gpu_arch}' HIP_CXX_FLAGS='-O3 -fPIC' python3 setup.py --variant rocm --nic cx7 build develop
+      requires:
+      - rocshmem
+
+  sglang-router:
+    0.3.2@pypi:
+      run:
+      - pip install --upgrade sglang-router==0.3.2
+      note: as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03
+
+  py-spy:
+    0.4.2@pypi:
+      run:
+      - pip install py-spy==0.4.2
+      note: as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03
+
+  flask:
+    3.1.3@pypi:
+      run:
+      - pip install flask==3.1.3
+      note: as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03
+
+  pyyaml:
+    6.0.1@pypi:
+      run:
+      - pip install pyyaml==6.0.1
+      note: as in the validated image (rocm/sgl-dev v0.5.20 gfx950 build), read from its pip list on 2026-11-03

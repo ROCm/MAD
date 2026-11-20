@@ -1,0 +1,32 @@
+# What every vLLM distributed-inference stack shares. A stack spec extends it.
+# What every vLLM DI stack shares: build prerequisites, the runtime env, the cache locations, the
+# smoke check.
+system_packages:
+- git
+- build-essential
+- cmake
+- ninja-build
+- ccache
+- libssl-dev
+- pkg-config
+setup:
+- sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true
+- sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true
+- touch /etc/pip-constraints.txt
+- pip install meson==0.64.0 'pybind11[global]' tqdm prettytable
+env:
+  PIP_CONSTRAINT: /etc/pip-constraints.txt
+  MORI_GPU_ARCHS: '{gpu_arch}'
+  BUILD_UMBP: 'OFF'
+  BUILD_UMBP_SPDK: 'OFF'
+  VLLM_TARGET_DEVICE: rocm
+  PYTORCH_ROCM_ARCH: '{gpu_arch}'
+  MAX_JOBS: '32'
+  AITER_JIT_DIR: /opt/vllm_cache/aiter_jit
+  VLLM_CACHE_ROOT: /opt/vllm_cache/vllm
+  TRITON_CACHE_DIR: /opt/vllm_cache/triton
+  COMGR_CACHE_DIR: /opt/vllm_cache/comgr
+finish:
+- 'python3 -c ''import mori, mori.io, mori.ops, aiter, vllm; print("stack OK: vllm", vllm.__version__)'''
+- vllm-router --help 2>&1 | grep -q moriio
+- rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori
