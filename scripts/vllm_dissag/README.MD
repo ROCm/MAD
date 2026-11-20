@@ -282,11 +282,33 @@ once the images you use ship the upstream fix:
 The MLA broadcast fix only matters when `save_only_first_rank` is on (default for MLA models) and DP > 1.
 Setting `LMCACHE_EXTRA_CONFIG='{"save_only_first_rank":false}'` also avoids it, as it skips that path.
 
-**Multi-node roles (e.g. 2P2D EP16).** The router must be built from
-[vllm-project/router #458](https://github.com/vllm-project/router/pull/458) (`--moriio-dp-size-local`,
-`--moriio-prefill-hosts`, `--moriio-decode-hosts`). A stock `vllm-router` lacks these flags: the
-launcher then warns and only the master node's DP ranks 0-7 of each role serve. The PR is open; point
-`ROUTER_BINARY` at a binary built from it.
+**Multi-node roles (e.g. 2P2D EP16).** Each role is one DP group spanning its nodes; only the master
+registers with the router, and the router dispatches to every DP rank of the registered `dp_size`
+([vllm-project/router #386](https://github.com/vllm-project/router/pull/386)). For the MoRI-IO
+connector to reach DP ranks on the child nodes, the launcher gives every node's connector config the
+peer role's node IPs (`remote_hosts`, DP-rank order) and `remote_dp_size_local` (GPUs per node); the
+connector copies them into each request when the router sends none
+([vLLM #65098](https://github.com/vllm-project/vllm/pull/65098), merged 2026-11-14). This needs a
+vLLM image with that PR (`vllm/vllm-openai-rocm:nightly` from 2026-11-15 on). Older images cannot
+serve child-node ranks and the request hangs on the KV handshake. A stock `vllm-router` works; no
+router flags or runtime patch are involved. `MORIIO_CONFIG_PEER_HOSTS=0` drops the keys. READ mode
+is unsupported for multi-node roles (the connector's READ handshake ignores per-node hosts).
+
+**Router policy.** For MoRI-IO the router's prefill policy defaults to `cache_aware` when the engines run with
+prefix caching (KV offload, `ENABLE_PREFIX_CACHING=1` or the agentic benchmark) and to `round_robin` otherwise,
+since a returning conversation gains nothing from landing on the same rank without a prefix cache. Global and
+decode policies stay `round_robin`; override with `ROUTER_PREFILL_POLICY`, `ROUTER_POLICY`, `ROUTER_DECODE_POLICY`.
+With [vllm-project/router #386](https://github.com/vllm-project/router/pull/386) (v0.1.17+) each DP rank is
+its own worker, so a conversation's next turn returns to the rank that holds its prefix KV; the decode
+leg is pinned to the prefill rank. This needs a router with #386: an older router sees one worker per
+role and the policy has no effect. On 1P1D EP8/DP8 (DeepSeek-V3, 64 prompts) `cache_aware` gave a 94%
+prefill cache hit against 41% for `round_robin`. NIXL (`rixl.sh`) honours the same variables but keeps
+`round_robin` as its default.
+
+The router discovery port defaults to 31367 (`MORI_PROXY_PING_PORT`), below the ephemeral range,
+because the router starts after the vLLM servers and a random vLLM listener can otherwise take the
+port. If the router cannot bind it, or prefill and decode do not register in time, the launcher
+aborts the run instead of benchmarking into 503s.
 
 ### Back-compat
 

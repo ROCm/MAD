@@ -22,6 +22,8 @@ connector_init() {
     SERVE_PORT="${MORI_SERVE_PORT:-20005}"
     KV_PORT="${MORI_KV_PORT:-9711}"
     PROXY_PORT="${MORI_PROXY_PORT:-10001}"
+    # Router discovery port, kept below the ephemeral range (32768-60999): the router starts after the
+    # vLLM servers, whose random TCP listeners can otherwise take it ("Failed to bind ZMQ socket").
     PROXY_PING_PORT="${MORI_PROXY_PING_PORT:-31367}"
     LOCAL_PING_PORT="${MORI_LOCAL_PING_PORT:-61555}"
     HANDSHAKE_PORT="${MORI_HANDSHAKE_PORT:-8405}"
@@ -136,23 +138,64 @@ connector_setup_env() {
 }
 
 # Multi-node wideEP role (xP>1 or yD>1): each role is ONE DP group spanning nodes behind its
-# master's URL. Child nodes get the MoRI-IO connector and the router is given every node's IP plus
-# the full rank range (connector_start_proxy), so DP ranks on every node serve. 1P1D is unchanged.
-# The router needs the --moriio-* flags from vllm-project/router PR #458.
+# master's URL. Child nodes get the MoRI-IO connector, and every node's connector config carries the
+# peer role's node IPs (_moriio_build_kv_transfer_config), so the router can dispatch to DP ranks on
+# every node. Needs vLLM with PR #65098 (nightly from 2026-11-15). 1P1D is unchanged.
 _moriio_multi_node() {
     parallelism_is_wide_ep && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
+}
+
+# Router prefill policy. ROUTER_PREFILL_POLICY wins. Otherwise cache_aware when the engines run with prefix
+# caching (KV offload, ENABLE_PREFIX_CACHING=1 or the agentic benchmark: see kv_prefix_cache_arg), else
+# round_robin: with prefix caching off a returning conversation gains nothing from landing on the same rank,
+# and cache_aware can skew load across ranks and costs the router a tokenize call per request.
+_moriio_prefill_policy() {
+    if [[ -n "${ROUTER_PREFILL_POLICY:-}" ]]; then echo "${ROUTER_PREFILL_POLICY}"; return 0; fi
+    if [[ "$(kv_prefix_cache_arg)" == "--enable-prefix-caching" ]]; then echo "cache_aware"; else echo "round_robin"; fi
+}
+
+# The router's cache_aware prefill policy builds its prefix keys from token ids. On vLLM builds that have the
+# scale-out API it asks POST /v1/completions/render, which vLLM answers with 403 unless the server runs with
+# --enable-scale-out; the router then has no keys and silently falls back to load balancing, so a conversation's
+# next turn lands on another DP rank and misses its prefix cache (Exp4: 6% GPU hit at np64 against 94% when keys
+# work). Older vLLM (e.g. 0.30.1) answers 404 and the router falls back to POST /tokenize, which works.
+# ENABLE_SCALE_OUT=1 forces the flag, =0 never adds it; default auto: add it when the prefill policy is not
+# round_robin and this vLLM has the option. Master servers only (a headless child serves no HTTP).
+_moriio_scale_out_arg() {
+    local mode="${ENABLE_SCALE_OUT:-auto}"
+    [[ "$mode" == "0" ]] && return 0
+    if [[ "$mode" != "1" ]]; then
+        [[ "$(_moriio_prefill_policy)" == "round_robin" ]] && return 0
+        local _vd
+        _vd="$(python3 -c 'import importlib.util as u; s = u.find_spec("vllm"); print(s.submodule_search_locations[0] if s else "")' 2>/dev/null)"
+        grep -qs enable_scale_out "${_vd}/entrypoints/common/cli_args.py" || return 0
+    fi
+    echo "--enable-scale-out"
 }
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
     local read_mode_val="false"
     [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && read_mode_val="true"
+    # Multi-node roles: give the connector the peer role's node IPs (DP-rank order, master
+    # first) and the DP ranks per node. vLLM from 2026-11-14 on (PR #65098) copies them into a
+    # request's kv_transfer_params when the router sends no remote_hosts, so DP ranks on child
+    # nodes are reachable with a stock router. Values the router stamps into a request win. Older
+    # images ignore the keys and hang on child-node ranks. MORIIO_CONFIG_PEER_HOSTS=0 disables them.
+    local peer_json=""
+    if _moriio_multi_node && [[ "${MORIIO_CONFIG_PEER_HOSTS:-1}" == "1" ]]; then
+        local -a peers
+        if [[ "${kv_role}" == "kv_producer" ]]; then peers=("${IP_ARRAY[@]:xP:yD}"); else peers=("${IP_ARRAY[@]:0:xP}"); fi
+        local hosts; hosts=$(printf '"%s",' "${peers[@]}")
+        peer_json=',"remote_hosts":['"${hosts%,}"'],"remote_dp_size_local":'"${DP_PARALLEL_SIZE_LOCAL}"
+    fi
     # DSV4: some image builds ignore VLLM_MORIIO_QP_PER_TRANSFER env; extra_config is the path.
     # GLM / DSV3 stay on the original extra_config (their images still honor the env).
     local extra='"read_mode":'"${read_mode_val}"',"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'
     if [ "${MODEL_NAME:-}" = "DeepSeek-V4-Flash-FP8" ] || [ "${MODEL_NAME:-}" = "DeepSeek-V4-Pro-FP8" ]; then
         extra="${extra},\"qp_per_transfer\":${VLLM_MORIIO_QP_PER_TRANSFER:-4},\"num_workers\":${VLLM_MORIIO_NUM_WORKERS:-4},\"post_batch_size\":${VLLM_MORIIO_POST_BATCH_SIZE:--1}"
     fi
+    extra="${extra}${peer_json}"
     echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${extra}"'}}'
 }
 
@@ -448,6 +491,48 @@ open(P, "w").write(src)
 print("[lmcache-broadcast-patch] patched OK: " + P)
 LMCACHE_BROADCAST_PATCH
 
+    # LMCache vs newer vLLM: LMCache <= 0.5.3 build_connector_meta reads CachedRequestData.resumed_req_ids or
+    # .resumed_from_preemption and raises AttributeError("Unable to determine preemption status ...") when neither
+    # exists, which kills the decode engine on its first request. vLLM removed both fields (#31734, Jan 2026) because
+    # a resumed (preempted) request is now re-sent in full like a new one, so a cached request is never resumed and
+    # "not preempted" is the right answer. TEMPORARY: remove once the LMCache in the image handles this. Idempotent;
+    # non-fatal; does nothing on images where either field still exists (the original branches are kept).
+    local _lmcache_adapter
+    _lmcache_adapter="$(python3 -c 'import importlib.util as u, os; s = u.find_spec("lmcache"); print(os.path.join(os.path.dirname(s.origin), "integration/vllm/vllm_v1_adapter.py") if s and s.origin else "")' 2>/dev/null)"
+    if [ -n "$_lmcache_adapter" ] && [ -f "$_lmcache_adapter" ]; then
+        python3 - "$_lmcache_adapter" <<'LMCACHE_PREEMPT_PATCH' || echo "[lmcache-preempt-patch] WARN: patch could not be applied (anchor missing / already fixed upstream?); continuing without it"
+import sys
+
+P = sys.argv[1]
+MARKER = "lmcache-preempt-patch: vLLM no longer reports resumed requests"
+src = open(P).read()
+if MARKER in src:
+    print("[lmcache-preempt-patch] already patched")
+    sys.exit(0)
+
+old = '''            else:
+                # This case should not be reached with supported vLLM versions.
+                # Raising an error is safer than assuming not preempted.
+                raise AttributeError(
+                    f"Unable to determine preemption status for request {req_id}. "
+                    f"This might be due to an unsupported vLLM version."
+                )
+'''
+new = '''            else:
+                # lmcache-preempt-patch: vLLM no longer reports resumed requests
+                # in CachedRequestData (a resumed request is re-sent in full, like a new one).
+                preempted = False
+'''
+if src.count(old) != 1:
+    sys.stderr.write("[lmcache-preempt-patch] PATCH FAILED: anchor not found/unique\n")
+    sys.exit(3)
+src = src.replace(old, new, 1)
+compile(src, P, "exec")
+open(P, "w").write(src)
+print("[lmcache-preempt-patch] patched OK")
+LMCACHE_PREEMPT_PATCH
+    fi
+
     # Per-role execution mode. Ported from #324: NEVER use bare --enforce-eager.
     # On these AITER images an enforce-eager worker (no +quant_fp8 custom op) routes
     # fp8 quant through an AITER op whose signature mismatches the build
@@ -495,6 +580,8 @@ LMCACHE_BROADCAST_PATCH
         local extra_args=() kv_args=()
         if [[ "$role" == "master" ]]; then
             extra_args+=(--api-server-count=${_GPUS_PER_NODE})
+            local _so_arg; _so_arg="$(_moriio_scale_out_arg)"
+            [[ -n "${_so_arg}" ]] && extra_args+=("${_so_arg}")
             local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
             # KV_OFFLOAD wrap; wideEP is tp1 per DP rank, so the pool is split per rank.
             local _OFFLOAD_TP_WORLD=1
@@ -694,29 +781,26 @@ connector_start_proxy() {
         fi
         echo "Using vllm-router binary: ${ROUTER_BIN}"
 
-        # Multi-node roles: give the router every node's IP (--moriio-*) and the full rank range, so
-        # it stamps each leg with the peer role's node IPs and DP ranks on every node serve. The
-        # router pins the decode leg to the prefill rank (one range for both), so with xP != yD the
-        # larger role's extra nodes stay idle. Falls back to master-node ranks only (as before) if
-        # the router lacks --moriio-* or in READ mode (the connector's READ eager handshake ignores
-        # per-node hosts). ROUTER_INTRA_NODE_DP overrides the range.
-        local _router_dp_default="${DP_PARALLEL_SIZE_LOCAL}" _router_multipod_args=() _router_help
+        # Multi-node roles: the router expands each discovered worker per DP rank from its registered
+        # dp_size (vllm-project/router #386), and the connector reaches DP ranks on child nodes through
+        # the peer hosts in kv_connector_extra_config (_moriio_build_kv_transfer_config). So the router
+        # needs no per-node flags; --intra-node-data-parallel-size stays the per-node size (it only
+        # matters for static URLs). READ mode: the connector's READ handshake ignores per-node hosts,
+        # so only master-node DP ranks can serve. ROUTER_INTRA_NODE_DP overrides the range.
+        local _router_dp_default="${DP_PARALLEL_SIZE_LOCAL}"
         if _moriio_multi_node; then
-            _router_help=$("${ROUTER_BIN}" --help 2>&1 || true)
             if [[ "${MORIIO_READ_MODE:-0}" == "1" ]]; then
                 echo "WARN: multi-node MoRIIO in READ mode: only master-node DP ranks serve"
-            elif [[ "${_router_help}" != *--moriio-prefill-hosts* ]]; then
-                echo "WARN: ${ROUTER_BIN} lacks --moriio-prefill-hosts: only master-node DP ranks serve"
             else
-                _router_dp_default=$(( PREFILL_DP_SIZE < DECODE_DP_SIZE ? PREFILL_DP_SIZE : DECODE_DP_SIZE ))
-                _router_multipod_args=(
-                    --moriio-dp-size-local "${DP_PARALLEL_SIZE_LOCAL}"
-                    --moriio-prefill-hosts "${IP_ARRAY[@]:0:xP}"
-                    --moriio-decode-hosts "${IP_ARRAY[@]:xP:yD}"
-                )
-                echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD}"
+                echo "  multi-node: prefill nodes ${IP_ARRAY[*]:0:xP}, decode nodes ${IP_ARRAY[*]:xP:yD} (peer hosts via kv_connector_extra_config; needs vLLM PR #65098)"
             fi
         fi
+        # Prefill policy defaults to cache_aware when prefix caching is on (see _moriio_prefill_policy), else
+        # round_robin. With vllm-router #386 every DP rank is its own worker (url@rank), so a conversation's next
+        # turn goes back to the rank that holds its prefix KV. The decode leg is pinned to the prefill rank, so
+        # the decode policy does not matter. Needs a router with #386 (v0.1.17+); an older router sees one worker
+        # per role, where any policy is moot. ROUTER_PREFILL_POLICY overrides.
+        local _prefill_policy; _prefill_policy="$(_moriio_prefill_policy)"
         local _router_dp_local="${ROUTER_INTRA_NODE_DP:-${_router_dp_default}}"
         parallelism_is_wide_ep || _router_dp_local=1
 
@@ -732,9 +816,8 @@ connector_start_proxy() {
             --decode "${DECODE_URL}"
             --vllm-discovery-address "0.0.0.0:${PROXY_PING_PORT}"
             --intra-node-data-parallel-size "${_router_dp_local}"
-            ${_router_multipod_args[@]+"${_router_multipod_args[@]}"}
             --policy "${ROUTER_POLICY:-round_robin}"
-            --prefill-policy "${ROUTER_PREFILL_POLICY:-round_robin}"
+            --prefill-policy "${_prefill_policy}"
             --decode-policy "${ROUTER_DECODE_POLICY:-round_robin}"
             --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}"
             --prometheus-port "${_PROMETHEUS_PORT}"

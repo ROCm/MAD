@@ -150,7 +150,12 @@ stateDiagram-v2
 ```
 
 > Note: PrefillChild / DecodeChild only exist when `xP>1` / `yD>1` (wideEP, multi-node DP). In TP 1P/1D
-> there is just rank 0 (prefill master + proxy) and rank xP (decode master).
+> there is just rank 0 (prefill master + proxy) and rank xP (decode master). With MoRI-IO the child
+> nodes also run the KV connector (`proxy_ip` blank, so they do not register with the router), and
+> every node's connector config lists the peer role's node IPs (`remote_hosts`, `remote_dp_size_local`).
+> The connector copies them into each request, so DP ranks on child nodes take traffic with a stock
+> vllm-router. Needs vLLM with PR #65098 (nightly from 2026-11-15); older images cannot serve
+> child-node ranks, and a current router dispatches to them anyway, so the request hangs.
 
 ---
 
