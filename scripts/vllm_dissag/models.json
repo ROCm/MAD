@@ -925,7 +925,7 @@
     {
         "name": "pyt_e2e_deepseek-v3_disagg_mtp",
         "url": "",
-        "image_spec": "${images.vllm-kimi-k3}",
+        "image_spec": "${images.vllm-per-gpu}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -957,7 +957,7 @@
     {
         "name": "pyt_e2e_deepseek-v3_dq",
         "url": "",
-        "image_spec": "${images.vllm-kimi-k3}",
+        "image_spec": "${images.vllm-per-gpu}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",

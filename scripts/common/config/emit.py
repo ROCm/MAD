@@ -7,8 +7,9 @@ A card's run configuration is placed where each part belongs, not copied:
                            names neither, so a fix there reaches the card
     shared layers          `defaults:` -- every layer of scripts/common/workloads (serving shapes,
                            benchmarks, model families, base) whose values the card has, all of them
-    the card's own part    model.env -- only what no chosen layer gives (and BENCHMARK_SCRIPT, which
-                           selects the benchmark entries)
+    the card's own part    model.env -- only what no chosen layer gives and the card's recipe does
+                           not already give on every GPU the card runs on
+    the image's name       stays with the card (DOCKER_IMAGE_NAME: the build's tag at run time)
     topology               the card's MAD_TOPOLOGY spec (a path), when it has one
     card, image            what the file was made from; when the build recorded the image's stack,
                            `image.spec` is that image generalized over compat (madengine) and
@@ -38,11 +39,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.normpath(os.path.join(HERE, "..", ".."))
 LAYERS = os.path.join(SCRIPTS, "common", "workloads")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(SCRIPTS, "common", "recipe"))
 import workload  # noqa: E402
+import models  # noqa: E402
 
 CATALOGS = ("vllm_dissag", "vllm_multinode", "sglang_disagg")
 VERSION = 2
-OWN = ("BENCHMARK_SCRIPT",)        # always in the card's own part: it selects the benchmark entries
+CARD_ONLY = ("DOCKER_IMAGE_NAME",)   # registers the card's image; madengine gives the built tag
+# Launchers that export the recipe's env as they do the card's, so a card value the recipe gives is
+# the recipe's. vllm_multinode passes the card's values into the container and applies the recipe
+# inside it (serve_colocated.sh), so there the two are not the same.
+RECIPE_ENV_AS_CARD = ("vllm_dissag", "sglang_disagg")
 
 
 class EmitError(ValueError):
@@ -99,6 +106,40 @@ def card_env(catalog, card):
     return env, data
 
 
+def recipes_of(catalog, data):
+    """The recipes the card's launcher reads: its workload file's own, else the catalog's."""
+    if data.get("recipes"):
+        return data["recipes"]
+    path = os.path.join(SCRIPTS, "vllm_dissag" if catalog == "vllm_multinode" else catalog, "models.yaml")
+    if not os.path.isfile(path):
+        return {}
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def card_archs(card, recipes, name):
+    """The GPUs the card runs on: those its recipe has a variant for, less the card's skip_gpu_arch
+    ([None] for a recipe without variants)."""
+    recipe = recipes.get(name) if isinstance(recipes, dict) else None
+    while isinstance(recipe, dict) and "alias" in recipe:
+        if recipe.get("arch"):
+            return [recipe["arch"]]
+        recipe = recipes.get(recipe["alias"])
+    archs = [a for a in ((recipe or {}).get("variants") or {}) if a.startswith("gfx")]
+    skip = {a.strip() for a in str(card.get("skip_gpu_arch") or "").split(",") if a.strip()}
+    return [a for a in archs if a not in skip] or [None]
+
+
+def recipe_gives(card, recipes, name):
+    """{name: value} the card's recipe sets the same on every GPU the card runs on."""
+    out = None
+    for arch in card_archs(card, recipes, name):
+        recipe = models.effective(recipes, name, arch) if name else None
+        env = {k: str(v) for k, v in ((recipe or {}).get("env") or {}).items()}
+        out = env if out is None else {k: v for k, v in out.items() if env.get(k) == v}
+    return out or {}
+
+
 def choose(env, candidates):
     """The layers whose every value the card has, largest first, each adding something; and the
     names they give."""
@@ -128,7 +169,10 @@ def compose(catalog, card, at=None):
     env, data = card_env(catalog, card)
     topology = env.pop("MAD_TOPOLOGY", None) or data.get("topology")
     chosen, given = choose(env, layers())
-    own = {k: v for k, v in env.items() if k not in given or k in OWN}
+    recipe = (recipe_gives(card, recipes_of(catalog, data), env.get("MODEL_NAME"))
+              if catalog in RECIPE_ENV_AS_CARD else {})
+    own = {k: v for k, v in env.items()
+           if k not in given and k not in CARD_ONLY and recipe.get(k) != v}
 
     out = {"version": VERSION, "card": {k: card[k] for k in ("name", "scripts", "tags") if k in card}}
     out["card"]["catalog"] = catalog
@@ -157,7 +201,7 @@ def suggest(composed, min_cards=3):
     by = collections.defaultdict(list)
     for catalog, d in composed:
         for k, v in (d["model"]["env"] or {}).items():
-            if k not in OWN and k not in ("MODEL_NAME", "DOCKER_IMAGE_NAME"):
+            if k not in ("MODEL_NAME", "BENCHMARK_SCRIPT"):
                 by[(catalog, k, v)].append(d["card"]["name"])
     groups = collections.defaultdict(dict)
     for (catalog, k, v), cards in by.items():

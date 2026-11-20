@@ -6,7 +6,8 @@
                            (how a format is asked for), kernels (engines an image's base provides)
     compat/hardware.yaml   formats, accelerators, fabrics, scale-up fabrics, platforms
     compat/sites/*.yaml    example site profiles (one per file: `clusters.<file name>`)
-    compat/images/*.yaml   named image specs (under IMAGES_KEY)
+    compat/images/*.yaml   named image specs (under IMAGES_KEY), each with its `extends` chain merged
+                           in, as madengine composes them
 
 MAD_CATALOG naming a file reads that one file as the whole catalog (tests point it at a fixture).
 Standard library and PyYAML only.
@@ -14,12 +15,14 @@ Standard library and PyYAML only.
     catalog.py dump        the merged catalog as YAML
 """
 import os
+import re
 import sys
 
 import yaml
 
 COMPAT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "compat"))
 IMAGES_KEY = "__images__"
+REF = re.compile(r"\$\{images\.([A-Za-z0-9_.-]+)\}")
 HARDWARE_KEYS = ("formats", "format_families", "accelerators", "fabric_detection", "fabrics",
                  "scale_up_fabrics", "default_platform", "platforms")
 
@@ -32,6 +35,27 @@ def _read(path):
 def _dir(path):
     return {f[:-5]: _read(os.path.join(path, f)) for f in sorted(os.listdir(path))
             if f.endswith(".yaml")} if os.path.isdir(path) else {}
+
+
+def _merge(base, over):
+    """madengine's merge of a spec over the one it extends: mappings merged, anything else replaced."""
+    out = dict(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def _flatten(images, name, seen=()):
+    """Named spec *name* with the spec it extends (`extends: ${images.<other>}`) merged under it."""
+    if name in seen:
+        raise ValueError(f"compat/images: extends loop: {' -> '.join(seen + (name,))}")
+    spec = images.get(name) or {}
+    m = REF.fullmatch(str(spec.get("extends") or ""))
+    if not m:
+        return spec
+    if m.group(1) not in images:
+        raise ValueError(f"compat/images/{name}.yaml extends {m.group(1)!r}, which does not exist")
+    return _merge(_flatten(images, m.group(1), seen + (name,)), {k: v for k, v in spec.items() if k != "extends"})
 
 
 def load(compat=None):
@@ -59,7 +83,7 @@ def load(compat=None):
         base = compat
     images = _dir(os.path.join(base, "images"))
     if images:
-        out[IMAGES_KEY] = images
+        out[IMAGES_KEY] = {n: _flatten(images, n) for n in images}
     return out
 
 
@@ -71,13 +95,22 @@ def spec_components(spec, arch=None):
     return {str(k): str(v) for k, v in comps.items()}
 
 
+def spec_archs(spec):
+    """The GPUs a named spec has its own selection for (its variants), besides its default one."""
+    return sorted(((spec or {}).get("variants") or {}))
+
+
+def selections(spec):
+    """Every {component: build key} the spec selects: the default one, then each variant's."""
+    return [spec_components(spec)] + [spec_components(spec, a) for a in spec_archs(spec)]
+
+
 def image_of_card(card, catalog=None):
     """The named spec a card builds from ("image_spec": "${images.<name>}", or extending one), or None."""
-    import re
     value = card.get("image_spec")
     if isinstance(value, dict):
         value = value.get("extends")
-    m = re.fullmatch(r"\$\{images\.([A-Za-z0-9_.-]+)\}", str(value or ""))
+    m = REF.fullmatch(str(value or ""))
     return m.group(1) if m else None
 
 
@@ -93,12 +126,13 @@ def components_of_card(card, arch=None, catalog=None):
 
 
 def image_of_components(catalog, components):
-    """The named spec whose selected builds an image holds (MAD_IMAGE_COMPONENTS), or None."""
+    """The named spec whose selected builds an image holds (MAD_IMAGE_COMPONENTS), or None. Specs
+    that select the same builds (one composed from others) name the same image: the first is given."""
     have = dict(p.split("=", 1) for p in (components or "").split(",") if "=" in p)
     for name, spec in (catalog.get(IMAGES_KEY) or {}).items():
-        sel = spec_components(spec)
-        if sel and all(have.get(k) == v for k, v in sel.items()):
-            return name
+        for sel in selections(spec):
+            if sel and all(have.get(k) == v for k, v in sel.items()):
+                return name
     return None
 
 

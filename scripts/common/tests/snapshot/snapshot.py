@@ -500,12 +500,15 @@ def emitted_equivalence(a):
             with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
                 f.write(emit.dump(emit.compose(catalog, card, os.path.dirname(f.name))))
             try:
-                for arch in _recipe_archs(catalog, card):
+                skip = {g.strip() for g in str(card.get("skip_gpu_arch") or "").split(",")}
+                for arch in [g for g in _recipe_archs(catalog, card) if g not in skip]:   # where it runs
                     checked += 1
                     on = json.loads(json.dumps(card))
                     on["env_vars"] = dict(on.get("env_vars") or {}, MAD_GPU_ARCH=arch)
                     want = snapshot_card(catalog, on)
                     sub = {"MAD_CONFIG": f.name, "MAD_GPU_ARCH": arch}
+                    if (card.get("env_vars") or {}).get("DOCKER_IMAGE_NAME"):   # the card keeps its image
+                        sub["DOCKER_IMAGE_NAME"] = card["env_vars"]["DOCKER_IMAGE_NAME"]
                     comps = submitted_env(on, catalog).get("MAD_IMAGE_COMPONENTS")
                     if comps:                      # as the card itself was submitted
                         sub["MAD_IMAGE_COMPONENTS"] = comps

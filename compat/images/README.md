@@ -9,6 +9,20 @@ interpolation and may override any part of it:
 "image_spec": {"extends": "${images.<name>}", "gpu_arch": "gfx950"}
 ```
 
-A spec may give its base per GPU architecture (`base: {gfx942: ..., gfx950: ...}`), put
-files from `docker/` into the image (`copy`), and run checks after its components
+A spec may give its base per GPU architecture (`base: {gfx942: ..., gfx950: ...}`), select
+other builds on one GPU (`variants.<arch>`), extend another spec (`extends: ${images.<name>}`),
+put files from `docker/` into the image (`copy`), and run checks after its components
 (`finish`). Its components are builds authorized in `compat/rocm.yaml`.
+
+| Spec | What it is |
+|---|---|
+| `di-vllm` | what every vLLM distributed-inference stack shares; the others extend it |
+| `vllm-mori121` | the validated mori121 stack (gfx942): the DeepSeek-V3, Llama and most vLLM DI cards |
+| `vllm-kimi-k3` | the Kimi-K3 stack (gfx942, gfx950) |
+| `vllm-glm51` | the GLM-5.1 stack (gfx942) |
+| `vllm-per-gpu` | the stack of each GPU, composed from `vllm-mori121` (gfx942) and the Kimi-K3 stack's builds (gfx950); no build of its own |
+| `sglang-disagg` | the SGLang release image per GPU, with MoRI on gfx942 |
+
+A build can generalize an image into this form: `madengine build --emit-config DIR` places the
+image under the stack it is closest to (`extends` and only what differs) -- see
+[docs/e2e-examples.md](../../docs/e2e-examples.md#from-a-build-to-the-matrix).

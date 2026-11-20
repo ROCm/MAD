@@ -78,6 +78,23 @@ class Catalog(unittest.TestCase):
         self.assertTrue(any("gfx000" in p for p in problems), problems)
 
 
+class NamedSpecs(unittest.TestCase):
+    """compat/images as catalog.py reads them: each with what it extends merged in, as madengine does."""
+
+    def test_a_spec_has_what_it_extends(self):
+        images = {"a": {"base": {"gfx942": "b"}, "components": {"mori": "1@x", "vllm": "1@x"}, "env": {"A": "1"}},
+                  "b": {"extends": "${images.a}", "base": {"gfx950": "c"}, "components": {"vllm": "2@x"}}}
+        self.assertEqual(catalog._flatten(images, "b"), {"base": {"gfx942": "b", "gfx950": "c"}, "env": {"A": "1"},
+                                                         "components": {"mori": "1@x", "vllm": "2@x"}})
+        images["a"]["extends"] = "${images.b}"
+        with self.assertRaises(ValueError):
+            catalog._flatten(images, "b")
+
+    def test_the_checkouts_specs_are_flat(self):
+        for name, spec in CAT[R.IMAGES_KEY].items():
+            self.assertNotIn("extends", spec, name)
+
+
 def with_spec_build(cat, image="stack-x", key="1.0+k3@x"):
     """A catalog whose named spec `image` selects a vLLM build stating the Kimi build's capabilities."""
     cat = copy.deepcopy(cat)
@@ -95,8 +112,19 @@ class EngineBuilds(unittest.TestCase):
         builds = R.engine_builds(cat)
         self.assertIn(KIMI_BUILD, builds)                         # the vllm-kimi-k3 spec's vLLM build
         self.assertIn("sglang@sglang-disagg", builds)             # kernels: an engine the base provides
-        self.assertIs(builds["vllm@stack-x"], cat["components"]["vllm"]["1.0+k3@x"]["capabilities"])
+        self.assertEqual(builds["vllm@stack-x"], cat["components"]["vllm"]["1.0+k3@x"]["capabilities"])
         self.assertEqual(R.build_of_image(cat, "stack-x"), "vllm@stack-x")
+
+    def test_a_gpus_variant_states_what_the_image_runs_on_that_gpu(self):
+        cat = with_spec_build(CAT)
+        caps = cat["components"]["vllm"]["1.0+k3@x"]["capabilities"]
+        cat["components"]["vllm"]["2.0@x"] = {"source": {}, "capabilities": {"gfx950": {"weights": ["bf16"]}}}
+        cat["components"]["vllm"]["3.0@x"] = {"source": {}}                       # states nothing
+        cat[R.IMAGES_KEY]["stack-x"]["variants"] = {"gfx950": {"components": {"vllm": "2.0@x"}}}
+        self.assertEqual(R.engine_builds(cat)["vllm@stack-x"], dict(caps, gfx950={"weights": ["bf16"]}))
+        self.assertEqual(R.build_of_components(cat, "vllm=2.0@x", "vllm"), "vllm@stack-x")
+        cat[R.IMAGES_KEY]["stack-x"]["variants"]["gfx950"]["components"]["vllm"] = "3.0@x"
+        self.assertNotIn("gfx950", R.engine_builds(cat)["vllm@stack-x"])           # not the default's
 
     def test_the_image_components_name_the_build(self):
         cat = with_spec_build(CAT)

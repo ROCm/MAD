@@ -73,11 +73,23 @@ def engine_builds(catalog):
     comps = catalog.get("components") or {}
     used = set()
     for image, spec in (catalog.get(IMAGES_KEY) or {}).items():
-        for comp, key in ((spec or {}).get("components") or {}).items():
-            caps = ((comps.get(comp) or {}).get(str(key)) or {}).get("capabilities")
+        # The default selection's capabilities, each GPU's variant laid over its own GPU.
+        per = {}
+        for arch in [None] + _catalog.spec_archs(spec):
+            for comp, key in _catalog.spec_components(spec, arch).items():
+                caps = ((comps.get(comp) or {}).get(str(key)) or {}).get("capabilities") or {}
+                if caps:
+                    used.add((comp, str(key)))
+                got = per.setdefault(comp, {})
+                if arch is None:
+                    got.update(caps)
+                else:                                   # on its GPU, the variant's build alone
+                    got.pop(arch, None)
+                    if arch in caps:
+                        got[arch] = caps[arch]
+        for comp, caps in per.items():
             if caps:
                 out[f"{comp}@{image}"] = caps
-                used.add((comp, str(key)))
     for comp, builds in comps.items():
         for key, entry in (builds or {}).items():
             if isinstance(entry, dict) and entry.get("capabilities") and (comp, key) not in used:
@@ -99,7 +111,7 @@ def build_of_components(catalog, components, engine):
         if name != engine or not key:
             continue
         for image, spec in (catalog.get(IMAGES_KEY) or {}).items():
-            if str(((spec or {}).get("components") or {}).get(name)) == key and f"{name}@{image}" in builds:
+            if f"{name}@{image}" in builds and any(sel.get(name) == key for sel in _catalog.selections(spec)):
                 return f"{name}@{image}"
         if f"{name}={key}" in builds:
             return f"{name}={key}"

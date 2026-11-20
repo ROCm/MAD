@@ -46,16 +46,17 @@ python3 scripts/common/config/emit.py vllm_dissag pyt_vllm_disagg_mori_deepseek-
 ```
 
 prints the card's configuration as a workload file that fits the shared layers: the layers
-(`scripts/common/workloads/`) whose values the card has, and the part that is the card's own. Its
+(`scripts/common/workloads/`) whose values the card has, and the part that is the card's own --
+what no layer gives and its recipe does not already give on the GPUs the card runs on. Its
 recipe and connector env stay where they live (`models.yaml`, `connectors/`), so a fix there
-reaches it. `madengine build --emit-config DIR` writes it for every card it builds, and the
+reaches it, and its image name stays on the card. `madengine build --emit-config DIR` writes it for every card it builds, and the
 pipeline records it with each run (`run_configs/`, the build manifest).
 
 ## Using the generated configuration
 
 That file is also a workload file the launcher runs. Point the card at it and the run is the same
 -- CI checks this for every card (`snapshot.py --from-emitted`: identical engine commands and
-container environment on each GPU the recipe covers):
+container environment on each GPU the card runs on):
 
 ```json
 "env_vars": {"MAD_CONFIG": "workloads/deepseek-v3.yaml"}
@@ -109,9 +110,12 @@ model:
 an existing card runs, the ones marked *demo* show a mechanism.
 
 **An image described, not written.** Keep building your image your way (a Dockerfile). Once a
-run with it works, the stack it proved is generalized into `compat/rocm.yaml`, the dependency state
-of what works together. A card can then select an image spec composed from those authorized builds
-instead of a Dockerfile (a folder's `image_spec.yaml`, or a shared one in `compat/images/`):
+run with it works, the build generalizes it: the image is placed under the named stack it is
+closest to (`extends: ${images.<stack>}` and only what differs), and what it proved is added to
+`compat/rocm.yaml`, the dependency state of what works together
+([e2e-examples.md](e2e-examples.md#from-a-build-to-the-matrix)). A card can then select an image
+spec composed from those authorized builds instead of a Dockerfile (a folder's `image_spec.yaml`,
+or a shared one in `compat/images/`):
 
 ```json
 "image_spec": {"extends": "${image_spec}", "gpu_arch": "gfx950"}

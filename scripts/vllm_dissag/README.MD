@@ -127,6 +127,7 @@ generates the Dockerfile from it:
 | `vllm-mori121` | [compat/images/vllm-mori121.yaml](../../compat/images/vllm-mori121.yaml) | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | on |
 | `vllm-glm51` | [compat/images/vllm-glm51.yaml](../../compat/images/vllm-glm51.yaml) | `GLM-5.1-FP8` | off (MoRI-EP only) |
 | `vllm-kimi-k3` | [compat/images/vllm-kimi-k3.yaml](../../compat/images/vllm-kimi-k3.yaml) | the Kimi-K3 models | on |
+| `vllm-per-gpu` | [compat/images/vllm-per-gpu.yaml](../../compat/images/vllm-per-gpu.yaml) | the end-to-end examples that run on either GPU: `vllm-mori121` on gfx942, the Kimi-K3 stack's builds on gfx950 | on |
 
 From the MAD root:
 

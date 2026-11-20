@@ -144,21 +144,27 @@ except ImportError:  # madengine is optional: the generalization is madengine's 
     emit_config = None
 
 MAD = SCRIPTS.parent
-# A stack someone built by hand (a Dockerfile of their own): the frameworks vLLM stack, but a newer
-# vLLM than compat lists, and a private build of their own.
-HAND_BUILT = {"python": "3.14.1", "rocm_version": "10.1.0", "packages": {
-    "torch": "2.13.0+rocm10.1.0", "torchvision": "0.28.0+rocm10.1.0",
-    "amd-aiter": "0.1.22.post2.dev0+gb4d9154d1.d20261002", "flash-attn": "2.8.3",
-    "vllm": "0.30.0.dev0+rocm10.1.0.g1234abcd.d20261101", "my-kernels": "0.1+g0000001", "numpy": "2.3.0"}}
-NEW_VLLM_URL = "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.30.0.dev0-cp314-cp314-linux_x86_64.whl"
+# A Kimi-K3 image someone built with a Dockerfile of their own, on the Kimi-K3 stack's base: the
+# stack's MoRI (from source, at its commit) and FlyDSL, AITER from source at a newer commit, and a
+# vLLM wheel from the frameworks index in place of the patched source build. This is what the build's
+# probe reads -- the Python packages of the image and of its base (versions illustrative).
+KIMI_BASE = "rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491"
+BASE_INFO = {"python": "3.12.11", "rocm_version": "7.1.0",
+             "packages": {"torch": "2.9.0+rocm7.1.0", "triton": "3.5.0", "numpy": "2.2.6"}}
+NEW_VLLM = "0.12.1.dev0+rocm7.1.0.g5e3f9a01"
+HAND_BUILT = {"python": "3.12.11", "rocm_version": "7.1.0", "packages": dict(
+    BASE_INFO["packages"], **{"mori": "1.2.3.dev12+gfe12a11a", "flydsl": "0.2.4",
+                              "amd-aiter": "0.1.17.dev40+g1a2b3c4d", "vllm": NEW_VLLM, "msgspec": "0.19.0"})}
+NEW_VLLM_URL = "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.12.1.dev0-cp312-cp312-linux_x86_64.whl"
 
 
 def served(name, version):
-    """The authorized index, as madengine's build reads it: it serves the newer vLLM."""
-    if (name, version) == ("vllm", HAND_BUILT["packages"]["vllm"]):
-        return "frameworks_vllm", Wheel(name=name, version=version, python="cp314", platform="linux_x86_64",
-                                        url=NEW_VLLM_URL, requires=["torch==2.13.0+rocm10.1.0", "amd-aiter",
-                                                                    "flash-attn==2.8.3", "transformers>=5"])
+    """The matrix's frameworks index, as madengine's build reads it: it serves the newer vLLM, whose
+    metadata asks for a newer AITER than the working image has."""
+    if (name, version) == ("vllm", NEW_VLLM):
+        return "frameworks_vllm", Wheel(name=name, version=version, python="cp312", platform="linux_x86_64",
+                                        url=NEW_VLLM_URL, requires=["torch==2.9.0+rocm7.1.0", "amd-aiter>=0.1.18",
+                                                                    "mori", "transformers>=4.57"])
     return None
 
 
@@ -173,7 +179,7 @@ class FromABuildToItsGeneralizedForm(unittest.TestCase):
         self.out = Path(tempfile.mkdtemp(dir=MAD / ".madengine"))
         self._cwd = os.getcwd()
         os.chdir(MAD)                          # madengine builds from the MAD root
-        c = card("vllm_dissag", "pyt_e2e_llama-3.1-405b_disagg")
+        c = card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah")
         self.model = dict(c, name="vllm_dissag/" + c["name"], scripts="scripts/vllm_dissag/" + c["scripts"])
 
     def tearDown(self):
@@ -185,30 +191,93 @@ class FromABuildToItsGeneralizedForm(unittest.TestCase):
 
     def test_a_card_built_from_its_spec_is_already_general(self):
         spec = madengine_image_spec.effective_image_spec(self.model, {}, str(MAD))
-        plan = madengine_image_spec.resolve(spec, "AMD", "gfx942", root=str(MAD), name=self.model["name"])
-        got = emit_config(self.model, self.out, {"build_plan": plan.to_dict()})
-        d = self.written(got)
-        self.assertEqual(d["defaults"], ["../../../scripts/common/workloads/base.yaml",
-                                         "../../../scripts/common/workloads/serve/vllm-disagg-nixl.yaml",
-                                         "../../../scripts/common/workloads/bench/sweep.yaml"])
-        self.assertEqual(d["model"]["env"]["MODEL_NAME"], "Llama-3.1-405B-Instruct-FP8-KV")   # its own part
-        self.assertEqual(d["image"]["spec"]["components"]["vllm"], "dccb412e+5ebb40fa@di")    # vllm-mori121's
-        self.assertNotIn("compat", got)                                                       # nothing to add
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                plan = madengine_image_spec.resolve(spec, "AMD", arch, root=str(MAD), name=self.model["name"])
+                got = emit_config(self.model, self.out, {"build_plan": plan.to_dict()})
+                d = self.written(got)
+                self.assertEqual(d["defaults"], ["../../../scripts/common/workloads/base.yaml",
+                                                 "../../../scripts/common/workloads/family/kimi-k3.yaml",
+                                                 "../../../scripts/common/workloads/bench/niah.yaml"])
+                self.assertEqual(d["model"]["env"], {"MODEL_NAME": "Kimi-K3-MXFP4", "xP": "2", "yD": "2",
+                                                     "MAD_BEST_REGISTRY": "vllm_dissag/workloads/e2e/best_known.example.jsonl"})
+                self.assertEqual(d["image"]["spec"], {"extends": "\\${images.vllm-kimi-k3}"})  # the stack itself
+                self.assertNotIn("compat", got)                                       # nothing to add
 
     def test_a_hand_built_image_adds_what_it_proves_to_compat(self):
-        build = {"base_docker": "rocm/base:10.1", "image_info": HAND_BUILT}
+        build = {"base_docker": KIMI_BASE, "image_info": HAND_BUILT, "base_info": BASE_INFO}
         got = emit_config(self.model, self.out, build, served)
         d = self.written(got)
-        spec = d["image"]["spec"]
-        self.assertEqual(spec["base"], "rocm/base:10.1")
-        self.assertEqual(spec["components"]["torch"], "2.13.0+rocm10.1.0")                    # compat's builds
-        self.assertEqual(spec["components"]["vllm"], HAND_BUILT["packages"]["vllm"] + "@frameworks_vllm")  # and the new one
-        self.assertEqual([u["component"] for u in d["image"]["unresolved"]], ["my-kernels"])  # not invented
+        # Placed under the stack it is closest to: the Kimi-K3 stack's MoRI (matched by the commit in
+        # its version), FlyDSL (by its version), base and native libraries are inherited; only what
+        # differs is written. torch, triton, numpy are the base's and msgspec is pip's job: none of them
+        # is the image's to record.
+        self.assertEqual(d["image"]["spec"], {
+            "extends": "\\${images.vllm-kimi-k3}",
+            "components": {"amd-aiter": "1a2b3c4d@di",                  # drafted below
+                           "vllm": NEW_VLLM + "@frameworks_vllm"}})     # new: added to the matrix below
+        unresolved = {u["component"]: u for u in d["image"]["unresolved"]}
+        aiter = unresolved["amd-aiter"]                    # a source build at a commit compat lacks
+        self.assertEqual(aiter["commit"], "1a2b3c4d")
+        [(key, entry)] = aiter["draft"].items()
+        self.assertEqual(key, "1a2b3c4d@di")
+        self.assertEqual(entry["source"]["repo"], "https://github.com/ROCm/aiter.git")
+        self.assertEqual(unresolved["vllm"]["requires"], "amd-aiter>=0.1.18")   # the working run says otherwise
+        self.assertEqual(unresolved["vllm"]["ran_with"], "amd-aiter==0.1.17.dev40+g1a2b3c4d")
         matrix = yaml.safe_load(Path(got["compat"]).read_text())
-        new = matrix["components"]["vllm"][HAND_BUILT["packages"]["vllm"] + "@frameworks_vllm"]
-        self.assertEqual((new["url"], new["requires"]),
-                         (NEW_VLLM_URL, ["torch==2.13.0+rocm10.1.0", "amd-aiter", "flash-attn==2.8.3"]))
-        self.assertNotIn("numpy", matrix["components"])            # plain index packages: pip's job
+        new = matrix["components"]["vllm"][NEW_VLLM + "@frameworks_vllm"]
+        self.assertEqual((new["url"], new["requires"], new["python"]),
+                         (NEW_VLLM_URL, ["torch==2.9.0+rocm7.1.0", "mori"], ["3.12"]))
+        self.assertNotIn("1a2b3c4d@di", matrix["components"]["amd-aiter"])    # a draft is confirmed by a person
+        self.assertNotIn("msgspec", matrix["components"])
+
+
+class FromACardToItsExample(unittest.TestCase):
+    """Emitting an existing card gives the example built from it: the same layers and the card's own
+    values, the rest left to the layers and to the recipe of the GPU it runs on."""
+
+    def test_the_kimi_k3_card_emits_the_kimi_k3_example(self):
+        sys.path.insert(0, str(SCRIPTS / "common" / "config"))
+        import emit
+        at = SCRIPTS / "vllm_dissag" / "workloads" / "e2e"
+        got = emit.compose("vllm_dissag", card("vllm_dissag", "pyt_vllm_disagg_mori_kimi-k3-mxfp4"), str(at))
+        example = yaml.safe_load((at / "kimi-k3-disagg-niah.yaml").read_text())
+        # The example adds the root layer (the recipe check, best-known configurations) and its registry.
+        self.assertEqual(["../../../common/workloads/base.yaml"] + got["defaults"], example["defaults"])
+        self.assertEqual(dict(got["model"]["env"], MAD_BEST_REGISTRY=example["model"]["env"]["MAD_BEST_REGISTRY"]),
+                         example["model"]["env"])
+        self.assertEqual(got["image"], {"image_spec": "\\${images.vllm-kimi-k3}"})
+
+
+class PerGpuStack(unittest.TestCase):
+    """compat/images/vllm-per-gpu.yaml: composed from the stacks the matrix has, one per GPU."""
+
+    def test_each_gpu_gets_the_stack_validated_there(self):
+        sys.path.insert(0, str(SCRIPTS / "common"))
+        sys.path.insert(0, str(SCRIPTS / "common" / "recipe"))
+        import catalog
+        import recipe
+        c = catalog.load()
+        demo = {"image_spec": "${images.vllm-per-gpu}"}
+        for arch, source in (("gfx942", "vllm-mori121"), ("gfx950", "vllm-kimi-k3")):
+            with self.subTest(arch=arch):
+                self.assertEqual(catalog.components_of_card(demo, arch, c),
+                                 catalog.components_of_card({"image_spec": "${images.%s}" % source}, arch, c))
+        caps = recipe.engine_builds(c)["vllm@vllm-per-gpu"]
+        self.assertEqual(sorted(caps), ["gfx942", "gfx950"])
+
+    @unittest.skipIf(emit_config is None, "madengine not importable: it composes the specs")
+    def test_composed_for_each_gpu_it_is_that_gpus_stack(self):
+        from madengine.stack import compose
+        specs = madengine_image_spec.named_specs(str(MAD))
+        matrix = madengine_image_spec.load_matrix(str(MAD))
+        for arch, source in (("gfx942", "vllm-mori121"), ("gfx950", "vllm-kimi-k3")):
+            with self.subTest(arch=arch):
+                mine, theirs = (compose._for_arch(specs[n], arch) for n in ("vllm-per-gpu", source))
+                self.assertEqual({k: v for k, v in mine.items() if k != "base"},
+                                 {k: v for k, v in theirs.items() if k != "base"})
+                self.assertEqual(compose.compose(specs["vllm-per-gpu"], matrix, arch)["base"],
+                                 compose.compose(specs[source], matrix, arch)["base"])
 
 
 class Examples(unittest.TestCase):
