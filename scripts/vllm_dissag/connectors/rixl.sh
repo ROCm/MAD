@@ -259,7 +259,8 @@ _rixl_launch_tp() {
 
     # Optional context cap and HBM KV cap (the cap forces eviction into the offload tier).
     local mml_args=()
-    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && ! _recipe_sets_flag --max-model-len "${log_prefix}" \
+        && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
     local mem_args=()
     [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 
@@ -360,7 +361,8 @@ _rixl_launch_deepep() {
     # Optional context cap (required for DeepSeek-V3 MLA, else TritonMLA workspace OOM) and
     # HBM KV cap (forces eviction into the offload tier).
     local mml_args=()
-    [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+    [[ -n "${MAX_MODEL_LEN:-}" ]] && ! _recipe_sets_flag --max-model-len "${log_prefix}" \
+        && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
     local mem_args=()
     [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
 

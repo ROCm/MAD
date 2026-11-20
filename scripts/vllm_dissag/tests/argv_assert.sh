@@ -154,6 +154,7 @@ _has    "$C" "--api-server-count=8" "K3 api-server-count=dp_size"
 _has    "$C" "--reasoning-parser" "K3 reasoning parser flag"
 _has    "$C" "kimi_k3" "K3 reasoning parser value"
 _hasnot "$C" "-tp 1" "K3 not -tp 1"
+_count  "$C" "--max-model-len" 1 "K3 --max-model-len once (recipe flag; MAX_MODEL_LEN not added again)"
 
 echo ""
 echo "=== -e EP_TP_SIZE=1 override beats the recipe (K3 falls back to plain wideEP -tp 1) ==="
