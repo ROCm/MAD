@@ -135,12 +135,6 @@ def catalog_problems(spec):
                 cat.update(yaml.safe_load(f) or {})
     n, build = spec.get("name"), f"{spec.get('engine')}@{spec.get('name')}"
     per = (cat.get("kernels") or {}).get(build) or {}
-    # An engine the image builds states its capabilities on its matrix build (compat/images/<name>.yaml).
-    image = os.path.join(os.path.dirname(CATALOG), "images", f"{n}.yaml")
-    if not per and os.path.isfile(image):
-        with open(image) as f:
-            key = ((yaml.safe_load(f) or {}).get("components") or {}).get(spec.get("engine"))
-        per = (((cat.get("components") or {}).get(spec.get("engine")) or {}).get(str(key)) or {}).get("capabilities") or {}
     out = []
     for arch in spec.get("gpu_archs") or []:
         if arch not in (cat.get("accelerators") or {}):

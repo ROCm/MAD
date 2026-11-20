@@ -105,12 +105,13 @@ model:
 [e2e-examples.md](e2e-examples.md) has nine worked examples; the ones marked *reproduction* run exactly what
 an existing card runs, the ones marked *demo* show a mechanism.
 
-**An image described, not written.** Instead of a Dockerfile, a card can select an image spec:
-authorized component builds from `compat/rocm.yaml`, composed and built by madengine. The DI stacks
-are `compat/images/<name>.yaml`:
+**An image described, not written.** Keep building your image your way (a Dockerfile). Once a
+run with it works, the stack it proved is generalized into `compat/rocm.yaml`, the dependency state
+of what works together. A card can then select an image spec composed from those authorized builds
+instead of a Dockerfile (a folder's `image_spec.yaml`, or a shared one in `compat/images/`):
 
 ```json
-"image_spec": {"extends": "${images.vllm-kimi-k3}", "gpu_arch": "gfx950"}
+"image_spec": {"extends": "${image_spec}", "gpu_arch": "gfx950"}
 ```
 
 **The best-known configuration.** A recorded best configuration for the model, platform and
@@ -134,7 +135,7 @@ What platform and CI owners maintain, and runs read on their own:
 |---|---|
 | Software matrix, engine builds and what each runs per GPU | `compat/rocm.yaml` |
 | GPUs, fabrics, node platforms | `compat/hardware.yaml` |
-| Image specs for the DI stacks | `compat/images/` |
+| Shared image specs | `compat/images/` |
 | Example sites | `compat/sites/` (a site keeps its own outside the repository: `MAD_CLUSTER_FILE`) |
 | Topology specs | `scripts/common/topology/specs/` |
 | Best-known configurations | `scripts/common/perf/best_known.jsonl` |

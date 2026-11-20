@@ -149,7 +149,7 @@ The capability catalog is `compat/` (read as one by `scripts/common/catalog.py`)
 |---|---|
 | `compat/rocm.yaml` | the image-spec matrix (#295): ROCm releases, indexes, authorized component builds -- an engine build with the `capabilities` it has per GPU (the weight, activation and KV-cache formats it runs, the conversions it makes, where weights may live); `kernels` for engines an image's base provides; `engines` (the arguments and variables that select a format) |
 | `compat/hardware.yaml` | `formats`; `accelerators` (what each GPU's matrix cores compute on, memory, wave size, scale-up domain); fabrics; scale-up fabrics; platforms |
-| `compat/images/*.yaml` | named image specs (the DI stacks); the recipe check names an image's engine build `<engine>@<image>` |
+| `compat/images/*.yaml` | shared image specs, reached as `${images.<name>}`; the recipe check names an image's engine build `<engine>@<image>` |
 | `compat/sites/*.yaml` | example site profiles (`MAD_CLUSTER`) |
 
 Nothing absent from the catalog is assumed.

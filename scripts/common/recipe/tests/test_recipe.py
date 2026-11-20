@@ -68,33 +68,42 @@ class Catalog(unittest.TestCase):
 
     def test_validate_names_a_bad_reference(self):
         bad = copy.deepcopy(CAT)
-        key = bad[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]      # its capabilities: on its build
-        bad["components"]["vllm"][key]["capabilities"]["gfx942"]["weights"].append("fp5_imaginary")
+        bad["kernels"][KIMI_BUILD]["gfx942"]["weights"].append("fp5_imaginary")
         bad["kernels"]["vllm@x"] = {"gfx000": {}}
         problems = R.validate(bad)
         self.assertTrue(any("fp5_imaginary" in p for p in problems), problems)
         self.assertTrue(any("gfx000" in p for p in problems), problems)
 
 
-class EngineBuilds(unittest.TestCase):
-    """What an image's engine runs: on the matrix build its named spec selects."""
+def with_spec_build(cat, image="stack-x", key="1.0+k3@x"):
+    """A catalog whose named spec `image` selects a vLLM build stating the Kimi build's capabilities."""
+    cat = copy.deepcopy(cat)
+    cat.setdefault("components", {}).setdefault("vllm", {})[key] = {
+        "source": {"repo": "r", "commit": "c"}, "capabilities": copy.deepcopy(cat["kernels"][KIMI_BUILD])}
+    cat.setdefault(R.IMAGES_KEY, {})[image] = {"components": {"vllm": key}}
+    return cat
 
-    def test_an_images_build_keeps_its_name(self):
-        builds = R.engine_builds(CAT)
-        key = CAT[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]
-        self.assertIs(builds[KIMI_BUILD], CAT["components"]["vllm"][key]["capabilities"])
-        self.assertIn("sglang@sglang-disagg", builds)              # an engine the base image provides
-        self.assertEqual(R.build_of_pin_set(CAT, "vllm-kimi-k3"), KIMI_BUILD)
+
+class EngineBuilds(unittest.TestCase):
+    """What an image's engine runs: kernels, or the capabilities on the matrix build a named spec selects."""
+
+    def test_kernels_and_spec_builds_are_engine_builds(self):
+        cat = with_spec_build(CAT)
+        builds = R.engine_builds(cat)
+        self.assertIn(KIMI_BUILD, builds)                         # kernels: <engine>@<image>
+        self.assertIs(builds["vllm@stack-x"], cat["components"]["vllm"]["1.0+k3@x"]["capabilities"])
+        self.assertEqual(R.build_of_pin_set(cat, "stack-x"), "vllm@stack-x")
 
     def test_the_image_components_name_the_build(self):
-        key = CAT[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]
-        self.assertEqual(R.build_of_components(CAT, f"mori=x@y,vllm={key}", "vllm"), KIMI_BUILD)
-        self.assertIsNone(R.build_of_components(CAT, "vllm=unknown@x", "vllm"))
-        self.assertIsNone(R.build_of_components(CAT, f"vllm={key}", "sglang"))
+        cat = with_spec_build(CAT)
+        self.assertEqual(R.build_of_components(cat, "mori=x@y,vllm=1.0+k3@x", "vllm"), "vllm@stack-x")
+        self.assertIsNone(R.build_of_components(cat, "vllm=unknown@x", "vllm"))
+        self.assertIsNone(R.build_of_components(cat, "vllm=1.0+k3@x", "sglang"))
 
     def test_a_build_no_named_spec_selects_is_named_by_its_key(self):
         cat = copy.deepcopy(CAT)
-        cat["components"]["vllm"]["1.0@x"] = {"source": {}, "capabilities": {"gfx942": {"weights": ["bf16"]}}}
+        cat.setdefault("components", {}).setdefault("vllm", {})["1.0@x"] = {
+            "source": {}, "capabilities": {"gfx942": {"weights": ["bf16"]}}}
         self.assertIn("vllm=1.0@x", R.engine_builds(cat))
         self.assertEqual(R.build_of_components(cat, "vllm=1.0@x", "vllm"), "vllm=1.0@x")
         self.assertEqual(R.engine_of("vllm=1.0@x"), "vllm")

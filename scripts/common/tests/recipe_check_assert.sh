@@ -37,8 +37,22 @@ _has "$out" "server weights=int4_g32" "the colocated launcher's server role"
 
 out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=vllm-kimi-k3)"
 _has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_PIN_SET names the image's build (as madengine sets it)"
-out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_IMAGE_COMPONENTS=mori=x,vllm=9a7ae4b8+cd0d2656@vllm-kimi-k3)"
-_has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_IMAGE_COMPONENTS (an image built from its spec) names its engine build"
+# An image built from a named spec: its vLLM build states its capabilities in the matrix (a fixture
+# catalog: the real one, plus a spec "stack-x" selecting such a build).
+mkdir -p "$TMP/cat/images"
+python3 - "$DIR/common" "$TMP/cat" <<'PY'
+import copy, sys, yaml
+sys.path.insert(0, sys.argv[1])
+import catalog
+c = catalog.load(catalog.COMPAT)
+c.pop(catalog.IMAGES_KEY, None)
+c["components"].setdefault("vllm", {})["1.0+k3@x"] = {"source": {"repo": "r", "commit": "c"},
+                                                     "capabilities": copy.deepcopy(c["kernels"]["vllm@vllm-kimi-k3"])}
+yaml.safe_dump(c, open(sys.argv[2] + "/catalog.yaml", "w"))
+yaml.safe_dump({"components": {"vllm": "1.0+k3@x"}}, open(sys.argv[2] + "/images/stack-x.yaml", "w"))
+PY
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_CATALOG="$TMP/cat/catalog.yaml" MAD_IMAGE_COMPONENTS=mori=x,vllm=1.0+k3@x)"
+_has "$out" "resolves on gfx942 with vllm@stack-x" "MAD_IMAGE_COMPONENTS (an image built from a spec) names its engine build"
 
 echo ""
 echo "=== refuses ==="

@@ -5,8 +5,8 @@ that several workloads share. A card selects one through madengine's OmegaConf
 interpolation and may override any part of it:
 
 ```json
-"image_spec": "${images.vllm-kimi-k3}"
-"image_spec": {"extends": "${images.vllm-kimi-k3}", "gpu_arch": "gfx950"}
+"image_spec": "${images.<name>}"
+"image_spec": {"extends": "${images.<name>}", "gpu_arch": "gfx950"}
 ```
 
 A spec may give its base per GPU architecture (`base: {gfx942: ..., gfx950: ...}`), put
