@@ -1,0 +1,14 @@
+# Add a model by changing a validated recipe, in this one file: DeepSeek-V3 for long contexts. Its
+# recipe inherits DeepSeek-V3's (alias) and changes what it needs: the KV budget sized from the GPU,
+# a longer context on both roles, more concurrent sequences on decode, and the same weights.
+version: 2
+defaults: [deepseek-v3.yaml]
+model:
+  env: {MODEL_NAME: DeepSeek-V3-LongCtx, MODEL_WEIGHTS_NAME: DeepSeek-V3}
+recipes:
+  DeepSeek-V3-LongCtx:
+    alias: DeepSeek-V3
+    env: {KV_CACHE_MEMORY_BYTES: null}
+    memory: {KV_CACHE_MEMORY_BYTES: {fraction: 0.25}}
+    prefill: {dp: "--max-model-len 131072"}
+    decode: {dp: "--max-model-len 131072 --max-num-seqs 64"}

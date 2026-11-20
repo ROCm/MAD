@@ -1,0 +1,4 @@
+# Serve it another way: the KV cache moves over the NIXL connector (rixl) instead of MoRI-IO. The
+# serving layer is swapped; the model (wide expert parallelism), shape and benchmark are kept.
+version: 2
+defaults: [deepseek-v3.yaml, ../../../common/workloads/serve/vllm-disagg-nixl.yaml]

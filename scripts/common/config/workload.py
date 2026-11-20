@@ -22,9 +22,9 @@ it at submit time, MAD's launchers read it here, and a test holds the two to the
 A file may also carry the layers a launcher otherwise reads from its directory, so one file
 holds a card's whole configuration (config/emit.py writes such files from existing cards):
 
-    recipes:                   # replaces the launcher's models.yaml: the card's recipe (MODEL_NAME)
-      Kimi-K3-MXFP4: {...}     # and any recipe it is an alias of, written as in models.yaml
-    connectors:                # replaces connectors/<name>.env: KEY: VALUE per connector
+    recipes:                   # laid over the launcher's models.yaml by name: a recipe may alias a
+      Kimi-K3-MXFP4: {...}     # validated one there and change only what it needs
+    connectors:                # laid over connectors/<name>.env by name: KEY: VALUE per connector
       moriio: {PYTORCH_ALLOC_CONF: "expandable_segments:False", ...}
     topology: common/topology/specs/v2/x.json    # as MAD_TOPOLOGY (a path; relative to scripts/)
     card: {...}                # what the file was generated from (informational)
@@ -34,9 +34,11 @@ holds a card's whole configuration (config/emit.py writes such files from existi
 
 The environment it gives, lowest first: model.env, the benchmark entries without a kind, the
 entries of the selected kind (BENCHMARK_SCRIPT: the run's, else the file's). The launcher applies
-it under everything set at submit time (config/layers.sh config_apply_workload).
+it under everything set at submit time (config/layers.sh config_apply_workload); a value set at
+submit for a name the file sets is used when the file is resolved, so values built from it follow.
 
-    workload.py env FILE [--kind KIND]     NAME=VALUE\0 ...
+    workload.py env FILE [--kind KIND] [--environ]   NAME=VALUE\0 ... (--environ: this process's
+                                           environment is what was set at submit)
     workload.py show FILE                  the merged, resolved file as JSON
     workload.py find MAD_CONFIG DIR        the file a card with MAD_CONFIG (may be empty) in DIR reads
     workload.py sections FILE --out DIR    write its recipes (DIR/models.yaml) and connectors
@@ -48,6 +50,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 
 import yaml
@@ -139,12 +142,19 @@ def _resolve(root, value, where, depth=0):
     return REF.sub(one, value).replace(ESCAPED, "${")
 
 
-def load(path):
-    """The workload file, merged over its defaults and resolved."""
+def load(path, over=None):
+    """The workload file, merged over its defaults and resolved. *over*: the card's and the run's
+    values (which win), laid over the model.env names the file sets before resolving -- so a value
+    given at submit reaches every value built from it (as madengine resolves it)."""
     data = _read(path)
     if data.get("version") == 2:
         data = _chain(path, data, ())
         data.pop("defaults", None)
+        env = (data.get("model") or {}).get("env")
+        if over and isinstance(env, dict):
+            for k in env:
+                if over.get(k) is not None:          # taken literally
+                    env[k] = str(over[k]).replace("${", "\\${")
         data = _resolve(data, data, os.path.basename(path))
         bench = data.get("benchmark")
         if isinstance(bench, dict):
@@ -180,19 +190,30 @@ def env_of(data, kind=None):
     return {str(k): str(v) for k, v in out.items()}
 
 
-def write_sections(data, out):
-    """Write the file's recipes and connectors where a launcher reads them; {name: value} of
-    those present: recipes (a models.yaml path), connectors (a directory), topology."""
+def write_sections(data, out, recipes=None, connectors=None):
+    """Write the file's recipes and connectors where a launcher reads them, each laid over the
+    launcher's own (*recipes*: its models.yaml, *connectors*: its connectors/ directory) by name --
+    so a file's recipe may alias a validated one. {name: value} of those present: recipes (a
+    models.yaml path), connectors (a directory), topology."""
     got = {}
     if data.get("recipes"):
         os.makedirs(out, exist_ok=True)
+        merged = {}
+        if recipes and os.path.isfile(recipes):
+            with open(recipes) as f:
+                merged = yaml.safe_load(f) or {}
+        merged.update(data["recipes"])
         path = os.path.join(out, "models.yaml")
         with open(path, "w") as f:
-            yaml.safe_dump(data["recipes"], f, sort_keys=False, width=1 << 16)
+            yaml.safe_dump(merged, f, sort_keys=False, width=1 << 16)
         got["recipes"] = path
     if data.get("connectors"):
         d = os.path.join(out, "connectors")
         os.makedirs(d, exist_ok=True)
+        if connectors and os.path.isdir(connectors):
+            for f in sorted(os.listdir(connectors)):
+                if f.endswith(".env"):
+                    shutil.copyfile(os.path.join(connectors, f), os.path.join(d, f))
         for name, env in data["connectors"].items():
             with open(os.path.join(d, f"{name}.env"), "w") as f:
                 for k, v in env.items():
@@ -221,7 +242,10 @@ def main(argv=None):
     ap.add_argument("file", help="the workload file (find: the card's MAD_CONFIG, may be empty)")
     ap.add_argument("dir", nargs="?", default=".", help="find: the card's script directory")
     ap.add_argument("--kind", default=None, help="the benchmark selected (BENCHMARK_SCRIPT) when the run set one")
+    ap.add_argument("--environ", action="store_true", help="env: values set in the environment win, and are used to resolve the file")
     ap.add_argument("--out", help="sections: where to write them")
+    ap.add_argument("--recipes", help="sections: the launcher's models.yaml, which the file's recipes are laid over")
+    ap.add_argument("--connectors", help="sections: the launcher's connectors/, which the file's are laid over")
     a = ap.parse_args(argv)
     if a.cmd == "find":
         path = find(a.file, a.dir)
@@ -229,7 +253,7 @@ def main(argv=None):
             print(path)
         return 0
     try:
-        data = load(a.file)
+        data = load(a.file, dict(os.environ) if a.environ else None)
     except WorkloadError as e:
         print(f"workload: {e}", file=sys.stderr)
         return 1
@@ -239,7 +263,7 @@ def main(argv=None):
         if not a.out:
             print("workload: sections needs --out", file=sys.stderr)
             return 2
-        for k, v in write_sections(data, a.out).items():
+        for k, v in write_sections(data, a.out, a.recipes, a.connectors).items():
             sys.stdout.write(f"{k}={v}\0")
     else:
         for k, v in env_of(data, a.kind or None).items():

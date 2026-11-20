@@ -100,7 +100,7 @@ def card_env(catalog, card):
     (MAD_CONFIG) under its env_vars, as the launcher applies them."""
     env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
     path = workload.find(env.pop("MAD_CONFIG", ""), os.path.join(SCRIPTS, catalog))
-    data = workload.load(path) if path else {}
+    data = workload.load(path, env) if path else {}
     if data:
         env = {**workload.env_of(data, env.get("BENCHMARK_SCRIPT")), **env}
     return env, data

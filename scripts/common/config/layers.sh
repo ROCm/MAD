@@ -166,9 +166,9 @@ config_recipe_file() {
 # values), labelled "workload". A MAD_CONFIG that names a missing or invalid file stops the run.
 #
 # It also sets where this run reads its recipes and connector env: RECIPES_YAML (default RECIPES,
-# the launcher's models.yaml) and CONNECTORS_DIR (default CONNECTORS_DIR, its connectors/), replaced
-# by the file's `recipes:` and `connectors:` sections when it has them; and MAD_TOPOLOGY from its
-# `topology:` when the run did not set one.
+# the launcher's models.yaml) and CONNECTORS_DIR (default CONNECTORS_DIR, its connectors/), with the
+# file's `recipes:` and `connectors:` sections laid over them by name when it has them (a file's
+# recipe may alias a validated one); and MAD_TOPOLOGY from its `topology:` when the run did not set one.
 config_apply_workload() {
     local dir="$1" here file out line k v
     RECIPES_YAML="${2:-${dir}/models.yaml}"; CONNECTORS_DIR="${3:-${dir}/connectors}"
@@ -180,7 +180,7 @@ config_apply_workload() {
         echo "ERROR: MAD_CONFIG=${MAD_CONFIG}: no such workload file (${file})" >&2
         return 1
     fi
-    out="$(set -o pipefail; python3 "$here/workload.py" env "$file" --kind "${BENCHMARK_SCRIPT:-}" | tr '\0' '\n')" \
+    out="$(set -o pipefail; python3 "$here/workload.py" env "$file" --kind "${BENCHMARK_SCRIPT:-}" --environ | tr '\0' '\n')" \
         || { echo "ERROR: workload file ${file} cannot be used (above)" >&2; return 1; }
     config_layer launcher                              # what came before is not the workload's
     while IFS= read -r line; do
@@ -193,15 +193,16 @@ config_apply_workload() {
     echo "[config] workload ${MAD_CONFIG:-$(basename "$file")}: $(grep -c . <<<"$out") value(s) (submitted ones kept)"
     # Its recipes, connectors and topology, when it carries them.
     _CONFIG_WL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mad_workload.XXXXXX")" || return 1
-    out="$(set -o pipefail; python3 "$here/workload.py" sections "$file" --out "$_CONFIG_WL_DIR" | tr '\0' '\n')" \
+    out="$(set -o pipefail; python3 "$here/workload.py" sections "$file" --out "$_CONFIG_WL_DIR" \
+            --recipes "$RECIPES_YAML" --connectors "$CONNECTORS_DIR" | tr '\0' '\n')" \
         || { echo "ERROR: workload file ${file}: its sections cannot be written (above)" >&2; return 1; }
     while IFS= read -r line; do
         k="${line%%=*}"; v="${line#*=}"
         case "$k" in
             recipes)    RECIPES_YAML="$v"; _CONFIG_RECIPES_FROM_WORKLOAD=1
-                        echo "[config] workload: recipes from the file (not ${2:-${dir}/models.yaml})" ;;
+                        echo "[config] workload: recipes from the file (over ${2:-${dir}/models.yaml})" ;;
             connectors) CONNECTORS_DIR="$v"
-                        echo "[config] workload: connector env from the file" ;;
+                        echo "[config] workload: connector env from the file (over ${3:-${dir}/connectors})" ;;
             topology)   if [[ -z "${MAD_TOPOLOGY:-}" ]]; then
                             export MAD_TOPOLOGY="$v"; _CONFIG_SRC[MAD_TOPOLOGY]=workload
                         fi ;;

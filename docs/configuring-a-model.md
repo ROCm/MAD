@@ -106,14 +106,14 @@ model:
   env: {MODEL_NAME: Kimi-K3-MXFP4, xP: "2", yD: "2"}
 ```
 
-[e2e-examples.md](e2e-examples.md) has nine worked examples; the ones marked *reproduction* run exactly what
+[context_as_code_developer_guide.md](context_as_code_developer_guide.md) has nine worked examples; the ones marked *reproduction* run exactly what
 an existing card runs, the ones marked *demo* show a mechanism.
 
 **An image described, not written.** Keep building your image your way (a Dockerfile). Once a
 run with it works, the build generalizes it: the image is placed under the named stack it is
 closest to (`extends: ${images.<stack>}` and only what differs), and what it proved is added to
 `compat/rocm.yaml`, the dependency state of what works together
-([e2e-examples.md](e2e-examples.md#from-a-build-to-the-matrix)). A card can then select an image
+([context_as_code_developer_guide.md](context_as_code_developer_guide.md#from-a-build-to-the-matrix)). A card can then select an image
 spec composed from those authorized builds instead of a Dockerfile (a folder's `image_spec.yaml`,
 or a shared one in `compat/images/`):
 

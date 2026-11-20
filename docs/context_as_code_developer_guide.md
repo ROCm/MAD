@@ -1,6 +1,14 @@
-# End-to-end examples
+# Context as code: developer guide
 
-Nine workloads, five model families, two engines, every serving type MAD runs and the next GPU
+A run's whole context -- what to run, how the engine is configured on each GPU, what it runs in,
+what works together, and where it runs -- is code: small files, each owned by whoever knows it,
+each inheriting what it does not change. This guide shows how the pieces fit, then changes them one
+at a time (the serving cluster, how it is served, tied values, a new model's recipe, the GPU, the
+site, one run) and shows what each change does to the run, and how what runs feeds back into the
+compatibility matrix. Every result shown is produced by the real launchers and held by a test. The
+high-level version is [context_as_code_user_guide.md](context_as_code_user_guide.md).
+
+The examples: nine workloads, five model families, two engines, every serving type MAD runs and the next GPU
 generation, each written as a few lines on shared layers. Each is either a **reproduction** -- it
 runs exactly the engine commands of an existing card, and a test holds them equal -- or a **demo**
 of a mechanism, with no invented setting presented as tuned. Their tests run each one through the
@@ -14,6 +22,7 @@ How to configure a model this way, step by step: [configuring-a-model.md](config
 ## Contents
 
 - [How it fits together: Kimi-K3, end to end](#how-it-fits-together-kimi-k3-end-to-end)
+- [Change anything, see what the run does](#change-anything-see-what-the-run-does)
 - [The workload library](#the-workload-library)
 - [The examples](#the-examples)
 - [What each example proves](#what-each-example-proves)
@@ -149,6 +158,159 @@ grows as engineers work.</td></tr>
 The test `CompatOverTime` in `scripts/common/tests/test_e2e_examples.py` runs this timeline: run 1,
 the PR, run 2 adding nothing, and its spec composing on both GPUs into the stack with exactly those
 two builds changed.
+
+## Change anything, see what the run does
+
+One baseline and one small file per change. Each file inherits the baseline and changes one thing;
+the result is what the real launchers produce from it (`scripts/common/tests/test_developer_guide.py`
+runs every one and holds the effect shown). The files are in
+[`scripts/vllm_dissag/workloads/guide/`](../scripts/vllm_dissag/workloads/guide/); a card runs one
+with `MAD_CONFIG`.
+
+**The baseline** -- DeepSeek-V3 on vLLM, 1 prefill + 1 decode node, MoRI wide expert parallelism,
+the throughput sweep (`deepseek-v3.yaml`):
+
+```yaml
+version: 2
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/deepseek-v3.yaml, ../../../common/workloads/bench/sweep.yaml]
+model:
+  env: {xP: "1", yD: "1", BENCHMARK_COMBINATIONS: "1024/1024"}
+```
+
+| Node | Role | Engine (excerpt) |
+|---|---|---|
+| 0 | prefill | `vllm serve … -tp 1 --data-parallel-size 8 --enable-expert-parallel --kv-cache-memory-bytes 20000000000 --all2all-backend mori_high_throughput --kv-transfer-config {"kv_connector":"MoRIIOConnector","kv_role":"kv_producer",…}` |
+| 1 | decode | the same, `--all2all-backend mori_low_latency`, CUDA graphs captured, `"kv_role":"kv_consumer"` |
+
+### 1. Scale the serving cluster
+
+<table>
+<tr><th>The change (<code>scale-2p2d.yaml</code>)</th><th>What the run does</th></tr>
+<tr><td><pre>version: 2
+defaults: [deepseek-v3.yaml]
+model:
+  env: {xP: "2", yD: "2"}</pre></td>
+<td><ul>
+<li>4 nodes: prefill, prefill, decode, decode</li>
+<li><code>--data-parallel-size 8 → 16</code>: each pool spans two nodes</li>
+<li>the second node of each pool joins <code>--headless</code> at <code>--data-parallel-start-rank 8</code></li>
+<li>given the baseline's 2 nodes, it stops before anything starts:<br><code>topology needs 4 nodes but the allocation has 2. Submit with --nodes=4 (madengine: the card's slurm.nodes)</code></li></ul></td></tr>
+</table>
+
+### 2. Serve it another way
+
+<table>
+<tr><th>The change (<code>serve-nixl.yaml</code>)</th><th>What the run does</th></tr>
+<tr><td><pre>version: 2
+defaults:
+- deepseek-v3.yaml
+- ../../../common/workloads/serve/vllm-disagg-nixl.yaml</pre></td>
+<td><ul>
+<li>the KV cache moves over NIXL: <code>{"kv_connector": "NixlConnector", …}</code>, <code>CONNECTOR=rixl</code></li>
+<li>MoRI-IO's environment (<code>MORI_IO_SL</code>, <code>MORI_RDMA_TC</code>, …) is no longer set</li>
+<li>the model, shape and benchmark are unchanged: one layer swapped</li></ul></td></tr>
+</table>
+
+### 3. Tie values together
+
+<table>
+<tr><th>The change (<code>tied.yaml</code>)</th><th>What the run does</th></tr>
+<tr><td><pre>version: 2
+defaults: [deepseek-v3.yaml]
+model:
+  env:
+    POOL: "2"
+    xP: ${model.env.POOL}
+    yD: ${model.env.POOL}
+    PERF_TAGS: deepseek-v3,${model.env.xP}p${model.env.yD}d,${model.env.BENCHMARK_SCRIPT}</pre></td>
+<td><ul>
+<li><code>POOL: "2"</code>: 2P2D on 4 nodes, tagged <code>deepseek-v3,2p2d,sweep</code></li>
+<li><code>POOL=1</code> at submit: 1P1D on 2 nodes, tagged <code>deepseek-v3,1p1d,sweep</code> -- a value set at submit
+is used when the file is resolved, so everything built from it follows</li>
+<li><code>xP=3</code> at submit: only xP and the tags change (<code>3p2d</code>)</li>
+<li>MAD's launcher and madengine resolve it the same way (a test holds them equal)</li></ul></td></tr>
+</table>
+
+### 4. Add a model by changing its recipe
+
+A new model is a file. Its recipe inherits a validated one (`alias`) and changes only what it needs;
+the file's `recipes:` are laid over the launcher's `models.yaml` by name.
+
+<table>
+<tr><th>The change (<code>new-model.yaml</code>)</th><th>What the run does</th></tr>
+<tr><td><pre>version: 2
+defaults: [deepseek-v3.yaml]
+model:
+  env:
+    MODEL_NAME: DeepSeek-V3-LongCtx
+    MODEL_WEIGHTS_NAME: DeepSeek-V3
+recipes:
+  DeepSeek-V3-LongCtx:
+    alias: DeepSeek-V3
+    env: {KV_CACHE_MEMORY_BYTES: null}
+    memory:
+      KV_CACHE_MEMORY_BYTES: {fraction: 0.25}
+    prefill: {dp: "--max-model-len 131072"}
+    decode:
+      dp: "--max-model-len 131072 --max-num-seqs 64"</pre></td>
+<td><ul>
+<li>the recipe check resolves <code>DeepSeek-V3-LongCtx</code> with DeepSeek-V3's roles (FP8 weights, activations, KV)</li>
+<li><code>--max-model-len 131072</code> on both roles; <code>--max-num-seqs 64</code> on decode only</li>
+<li>the KV budget is a quarter of the GPU's memory, measured on the node:
+<code>--kv-cache-memory-bytes 20000000000 → 48000000000</code> on MI300X, <code>→ 72000000000</code> on MI355X</li>
+<li>the same weights (<code>MODEL_WEIGHTS_NAME</code>); nothing else moves</li></ul></td></tr>
+</table>
+
+A recipe can change anything a model needs, each in one place: its roles' needs (quantization, KV
+format, speculative decoding -- `DeepSeek-V3-MTP` adds MTP to decode only; a checkpoint per role --
+`DeepSeek-V3-DQ`), its environment, its flags per role and parallel mode, memory sizes derived from
+the GPU, and a variant per GPU (`variants.gfx942`, `variants.gfx950`, as Kimi-K3 has).
+
+### 5. Run it on another GPU
+
+<table>
+<tr><th>The change</th><th>What the run does</th></tr>
+<tr><td>nothing in the files: the job lands on MI355X (gfx950) instead of MI300X (gfx942)</td>
+<td><ul>
+<li>the recipe check asks for the same FP8 and gets each GPU's format, on that GPU's stack:<br>
+<code>DeepSeek-V3 resolves on gfx942 with vllm@vllm-mori121: prefill weights=fp8_e4m3fnuz,…</code><br>
+<code>DeepSeek-V3 resolves on gfx950 with vllm@vllm-kimi-k3: prefill weights=fp8_e4m3,…</code></li>
+<li>the image is the card's <code>vllm-per-gpu</code> stack, built for that GPU</li>
+<li>a recipe with per-GPU variants switches to that GPU's (Kimi-K3: <code>EP_TP_SIZE</code> 2 → 1, int4 conversion → native MXFP4)</li></ul></td></tr>
+</table>
+
+### 6. Run it at another site
+
+<table>
+<tr><th>The change</th><th>What the run does</th></tr>
+<tr><td>the run names its site:<br><code>MAD_CLUSTER=example-slurm-mi300x-cx7</code><br>→ <code>MAD_CLUSTER=example-slurm-mi355x-ainic</code><br>(<a href="../compat/sites/">compat/sites/</a>: platform, fabric, mounts)</td>
+<td><ul>
+<li>the engine commands are identical</li>
+<li>the fabric follows the site: <code>NCCL_IB_HCA</code> and <code>MORI_RDMA_DEVICES</code> = <code>rdma0…rdma7</code> (AINIC),
+<code>NCCL_IB_GID_INDEX 3 → 1</code>, interfaces <code>eth0 → eno0</code></li>
+<li>the platform says what the nodes are: <code>platform mi355x-ubb-8: gfx950, 8 GPUs per node</code></li></ul></td></tr>
+</table>
+
+### 7. Change one run
+
+<table>
+<tr><th>The change</th><th>What the run does</th></tr>
+<tr><td>at submit, no file edited:<br><code>--additional-context '{"env_vars": {"BENCHMARK_COMBINATIONS": "8192/1024"}}'</code></td>
+<td><ul>
+<li><code>BENCHMARK_COMBINATIONS 1024/1024 → 8192/1024</code>; the engine commands are unchanged</li>
+<li>a submit-time value wins over every layer, and (3) values built from it follow</li></ul></td></tr>
+</table>
+
+### Who changes what
+
+| To change | Edit | Owned by |
+|---|---|---|
+| the serving shape, benchmark, a run's values | the workload file (or submit-time config) | whoever runs the workload |
+| how a serving method or benchmark works for everyone | a shared layer (`scripts/common/workloads/`) | the layer's owner |
+| how the engine runs a model on each GPU | its recipe (`models.yaml`, or the file's `recipes:`) | the model's developer |
+| what an image holds | its image spec (`compat/images/`) | the stack's owner |
+| what works together | the matrix (`compat/rocm.yaml`), from builds that ran | everyone, through their runs' PRs |
+| where it runs | a site profile (`compat/sites/`), platforms and fabrics (`compat/hardware.yaml`) | the site's owner |
 
 ## The workload library
 

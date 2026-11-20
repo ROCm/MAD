@@ -9,7 +9,7 @@
  "calls": [],
  "ranks": [],
  "stderr_tail": [
-  "[recipe] DeepSeek-V3-DQ decode: mxfp4 weights are converted to int4_g32 by vllm@vllm-kimi-k3 on gfx942",
+  "ERROR: DeepSeek-V3-DQ on gfx942 with vllm@vllm-mori121: decode: weights 'mxfp4' -- gfx942 with vllm@vllm-mori121 offers ['bf16', 'fp8_e4m3fnuz'] and no conversion",
   "[recipe] DeepSeek-V3-DQ prefill: serves its own artifact DeepSeek-V3-MXFP4-W4A4",
   "[recipe] DeepSeek-V3-DQ decode: serves its own artifact DeepSeek-V3-MXFP4-W4A16",
   "x DeepSeek-V3-DQ's roles do not resolve on gfx942 with the builds of its image (above).",

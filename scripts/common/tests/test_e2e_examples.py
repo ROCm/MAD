@@ -1,4 +1,4 @@
-"""The end-to-end examples (docs/e2e-examples.md), each run through the real launcher and role
+"""The end-to-end examples (docs/context_as_code_developer_guide.md), each run through the real launcher and role
 scripts on each GPU it targets -- the launcher applies the card's workload file itself
 (common/config/workload.py), so no madengine is needed. What each example claims, its engine
 commands show. When madengine is importable, its reader of the same files is checked to agree.
@@ -38,8 +38,8 @@ def example_cards():
 
 def mad_env(c, d, runtime=None):
     """The card's environment as MAD's launcher builds it: workload file < card env_vars < runtime."""
-    data = W.load(W.find(c["env_vars"]["MAD_CONFIG"], str(SCRIPTS / d)))
     card_env = {k: str(v) for k, v in c["env_vars"].items()}
+    data = W.load(W.find(c["env_vars"]["MAD_CONFIG"], str(SCRIPTS / d)), {**card_env, **(runtime or {})})
     kind = (runtime or {}).get("BENCHMARK_SCRIPT") or card_env.get("BENCHMARK_SCRIPT")
     return {**W.env_of(data, kind), **card_env, **(runtime or {})}
 
@@ -172,7 +172,7 @@ def served(name, version):
 class FromABuildToItsGeneralizedForm(unittest.TestCase):
     """The build manifest is the specific instance; what the build writes beside it is the
     generalized form: the card on the shared layers, its image as a spec over compat, and what compat
-    lacks merged into a copy of the matrix (docs/e2e-examples.md, "From a build to the matrix")."""
+    lacks merged into a copy of the matrix (docs/context_as_code_developer_guide.md, "From a build to the matrix")."""
 
     def setUp(self):
         (MAD / ".madengine").mkdir(exist_ok=True)              # where madengine writes (ignored by git)
@@ -234,7 +234,7 @@ class FromABuildToItsGeneralizedForm(unittest.TestCase):
 
 @unittest.skipIf(emit_config is None, "madengine not importable: the generalization runs in its build")
 class CompatOverTime(unittest.TestCase):
-    """docs/e2e-examples.md, "How compat gets more accurate over time": run 1 writes what it proved,
+    """docs/context_as_code_developer_guide.md, "How compat gets more accurate over time": run 1 writes what it proved,
     its PR merges it, and run 2 on the same stack adds nothing -- its image now a spec that composes
     into the whole stack on every GPU."""
 

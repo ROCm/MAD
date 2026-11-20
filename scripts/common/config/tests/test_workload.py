@@ -91,5 +91,36 @@ class Workload(unittest.TestCase):
         self.assertEqual(bad.returncode, 1)
 
 
+class SubmittedValuesAndSections(unittest.TestCase):
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.d)
+
+    def test_a_submitted_value_reaches_every_value_built_from_it(self):
+        f = self.d / "w.yaml"
+        f.write_text('version: 2\nmodel:\n  env: {POOL: "2", xP: "${model.env.POOL}", TAGS: "run-${model.env.xP}p"}\n')
+        env = W.env_of(W.load(str(f), {"POOL": "1", "UNRELATED": "x"}))
+        self.assertEqual((env["POOL"], env["xP"], env["TAGS"]), ("1", "1", "run-1p"))
+        self.assertNotIn("UNRELATED", env)                       # only the names the file sets
+        self.assertEqual(W.env_of(W.load(str(f), {"POOL": "${lit}"}))["xP"], "${lit}")   # taken literally
+
+    def test_a_files_recipes_and_connectors_are_laid_over_the_launchers(self):
+        (self.d / "models.yaml").write_text("Base: {env: {A: '1'}}\nOther: {env: {B: '2'}}\n")
+        (self.d / "conn").mkdir()
+        (self.d / "conn" / "moriio.env").write_text("X=1\n")
+        (self.d / "conn" / "rixl.env").write_text("Y=1\n")
+        data = {"recipes": {"Mine": {"alias": "Base"}, "Other": {"env": {"B": "3"}}},
+                "connectors": {"rixl": {"Y": "2"}}}
+        got = W.write_sections(data, str(self.d / "out"), str(self.d / "models.yaml"), str(self.d / "conn"))
+        import yaml
+        recipes = yaml.safe_load(open(got["recipes"]))
+        self.assertEqual(recipes, {"Base": {"env": {"A": "1"}}, "Other": {"env": {"B": "3"}}, "Mine": {"alias": "Base"}})
+        self.assertEqual((Path(got["connectors"]) / "moriio.env").read_text(), "X=1\n")   # the launcher's, kept
+        self.assertEqual((Path(got["connectors"]) / "rixl.env").read_text(), "Y=2\n")     # the file's, over it
+
+
 if __name__ == "__main__":
     unittest.main()

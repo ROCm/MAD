@@ -597,7 +597,7 @@ Kimi-K3-MXFP4-MI355X:                   # the gfx950 variant, by name for its ca
   alias: Kimi-K3-MXFP4
   arch: gfx950
 
-# ============================ End-to-end examples (docs/e2e-examples.md) ============================
+# ============================ End-to-end examples (docs/context_as_code_developer_guide.md) ============================
 # Each inherits a validated recipe (alias) and changes only what the example demonstrates; the
 # base recipes above are untouched.
 

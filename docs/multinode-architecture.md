@@ -6,7 +6,7 @@ page that describes it in detail. Read [multinode-overview.md](multinode-overvie
 the concepts (prefill and decode, launchers, connectors).
 
 End-to-end examples of all of this, across model families and serving types:
-[e2e-examples.md](e2e-examples.md).
+[context_as_code_developer_guide.md](context_as_code_developer_guide.md).
 
 ## Contents
 

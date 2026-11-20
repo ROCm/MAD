@@ -25,4 +25,4 @@ put files from `docker/` into the image (`copy`), and run checks after its compo
 
 A build can generalize an image into this form: `madengine build --emit-config DIR` places the
 image under the stack it is closest to (`extends` and only what differs) -- see
-[docs/e2e-examples.md](../../docs/e2e-examples.md#from-a-build-to-the-matrix).
+[docs/context_as_code_developer_guide.md](../../docs/context_as_code_developer_guide.md#from-a-build-to-the-matrix).

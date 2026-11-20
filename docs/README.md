@@ -60,6 +60,8 @@ learning path and stop when you have what you need.
 | Page | What it covers |
 |---|---|
 | [README.md](README.md) | This page: what MAD is, the learning path, the glossary and the index. |
+| [context_as_code_user_guide.md](context_as_code_user_guide.md) | Context as code, at a high level: the five scopes of a run (what to run, how the engine runs a model, what it runs in, what works together, where it runs), who owns each, and what you get. |
+| [context_as_code_developer_guide.md](context_as_code_developer_guide.md) | The same in detail, worked end to end: how the files of a Kimi-K3 run fit together and resolve on each GPU, seven changes (cluster, serving method, tied values, a new model's recipe, GPU, site, one run) each with its effect on the run, how the compatibility matrix learns from runs, and nine example workloads. |
 | [getting-started.md](getting-started.md) | Prerequisites, installation, running models, tags, timeouts, debugging, model discovery, build versus run, and where results go. |
 | [configuring-a-model.md](configuring-a-model.md) | Adding or tuning a multinode inference model: the card and recipe, what a run will do and why, the generated configuration, and when to use variants, roles, shared layers and image specs. |
 | [adding-a-model.md](adding-a-model.md) | Every model-card field, Dockerfile resolution, the GPU architecture build argument, run scripts, the performance reporting contract, and multinode cards. |
