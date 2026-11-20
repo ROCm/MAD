@@ -10,7 +10,9 @@ A card's run configuration is placed where each part belongs, not copied:
     the card's own part    model.env -- only what no chosen layer gives (and BENCHMARK_SCRIPT, which
                            selects the benchmark entries)
     topology               the card's MAD_TOPOLOGY spec (a path), when it has one
-    card, image            what the file was made from (informational; the image is for the build)
+    card, image            what the file was made from; when the build recorded the image's stack,
+                           `image.spec` is that image generalized over compat (madengine) and
+                           `image.unresolved` what compat cannot express yet
 
 A card that already has a workload file (MAD_CONFIG) keeps its own sections (recipes:,
 connectors:, topology:). The file resolves to exactly the environment the card runs with:
@@ -131,6 +133,11 @@ def compose(catalog, card, at=None):
     out = {"version": VERSION, "card": {k: card[k] for k in ("name", "scripts", "tags") if k in card}}
     out["card"]["catalog"] = catalog
     image = {k: card[k] for k in ("dockerfile", "docker_build_arg", "image_spec") if card.get(k)}
+    # The image generalized from its build (madengine: the stack it recorded, over compat).
+    if card.get("_image_spec"):
+        image["spec"] = card["_image_spec"]
+    if card.get("_image_unresolved"):
+        image["unresolved"] = card["_image_unresolved"]
     if image:
         out["image"] = image
     if chosen:
