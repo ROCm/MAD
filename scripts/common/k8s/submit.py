@@ -214,10 +214,15 @@ def submit_environment(card, env_overrides, distributed):
         env[k], sources[k] = str(v), "card"
     for k, v in env_overrides.items():
         env[k], sources[k] = str(v), "additional-context"
-    pins = (card.get("docker_build_arg") or {}).get("PINS")   # as madengine's pin_set_of
-    if pins and "MAD_PIN_SET" not in env:
-        env["MAD_PIN_SET"], sources["MAD_PIN_SET"] = str(pins), "madengine"
     return env, sources
+
+
+def image_components(card, env):
+    """The image's builds for a card built from a named spec (MAD_IMAGE_COMPONENTS), as madengine's
+    build passes them; None for a hand-written Dockerfile."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import catalog
+    return catalog.components_of_card(card, env.get("MAD_GPU_ARCH"))
 
 
 def build(card, k8s, env_overrides, image, nnodes_override, timeout):
@@ -240,6 +245,9 @@ def build(card, k8s, env_overrides, image, nnodes_override, timeout):
 
     run_id = str(int(time.time()) % 100000000)
     env, sources = submit_environment(card, env_overrides, k8s.get("distributed"))
+    comps = image_components(card, env)
+    if comps and "MAD_IMAGE_COMPONENTS" not in env:
+        env["MAD_IMAGE_COMPONENTS"], sources["MAD_IMAGE_COMPONENTS"] = comps, "madengine"
     env["DOCKER_IMAGE_NAME"] = image
     sources["DOCKER_IMAGE_NAME"] = "madengine"
     if "LOG_PATH" not in env:

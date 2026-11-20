@@ -28,7 +28,7 @@ names every need nothing meets. Nothing is guessed: a capability the catalog doe
 is not assumed.
 
 CLI (from the MAD root):
-  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--engine E] [--build ENGINE@BUILD | --pin-set NAME]
+  recipe.py check   --recipes M.yaml --model NAME --arch ARCH [--engine E] [--build ENGINE@BUILD | --image NAME | --image-components C]
                     [--roles R,..]
   recipe.py explain ... (same arguments): the resolution of every role, as JSON
   recipe.py validate                      : the catalog's own references
@@ -66,8 +66,7 @@ def engine_builds(catalog):
     """{build: {arch: capabilities}}: every engine build that states what it runs.
 
     An image built from a named spec (compat/images/<image>.yaml) that selects an engine build
-    with `capabilities` in the matrix is <engine>@<image> (e.g. vllm@vllm-kimi-k3, as its pin set
-    was named); a matrix build with capabilities that no named spec selects is <component>=<key>;
+    with `capabilities` in the matrix is <engine>@<image> (e.g. vllm@vllm-kimi-k3); a matrix build with capabilities that no named spec selects is <component>=<key>;
     an engine the image's base provides keeps its entry in `kernels` (<engine>@<image>)."""
     out = dict(catalog.get("kernels") or {})
     comps = catalog.get("components") or {}
@@ -103,7 +102,11 @@ def build_of_components(catalog, components, engine):
                 return f"{name}@{image}"
         if f"{name}={key}" in builds:
             return f"{name}={key}"
-    return None
+    # An engine the image's base provides: the named spec whose builds the image holds.
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    import catalog as _catalog
+    image = _catalog.image_of_components(catalog, components)
+    return build_of_image(catalog, image, engine) if image else None
 
 
 def _merge(base, over):
@@ -254,10 +257,10 @@ def resolve_role(catalog, recipe, role, arch, build=None, engine="vllm", platfor
     return out
 
 
-def build_of_pin_set(catalog, pin_set):
-    """The engine build (<engine>@<image>) of an image named by its pin set / spec name, or None."""
-    found = [b for b in engine_builds(catalog) if "@" in b and b.split("@", 1)[-1] == pin_set
-             and "=" not in b]
+def build_of_image(catalog, image, engine=None):
+    """The engine build (<engine>@<image>) of the image built from named spec `image`, or None."""
+    found = [b for b in engine_builds(catalog) if "=" not in b and b.split("@", 1)[-1] == image
+             and (engine is None or engine_of(b) == engine)]
     return found[0] if len(found) == 1 else None
 
 
@@ -453,33 +456,30 @@ def validate(catalog):
     return bad
 
 
-def bringup(catalog, arch, pins_dir=None):
-    """What stands between an accelerator and a run: its compiler target, the pin sets that build
-    for it (and the components they pin there), the engine builds the catalog lists for it.
-    {"arch", "target", "pin_sets": {name: [components]}, "builds": [...], "missing": [...]}"""
-    import glob as _glob
-    pins_dir = pins_dir or os.path.join(MAD_ROOT, "docker", "pins")
+def bringup(catalog, arch):
+    """What stands between an accelerator and a run: its compiler target, the image specs that
+    build for it (compat/images: a base for it) and the builds they select there, the engine builds
+    the catalog lists for it.
+    {"arch", "target", "images": {name: [components]}, "builds": [...], "missing": [...]}"""
+    sys.path.insert(0, os.path.join(HERE, ".."))
+    import catalog as _catalog
     acc = (catalog.get("accelerators") or {}).get(arch)
-    out = {"arch": arch, "target": None, "pin_sets": {}, "builds": [], "missing": []}
+    out = {"arch": arch, "target": None, "images": {}, "builds": [], "missing": []}
     if acc is None:
         out["missing"].append(f"{arch} is not an accelerator in compat/hardware.yaml")
         return out
     out["target"] = acc.get("target", arch)
     if out["target"] == "tbd":
         out["missing"].append("no compiler target in the catalog yet (target: tbd)")
-    for f in sorted(_glob.glob(os.path.join(pins_dir, "*.json"))):
-        with open(f) as fh:
-            ps = json.load(fh)
-        if arch in (ps.get("gpu_archs") or []):
-            comps = [c for c, d in (ps.get("components") or {}).items()
-                     if isinstance(d, dict) and d.get("enabled") is not False
-                     and (not d.get("archs") or arch in d["archs"])]
-            out["pin_sets"][ps["name"]] = comps
+    for name, spec in (catalog.get(IMAGES_KEY) or {}).items():
+        base = (spec or {}).get("base")
+        if isinstance(base, dict) and arch in base:
+            out["images"][name] = list(_catalog.spec_components(spec, arch))
     out["builds"] = [b for b, per in engine_builds(catalog).items() if arch in (per or {})]
-    if not out["pin_sets"]:
-        out["missing"].append("no pin set builds an image for it (docker/pins gpu_archs)")
+    if not out["images"]:
+        out["missing"].append("no image spec builds for it (compat/images: a base for it)")
     if not out["builds"]:
-        out["missing"].append("no engine build lists what it runs there (compat/rocm.yaml kernels)")
+        out["missing"].append("no engine build lists what it runs there (compat/rocm.yaml capabilities or kernels)")
     return out
 
 
@@ -495,7 +495,7 @@ def main(argv=None):
         p.add_argument("--platform", default=os.environ.get("MAD_PLATFORM") or None,
                        help="the run's platform (MAD_PLATFORM): platform variants and memory requirements")
         p.add_argument("--build", help="ENGINE@BUILD, e.g. vllm@vllm-kimi-k3")
-        p.add_argument("--pin-set", help="the image's pin set / named spec (compat/images/<name>.yaml): its engine build")
+        p.add_argument("--image", help="the image's named spec (compat/images/<name>.yaml): its engine build")
         p.add_argument("--image-components", default=os.environ.get("MAD_IMAGE_COMPONENTS") or None,
                        help="the image's component builds (name=key,...; MAD_IMAGE_COMPONENTS): its engine build")
         p.add_argument("--roles", help="comma-separated (default: the roles the recipe declares)")
@@ -514,8 +514,8 @@ def main(argv=None):
     if a.cmd == "bringup":
         r = bringup(catalog, a.arch)
         print(f"{a.arch}: target {r['target']}")
-        for name, comps in r["pin_sets"].items():
-            print(f"  pin set {name}: {', '.join(comps)}")
+        for name, comps in r["images"].items():
+            print(f"  image {name}: {', '.join(comps)}")
         for b in r["builds"]:
             print(f"  engine build {b}")
         for m in r["missing"]:
@@ -540,11 +540,24 @@ def main(argv=None):
         return 0
     if a.image_components and not a.build:
         a.build = build_of_components(catalog, a.image_components, a.engine)
-    if a.pin_set and not a.build:
-        a.build = build_of_pin_set(catalog, a.pin_set)
         if a.build is None:
-            print(f"ERROR: {a.model}: the image's pin set {a.pin_set!r} has no entry in the capability "
-                  f"catalog (compat/rocm.yaml kernels), so what it can run is unknown", file=sys.stderr)
+            sys.path.insert(0, os.path.join(HERE, ".."))
+            import catalog as _catalog
+            comps = dict(p.split("=", 1) for p in a.image_components.split(",") if "=" in p)
+            image = _catalog.image_of_components(catalog, a.image_components)
+            other = build_of_image(catalog, image) if image else None
+            if other:
+                a.build = other           # another engine's image: refused below
+            elif a.engine in comps:
+                print(f"ERROR: {a.model}: the image's {a.engine} build {comps[a.engine]} states no capabilities "
+                      f"in the catalog (compat/rocm.yaml), so what it can run is unknown", file=sys.stderr)
+                return 1
+    if a.image and not a.build:
+        a.build = build_of_image(catalog, a.image, a.engine)
+        if a.build is None:
+            print(f"ERROR: {a.model}: the image {a.image!r} has no engine build in the capability "
+                  f"catalog (compat/rocm.yaml capabilities or kernels), so what it can run is unknown",
+                  file=sys.stderr)
             return 1
     engine = engine_of(a.build) if a.build else a.engine
     if a.build and engine != a.engine:

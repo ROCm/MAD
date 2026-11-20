@@ -60,7 +60,7 @@ class Registry(unittest.TestCase):
     def test_best_meets_the_slo_and_accuracy(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "reg.jsonl")
-            base = {"model": "DeepSeek-V3", "platform": "mi355x-ubb-8", "pin_set": "vllm-mori121", "launcher": "vllm_dissag",
+            base = {"model": "DeepSeek-V3", "platform": "mi355x-ubb-8", "image": "vllm-mori121", "launcher": "vllm_dissag",
                     "serving_type": "disagg", "slo": {"tpot_ms": 50}, "config": "run1/config.resolved.json"}
             R.record(path, dict(base, throughput=900, tpot_ms=40, accuracy={"gsm8k": 0.95}))
             R.record(path, dict(base, throughput=1200, tpot_ms=70, accuracy={"gsm8k": 0.95}))   # misses SLO

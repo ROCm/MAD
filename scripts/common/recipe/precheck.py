@@ -4,7 +4,7 @@ GPU is refused before the job waits in a queue. The launcher still checks on the
 (cluster_check_recipe); this only refuses earlier, when the target GPU is known at submit time.
 
     precheck.py --script scripts/<dir>/<launcher> --arch gfx950      (the run's env: MODEL_NAME,
-                                                                       MAD_PIN_SET, MAD_PLATFORM, ...)
+                                                                       MAD_IMAGE_COMPONENTS, MAD_PLATFORM, ...)
 Exit 0: resolves, or nothing to check; 1: refused (the reason on stderr).
 """
 import argparse
@@ -37,8 +37,8 @@ def main(argv=None):
     scripts = os.path.dirname(os.path.dirname(HERE))
     argv = ["check", "--recipes", os.path.join(scripts, recipes), "--model", env["MODEL_NAME"],
             "--arch", a.arch, "--engine", engine]
-    if env.get("MAD_PIN_SET"):
-        argv += ["--pin-set", env["MAD_PIN_SET"]]
+    if env.get("MAD_IMAGE_COMPONENTS"):
+        argv += ["--image-components", env["MAD_IMAGE_COMPONENTS"]]
     if roles:
         argv += ["--roles", roles]
     if flags_var:

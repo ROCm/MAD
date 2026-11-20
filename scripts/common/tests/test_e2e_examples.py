@@ -11,6 +11,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+
+import yaml
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -132,6 +134,81 @@ class Reproductions(unittest.TestCase):
                 self.assertEqual(arch, src_arch)
                 self.assertTrue(want and any(want), "the source card runs nothing")
                 self.assertEqual(got, want)
+
+
+try:
+    from madengine.deployment.slurm_multi_env import emit_config
+    from madengine.execution import image_spec as madengine_image_spec
+    from madengine.stack.wheels import Wheel
+except ImportError:  # madengine is optional: the generalization is madengine's build step
+    emit_config = None
+
+MAD = SCRIPTS.parent
+# A stack someone built by hand (a Dockerfile of their own): the frameworks vLLM stack, but a newer
+# vLLM than compat lists, and a private build of their own.
+HAND_BUILT = {"python": "3.14.1", "rocm_version": "10.1.0", "packages": {
+    "torch": "2.13.0+rocm10.1.0", "torchvision": "0.28.0+rocm10.1.0",
+    "amd-aiter": "0.1.22.post2.dev0+gb4d9154d1.d20261002", "flash-attn": "2.8.3",
+    "vllm": "0.30.0.dev0+rocm10.1.0.g1234abcd.d20261101", "my-kernels": "0.1+g0000001", "numpy": "2.3.0"}}
+NEW_VLLM_URL = "https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.30.0.dev0-cp314-cp314-linux_x86_64.whl"
+
+
+def served(name, version):
+    """The authorized index, as madengine's build reads it: it serves the newer vLLM."""
+    if (name, version) == ("vllm", HAND_BUILT["packages"]["vllm"]):
+        return "frameworks_vllm", Wheel(name=name, version=version, python="cp314", platform="linux_x86_64",
+                                        url=NEW_VLLM_URL, requires=["torch==2.13.0+rocm10.1.0", "amd-aiter",
+                                                                    "flash-attn==2.8.3", "transformers>=5"])
+    return None
+
+
+@unittest.skipIf(emit_config is None, "madengine not importable: the generalization runs in its build")
+class FromABuildToItsGeneralizedForm(unittest.TestCase):
+    """The build manifest is the specific instance; what the build writes beside it is the
+    generalized form: the card on the shared layers, its image as a spec over compat, and what compat
+    lacks merged into a copy of the matrix (docs/e2e-examples.md, "From a build to the matrix")."""
+
+    def setUp(self):
+        (MAD / ".madengine").mkdir(exist_ok=True)              # where madengine writes (ignored by git)
+        self.out = Path(tempfile.mkdtemp(dir=MAD / ".madengine"))
+        self._cwd = os.getcwd()
+        os.chdir(MAD)                          # madengine builds from the MAD root
+        c = card("vllm_dissag", "pyt_e2e_llama-3.1-405b_disagg")
+        self.model = dict(c, name="vllm_dissag/" + c["name"], scripts="scripts/vllm_dissag/" + c["scripts"])
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        shutil.rmtree(self.out)
+
+    def written(self, got):
+        return yaml.safe_load(Path(got["path"]).read_text())
+
+    def test_a_card_built_from_its_spec_is_already_general(self):
+        spec = madengine_image_spec.effective_image_spec(self.model, {}, str(MAD))
+        plan = madengine_image_spec.resolve(spec, "AMD", "gfx942", root=str(MAD), name=self.model["name"])
+        got = emit_config(self.model, self.out, {"build_plan": plan.to_dict()})
+        d = self.written(got)
+        self.assertEqual(d["defaults"], ["../../../scripts/common/workloads/base.yaml",
+                                         "../../../scripts/common/workloads/serve/vllm-disagg-nixl.yaml",
+                                         "../../../scripts/common/workloads/bench/sweep.yaml"])
+        self.assertEqual(d["model"]["env"]["MODEL_NAME"], "Llama-3.1-405B-Instruct-FP8-KV")   # its own part
+        self.assertEqual(d["image"]["spec"]["components"]["vllm"], "dccb412e+5ebb40fa@di")    # vllm-mori121's
+        self.assertNotIn("compat", got)                                                       # nothing to add
+
+    def test_a_hand_built_image_adds_what_it_proves_to_compat(self):
+        build = {"base_docker": "rocm/base:10.1", "image_info": HAND_BUILT}
+        got = emit_config(self.model, self.out, build, served)
+        d = self.written(got)
+        spec = d["image"]["spec"]
+        self.assertEqual(spec["base"], "rocm/base:10.1")
+        self.assertEqual(spec["components"]["torch"], "2.13.0+rocm10.1.0")                    # compat's builds
+        self.assertEqual(spec["components"]["vllm"], HAND_BUILT["packages"]["vllm"] + "@frameworks_vllm")  # and the new one
+        self.assertEqual([u["component"] for u in d["image"]["unresolved"]], ["my-kernels"])  # not invented
+        matrix = yaml.safe_load(Path(got["compat"]).read_text())
+        new = matrix["components"]["vllm"][HAND_BUILT["packages"]["vllm"] + "@frameworks_vllm"]
+        self.assertEqual((new["url"], new["requires"]),
+                         (NEW_VLLM_URL, ["torch==2.13.0+rocm10.1.0", "amd-aiter", "flash-attn==2.8.3"]))
+        self.assertNotIn("numpy", matrix["components"])            # plain index packages: pip's job
 
 
 class Examples(unittest.TestCase):

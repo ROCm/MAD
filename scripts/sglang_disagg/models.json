@@ -708,16 +708,12 @@
     {
         "name": "pyt_e2e_deepseek-r1_sglang",
         "url": "",
-        "dockerfile": "../../docker/di_sglang",
-        "dockercontext": ".",
+        "image_spec": "${images.sglang-disagg}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "sglang-disagg"
-        },
         "multiple_results": "perf_DeepSeek-R1.csv",
         "tags": [
             "pyt",
@@ -744,16 +740,12 @@
     {
         "name": "pyt_e2e_qwen3-32b_sglang",
         "url": "",
-        "dockerfile": "../../docker/di_sglang",
-        "dockercontext": ".",
+        "image_spec": "${images.sglang-disagg}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "sglang-disagg"
-        },
         "multiple_results": "perf_Qwen3-32B.csv",
         "tags": [
             "pyt",

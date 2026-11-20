@@ -63,6 +63,45 @@ def load(compat=None):
     return out
 
 
+def spec_components(spec, arch=None):
+    """{component: build key} a named spec selects (its variants.<arch> laid over it when given)."""
+    comps = dict((spec or {}).get("components") or {})
+    if arch:
+        comps.update(((spec or {}).get("variants") or {}).get(arch, {}).get("components") or {})
+    return {str(k): str(v) for k, v in comps.items()}
+
+
+def image_of_card(card, catalog=None):
+    """The named spec a card builds from ("image_spec": "${images.<name>}", or extending one), or None."""
+    import re
+    value = card.get("image_spec")
+    if isinstance(value, dict):
+        value = value.get("extends")
+    m = re.fullmatch(r"\$\{images\.([A-Za-z0-9_.-]+)\}", str(value or ""))
+    return m.group(1) if m else None
+
+
+def components_of_card(card, arch=None, catalog=None):
+    """MAD_IMAGE_COMPONENTS for a card built from a named spec (name=key,...), as madengine passes an
+    image_spec image's builds to the run; None for a card with a hand-written Dockerfile."""
+    catalog = catalog if catalog is not None else load(COMPAT)
+    name = image_of_card(card)
+    spec = (catalog.get(IMAGES_KEY) or {}).get(name) if name else None
+    if not spec:
+        return None
+    return ",".join(f"{k}={v}" for k, v in sorted(spec_components(spec, arch).items())) or None   # by name
+
+
+def image_of_components(catalog, components):
+    """The named spec whose selected builds an image holds (MAD_IMAGE_COMPONENTS), or None."""
+    have = dict(p.split("=", 1) for p in (components or "").split(",") if "=" in p)
+    for name, spec in (catalog.get(IMAGES_KEY) or {}).items():
+        sel = spec_components(spec)
+        if sel and all(have.get(k) == v for k, v in sel.items()):
+            return name
+    return None
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] != ["dump"]:

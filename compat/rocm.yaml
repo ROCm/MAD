@@ -159,6 +159,38 @@ components:
       - amd-aiter
       note: vLLM for Kimi-K3. Carried as a patch on upstream.
       fork_commit: 862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          - int4_g32
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          convert:
+            mxfp4: int4_g32
+          placement:
+          - hbm
+          evidence: Kimi-K3 / Kimi-K3-MXFP4 2P2D on MI300X (MoE requantized to int4 for SiTUv2)
+        gfx950:
+          weights:
+          - bf16
+          - fp8_e4m3
+          - mxfp4
+          activations:
+          - bf16
+          - fp8_e4m3
+          - mxfp4
+          kv_cache:
+          - bf16
+          - fp8_e4m3
+          placement:
+          - hbm
+          evidence: Kimi-K3-MXFP4-MI355X (bring-up recipe, not validated)
     dccb412e+5ebb40fa@di:
       source:
         repo: https://github.com/vllm-project/vllm.git
@@ -177,6 +209,20 @@ components:
       - amd-aiter
       note: 'Wide-EP multi-pod PD WRITE mode with the MoRIIO disagg fixes (#39276 notify, #41751 LL split, DP-rank hash-failsafe) native. Branch tip on 2026-11-03 (last commit 2026-06-26). Carried as a patch on upstream until it is merged there.'
       fork_commit: 1ba8a2a905a4dac96f74a6f0fba8f39ef8e94a31
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          placement:
+          - hbm
+          evidence: DeepSeek-V3/R1 and Llama FP8 disagg cards on MI300X
     d626108b+e055be85@di:
       source:
         repo: https://github.com/vllm-project/vllm.git
@@ -195,6 +241,20 @@ components:
       - amd-aiter
       note: vLLM for GLM-5.1 disaggregated serving. Carried as a patch on upstream.
       fork_commit: 094820b5deeb1b93733586ca8942589e385a25dc
+      capabilities:
+        gfx942:
+          weights:
+          - bf16
+          - fp8_e4m3fnuz
+          activations:
+          - bf16
+          - fp8_e4m3fnuz
+          kv_cache:
+          - bf16
+          - fp8_e4m3fnuz
+          placement:
+          - hbm
+          evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
 
   # KV-cache transfer backends, built from source on the SGLang ROCm 10 image
   # (see scripts/kvcache_transfer_bench/image_spec.yaml).
@@ -449,38 +509,10 @@ components:
 
 # What an engine build supports per target: weight, activation and KV-cache formats, where
 # weights can live, and conversions it performs (a format the target cannot compute on,
-# requantized to one it can). Keyed <engine>@<image> (the image's pin set or named spec). A build in
+# requantized to one it can). Keyed <engine>@<image> (the image's named spec). A build in
 # components may state the same on itself (capabilities:), when the engine is a build of the matrix;
 # recipe.py then names it <engine>@<image> for a named spec selecting it, else <engine>=<key>.
 kernels:
-  vllm@vllm-kimi-k3:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz, int4_g32]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      convert: {mxfp4: int4_g32}
-      placement: [hbm]
-      evidence: Kimi-K3 / Kimi-K3-MXFP4 2P2D on MI300X (MoE requantized to int4 for SiTUv2)
-    gfx950:
-      weights: [bf16, fp8_e4m3, mxfp4]
-      activations: [bf16, fp8_e4m3, mxfp4]
-      kv_cache: [bf16, fp8_e4m3]
-      placement: [hbm]
-      evidence: Kimi-K3-MXFP4-MI355X (bring-up recipe, not validated)
-  vllm@vllm-mori121:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      placement: [hbm]
-      evidence: DeepSeek-V3/R1 and Llama FP8 disagg cards on MI300X
-  vllm@vllm-glm51:
-    gfx942:
-      weights: [bf16, fp8_e4m3fnuz]
-      activations: [bf16, fp8_e4m3fnuz]
-      kv_cache: [bf16, fp8_e4m3fnuz]
-      placement: [hbm]
-      evidence: GLM-5.1-FP8 2P/2D and 4P/4D on MI300X
   sglang@sglang-disagg:
     gfx942:
       weights: [bf16, fp8_e4m3fnuz]

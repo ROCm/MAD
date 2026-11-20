@@ -189,16 +189,20 @@ python3 scripts/common/recipe/recipe.py validate      # the catalog's own refere
 
 Every vLLM and SGLang recipe declares its roles, except gpt-oss-120b (whose MXFP4 support in
 the v1.2.1 vLLM build on gfx942 is not yet recorded in the catalog). The tests require each
-card's recipe to resolve, with the card's own pin set, on exactly the GPUs the card runs on.
+card's recipe to resolve, with the engine build of the card's image spec, on exactly the GPUs the
+card runs on.
 
 The launchers run the same check right after the GPU-architecture gate
 (`cluster_check_recipe` in `cluster.sh`, told the launcher's engine; the colocated launcher
 also passes the card's `COLOCATED_EXTRA_ARGS`, where its engine flags live), against the
 detected GPU and the image's engine
-build: `MAD_ENGINE_BUILD=ENGINE@PINSET` when set, else `MAD_PIN_SET`, which madengine (every
-path) and the pipeline export from the card's `PINS` build argument. A pin set with no catalog
-entry is refused for a recipe that declares roles. With neither (a plain `sbatch` of an image
-built by hand), the first catalog build for that GPU that resolves the recipe is used, and named. The resolution is
+build: `MAD_ENGINE_BUILD=ENGINE@IMAGE` when set, else `MAD_IMAGE_COMPONENTS`, the builds an image
+built from a spec holds, which madengine (every path) and the pipeline pass from the build plan.
+The engine build is the image's own (`vllm@vllm-kimi-k3`: the vLLM build the vllm-kimi-k3 spec
+selects, with the capabilities it states in the matrix); an image whose engine build states none,
+or an image of another engine, is refused for a recipe that declares roles. With neither (a plain
+`sbatch` of an image built by hand), the first catalog build for that GPU that resolves the recipe
+is used, and named. The resolution is
 recorded in `config.resolved.json` as `MAD_RECIPE_ROLES`. `RECIPE_CHECK=0` skips the check;
 a recipe without `roles:` passes as before.
 
@@ -358,14 +362,14 @@ whose weights do not fit. It ignores overlap and kernels: it ranks, it does not 
 exist, `perf/calibration.yaml` (per platform: `efficiency`, measured / modelled) corrects it.
 
 `scripts/common/perf/registry.py` records measured runs (model, platform, launcher, the card's
-shape, pin set, serving type, SLO, accuracy, throughput, what reproduces them, and `apply`: the
+shape, image (the named spec), serving type, SLO, accuracy, throughput, what reproduces them, and `apply`: the
 recipe keys that made them). `best` returns the highest throughput meeting its SLO and an accuracy
 floor; `promote` copies it into `scripts/common/perf/best_known.jsonl`.
 
 **The best-known configuration is what MAD runs by default**, through STANDALONE and madengine
 alike: the launcher lays the matching record's `apply` over the recipe (`models.py for_job`) --
 same model and launcher, the run's platform (`MAD_PLATFORM`, else a platform of the detected GPU
-and GPU count), the card's shape, and the pin set when the record names one -- so the job's
+and GPU count), the card's shape, and the image when the record names one -- so the job's
 recipe file and every container get it, and `config.resolved.json` names it (`MAD_BEST_KNOWN`).
 It is a layer like the others: a value passed through config still wins, and `MAD_BEST_CONFIG=0`
 runs the recipe as written (`MAD_BEST_REGISTRY` names another file). A record never changes the
@@ -379,7 +383,7 @@ Each is a data change plus the check that proves it; no launcher or role script 
 | To add | Change | Proves it |
 |---|---|---|
 | An accelerator (GPU generation) | `compat/hardware.yaml accelerators`: target, products (HBM), matmul formats, peak TFLOPS, partition sizes | `recipe.py validate`; `recipe.py bringup --arch X` lists what is still missing |
-| An engine build for it | a pin set's `gpu_archs` + base image (`docker/pins`), and `kernels.<engine>@<pin set>.<arch>` (formats it runs, conversions, placements) | `pins.py validate` (refuses an arch without a kernels entry); recipe tests |
+| An engine build for it | the build in `compat/rocm.yaml components` with its `capabilities.<arch>` (formats it runs, conversions, placements; `kernels.<engine>@<image>` for an engine the base image provides), and a base for the arch in the stack's `compat/images/<stack>.yaml` | `madengine build --explain` (the spec composes); `recipe.py bringup --arch X`; recipe tests |
 | A node type | `platforms`: accelerator, product, GPUs per node, scale-up domain, NICs per GPU and speeds | `recipe.py validate`; `platform_assert.sh`; `MAD_PLATFORM=<name>` on a run |
 | A NIC family | `fabrics`: match names, GID, interface, drivers, KV NIC, rails, RDMA QoS, own settings; add it to `fabric_detection.order` | `cluster_fabric_assert.sh` with a fake sysfs tree of that node |
 | A site | `clusters` example, or a site file passed as `MAD_CLUSTER_FILE` | `platform_assert.sh` |

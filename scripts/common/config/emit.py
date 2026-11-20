@@ -139,7 +139,7 @@ def compose(catalog, card, at=None):
     if card.get("_image_unresolved"):
         image["unresolved"] = card["_image_unresolved"]
     if image:
-        out["image"] = image
+        out["image"] = _escape(image)        # written as text: ${images.<stack>} is madengine's reference
     if chosen:
         out["defaults"] = [os.path.relpath(p, at) for p in chosen]
     for section in ("recipes", "connectors"):          # the card's own, when its file has them

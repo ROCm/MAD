@@ -35,8 +35,9 @@ _has "$out" "resolves with vllm@vllm-kimi-k3" "no build named: the catalog build
 out="$(gate Kimi-K3 server MAD_GPU_ARCH=gfx942)"
 _has "$out" "server weights=int4_g32" "the colocated launcher's server role"
 
-out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=vllm-kimi-k3)"
-_has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "MAD_PIN_SET names the image's build (as madengine sets it)"
+KIMI_IMAGE="mori=fe12a11a@di,amd-aiter=68e42f5f@di,flydsl=0.2.4@di,vllm=9a7ae4b8+cd0d2656@di,vllm-router=1d10e71f+0cc1c443@di,ucx=da3fac2a@di,googletest=1.14.0@di,rixl=f33a5599@di,rocshmem=9c43b232@di,deepep=0f63d3e9@di-cx7"   # the vllm-kimi-k3 spec's builds (compat/images)
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_IMAGE_COMPONENTS="$KIMI_IMAGE")"
+_has "$out" "resolves on gfx942 with vllm@vllm-kimi-k3" "the image's builds name its engine build (as madengine passes them)"
 # An image built from a named spec: its vLLM build states its capabilities in the matrix (a fixture
 # catalog: the real one, plus a spec "stack-x" selecting such a build).
 mkdir -p "$TMP/cat/images"
@@ -45,9 +46,9 @@ import copy, sys, yaml
 sys.path.insert(0, sys.argv[1])
 import catalog
 c = catalog.load(catalog.COMPAT)
-c.pop(catalog.IMAGES_KEY, None)
+images = c.pop(catalog.IMAGES_KEY)
 c["components"].setdefault("vllm", {})["1.0+k3@x"] = {"source": {"repo": "r", "commit": "c"},
-                                                     "capabilities": copy.deepcopy(c["kernels"]["vllm@vllm-kimi-k3"])}
+                                                     "capabilities": copy.deepcopy(c["components"]["vllm"][images["vllm-kimi-k3"]["components"]["vllm"]]["capabilities"])}
 yaml.safe_dump(c, open(sys.argv[2] + "/catalog.yaml", "w"))
 yaml.safe_dump({"components": {"vllm": "1.0+k3@x"}}, open(sys.argv[2] + "/images/stack-x.yaml", "w"))
 PY
@@ -56,9 +57,9 @@ _has "$out" "resolves on gfx942 with vllm@stack-x" "MAD_IMAGE_COMPONENTS (an ima
 
 echo ""
 echo "=== refuses ==="
-out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_PIN_SET=no-such-pins)"
-_has "$out" "rc=1" "a pin set the catalog has no entry for"
-_has "$out" "has no entry in the capability catalog" "...saying so"
+out="$(gate Kimi-K3-MXFP4 "" MAD_GPU_ARCH=gfx942 MAD_IMAGE_COMPONENTS=vllm=0.0.0@nowhere)"
+_has "$out" "rc=1" "an image whose engine build states no capabilities: what it can run is unknown"
+_has "$out" "states no capabilities" "...saying so"
 out="$(gate Kimi-K3-MXFP4-MI355X "" MAD_GPU_ARCH=gfx942 MAD_ENGINE_BUILD=vllm@vllm-kimi-k3)"
 _has "$out" "rc=1" "a recipe pinned to gfx950 (alias), on gfx942"
 _has "$out" "written for gfx950 (GPU_ARCHS), not gfx942" "naming its declared accelerators"
@@ -76,7 +77,7 @@ _has "$(gate Kimi-K3 server MAD_GPU_ARCH=gfx950 GATE_FLAGS="$INT4")" "rc=1" "col
 _has "$(gate Kimi-K3 server MAD_GPU_ARCH=gfx942 GATE_FLAGS="$INT4")" "rc=0" "...and agree on gfx942"
 SG="$DIR/sglang_disagg/models.yaml"
 _has "$(GATE_YAML="$SG" gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx950 GATE_ENGINE=sglang)" "resolves with sglang@sglang-disagg" "the launcher's engine picks the catalog build"
-_has "$(GATE_YAML="$SG" gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx942 GATE_ENGINE=sglang MAD_PIN_SET=vllm-kimi-k3)" "is not a sglang build" "a pin set of another engine is refused"
+_has "$(GATE_YAML="$SG" gate DeepSeek-V3 "" MAD_GPU_ARCH=gfx942 GATE_ENGINE=sglang MAD_IMAGE_COMPONENTS="$KIMI_IMAGE")" "is not a sglang build" "an image of another engine is refused"
 
 echo ""
 echo "=== does not gate ==="

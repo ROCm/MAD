@@ -25,6 +25,8 @@ VLLM_RECIPES = os.path.join(SCRIPTS, "vllm_dissag", "models.yaml")
 KIMI_BUILD = "vllm@vllm-kimi-k3"
 INT4_ARG = """--quantization-config '{"moe":{"weight":"int4_per_group_32"}}'"""
 
+sys.path.insert(0, os.path.join(SCRIPTS, "common"))
+import catalog  # noqa: E402
 CAT = R.load_catalog()
 with open(VLLM_RECIPES) as _f:
     _RAW = yaml.safe_load(_f)
@@ -68,7 +70,8 @@ class Catalog(unittest.TestCase):
 
     def test_validate_names_a_bad_reference(self):
         bad = copy.deepcopy(CAT)
-        bad["kernels"][KIMI_BUILD]["gfx942"]["weights"].append("fp5_imaginary")
+        key = bad[R.IMAGES_KEY]["vllm-kimi-k3"]["components"]["vllm"]      # its capabilities: on its build
+        bad["components"]["vllm"][key]["capabilities"]["gfx942"]["weights"].append("fp5_imaginary")
         bad["kernels"]["vllm@x"] = {"gfx000": {}}
         problems = R.validate(bad)
         self.assertTrue(any("fp5_imaginary" in p for p in problems), problems)
@@ -79,7 +82,7 @@ def with_spec_build(cat, image="stack-x", key="1.0+k3@x"):
     """A catalog whose named spec `image` selects a vLLM build stating the Kimi build's capabilities."""
     cat = copy.deepcopy(cat)
     cat.setdefault("components", {}).setdefault("vllm", {})[key] = {
-        "source": {"repo": "r", "commit": "c"}, "capabilities": copy.deepcopy(cat["kernels"][KIMI_BUILD])}
+        "source": {"repo": "r", "commit": "c"}, "capabilities": copy.deepcopy(R.engine_builds(cat)[KIMI_BUILD])}
     cat.setdefault(R.IMAGES_KEY, {})[image] = {"components": {"vllm": key}}
     return cat
 
@@ -90,9 +93,10 @@ class EngineBuilds(unittest.TestCase):
     def test_kernels_and_spec_builds_are_engine_builds(self):
         cat = with_spec_build(CAT)
         builds = R.engine_builds(cat)
-        self.assertIn(KIMI_BUILD, builds)                         # kernels: <engine>@<image>
+        self.assertIn(KIMI_BUILD, builds)                         # the vllm-kimi-k3 spec's vLLM build
+        self.assertIn("sglang@sglang-disagg", builds)             # kernels: an engine the base provides
         self.assertIs(builds["vllm@stack-x"], cat["components"]["vllm"]["1.0+k3@x"]["capabilities"])
-        self.assertEqual(R.build_of_pin_set(cat, "stack-x"), "vllm@stack-x")
+        self.assertEqual(R.build_of_image(cat, "stack-x"), "vllm@stack-x")
 
     def test_the_image_components_name_the_build(self):
         cat = with_spec_build(CAT)
@@ -113,27 +117,26 @@ class KimiRecipes(unittest.TestCase):
     """The declared roles reach the verdict the hand-written GPU_ARCHS states."""
 
     def test_every_card_resolves_exactly_where_it_runs(self):
-        """A card runs on its pin set's GPUs it does not skip; there its recipe's variant for the GPU
-        (GPU_ARCHS) must resolve with the card's own build, and where the recipe does not cover a
-        GPU the card does not skip, the check must refuse."""
+        """A card runs on the GPUs its image spec has a base for and it does not skip; there its
+        recipe's variant for the GPU (GPU_ARCHS) must resolve with the image's own engine build, and
+        where the recipe does not cover a GPU the card does not skip, the check must refuse."""
         checked = 0
         for path in glob.glob(os.path.join(SCRIPTS, "*", "models.json")):
             with open(path) as f:
                 cards = json.load(f)
             for card in cards:
                 model = (card.get("env_vars") or {}).get("MODEL_NAME")
-                pins = (card.get("docker_build_arg") or {}).get("PINS")
+                image = catalog.image_of_card(card)
                 recipe_file = (card.get("env_vars") or {}).get("MODELS_YAML") or (
                     VLLM_RECIPES if "vllm" in os.path.basename(os.path.dirname(path))
                     else os.path.join(os.path.dirname(path), "models.yaml"))
-                if not (model and pins) or not os.path.isfile(recipe_file):
+                if not (model and image) or not os.path.isfile(recipe_file):
                     continue
                 with open(recipe_file) as f:
                     raw = yaml.safe_load(f) or {}
                 if not (R.models.effective(raw, model) or {}).get("roles"):
                     continue
-                with open(os.path.join(MAD_ROOT, "docker", "pins", pins + ".json")) as f:
-                    pin_archs = json.load(f)["gpu_archs"]
+                image_archs = list((CAT[R.IMAGES_KEY][image].get("base") or {}))
                 skip = str(card.get("skip_gpu_arch") or "").replace(",", " ").split()
                 roles = ["server"] if "vllm_multinode" in path else None
                 for arch in ("gfx942", "gfx950"):
@@ -141,10 +144,10 @@ class KimiRecipes(unittest.TestCase):
                     only = str((recipe.get("env") or {}).get("GPU_ARCHS", "")).replace(",", " ").split()
                     if arch in skip:
                         continue          # a card may run on fewer GPUs than its recipe supports
-                    runs = arch in pin_archs and (not only or arch in only)
+                    runs = arch in image_archs and (not only or arch in only)
                     with self.subTest(card=card["name"], arch=arch):
                         flags = (card.get("env_vars") or {}).get("COLOCATED_EXTRA_ARGS", "") if roles else None
-                        _, problems = R.check(CAT, recipe, arch, R.build_of_pin_set(CAT, pins), roles, flags=flags)
+                        _, problems = R.check(CAT, recipe, arch, R.build_of_image(CAT, image), roles, flags=flags)
                         self.assertEqual(not problems, runs, problems)
                         checked += 1
         self.assertGreater(checked, 60)
@@ -289,13 +292,13 @@ class Lora(unittest.TestCase):
 class BringUp(unittest.TestCase):
     def test_cdna5_lists_every_gap(self):
         r = R.bringup(CAT, "cdna5")
-        self.assertEqual((r["pin_sets"], r["builds"]), ({}, []))
-        self.assertEqual(len(r["missing"]), 3)          # target, pin set, engine build
+        self.assertEqual((r["images"], r["builds"]), ({}, []))
+        self.assertEqual(len(r["missing"]), 3)          # target, image spec, engine build
 
     def test_gfx950_is_ready(self):
         r = R.bringup(CAT, "gfx950")
         self.assertEqual(r["missing"], [])
-        self.assertIn("vllm-kimi-k3", r["pin_sets"])
+        self.assertIn("vllm-kimi-k3", r["images"])
         self.assertIn("sglang@sglang-disagg", r["builds"])
 
 

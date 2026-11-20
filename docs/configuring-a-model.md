@@ -20,7 +20,7 @@ This is unchanged:
 
 ```json
 {"name": "pyt_vllm_disagg_mori_deepseek-v3", "scripts": "run_xPyD_models.slurm",
- "dockerfile": "../../docker/di_vllm", "docker_build_arg": {"PINS": "vllm-mori121"},
+ "image_spec": "${images.vllm-mori121}",
  "env_vars": {"MODEL_NAME": "DeepSeek-V3", "xP": "1", "yD": "1"}, ...}
 ```
 

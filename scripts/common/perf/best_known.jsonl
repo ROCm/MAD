@@ -1,6 +1,6 @@
 # Best-known configurations MAD runs by default (scripts/common/recipe/models.py for_job): one JSON
 # object per line, from measured runs (perf/registry.py record). A record applies to a run of
 # `model` through `launcher` on `platform` (or a node of its accelerator and GPU count) with the
-# card's `shape` (e.g. {"xP": 1, "yD": 1}) and, when given, `pin_set`; its `apply` (env, prefill,
+# card's `shape` (e.g. {"xP": 1, "yD": 1}) and, when given, `image` (the named spec); its `apply` (env, prefill,
 # decode, ... -- recipe keys) is laid over the recipe. Values passed through config still win;
 # MAD_BEST_CONFIG=0 runs the recipe as written. Empty until runs are recorded.

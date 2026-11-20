@@ -136,8 +136,9 @@ def best_record(name, env=None):
     """The best-known configuration for this run of NAME, or None: a record of the registry
     (MAD_BEST_REGISTRY, default perf/best_known.jsonl) for this model and launcher (MAD_LAUNCHER),
     on this platform (MAD_PLATFORM; else a platform with the detected accelerator, MAD_GPU_ARCH,
-    and GPUS_PER_NODE), with the card's shape and, when the record names one, pin set
-    (MAD_PIN_SET); the highest throughput among those. MAD_BEST_CONFIG=0: none."""
+    and GPUS_PER_NODE), with the card's shape and, when the record names one, image (the named
+    spec whose builds the run's image holds, MAD_IMAGE_COMPONENTS); the highest throughput among
+    those. MAD_BEST_CONFIG=0: none."""
     env = os.environ if env is None else env
     if env.get("MAD_BEST_CONFIG", "1") == "0" or not name:
         return None
@@ -159,9 +160,14 @@ def best_record(name, env=None):
                 and str(p.get("gpus_per_node")) == str(env.get("GPUS_PER_NODE", p.get("gpus_per_node"))))
     def shape_ok(r):
         return all(str(env.get(k, "")) == str(v) for k, v in (r.get("shape") or {}).items())
-    def pins_ok(r):
-        return not r.get("pin_set") or r["pin_set"] == env.get("MAD_PIN_SET")
-    rows = [r for r in rows if platform_ok(r) and shape_ok(r) and pins_ok(r)]
+    def image_ok(r):
+        if not r.get("image"):
+            return True
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        import catalog
+        return r["image"] == catalog.image_of_components(catalog.load(catalog.COMPAT),
+                                                         env.get("MAD_IMAGE_COMPONENTS", ""))
+    rows = [r for r in rows if platform_ok(r) and shape_ok(r) and image_ok(r)]
     return max(rows, key=lambda r: r.get("throughput", 0)) if rows else None
 
 

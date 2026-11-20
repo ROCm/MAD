@@ -633,8 +633,8 @@ cluster_gpu_arch_for_recipe() {
 # GPU_ARCH_CHECK=0 bypasses the check, for bringing up a recipe on a new GPU.
 # cluster_check_recipe MODELS_YAML MODEL ENGINE [ROLES [FLAGS]]: resolve the recipe's declared serving roles
 # (models.yaml `roles:`) against this allocation's GPU and the image's engine build -- named by
-# MAD_ENGINE_BUILD (ENGINE@PINSET), else by MAD_PIN_SET, which madengine and the pipeline set
-# from the card's PINS build arg -- using scripts/common/recipe/recipe.py with the
+# MAD_ENGINE_BUILD (ENGINE@IMAGE), else by MAD_IMAGE_COMPONENTS (the image's builds, which madengine
+# and the pipeline pass for an image built from a spec) -- using scripts/common/recipe/recipe.py with the
 # capability catalog in compat/ (scripts/common/catalog.py). A recipe that declares no roles passes. A refusal
 # names what the hardware or build lacks. FLAGS: the engine flags of roles the recipe holds no
 # flags for (colocated serving: the card's COLOCATED_EXTRA_ARGS). RECIPE_CHECK=0 skips it. The resolution is recorded
@@ -658,7 +658,7 @@ cluster_check_recipe() {
     exports="$(mktemp)"
     out="$(python3 "$tool" check --catalog "$catalog" --recipes "$yaml" --model "$model" --exports "$exports" \
            --arch "$MAD_GPU_ARCH" ${MAD_ENGINE_BUILD:+--build "$MAD_ENGINE_BUILD"} \
-           ${MAD_PIN_SET:+--pin-set "$MAD_PIN_SET"} ${roles:+--roles "$roles"} \
+           ${MAD_IMAGE_COMPONENTS:+--image-components "$MAD_IMAGE_COMPONENTS"} ${roles:+--roles "$roles"} \
            ${5+--flags "$flags"} --engine "$engine" 2>&1)"; rc=$?
     [ -n "$out" ] && printf '%s\n' "$out"
     # 2: no such recipe -- whether the model needs one is the launcher's check, not this one.
@@ -679,7 +679,7 @@ cluster_check_recipe() {
         return 0
     fi
     rm -f "$exports"
-    echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}}${MAD_PIN_SET:+ (pin set ${MAD_PIN_SET})}${MAD_IMAGE_COMPONENTS:+ (image builds ${MAD_IMAGE_COMPONENTS})} (above)." >&2
+    echo "x ${model}'s roles do not resolve on ${MAD_GPU_ARCH}${MAD_ENGINE_BUILD:+ with ${MAD_ENGINE_BUILD}}${MAD_IMAGE_COMPONENTS:+ with the builds of its image} (above)." >&2
     echo "  Use the model's recipe for this GPU, or RECIPE_CHECK=0 to run it anyway." >&2
     return 1
 }

@@ -101,12 +101,15 @@ def cards_of(catalog, a):
 
 def submitted_env(card, catalog):
     """The card's env as it is submitted (the launcher applies its workload file itself, MAD_CONFIG,
-    as it does without madengine). A workload card also gets MAD_PIN_SET, as madengine's submit
-    environment gives it."""
+    as it does without madengine), with the image's builds for a card built from a named spec
+    (MAD_IMAGE_COMPONENTS), as madengine's build passes them."""
     env = {k: str(v) for k, v in (card.get("env_vars") or {}).items()}
-    pins = (card.get("docker_build_arg") or {}).get("PINS")
-    if env.get("MAD_CONFIG") and pins:
-        env.setdefault("MAD_PIN_SET", pins)
+    sys.path.insert(0, str(SCRIPTS / "common"))
+    import catalog as _catalog
+    comps = _catalog.components_of_card(card, env.get("MAD_GPU_ARCH") or gpu_arch(card),
+                                        _catalog.load(str(COMPAT)))
+    if comps:
+        env.setdefault("MAD_IMAGE_COMPONENTS", comps)
     return env
 
 
@@ -503,9 +506,9 @@ def emitted_equivalence(a):
                     on["env_vars"] = dict(on.get("env_vars") or {}, MAD_GPU_ARCH=arch)
                     want = snapshot_card(catalog, on)
                     sub = {"MAD_CONFIG": f.name, "MAD_GPU_ARCH": arch}
-                    pins = submitted_env(card, catalog).get("MAD_PIN_SET")
-                    if pins:                       # as the card itself was submitted
-                        sub["MAD_PIN_SET"] = pins
+                    comps = submitted_env(on, catalog).get("MAD_IMAGE_COMPONENTS")
+                    if comps:                      # as the card itself was submitted
+                        sub["MAD_IMAGE_COMPONENTS"] = comps
                     got = snapshot_card(catalog, on, submit_env=sub)
                     problems = []
                     if got["exit_code"] != want["exit_code"]:

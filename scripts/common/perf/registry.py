@@ -4,14 +4,14 @@
 One JSON object per line in a registry file (where the shared registry lives -- Client Perf Hub,
 MAD, or both -- is still to be decided; this is the record and the lookup):
 
-  key    model, platform, launcher, shape, pin_set, serving_type, slo (e.g. {"tpot_ms": 50})
+  key    model, platform, launcher, shape, image, serving_type, slo (e.g. {"tpot_ms": 50})
   value  throughput (tokens/s/GPU), ttft_ms, tpot_ms, accuracy (task -> score), and what reproduces
          the run: config (config.resolved.json path or contents), topology (spec), recipe, date
 
 best() returns the highest-throughput record for a key that meets its SLO and accuracy floor.
 
     registry.py record --registry FILE --json '{...}'
-    registry.py best    --registry FILE --model M --platform P [--launcher L] [--serving-type T] [--pin-set S]
+    registry.py best    --registry FILE --model M --platform P [--launcher L] [--serving-type T] [--image S]
     registry.py promote --registry FILE --to scripts/common/perf/best_known.jsonl --model M ...
                         the best run becomes the default MAD runs (both STANDALONE and madengine)
 """
@@ -19,7 +19,7 @@ import argparse
 import json
 import sys
 
-KEY = ("model", "platform", "launcher", "pin_set", "serving_type")
+KEY = ("model", "platform", "launcher", "image", "serving_type")
 REQUIRED = ("model", "platform", "launcher", "throughput", "config")
 
 
@@ -59,13 +59,13 @@ def best(path, accuracy_floor=None, **key):
 def promote(runs, best_known, accuracy_floor=None, **key):
     """Copy the best run meeting its SLO (and an accuracy floor) for `key` into the best-known file
     MAD runs by default (perf/best_known.jsonl), replacing an older record of the same key, model,
-    launcher, platform, shape and pin set. Returns the promoted record or None."""
+    launcher, platform, shape and image. Returns the promoted record or None."""
     e = best(runs, accuracy_floor, **key)
     if e is None:
         return None
     if "apply" not in e:
         raise ValueError("the run has no `apply` (the recipe keys to lay over the recipe)")
-    same = lambda r: all(r.get(k) == e.get(k) for k in ("model", "launcher", "platform", "shape", "pin_set"))  # noqa: E731
+    same = lambda r: all(r.get(k) == e.get(k) for k in ("model", "launcher", "platform", "shape", "image"))  # noqa: E731
     with open(best_known) as f:
         lines = f.read().splitlines()
     kept = [l for l in lines if not l.strip() or l.lstrip().startswith("#") or not same(json.loads(l))]

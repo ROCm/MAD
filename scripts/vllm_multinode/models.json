@@ -167,11 +167,7 @@
     {
         "name": "pyt_vllm_kimi-k3_pp2xtp8",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -210,11 +206,7 @@
     {
         "name": "pyt_vllm_kimi-k3_wideep_allgather",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -254,11 +246,7 @@
     {
         "name": "pyt_vllm_kimi-k3_wideep_moriep",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -299,16 +287,12 @@
     {
         "name": "pyt_e2e_qwen3-32b_replicas_lora",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_Qwen3-32B-LoRA.csv",
         "tags": [
             "pyt",
@@ -335,16 +319,12 @@
     {
         "name": "pyt_e2e_qwen3-embedding_replicas",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_multinode.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_Qwen3-Embedding-8B.csv",
         "tags": [
             "pyt",

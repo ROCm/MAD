@@ -813,11 +813,7 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3_auto",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -857,11 +853,7 @@
     {
         "name": "pyt_vllm_disagg_mori_kimi-k3-mxfp4_auto",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
@@ -901,16 +893,12 @@
     {
         "name": "pyt_e2e_kimi-k3_disagg_niah",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_Kimi-K3-MXFP4.csv",
         "tags": [
             "pyt",
@@ -937,16 +925,12 @@
     {
         "name": "pyt_e2e_deepseek-v3_disagg_mtp",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_DeepSeek-V3-MTP.csv",
         "tags": [
             "pyt",
@@ -973,16 +957,12 @@
     {
         "name": "pyt_e2e_deepseek-v3_dq",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_DeepSeek-V3-DQ.csv",
         "tags": [
             "pyt",
@@ -1009,16 +989,12 @@
     {
         "name": "pyt_e2e_kimi-k3_helios",
         "url": "",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-kimi-k3}",
         "scripts": "run_xPyD_models.slurm",
         "data": "huggingface",
         "n_gpus": "-1",
         "owner": "mad.support@amd.com",
         "training_precision": "",
-        "docker_build_arg": {
-            "PINS": "vllm-kimi-k3"
-        },
         "multiple_results": "perf_Kimi-K3-MXFP4.csv",
         "tags": [
             "pyt",
@@ -1044,10 +1020,8 @@
     },
     {
         "name": "pyt_e2e_llama-3.1-405b_disagg",
-        "dockerfile": "../../docker/di_vllm",
-        "dockercontext": ".",
+        "image_spec": "${images.vllm-mori121}",
         "docker_build_arg": {
-            "PINS": "vllm-mori121",
             "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"
         },
         "scripts": "run_xPyD_models.slurm",
