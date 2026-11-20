@@ -20,6 +20,7 @@
 #   roles: {prefill, decode}    one role; `--flag` keys apply to every mode,
 #                               `tp:` / `dp_ep:` sub-blocks to one mode
 #   extends: <model>            start from another model's entry
+#   env: {NAME: value}          (models only) exported before both roles' servers start
 #
 # Precedence, lowest first: defaults, the model, the backend's `args`, overlays,
 # EXTRA_SERVER_ARGS / EXTRA_PREFILL_ARGS / EXTRA_DECODE_ARGS. `true` is a bare flag,
@@ -30,7 +31,8 @@
 # sets the topology and transport flags (--model-path, --disaggregation-mode,
 # --host, --port, --tp-size, --dp-size, --ep-size, --dist-init-addr, --nnodes,
 # --node-rank, --disaggregation-ib-device); do not set them here. The servers'
-# environment (NCCL, MoRI) is not here: mori_ep_env.sh and connectors/mori.env.
+# shared environment (NCCL, MoRI) is not here: mori_ep_env.sh and connectors/mori.env;
+# a model's `env` is only what that model needs.
 
 defaults:
   base:

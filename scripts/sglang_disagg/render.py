@@ -28,7 +28,8 @@ Commands:
   plan [--json]     every node's role and commands (a dry run; needs no GPUs)
   shell --rank R    bash assignments for node R: ROLE, ROLE_INDEX, RUNS_SERVER,
                     RUNS_ROUTER, TP_SIZE, SERVER_ARGV=(...), ROUTER_ARGV=(...),
-                    IP_FIRST_PREFILL, IP_FIRST_DECODE
+                    IP_FIRST_PREFILL, IP_FIRST_DECODE, and an export for each of the
+                    model's `env:` entries on a server node
   check             every flag the catalog can render exists in the installed SGLang
 """
 
@@ -62,6 +63,7 @@ LAUNCHER_FLAGS = frozenset({
 
 _RANGE = re.compile(r"\s*(\d+)\s*\.\.\s*(\d+)\s*")
 _OPTION = re.compile(r"(?<![\w-])--[A-Za-z0-9][A-Za-z0-9-]*")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 Flags = Dict[str, object]
 
@@ -169,6 +171,21 @@ class Catalog:
                 raise RenderError(f"models.yaml has no overlay {overlay!r}")
             _apply(acc, _flag_map(self.overlays[overlay], f"overlays.{overlay}"))
         return acc
+
+    def server_env(self, name: str) -> Dict[str, str]:
+        """The model's `env:` map, as the strings its servers are started with."""
+        block = self.model(name).get("env") or {}
+        if not isinstance(block, dict):
+            raise RenderError(f"models.{name}.env: expected a map of NAME: value")
+        out = {}
+        for key, value in block.items():
+            # YAML reads unquoted ON/OFF/YES/NO keys as booleans.
+            if not isinstance(key, str) or not _ENV_NAME.fullmatch(key):
+                raise RenderError(f"models.{name}.env: {key!r} is not an environment variable name")
+            if value is None or isinstance(value, (dict, list)):
+                raise RenderError(f"models.{name}.env.{key}: expected a scalar value")
+            out[str(key)] = str(value).lower() if isinstance(value, bool) else str(value)
+        return out
 
     def compat(self, flags: Flags, options: Optional[Set[str]]) -> Tuple[Flags, List[str]]:
         """`flags` in the installed SGLang's names. Unknown options: unchanged."""
@@ -394,6 +411,7 @@ def validate(cat: Catalog, s: Settings):
                           f"(models.yaml backends.{s.backend}.modes: {', '.join(backend_modes)})")
     for role in ROLES:
         cat.server_flags(s.model, s.mode, role, s.backend, s.overlays)
+    cat.server_env(s.model)
     return build_topology(s)
 
 
@@ -437,6 +455,7 @@ def shell_vars(cat: Catalog, s: Settings, node: Node, leaders,
              f"IP_FIRST_PREFILL={leaders['prefill'][0]}", f"IP_FIRST_DECODE={leaders['decode'][0]}"]
     if node.role != "router":
         lines.append(f"SERVER_ARGV={_bash_array(server_argv(cat, s, node, options, notes))}")
+        lines += [f"export {key}={shlex.quote(value)}" for key, value in cat.server_env(s.model).items()]
     if node.runs_router:
         lines.append(f"ROUTER_ARGV={_bash_array(router_argv(s, leaders))}")
     return lines
@@ -448,6 +467,7 @@ def print_plan(cat: Catalog, s: Settings, nodes, leaders, options, as_json: bool
         node = nodes[rank]
         row = asdict(node)
         if node.role != "router":
+            row["server_env"] = cat.server_env(s.model)
             row["server_cmd"] = ["python3", "-m", "sglang.launch_server"] + server_argv(cat, s, node, options)
         if node.runs_router:
             row["router_cmd"] = ["python3", "-m", "sglang_router.launch_router"] + router_argv(s, leaders)
@@ -460,6 +480,8 @@ def print_plan(cat: Catalog, s: Settings, nodes, leaders, options, as_json: bool
     for row in rows:
         print(f"\n[node {row['rank']}] {row['ip']}  {row['role']} {row['role_index']}"
               f"{' + router' if row['runs_router'] and row['role'] != 'router' else ''}")
+        if row.get("server_env"):
+            print("  env " + " ".join(f"{k}={shlex.quote(v)}" for k, v in row["server_env"].items()))
         for key in ("server_cmd", "router_cmd"):
             if key in row:
                 print("  " + shlex.join(row[key]))

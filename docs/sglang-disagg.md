@@ -266,7 +266,7 @@ reference.
 | Section | Meaning |
 |---|---|
 | `defaults` | Flags for every model. |
-| `models.<MODEL_NAME>` | The model's entry. An empty entry (`{}`) takes the defaults. `extends: <model>` starts from another entry. |
+| `models.<MODEL_NAME>` | The model's entry. An empty entry (`{}`) takes the defaults. `extends: <model>` starts from another entry. `env: {NAME: value}` is exported before both roles' servers start, for settings a model needs that are environment variables rather than flags (quote values and keys YAML would read as booleans or numbers). |
 | `backends.<name>` | The KV transfer backend (`KV_TRANSFER_BACKEND`): its flag and the modes it is validated with. |
 | `overlays` | Switched on by run settings: `radix_cache` (agentic, or `ENABLE_RADIX_CACHE=1`) and `server_metrics` (agentic, or `ENABLE_SERVER_METRICS=1`). |
 | `compat` | Flags SGLang renamed or removed, applied only where the installed SGLang no longer accepts the name written in the recipe. |

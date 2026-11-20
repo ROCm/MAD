@@ -70,6 +70,31 @@ class Catalog(unittest.TestCase):
             with self.assertRaisesRegex(render.RenderError, "set by the launcher"):
                 render.Catalog(Path(tmp.name)).server_flags("M", "tp", "prefill", "mori")
 
+    def test_model_env_is_exported_by_server_nodes_only(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write("backends:\n  mori: {}\nmodels:\n  M: {env: {BOUND: '0', NAME: two words}}\n")
+            tmp.flush()
+            cat = render.Catalog(Path(tmp.name))
+            s = settings(MODEL_NAME="M", IPADDRS="10.0.0.1,10.0.0.2,10.0.0.3", ROUTER_NODE=1)
+            nodes, leaders = render.build_topology(s)
+            server = render.shell_vars(cat, s, nodes[0], leaders, None, [])
+            self.assertIn("export BOUND=0", server)
+            self.assertIn("export NAME='two words'", server)
+            router = render.shell_vars(cat, s, nodes[2], leaders, None, [])
+            self.assertEqual([line for line in router if line.startswith("export ")], [])
+        self.assertNotIn("export ", shell(RANK="0").stdout)
+
+    def test_env_is_inherited_and_checked(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write("models:\n  A: {env: {X: 1, FLAG: true}}\n  B: {extends: A, env: {Y: two}}\n"
+                      "  C: {env: {BAD-NAME: 1}}\n  D: {env: {ON: 1}}\n")
+            tmp.flush()
+            cat = render.Catalog(Path(tmp.name))
+            self.assertEqual(cat.server_env("B"), {"X": "1", "FLAG": "true", "Y": "two"})
+            for bad in ("C", "D"):
+                with self.assertRaisesRegex(render.RenderError, "not an environment variable name"):
+                    cat.server_env(bad)
+
     def test_ranges_and_lists_expand(self):
         self.assertEqual(render.flags_to_argv({"--a": "1..3", "--b": [4, 5], "--c": True}),
                          ["--a", "1", "2", "3", "--b", "4", "5", "--c"])
