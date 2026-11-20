@@ -289,8 +289,10 @@ Reference standalone launcher: the Kimi-K3 disagg recipe in PR#241 (out of tree;
 ### Docker image
 
 Every Kimi-K3 card (MI300X and MI355X, disagg and colocated) builds
-`docker/di_vllm.ubuntu.amd.Dockerfile` from the `vllm-kimi-k3` pin set: upstream vLLM with the
+the `vllm-kimi-k3` image spec (`"image_spec": "${images.vllm-kimi-k3}"`,
+[compat/images/vllm-kimi-k3.yaml](../../compat/images/vllm-kimi-k3.yaml)): upstream vLLM with the
 Kimi-K3 patch (it reproduces fork commit `862bfd8`), MoRI `fe12a11a`, AITER 68e42f5f from source,
-the DP-rank vllm-router, built for `MAD_SYSTEM_GPU_ARCHITECTURE`. Pin sets are described in
-[docker/pins/README.md](../../docker/pins/README.md). Operators building by hand tag the image
+the DP-rank vllm-router, built for `MAD_SYSTEM_GPU_ARCHITECTURE`. madengine generates the
+Dockerfile from the spec; the component builds are authorized in
+[compat/rocm.yaml](../../compat/rocm.yaml). Operators building by hand tag the image
 themselves and pass `DOCKER_IMAGE_NAME` to slurm.

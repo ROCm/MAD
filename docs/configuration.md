@@ -17,7 +17,7 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 
 | Term | Meaning |
 |---|---|
-| Model card | One entry in a `models.json` file. It names the Dockerfile (and, for the distributed-inference images, the pin set), the launcher script, the node count and the environment. madengine selects cards by `--tags`. |
+| Model card | One entry in a `models.json` file. It names the Dockerfile (or, for the distributed-inference images, the image spec), the launcher script, the node count and the environment. madengine selects cards by `--tags`. |
 | Launcher | The batch script a card names in `scripts`, for example `scripts/vllm_dissag/run_xPyD_models.slurm`. It runs on the first node of the allocation (or once per node under a per-node dispatch), and runs its `node.sh` on every node through the dispatcher; `node.sh` starts that node's container with `docker run`. See [multinode-architecture.md](multinode-architecture.md). |
 | Recipe | The per-model serving settings in `scripts/vllm_dissag/models.yaml` or `scripts/sglang_disagg/models.yaml`: serve flags per role and mode, and (vLLM only) per-model environment. |
 | Allocation | What SLURM gives the job: partition, node count, GPUs per node, exclusivity, time limit. |
@@ -38,7 +38,7 @@ For the concepts used here (launcher, prefill and decode, connector, wideEP) see
 | Connector env files | `scripts/vllm_dissag/connectors/*.env` | Platform env each connector must have at container start | `scripts/vllm_dissag/run_xPyD_models.slurm` | Before `docker run`, forwarded with `-e` |
 | Recipe | `scripts/vllm_dissag/models.yaml`, `scripts/sglang_disagg/models.yaml` | Serve flags per role and mode, per-model env | The launcher (its `env:` block, over site and connector defaults) and the in-container launcher | In the batch script and in the job |
 | Connector and launcher defaults | `connectors/moriio.sh`, `connectors/rixl.sh`, `scripts/sglang_disagg/mori_ep_env.sh` with `scripts/sglang_disagg/connectors/mori.env` | `${VAR:-default}` fallbacks | The in-container launcher | In the job |
-| Image | `docker/di_vllm.ubuntu.amd.Dockerfile`, `docker/di_sglang.ubuntu.amd.Dockerfile` and the pin sets in `docker/pins/` | Every source by commit, the base image per GPU architecture, cache locations | `docker build` | At build |
+| Image | The image specs in `compat/images/` (one per stack) over the compatibility matrix `compat/rocm.yaml` | Every component build by commit, the base image per GPU architecture, cache locations | madengine build (it generates the Dockerfile) | At build |
 
 Everything that reaches a serving process ends up as an environment variable or a serve flag.
 The environment is the only thing that crosses both the container boundary and the choice of
@@ -57,9 +57,7 @@ Example, from [`scripts/vllm_dissag/models.json`](../scripts/vllm_dissag/models.
 ```json
 {
   "name": "pyt_vllm_disagg_mori_kimi-k3",
-  "dockerfile": "../../docker/di_vllm",
-  "dockercontext": ".",
-  "docker_build_arg": {"PINS": "vllm-kimi-k3"},
+  "image_spec": "${images.vllm-kimi-k3}",
   "scripts": "run_xPyD_models.slurm",
   "multiple_results": "perf_Kimi-K3.csv",
   "tags": ["pyt", "vllm", "vllm_disagg", "mori_ep", "inference"],
@@ -84,15 +82,15 @@ Example, from [`scripts/vllm_dissag/models.json`](../scripts/vllm_dissag/models.
 
 | Field | What it holds | Who reads it |
 |---|---|---|
-| `dockerfile` | The Dockerfile prefix. `../../docker/di_vllm` means `docker/di_vllm.ubuntu.amd.Dockerfile`. | madengine build |
-| `dockercontext` | The build context. The distributed-inference cards use `.` (the repository root), because their Dockerfiles copy `docker/pins/` and `docker/patches/`. | madengine build |
+| `image_spec` | The image the card builds, for the distributed-inference cards: `${images.<stack>}` names a spec in `compat/images/`. madengine generates the Dockerfile from it (build context `./docker`), so these cards have no `dockerfile` or `dockercontext`. | madengine build |
+| `dockerfile` | The Dockerfile prefix, for cards with a hand-written Dockerfile. `../../docker/pyt_vllm` means `docker/pyt_vllm.ubuntu.amd.Dockerfile`. | madengine build |
 | `scripts` | The launcher, relative to the card's directory. | madengine; you under `sbatch` |
 | `env_vars` | The launcher's contract: model name, topology, benchmark selection, model properties such as `REQUIRE_LOCAL_WEIGHTS`. | madengine exports them into the generated batch script; under plain `sbatch` you export them yourself |
 | `slurm` | Allocation for this card: `nodes`, `gpus_per_node`, `time`. madengine copies `partition`, `nodes`, `gpus_per_node`, `time`, `exclusive`, `reservation`, `output_dir` and `nodelist` from it, but only for keys you did not set in `--additional-context`. | madengine |
 | `distributed` | `launcher` (`slurm_multi` for every multinode card here) and `nnodes`. `slurm_multi` means the card's own script manages its per-node containers. | madengine |
 | `args` | Arguments. madengine passes them to the launcher script, not to `sbatch`. See the note below. | madengine; you |
 | `skip_gpu_arch` | GPU architectures the card must not run on. madengine enforces it before submission. | madengine |
-| `docker_build_arg` | Build arguments for this card's image. The distributed-inference cards name their pin set here (`PINS`), and some also `MAD_SYSTEM_GPU_ARCHITECTURE`. The additional context overrides the card for the same key. | madengine build |
+| `docker_build_arg` | Build arguments for this card's image. Some distributed-inference cards pin their GPU here (`MAD_SYSTEM_GPU_ARCHITECTURE`). The additional context overrides the card for the same key. | madengine build |
 | `timeout` | madengine's per-model timeout in seconds. `0` or `-1` means no timeout. | madengine |
 | `multiple_results` | The CSV name the launcher publishes for madengine. | madengine |
 
@@ -681,13 +679,13 @@ Where each of these values comes from when you do not pass it is in the
 
 ## 8. `MAD_SYSTEM_GPU_ARCHITECTURE` for images built per GPU
 
-The distributed-inference images are built for exactly one GPU. Their Dockerfiles,
-[`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile) and
-[`docker/di_sglang.ubuntu.amd.Dockerfile`](../docker/di_sglang.ubuntu.amd.Dockerfile), build the pin
-set named by `PINS` for `MAD_SYSTEM_GPU_ARCHITECTURE` on the set's base image for that architecture,
-and stop on an architecture the set is not for or on another base image. The vLLM Dockerfile has
-no default for the architecture; the SGLang one defaults to `gfx942`. Pin sets are described in
-[`docker/pins/README.md`](../docker/pins/README.md).
+The distributed-inference images are built for exactly one GPU. The card's image spec (in
+[`compat/images/`](../compat/images/README.md)) gives a base image per GPU architecture;
+madengine builds it for `MAD_SYSTEM_GPU_ARCHITECTURE` on the spec's base for that architecture
+and stops on an architecture the spec has no base for. The component builds the spec selects are
+authorized in the compatibility matrix [`compat/rocm.yaml`](../compat/rocm.yaml), whose header
+comment documents its keys; the spec format is in madengine's `docs/configuration.md` (section
+"Declarative Image Spec (image_spec)").
 
 Where the value comes from:
 
@@ -703,15 +701,15 @@ madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --registry <your-registry> \
   --additional-context '{"slurm": {}, "docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 ```
 
-madengine adds the pin set's base image for the build's architecture.
+madengine takes the spec's base image for the build's architecture and generates the Dockerfile
+under `.madengine/build/`, one layer per component in dependency order.
 
-- By hand, from the repository root, `pins.py build-args` prints `PINS`, the base image and the
-  architecture:
+- To see the generated Dockerfile and the resolved plan without building, from the repository
+  root:
 
 ```bash
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
-  -t <registry>/di-vllm:vllm-kimi-k3-gfx942 .
+madengine build --tags pyt_vllm_disagg_mori_kimi-k3 --explain \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 ```
 
 Runtime differences between the arches (AITER MLA on gfx950 only, the int4 MoE requant on gfx942)
@@ -874,9 +872,9 @@ written as `<set>`.
 | Model weights location | `MODEL_DIR` (added candidate), `MODEL_DIR_CANDIDATES`, `NVME_ROOT`, `SHARED_MOUNT`, or `MODEL_PATH` (skips the probe) | Directory name: `MODEL_WEIGHTS_NAME`; NVMe only: `REQUIRE_LOCAL_WEIGHTS=1` |
 | Log location | `LOG_PATH` | |
 | Benchmark knobs | Card or `--additional-context` `env_vars`: `BENCHMARK_SCRIPT`, `BENCHMARK_COMBINATIONS`, `BENCHMARK_CON`, `BENCHMARK_ITR`, `NIAH_WORDS`, `DURATION`, `AGENTIC_*` | Or `benchmark:` in `mad-config.yaml` |
-| Image | `--use-image` on `madengine build`, or `MAD_CONTAINER_IMAGE`; plain `sbatch`: `DOCKER_IMAGE_NAME` | The card's `dockerfile` for what madengine builds |
-| Image sources and build pins | The pin set in `docker/pins/<name>.json`; which set a card builds is `docker_build_arg.PINS` | See [`docker/pins/README.md`](../docker/pins/README.md). Other images: `docker_build_arg`, e.g. `BASE_DOCKER` |
-| GPU arch for a build | `docker_build_arg.MAD_SYSTEM_GPU_ARCHITECTURE` | `--build-arg` by hand |
+| Image | `--use-image` on `madengine build`, or `MAD_CONTAINER_IMAGE`; plain `sbatch`: `DOCKER_IMAGE_NAME` | The card's `image_spec` (or `dockerfile`) for what madengine builds |
+| Image sources and build pins | The stack's spec in `compat/images/<stack>.yaml`, selecting builds authorized in `compat/rocm.yaml`; which stack a card builds is its `image_spec` | See [`compat/images/README.md`](../compat/images/README.md). Other images: `docker_build_arg`, e.g. `BASE_DOCKER` |
+| GPU arch for a build | `docker_build_arg.MAD_SYSTEM_GPU_ARCHITECTURE` | On the card, or in `--additional-context` on `madengine build` |
 | GPU arch check | `GPU_ARCHS` in the recipe; card `skip_gpu_arch`; `GPU_ARCH_CHECK=0` to bypass | |
 | One-off override for a single run | `--additional-context '{"env_vars": {...}, "slurm": {...}}'`; plain `sbatch`: `export` before `sbatch` | Only forwarded names reach the container |
 | Ports | `ROUTER_PORT`, `MORI_SERVE_PORT`, `MORI_PROXY_PORT`, `SERVE_PORT`, `MASTER_PORT` | |

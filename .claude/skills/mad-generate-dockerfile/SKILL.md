@@ -33,8 +33,8 @@ the output is identical whichever agent runs this skill.
 | `sglang` | SGLang inference | `docker/pyt_sglang.ubuntu.amd.Dockerfile` |
 | `atom` | ATOM inference | `docker/pyt_atom.ubuntu.amd.Dockerfile` |
 | `xdit` | xDiT diffusion inference | `docker/pyt_xdit.ubuntu.amd.Dockerfile` |
-| `sglang_disagg` | SGLang disaggregated prefill-decode (RDMA + MoRI) | `docker/di_sglang.ubuntu.amd.Dockerfile` with pin set `docker/pins/sglang-disagg.json` (base image) |
-| `vllm_disagg` | vLLM disaggregated prefill-decode (MoRI, AITER, NIXL/RIXL, DeepEP) | `docker/di_vllm.ubuntu.amd.Dockerfile` with pin set `docker/pins/vllm-mori121.json` (base image) |
+| `sglang_disagg` | SGLang disaggregated prefill-decode (RDMA + MoRI) | the image spec `compat/images/sglang-disagg.yaml` (base image) |
+| `vllm_disagg` | vLLM disaggregated prefill-decode (MoRI, AITER, NIXL/RIXL, DeepEP) | the image spec `compat/images/vllm-mori121.yaml` (base image) |
 
 `render_dockerfile.py --list` prints the context variables each template
 accepts and the default base image it would use. The renderer reads that

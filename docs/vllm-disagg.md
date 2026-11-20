@@ -135,7 +135,7 @@ rejected.
 | `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | Validated serving (moriio + MoRI-EP). |
 | `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | Smoke and development variant. |
 | `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | Needs a co-versioned AITER image (see [Caveats](#caveats)). |
-| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | Own pin set (`vllm-glm51`). 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH about 93 to 97 percent). moriio + TP is untested. |
+| `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | Own stack (`vllm-glm51`). 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH about 93 to 97 percent). moriio + TP is untested. |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8 (`EP_TP_SIZE=2`). `vllm-kimi-k3` image. Card `pyt_vllm_disagg_mori_kimi-k3`. |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942, 2P/2D, TP2 x DP8. `vllm-kimi-k3` image. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4`. Its recipe serves the name `kimi-k3`. |
 | `Kimi-K3-MXFP4-MI355X` | MoE | 3 (moriio wideEP only) | MI355X gfx950, bring-up (not yet run). Native MXFP4, TP1 x DP16 (`EP_TP_SIZE=1`). `vllm-kimi-k3` image built for gfx950. Card `pyt_vllm_disagg_mori_kimi-k3-mxfp4_mi355x`. |
@@ -158,7 +158,7 @@ in PR #241; it is not part of this framework.
 The cards in [`models.json`](../scripts/vllm_dissag/models.json). All run
 `run_xPyD_models.slurm` with the `slurm_multi` launcher.
 
-| Card | `MODEL_NAME` | Nodes | Axes | Benchmark | Pin set |
+| Card | `MODEL_NAME` | Nodes | Axes | Benchmark | Image spec |
 |---|---|---|---|---|---|
 | `pyt_vllm_disagg_nixl_deepseek-v3` | `DeepSeek-V3` | 2 | `WIDE_EP=1`, no legacy flag: rixl + deepep | sweep 1024/1024 | `vllm-mori121` |
 | `pyt_vllm_disagg_nixl_deepseek-r1` | `DeepSeek-R1` | 2 | same | sweep 1024/1024 | `vllm-mori121` |
@@ -191,18 +191,18 @@ use `NIAH_WORDS=10000,50000,100000,200000`, declare `multiple_results`
 
 ## Kimi-K3 notes
 
-**Docker image.** Every Kimi-K3 card builds `docker/di_vllm.ubuntu.amd.Dockerfile` from the
-`vllm-kimi-k3` pin set, for the GPU given as `MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950;
-the cards do not name it, so pass it when building on a host without that GPU). The set pins
-MoRI `fe12a11a`, AITER `68e42f5f` from source, upstream vLLM with the Kimi-K3 patch (it
+**Docker image.** Every Kimi-K3 card builds the `vllm-kimi-k3` image spec
+([`compat/images/vllm-kimi-k3.yaml`](../compat/images/vllm-kimi-k3.yaml)), for the GPU given as
+`MAD_SYSTEM_GPU_ARCHITECTURE` (gfx942 or gfx950; the cards do not name it, so pass it when
+building on a host without that GPU). The stack selects MoRI `fe12a11a`, AITER `68e42f5f` from source, upstream vLLM with the Kimi-K3 patch (it
 reproduces fork commit `862bfd8`), and the DP-rank vllm-router; see
 [kimi-k3.md](kimi-k3.md#the-image). By hand:
 
 ```bash
-# Build (once per cluster, or after the pin set moves), from the MAD repo root:
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-kimi-k3 --arch gfx942) \
-  -t kimik3-wideep-disagg:latest .
+# Build (once per cluster, or after the stack moves), from the MAD repo root, then tag
+# the image as kimik3-wideep-disagg:latest (or push it where the nodes can pull it):
+madengine build --tags pyt_vllm_disagg_mori_kimi-k3 \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
 
 # Run via the unified launcher. sbatch options, --export included, go BEFORE the
 # script; anything after it is passed to the script as an argument and silently ignored.
@@ -254,38 +254,49 @@ The full list, including Docker on the compute nodes and the wall-time check, is
 
 ## Building the Docker image
 
-No public prebuilt image ships. Every card builds
-[`docker/di_vllm.ubuntu.amd.Dockerfile`](../docker/di_vllm.ubuntu.amd.Dockerfile) from a pin set
-in [`docker/pins/`](../docker/pins/README.md): MoRI, AITER, vLLM, vllm-router and, where the set
-turns it on, the UCX / RIXL / rocSHMEM / DeepEP transport stack, each at a full upstream commit
-with any changes not yet upstream applied as patches from `docker/patches/`. A card names its set:
+No public prebuilt image ships. Every card names an image spec (a stack) in
+[`compat/images/`](../compat/images/README.md), and madengine generates the Dockerfile from it.
+The three vLLM stacks extend [`compat/images/di-vllm.yaml`](../compat/images/di-vllm.yaml) (build
+prerequisites, env, cache locations, the smoke check), give a base image per GPU architecture by
+digest, and select component builds authorized in the compatibility matrix
+[`compat/rocm.yaml`](../compat/rocm.yaml): MoRI, AITER, flydsl, vLLM, vllm-router and, where the
+stack selects it, the UCX / googletest / RIXL / rocSHMEM / DeepEP transport stack, each at a full
+upstream commit with any changes not yet upstream applied as patches from `docker/patches/`
+(digest-checked when applied). A card names its stack:
 
 ```json
-"dockerfile": "../../docker/di_vllm",
-"dockercontext": ".",
-"docker_build_arg": {"PINS": "vllm-mori121", "MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}
+"image_spec": "${images.vllm-mori121}",
+"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"},
 ```
 
-madengine adds the set's base image for the build's GPU architecture. By hand, from the MAD root:
+madengine takes the spec's base image for the build's GPU architecture and builds one layer per
+component in dependency order; the build ends with a smoke check (it imports MoRI, AITER and vLLM,
+and checks that vllm-router has moriio). By hand, from the MAD root:
 
 ```bash
-docker build -f docker/di_vllm.ubuntu.amd.Dockerfile \
-  $(python3 docker/pins/pins.py build-args vllm-mori121 --arch gfx942) \
-  -t <your-registry>/di-vllm:vllm-mori121-gfx942 .
+madengine build --tags pyt_vllm_disagg_nixl_deepseek-v3 \
+  --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'
+madengine build --tags pyt_vllm_disagg_nixl_deepseek-v3 --explain ...   # print the generated Dockerfile and the resolved plan, without building
 ```
 
-| Pin set | Cards | Architectures | Transport stack (rixl, DeepEP) |
-|---|---|---|---|
-| `vllm-mori121` | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | gfx942 | on |
-| `vllm-glm51` | `GLM-5.1-FP8` | gfx942 | off (MoRI-EP only) |
-| `vllm-kimi-k3` | the Kimi-K3 models, disaggregated and colocated | gfx942, gfx950 | on |
+The image records its installed stack in `/opt/mad/build_info.json`, and the build manifest
+records `build_plan` (the resolved components).
 
-Whether the rixl transport stack is built is part of the pin set, not a build argument.
-`GLM-5.1-FP8` needs its own set because its vLLM, AITER and MoRI pins differ from the
+| Stack | Spec | Cards | Architectures | Transport stack (rixl, DeepEP) |
+|---|---|---|---|---|
+| `vllm-mori121` | [`compat/images/vllm-mori121.yaml`](../compat/images/vllm-mori121.yaml) | every model above except `GLM-5.1-FP8` and the Kimi-K3 models | gfx942 | on |
+| `vllm-glm51` | [`compat/images/vllm-glm51.yaml`](../compat/images/vllm-glm51.yaml) | `GLM-5.1-FP8` | gfx942 | off (MoRI-EP only) |
+| `vllm-kimi-k3` | [`compat/images/vllm-kimi-k3.yaml`](../compat/images/vllm-kimi-k3.yaml) | the Kimi-K3 models, disaggregated and colocated | gfx942, gfx950 | on |
+
+Whether the rixl transport stack is built is part of the stack's spec, not a build argument.
+`GLM-5.1-FP8` needs its own stack because its vLLM, AITER and MoRI builds differ from the
 DeepSeek-V3/R1 stack: MAD ships no runtime patchers, so every GLM DSA fix has to be in the source
-of that image. For a future model that needs its own pins, add a pin set rather than moving a
-shared one. What each set pins and why, the patches, and the rules are in
-[`docker/pins/README.md`](../docker/pins/README.md).
+of that image. To change what a stack builds (another MoRI or vLLM commit, another base), add the
+build to `compat/rocm.yaml` (or reuse one) and select it in the stack's
+`compat/images/<stack>.yaml`. For a future model that needs other sources, add a spec (usually a
+few lines extending `${images.di-vllm}`) rather than moving a shared one. Why each build is pinned
+and what its patches wait on upstream are in the builds' notes in `compat/rocm.yaml`; the spec
+format is in madengine's `docs/configuration.md` (section "Declarative Image Spec (image_spec)").
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The
 launcher runs `docker pull` on every node, so a local-only tag must be pushed to a
@@ -714,8 +725,8 @@ The launcher assembles correct argv for all four combinations (checked offline i
 | rixl + TP | needs a NIXL-validated image | NixlConnector and a working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
 
-The rixl and DeepEP combinations need an image whose pin set turns the transport stack on
-(`vllm-mori121`, `vllm-kimi-k3`); the pin sets' notes say the moriio paths are the validated ones.
+The rixl and DeepEP combinations need an image whose stack builds the transport stack
+(`vllm-mori121`, `vllm-kimi-k3`); the moriio paths are the validated ones.
 
 A recipe is validated on specific shapes and GPUs, and its `models.yaml` entry says
 which. Run a card at one of those shapes before suspecting the recipe.
