@@ -20,7 +20,7 @@
 #
 # Specs several workloads share are named: compat/images/<name>.yaml, reached
 # from a card as ${images.<name>} (madengine), e.g.
-#   "image_spec": {"extends": "${images.vllm-kimi-k3}", "gpu_arch": "gfx950"}
+#   "image_spec": {"extends": "${images.<name>}", "gpu_arch": "gfx950"}
 #
 # Index locations: https://github.com/ROCm/TheRock/blob/main/RELEASES.md and
 # docs/packaging/legacy_multi_arch_releases.md; frameworks wheels from
