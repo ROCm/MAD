@@ -134,7 +134,6 @@ _CATALOG = None
 def catalog():
     global _CATALOG
     if _CATALOG is None:
-        import yaml
         path = os.environ.get("MAD_CATALOG") or CATALOG
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))

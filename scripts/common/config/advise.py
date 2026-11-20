@@ -16,8 +16,6 @@ import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.normpath(os.path.join(HERE, "..", ".."))
-sys.path.insert(0, os.path.join(SCRIPTS, "common", "recipe"))
-import models  # noqa: E402
 
 CATALOGS = {"vllm_dissag": "vllm_dissag", "vllm_multinode": "vllm_dissag", "sglang_disagg": "sglang_disagg"}
 GPU_ENV = {"GPU_ARCHS", "EP_TP_SIZE", "DOCKER_IMAGE_NAME", "MAD_GPU_ARCH"}

@@ -17,7 +17,6 @@ import shlex
 import subprocess
 import sys
 
-import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CATALOG = os.path.join(HERE, "..", "..", "..", "compat")     # the compat/ directory (or one file)

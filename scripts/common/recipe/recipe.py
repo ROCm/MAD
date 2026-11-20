@@ -52,14 +52,15 @@ ROLES = ("prefill", "decode", "server")
 NEEDS = ("weights", "activations", "kv_cache")
 
 
-IMAGES_KEY = "__images__"      # the named image specs (compat/images), as catalog.py loads them
+sys.path.insert(0, os.path.join(HERE, ".."))
+import catalog as _catalog  # noqa: E402  (scripts/common/catalog.py: compat/ as one dict)
+
+IMAGES_KEY = _catalog.IMAGES_KEY      # the named image specs (compat/images)
 
 
 def load_catalog(path=CATALOG):
-    """compat/ as one dict (scripts/common/catalog.py); a file is read as the whole catalog."""
-    sys.path.insert(0, os.path.join(HERE, ".."))
-    import catalog
-    return catalog.load(path)
+    """compat/ as one dict; a file is read as the whole catalog."""
+    return _catalog.load(path)
 
 
 def engine_builds(catalog):
@@ -103,8 +104,6 @@ def build_of_components(catalog, components, engine):
         if f"{name}={key}" in builds:
             return f"{name}={key}"
     # An engine the image's base provides: the named spec whose builds the image holds.
-    sys.path.insert(0, os.path.join(HERE, ".."))
-    import catalog as _catalog
     image = _catalog.image_of_components(catalog, components)
     return build_of_image(catalog, image, engine) if image else None
 
@@ -461,8 +460,6 @@ def bringup(catalog, arch):
     build for it (compat/images: a base for it) and the builds they select there, the engine builds
     the catalog lists for it.
     {"arch", "target", "images": {name: [components]}, "builds": [...], "missing": [...]}"""
-    sys.path.insert(0, os.path.join(HERE, ".."))
-    import catalog as _catalog
     acc = (catalog.get("accelerators") or {}).get(arch)
     out = {"arch": arch, "target": None, "images": {}, "builds": [], "missing": []}
     if acc is None:
@@ -541,8 +538,6 @@ def main(argv=None):
     if a.image_components and not a.build:
         a.build = build_of_components(catalog, a.image_components, a.engine)
         if a.build is None:
-            sys.path.insert(0, os.path.join(HERE, ".."))
-            import catalog as _catalog
             comps = dict(p.split("=", 1) for p in a.image_components.split(",") if "=" in p)
             image = _catalog.image_of_components(catalog, a.image_components)
             other = build_of_image(catalog, image) if image else None
