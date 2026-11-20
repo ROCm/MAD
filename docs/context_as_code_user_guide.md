@@ -107,25 +107,56 @@ One file, both GPUs; nothing in the workload names a GPU.
 ## Run a card
 
 Nothing changes in how you run: a card with a workload file (`MAD_CONFIG`) reads it; a card without
-one runs as it always has.
+one runs as it always has. Every block below is complete: replace only what is in `<angle brackets>`
+(your registry, image, partition). All commands run from the MAD root unless they `cd`.
 
-Through madengine:
+**Preview it first, on any machine** -- what every node will run, with the cluster, Docker and the
+GPUs stood in for:
 
 ```bash
-madengine build --tags pyt_e2e_kimi-k3_disagg_niah --additional-context-file <site context>
-madengine run --manifest-file build_manifest.json --additional-context-file <site context>
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942
 ```
 
-Without madengine -- the launcher reads the workload file itself:
+**Through madengine** -- build the image for the GPU it will run on, then run it on SLURM:
+
+```bash
+# 1. build (on a host with docker); MAD_SYSTEM_GPU_ARCHITECTURE: gfx942 (MI300X/MI325X) or gfx950 (MI355X)
+madengine build --tags pyt_e2e_kimi-k3_disagg_niah --registry <registry>/<namespace> \
+    --additional-context '{"slurm": {}, "docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}' \
+    --manifest-output build_manifest.json
+
+# 2. run (on the SLURM login node)
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>", "time": "06:00:00"}}' \
+    --live-output -o perf.csv
+```
+
+**With `sbatch`, no madengine** -- the launcher reads the workload file itself:
 
 ```bash
 cd scripts/vllm_dissag
-export MAD_CONFIG=workloads/e2e/kimi-k3-disagg-niah.yaml DOCKER_IMAGE_NAME=<your image>
-sbatch -N 4 run_xPyD_models.slurm
+export MAD_CONFIG=workloads/e2e/kimi-k3-disagg-niah.yaml DOCKER_IMAGE_NAME=<registry>/<image>:<tag>
+sbatch --partition=<partition> --nodes=4 --ntasks=4 --gpus-per-node=8 --exclusive \
+       --time=06:00:00 --export=ALL run_xPyD_models.slurm
 ```
 
-On Kubernetes: `python3 scripts/common/k8s/submit.py --card pyt_e2e_kimi-k3_disagg_niah ...`
-([multinode-kubernetes.md](multinode-kubernetes.md)). Every way gives the same run.
+**On Kubernetes** ([multinode-kubernetes.md](multinode-kubernetes.md)):
+
+```bash
+python3 scripts/common/k8s/submit.py --card pyt_e2e_kimi-k3_disagg_niah --image <registry>/<image>:<tag> --dry-run   # print the manifests
+python3 scripts/common/k8s/submit.py --card pyt_e2e_kimi-k3_disagg_niah --image <registry>/<image>:<tag>
+```
+
+Every way gives the same run. The other example cards run the same way -- swap the card name:
+
+| Card | Nodes | What it is |
+|---|---|---|
+| `pyt_e2e_kimi-k3_disagg_niah` | 4 | Kimi-K3, 2P2D, long-context retrieval, any GPU |
+| `pyt_e2e_deepseek-v3_disagg_mtp` | 2 | DeepSeek-V3 with MTP speculative decoding, any GPU |
+| `pyt_e2e_llama-3.1-405b_disagg` | 2 | Llama-3.1-405B FP8, 1P1D over NIXL, MI300X |
+| `pyt_e2e_deepseek-r1_sglang` | 2 | DeepSeek-R1 on SGLang, DP attention + EP |
+| `pyt_e2e_qwen3-32b_sglang` | 2 | Qwen3-32B on SGLang |
+| `pyt_e2e_qwen3-32b_replicas_lora` | 1 | Qwen3-32B replicas serving LoRA adapters (`scripts/vllm_multinode`) |
 
 ## Switch the cluster
 
@@ -153,8 +184,49 @@ env:
   NVME_ROOT: /mnt/nvme
 ```
 
-Through madengine, pass it like any value: `--additional-context '{"env_vars": {"MAD_CLUSTER":
-"example-slurm-mi355x-ainic"}}'`; with `sbatch`, `export MAD_CLUSTER=...` first.
+Copy and paste -- the Kimi-K3 card on the example MI355X site:
+
+```bash
+# preview
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx950 \
+    --env MAD_CLUSTER=example-slurm-mi355x-ainic --print-env NCCL_IB_HCA,NCCL_IB_GID_INDEX,NCCL_SOCKET_IFNAME
+
+# madengine
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>", "time": "06:00:00"}, "env_vars": {"MAD_CLUSTER": "example-slurm-mi355x-ainic"}}'
+
+# sbatch (in a subshell, so you stay in the MAD root)
+( cd scripts/vllm_dissag
+  export MAD_CONFIG=workloads/e2e/kimi-k3-disagg-niah.yaml DOCKER_IMAGE_NAME=<registry>/<image>:<tag> \
+         MAD_CLUSTER=example-slurm-mi355x-ainic
+  sbatch --partition=<partition> --nodes=4 --ntasks=4 --gpus-per-node=8 --exclusive --time=06:00:00 --export=ALL run_xPyD_models.slurm )
+
+# Kubernetes
+python3 scripts/common/k8s/submit.py --card pyt_e2e_kimi-k3_disagg_niah --image <registry>/<image>:<tag> \
+    --env MAD_CLUSTER=example-slurm-mi355x-ainic
+```
+
+**Your own site** -- write its file once, somewhere the batch node can read (a shared home or
+project directory), and name it with `MAD_CLUSTER_FILE`. For example an MI325X cluster on Thor2 NICs:
+
+```bash
+cat > ~/my-site.yaml <<'EOF'
+scheduler: slurm
+platform: mi325x-oam-8      # compat/hardware.yaml: gfx942, 8 GPUs per node, 256 GB each
+fabric: thor2               # compat/hardware.yaml: rails bnxt_re0..7, GID index 3, interface fenic0
+env:
+  SHARED_MOUNT: /shared     # where your shared storage is mounted
+  NVME_ROOT: /mnt/nvme      # local NVMe, for weights that must be local
+EOF
+
+# preview
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 \
+    --env MAD_CLUSTER_FILE=$HOME/my-site.yaml --print-env NCCL_IB_HCA,NCCL_IB_GID_INDEX,NCCL_SOCKET_IFNAME
+
+# madengine
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>", "time": "06:00:00"}, "env_vars": {"MAD_CLUSTER_FILE": "'$HOME'/my-site.yaml"}}'
+```
 
 The Kimi-K3 card ([`pyt_e2e_kimi-k3_disagg_niah`](../scripts/vllm_dissag/models.json)) on three
 clusters -- the same card, nothing edited:
@@ -166,13 +238,15 @@ clusters -- the same card, nothing edited:
 | fabric | GID index 3, `eth0`; rails chosen by the connector | rails `rdma0…7`, GID index 1, `eno0` | rails `bnxt_re0…7`, GID index 3, `fenic0` |
 | best-known configuration | the one recorded for `mi300x-oam-8`, applied | none recorded for this platform | none: records are per platform |
 
-Try it:
+Compare the three yourself:
 
 ```bash
 python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 \
     --env MAD_CLUSTER=example-slurm-mi300x-cx7 --print-env EP_TP_SIZE,NCCL_IB_GID_INDEX,NCCL_SOCKET_IFNAME
 python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx950 \
     --env MAD_CLUSTER=example-slurm-mi355x-ainic --print-env EP_TP_SIZE,NCCL_IB_HCA,NCCL_IB_GID_INDEX,NCCL_SOCKET_IFNAME
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 \
+    --env MAD_CLUSTER_FILE=$HOME/my-site.yaml --print-env EP_TP_SIZE,NCCL_IB_HCA,NCCL_SOCKET_IFNAME
 ```
 
 ## Switch the recipe
@@ -189,23 +263,79 @@ for one run, all at submit time. The recipes are in [`models.yaml`](../scripts/v
 | run a recipe file of your own | `MAD_RECIPE_FILE=<file>` | your file is used instead of the job's written recipe |
 
 Every switch is checked like the original: a recipe the GPU and image cannot run is refused with the
-reason ([below](#when-a-run-is-refused)). Try it:
+reason ([below](#when-a-run-is-refused)). Copy and paste -- preview, then run:
 
 ```bash
+# the other Kimi-K3 recipe
 python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 --env MODEL_NAME=Kimi-K3
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"MODEL_NAME": "Kimi-K3"}}'
+
+# DeepSeek-V3's base recipe instead of its MTP variant
 python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_deepseek-v3_disagg_mtp --env MAD_GPU_ARCH=gfx942 --env MODEL_NAME=DeepSeek-V3
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"MODEL_NAME": "DeepSeek-V3"}}'
+
+# one recipe value: EP_TP_SIZE=2 on MI355X
 python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx950 --env EP_TP_SIZE=2
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"EP_TP_SIZE": "2"}}'
+
+# the recipe without its best-known configuration
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"MAD_BEST_CONFIG": "0"}}'
 ```
+
+With `sbatch`, the same values are `export`ed before submitting (`export MODEL_NAME=Kimi-K3`,
+`export EP_TP_SIZE=2`, ...).
+
+**Your own recipe on top of a real one** -- a file of your own that inherits the Kimi-K3 workload and
+carries a recipe that inherits `Kimi-K3-MXFP4`, changing only the KV budget. Its `recipes:` are laid
+over `models.yaml` by name; the per-GPU variants still apply:
+
+```bash
+cat > ~/my-kimi-k3-recipe.yaml <<EOF
+version: 2
+defaults: [$PWD/scripts/vllm_dissag/workloads/e2e/kimi-k3-disagg-niah.yaml]
+model:
+  env: {MODEL_NAME: Kimi-K3-MXFP4-bigkv, MODEL_WEIGHTS_NAME: Kimi-K3-MXFP4}
+recipes:
+  Kimi-K3-MXFP4-bigkv:
+    alias: Kimi-K3-MXFP4
+    env: {KV_CACHE_MEMORY_BYTES: "16000000000"}
+EOF
+
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx950 --env MAD_CONFIG=$HOME/my-kimi-k3-recipe.yaml
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"MAD_CONFIG": "'$HOME'/my-kimi-k3-recipe.yaml"}}'
+```
+
+The run: `Kimi-K3-MXFP4-bigkv resolves` on each GPU with that GPU's variant (int4 conversion and data
+parallel 8 on MI300X, native MXFP4 and data parallel 16 on MI355X), and `--kv-cache-memory-bytes
+16000000000` on both.
 
 ## Change a run without editing anything
 
-Anything given at submit time wins over every file. With madengine:
+Anything given at submit time wins over every file -- in madengine's `env_vars`, `export` before
+`sbatch`, or `--env` for Kubernetes. Copy and paste:
 
 ```bash
---additional-context '{"env_vars": {"NIAH_WORDS": "2000", "MAD_BEST_CONFIG": "0"}}'
+# shorter NIAH contexts for a quick check
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"NIAH_WORDS": "10000,50000"}}'
+
+# another benchmark on the same card: the throughput sweep at 8K in / 1K out
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 \
+    --env BENCHMARK_SCRIPT=sweep --env BENCHMARK_COMBINATIONS=8192/1024 --print-env BENCHMARK_SCRIPT,BENCHMARK_COMBINATIONS
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"BENCHMARK_SCRIPT": "sweep", "BENCHMARK_COMBINATIONS": "8192/1024"}}'
+
+# a smaller shape -- with the nodes it needs (xP + yD)
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>", "nodes": 2}, "env_vars": {"xP": "1", "yD": "1"}}'
 ```
 
-or `export NAME=value` before `sbatch`. Which value wins, lowest first:
+Which value wins, lowest first:
 
 ```
 the site  <  the connector's env  <  the recipe  <  a topology spec  <  the workload file  <  submit time
@@ -245,6 +375,26 @@ In the job's log directory (`$LOG_PATH/<job>/`, `/run_logs/<job>/` in the contai
 | `perf.csv` | the results, one row per measurement ([benchmarks-and-results.md](benchmarks-and-results.md)); copied to `perf_<MODEL_NAME>.csv` for madengine |
 | the per-node logs | each node's engine and benchmark output |
 
+Copy and paste -- every value the run used and where it came from, and the recipe it ran:
+
+```bash
+python3 - "$LOG_PATH/<job>/config.resolved.json" <<'EOF'
+import json, sys
+for name, v in sorted(json.load(open(sys.argv[1]))["env"].items()):
+    print(f"{name}={v['value']}    [{v['source']}]")
+EOF
+cat "$LOG_PATH/<job>/recipe.yaml"
+```
+
+Before a run, the same questions offline:
+
+```bash
+# the environment a workload file gives
+python3 scripts/common/config/workload.py env scripts/vllm_dissag/workloads/e2e/kimi-k3-disagg-niah.yaml | tr '\0' '\n'
+# the recipe as one GPU uses it
+python3 scripts/common/recipe/models.py scripts/vllm_dissag/models.yaml Kimi-K3-MXFP4 --arch gfx950
+```
+
 A build with `--emit-config DIR` also writes the run's configuration as a workload file (on the
 shared layers, with its image generalized) -- the record you can rerun from.
 
@@ -259,8 +409,16 @@ A run that cannot work stops before any engine starts, and says why. Real messag
 | the platform the run names is not what the nodes are | `MAD_PLATFORM=mi455x-helios-tray is cdna5, but these nodes are gfx942.` |
 | a model is served a way it does not support | `MODEL_NAME 'DeepSeek-V3' is wideEP-only (set WIDE_EP=1). TP mode is not supported for it.` |
 
-Ask the same question offline: `python3 scripts/common/recipe/recipe.py check --recipes
-scripts/vllm_dissag/models.yaml --model <model> --arch <gfx> --image <stack>`.
+Ask the same question offline, before you submit:
+
+```bash
+# can DeepSeek-V3-DQ run on MI300X with the vllm-mori121 image? (no -- and why)
+python3 scripts/common/recipe/recipe.py check --recipes scripts/vllm_dissag/models.yaml \
+    --model DeepSeek-V3-DQ --arch gfx942 --image vllm-mori121
+# Kimi-K3-MXFP4 on MI300X with its image (yes -- MXFP4 converted to int4)
+python3 scripts/common/recipe/recipe.py check --recipes scripts/vllm_dissag/models.yaml \
+    --model Kimi-K3-MXFP4 --arch gfx942 --image vllm-kimi-k3
+```
 
 ## Write your own workload
 
@@ -285,6 +443,25 @@ The real workloads, each a few lines on those layers:
 
 To change what a run does, change one line or one layer: the shape (`xP`, `yD`), the serving
 method (another `serve/` layer), the benchmark (another `bench/` layer), the model (`MODEL_NAME`).
+
+**Your own workload on top of a real one** -- inherit the example and change what you need. Values of
+a benchmark go in its `benchmark:` entry (they apply over `model.env`):
+
+```bash
+cat > ~/my-kimi-k3.yaml <<EOF
+version: 2
+defaults: [$PWD/scripts/vllm_dissag/workloads/e2e/kimi-k3-disagg-niah.yaml]
+model:
+  env: {xP: "1", yD: "1"}                          # 1 prefill + 1 decode node
+benchmark:
+  niah: {env: {NIAH_WORDS: "10000,50000"}}          # shorter contexts
+EOF
+
+python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx942 \
+    --env MAD_CONFIG=$HOME/my-kimi-k3.yaml --nodes 2 --print-env xP,yD,NIAH_WORDS
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>", "nodes": 2}, "env_vars": {"MAD_CONFIG": "'$HOME'/my-kimi-k3.yaml"}}'
+```
 
 Already have a card? `python3 scripts/common/config/emit.py <catalog> <card>` prints it as a
 workload file on the shared layers -- its own part is only what no layer or recipe already gives.
@@ -345,16 +522,28 @@ composes the stack over the matrix for the GPU the image is built for and genera
 | [`sglang-disagg`](../compat/images/sglang-disagg.yaml) | SGLang disaggregation, per GPU |
 
 Every vLLM stack extends [`di-vllm`](../compat/images/di-vllm.yaml), so it lists only its base and
-its builds. `madengine build --tags <card> --explain` prints the plan and the Dockerfile without
-building.
+its builds. See what a card's image will be, without building:
 
-**Bring your own image.** Keep your Dockerfile. Build with `madengine build --emit-config DIR` and
-`"image_probe": true` in the context. When the run passes, DIR holds:
+```bash
+madengine build --tags pyt_e2e_kimi-k3_disagg_niah --explain \
+    --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx950"}}'
+```
 
-- `DIR/<catalog>/<card>.yaml` -- the run's configuration, with your image written as the stack it
+**Bring your own image.** Keep your Dockerfile. Build with `--emit-config` and the image probe on:
+
+```bash
+madengine build --tags <your card> --registry <registry>/<namespace> \
+    --additional-context '{"slurm": {}, "image_probe": true}' \
+    --manifest-output build_manifest.json --emit-config run_configs/
+ls run_configs/ run_configs/compat/
+```
+
+When the run passes, `run_configs/` holds:
+
+- `run_configs/<catalog>/<card>.yaml` -- the run's configuration, with your image written as the stack it
   is closest to plus only what differs (for example `extends: ${images.vllm-kimi-k3}` and a newer
   vLLM), so it inherits everything else that stack holds;
-- `DIR/compat/rocm.yaml` -- the matrix with what your run proved added (a new version from an
+- `run_configs/compat/rocm.yaml` -- the matrix with what your run proved added (a new version from an
   authorized index, with its requirements);
 - under `image.unresolved`, what needs you: a source build at a new commit comes with a draft entry
   to confirm; a requirement your working run contradicts is reported.
@@ -425,8 +614,9 @@ python3 scripts/common/recipe/models.py scripts/vllm_dissag/models.yaml Kimi-K3-
     the files behind one Kimi-K3 run, the full system they resolve to on each GPU.
   - [How a run puts them together](context_as_code_developer_guide.md#how-a-run-puts-them-together):
     from submit to the engine command, the file behind each step, and which value wins.
-  - [Change anything, see what the run does](context_as_code_developer_guide.md#change-anything-see-what-the-run-does):
-    seven changes, each with its effect on the run.
+  - [Add a model card that inherits, and give it the stack it needs](context_as_code_developer_guide.md#add-a-model-card-that-inherits-and-give-it-the-stack-it-needs):
+    the DeepSeek-V3 MTP card, step by step.
+  - [Change the cluster, the recipe and the stack of a run](context_as_code_developer_guide.md#change-the-cluster-the-recipe-and-the-stack-of-a-run).
   - [From a build to the matrix](context_as_code_developer_guide.md#from-a-build-to-the-matrix):
     exactly what a build writes for a hand-built image.
 - [configuring-a-model.md](configuring-a-model.md): adding or tuning a model, step by step.

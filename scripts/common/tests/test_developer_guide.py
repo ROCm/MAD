@@ -121,13 +121,49 @@ class TheGuidesCommandsRun(unittest.TestCase):
         for doc in ("context_as_code_developer_guide.md", "context_as_code_user_guide.md"):
             text = (MAD / "docs" / doc).read_text().replace("\\\n", " ")
             commands += [c.strip() for c in re.findall(r"(python3 scripts/common/tests/snapshot/snapshot.py --show [^`\n]*)", text)
-                         if "<" not in c and "[" not in c]                         # not a usage line
+                         if "<" not in c and "[" not in c and "$" not in c]      # standalone ones (the block
+                                                                                  # test runs the rest in order)
         self.assertGreaterEqual(len(commands), 10)
         for cmd in sorted(set(commands)):
             with self.subTest(cmd=cmd):
                 p = subprocess.run(shlex.split(cmd), cwd=MAD, capture_output=True, text=True, timeout=600)
                 self.assertEqual(p.returncode, 0, p.stderr[-800:])
                 self.assertIn(": exit 0", p.stdout)
+
+
+class TheGuidesBlocksRun(unittest.TestCase):
+    """Every bash block in the two guides runs as pasted, in order, from the MAD root -- with madengine
+    and sbatch stood in for, Kubernetes submissions as dry runs, <placeholders> filled, and HOME a
+    scratch directory (so the files the blocks write are real and later blocks use them). Blocks that
+    read a finished job's logs are skipped."""
+
+    def test_every_bash_block_runs(self):
+        home = Path(tempfile.mkdtemp())
+        made = MAD / "run_configs"
+        self.assertFalse(made.exists(), "a run_configs/ in the MAD root would be overwritten")
+        try:
+            for doc in ("context_as_code_user_guide.md", "context_as_code_developer_guide.md"):
+                blocks = re.findall(r"```bash\n(.*?)```", (MAD / "docs" / doc).read_text(), re.S)
+                self.assertTrue(blocks, doc)
+                for block in blocks:
+                    if "LOG_PATH" in block:
+                        continue
+                    script = re.sub(r"<([a-z][^<>\n]*)>", "x", block.replace("\\\n", " "))
+                    script = re.sub(r"(k8s/submit\.py(?![^\n]*--dry-run)[^\n]*)", r"\1 --dry-run", script)
+                    with self.subTest(doc=doc, block=block[:80]):
+                        # Not -e: a refusal shown on purpose (recipe.py check) exits non-zero.
+                        stubs = ('madengine() { case "$*" in *--emit-config*) mkdir -p run_configs/compat;; esac; }\n'
+                                 'sbatch() { :; }\n')
+                        p = subprocess.run(["bash", "-c", stubs + script],
+                                           cwd=MAD, capture_output=True, text=True, timeout=1800,
+                                           env=dict(os.environ, HOME=str(home)))
+                        out = p.stdout + p.stderr
+                        for broken in ("Traceback", "command not found", "No such file", "usage:", ": exit 1"):
+                            self.assertNotIn(broken, out, out[-1200:])
+        finally:
+            import shutil
+            shutil.rmtree(home)
+            shutil.rmtree(made, ignore_errors=True)       # what the stubbed --emit-config build made
 
 
 if __name__ == "__main__":

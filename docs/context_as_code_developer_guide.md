@@ -577,7 +577,8 @@ workload itself when madengine did not.
 Anything can be overridden for one run without editing a file -- submit-time values win:
 
 ```bash
---additional-context '{"env_vars": {"NIAH_WORDS": "2000", "MAD_BEST_CONFIG": "0", "ACC_TASKS": "/data/gsm8k.jsonl"}}'
+madengine run --manifest-file build_manifest.json \
+    --additional-context '{"slurm": {"partition": "<partition>"}, "env_vars": {"NIAH_WORDS": "2000", "MAD_BEST_CONFIG": "0", "ACC_TASKS": "/data/gsm8k.jsonl"}}'
 ```
 
 ## The images
