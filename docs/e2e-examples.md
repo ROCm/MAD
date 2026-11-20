@@ -13,6 +13,7 @@ How to configure a model this way, step by step: [configuring-a-model.md](config
 
 ## Contents
 
+- [How it fits together: Kimi-K3, end to end](#how-it-fits-together-kimi-k3-end-to-end)
 - [The workload library](#the-workload-library)
 - [The examples](#the-examples)
 - [What each example proves](#what-each-example-proves)
@@ -22,6 +23,132 @@ How to configure a model this way, step by step: [configuring-a-model.md](config
 - [From a card to its example](#from-a-card-to-its-example)
 - [Maintaining workloads with inheritance](#maintaining-workloads-with-inheritance)
 - [How they are tested](#how-they-are-tested)
+
+## How it fits together: Kimi-K3, end to end
+
+One run is described by four files, each inheriting what it does not change. Nothing is copied: a
+fix in any layer reaches every run built on it.
+
+```
+WHAT TO RUN (workload, scripts/vllm_dissag/workloads/e2e/kimi-k3-disagg-niah.yaml)
+  defaults:
+    common/workloads/base.yaml ............ RECIPE_CHECK=1, MAD_BEST_CONFIG=1
+    common/workloads/family/kimi-k3.yaml .. REQUIRE_LOCAL_WEIGHTS=1
+      └─ serve/vllm-disagg-wide-ep.yaml ... RUN_MORI=1, WIDE_EP=1
+    common/workloads/bench/niah.yaml ...... BENCHMARK_SCRIPT=niah, NIAH_WORDS=10000..200000
+  model.env (its own) ..................... MODEL_NAME=Kimi-K3-MXFP4, xP=2, yD=2, its best-known registry
+
+HOW THE ENGINE RUNS ON EACH GPU (recipe, scripts/vllm_dissag/models.yaml: Kimi-K3-MXFP4)
+  roles ..................... MXFP4 weights, FP8 activations and KV cache, on every GPU
+  variants.gfx942 ........... EP_TP_SIZE=2, AITER MLA off, MoE converted to int4 (--quantization-config)
+  variants.gfx950 ........... EP_TP_SIZE=1, AITER MLA on, native MXFP4, --max-num-batched-tokens 4096
+
+WHAT IT RUNS IN (image spec, compat/images/vllm-kimi-k3.yaml; the card: "image_spec": "${images.vllm-kimi-k3}")
+  extends: di-vllm.yaml ..... build prerequisites, runtime env, cache locations, smoke check
+  base ...................... one per GPU (gfx942, gfx950), by digest
+  components ................ mori, amd-aiter, flydsl, vllm, vllm-router, ucx, googletest, rixl, rocshmem, deepep
+
+WHAT WORKS TOGETHER (matrix, compat/rocm.yaml)
+  each build once: its source (repo, commit, patches) or wheel, how it installs, what it requires,
+  and for an engine what it runs on each GPU (capabilities) -- shared by every stack that selects it
+```
+
+### The full system it resolves to
+
+The run's GPU picks the recipe variant and the image's base; everything else is the same file.
+
+<table>
+<tr><th></th><th>on gfx942 (MI300X)</th><th>on gfx950 (MI355X)</th></tr>
+<tr><td>workload</td><td colspan="2"><code>RECIPE_CHECK=1 MAD_BEST_CONFIG=1 RUN_MORI=1 WIDE_EP=1 REQUIRE_LOCAL_WEIGHTS=1 BENCHMARK_SCRIPT=niah NIAH_WORDS=10000,50000,100000,200000 MODEL_NAME=Kimi-K3-MXFP4 xP=2 yD=2</code></td></tr>
+<tr><td>recipe</td>
+<td><pre>EP_TP_SIZE=2  GPU_ARCHS=gfx942
+VLLM_ROCM_USE_AITER_MLA=0
+--quantization-config
+  '{"moe":{"weight":"int4_per_group_32"}}'
+best-known record laid over it</pre></td>
+<td><pre>EP_TP_SIZE=1  GPU_ARCHS=gfx950
+VLLM_ROCM_USE_AITER_MLA=1
+native MXFP4 (no conversion)
+--max-num-batched-tokens 4096</pre></td></tr>
+<tr><td>image</td><td colspan="2"><pre>base  rocm/vllm-dev:ci_base-0fcd9b99… (the GPU's digest)
+mori fe12a11a@di · amd-aiter 68e42f5f@di · flydsl 0.2.4@di · vllm 9a7ae4b8+cd0d2656@di (Kimi-K3 patch)
+vllm-router 1d10e71f+0cc1c443@di · ucx da3fac2a@di · googletest 1.14.0@di · rixl f33a5599@di
+rocshmem 9c43b232@di · deepep 0f63d3e9@di-cx7</pre></td></tr>
+<tr><td>checked before it runs</td><td colspan="2">the recipe's roles against the GPU and the image's vLLM build (what that build runs on that GPU), and the nodes' GPU against the recipe's</td></tr>
+</table>
+
+### A change, side by side
+
+An engineer builds Kimi-K3 their own way: their own Dockerfile on the same base, with AITER at a
+newer commit and a newer vLLM wheel from the frameworks index. They run it, and it works. The build
+writes the generalized form of what they ran
+([details below](#from-a-build-to-the-matrix)):
+
+<table>
+<tr><th>The stack the card names</th><th>The stack they ran, generalized by the build</th></tr>
+<tr><td><pre>image_spec: ${images.vllm-kimi-k3}</pre></td>
+<td><pre>image_spec:
+  extends: ${images.vllm-kimi-k3}
+  components:
+    amd-aiter: 1a2b3c4d@di
+    vllm: 0.12.1.dev0+rocm7.1.0.g5e3f9a01@frameworks_vllm</pre></td></tr>
+<tr><th colspan="2">The full image each resolves to (madengine composes it, on either GPU)</th></tr>
+<tr><td><pre>mori        fe12a11a@di
+<b>amd-aiter   68e42f5f@di</b>
+flydsl      0.2.4@di
+<b>vllm        9a7ae4b8+cd0d2656@di</b>
+vllm-router 1d10e71f+0cc1c443@di
+ucx         da3fac2a@di
+googletest  1.14.0@di
+rixl        f33a5599@di
+rocshmem    9c43b232@di
+deepep      0f63d3e9@di-cx7</pre></td>
+<td><pre>mori        fe12a11a@di
+<b>amd-aiter   1a2b3c4d@di</b>
+flydsl      0.2.4@di
+<b>vllm        0.12.1.dev0+rocm7.1.0.g5e3f9a01@frameworks_vllm</b>
+vllm-router 1d10e71f+0cc1c443@di
+ucx         da3fac2a@di
+googletest  1.14.0@di
+rixl        f33a5599@di
+rocshmem    9c43b232@di
+deepep      0f63d3e9@di-cx7</pre></td></tr>
+</table>
+
+Two lines differ, and only those two are written: the base, MoRI, FlyDSL, the router and the native
+transport stack are inherited from the stack, though the engineer's Dockerfile never mentioned
+the stack. The workload, the recipe and the checks are untouched: the same run, on a different
+image.
+
+### How compat gets more accurate over time
+
+<table>
+<tr><th></th><th>What happens</th><th>What the matrix (<code>compat/rocm.yaml</code>) learns</th></tr>
+<tr><td><b>Run 1</b><br>(the engineer, on their machine)</td>
+<td>Their image is matched to the matrix: MoRI by the commit in its version, FlyDSL by its version;
+torch and triton are the base's. Two builds are new.</td>
+<td><ul>
+<li>the vLLM wheel: a build entry with its url, python, and requirements from its own metadata</li>
+<li>the wheel asks for <code>amd-aiter&gt;=0.1.18</code>, but the run worked with 0.1.17: reported, and left out of the entry</li>
+<li>AITER at 1a2b3c4d: a draft entry from the matrix's AITER build, for the engineer to confirm</li></ul></td></tr>
+<tr><td><b>The PR</b></td>
+<td>The engineer commits the generated matrix and confirms the AITER draft, alongside their change.</td>
+<td>two builds, each recorded once, true to what ran</td></tr>
+<tr><td><b>Run 2</b><br>(anyone, the same stack, either GPU)</td>
+<td>Everything matches: the build writes nothing new, and nothing is left for a person. The
+generalized spec now composes into the whole ten-build image on gfx942 and gfx950, and can be a
+card's image spec as it stands.</td>
+<td>nothing: it is already true</td></tr>
+<tr><td><b>Run N</b></td>
+<td>Each run proves the stack it ran on its hardware.</td>
+<td>only what is new: a version it had not seen, a requirement a working run contradicts, a
+build a person confirms. The matrix stays general (one entry per build, no per-run record) and
+grows as engineers work.</td></tr>
+</table>
+
+The test `CompatOverTime` in `scripts/common/tests/test_e2e_examples.py` runs this timeline: run 1,
+the PR, run 2 adding nothing, and its spec composing on both GPUs into the stack with exactly those
+two builds changed.
 
 ## The workload library
 
@@ -210,7 +337,7 @@ model:
 # DIR/compat/rocm.yaml: the checkout's matrix, comments kept, with what this build established
 +    0.12.1.dev0+rocm7.1.0.g5e3f9a01@frameworks_vllm:
 +      url: https://rocm.frameworks.amd.com/whl-multi-arch/vllm/vllm/vllm-0.12.1.dev0-cp312-cp312-linux_x86_64.whl
-+      requires: [torch==2.9.0+rocm7.1.0, mori]
++      requires: [mori]                 # torch is the base image's, as for the matrix's own builds
 +      python: ['3.12']
 +      note: generalized from a working build manifest
 ```
@@ -220,7 +347,7 @@ What each part of the image becomes:
 | In the image | Becomes |
 |---|---|
 | a build the matrix has (by version, or by the commit a source build carries) | the stack's, inherited |
-| a package the base image already has (torch, triton) | nothing: it is the base's |
+| a package the base image already has (torch, triton) | nothing: it is the base's, and no build's requirement |
 | a plain index dependency (msgspec) | nothing: pip installs it |
 | a version an authorized index serves | a build entry in the matrix: url, python, and its requirements on components the matrix knows (from the wheel's metadata) |
 | a requirement of that wheel the working run contradicts | reported, and left out of the entry: the run shows the wheel works without it |

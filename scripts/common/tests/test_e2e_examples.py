@@ -227,9 +227,58 @@ class FromABuildToItsGeneralizedForm(unittest.TestCase):
         matrix = yaml.safe_load(Path(got["compat"]).read_text())
         new = matrix["components"]["vllm"][NEW_VLLM + "@frameworks_vllm"]
         self.assertEqual((new["url"], new["requires"], new["python"]),
-                         (NEW_VLLM_URL, ["torch==2.9.0+rocm7.1.0", "mori"], ["3.12"]))
+                         (NEW_VLLM_URL, ["mori"], ["3.12"]))         # torch is the base's
         self.assertNotIn("1a2b3c4d@di", matrix["components"]["amd-aiter"])    # a draft is confirmed by a person
         self.assertNotIn("msgspec", matrix["components"])
+
+
+@unittest.skipIf(emit_config is None, "madengine not importable: the generalization runs in its build")
+class CompatOverTime(unittest.TestCase):
+    """docs/e2e-examples.md, "How compat gets more accurate over time": run 1 writes what it proved,
+    its PR merges it, and run 2 on the same stack adds nothing -- its image now a spec that composes
+    into the whole stack on every GPU."""
+
+    def setUp(self):
+        (MAD / ".madengine").mkdir(exist_ok=True)
+        self.work = Path(tempfile.mkdtemp(dir=MAD / ".madengine"))      # a checkout the PR merges into
+        shutil.copytree(MAD / "compat", self.work / "compat")
+        for d in ("common", "vllm_dissag"):
+            shutil.copytree(SCRIPTS / d, self.work / "scripts" / d, symlinks=True)
+        self._cwd = os.getcwd()
+        os.chdir(self.work)
+        c = card("vllm_dissag", "pyt_e2e_kimi-k3_disagg_niah")
+        self.model = dict(c, name="vllm_dissag/" + c["name"], scripts="scripts/vllm_dissag/" + c["scripts"])
+        self.build = {"base_docker": KIMI_BASE, "image_info": HAND_BUILT, "base_info": BASE_INFO}
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        shutil.rmtree(self.work)
+
+    def test_a_merged_run_makes_the_next_one_general(self):
+        from madengine.stack import compose, generalize
+        run1 = emit_config(dict(self.model), self.work / "run1", self.build, served)
+        image = yaml.safe_load(Path(run1["path"]).read_text())["image"]
+        # The PR: the matrix the run wrote, and the drafted AITER build its author confirmed.
+        draft = next(u["draft"] for u in image["unresolved"] if u.get("draft"))
+        text = generalize.insert_builds(Path(run1["compat"]).read_text(), {"amd-aiter": draft})
+        (self.work / "compat" / "rocm.yaml").write_text(text)
+        run2 = emit_config(dict(self.model), self.work / "run2", self.build, served)
+        again = yaml.safe_load(Path(run2["path"]).read_text())["image"]
+        self.assertNotIn("compat", run2)                                  # nothing new to add
+        self.assertNotIn("unresolved", again)                             # nothing left for a person
+        spec = madengine_image_spec.effective_image_spec(
+            {"name": "next", "_fs_rel_path": "vllm_dissag",
+             "image_spec": {"extends": "${images.vllm-kimi-k3}", **{k: v for k, v in again["spec"].items()
+                                                                     if k != "extends"}}}, {}, str(self.work))
+        kimi = madengine_image_spec.named_specs(str(self.work))["vllm-kimi-k3"]
+        matrix = madengine_image_spec.load_matrix(str(self.work))
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                got = {i["name"]: i["key"] for i in compose.compose(spec, matrix, arch)["items"]}
+                was = {i["name"]: i["key"] for i in compose.compose(kimi, matrix, arch)["items"]}
+                self.assertEqual({k: v for k, v in got.items() if was.get(k) != v},
+                                 {"amd-aiter": "1a2b3c4d@di", "vllm": NEW_VLLM + "@frameworks_vllm"})
+                self.assertEqual(set(got), set(was))                      # the whole stack: native libraries too
 
 
 class FromACardToItsExample(unittest.TestCase):
