@@ -146,8 +146,13 @@ _has "$(_stub)" "docker ps -q --filter name=^container_" "only this launcher's l
 
 echo ""
 echo "=== the NIAH wrapper leaves max_tokens to benchmark_niah.py ==="
-_hasnot "$(grep -v '^ *#' "$DIR/vllm_dissag/benchmark_niah.sh")" "NIAH_MAXTOK=" "benchmark_niah.sh does not override NIAH_MAXTOK"
+# The chat harness's own default (8192) applies: a reasoning model needs room for its trace
+# before the answer (Kimi-K3 at 2048 scored 1/10 on two of four lengths, cut off mid-trace).
+_chat="$(sed -n '/^else$/,/^fi$/p' "$DIR/vllm_dissag/benchmark_niah.sh" | grep -v '^ *#')"
+_has    "$_chat" "benchmark_niah.py" "the chat path runs benchmark_niah.py"
+_hasnot "$_chat" "NIAH_MAXTOK=" "benchmark_niah.sh does not override NIAH_MAXTOK on the chat path"
 _has "$(grep '^MAXTOK' "$DIR/vllm_dissag/benchmark_niah.py")" '"8192"' "benchmark_niah.py defaults to 8192"
+_has "$(sed -n '/NIAH_METHOD:-/,/^else$/p' "$DIR/vllm_dissag/benchmark_niah.sh")" "benchmark_niah_methods.py" "NIAH_METHOD selects the prompt-method harness"
 
 echo "======================================================"
 echo "  launcher_verdict_assert: ${pass} passed, ${fail} failed"

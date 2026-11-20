@@ -44,6 +44,8 @@ node_site_mounts() {
 node_rdma_mounts() {
     local _lib _vlib _pattern _libdir=/usr/lib/x86_64-linux-gnu
     _RDMA_MOUNTS=""
+    # DISABLE_HOST_RDMA_MOUNTS=1: the image's own rdma-core (host and container ABI differ).
+    [ "${DISABLE_HOST_RDMA_MOUNTS:-0}" = "1" ] && return 0
     for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
         [ -f "$_libdir/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_libdir/$_lib:$_libdir/$_lib:ro"
     done
@@ -136,5 +138,10 @@ node_run_container() {
     _rc=$?
     [ -n "$hook" ] && "$hook"
     trap - TERM INT
+    # A job a node declared failed during boot (vllm_disagg.sh BOOT_FATAL) ends the step.
+    if [ -f "${LOG_PATH:-}/${SLURM_JOB_ID:-}/BOOT_FATAL" ]; then
+        echo "BOOT_FATAL on $(hostname): $(cat "${LOG_PATH}/${SLURM_JOB_ID}/BOOT_FATAL"); ending the step"
+        exit 3
+    fi
     exit "$_rc"
 }

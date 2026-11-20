@@ -53,7 +53,7 @@ path). The DeepSeek family is wideEP plus moriio+TP (`MORIIO_TP_MODELS`), the TP
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
-| `amd-Llama-3.3-70B-Instruct-FP8-KV` | dense | 1, 2 (TP) | validated serving (moriio+TP) |
+| `amd-Llama-3.3-70B-Instruct-FP8-KV` | dense | 1, 2 (TP) | validated serving (moriio+TP) on the `dsv4` image; the shared image returns incorrect output |
 | `Llama-3.1-405B-Instruct-FP8-KV` | dense | 1, 2 (TP) | |
 | `Qwen3-32B` | dense | 1, 2 (TP) | validated serving (MoRIIO + TP) |
 | `gpt-oss-120b` | MoE | 1, 2 (TP) | |
@@ -61,6 +61,8 @@ path). The DeepSeek family is wideEP plus moriio+TP (`MORIIO_TP_MODELS`), the TP
 | `DeepSeek-V3` | MoE | 2 (moriio TP), 3, 4 | validated serving (moriio+MoRI-EP) |
 | `DeepSeek-V3-5layer` | MoE | 2 (moriio TP), 3, 4 | smoke/dev variant |
 | `DeepSeek-R1` | MoE | 2 (moriio TP), 3, 4 | needs a co-versioned AITER image (see Caveats) |
+| `DeepSeek-V4-Flash-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
+| `DeepSeek-V4-Pro-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own stack (`vllm-glm51`); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
 | `Kimi-K3` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8** (`EP_TP_SIZE=2`); `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3` |
 | `Kimi-K3-MXFP4` | MoE | 3 (moriio wideEP only) | MI300X gfx942 2P/2D; **TP2×DP8**; `vllm-kimi-k3` image; card `pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
@@ -128,6 +130,11 @@ generates the Dockerfile from it:
 | `vllm-glm51` | [compat/images/vllm-glm51.yaml](../../compat/images/vllm-glm51.yaml) | `GLM-5.1-FP8` | off (MoRI-EP only) |
 | `vllm-kimi-k3` | [compat/images/vllm-kimi-k3.yaml](../../compat/images/vllm-kimi-k3.yaml) | the Kimi-K3 models | on |
 
+`amd-Llama-3.3-70B-Instruct-FP8-KV` boots and benchmarks on `vllm-mori121` but answers incorrectly;
+it runs on the DeepSeek-V4 image instead. The DeepSeek-V4 models are not on a stack yet: they build
+from their own Dockerfile (`docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile`) and are
+submitted with `run_wideep.sh`.
+
 From the MAD root:
 
 ```bash
@@ -142,6 +149,58 @@ MAD ships no runtime patchers, so every fix a model needs is in its stack's buil
 a stack builds, add the build to `compat/rocm.yaml` (or reuse one) and select it in the stack's
 spec; a future model that needs other sources gets its own spec (usually a few lines extending
 `di-vllm`), not a new Dockerfile.
+
+`DeepSeek-V4-Flash-FP8` / `DeepSeek-V4-Pro-FP8` need their own image for the same
+reason, and follow the same per-model naming:
+
+```bash
+docker build -t <your-registry>/vllm-disagg:dsv4 \
+  -f docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile .
+```
+
+The DSV4 source patches are applied at image build, so nothing patches at job
+start; `connectors/moriio.sh` only checks that `/app/versions.txt` carries
+`DSV4_PATCHES_BAKED=`.
+
+The same image is the one to use for `amd-Llama-3.3-70B-Instruct-FP8-KV` on
+moriio + TP. On its newer vLLM, Llama answers the smoke curl correctly at
+2P/2D, where the shared image returns repetitive, off-topic text. Submit it the
+usual way, pointing at that image:
+
+```bash
+export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4
+export CONNECTOR=moriio WIDE_EP=0 MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV
+```
+
+### Launching DSV4 jobs
+
+DSV4 submits through `./run_wideep.sh <bench> <model> <topology>`, which
+derives every dependent knob from those three arguments. Set the image with
+`DOCKER_IMAGE_NAME` or `--image`:
+
+```bash
+cd MAD/scripts/vllm_dissag
+export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4
+
+# curl + NIAH ladder + concurrency sweep in one allocation (the usual first run)
+./run_wideep.sh validate dsv4fls ep16
+
+# a single bench
+./run_wideep.sh niah  dsv4pro 2p2d
+./run_wideep.sh smoke dsv4fls 1p1d
+
+# print the sbatch line without submitting
+./run_wideep.sh validate dsv4fls ep32 --dry-run
+```
+
+`dsv4fls` / `dsv4pro` are shorthand for the two `MODEL_NAME` values; topology is
+`xPyD` (`2p2d`) or an EP width (`ep16`, `ep32`). Useful flags: `--time HH:MM:SS`,
+`--exclude <nodelist>`, `--after JOBID` to queue behind a running job. Site
+settings come from the environment: `PARTITION`, `ACCOUNT`, `QOS`.
+
+Prompt defaults are handled per model and should not be set by hand — the Flash
+NIAH branch primes the answer stem (`NIAH_LIST_PRIME=1.`) and the Pro branch runs
+unprimed. The MoRI dispatch trim and `DSV4_ENABLE_HMA=0` are hardcoded and cannot be overridden.
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -186,6 +245,101 @@ Each followed by:
 export MODEL_NAME=<model> xP=<prefill_nodes> yD=<decode_nodes>
 sbatch -N $((xP+yD)) -n $((xP+yD)) --nodelist=<nodes> run_xPyD_models.slurm
 ```
+
+### Tiered prefix caching (`KV_OFFLOAD`)
+
+An orthogonal overlay that attaches a CPU-RAM KV tier (GPU KV → host, for prefix reuse)
+*on top of* the disagg P/D connector, by composing both via vLLM's `MultiConnector`. Two
+independent axes: the tier topology (`KV_OFFLOAD`) and the CPU-tier backend
+(`OFFLOAD_BACKEND`).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KV_OFFLOAD` | `none` | `none` (off) \| `cpu` (CPU-RAM tier) \| `fs` (CPU-RAM + filesystem tier) |
+| `OFFLOAD_BACKEND` | `OffloadingConnector` | `OffloadingConnector` (alias `native`) \| `SimpleCPUOffloadConnector` \| `LMCacheConnectorV1` (alias `lmcache`) |
+| `OFFLOAD_CPU_BYTES_PER_NODE` | `107374182400` (100 GiB) | **Single CPU-tier budget for all backends**: total host RAM for KV offload **per node** (bytes). The connector derives the per-rank (native) / per-worker (lmcache) value from this + node topology, so one budget means the same node footprint across native TP, native EP, and lmcache. See the conversion note in `connectors/offloading.inc.sh`. |
+| `OFFLOAD_DISK_PATH` | (unset) | required for `KV_OFFLOAD=fs`: base dir for the fs tier (NVMe or NFS, node-accessible). A per-host subdir is appended. |
+| `KV_CACHE_MEMORY_BYTES` | per-model (`models.yaml`) | Per-GPU HBM KV-cache cap in bytes, passed as `--kv-cache-memory-bytes` (also skips the boot profiling forward). Set it explicitly with offloading: a cap makes blocks evict into the CPU tier, and an uncapped KV pool can make the connector's extra KV-registration pass exceed the init timeout. |
+| `LMCACHE_MAX_LOCAL_DISK_SIZE` | `0.0` | `LMCacheConnectorV1` only: **per-worker** fs tier in GB |
+| `FORCE_FRESH_IMAGE` | `0` | Set to `1` to `docker pull` the image on every node and abort if the pull fails (never run a stale cached image). |
+| `DISABLE_HOST_RDMA_MOUNTS` | `0` | Set to `1` to skip host rdma-core bind-mounts (use when host and container rdma-core ABI versions differ). |
+| `MORIIO_READ_MODE` | `0` | MoRIIO only: set to `1` for READ mode (decode pulls KV from prefill instead of prefill pushing). |
+
+**Backend choice.** `OffloadingConnector` (native, default) is the general-purpose backend
+and supports the fs tier via `TieringOffloadingSpec`. `SimpleCPUOffloadConnector` is a
+lighter hash-driven CPU-only alternative (no fs tier). `LMCacheConnectorV1` (lmcache) is best
+for prefix-heavy workloads and supports the fs tier, using the `lmcache` package bundled in
+vLLM ROCm images v0.33.0 and later; it works under both rixl and MoRIIO. The `fs` tier is supported
+by `OffloadingConnector` and `LMCacheConnectorV1` only, not `SimpleCPUOffloadConnector`.
+
+Env for each recipe (submit with the same `MODEL_NAME`/`xP`/`yD`/`sbatch` command as above):
+
+```bash
+# Common to all offload runs
+export BENCHMARK_SCRIPT=multiturn
+export PROXY_TYPE=vllm_router ROUTER_BINARY=<path>/vllm-router
+export GPU_MEMORY_UTILIZATION=0.8
+export KV_CACHE_MEMORY_BYTES=25000000000          # per-GPU HBM KV cap so blocks evict into the CPU tier
+export OFFLOAD_CPU_BYTES_PER_NODE=644245094400    # 600 GiB/node; connector splits per rank/worker
+export CLEAN_STALE_JIT_LOCKS=1
+
+# ── native · CPU tier (moriio wideEP, DSV3) ──────────────────────────────────
+export CONNECTOR=moriio WIDE_EP=1 VLLM_ROCM_USE_AITER_MLA=1
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU tier (rixl TP, gpt-oss-120b) ────────────────────────────────
+export CONNECTOR=rixl WIDE_EP=0
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU tier (moriio TP, gpt-oss-120b) ──────────────────────────────
+export CONNECTOR=moriio WIDE_EP=0
+export MORIIO_READ_MODE=1                         # gpt-oss has sliding-window attn; WRITE unsupported
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=OffloadingConnector
+
+# ── native · CPU + fs tier ───────────────────────────────────────────────────
+export KV_OFFLOAD=fs OFFLOAD_BACKEND=OffloadingConnector
+export OFFLOAD_DISK_PATH=/mnt/kv_offload          # node-accessible storage (NVMe or NFS)
+
+# ── lmcache · CPU (+ optional fs) tier (rixl or moriio) ──────────────────────
+export KV_OFFLOAD=cpu OFFLOAD_BACKEND=LMCacheConnectorV1
+export PYTHONHASHSEED=0                           # fixed + identical across all vLLM procs, else lookups miss
+export DISABLE_HOST_RDMA_MOUNTS=1                 # if host rdma-core ABI differs from container
+```
+
+When `KV_OFFLOAD!=none` the launcher forces `--enable-prefix-caching` (offloading is
+meaningless without it). Pair it with a small `--kv-cache-memory-bytes` cap so HBM KV
+actually evicts into the CPU tier. These recipes assume a `vllm/vllm-openai-rocm` image at
+v0.33.0 or later (release or nightly, as in `docker/pyt_vllm.ubuntu.amd.Dockerfile`), which
+ships `OffloadingConnector`, `SimpleCPUOffloadConnector`, `MultiConnector` and `lmcache`; no
+custom image is needed.
+
+LMCache (`lmcache`) CPU and fs tiers are validated on the cluster with both `CONNECTOR=rixl` and
+`CONNECTOR=moriio`, alongside the native backend. Under moriio, LMCache relies on the temporary
+device-binding patch below.
+
+`CONNECTOR=moriio` + TP (`WIDE_EP=0`) with `KV_OFFLOAD` is newly wired and not yet validated end-to-end.
+`LMCACHE_MAX_LOCAL_CPU_SIZE` (GB/worker), if set explicitly, still overrides the value derived from
+`OFFLOAD_CPU_BYTES_PER_NODE`.
+
+**Temporary runtime patches** (`connectors/moriio.sh`, applied per worker at launch, idempotent).
+Each is non-fatal: if its anchor is missing (image already has the fix) it logs
+`WARN: patch could not be applied ... continuing without it` and the launch proceeds. Remove each
+once the images you use ship the upstream fix:
+
+| Patch | Upstream PR | Already in |
+|---|---|---|
+| MoRIIO sideline fix (MultiConnector + offload; WRITE-mode requests stranded in `WAITING_FOR_REMOTE_KVS`) | [vLLM #57705](https://github.com/vllm-project/vllm/pull/57705), merged 2026-10-12 | vLLM v0.33.0 and later (and nightlies from 0.32.1rc1.dev361 on), so the patch logs a no-op on supported images |
+| LMCache device-binding fix (`local_worker_id` -> `torch.cuda.current_device()`; every DP rank otherwise binds GPU 0) | [LMCache #5501](https://github.com/LMCache/LMCache/pull/5501), merged 2026-10-07 | LMCache v0.5.6 and later. vLLM v0.33.0 images still bundle LMCache 0.5.3, so they need it |
+| LMCache MLA broadcast device fix (retrieve broadcast copied KV chunks to `cuda:{worker_id}`, which is GPU 0 on every DP rank; non-DP0 ranks GPU-fault at the first LMCache hit under DP) | [LMCache #6109](https://github.com/LMCache/LMCache/pull/6109) (open), which supersedes the stale [#5515](https://github.com/LMCache/LMCache/pull/5515) | No release yet: still present in v0.5.6 and v0.5.7rc2 |
+
+The MLA broadcast fix only matters when `save_only_first_rank` is on (default for MLA models) and DP > 1.
+Setting `LMCACHE_EXTRA_CONFIG='{"save_only_first_rank":false}'` also avoids it, as it skips that path.
+
+**Multi-node roles (e.g. 2P2D EP16).** The router must be built from
+[vllm-project/router #458](https://github.com/vllm-project/router/pull/458) (`--moriio-dp-size-local`,
+`--moriio-prefill-hosts`, `--moriio-decode-hosts`). A stock `vllm-router` lacks these flags: the
+launcher then warns and only the master node's DP ranks 0-7 of each role serve. The PR is open; point
+`ROUTER_BINARY` at a binary built from it.
 
 ### Back-compat
 
@@ -272,7 +426,7 @@ but each combo also needs the connector's transport built into the image:
 
 | Combo | Live-validated | Image requirement |
 |-------|----------------|-------------------|
-| moriio + TP | ✅ | MoRI (`vllm-mori121` image) |
+| moriio + TP | ✅ | MoRI (`vllm-mori121` image; Llama-3.3-70B on the DeepSeek-V4 image, see above) |
 | moriio + wideEP (mori) | ✅ 1P/1D + 2P/2D | MoRI (`vllm-mori121` image) |
 | rixl + TP | needs a NIXL-validated image | NixlConnector + working NCCL TP path |
 | rixl + wideEP (deepep) | needs a DeepEP-validated image | DeepEP all2all kernels |
@@ -379,10 +533,10 @@ resolved from the prefill worker (the first `host:port` in
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BENCHMARK_SCRIPT` | `sweep` | Set to `agentic` to run the agentic replay (`sweep`, `long_context`, `agentic`) |
+| `BENCHMARK_SCRIPT` | `sweep` | Selects the benchmark: `sweep`, `long_context`, `agentic`, `niah`, `multiturn` |
 | `DURATION` | `120` | Benchmark duration in seconds (use `>=900` for a canonical/valid submission) |
 | `AGENTIC_PORT` | `${BENCHMARK_PORT}` | Endpoint aiperf targets (auto-resolved to the proxy/router port, then the shim port) |
-| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic) |
+| `ENABLE_SERVER_METRICS` | auto | `1` forces server Prometheus metrics on (auto-on for agentic and multiturn) |
 | `ENABLE_PREFIX_CACHE` | auto | `1` forces prefix cache on i.e. strips `--no-enable-prefix-caching` (auto-on for agentic) |
 | `SUITE_CORPUS_FORCE` | `0` | Set `1` to regenerate a cached corpus after editing a profile. |
 
@@ -490,6 +644,21 @@ The suite roll-up (`suite_summary.json`) has a `workloads[]` array; each entry c
 ```
 
 Thresholds: `AGENTIC_MAX_ERROR_RATE` (default `0.10`, gates PASS/WARN) and `AGENTIC_MIN_CACHE_HIT` (default `0.30`, warn-only). A low cache hit rate on `xP>1` usually indicates the router is not keeping a conversation's turns on the worker holding its prefix (session-affinity).
+### Multi-turn benchmark (for `KV_OFFLOAD`)
+
+`benchmark_multiturn.sh` is the benchmark for the offloading overlays (`export BENCHMARK_SCRIPT=multiturn`).
+Each conversation has a **unique** large prefix and runs as two passes on `vllm bench serve`:
+pass A primes the cache (`prefix + q1`, tiny output); pass B measures turn 2 (`prefix + q1 + q2`).
+Once the primed set exceeds the HBM KV cap, evicted prefixes reload from the CPU/fs tier with
+`KV_OFFLOAD` on (low turn-2 TTFT) or are recomputed with it off (high TTFT). Around each measure
+pass it scrapes the prefill `/metrics` (`PREFILL_METRICS_URL`, exported
+by the connector) and writes GPU prefix-cache and external (offload) hit-rate deltas to `perf.csv`.
+
+- `MT_SWEEP="con:np:isl ..."` is an explicit point list: `con` = in-flight requests (keep low), `np` =
+  distinct primed conversations (the HBM-pressure knob; raise it to cross the HBM -> CPU boundary),
+  `isl` = prefix length. Without it a legacy `MT_CON_LIST` x `MT_PREFIX_LEN_LIST` grid is used.
+- Other knobs: `MT_Q1_LEN`, `MT_Q2_LEN`, `MT_OSL1`, `MT_OSL2`, `MT_SEED`, `MT_DRYRUN`; see the header of
+  `benchmark_multiturn.sh` for defaults.
 
 ## Testing the launcher (no GPUs)
 

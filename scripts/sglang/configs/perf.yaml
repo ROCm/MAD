@@ -147,6 +147,24 @@
         # Null removes the key in case it ever moves into the common block.
         --enable-deepseek-v4-fp4-indexer: ~
 
+- model: deepseek-ai/DeepSeek-V4.1-Flash
+  env:
+    # Required: fp4 routed experts have no bf16-activation CK MoE kernel.
+    AITER_BF16_FP8_MOE_BOUND: 0
+    SGLANG_USE_ROCM700A: 0
+    TORCH_BLAS_PREFER_HIPBLASLT: 1
+    SGLANG_OPT_HIP_OPUS_SPARSE_PREFILL: "true"
+    SGLANG_OPT_HIP_FLYDSL_MXFP8: 1
+    SGLANG_HIP_FP4_INDEXER_ROWGROUP: 1
+    SGLANG_HIP_DSV41_INDEX_K_PAGE8: 1
+  extra_args:
+    --trust-remote-code: true
+    --fp8-gemm-backend: aiter
+    --mem-fraction-static: 0.85
+    --enforce-shared-experts-fusion: true
+    --enable-decoder-swa-bounded-replay: true
+    --cuda-graph-backend-prefill: disabled
+
 - model: black-forest-labs/FLUX.2-dev black-forest-labs/FLUX.1-dev
   extra_args:
     --attention-backend: aiter
@@ -181,9 +199,43 @@
   # the docker/pyt_sglang default (v0.5.22) satisfies this, so no docker_base pin.
   env:
     SGLANG_USE_AITER: 1
+    # INT4 quantises the 268 MB prefill all-reduce;
+    ROCM_QUICK_REDUCE_QUANTIZATION: INT4
   extra_args:
     --trust-remote-code: true
     --attention-backend: aiter
     --mem-fraction-static: 0.9
     --reasoning-parser: qwen3
     --tool-call-parser: qwen3_coder
+    # +9.9% prefill / +2.7% decode, GSM8K 97.11 -> 97.26.
+    --kv-cache-dtype: fp8_e4m3
+    --mamba-ssm-dtype: bfloat16
+
+- model: amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4
+  # Muse Spark: 816B total / 42B active MoE, 62 text layers, GQA (128 q / 16 kv
+  # heads, head_dim 64), sliding_window 2048, 1M max position. Quark MXFP4
+  # (per-group-32, e8m0 scales) weights + activations.
+  # Arch class is MuseSparkForConditionalGeneration, which only the muse-spark
+  # SGLang branch knows, so docker_base is pinned instead of using the
+  # Dockerfile default (v0.5.22-rocm10-mi35x) -- that image fails at model load.
+  docker_base: lmsysorg/sglang-rocm:muse-spark-open
+  env:
+    SGLANG_USE_AITER: 1
+    SGLANG_USE_AITER_UNIFIED_ATTN: 1
+    MUSE_MOE_BACKEND: flydsl
+  extra_args:
+    --attention-backend: aiter
+    --page-size: 16
+    --mem-fraction-static: 0.85
+    --kv-cache-dtype: fp8_e4m3
+    # EP must track the run config's tp (issue #1680 asks for TP8 on MI355X).
+    # Muse Spark supports TP4/EP4 and TP8/EP8; change both together.
+    --ep-size: 8
+    # DFLASH speculative decoding against the 10 GB DFlash2 draft, per the
+    # model card. The draft runs on triton attention, not aiter.
+    --speculative-algorithm: DFLASH
+    --speculative-draft-model-path: RadixArk/Muse-Spark-Open-DFlash2
+    --speculative-draft-attention-backend: triton
+    --speculative-num-draft-tokens: 8
+    --reasoning-parser: muse
+    --tool-call-parser: muse
