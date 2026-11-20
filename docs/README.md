@@ -24,7 +24,7 @@ learning path and stop when you have what you need.
 |---|---|
 | Run one model on one GPU host | [Getting started](getting-started.md) |
 | Add a model, a Dockerfile or a script | [Adding a model](adding-a-model.md) |
-| Add or tune a multinode inference model: one card for every GPU, its whole configuration in one file | [Configuring a distributed-inference model](configuring-a-model.md) |
+| Add or tune a multinode inference model: one card for every GPU, its configuration on shared layers | [Configuring a distributed-inference model](configuring-a-model.md) |
 | Understand multinode inference (disaggregated prefill/decode, colocated) | [Multinode overview](multinode-overview.md) |
 | Find the code behind each step of a multinode run | [Multinode architecture](multinode-architecture.md) |
 | Run a multinode card on a SLURM cluster | [Running multinode workloads](multinode-running.md) |

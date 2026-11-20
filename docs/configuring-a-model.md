@@ -45,9 +45,11 @@ it (site, connector env, recipe, topology, workload, submit). Before a run:
 python3 scripts/common/config/emit.py vllm_dissag pyt_vllm_disagg_mori_deepseek-v3
 ```
 
-prints the card's whole configuration in one file: its recipe (with every GPU's variant), its
-connector env, its topology, its env and its image. `madengine build --emit-config DIR` writes it
-for every card it builds, and the pipeline archives it with each run (`run_configs/`).
+prints the card's configuration as a workload file that fits the shared layers: the layers
+(`scripts/common/workloads/`) whose values the card has, and the part that is the card's own. Its
+recipe and connector env stay where they live (`models.yaml`, `connectors/`), so a fix there
+reaches it. `madengine build --emit-config DIR` writes it for every card it builds, and the
+pipeline records it with each run (`run_configs/`, the build manifest).
 
 ## Using the generated configuration
 
@@ -59,10 +61,11 @@ container environment on each GPU the recipe covers):
 "env_vars": {"MAD_CONFIG": "workloads/deepseek-v3.yaml"}
 ```
 
-From then on the card's configuration is in one place you can edit: change a flag under
-`recipes:`, a connector value under `connectors:`, a benchmark setting under `model.env`, and the
-run follows. The original card, recipe and `.env` files stay as they were; other cards keep using
-them.
+From then on the card's own part is in one place you can edit, and the shared parts stay
+shared: a serving shape, a benchmark or a recipe changed in its layer changes every card on it. A
+card that needs its own recipe or connector values can add them to its file (`recipes:`,
+`connectors:`), over the shared ones. `emit.py --all -o DIR --suggest` lists values many cards keep
+that no layer holds yet: candidates for a new shared layer.
 
 ## When you need more
 
@@ -126,7 +129,7 @@ What a model developer edits:
 |---|---|
 | The card | `scripts/<launcher>/models.json` |
 | The recipe | `scripts/<launcher>/models.yaml` (the colocated launcher reads `vllm_dissag`'s) |
-| A card's whole configuration (optional) | the workload file its `MAD_CONFIG` names |
+| A card's own part, on the shared layers (optional) | the workload file its `MAD_CONFIG` names |
 | Shared layers (optional) | `scripts/common/workloads/` |
 
 What platform and CI owners maintain, and runs read on their own:

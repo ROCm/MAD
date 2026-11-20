@@ -5,7 +5,7 @@
 # Measures long-context retrieval (NIAH). The example's own best-known registry shows a measured
 # configuration laid over the recipe by default (MAD_BEST_CONFIG=0 runs the recipe as written).
 version: 2
-defaults: [../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/niah.yaml]
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/niah.yaml]
 model:
   env:
     MODEL_NAME: Kimi-K3-MXFP4

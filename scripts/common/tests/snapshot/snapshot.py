@@ -495,7 +495,7 @@ def emitted_equivalence(a):
             continue
         for card in cards_of(catalog, a):
             with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-                f.write(emit.dump(emit.compose(catalog, card)))
+                f.write(emit.dump(emit.compose(catalog, card, os.path.dirname(f.name))))
             try:
                 for arch in _recipe_archs(catalog, card):
                     checked += 1

@@ -3,7 +3,7 @@
 # spec (scheduler placement: --segment / pod affinity) and the platform (4 GPUs per tray). Until a
 # pin set and engine build list CDNA 5, the gate refuses with what is missing (recipe.py bringup).
 version: 2
-defaults: [../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/sweep.yaml]
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/sweep.yaml]
 model:
   env:
     MODEL_NAME: Kimi-K3-MXFP4

@@ -3,6 +3,6 @@
 # serving two LoRA adapters beside the base model (the recipe's lora:), measured by spreading
 # requests over the adapters.
 version: 2
-defaults: [../../../common/workloads/serve/replicas.yaml, ../../../common/workloads/bench/lora.yaml]
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/serve/replicas.yaml, ../../../common/workloads/bench/lora.yaml]
 model:
   env: {MODEL_NAME: Qwen3-32B-LoRA, MODEL_WEIGHTS_NAME: Qwen3-32B, COLOCATED_EXTRA_ARGS: "--max-model-len 8192"}

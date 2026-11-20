@@ -1,7 +1,6 @@
 # Independent servers per node behind a router (multi-tenant / high throughput): GPUS_PER_NODE /
 # TP_SIZE of them on every node. The tag names the shape from the values below (interpolation).
 version: 2
-defaults: [../base.yaml]
 model:
   env:
     REPLICAS: "1"

@@ -4,6 +4,6 @@
 # on decode (a recipe-role need turned into vLLM's --speculative-config), the KV budget as a tenth
 # of GPU memory (probed per node), and the accuracy harness.
 version: 2
-defaults: [../../../common/workloads/family/deepseek-v3.yaml, ../../../common/workloads/bench/accuracy.yaml]
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/deepseek-v3.yaml, ../../../common/workloads/bench/accuracy.yaml]
 model:
   env: {MODEL_NAME: DeepSeek-V3-MTP, MODEL_WEIGHTS_NAME: DeepSeek-V3}

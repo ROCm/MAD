@@ -1,5 +1,4 @@
 # vLLM prefill/decode disaggregation over MoRI-IO, wide expert parallelism (DP attention + EP).
 version: 2
-defaults: [../base.yaml]
 model:
   env: {RUN_MORI: "1", WIDE_EP: "1"}       # the shape (xP, yD or a topology spec) is each workload's
