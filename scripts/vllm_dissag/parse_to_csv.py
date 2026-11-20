@@ -10,6 +10,7 @@ Log format (from benchmark_xPyD.sh):
   Total token throughput (tok/s):          <VALUE>
 """
 
+import os
 import re
 import sys
 import csv
@@ -216,8 +217,9 @@ def _get_run_metadata(pipeline: str = "vllm"):
 def parse_niah_log(log_file: str) -> Dict[int, Dict]:
     """Parse NIAH benchmark log file and extract retrieval results per context length.
 
-    Scans the summary lines emitted by benchmark_niah.py, one per context length:
-      words=  2000  mean=9.7/10  min=9  max=10  (n=3)
+    Scans the summary lines emitted by benchmark_niah.py, one per context length (anything
+    between max= and (n=, such as decoys= and a verdict, is tolerated):
+      words=  2000  mean=10.0/10  min=10  max=10  decoys=0.0  RETRIEVAL  (n=3)
       words=  2000  mean=9.5/10  min=9  max=10  (n=2)  [1 timeout/err excluded]
       words=  2000  NO-RESULT (3/3 timed out or errored ...)
     Returns {n_words: {'mean', 'min', 'max', 'n', 'errors', 'no_result'}}. A length whose
@@ -227,8 +229,11 @@ def parse_niah_log(log_file: str) -> Dict[int, Dict]:
     results = {}
     with open(log_file, 'r') as f:
         for line in f:
+            # Anything between max= and (n=) is tolerated: the scorer has grown
+            # decoys= and a verdict since this was written, and requiring (n=
+            # to sit directly after max= made the regex match nothing at all.
             m = re.search(
-                r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\s+\(n=(\d+)\)',
+                r'words=\s*(\d+)\s+mean=([\d.]+)/10\s+min=(\d+)\s+max=(\d+)\b.*?\(n=(\d+)\)',
                 line
             )
             if m:
@@ -257,6 +262,28 @@ def niah_length_failed(data: Dict) -> bool:
     return data['no_result'] or data['errors'] > 0
 
 
+def _open_perf_csv(output_file: str, fieldnames):
+    """Open perf.csv for writing, appending to an existing file of the same shape.
+
+    BENCH=validate runs NIAH and then the concurrency sweep in one allocation, and
+    both write this path. Truncating would leave only whichever ran last (
+    lost all six NIAH rows to the sweep that followed it). Append instead, writing
+    the header only when creating the file. A file with a different header is
+    replaced rather than corrupted.
+    """
+    exists = os.path.isfile(output_file) and os.path.getsize(output_file) > 0
+    if exists:
+        with open(output_file, newline='') as f:
+            first = f.readline().strip()
+        if first != ','.join(fieldnames):
+            exists = False
+    f = open(output_file, 'a' if exists else 'w', newline='')
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    if not exists:
+        writer.writeheader()
+    return f, writer
+
+
 def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
                        model_name: str = "", pipeline: str = "vllm"):
     """Save NIAH results in madengine perf.csv format (one row per context length)."""
@@ -276,10 +303,8 @@ def save_niah_perf_csv(results: Dict[int, Dict], output_file: str,
         'additional_docker_run_options',
     ]
 
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
+    f, writer = _open_perf_csv(output_file, fieldnames)
+    with f:
         for n_words in sorted(results.keys()):
             data = results[n_words]
             row = {
@@ -332,9 +357,8 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
         config_cols = _workload_config_columns()
         fieldnames = (['model', 'benchmark', 'inp', 'out', 'max_concurrency',
                        'performance', 'metric'] + list(config_cols))
-        with open(output_file, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
+        f, writer = _open_perf_csv(output_file, fieldnames)   # appends after a NIAH run (BENCH=validate)
+        with f:
             for (input_tokens, output_tokens, concurrency), data in sorted(
                 results.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])
             ):
@@ -356,10 +380,8 @@ def save_perf_csv(results: Dict[Tuple[int, int, int], Dict], output_file: str,
 
     fieldnames = PERF_CSV_FIELDNAMES
 
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
+    f, writer = _open_perf_csv(output_file, fieldnames)
+    with f:
         for (input_tokens, output_tokens, concurrency), data in sorted(
             results.items(), key=lambda x: (x[0][2], x[0][0], x[0][1])
         ):

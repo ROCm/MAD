@@ -103,6 +103,8 @@ VALID_MODELS=( \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
     "Kimi-K3-MXFP4-MI355X" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -114,6 +116,8 @@ MORI_EP_VALID_MODELS=( \
     "Kimi-K3" \
     "Kimi-K3-MXFP4" \
     "Kimi-K3-MXFP4-MI355X" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -200,7 +204,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
 # Kimi-K3 and Kimi-K3-MXFP4 are wideEP-only as well (see their models.yaml blocks).
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "Kimi-K3" "Kimi-K3-MXFP4" "Kimi-K3-MXFP4-MI355X" "DeepSeek-V4-Flash-FP8" "DeepSeek-V4-Pro-FP8" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -472,14 +476,16 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # The launcher/connectors auto-enable prefix caching + server /metrics when
 # BENCHMARK_SCRIPT=agentic.
 #   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
+#   validate               -> benchmark_validate.sh     (niah then smoke; curl already ran)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
+    validate)     BENCHMARK_SCRIPT_FILE="benchmark_validate.sh" ;;
     multiturn)    BENCHMARK_SCRIPT_FILE="benchmark_multiturn.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, multiturn)" >&2; exit 1 ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, validate, multiturn)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -528,7 +534,11 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+rm -f "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL"
+# --kill-on-bad-exit: a node that exits on BOOT_FATAL takes the step down, and the
+# cleanup srun below then stops every container. A bare scancel would skip that
+# cleanup and leave containers holding GPUs after their docker client is killed.
+srun --kill-on-bad-exit=1 --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
@@ -734,6 +744,7 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
     ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
     ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
+    ${HOLD_AFTER_READY:+-e HOLD_AFTER_READY=$HOLD_AFTER_READY} \
     ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
@@ -766,6 +777,11 @@ docker run --rm \
     ${ENABLE_PREFIX_CACHING:+-e ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
+    ${ROUTER_BOOT_INSTALL:+-e ROUTER_BOOT_INSTALL=$ROUTER_BOOT_INSTALL} \
+    ${ROUTER_REPO:+-e ROUTER_REPO=$ROUTER_REPO} \
+    ${ROUTER_REF:+-e ROUTER_REF=$ROUTER_REF} \
+    ${RUST_TOOLCHAIN:+-e RUST_TOOLCHAIN=$RUST_TOOLCHAIN} \
+    ${ROUTER_SKIP_MORIIO_DP_SIZE:+-e ROUTER_SKIP_MORIIO_DP_SIZE=$ROUTER_SKIP_MORIIO_DP_SIZE} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
@@ -783,9 +799,28 @@ docker run --rm \
     ${MT_DRYRUN:+-e MT_DRYRUN=$MT_DRYRUN} \
     ${NIAH_WORDS:+-e NIAH_WORDS="$NIAH_WORDS"} \
     ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
+    ${NIAH_HALT_ON_FAIL:+-e NIAH_HALT_ON_FAIL=$NIAH_HALT_ON_FAIL} \
     ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
     ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
+    ${NIAH_METHOD:+-e NIAH_METHOD=$NIAH_METHOD} \
+    ${NIAH_LIST_PRIME:+-e NIAH_LIST_PRIME=$NIAH_LIST_PRIME} \
+    ${NIAH_STOP:+-e NIAH_STOP=$NIAH_STOP} \
+    ${NIAH_LOGPROBS:+-e NIAH_LOGPROBS=$NIAH_LOGPROBS} \
+    ${NIAH_TERSE:+-e NIAH_TERSE=$NIAH_TERSE} \
+    ${NIAH_STOP_BLANK:+-e NIAH_STOP_BLANK=$NIAH_STOP_BLANK} \
+    ${NIAH_PAIR_SLEEP_S:+-e NIAH_PAIR_SLEEP_S=$NIAH_PAIR_SLEEP_S} \
+    ${NIAH_WARMUP_SCORE_SLEEP_S:+-e NIAH_WARMUP_SCORE_SLEEP_S=$NIAH_WARMUP_SCORE_SLEEP_S} \
+    ${NIAH_DS_WRAP:+-e NIAH_DS_WRAP=$NIAH_DS_WRAP} \
+    ${NIAH_MIN_TOKENS:+-e NIAH_MIN_TOKENS=$NIAH_MIN_TOKENS} \
+    ${DSV4_ENABLE_HMA:+-e DSV4_ENABLE_HMA=$DSV4_ENABLE_HMA} \
+    ${DSV4_TRANSFER_ATTN:+-e DSV4_TRANSFER_ATTN=$DSV4_TRANSFER_ATTN} \
+    ${DSV4_STORAGE_UPSTREAM_SPAN:+-e DSV4_STORAGE_UPSTREAM_SPAN=$DSV4_STORAGE_UPSTREAM_SPAN} \
+    ${DSV4_EAGER:+-e DSV4_EAGER=$DSV4_EAGER} \
+    ${CONTAINER_BARRIER_TIMEOUT_SECONDS:+-e CONTAINER_BARRIER_TIMEOUT_SECONDS=$CONTAINER_BARRIER_TIMEOUT_SECONDS} \
+    ${PY_BOOT_DEPS:+-e PY_BOOT_DEPS=$PY_BOOT_DEPS} \
+    -e SKIP_RUNTIME_PATCH=${SKIP_RUNTIME_PATCH:-1} \
+    ${STEP_SEC_PER_TOK:+-e STEP_SEC_PER_TOK=$STEP_SEC_PER_TOK} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
@@ -846,6 +881,10 @@ _docker_pid=$!
 wait "$_docker_pid"
 _docker_rc=$?
 trap - TERM INT
+if [ -f "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL" ]; then
+    echo "BOOT_FATAL on $(hostname): $(cat "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL"); ending the step";
+    exit 3;
+fi
 exit "$_docker_rc"
 '
 _srun_rc=$?

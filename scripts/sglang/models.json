@@ -406,5 +406,43 @@
         "timeout": -1,
         "skip_gpu_arch": "gfx942",
         "args": "--model_repo amd/gpt-oss-120b-w-mxfp4-a-fp8 --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_deepseek-v4.1-flash",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4.1-Flash.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo deepseek-ai/DeepSeek-V4.1-Flash --config configs/default.yaml"
+    },
+    {
+        "name": "pyt_sglang_muse-spark-open-816b-a42b_fp4",
+        "url": "",
+        "dockerfile": "../../docker/pyt_sglang_muse-spark",
+        "scripts": "run.sh",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Muse-Spark-Open-816B-A42B-Quark-MXFP4.csv",
+        "tags": [
+            "pyt",
+            "sglang",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx942",
+        "args": "--model_repo amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4 --config configs/default.yaml"
     }
 ]
