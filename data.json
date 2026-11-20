@@ -1,3 +1,7 @@
 {
-    "huggingface": {}
+    "huggingface": {
+        "local": {
+            "path": "/datasets/MAD/huggingface/"
+        }
+    }
 }

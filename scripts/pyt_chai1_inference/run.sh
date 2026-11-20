@@ -26,8 +26,11 @@
 #################################################################################
 set -ex
 
+# strip '<script_dir>/' prefix (per-directory models.json migration) so filenames match multiple_results
+MAD_MODEL_NAME="${MAD_MODEL_NAME##*/}"
+
 # File containing multiple results
-MAD_CSV="../perf_$MAD_MODEL_NAME.csv"
+MAD_CSV="../perf_${MAD_MODEL_NAME}.csv"
 
 # Delete previous multiple results file if it exists
 if [ -f "$MAD_CSV" ] ; then
@@ -38,7 +41,7 @@ fi
 # Create CSV header file
 echo "model, performance, metric" > $MAD_CSV
 
-cmd="python ../../workspace/chai-lab/examples/predict_structure.py > output.log 2>&1"
+cmd="python3 ../../workspace/chai-lab/examples/predict_structure.py > output.log 2>&1"
 if [[ "$MAD_SYSTEM_GPU_ARCHITECTURE" == *"gfx"* ]];then
 	bash -c "$cmd"
 else

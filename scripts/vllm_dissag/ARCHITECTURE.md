@@ -170,7 +170,7 @@ sequenceDiagram
     D->>Y: parse env: + prefill/decode flags (by PARALLEL_MODE)
     D->>P: source (parallelism_is_wide_ep, role_args)
     D->>C: source + connector_init()  ⟶ ports, PROXY_TYPE, CONTAINER_BARRIER_PORT
-    D->>C: connector_runtime_patch()  (moriio: no-op, fixes in-source; rixl: no-op, deepep seds in setup_env)
+    D->>C: connector_runtime_patch()  (moriio: temporary non-fatal offload patches; rixl: no-op, deepep seds in setup_env)
     Note over D: branch on NODE_RANK
     D->>C: connector_launch_worker(role, dp_size, dp_addr, kv_role, log_prefix[, start_rank])
     C->>C: connector_setup_env(EP_BACKEND)  ⟶ fabric env (MoRI/RDMA or UCX/NIXL)
@@ -191,7 +191,7 @@ sequenceDiagram
 |------|---------|-----------|
 | `connector_init` | ports 2584/router; PROXY_TYPE; barrier 5000/15000 | ports 20005/10001; per-role MoRI backend; barrier 2222 |
 | `connector_setup_env` | UCX/NIXL (TP) or RocSHMEM/UCX/NIXL+#39276 sed (deepep) | MoRI/RDMA/RocSHMEM + caches |
-| `connector_runtime_patch` | no-op (deepep patches inline in setup_env) | no-op (disagg fixes are in-source in the image's vLLM) |
+| `connector_runtime_patch` | no-op (deepep patches inline in setup_env) | temporary, non-fatal patches: MoRIIO sideline (vLLM PR #57705) + LMCache device binding (LMCache PR #5501) + LMCache MLA broadcast device (LMCache PR #6109, supersedes #5515); see README for which images already ship them |
 | `connector_launch_worker` | TP server **or** deepep DP+EP server | MoRIIO+TP server **or** MoRI-EP DP+EP server |
 | `connector_wait_workers_ready` | TP: socket_barrier; deepep: log-signal | log-signal on prefill+decode masters |
 | `connector_start_proxy` | vllm_router / toy_proxy over all P/D IPs | moriio_toy_proxy (or router) + curl probe |
@@ -230,6 +230,7 @@ flowchart TD
 | `run_xPyD_models.slurm` | sbatch entry: node pick, validation, axis shim, `docker run` env plumb |
 | `vllm_disagg.sh` | **the launcher** — axis resolve, yaml parse, role branch, barrier/benchmark/cleanup |
 | `parallelism.sh` | TP-vs-wideEP shared helpers |
+| `connectors/offloading.inc.sh` | tiered prefix caching overlay: `kv_offload_wrap()` composes the disagg connector + the CPU-tier backend (`OFFLOAD_BACKEND=OffloadingConnector`\|`native` / `SimpleCPUOffloadConnector` / `LMCacheConnectorV1`\|`lmcache`) via `MultiConnector` when `KV_OFFLOAD=cpu`\|`fs` (no-op when `none`); `kv_offload_setup_env()` exports tier env and creates the fs-tier dir when `KV_OFFLOAD=fs` |
 | `connectors/rixl.sh` | NixlConnector profile (TP + DeepEP) |
 | `connectors/moriio.sh` | MoRIIOConnector profile (MoRIIO+TP + MoRI-EP) |
 | `connectors/{rixl,moriio}.env` | per-connector platform env (expandable_segments:False etc.), forwarded via `docker -e` |

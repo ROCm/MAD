@@ -51,9 +51,14 @@ fi
 current_dir=$(pwd)
 
 # Clone Mochi repo and install Python dependencies
+# Pinned 2026-11-03 to upstream main commit 674ce88 (2026-10-06), the last commit before #165.
+# Why: 15c9bad (#165, 2026-10-22) moved to the moviepy 2.x import (from moviepy import
+# ImageSequenceClip), which fails against the moviepy==1.0.3 pin below. mochi is installed
+# with --no-deps, so the rest of #165's dependency refresh would not be picked up either.
+MOCHI_COMMIT="674ce88"
 cd /app
 git clone https://github.com/genmoai/mochi.git
-cd mochi && pip install -e . --no-build-isolation --no-deps
+cd mochi && git checkout ${MOCHI_COMMIT} && pip install -e . --no-build-isolation --no-deps
 patch -p1 < "$current_dir/mochi_fix.patch"
 pip install moviepy==1.0.3
 

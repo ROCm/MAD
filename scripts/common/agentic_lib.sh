@@ -38,6 +38,19 @@ INFERENCEX_REPO="${INFERENCEX_REPO:-https://github.com/SemiAnalysisAI/InferenceX
 INFERENCEX_PIN="${AGENTIC_UTILS_PIN:-ef8a17ecf0c3679dc12020eddab3c1a36d285b58}"   # InferenceX main @ 2026-07-25
 AIPERF_PIN="${AIPERF_PIN:-0d2aa0572ac685943d38c580675c4a61023581d3}"             # utils/aiperf submodule (cquil11/aiperf-agentx-v1.0)
 
+# Replay driver. Two ways to get the same engine:
+#   aiperf (default) - the pinned source build above (InferenceX + its aiperf
+#                      submodule), i.e. today's behavior, byte-identical.
+#   agentx           - the released wheel `agentx-harness==<AGENTX_HARNESS_VERSION>`
+#                      that https://inferencex.semianalysis.com/agentx documents.
+# The wheel ships the same aiperf codebase plus an `agentx` console script, and
+# accepts the same flags and the same underscore loader names, so build_replay_cmd
+# differs only in the binary and the default --scenario. InferenceX is still
+# cloned either way: the result aggregator (utils.agentic.aggregation) lives in
+# that repo, not in the wheel.
+AGENTIC_HARNESS="${AGENTIC_HARNESS:-aiperf}"
+AGENTX_HARNESS_VERSION="${AGENTX_HARNESS_VERSION:-1.0.7}"
+
 set -o pipefail
 
 agentic_log()  { echo "[agentic] $*"; }
@@ -59,7 +72,11 @@ AIPERF_VENV="${AIPERF_VENV:-${AGENTIC_RUNTIME_DIR}/venv}"
 AIPERF_UV_INSTALL_DIR="${AIPERF_UV_INSTALL_DIR:-${AGENTIC_RUNTIME_DIR}/uv/bin}"
 AIPERF_UV_CACHE_DIR="${AIPERF_UV_CACHE_DIR:-${AGENTIC_RUNTIME_DIR}/uv-cache}"
 AIPERF_PYTHON="${AIPERF_VENV}/bin/python"
-AIPERF_CLI="${AIPERF_VENV}/bin/aiperf"
+case "$AGENTIC_HARNESS" in
+    aiperf)  AIPERF_CLI="${AIPERF_VENV}/bin/aiperf" ;;
+    agentx)  AIPERF_CLI="${AIPERF_VENV}/bin/agentx" ;;
+    *) echo "[agentic][ERROR] unknown AGENTIC_HARNESS='$AGENTIC_HARNESS' (aiperf|agentx)" >&2; exit 2 ;;
+esac
 AIPERF_HF_CLI="${AIPERF_VENV}/bin/hf"
 AIPERF_DEPS_READY=0
 AIPERF_FAILED_REQUEST_THRESHOLD="${AIPERF_FAILED_REQUEST_THRESHOLD:-0.10}"
@@ -116,13 +133,24 @@ install_agentic_deps() {
     rm -rf "$AIPERF_VENV"
     mkdir -p "$AIPERF_UV_CACHE_DIR"
     UV_CACHE_DIR="$AIPERF_UV_CACHE_DIR" "$AIPERF_UV_BIN" venv --python "$(command -v python3)" "$AIPERF_VENV"
+    # The released wheel vendors its own aiperf, so installing the pinned source
+    # tree alongside it would have two copies racing for the same import name.
+    local driver_pkgs
+    if [ "$AGENTIC_HARNESS" = "agentx" ]; then
+        driver_pkgs="agentx-harness==${AGENTX_HARNESS_VERSION}"
+        agentic_log "replay driver: agentx-harness==${AGENTX_HARNESS_VERSION} (released wheel)"
+    else
+        driver_pkgs="-e|$INFMAX_WS/utils/aiperf"
+        agentic_log "replay driver: pinned aiperf source @ $AIPERF_PIN"
+    fi
+    # shellcheck disable=SC2086  # driver_pkgs is a deliberate 1-or-2 token list
     UV_CACHE_DIR="$AIPERF_UV_CACHE_DIR" "$AIPERF_UV_BIN" pip install --python "$AIPERF_PYTHON" \
         -r "$INFMAX_WS/utils/agentic-benchmark/requirements.txt" \
-        -e "$INFMAX_WS/utils/aiperf" \
+        ${driver_pkgs//|/ } \
         "datasets>=4.7.0" "huggingface_hub[cli]>=0.25.0" urllib3 requests
 
     [ -x "$AIPERF_CLI" ] && [ -x "$AIPERF_HF_CLI" ] || \
-        agentic_die "isolated aiperf environment incomplete at $AIPERF_VENV"
+        agentic_die "isolated $AGENTIC_HARNESS environment incomplete at $AIPERF_VENV (missing $AIPERF_CLI)"
     AIPERF_DEPS_READY=1
 }
 
@@ -370,7 +398,15 @@ build_replay_cmd() {
     export AIPERF_DATASET_CONFIGURATION_TIMEOUT=1800
     export AIPERF_SERVICE_PROFILE_CONFIGURE_TIMEOUT=1800
 
-    REPLAY_CMD="$AIPERF_CLI profile --scenario ${AGENTIC_SCENARIO:-inferencex-agentx-mvp}"
+    # Scenario default tracks the driver. The released wheel registers an
+    # `agentx` scenario that locks the published v1.0 invariants (1h default
+    # window, 0.25/0.75 trajectory, seed 42, 393 entries, 1800s warmup grace) --
+    # the same values this function sets by hand below, so passing them
+    # explicitly stays consistent rather than conflicting. The pinned source
+    # build predates that name and only has inferencex-agentx-mvp.
+    local default_scenario="inferencex-agentx-mvp"
+    [ "$AGENTIC_HARNESS" = "agentx" ] && default_scenario="agentx"
+    REPLAY_CMD="$AIPERF_CLI profile --scenario ${AGENTIC_SCENARIO:-$default_scenario}"
     REPLAY_CMD+=" --url http://localhost:${AGENTIC_PORT}"
     REPLAY_CMD+=" --endpoint /v1/chat/completions --endpoint-type chat --streaming"
     REPLAY_CMD+=" --model ${MODEL:-auto}"
@@ -427,11 +463,22 @@ write_agentic_result_json() {
     AGENTIC_RESULT_JSON="${AGENTIC_OUTPUT_DIR:-$result_dir}/${result_filename}.json"
     # process_agentic_result requires KV_OFFLOADING; "none" is the no-offload case
     # (and requires KV_OFFLOAD_BACKEND to be empty). All other metadata env vars
-    # default cleanly, so the aggregate JSON's metrics are unaffected.
+    # default cleanly.
+    #
+    # The labelling vars below name the run in the aggregate JSON; left unset
+    # they serialize as "" / tp=1. TP is the one that also feeds a metric: the
+    # aggregator reads TP (not TP_SIZE) and divides throughput by it for the
+    # per_gpu fields, so an unset TP records a tp=8 server as tp=1 with 8x
+    # per-GPU throughput.
     ( cd "$INFMAX_WS" && \
       RESULT_DIR="$result_dir" AGENTIC_OUTPUT_DIR="${AGENTIC_OUTPUT_DIR:-$result_dir}" \
       RESULT_FILENAME="$result_filename" \
       KV_OFFLOADING="${KV_OFFLOADING:-none}" \
+      CONC="${AGENTIC_CONC:-0}" \
+      MODEL="${MODEL:-}" MODEL_PREFIX="${MODEL_PREFIX:-}" \
+      TP="${TP_SIZE:-1}" FRAMEWORK="${FRAMEWORK:-}" PRECISION="${PRECISION:-}" \
+      IMAGE="${IMAGE:-}" RUNNER_TYPE="${RUNNER_TYPE:-}" \
+      SPEC_DECODING="${SPEC_DECODING:-none}" \
       "$AIPERF_PYTHON" -m utils.agentic.aggregation.process_agentic_result )
     "$AIPERF_PYTHON" "$INFMAX_WS/utils/generate_aiperf_plots.py" "$result_dir" 2>&1 || true
     agentic_log "aggregate JSON: $AGENTIC_RESULT_JSON"
@@ -482,6 +529,7 @@ agentic_dry_run() {
   DURATION               : ${DURATION:-120}
   trace loader / dataset : ${TRACE_LOADER} / ${TRACE_DATASET}
   RESULT_DIR             : ${result_dir}
+  harness                : ${AGENTIC_HARNESS}$([ "$AGENTIC_HARNESS" = agentx ] && echo " (agentx-harness==${AGENTX_HARNESS_VERSION})")
   InferenceX pin         : ${INFERENCEX_PIN}
   aiperf pin             : ${AIPERF_PIN}
 

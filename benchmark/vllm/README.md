@@ -13,9 +13,9 @@ kernels and modules in vLLM to enhance performance further.
 This Docker image packages vLLM with PyTorch for AMD Instinct™ MI300X, MI325X, MI350X and MI355X
 accelerators. It includes:
 
--   ✅ ROCm™ 7.2.3
--   ✅ vLLM 0.29.0
--   ✅ PyTorch 2.12.0 (2.12.0+git6bbd260)
+-   ✅ ROCm™ 10.0.0
+-   ✅ vLLM 0.33.0
+-   ✅ PyTorch 2.13.0 (2.13.0+rocm10.0.0)
 -   ✅ hipBLASLt 1.0
 
 With this Docker image, users can quickly validate the expected inference performance numbers on the Instinct accelerators listed above. 
@@ -51,14 +51,16 @@ cat /proc/sys/kernel/numa_balancing
 
 For the experimental features and known issues concerning ROCm optimization efforts on vLLM, see the developer's guide at [ROCm/vLLM](https://github.com/ROCm/vllm/blob/main/docs/dev-docker/README.md).
 
-To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [CSV configs](../../scripts/vllm/configs/)
+To override the benchmark configs, specify a certain benchmark to use, or add your own configs, please see the [vllm benchmark script](../../scripts/vllm/run.sh) and the [YAML configs](../../scripts/vllm/configs/)
+
+`run.sh` passes `--warmup` to `run_vllm.py` by default; pass `--no-warmup` to `run.sh` to skip it. With `--warmup`, each `serving` config first sends `max_concurrency` prefill-only requests (a prompt of roughly the configured input length, 1 output token) so Triton kernels are compiled before measurement. `run_vllm.py` run directly does not warm up unless `--warmup` is given. `--profile` runs and the latency, throughput and accuracy benchmarks do not warm up.
 
 ### Download the Docker image 🐳
 
 The following command pulls the Docker image from Docker Hub.
 
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.29.0
+docker pull vllm/vllm-openai-rocm:v0.33.0
 ```
 
 ### MAD-integrated benchmarking
@@ -71,14 +73,14 @@ cd MAD
 pip install -r requirements.txt
 ```
 
-Use this command to run a performance benchmark test of the Llama 3.1 8B model on one GPU with float16 data type in the host machine. 
+Use this command to run a performance benchmark test of the Llama 3.1 8B model with an FP8 KV cache (`amd/Llama-3.1-8B-Instruct-FP8-KV`) in the host machine.
 
 ```sh
 export MAD_SECRETS_HFTOKEN="your personal Hugging Face token to access gated models"
 madengine run --tags pyt_vllm_llama-3.1-8b_fp8 --keep-model-dir --live-output
 ```
 
-ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b_fp8`. The benchmark results of the model are collected at `perf_Llama-3.1-8B-Instruct.csv`.
+ROCm MAD launches a Docker container with the name `container_ci-pyt_vllm_llama-3.1-8b_fp8`. The benchmark results of the model are collected at `perf_Llama-3.1-8B-Instruct-FP8-KV.csv`.
 
 Although the following models are pre-configured to collect online serving performance data,
 users can also directly run the vLLm benchmark scripts and change the benchmarking parameters. Refer to the [Standalone benchmarking](#standalone-benchmarking) section.
@@ -91,19 +93,26 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | MAD model name                         | Model repo                             |
 | -------------------------------------- | -------------------------------------- |
 | pyt_vllm_command-a-plus                | [CohereLabs/command-a-plus-05-2026-bf16](https://huggingface.co/CohereLabs/command-a-plus-05-2026-bf16) |
+| pyt_vllm_command-a-plus_fp8            | [CohereLabs/command-a-plus-05-2026-fp8](https://huggingface.co/CohereLabs/command-a-plus-05-2026-fp8) |
 | pyt_vllm_command-r7b                   | [CohereLabs/c4ai-command-r7b-12-2024](https://huggingface.co/CohereLabs/c4ai-command-r7b-12-2024) |
 | pyt_vllm_deepseek-r1                   | [deepseek-ai/DeepSeek-R1-0528](https://huggingface.co/deepseek-ai/DeepSeek-R1-0528) |
 | pyt_vllm_deepseek-r1_fp4               | [amd/DeepSeek-R1-0528-MXFP4](https://huggingface.co/amd/DeepSeek-R1-0528-MXFP4) |
+| pyt_vllm_deepseek-v3.2                 | [deepseek-ai/DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2) |
 | pyt_vllm_deepseek-v3.2_fp4             | [amd/DeepSeek-V3.2-MXFP4](https://huggingface.co/amd/DeepSeek-V3.2-MXFP4) |
 | pyt_vllm_deepseek-v4-flash             | [deepseek-ai/DeepSeek-V4-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash) |
 | pyt_vllm_deepseek-v4-pro               | [deepseek-ai/DeepSeek-V4-Pro](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro) |
+| pyt_vllm_glm-4.7_fp8                   | [zai-org/GLM-4.7-FP8](https://huggingface.co/zai-org/GLM-4.7-FP8) |
+| pyt_vllm_glm-5_fp8                     | [zai-org/GLM-5-FP8](https://huggingface.co/zai-org/GLM-5-FP8) |
 | pyt_vllm_glm-5.1_fp8                   | [zai-org/GLM-5.1-FP8](https://huggingface.co/zai-org/GLM-5.1-FP8) |
 | pyt_vllm_glm-5.1_fp4                   | [amd/GLM-5.1-MXFP4](https://huggingface.co/amd/GLM-5.1-MXFP4) |
 | pyt_vllm_glm-5.2_fp8                   | [zai-org/GLM-5.2-FP8](https://huggingface.co/zai-org/GLM-5.2-FP8) |
 | pyt_vllm_glm-5.2_fp4                   | [amd/GLM-5.2-MXFP4](https://huggingface.co/amd/GLM-5.2-MXFP4) |
 | pyt_vllm_gpt-oss-20b                   | [openai/gpt-oss-20b](https://huggingface.co/openai/gpt-oss-20b) |
 | pyt_vllm_gpt-oss-120b                  | [openai/gpt-oss-120b](https://huggingface.co/openai/gpt-oss-120b) |
-| pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss120b-w-mxfp4-a-fp8) |
+| pyt_vllm_gpt-oss-120b_w4a8             | [amd/gpt-oss-120b-w-mxfp4-a-fp8](https://huggingface.co/amd/gpt-oss-120b-w-mxfp4-a-fp8) |
+| pyt_vllm_kimi-k2.5                     | [moonshotai/Kimi-K2.5](https://huggingface.co/moonshotai/Kimi-K2.5) |
+| pyt_vllm_kimi-k2.5_fp4                 | [amd/Kimi-K2.5-MXFP4](https://huggingface.co/amd/Kimi-K2.5-MXFP4) |
+| pyt_vllm_kimi-k2-thinking_fp4          | [amd/Kimi-K2-Thinking-MXFP4](https://huggingface.co/amd/Kimi-K2-Thinking-MXFP4) |
 | pyt_vllm_kimi-k2.6                     | [moonshotai/Kimi-K2.6](https://huggingface.co/moonshotai/Kimi-K2.6) |
 | pyt_vllm_kimi-k2.6_fp4                 | [amd/Kimi-K2.6-MXFP4](https://huggingface.co/amd/Kimi-K2.6-MXFP4) |
 | pyt_vllm_kimi-k3                       | [moonshotai/Kimi-K3](https://huggingface.co/moonshotai/Kimi-K3) |
@@ -115,6 +124,8 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_llama-3.3-70b                 | [meta-llama/Llama-3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct) |
 | pyt_vllm_llama-3.3-70b_fp8             | [amd/Llama-3.3-70B-Instruct-FP8-KV](https://huggingface.co/amd/Llama-3.3-70B-Instruct-FP8-KV) |
 | pyt_vllm_llama-3.3-70b_fp4             | [amd/Llama-3.3-70B-Instruct-MXFP4-Preview](https://huggingface.co/amd/Llama-3.3-70B-Instruct-MXFP4-Preview) |
+| pyt_vllm_mimo-v2.6-pro-mopd            | [XiaomiMiMo/MiMo-V2.6-Pro-MOPD](https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Pro-MOPD) |
+| pyt_vllm_mimo-v2.6-pro-rl              | [XiaomiMiMo/MiMo-V2.6-Pro-RL](https://huggingface.co/XiaomiMiMo/MiMo-V2.6-Pro-RL) |
 | pyt_vllm_minimax-m2.7                  | [MiniMaxAI/MiniMax-M2.7](https://huggingface.co/MiniMaxAI/MiniMax-M2.7) |
 | pyt_vllm_minimax-m2.7_fp4              | [amd/MiniMax-M2.7-MXFP4](https://huggingface.co/amd/MiniMax-M2.7-MXFP4) |
 | pyt_vllm_minimax-m3_mxfp8              | [MiniMaxAI/MiniMax-M3-MXFP8](https://huggingface.co/MiniMaxAI/MiniMax-M3-MXFP8) |
@@ -131,7 +142,19 @@ users can also directly run the vLLm benchmark scripts and change the benchmarki
 | pyt_vllm_qwen3-235b-a22b_fp8           | [Qwen/Qwen3-235B-A22B-Thinking-2507-FP8](https://huggingface.co/Qwen/Qwen3-235B-A22B-Thinking-2507-FP8) |
 | pyt_vllm_qwen3.5-397b-a17b             | [Qwen/Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B) |
 | pyt_vllm_qwen3.5-397b-a17b_fp8         | [Qwen/Qwen3.5-397B-A17B-FP8](https://huggingface.co/Qwen/Qwen3.5-397B-A17B-FP8) |
+| pyt_vllm_qwen3-next-80b-a3b_fp8        | [Qwen/Qwen3-Next-80B-A3B-Instruct-FP8](https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct-FP8) |
+| pyt_vllm_step-3.5-flash                | [stepfun-ai/Step-3.5-Flash](https://huggingface.co/stepfun-ai/Step-3.5-Flash) |
 
+>[!NOTE]
+>`pyt_vllm_kimi-k3` uses the shared Docker image above but needs an 8x MI350X/MI355X (gfx950)
+>node — the ~1680 GB minimum footprint does not fit a single 8x MI300X node, so the tag is
+>skipped on gfx942 — and the checkpoint is ~1.56 TB, so make sure `HF_HUB_CACHE` has room.
+>The sweep (concurrency 1–128, input 1024, output 1024) is the Kimi-K3 block in
+>[configs/default.yaml](../../scripts/vllm/configs/default.yaml). Server flags and env vars come
+>from the Kimi-K3 entry in [configs/perf.yaml](../../scripts/vllm/configs/perf.yaml), which follows the
+>[MI355X recipe profile](https://recipes.vllm.ai/moonshotai/Kimi-K3?hardware=mi355x). The K3 row is
+>`benchmark: serving`, so it does not run GSM8K: over `/v1/completions` the always-on reasoning
+>exhausts the `max_gen_toks=2048` budget and the score is meaningless.
 
 ### Standalone benchmarking              
 -----------------------------
@@ -140,9 +163,9 @@ Users also can run the benchmark tool after they launch a Docker container. For 
 
 #### Docker launch
 ```sh
-docker pull vllm/vllm-openai-rocm:v0.29.0
+docker pull vllm/vllm-openai-rocm:v0.33.0
 
-docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.29.0
+docker run -it --device=/dev/kfd --device=/dev/dri --group-add video --shm-size 16G --security-opt seccomp=unconfined --security-opt apparmor=unconfined --cap-add=SYS_PTRACE -v $(pwd):/workspace --env VLLM_ROCM_USE_AITER=1 --env HUGGINGFACE_HUB_CACHE=/workspace --name test vllm/vllm-openai-rocm:v0.33.0
 ```
 
 >[!NOTE]
@@ -236,6 +259,8 @@ vllm bench serve --model $model \
 
 #### Accuracy Command
 
+The MAD accuracy runs (the `vllm-accuracy` tag) are driven by [configs/acc.yaml](../../scripts/vllm/configs/acc.yaml), which defines the lm_eval task, endpoint and generation settings per model. The steps below reproduce one of those runs by hand.
+
 1. Start the server
 ```
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
@@ -266,8 +291,8 @@ pip install lm-eval[api]
 # Run the benchmark
 model=amd/Llama-3.1-8B-Instruct-FP8-KV
 lm_eval --model local-completions \
-    --model_args model=$model,max_gen_toks=2048,num_concurrent=256,max_retries=10,base_url=http://localhost:8000/v1/completions \
-    --tasks gsm8k --limit 250 --output_path ./tmp
+    --model_args model=$model,max_gen_toks=2048,num_concurrent=64,max_retries=3,base_url=http://localhost:8000/v1/completions,tokenized_requests=False \
+    --tasks gsm8k --num_fewshot 5 --output_path ./tmp
 ```
 
 >[!NOTE]
@@ -357,6 +382,13 @@ owners and are only mentioned for informative purposes.   
 ## Changelog
 ----------
 This release note summarizes notable changes since the previous docker release.
+
+v0.33.0
+- Upgraded the vLLM base image to v0.33.0 (ROCm 10.0.0, PyTorch 2.13.0+rocm10.0.0)
+
+v0.31.0
+- Upgraded the vLLM base image to v0.31.0
+- gsm8k accuracy runs default to 5-shot
 
 v0.29.0
 - Updated Kimi K3 to use upstream image

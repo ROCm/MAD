@@ -15,11 +15,15 @@ parser.add_argument("--node-ports", required=True, help="Comma-separated list of
 # Both default to the old behaviour (wait forever, nothing to watch). Without them a node
 # whose peer had already given up waited here until the job's wall clock: in one run
 # the prefill master timed out and the other three nodes sat in this loop
-# until the job was cancelled by hand.
+# until the job was cancelled by hand; in another, one node never launched and the
+# other seven printed "Waiting for nodes. . ." until cancelled.
 parser.add_argument("--timeout", type=float, default=0,
-                    help="Give up (exit 1) after this many seconds; 0 waits forever.")
+                    help="Give up after N seconds and exit 1, naming the peers that never "
+                         "opened. Default 0 waits forever (the historical behaviour).")
 parser.add_argument("--abort-file",
                     help="Exit 1 as soon as this file exists: a peer has declared the job failed.")
+parser.add_argument("--report-every", type=float, default=60,
+                    help="Seconds between listing the peers still missing.")
 args = parser.parse_args()
 
 # Parse node IPs and ports from command-line arguments
@@ -46,22 +50,35 @@ def _give_up(reason):
     sys.exit(1)
 
 def wait_for_all_ports():
-    """Wait until all nodes have opened the specified ports."""
+    """Wait until all nodes have opened the specified ports.
+
+    A node whose container never starts cannot open its port, so without a deadline one
+    dead node holds the whole allocation until walltime with no indication of which node
+    it was. --timeout turns that into a fast, named failure; --abort-file ends the wait
+    as soon as a peer has declared the job failed.
+    """
     start = time.monotonic()
+    last_report = 0.0
     while True:
-        all_open = all(is_port_open(ip, port) for ip, port in zip(NODE_IPS, NODE_PORTS))
-        if all_open:
-            break
+        missing = [f"{ip}:{port}" for ip, port in zip(NODE_IPS, NODE_PORTS)
+                   if not is_port_open(ip, port)]
+        if not missing:
+            return
         if args.abort_file and os.path.exists(args.abort_file):
             try:
                 why = open(args.abort_file).read().strip()
             except OSError:
                 why = ""
             _give_up(f"a peer aborted the job ({args.abort_file}): {why or 'no reason recorded'}")
-        if args.timeout and time.monotonic() - start >= args.timeout:
-            closed = [f"{ip}:{port}" for ip, port in zip(NODE_IPS, NODE_PORTS) if not is_port_open(ip, port)]
-            _give_up(f"timed out after {args.timeout:.0f}s; still closed: {', '.join(closed)}")
         print("Waiting for nodes. . .", flush=True)
+        waited = time.monotonic() - start
+        if waited - last_report >= args.report_every:
+            last_report = waited
+            print(f"  still waiting after {waited:.0f}s on {len(missing)}/"
+                  f"{len(NODE_IPS)}: {', '.join(missing)}", flush=True)
+        if args.timeout and waited >= args.timeout:
+            _give_up(f"timed out after {waited:.0f}s; {len(missing)}/{len(NODE_IPS)} peers never "
+                     f"opened their port: {', '.join(missing)}")
         time.sleep(5)
 
 def bind_port():
@@ -70,7 +87,7 @@ def bind_port():
     A bind that fails must not be survivable. It used to fail inside the accept thread,
     which printed a traceback and died while this node carried on waiting -- and every
     node's check then connected to whatever else was listening on that port and counted
-    it as this node being ready. On OCI port 5000 is held on the hosts by something the
+    it as this node being ready. On one cluster a host port is held by something the
     job cannot kill, so the rixl/TP barrier passed on both nodes without either one
     having opened it.
     """
@@ -83,7 +100,7 @@ def bind_port():
         _give_up(f"cannot open port {args.local_port} on {args.local_ip}: {e}. Something else on "
                  f"this host holds it; set BARRIER_PORT to a free port.")
     server_socket.listen(5)
-    print(f"Port {args.local_port} is now open on {args.local_ip}.")
+    print(f"Port {args.local_port} is now open on {args.local_ip}.", flush=True)
 
 def open_port():
     """Accept (and drop) connections on the bound barrier port."""
