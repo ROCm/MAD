@@ -1,0 +1,8 @@
+# Image spec for vLLM workloads that opt in with "image_spec": "${image_spec}".
+# Selects from compat/rocm.yaml; madengine adds what vllm requires (torch,
+# amd-aiter, flash-attn, rocm) and installs them in dependency order.
+# Cards without image_spec keep building docker/pyt_vllm.
+rocm: "10.1"
+python: "3.14"
+components:
+  vllm: "0.29.1.dev0+rocm10.1.0.g98dff2a81.d20261002@frameworks-vllm"
