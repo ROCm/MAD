@@ -39,7 +39,7 @@ _argv() { # connector wide_ep ep_backend model model_path
 
 # emit argv for a cell with a KV_OFFLOAD tier set
 _argv_off() { # connector wide_ep ep_backend model model_path kv_offload [backend] [disk_path]
-  env -i PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
+  env -i ${MADFAB} PATH="$PATH" HOME="$HOME" NIXL_COOKBOOK_PATH="$DIR" \
     DRY_RUN=1 NODE_RANK=0 xP=1 yD=1 CONNECTOR="$1" WIDE_EP="$2" EP_BACKEND="$3" \
     MODEL_NAME="$4" MODEL_PATH="$5" KV_OFFLOAD="$6" ${7:+OFFLOAD_BACKEND="$7"} ${8:+OFFLOAD_DISK_PATH="$8"} \
     MASTER_ADDR=10.0.0.1 IPADDRS=10.0.0.1,10.0.0.2 \
