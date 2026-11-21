@@ -48,7 +48,7 @@ MAD root on a laptop -- no cluster, no GPU, no madengine needed (except the last
 | a recipe as one GPU uses it (alias followed, variant applied) | `python3 scripts/common/recipe/models.py scripts/vllm_dissag/models.yaml Kimi-K3-MXFP4 --arch gfx950` |
 | whether a recipe runs on a GPU with an image, and why | `python3 scripts/common/recipe/recipe.py check --recipes scripts/vllm_dissag/models.yaml --model Kimi-K3-MXFP4 --arch gfx942 --image vllm-kimi-k3` (`explain` for the detail) |
 | **what every node of a run does** -- the real launchers, with SLURM, Docker and the GPUs stood in for | `python3 scripts/common/tests/snapshot/snapshot.py --show --card pyt_e2e_kimi-k3_disagg_niah --env MAD_GPU_ARCH=gfx950` (`--env NAME=VALUE` as at submit, `--nodes N`, `--print-env NAME,...` for container env) |
-| the recorded result of every card | [`scripts/common/tests/snapshot/golden/`](../scripts/common/tests/snapshot/golden/) (per node: the container's env and the engine command) |
+| the recorded paths through the launchers | [`scripts/common/tests/snapshot/cases/`](../scripts/common/tests/snapshot/cases/): one case per distinct path (connector, EP backend, DP mode, multi-node pool, ...), per node the container's env and the engine command; a card on a recorded path records nothing |
 | an existing card as a workload file on the shared layers | `python3 scripts/common/config/emit.py vllm_dissag pyt_vllm_disagg_mori_kimi-k3-mxfp4` |
 | the whole catalog (`compat/` as one document: matrix, hardware, sites, named specs) | `python3 scripts/common/catalog.py dump` |
 | the Dockerfile an image spec generates (madengine) | `madengine build --tags pyt_e2e_kimi-k3_disagg_niah --explain` |
@@ -723,7 +723,8 @@ through the real launchers and role scripts (the snapshot harness's stand-ins fo
 the GPUs), on each GPU it targets, asserting what it claims: the int4 conversion on gfx942 only,
 the best-known record applied and switched off, MTP on decode only, the KV budget per GPU, the DQ
 refusal and per-role checkpoints, the Helios topology and refusal, the replicas and their LoRA or
-pooling flags, the SGLang DP flags. Their goldens are in the snapshot suite, and the pipeline's
+pooling flags, the SGLang DP flags. The snapshot suite runs every one of them and records a case for
+each that takes a new path through the launchers, and the pipeline's
 path-equivalence check runs every example card in STANDALONE and through madengine and requires
 the same environment, directory and allocation. `PerGpuStack` holds `vllm-per-gpu` equal to the
 stack of each GPU it is composed from.

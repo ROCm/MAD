@@ -107,11 +107,11 @@ REPRODUCES = {
     ("sglang_disagg", "pyt_e2e_deepseek-r1_sglang"): ("sglang_disagg", "pyt_sglang_disagg_mori_dp_deepseek-r1"),
     ("sglang_disagg", "pyt_e2e_qwen3-32b_sglang"): ("sglang_disagg", "pyt_sglang_disagg_mori_io_qwen3-32b"),
 }
-GOLDEN = HERE / "snapshot" / "golden"
 
 
 def engine_commands(catalog, name):
-    g = json.loads((GOLDEN / catalog / f"{name}.json").read_text())
+    """What the card runs on each rank, live (the snapshot harness's run, as submitted)."""
+    g = S.snapshot_card(catalog, card(catalog, name))
     return g["inputs"]["gpu_arch"], [[b["argv"] for b in (r.get("engine") or {}).get("blocks", [])] for r in g["ranks"]]
 
 

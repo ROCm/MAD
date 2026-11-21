@@ -672,8 +672,10 @@ madengine build --tags <name> --explain \
   --additional-context '{"docker_build_arg": {"MAD_SYSTEM_GPU_ARCHITECTURE": "gfx942"}}'   # the image spec composes against the matrix
 ```
 
-A new card has no golden yet: review its snapshot, then record it with
-`snapshot.py --card <name> --update`. The full list of offline checks is in
+A new card needs no recording when it takes a path through the launcher code an existing case
+already records (same connector, EP backend, serving shape, benchmark, engine features): only its
+recipe data differs, and every check runs it. A card on a new path fails the snapshot check with
+`NEW PATH`; review its snapshot, then record it as a case with `snapshot.py --update`. The full list of offline checks is in
 [multinode-running.md](multinode-running.md#checks-that-need-no-gpus).
 
 A launcher can also be previewed without starting servers: `DRY_RUN=1` prints each node's server

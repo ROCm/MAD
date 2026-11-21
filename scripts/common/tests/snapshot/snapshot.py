@@ -12,11 +12,24 @@ srun / docker / hostname in stubs/, and records per node rank:
     mode with exactly that rank's container environment.
 
 plus the launcher's exit status and the order of its srun / docker calls. Paths
-that differ between runs are replaced with placeholders. The results are
-compared with golden/<catalog>/<card>.json; any difference fails.
+that differ between runs are replaced with placeholders.
 
-A refactor of the launchers must leave every snapshot unchanged, or change it
-on purpose: rerun with --update and review the golden diff in the commit.
+What is recorded is one snapshot per CASE, not per card. A case is a distinct path through
+the launcher code: the catalog, the connector and EP backend, wide EP, DP mode, TP-within-EP,
+a pool spanning nodes, the router's node, the benchmark, and the engine features the run turns
+on (path_of). Every card runs on every check; a card whose path a case already records needs
+no snapshot of its own, since what differs between such cards is recipe data (models.yaml),
+not code. So:
+
+  - each case's snapshot is compared with cases/<catalog>/<card>.json; any difference fails;
+  - every card's path must be a case's: a card on a new path fails until it is recorded
+    (--update records it, from that card);
+  - the other checks (--spooled, --spec-file, --equivalence) compare every card under that
+    dispatch with the same card's own run, live, with nothing stored.
+
+A launcher change must leave every case unchanged, or change it on purpose: rerun with
+--update and review the case diff in the commit. Adding a card records nothing unless it
+takes a new path.
 
 Each card runs in its own temporary directory, on a copy of scripts/, with HOME,
 LOG_PATH, NVME_ROOT, SHARED_MOUNT and the JIT cache pointed inside it, so a run
@@ -25,10 +38,11 @@ writes nothing into the repository or the machine. (The launchers still create
 
 Usage:
   python3 scripts/common/tests/snapshot/snapshot.py              # compare
-  python3 scripts/common/tests/snapshot/snapshot.py --update     # rewrite goldens
+  python3 scripts/common/tests/snapshot/snapshot.py --update     # record the cases
   python3 scripts/common/tests/snapshot/snapshot.py --card qwen3 # cards matching
 """
 import argparse
+import collections
 import difflib
 import json
 import os
@@ -43,7 +57,7 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parents[2]          # snapshot -> tests -> common -> scripts
 COMPAT = HERE.parents[3] / "compat"   # the capability catalog (a test may point SCRIPTS at a copy)
 STUBS = HERE / "stubs"
-GOLDEN = HERE / "golden"
+CASES = HERE / "cases"
 CATALOGS = ("vllm_dissag", "sglang_disagg", "vllm_multinode")
 JOB_ID = "4242"
 
@@ -275,7 +289,7 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_outp
     work = Path(tempfile.mkdtemp(prefix="madsnap."))
     try:
         shutil.copytree(SCRIPTS, work / "scripts", symlinks=True,
-                        ignore=shutil.ignore_patterns("__pycache__", "golden"))
+                        ignore=shutil.ignore_patterns("__pycache__", "cases"))
         # The capability catalog the launchers resolve recipe roles against.
         shutil.copytree(COMPAT, work / "compat")
         for d in ("home", "logs", "stub", "nvme", "shared", "model", "job", "jit"):
@@ -340,7 +354,7 @@ def snapshot_card(catalog, card, dispatch="slurm-srun", spooled=False, keep_outp
         if rc != 0:
             snap["stderr_tail"] = output.splitlines()[-5:]
         out = normalize(snap, work)
-        if keep_output:              # for tests that read what the launcher said; never in a golden
+        if keep_output:              # for tests that read what the launcher said; never in a case
             out["output"] = output
         return out
     finally:
@@ -380,30 +394,67 @@ def show(a):
     return 0
 
 
+# What selects a path through the launcher code: container settings of rank 0, and engine
+# features the run turns on. Recipe values (sizes, model flags) are data, not paths.
+PATH_ENV = ("CONNECTOR", "WIDE_EP", "EP_BACKEND", "RUN_MORI", "RUN_DEEPEP", "DP_MODE", "ENABLE_EP",
+            "ALL2ALL_BACKEND", "MAD_TOPO_ROUTER", "BENCHMARK_SCRIPT_FILE", "KV_OFFLOAD")
+PATH_FLAGS = ("--enable-expert-parallel", "--headless", "--speculative-config", "--enable-lora",
+              "--tensor-parallel-size", "--data-parallel-size", "--pipeline-parallel-size",
+              "--enable-dp-attention")
+
+
+def path_of(catalog, got):
+    """The card's path through the launcher code, from its snapshot (a list, as stored)."""
+    if not got["ranks"]:
+        return [catalog, "refused", got["exit_code"]]
+    env = dict(e.split("=", 1) for e in got["ranks"][0]["docker"]["env"] if "=" in e)
+    argv = [w for r in got["ranks"] for b in (r.get("engine") or {}).get("blocks", []) for w in b["argv"]]
+    backend = sorted({argv[i + 1] for i, w in enumerate(argv[:-1]) if w == "--disaggregation-transfer-backend"})
+    connectors = sorted(set(re.findall(r'"kv_connector": ?"(\w+)"', " ".join(argv))))
+    multi = "--headless" in argv or any(int(env.get(k, "1") or 1) > 1 for k in ("xP", "yD"))
+    return ([catalog] + [f"{k}={env[k]}" for k in PATH_ENV if k in env]
+            + ["multi-node pool" if multi else "single-node pools",
+               "TP-within-EP" if int(env.get("EP_TP_SIZE", "1") or 1) > 1 else "no TP-within-EP",
+               "transfer=" + ",".join(backend), "kv_connector=" + ",".join(connectors),
+               "flags=" + ",".join(f for f in PATH_FLAGS if f in argv), got["exit_code"]])
+
+
+def _cards(a):
+    for catalog in CATALOGS:
+        if a.catalog and catalog != a.catalog:
+            continue
+        for card in cards_of(catalog, a):
+            yield catalog, card
+
+
+def _case_files():
+    return sorted(CASES.glob("*/*.json"))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--update", action="store_true", help="rewrite the golden files")
+    ap.add_argument("--update", action="store_true", help="record the cases: every path's snapshot, new paths added, stale ones removed")
     ap.add_argument("--card", default="", help="only cards whose name contains this")
     ap.add_argument("--catalog", choices=CATALOGS, help="only this catalog")
     ap.add_argument("--spec-file", action="store_true",
                     help="run every card from a topology spec file (MAD_TOPOLOGY) instead of its "
-                         "xP / yD / ... settings and require the same run as the goldens")
+                         "xP / yD / ... settings and require the same run as from its settings")
     ap.add_argument("--spooled", action="store_true",
                     help="run each launcher as sbatch does: a copy in a spool directory, "
                          "started in the submit directory (with --equivalence: under that "
-                         "dispatch); require the same run as the goldens")
+                         "dispatch); require the same run as the card's own slurm-srun run")
     ap.add_argument("--from-emitted", action="store_true",
                     help="run every card from its generated configuration (config/emit.py: the card's "
                          "MAD_CONFIG pointing at it, nothing else submitted) and require the same run "
-                         "as the goldens, on the card's GPU and on every other GPU its recipe has a "
+                         "as the card's own run, on the card's GPU and on every other GPU its recipe has a "
                          "variant for")
     ap.add_argument("--equivalence", choices=("spur-array", "k8s-indexed"),
                     help="run every card under this dispatch instead and require the same "
                          "per-node docker run and engine command, and exit status, as the "
-                         "goldens (recorded under slurm-srun); no srun may be called")
+                         "card's own slurm-srun run; no srun may be called")
     ap.add_argument("--show", action="store_true",
                     help="run the matching card(s) and print what each node does (its role and engine "
-                         "command; --env/--nodes change the run), instead of comparing with the goldens")
+                         "command; --env/--nodes change the run), instead of comparing")
     ap.add_argument("--env", action="append", default=[], metavar="NAME=VALUE",
                     help="with --show: set NAME for the run, as at submit time (e.g. MAD_CONFIG=workloads/guide/"
                          "tied.yaml, MAD_GPU_ARCH=gfx950, MAD_CLUSTER=<site>); repeatable")
@@ -419,33 +470,64 @@ def main():
         return emitted_equivalence(a)
     if a.equivalence or a.spooled:
         return equivalence(a)
-    changed, checked = [], 0
-    for catalog in CATALOGS:
-        if a.catalog and catalog != a.catalog:
-            continue
-        for card in cards_of(catalog, a):
-            checked += 1
-            got = json.dumps(snapshot_card(catalog, card), indent=1) + "\n"
-            gold = GOLDEN / catalog / f"{card['name']}.json"
-            want = gold.read_text() if gold.exists() else ""
-            if got == want:
-                continue
-            if a.update:
-                gold.parent.mkdir(parents=True, exist_ok=True)
-                gold.write_text(got)
-                print(f"updated  {catalog}/{card['name']}")
-            else:
-                changed.append(f"{catalog}/{card['name']}")
-                diff = difflib.unified_diff(want.splitlines(), got.splitlines(),
-                                            f"golden/{catalog}/{card['name']}.json", "now", lineterm="", n=2)
-                print("\n".join(list(diff)[:60]))
+    runs, paths = {}, collections.defaultdict(list)
+    for catalog, card in _cards(a):
+        got = snapshot_card(catalog, card)
+        runs[(catalog, card["name"])] = got
+        paths[json.dumps(path_of(catalog, got))].append((catalog, card["name"]))
+    cases = {}
+    for f in _case_files():
+        d = json.loads(f.read_text())
+        cases[json.dumps(d["path"])] = (f, d)
     if a.update:
-        print(f"snapshot: {checked} card(s) recorded")
+        written = set()
+        for key, members in paths.items():
+            old = cases.get(key)
+            pick = (old[1]["catalog"], old[1]["card"]) if old and (old[1]["catalog"], old[1]["card"]) in members \
+                else members[0]
+            out = CASES / pick[0] / f"{pick[1]}.json"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            text = json.dumps({"path": json.loads(key), "catalog": pick[0], "card": pick[1],
+                               "snapshot": runs[pick]}, indent=1) + "\n"
+            if not out.exists() or out.read_text() != text:
+                out.write_text(text)
+                print(f"recorded {pick[0]}/{pick[1]}")
+            written.add(out)
+            if old and old[0] != out:
+                old[0].unlink()
+        if not (a.card or a.catalog):            # a path no card takes any more is not a case
+            for f in _case_files():
+                if f not in written:
+                    f.unlink()
+                    print(f"removed  {f.relative_to(CASES)} (no card takes its path)")
+        print(f"snapshot: {sum(map(len, paths.values()))} card(s) on {len(paths)} path(s); cases recorded")
         return 0
-    print(f"snapshot: {checked} card(s) checked, {len(changed)} differ")
+    changed, uncovered = [], []
+    for key, members in sorted(paths.items()):
+        case = cases.get(key)
+        if case is None:
+            uncovered.append((members[0], json.loads(key)))
+            continue
+        f, d = case
+        mine = (d["catalog"], d["card"])
+        if mine not in runs:                         # filtered out of this run
+            continue
+        got = json.dumps(runs[mine], indent=1)
+        want = json.dumps(d["snapshot"], indent=1)
+        if got != want:
+            changed.append(f"{mine[0]}/{mine[1]}")
+            diff = difflib.unified_diff(want.splitlines(), got.splitlines(),
+                                        f"cases/{mine[0]}/{mine[1]}.json", "now", lineterm="", n=2)
+            print("\n".join(list(diff)[:60]))
+    for (catalog, name), path in uncovered:
+        print(f"NEW PATH  {catalog}/{name}: {path}\n          no case records it; review its snapshot "
+              f"(--show) and record it with --update")
+    n = sum(map(len, paths.values()))
+    print(f"snapshot: {n} card(s) on {len(paths)} path(s); {len(paths) - len(uncovered)} case(s) "
+          f"checked, {len(changed)} differ, {len(uncovered)} new path(s)")
     for c in changed:
         print(f"  DIFF  {c}")
-    return 1 if changed else 0
+    return 1 if changed or uncovered else 0
 
 
 # The settings a spec file replaces. With MAD_TOPOLOGY they are all set explicitly,
@@ -472,7 +554,7 @@ def spec_file_equivalence(a):
             continue
         for card in cards_of(catalog, a):
             checked += 1
-            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
+            gold = snapshot_card(catalog, card)        # the card as it runs from its settings
             env = launch_env(card, catalog)
             env["SLURM_NNODES"] = str(node_count(card))
             env.setdefault("GPUS_PER_NODE", str(default_gpus_per_node()))   # as cluster.sh: the platform's
@@ -489,7 +571,7 @@ def spec_file_equivalence(a):
                 os.unlink(f.name)
             problems = []
             if got["exit_code"] != gold["exit_code"]:
-                problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
+                problems.append(f"exit {got['exit_code']} (slurm-srun {gold['exit_code']}): {got.get('stderr_tail')}")
             if _without_settings(got["ranks"]) != _without_settings(gold["ranks"]):
                 diff = difflib.unified_diff(json.dumps(_without_settings(gold["ranks"]), indent=1).splitlines(),
                                             json.dumps(_without_settings(got["ranks"]), indent=1).splitlines(),
@@ -577,18 +659,18 @@ def emitted_equivalence(a):
 
 
 def equivalence(a):
-    """Same per-node work under another dispatch: compare with the goldens."""
+    """Same per-node work under another dispatch: compare with the card's own slurm-srun run."""
     bad, checked = [], 0
     for catalog in CATALOGS:
         if a.catalog and catalog != a.catalog:
             continue
         for card in cards_of(catalog, a):
             checked += 1
-            gold = json.loads((GOLDEN / catalog / f"{card['name']}.json").read_text())
+            gold = snapshot_card(catalog, card)        # the reference: slurm-srun, as submitted
             got = snapshot_card(catalog, card, a.equivalence or "slurm-srun", a.spooled)
             problems = []
             if got["exit_code"] != gold["exit_code"]:
-                problems.append(f"exit {got['exit_code']} (golden {gold['exit_code']}): {got.get('stderr_tail')}")
+                problems.append(f"exit {got['exit_code']} (slurm-srun {gold['exit_code']}): {got.get('stderr_tail')}")
             if got["ranks"] != gold["ranks"]:
                 g = {r["rank"]: r for r in gold["ranks"]}
                 for r in got["ranks"]:
@@ -597,7 +679,7 @@ def equivalence(a):
                                                     json.dumps(r, indent=1).splitlines(), lineterm="", n=1)
                         problems.append(f"rank {r['rank']} differs:\n" + "\n".join(list(diff)[:30]))
                 if len(got["ranks"]) != len(gold["ranks"]):
-                    problems.append(f"{len(got['ranks'])} ranks (golden {len(gold['ranks'])})")
+                    problems.append(f"{len(got['ranks'])} ranks (slurm-srun {len(gold['ranks'])})")
             srun_calls = [c for c in got["calls"] if c.startswith("srun")]
             if srun_calls and a.equivalence:
                 problems.append(f"srun called: {srun_calls}")
