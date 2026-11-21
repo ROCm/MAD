@@ -582,7 +582,8 @@ LMCACHE_BROADCAST_PATCH
         # the connector stays model-agnostic (no default). Needed for MLA models
         # whose default max_model_len makes the TritonMLA attn-logits workspace OOM.
         local mml_args=()
-        [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+        [[ -n "${MAX_MODEL_LEN:-}" ]] && ! _recipe_sets_flag --max-model-len "${log_prefix}" \
+        && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
