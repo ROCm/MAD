@@ -8,9 +8,10 @@ stack are switched, what each change does to the run, and how what runs feeds ba
 compatibility matrix. Every result shown is produced by the real launchers and held by a test. The
 high-level version is [context_as_code_user_guide.md](context_as_code_user_guide.md).
 
-The examples: nine workloads, five model families, two engines, every serving type MAD runs and the next GPU
+The examples: eleven workloads, six model families, two engines, every serving type MAD runs and the next GPU
 generation, each written as a few lines on shared layers. Each is either a **reproduction** -- it
-runs exactly the engine commands of an existing card, and a test holds them equal -- or a **demo**
+runs exactly the engine commands of an existing card (or, for DeepSeek-V4, of `develop`'s submit
+script), and a test holds them equal -- or a **demo**
 of a mechanism, with no invented setting presented as tuned. Their tests run each one through the
 real launchers on each GPU it targets. Every example builds its image from an image spec over the
 compatibility matrix, on each GPU with the stack validated there. The last sections follow the
@@ -33,6 +34,7 @@ How to configure a model this way, step by step: [configuring-a-model.md](config
 - [The images](#the-images)
 - [From a build to the matrix](#from-a-build-to-the-matrix)
 - [From a card to its example](#from-a-card-to-its-example)
+- [One workload, two paths: DeepSeek-V4](#one-workload-two-paths-deepseek-v4)
 - [Maintaining workloads with inheritance](#maintaining-workloads-with-inheritance)
 - [How they are tested](#how-they-are-tested)
 
@@ -475,9 +477,9 @@ scripts/common/workloads/
     sglang-disagg-dp-ep.yaml         SGLang, DP attention + EP
     replicas.yaml                    independent servers per node behind a router
   bench/                           what is measured
-    sweep.yaml niah.yaml accuracy.yaml embeddings.yaml lora.yaml
+    sweep.yaml niah.yaml accuracy.yaml embeddings.yaml lora.yaml validate.yaml
   family/                          what is true of every workload of a model family (inherits its serve/)
-    kimi-k3.yaml deepseek-v3.yaml
+    kimi-k3.yaml deepseek-v3.yaml deepseek-v4.yaml
 ```
 
 | Layer | What it gives |
@@ -488,9 +490,10 @@ scripts/common/workloads/
 | [`serve/sglang-disagg-mori-io.yaml`](../scripts/common/workloads/serve/sglang-disagg-mori-io.yaml) | SGLang disaggregation, tensor parallel, KV over MoRI-IO |
 | [`serve/sglang-disagg-dp-ep.yaml`](../scripts/common/workloads/serve/sglang-disagg-dp-ep.yaml) | SGLang disaggregation, DP attention + EP |
 | [`serve/replicas.yaml`](../scripts/common/workloads/serve/replicas.yaml) | independent servers per node behind a router (`PERF_TAGS` by interpolation) |
-| [`bench/`](../scripts/common/workloads/bench/) (`sweep`, `niah`, `accuracy`, `embeddings`, `lora`) | what is measured |
+| [`bench/`](../scripts/common/workloads/bench/) (`sweep`, `niah`, `accuracy`, `embeddings`, `lora`, `validate`) | what is measured (`validate`: curl, NIAH, then the sweep, in one allocation) |
 | [`family/kimi-k3.yaml`](../scripts/common/workloads/family/kimi-k3.yaml) | facts true of every Kimi-K3 workload (local weights only) |
 | [`family/deepseek-v3.yaml`](../scripts/common/workloads/family/deepseek-v3.yaml) | the DeepSeek-V3 family |
+| [`family/deepseek-v4.yaml`](../scripts/common/workloads/family/deepseek-v4.yaml) | the DeepSeek-V4 family: what `run_wideep.sh` sets for every DeepSeek-V4 run (router, ports, boot gate, DSV4 transfer knobs, NIAH method) |
 
 Site facts are not here: a run names its site (`MAD_CLUSTER` / `MAD_CLUSTER_FILE`, a pipeline
 context, `MAD_PLATFORM`), so one workload runs on every site.
@@ -507,6 +510,8 @@ context, `MAD_PLATFORM`), so one workload runs on every site.
 | [`pyt_e2e_deepseek-v3_dq`](../scripts/vllm_dissag/workloads/e2e/deepseek-v3-dq.yaml) | DeepSeek-V3, disaggregated quantization | family/deepseek-v3 + bench/accuracy | gfx950 (refused on gfx942) | demo |
 | [`pyt_e2e_kimi-k3_helios`](../scripts/vllm_dissag/workloads/e2e/kimi-k3-helios.yaml) | Kimi-K3 on Helios, 72-GPU pools | family/kimi-k3 + bench/sweep | CDNA 5 once brought up (refused today) | demo |
 | [`pyt_e2e_qwen3-32b_replicas_lora`](../scripts/vllm_multinode/workloads/e2e/qwen3-32b-replicas-lora.yaml) | Qwen3-32B, dense BF16, replicas + LoRA | serve/replicas + bench/lora | gfx942, gfx950 | demo |
+| [`pyt_e2e_deepseek-v4-flash_validate`](../scripts/vllm_dissag/workloads/e2e/deepseek-v4-flash-validate.yaml) | DeepSeek-V4-Flash, MoE FP8, 4P4D (EP32) | family/deepseek-v4 + bench/validate | gfx942 | reproduction of `run_wideep.sh validate dsv4fls ep32` |
+| [`pyt_e2e_deepseek-v4-pro_validate`](../scripts/vllm_dissag/workloads/e2e/deepseek-v4-pro-validate.yaml) | DeepSeek-V4-Pro, MoE FP8, 4P4D (EP32) | family/deepseek-v4 + bench/validate | gfx942 | reproduction of `run_wideep.sh validate dsv4pro ep32` |
 | [`pyt_e2e_qwen3-embedding_replicas`](../scripts/vllm_multinode/workloads/e2e/qwen3-embedding-replicas.yaml) | Qwen3-Embedding-8B, embeddings | serve/replicas + bench/embeddings | gfx942, gfx950 | demo |
 
 The cards (tags `e2e_example`, `reproduction` or `demo`, and `any_gpu` where they run on any GPU) hold only what registers a run -- name, image, node
@@ -555,6 +560,11 @@ concurrency.
 
 **DeepSeek-R1 on SGLang.** The same layers, the second engine: DP attention + MoRI EP.
 
+**DeepSeek-V4, Flash and Pro.** A workload that was never a card: `develop` runs it through its own
+submit script and Dockerfile. The two cards run it on the shared layers and an image spec, and
+every node runs the same container and engine command as the script's job. The comparison is
+below ([One workload, two paths](#one-workload-two-paths-deepseek-v4)).
+
 ## Running them
 
 Without madengine -- the launcher reads the card's `MAD_CONFIG` itself:
@@ -590,6 +600,7 @@ Every example card names its image as a spec, not a Dockerfile:
 | [`compat/images/vllm-kimi-k3.yaml`](../compat/images/vllm-kimi-k3.yaml) | Kimi-K3, Kimi-K3 on Helios | extends `di-vllm.yaml`; a base per GPU (gfx942, gfx950); MoRI, AITER + FlyDSL, vLLM with the Kimi-K3 patch, vllm-router, the rixl transport stack |
 | [`compat/images/vllm-mori121.yaml`](../compat/images/vllm-mori121.yaml) | Llama-3.1-405B | extends `di-vllm.yaml`; gfx942; the validated mori121 stack the DeepSeek-V3 and Llama cards run: the AITER release wheel, vLLM with the wide-EP patch, the same router and transports |
 | [`compat/images/vllm-per-gpu.yaml`](../compat/images/vllm-per-gpu.yaml) | DeepSeek-V3 MTP and DQ, Qwen3 replicas | composed from the two above, one per GPU: extends `vllm-mori121.yaml`, and on gfx950 (`variants.gfx950`) selects the builds the matrix's gfx950 vLLM is validated with. No build of its own |
+| [`compat/images/vllm-dsv4.yaml`](../compat/images/vllm-dsv4.yaml) | DeepSeek-V4 Flash and Pro | gfx942; the upstream vLLM ROCm 7.2 nightly as base (vLLM, AITER, MoRI from it), vllm-router 37b37a43, the four DeepSeek-V4 patches baked into its vLLM. Not an extension of `di-vllm.yaml`: nothing is built from source but the router |
 | [`compat/images/sglang-disagg.yaml`](../compat/images/sglang-disagg.yaml) | DeepSeek-R1, Qwen3-32B on SGLang | the SGLang release image per GPU, its pip packages, MoRI on gfx942 only (a per-GPU variant) |
 
 The specs inherit: [`compat/images/di-vllm.yaml`](../compat/images/di-vllm.yaml) holds what every vLLM stack shares (build
@@ -701,6 +712,82 @@ card's `skip_gpu_arch`, so one card runs on both GPUs: the gfx950 recipe gives t
 equal; `snapshot.py --from-emitted` runs every card from its generated file on each GPU it runs on
 and requires the same engine commands and container environment.
 
+## One workload, two paths: DeepSeek-V4
+
+`develop` runs DeepSeek-V4 without a card. A submit script derives the run from three words, and a
+hand-written Dockerfile builds its image:
+
+```bash
+export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4    # built from docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile
+scripts/vllm_dissag/run_wideep.sh validate dsv4fls ep32 --dry-run   # BENCH MODEL TOPO -> env -> sbatch run_xPyD_models.slurm
+                                                               # (prints the plan and the sbatch line; without --dry-run it submits)
+```
+
+The migrated version runs the same workload as a card. Both paths end in the same launcher
+(`run_xPyD_models.slurm`), the same role script and the same recipe (`DeepSeek-V4-Flash-FP8` in
+[`models.yaml`](../scripts/vllm_dissag/models.yaml)). What differs is where each value is written down:
+
+```bash
+madengine build --tags pyt_e2e_deepseek-v4-flash_validate --additional-context-file <site context>
+madengine run --manifest-file build_manifest.json --additional-context-file <site context>
+```
+
+or, without madengine, with the launcher reading the card's workload file itself:
+
+```bash
+cd scripts/vllm_dissag && MAD_CONFIG=workloads/e2e/deepseek-v4-flash-validate.yaml DOCKER_IMAGE_NAME=<image> \
+    sbatch -N 8 run_xPyD_models.slurm
+```
+
+| What | `run_wideep.sh` path | Card path |
+|---|---|---|
+| model | `MODEL` word (`dsv4fls` -> `DeepSeek-V4-Flash-FP8`) | `MODEL_NAME` in the workload file |
+| shape | `TOPO` word (`ep32` -> `xP=4 yD=4`, `-N 8`) | `xP`, `yD` in the workload file; nodes on the card |
+| connector, wide EP | exported (`CONNECTOR=moriio WIDE_EP=1`) | inherited: `serve/vllm-disagg-wide-ep.yaml` |
+| benchmark | `BENCH` word (`validate`) | inherited: `bench/validate.yaml` |
+| DeepSeek-V4 run knobs: router, discovery port 31367, the 3 h boot gate, `DSV4_*`, the NIAH method and ladder, the smoke concurrencies | one `if [[ "$MODEL_NAME" == ... ]]` block per model, mostly the same lines twice | once, for both models: `family/deepseek-v4.yaml` |
+| what Flash and Pro do differently (NIAH priming; Pro's concurrencies and step timeouts on 4P4D) | inside those blocks and the `BENCH` cases | each card's workload file: a few lines |
+| engine settings: KV dtype, AITER MLA, MoRI heap, CUDA-graph modes, HMA off | the recipe, and again with `-e` for four of them | the recipe only |
+| walltime | a table in the script, clamped to `ASSOC_MAX_WALL` | `slurm.time` on the card |
+| partition, account, nodes to use or avoid | env and flags of the script | the site context (`MAD_CLUSTER`, the pipeline's context) |
+| image | a 133-line Dockerfile built by hand, its tag passed with `--image` | [`compat/images/vllm-dsv4.yaml`](../compat/images/vllm-dsv4.yaml); madengine generates the Dockerfile and records the build plan in the image |
+
+The image, side by side. Both start from the same base and add the same two things:
+
+| Dockerfile | Image spec | Build in [`compat/rocm.yaml`](../compat/rocm.yaml) |
+|---|---|---|
+| `ARG BASE_IMAGE=vllm/vllm-openai-rocm:nightly-rocm72-83c078d...` | `base: {gfx942: ...}` (the same tag) | -- |
+| router: clone, check out `37b37a43`, `cargo +1.95 build`, install | `vllm-router: 37b37a43@dsv4` | `vllm-router` `37b37a43@dsv4`: the same steps |
+| patches: partial clone of the vLLM branch at `64fe5a00`, run `bake.sh` | `vllm-dsv4-patches: 64fe5a00@dsv4` | `vllm-dsv4-patches` `64fe5a00@dsv4`: a sparse checkout of the patch directory, then `bake.sh` |
+| `ENV SKIP_RUNTIME_PATCH=1 HSA_ENABLE_IPC_MODE_LEGACY=0` and the cache directories | `env:` (the same values) | -- |
+| writes `/app/versions.txt` | -- | madengine records the build plan as an image label, and the installed packages in `/opt/mad/build_info.json` |
+
+`madengine build --tags pyt_e2e_deepseek-v4-flash_validate --explain` prints the generated
+Dockerfile. When another stack needs the same router, its spec selects the same build.
+
+**What each node runs.** `DeepSeekV4BothPaths` in
+[`test_e2e_examples.py`](../scripts/common/tests/test_e2e_examples.py) runs `run_wideep.sh validate dsv4fls ep32`
+and `validate dsv4pro ep32` with `sbatch` stood in for. It takes the environment and allocation each
+submits and runs the launcher on 8 stand-in nodes under that environment, then runs each card the
+same way. On every node the docker flags, mounts, image and command are the same, and so is the
+engine command: prefill on nodes 0-3, decode on nodes 4-7, `--data-parallel-size 32`, MoRI-EP
+high-throughput on prefill and low-latency on decode, the same CUDA-graph modes, KV size and
+MoRI-IO config. The container environments differ in six names, and the test holds the list:
+
+| Name | Set by | Why it is the same run |
+|---|---|---|
+| `KV_CACHE_DTYPE`, `MORI_SHMEM_HEAP_SIZE`, `VLLM_ROCM_USE_AITER_MLA`, `DSV4_ENABLE_HMA` | `run_wideep.sh` only | the recipe already sets them, to the values the script passes again (the test checks they are equal) |
+| `RUN_MORI`, `EP_BACKEND` | the card only | the shared wide-EP layer names the EP backend; without it the role script picks MoRI for the MoRI-IO connector, the same backend |
+
+The test also checks that the spec selects what the Dockerfile pins: the base, the router commit,
+the patches repository and commit, and the runtime env. If the script changes, the test shows
+what to move into the workload files.
+
+The script is not removed. It keeps working, and the cards are another way to run the same job.
+The table above says where each script feature lives as data. Some features belong to a site
+rather than a workload, such as a staged NVMe node list or the association's walltime limit. Those
+go into a site profile, so one card runs on every site.
+
 ## Maintaining workloads with inheritance
 
 - A fact lives in one layer: a model family's (`family/kimi-k3.yaml`), a serving shape's
@@ -727,4 +814,5 @@ pooling flags, the SGLang DP flags. The snapshot suite runs every one of them an
 each that takes a new path through the launchers, and the pipeline's
 path-equivalence check runs every example card in STANDALONE and through madengine and requires
 the same environment, directory and allocation. `PerGpuStack` holds `vllm-per-gpu` equal to the
-stack of each GPU it is composed from.
+stack of each GPU it is composed from. `DeepSeekV4BothPaths` runs `run_wideep.sh` and the DeepSeek-V4
+cards side by side and holds them to the same containers and engine commands on every node.

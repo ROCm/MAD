@@ -1,0 +1,6 @@
+# One allocation, three checks in order (benchmark_validate.sh): a request through every path
+# (curl), then NIAH, then the throughput sweep. NIAH does not halt the run on a failed rung, so the
+# sweep still runs.
+version: 2
+model:
+  env: {BENCHMARK_SCRIPT: validate, NIAH_HALT_ON_FAIL: "0"}

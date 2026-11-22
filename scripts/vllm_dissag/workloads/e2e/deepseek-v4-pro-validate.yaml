@@ -1,0 +1,16 @@
+# Reproduction of `run_wideep.sh validate dsv4pro ep32` as a card: the same engine commands on every
+# node (a test holds them equal). DeepSeek-V4-Pro-FP8 on the Flash card's shape and image; what
+# differs from Flash is here, the rest is the recipe's (models.yaml: heap, KV, decode graph).
+version: 2
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/deepseek-v4.yaml,
+           ../../../common/workloads/bench/validate.yaml]
+model:
+  env:
+    MODEL_NAME: DeepSeek-V4-Pro-FP8
+    xP: "4"
+    yD: "4"
+    NIAH_LIST_PRIME: ""       # Pro retrieves on the bare stem; priming is a wash
+    # 4P/4D: skip con=1 (eight serial 1024-token decodes at ~2.7 s/token overrun the walltime).
+    BENCHMARK_CON: "8 16 32"
+    STEP_SEC_PER_TOK: "3"
+    STEP_TIMEOUT: "7200"

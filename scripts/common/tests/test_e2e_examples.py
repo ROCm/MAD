@@ -8,6 +8,7 @@ commands show. When madengine is importable, its reader of the same files is che
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -124,7 +125,7 @@ class Reproductions(unittest.TestCase):
             with self.subTest(card=c["name"]):
                 kinds = {"reproduction", "demo"} & set(c["tags"])
                 self.assertEqual(len(kinds), 1, c["tags"])
-                self.assertEqual("reproduction" in kinds, (d, c["name"]) in REPRODUCES)
+                self.assertEqual("reproduction" in kinds, (d, c["name"]) in REPRODUCES or (d, c["name"]) in SUBMITS)
 
     def test_each_reproduction_runs_the_engine_commands_of_its_card(self):
         for (d, name), (sd, source) in REPRODUCES.items():
@@ -134,6 +135,91 @@ class Reproductions(unittest.TestCase):
                 self.assertEqual(arch, src_arch)
                 self.assertTrue(want and any(want), "the source card runs nothing")
                 self.assertEqual(got, want)
+
+
+
+# Reproductions of a submit script rather than a card: develop runs DeepSeek-V4 through
+# run_wideep.sh (BENCH MODEL TOPO -> env -> sbatch run_xPyD_models.slurm) with its own Dockerfile;
+# the example cards run the same workload from workload files on the shared layers and an image spec.
+SUBMITS = {
+    ("vllm_dissag", "pyt_e2e_deepseek-v4-flash_validate"): ("validate", "dsv4fls", "ep32"),
+    ("vllm_dissag", "pyt_e2e_deepseek-v4-pro_validate"): ("validate", "dsv4pro", "ep32"),
+}
+# Container env the two paths set differently, and why. run_wideep.sh passes four recipe values
+# again with -e (the card leaves them to the recipe, which holds the same values: checked below);
+# the card's serving layer (common/workloads/serve/vllm-disagg-wide-ep.yaml) names the EP backend.
+ONLY_SUBMIT_SCRIPT = {"KV_CACHE_DTYPE", "MORI_SHMEM_HEAP_SIZE", "VLLM_ROCM_USE_AITER_MLA", "DSV4_ENABLE_HMA"}
+ONLY_CARD = {"RUN_MORI", "EP_BACKEND"}
+
+
+def submit_script_run(bench, model, topo):
+    """run_wideep.sh as a user runs it, with sbatch stood in for: the env it submits and the
+    allocation it asks for, then run_xPyD_models.slurm under that env (the snapshot harness)."""
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        stub = tmp / "sbatch"
+        stub.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$CAP/argv"; env -0 > "$CAP/env"\n')
+        stub.chmod(0o755)
+        outer = {"PATH": f"{tmp}:/usr/bin:/bin", "HOME": str(tmp), "CAP": str(tmp)}
+        p = subprocess.run(["bash", str(SCRIPTS / "vllm_dissag" / "run_wideep.sh"), bench, model, topo,
+                            "--image", "img:snapshot"], env=outer, capture_output=True, text=True, timeout=120)
+        assert p.returncode == 0, p.stdout + p.stderr
+        env = dict(e.split("=", 1) for e in (tmp / "env").read_text().split("\0") if "=" in e)
+        argv = (tmp / "argv").read_text().split("\0")
+    finally:
+        shutil.rmtree(tmp)
+    env = {k: v for k, v in env.items() if k not in outer and k not in ("PWD", "OLDPWD", "SHLVL", "_")}
+    nodes = int(argv[argv.index("-N") + 1])
+    card = {"name": f"run_wideep.sh {bench} {model} {topo}", "scripts": "run_xPyD_models.slurm",
+            "slurm": {"nodes": nodes}, "env_vars": {}}
+    return S.snapshot_card("vllm_dissag", card, submit_env=env)
+
+
+def container_env(rank):
+    return dict(e.split("=", 1) for e in rank["docker"]["env"] if "=" in e)
+
+
+class DeepSeekV4BothPaths(unittest.TestCase):
+    """DeepSeek-V4 two ways: develop's submit script and its Dockerfile, and the migrated cards
+    (workload files on the shared layers, compat/images/vllm-dsv4.yaml). Every node runs the same
+    container and the same engine command either way (docs/context_as_code_developer_guide.md,
+    "One workload, two paths: DeepSeek-V4")."""
+
+    def test_each_card_runs_what_the_submit_script_runs(self):
+        sys.path.insert(0, str(SCRIPTS / "common" / "recipe"))
+        import models as M
+        recipes = yaml.safe_load((SCRIPTS / "vllm_dissag" / "models.yaml").read_text())
+        for (d, name), submit in SUBMITS.items():
+            with self.subTest(card=name, submit=" ".join(submit)):
+                theirs, ours = submit_script_run(*submit), S.snapshot_card(d, card(d, name))
+                self.assertEqual((ours["exit_code"], len(ours["ranks"])), (theirs["exit_code"], len(theirs["ranks"])))
+                self.assertEqual(theirs["exit_code"], 0, theirs.get("stderr_tail"))
+                recipe_env = M.effective(recipes, container_env(ours["ranks"][0])["MODEL_NAME"], "gfx942")["env"]
+                for a, b in zip(theirs["ranks"], ours["ranks"]):
+                    self.assertEqual([x["argv"] for x in a["engine"]["blocks"]],
+                                     [x["argv"] for x in b["engine"]["blocks"]], f"rank {a['rank']}")
+                    self.assertTrue(b["engine"]["blocks"], "the card runs nothing")
+                    for part in ("flags", "mounts", "image", "command"):
+                        self.assertEqual(a["docker"][part], b["docker"][part], f"rank {a['rank']} {part}")
+                    ea, eb = container_env(a), container_env(b)
+                    self.assertEqual(set(ea) - set(eb), ONLY_SUBMIT_SCRIPT)
+                    self.assertEqual(set(eb) - set(ea), ONLY_CARD)
+                    self.assertEqual({k: ea[k] for k in ONLY_SUBMIT_SCRIPT}, {k: str(recipe_env[k]) for k in ONLY_SUBMIT_SCRIPT})
+                    self.assertEqual({k: v for k, v in ea.items() if k in eb and eb[k] != v}, {})
+
+    def test_the_image_spec_is_the_dockerfile(self):
+        """What the DeepSeek-V4 Dockerfile pins, the spec selects: the same base, router and patches."""
+        dockerfile = (SCRIPTS.parent / "docker" / "vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile").read_text()
+        spec = yaml.safe_load((SCRIPTS.parent / "compat" / "images" / "vllm-dsv4.yaml").read_text())
+        matrix = yaml.safe_load((SCRIPTS.parent / "compat" / "rocm.yaml").read_text())["components"]
+        self.assertIn(f"ARG BASE_IMAGE={spec['base']['gfx942']}\n", dockerfile)
+        for name, arg in (("vllm-router", "ROUTER_REF"), ("vllm-dsv4-patches", "PATCHES_REF")):
+            commit = matrix[name][spec["components"][name]]["source"]["commit"]
+            self.assertIn(f"ARG {arg}={commit}\n", dockerfile)
+        self.assertIn(f"ARG PATCHES_REPO={matrix['vllm-dsv4-patches'][spec['components']['vllm-dsv4-patches']]['source']['repo']}\n",
+                      dockerfile)
+        for k, v in spec["env"].items():
+            self.assertRegex(dockerfile, rf"\b{k}={v}\b")
 
 
 try:

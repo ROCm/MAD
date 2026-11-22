@@ -1052,5 +1052,71 @@
             "gpus_per_node": 8,
             "time": "24:00:00"
         }
+    },
+    {
+        "name": "pyt_e2e_deepseek-v4-flash_validate",
+        "url": "",
+        "image_spec": "${images.vllm-dsv4}",
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Flash-FP8.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "reproduction",
+            "vllm_disagg"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 8
+        },
+        "slurm": {
+            "nodes": 8,
+            "gpus_per_node": 8,
+            "time": "08:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/deepseek-v4-flash-validate.yaml"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_e2e_deepseek-v4-pro_validate",
+        "url": "",
+        "image_spec": "${images.vllm-dsv4}",
+        "scripts": "run_xPyD_models.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_DeepSeek-V4-Pro-FP8.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "reproduction",
+            "vllm_disagg"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 8
+        },
+        "slurm": {
+            "nodes": 8,
+            "gpus_per_node": 8,
+            "time": "08:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/deepseek-v4-pro-validate.yaml"
+        },
+        "args": ""
     }
 ]

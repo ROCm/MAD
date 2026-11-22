@@ -437,6 +437,36 @@ components:
       note: vllm-router with DP-rank round-robin (11841c0d) and the 2P2D KV-notify fix (remote_dp_rank_override + remote_dp_size); without the latter 2P2D EP=16 wedges with 'remote blocks never arrived'. Carried as a patch on upstream until it is merged there.
       fork_commit: 82dc9811af17412e6e24b5942a5486bc502df23a
 
+    37b37a43@dsv4:
+      source:
+        repo: https://github.com/vllm-project/router.git
+        commit: 37b37a43c577cd7d83bad7b10b8b4650325b4fc7
+        path: /tmp/vllm-router-src
+        steps:
+        - command -v rustup >/dev/null 2>&1 || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.95
+        - export PATH=/root/.cargo/bin:$PATH
+        - rustup toolchain install 1.95
+        - grep -q 'version = "0.1.16"' Cargo.toml
+        - ulimit -n 1048576 || ulimit -n 65536 || true
+        - cargo +1.95 build --release --locked -j 8
+        - install -m 755 target/release/vllm-router /usr/local/bin/vllm-router
+        - cd / && rm -rf /tmp/vllm-router-src
+      note: vllm-router upstream at crate 0.1.16 (rustc >= 1.91 for vLLM's tokenizer crate), as the DeepSeek-V4 image bakes it; cargo needs a raised nofile limit (EMFILE under the default 1024).
+
+  vllm-dsv4-patches:
+    64fe5a00@dsv4:
+      source:
+        repo: https://github.com/basemam/vllm.git
+        commit: 64fe5a00b544cdf574f20b1591e0d91e9c54415f
+        path: /tmp/vllm-mad
+        sparse: [mad/scripts/vllm_disagg/patches]
+        steps:
+        - test -f mad/scripts/vllm_disagg/patches/bake.sh
+        - rm -rf /opt/dsv4_patches && mkdir -p /opt/dsv4_patches && cp -a mad/scripts/vllm_disagg/patches/. /opt/dsv4_patches/
+        - cd / && rm -rf /tmp/vllm-mad
+        - bash /opt/dsv4_patches/bake.sh
+      note: "The four DeepSeek-V4 patches, baked into the base image's installed vLLM (83c078d) by their own bake.sh: SWA MLA bounded_replay drop (vllm-project/vllm#63411), MoRI dispatch trim (#63412), the MoRI-IO DSV4 attention-backend fix (#62311) and the mixed-block-size fix. They live on a vLLM branch cut from 83c078d, so they are tested against exactly that tree; drop each as its upstream PR reaches the base nightly."
+
   googletest:
     1.14.0@di:
       run:
