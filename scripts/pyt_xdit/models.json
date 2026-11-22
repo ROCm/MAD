@@ -1,39 +1,5 @@
 [
   {
-    "name": "pyt_xdit_flux",
-    "dockerfile": "../../docker/pyt_xdit",
-    "scripts": "run.sh",
-    "n_gpus": "8",
-    "owner": "nsakkine@amd.com",
-    "training_precision": "",
-    "tags": [
-        "inference",
-        "diffusion",
-        "t2i",
-        "pyt",
-        "xdit"
-    ],
-    "args": "--workload flux",
-    "multiple_results": "results.csv"
-  },
-  {
-    "name": "pyt_xdit_flux_kontext",
-    "dockerfile": "../../docker/pyt_xdit",
-    "scripts": "run.sh",
-    "n_gpus": "8",
-    "owner": "nsakkine@amd.com",
-    "training_precision": "",
-    "tags": [
-        "inference",
-        "diffusion",
-        "ti2i",
-        "pyt",
-        "xdit"
-    ],
-    "args": "--workload flux_kontext",
-    "multiple_results": "results.csv"
-  },
-  {
     "name": "pyt_xdit_flux_2",
     "dockerfile": "../../docker/pyt_xdit",
     "scripts": "run.sh",
@@ -53,7 +19,7 @@
     "multiple_results": "results.csv"
   },
   {
-    "name": "pyt_xdit_flux_2_klein",
+    "name": "pyt_xdit_flux_3_klein_base",
     "dockerfile": "../../docker/pyt_xdit",
     "scripts": "run.sh",
     "n_gpus": "8",
@@ -66,7 +32,7 @@
         "pyt",
         "xdit"
     ],
-    "args": "--workload flux2_klein",
+    "args": "--workload flux3_klein_base",
     "multiple_results": "results.csv"
   },
   {
@@ -152,6 +118,23 @@
         "xdit"
     ],
     "args": "--workload qwen_image",
+    "multiple_results": "results.csv"
+  },
+  {
+    "name": "pyt_xdit_qwen_image_2_1",
+    "dockerfile": "../../docker/pyt_xdit",
+    "scripts": "run.sh",
+    "n_gpus": "8",
+    "owner": "nsakkine@amd.com",
+    "training_precision": "",
+    "tags": [
+        "inference",
+        "diffusion",
+        "t2i",
+        "pyt",
+        "xdit"
+    ],
+    "args": "--workload qwen_image_2_1",
     "multiple_results": "results.csv"
   },
   {
