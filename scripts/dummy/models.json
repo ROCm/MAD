@@ -11,5 +11,20 @@
         ],
         "args": "",
         "multiple_results": "perf_dummy.csv"
+    },
+    {
+        "name": "dummy_image_spec",
+        "image_spec": {
+            "rocm": "10.1"
+        },
+        "scripts": "run_multi.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "tags": [
+            "dummy_image_spec"
+        ],
+        "args": "",
+        "multiple_results": "perf_dummy.csv"
     }
 ]
