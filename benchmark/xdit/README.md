@@ -35,15 +35,14 @@ latencies can be found from `results.csv` once the benchmark runs have finished.
 
 | MAD model TAG                  | Model repository                                                                      |
 | -------------------------------| --------------------------------------------------------------------------------------|
-| pyt_xdit_flux                  | [Flux.1](https://huggingface.co/black-forest-labs/FLUX.1-dev)                         |
-| pyt_xdit_flux_kontext          | [Flux.1 Kontext](https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev)         |
 | pyt_xdit_flux_2                | [Flux.2](https://huggingface.co/black-forest-labs/FLUX.2-dev)                         |
-| pyt_xdit_flux_2_klein          | [Flux.2 Klein](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B)              |
+| pyt_xdit_flux_3_klein_base     | [FLUX.3 Klein Base](https://huggingface.co/black-forest-labs/flux-3-image-klein-base) |
 | pyt_xdit_hunyuanvideo          | [HunyuanVideo](https://huggingface.co/tencent/HunyuanVideo)                           |
 | pyt_xdit_hunyuanvideo_1_5      | [HunyuanVideo 1.5](https://huggingface.co/tencent/HunyuanVideo-1.5)                   |
 | pyt_xdit_ltx_2_5               | [LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5)                                  |
-| pyt_xdit_minimax_h3            | [Minimax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3)                             |
+| pyt_xdit_minimax_h3            | [MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3)                             |
 | pyt_xdit_qwen_image            | [Qwen-Image](https://huggingface.co/Qwen/Qwen-Image-2512)                             |
+| pyt_xdit_qwen_image_2_1        | [Qwen-Image-2.1](https://huggingface.co/Qwen/Qwen-Image-2.1)                          |
 | pyt_xdit_qwen_image_edit       | [Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit)                        |
 | pyt_xdit_wan_2_1               | [Wan 2.1](https://huggingface.co/Wan-AI/Wan2.1-I2V-14B-720P)                          |
 | pyt_xdit_wan_2_2               | [Wan 2.2](https://huggingface.co/Wan-AI/Wan2.2-I2V-A14B)                              |
