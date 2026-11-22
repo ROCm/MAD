@@ -32,6 +32,7 @@ MAD_MODEL_NAME=$(echo $MAD_MODEL_NAME | tr "/" "_")
 
 PERF_ARGS=""
 PROFILE=false
+WARMUP=true
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --model_repo) MODEL="$2"; shift ;;
@@ -42,9 +43,10 @@ while [[ "$#" -gt 0 ]]; do
         --perf-output) PERF_ARGS="$PERF_ARGS --perf-output $2"; shift ;;
         --no-perf-merge) PERF_ARGS="$PERF_ARGS --no-perf-merge" ;;
         --profile) PROFILE=true ;;
+        --warmup) WARMUP=true ;;
+        --no-warmup) WARMUP=false ;;
         *)
             echo "Unknown parameter passed: $1" >&2
-            echo "Usage: run.sh --model_repo <repo> [--config <yaml>] [--benchmark <name>] [--output_csv <csv>] [--perf <yaml>] [--perf-output <yaml>] [--no-perf-merge]" >&2
             exit 1
             ;;
     esac
@@ -58,6 +60,11 @@ if [[ -z "$BENCHMARK" ]]; then
     # Infer benchmark from tag name if not explicitly set
     if [[ "$MAD_MODEL_NAME" == *"-accuracy"* ]]; then
         BENCHMARK=${BENCHMARK_ARG:-"accuracy"}
+    elif [[ "$MAD_MODEL_NAME" == *"agentic"* || "$MAD_MODEL_NAME" == *"agentx"* ]]; then
+        # AgentX trace replay. Checked before -perf so an agentic entry carrying
+        # the perf tag still selects the replay path rather than the random
+        # ISL/OSL sweep, which would filter every agentic config out.
+        BENCHMARK=${BENCHMARK_ARG:-"agentic"}
     elif [[ "$MAD_MODEL_NAME" == *"-perf"* ]]; then
         BENCHMARK=${BENCHMARK_ARG:-"serving"}
     else
@@ -95,17 +102,24 @@ fi
 
 # install profiling dependencies (rocm-trace-lite) only when profiling; mirrors scripts/vllm/run.sh
 if $PROFILE; then
-    # Activate the profiling-only ROCR 7.2.3 runtime that the Dockerfile STAGED under /opt/rocr723:
-    # copy the fixed libhsa-runtime64.so over the active ROCm lib so `rtl trace --mode full` does not
-    # SEGFAULT on cuda-graph replay (rocm-systems 559d48b1). Scoped to --profile so benchmark/accuracy
-    # runs keep the untouched base 7.2.0 runtime. Must run BEFORE building rtl, which links the active
-    # runtime. No network fetch here — the .so was downloaded once at image build.
-    if [ -e /opt/rocr723/libhsa-runtime64.so.1 ]; then
-        ROCR_DEST="$(readlink -f /opt/rocm)/lib"
-        cp -avf /opt/rocr723/libhsa-runtime64.so* "$ROCR_DEST/"
+    # Install ROCR 7.2.3 runtime to fix SEGFAULT on cuda-graph replay under rtl --mode full.
+    # Only needed for the affected ROCm 7.2.0 runtime (hsa-rocr 1.18.0.70200) which lacks
+    # rocm-systems commit 559d48b1; newer runtimes (7.2.3+) already include the fix.
+    ROCR_DEST="$(readlink -f /opt/rocm)/lib"
+    ROCR_VER=$(dpkg-query -W -f '${Version}' hsa-rocr 2>/dev/null || echo "unknown")
+    if [[ "$ROCR_VER" == 1.18.0.70200* ]]; then
+        echo "Detected hsa-rocr $ROCR_VER (affected); upgrading to 7.2.3 for rtl compatibility"
+        if ! command -v curl >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*; fi
+        curl -fsSL -o /tmp/hsa-rocr723.deb https://repo.radeon.com/rocm/apt/7.2.3/pool/main/h/hsa-rocr/hsa-rocr_1.18.0.70203-90~22.04_amd64.deb
+        dpkg-deb -x /tmp/hsa-rocr723.deb /tmp/rocr723
+        cp -avf /tmp/rocr723/opt/rocm-*/lib/libhsa-runtime64.so* "$ROCR_DEST/"
         ldconfig
         ls -l "$ROCR_DEST"/libhsa-runtime64.so.1
+        rm -rf /tmp/rocr723 /tmp/hsa-rocr723.deb
+    else
+        echo "hsa-rocr $ROCR_VER is newer than 7.2.0; skipping ROCR swap"
     fi
+
     apt install libsqlite3-dev g++
     git clone https://github.com/amathews-amd/rocm-trace-lite.git
     cd rocm-trace-lite
@@ -119,7 +133,7 @@ if $PROFILE; then
 fi
 
 # Run benchmark; use -u to make python prints unbuffered
-python3 -u run_sglang.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $PERF_ARGS
+python3 -u run_sglang.py --config $CONFIG --model $MODEL --benchmark $BENCHMARK $($PROFILE && echo --profile) $($WARMUP && echo --warmup) $PERF_ARGS
 
 # Move the output csv to parent directory (absent in --profile mode; guard the move)
 if [ -f "perf_${MODEL_NAME}.csv" ]; then

@@ -119,6 +119,60 @@ def _format_cli_arg(k, v):
     return f" {k}={v_str}"
 
 
+def _extra_args_to_str(extra):
+    """Serialize an extra_args dict into one CLI fragment."""
+    extra_args_str = ""
+    for k, v in (extra or {}).items():
+        extra_args_str += _format_cli_arg(k, v)
+    return extra_args_str
+
+
+def apply_optional_dcp(extra, dcp):
+    """Add vLLM decode context parallel from --dcp when this test did not set it.
+
+    Returns a new dict. The input dict is not changed.
+    """
+    extra = dict(extra or {})
+    if dcp is None:
+        return extra
+    key = "--decode-context-parallel-size"
+    if key in extra:
+        print(f"Keeping {key} {extra[key]} from the test config")
+        return extra
+    extra[key] = dcp
+    print(f"Applying optional --dcp {dcp}")
+    return extra
+
+
+def require_valid_dcp(dcp, tp, model=None):
+    """Stop before vLLM starts when DCP cannot shard this tensor-parallel size.
+
+    A legal size is a positive whole number that divides ``tp``. For tp 8 the
+    legal values are 1, 2, 4, and 8, so 3 is rejected here.
+    """
+    if dcp is None or dcp == "":
+        return
+    where = f" for {model}" if model else ""
+    try:
+        dcp_size = int(dcp)
+        tp_size = int(tp)
+    except (TypeError, ValueError):
+        print(
+            f"Invalid --dcp {dcp!r}{where}: it must be a positive whole number "
+            f"and tensor parallel size must be a whole number (got tp {tp!r}).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if dcp_size < 1 or tp_size < 1 or tp_size % dcp_size != 0:
+        legal = ", ".join(str(i) for i in range(1, tp_size + 1) if tp_size % i == 0) if tp_size >= 1 else "none"
+        print(
+            f"Invalid --dcp {dcp_size}{where}: it must divide tensor parallel size {tp_size}. "
+            f"Legal values: {legal}.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+
 def _fill_missing(base, overrides):
     """Return a copy of `base` with keys from `overrides` added only when missing.
 
@@ -336,11 +390,24 @@ def parse_args():
                             required=False,
                             default=None,
                         )
+    parser.add_argument('--warmup',
+                            action='store_true',
+                            help='Enable pre-benchmark warmup: sends 1×concurrency requests with '
+                                 'OSL=1 to trigger Triton JIT compilation before measurement',
+                        )
     parser.add_argument('--profile',
                             action='store_true',
                             help='Profile workload',
                         )
+    parser.add_argument('--dcp',
+                            type=int,
+                            help='Optional decode context parallel size. Used only when the test config does not already set --decode-context-parallel-size.',
+                            required=False,
+                            default=None,
+                        )
     args = parser.parse_args()
+    if args.dcp is not None and args.dcp < 1:
+        parser.error("--dcp must be a positive integer")
     return args
 
 def expand_configs(args, configs: List[Dict]):
@@ -545,6 +612,60 @@ def _build_server_cmd(model, config, env="", extra_args="", extra_flags=""):
     return f"{env} {cmd} {extra_args}".strip()
 
 
+def _warmup(model, config):
+    """Send 1×concurrency prefill-only requests (OSL=1) to trigger Triton JIT compilation.
+
+    Modeled after InferenceX's warmup phase: exercise the full prefill path at
+    the benchmark's ISL and concurrency so that all Triton kernels are compiled
+    before measurement begins. OSL=1 keeps each request fast (prefill-dominated)
+    while naturally scaling warmup time with workload complexity.
+    """
+    concurrency = int(config['max_concurrency'])
+    inp = int(config['inp'])
+    num_warmups = concurrency
+    print(f"Warmup: sending {num_warmups} prefill-only requests "
+          f"(ISL={inp}, OSL=1, concurrency={concurrency})...")
+    warmup_script = (
+        "import asyncio, aiohttp, random, string, sys, time\n"
+        "VOCAB = [c + d for c in string.ascii_lowercase for d in string.ascii_lowercase]\n"
+        "failed = 0\n"
+        "async def send_one(session, model, inp):\n"
+        "    global failed\n"
+        "    words = ' '.join(random.choices(VOCAB, k=max(1, inp // 4)))\n"
+        "    payload = {'model': model, 'prompt': words, 'max_tokens': 1, 'temperature': 0, 'stream': False}\n"
+        "    try:\n"
+        "        async with session.post('http://localhost:8000/v1/completions', json=payload,\n"
+        "                                timeout=aiohttp.ClientTimeout(total=600)) as r:\n"
+        "            if r.status != 200:\n"
+        "                failed += 1\n"
+        "                body = await r.text()\n"
+        "                print(f'Warmup request failed (HTTP {r.status}): {body[:200]}', flush=True)\n"
+        "            else:\n"
+        "                await r.read()\n"
+        "    except Exception as e:\n"
+        "        failed += 1\n"
+        "        print(f'Warmup request exception: {e}', flush=True)\n"
+        "async def main():\n"
+        f"    conn = aiohttp.TCPConnector(limit={concurrency})\n"
+        "    async with aiohttp.ClientSession(connector=conn) as session:\n"
+        "        start = time.time()\n"
+        f"        tasks = [asyncio.create_task(send_one(session, '{model}', {inp})) for _ in range({num_warmups})]\n"
+        "        await asyncio.gather(*tasks, return_exceptions=True)\n"
+        f"        elapsed = time.time()-start\n"
+        f"        if failed == {num_warmups}:\n"
+        f"            print(f'WARNING: All {num_warmups} warmup requests failed — benchmark may measure cold performance', flush=True)\n"
+        f"            sys.exit(1)\n"
+        f"        elif failed > 0:\n"
+        f"            print(f'Warmup done with {{failed}}/{num_warmups} failures in {{elapsed:.1f}}s', flush=True)\n"
+        f"        else:\n"
+        f"            print(f'Warmup complete: {num_warmups} requests in {{elapsed:.1f}}s', flush=True)\n"
+        "asyncio.run(main())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", warmup_script], check=False)
+    if result.returncode != 0:
+        print("WARNING: Warmup subprocess failed — proceeding with benchmark anyway")
+
+
 def _build_bench_serve_cmd(model, config, bench_args=None, extra_flags=""):
     """Build a vllm bench serve command string."""
     cmd = (
@@ -600,6 +721,10 @@ def run_serving(model, config):
             return [config]
         else:
             print(f"Server at {server.pid} contacted successfully", flush=True)
+
+        # warmup
+        if config.pop('warmup', False):
+            _warmup(model, config)
 
         # run benchmark
         bench_args = config.pop('bench_args', {})
@@ -902,6 +1027,12 @@ def main():
             config["extra_args_dict"] = extra_args  # Preserve dict for acc.yaml merge
             config["bench_args_dict"] = bench_args  # Preserve dict for acc.yaml merge
 
+            require_valid_dcp(
+                extra_args.get("--decode-context-parallel-size", args.dcp),
+                config.get("tp"),
+                config.get("model"),
+            )
+
             env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
@@ -909,6 +1040,9 @@ def main():
             config["env"] = env_vars_str
             config["extra_args"] = extra_args_str
             
+            if getattr(args, 'warmup', False):
+                config["warmup"] = True
+
             # run benchmark
             results = []
             benchmark = config["benchmark"]
@@ -919,6 +1053,9 @@ def main():
                 print(f"\n=== Running serving benchmark for {model} ===")
                 serving_config = dict(config)
                 serving_config["benchmark"] = "serving"
+                serving_config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(serving_config.get("extra_args_dict"), args.dcp)
+                )
                 if not args.profile:
                     serving_results = run_serving(model, serving_config)
                 else:
@@ -1020,6 +1157,14 @@ def main():
                             else:
                                 print(f"  No model-specific entry, using task-level defaults only")
 
+                            acc_extra = apply_optional_dcp(acc_config.get("extra_args_dict"), args.dcp)
+                            require_valid_dcp(
+                                acc_extra.get("--decode-context-parallel-size"),
+                                acc_config.get("tp"),
+                                acc_config.get("model"),
+                            )
+                            acc_config["extra_args_dict"] = acc_extra
+                            acc_config["extra_args"] = _extra_args_to_str(acc_extra)
                             acc_config["benchmark"] = "accuracy"
                             accuracy_results = run_accuracy(model, acc_config)
 
@@ -1037,14 +1182,23 @@ def main():
                     print(f"  Skipping accuracy for {model} (already completed)")
 
             elif benchmark == "latency":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 results = run_latency(model, config)
                 for result in results:
                     writer.writerow(result)
             elif benchmark == "throughput":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 results = run_throughput(model, config)
                 for result in results:
                     writer.writerow(result)
             elif benchmark == "serving":
+                config["extra_args"] = _extra_args_to_str(
+                    apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                )
                 if not args.profile:
                     results = run_serving(model, config)
                 else:
@@ -1145,6 +1299,14 @@ def main():
                 else:
                     print(f"  Warning: acc.yaml not found at {acc_path}, running accuracy with base config only")
 
+                acc_extra = apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                require_valid_dcp(
+                    acc_extra.get("--decode-context-parallel-size"),
+                    config.get("tp"),
+                    config.get("model"),
+                )
+                config["extra_args_dict"] = acc_extra
+                config["extra_args"] = _extra_args_to_str(acc_extra)
                 results = run_accuracy(model, config)
                 for result in results:
                     writer.writerow(result)

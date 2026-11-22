@@ -13,7 +13,7 @@
     - framework: lm_eval
       task: gsm8k
       apply_chat_template: false
-      num_fewshot: 0
+      num_fewshot: 5
       base_url: http://localhost:8000/v1/completions
       lm_eval_model: local-completions
       num_concurrent: 64
@@ -48,6 +48,21 @@
     - apply_chat_template: true
       lm_eval_model: local-chat-completions
       base_url: http://localhost:8000/v1/chat/completions
+
+# GLM-5.3: instruct model, needs chat-completions endpoint
+- model: zai-org/GLM-5.3
+  evaluations:
+    - apply_chat_template: true
+      lm_eval_model: local-chat-completions
+      base_url: http://localhost:8000/v1/chat/completions
+
+# MiniMax-M3.1-Flash: chat model, needs the chat-completions endpoint.
+- model: MiniMaxAI/MiniMax-M3.1-Flash
+  evaluations:
+    - apply_chat_template: true
+      lm_eval_model: local-chat-completions
+      base_url: http://localhost:8000/v1/chat/completions
+      trust_remote_code: true
 
 # Base models: override num_fewshot to 3 (inherits framework and other params from task defaults)
 - model: >

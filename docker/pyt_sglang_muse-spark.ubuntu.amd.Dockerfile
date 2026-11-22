@@ -3,7 +3,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,20 +24,12 @@
 # SOFTWARE.
 #
 #################################################################################
-# Kimi K3 day-0 support landed in sgl-project/sglang#32541 and is not in a
-# tagged SGLang ROCm release yet; this model-specific image is the only ROCm
-# build carrying the KDA / Stable LatentMoE / AITER A8W4 support the checkpoint
-# needs. Kept separate from docker/pyt_sglang, whose lmsysorg/sglang
-# v0.5.18-rocm720-mi35x base does not include K3 support.
-#
-# The tag is the day-0 image named in the AMD tracking issue
-# https://github.com/sgl-project/sglang/issues/32548, which is what its MI355X
-# performance tables were measured against. A newer rocm720-mi35x-k3-20260728
-# tag exists on Docker Hub but nothing published ties it to the recipe, so it is
-# deliberately not adopted here.
-#
-# Fold this back into docker/pyt_sglang once K3 lands in a versioned ROCm image.
-ARG BASE_DOCKER=lmsysorg/sglang-rocm:rocm720-mi35x-k3-20260727
+# Standalone image for amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4 (tag pyt_sglang_muse-spark-open-816b-a42b_fp4).
+# MuseSparkForConditionalGeneration is only in the muse-spark SGLang branch, so the default
+# docker/pyt_sglang base cannot load it. Otherwise identical to pyt_sglang.ubuntu.amd.Dockerfile.
+# Keep BASE_DOCKER in sync with docker_base in scripts/sglang/configs/perf.yaml; fold this tag back
+# into docker/pyt_sglang once the default base supports the architecture. gfx950 only.
+ARG BASE_DOCKER=lmsysorg/sglang-rocm:muse-spark-open
 
 FROM $BASE_DOCKER
 
@@ -45,6 +37,12 @@ USER root
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
+# huggingface_hub 1.x CLI uses `suggest_commands` which requires typer>=0.17.0;
+# the base image ships with typer 0.16.1 causing `hf` to crash on import.
+RUN pip install "typer>=0.17.0"
+
+# FID accuracy benchmark dependencies (pytorch-fid, pillow)
+RUN pip install --no-cache-dir pytorch-fid pillow
 
 # record configuration for posterity
 RUN pip3 list

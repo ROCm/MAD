@@ -309,11 +309,24 @@ def parse_args():
                             required=False,
                             default=None,
                         )
+    parser.add_argument('--warmup',
+                            action='store_true',
+                            help='Enable pre-benchmark warmup: sends 1×concurrency requests with '
+                                 'OSL=1 to trigger Triton JIT compilation before measurement',
+                        )
     parser.add_argument('--profile',
                             action='store_true',
                             help='Kernel-profiling run: serve under rtl trace + roctx markers and aggregate a kernel payload',
                         )
+    parser.add_argument('--dcp',
+                            type=int,
+                            help='Optional decode context parallel size. Used only when the test config does not already set -dcp.',
+                            required=False,
+                            default=None,
+                        )
     args = parser.parse_args()
+    if args.dcp is not None and args.dcp < 1:
+        parser.error("--dcp must be a positive integer")
     return args
 
 def dict_to_args(args_dict: Dict) -> str:
@@ -380,6 +393,20 @@ def expand_configs(args, configs: List[Dict]):
         filtered_configs = [cfg for cfg in filtered_configs if cfg["benchmark"] == args.benchmark]
 
     return filtered_configs
+
+def apply_optional_dcp(config, dcp):
+    """Add -dcp from the optional CLI flag when this test did not set it."""
+    if dcp is None:
+        return
+    extra = config.get('extra_args')
+    if not isinstance(extra, dict):
+        extra = {}
+        config['extra_args'] = extra
+    if '-dcp' in extra:
+        print(f"Keeping -dcp {extra['-dcp']} from the test config")
+        return
+    extra['-dcp'] = dcp
+    print(f"Applying optional --dcp {dcp}")
 
 def adjust_glm_batched_tokens(config):
     """Adjust max-num-batched-tokens for GLM-5.x models with large ISL.
@@ -450,6 +477,54 @@ def _wait_for_server(server, port=8000, timeout=5400, poll_interval=30):
     print("Timed out waiting for server to start", flush=True)
     return False
 
+def _warmup(model, config):
+    """Send 1×concurrency prefill-only requests (OSL=1) to trigger Triton JIT compilation."""
+    concurrency = int(config['max_concurrency'])
+    inp = int(config['inp'])
+    num_warmups = concurrency
+    print(f"Warmup: sending {num_warmups} prefill-only requests "
+          f"(ISL={inp}, OSL=1, concurrency={concurrency})...")
+    warmup_script = (
+        "import asyncio, aiohttp, random, string, sys, time\n"
+        "VOCAB = [c + d for c in string.ascii_lowercase for d in string.ascii_lowercase]\n"
+        "failed = 0\n"
+        "async def send_one(session, model, inp):\n"
+        "    global failed\n"
+        "    words = ' '.join(random.choices(VOCAB, k=max(1, inp // 4)))\n"
+        "    payload = {'model': model, 'prompt': words, 'max_tokens': 1, 'temperature': 0, 'stream': False}\n"
+        "    try:\n"
+        "        async with session.post('http://localhost:8000/v1/completions', json=payload,\n"
+        "                                timeout=aiohttp.ClientTimeout(total=600)) as r:\n"
+        "            if r.status != 200:\n"
+        "                failed += 1\n"
+        "                body = await r.text()\n"
+        "                print(f'Warmup request failed (HTTP {r.status}): {body[:200]}', flush=True)\n"
+        "            else:\n"
+        "                await r.read()\n"
+        "    except Exception as e:\n"
+        "        failed += 1\n"
+        "        print(f'Warmup request exception: {e}', flush=True)\n"
+        "async def main():\n"
+        f"    conn = aiohttp.TCPConnector(limit={concurrency})\n"
+        "    async with aiohttp.ClientSession(connector=conn) as session:\n"
+        "        start = time.time()\n"
+        f"        tasks = [asyncio.create_task(send_one(session, '{model}', {inp})) for _ in range({num_warmups})]\n"
+        "        await asyncio.gather(*tasks, return_exceptions=True)\n"
+        f"        elapsed = time.time()-start\n"
+        f"        if failed == {num_warmups}:\n"
+        f"            print(f'WARNING: All {num_warmups} warmup requests failed — benchmark may measure cold performance', flush=True)\n"
+        f"            sys.exit(1)\n"
+        f"        elif failed > 0:\n"
+        f"            print(f'Warmup done with {{failed}}/{num_warmups} failures in {{elapsed:.1f}}s', flush=True)\n"
+        f"        else:\n"
+        f"            print(f'Warmup complete: {num_warmups} requests in {{elapsed:.1f}}s', flush=True)\n"
+        "asyncio.run(main())\n"
+    )
+    result = subprocess.run([sys.executable, "-c", warmup_script], check=False)
+    if result.returncode != 0:
+        print("WARNING: Warmup subprocess failed — proceeding with benchmark anyway")
+
+
 def run_serving(model, config):
     # num_prompts = multiplier * max_concurrency; multiplier from perf.yaml bench_serving (default 10), popped so it stays out of the CSV row
     multiplier = int((config.pop("bench_serving", {}) or {}).get("num_prompts_multiplier") or 10)
@@ -491,6 +566,10 @@ def run_serving(model, config):
             return [config]
         else:
             print(f"Server at {server.pid} contacted successfully", flush=True)
+
+        # warmup
+        if config.pop('warmup', False):
+            _warmup(model, config)
 
         # run benchmark
         bench_cmd = (
@@ -954,12 +1033,15 @@ def main():
             # Adjust max-num-batched-tokens for GLM-5.x models if needed
             adjust_glm_batched_tokens(config)
 
-            # Keep dict forms for potential acc.yaml merge (for benchmark: all)
-            env_vars = config.get("env", {})
-            extra_args = config.get("extra_args", {})
+            # Keep dict forms for potential acc.yaml merge (for benchmark: all).
+            # Copies so a -dcp fallback applied to serving cannot leak into accuracy.
+            env_vars = dict(config.get("env") or {})
+            extra_args = dict(config.get("extra_args") or {})
 
             config["env_dict"] = env_vars  # Preserve dict for acc.yaml merge
             config["extra_args_dict"] = extra_args  # Preserve dict for acc.yaml merge
+            if getattr(args, 'warmup', False):
+                config["warmup"] = True
 
             # run benchmark
             results = []
@@ -970,6 +1052,9 @@ def main():
                 print(f"\n=== Running serving benchmark for {model} ===")
                 serving_config = dict(config)
                 serving_config["benchmark"] = "serving"
+                serving_config["extra_args"] = dict(extra_args)
+                serving_config["env"] = dict(env_vars)
+                apply_optional_dcp(serving_config, args.dcp)
                 serving_results = run_serving_profile(model, serving_config) if profile else run_serving(model, serving_config)
 
                 # Write serving results
@@ -980,6 +1065,10 @@ def main():
                 print(f"\n=== Running accuracy benchmark for {model} ===")
                 acc_config = dict(config)
                 acc_config["benchmark"] = "accuracy"
+                acc_config["extra_args"] = dict(extra_args)
+                acc_config["extra_args_dict"] = dict(extra_args)
+                acc_config["env"] = dict(env_vars)
+                acc_config["env_dict"] = dict(env_vars)
 
                 # Load and merge acc.yaml for accuracy run
                 config_dir = os.path.dirname(os.path.abspath(args.config))
@@ -1043,10 +1132,13 @@ def main():
                     acc_config['extra_args'] = acc_config.get('extra_args_dict', {})
                     acc_config['env'] = acc_config.get('env_dict', {})
 
+                apply_optional_dcp(acc_config, args.dcp)
                 results = run_accuracy(model, acc_config)
             elif benchmark == "serving":
+                apply_optional_dcp(config, args.dcp)
                 results = run_serving_profile(model, config) if profile else run_serving(model, config)
             elif benchmark == "accuracy":
+                apply_optional_dcp(config, args.dcp)
                 results = run_accuracy(model, config)
             else:
                 raise ValueError(f"Unknown benchmark: {benchmark}")
