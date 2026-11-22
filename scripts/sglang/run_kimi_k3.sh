@@ -33,7 +33,10 @@ set -ex
 if [[ -z "${HF_HUB_CACHE:-}" ]]; then
     export HF_HUB_CACHE="/myworkspace"
 fi
-export HF_TOKEN=$MAD_SECRETS_HFTOKEN
+# Keep credentials out of xtrace, including when invoked with bash -x.
+set +x
+export HF_TOKEN="${MAD_SECRETS_HFTOKEN:-}"
+set -x
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
