@@ -1,0 +1,3893 @@
+MAD pin-set patch: vLLM changes for Kimi-K3 disaggregated / colocated serving
+Upstream: https://github.com/vllm-project/vllm.git @ 9a7ae4b80866a322678ece31ca2854d9a174ab8d
+Reproduces: fork commit 862bfd8ca4db78b9cbcbcf9ec6013638e3ae6543 of vllm.git (applying this to the upstream commit gives its tree exactly)
+Fork commits:
+  862bfd8ca KDA gather: make OOB-guard sync-free (unblocks + speeds up ctx >500K)
+  6e6c3b152 MoRIIO/K3 EP16: fold decode-recall fixes into source (NIAH to 300K)
+  fb7f7e11c MoRIIO/K3: add opt-in ordering/determinism knobs (default OFF)
+  74d319188 MoRIIO/K3: honor the mamba N-1 prefill/decode boundary for hybrid models
+  b799df648 MoRIIO: normalize degenerate remote_tp_size so writes fan out to all decode ranks
+  d766ec031 MoRIIO/K3: route mamba (KDA) state transfer by the mamba KV-group block ids
+  267f6e849 K3 MoRIIO disagg: baseline runtime patches as source
+  bbbf698c8 Bake K3 KDA/HMA MoRIIO connector support as source (from validated patchers)
+  c8b358a32 Skip the generic 256 round-up on the gfx942 int4 SiTU MoE path
+  9f5d6575b Chunk the gfx942 int4 conversion over experts
+  083f7ee3c Evaluate the Kimi-K3 latent up projection row-parallel over TP ranks KimiRoutedOutputTransform is replicated and fed a rank-identical input, so every rank recomputes the same up projection. It is linear, so each rank can contract only its own 1/tp latent slice; the partials are summed by the all-reduce the combined MoE output already performs, at no extra cost. MI325X TP=8, 8192-token prefill: 4.83x on the projection, mean TTFT 2840 -> 2678 ms, TPOT unchanged. Gated on VLLM_KIMI_ROW_PARALLEL_LATENT_UP_PROJ (token threshold, default 0 = off); set above the decode batch size, decode stays bitwise identical.
+  06ffc76fa Fuse Kimi-K3 attention residual and RMSNorm Fold the residual add and output RMSNorm into the attention-residual Triton kernel, removing three launches per decoder layer without scratch storage. MI325X TP=8: output throughput improved 2.88%, TPOT improved 2.96%, and mean TTFT improved by 35 ms. All requests completed without GPU faults. Add ROCm coverage for fused decode and prefill paths with and without the residual add.
+  d2cc658c7 Add an int4_per_group_32 online quantization key
+  b5360b5b2 Make the gfx942 int4 requantization opt-in and guard the activation
+  06c452584 Fix gfx942 MXFP4 bias type narrowing
+  57ca504db feat: run shared expert in separate stream for small batches
+  9deb55068 Keep Kimi-K3 MoE correction bias in fp32 on gfx942
+  d13ab0239 Enable fused bf16→fp32 router GEMM on ROCm
+  a27ac8800 Pin AITER to the upstream v0.1.19 tag instead of a fork branch
+  b32d15429 Add a build file for the Kimi-K3 gfx942 image
+  622906894 Enable Kimi-K3 SiTU MXFP4 experts on gfx942
+  9d019c8fc [ROCm][V1][DP] Restore upstream DP wave wake; consolidate MoRI-IO DP helpers
+  cc548f594 [ROCm][KVConnector][MoRI-IO] Tighten verbose code comments
+  85ca6f416 [ROCm][KVConnector][MoRI-IO] Make KV-notify DP-rank routing router-authoritative (Wide-EP 2P2D)
+  953f55a0e [ROCm][V1][DP] Remove sampler warm-up skip; require AITER #3658
+  c1d56e447 [ROCm][V1][DP] Wake DP engines on cold first wave in all LB modes
+  59367f340 [ROCm][V1][DP] Address review feedback: delegate DP routing, platform-agnostic wave wake
+  77f0e35f8 [ROCm][V1][DP] Address review feedback: scope warm-up skip, split DP routing, add tests
+  66c720796 [ROCm][KVConnector][MoRI-IO] Send consumer_tp_size in WRITE-mode release
+  43bf3a55c [ROCm][DP] Relax sampler warm-up skip from DP>=16 to DP>=1
+  5b0aad6f7 [ROCm][V1][DP] Address PR #45043 review feedback
+  737a25df9 [ROCm][KVConnector][MoRI-IO] Refactor request_id handling: use transfer_id
+  6408ebedd [ROCm][KVConnector][MoRI-IO] Support Wide-EP multi-pod PD disaggregation
+  db8be589d [ROCm][DP-EP] Skip sampler warm-ups that hang DP-EP-16 bring-up
+  8ad264769 [ROCm][V1][DP] Fix multi-pod DP core bring-up for cross-pod EP
+  e3e0f0237 [ROCm] Gate disagg-DP fixes behind current_platform.is_rocm()
+  53b6e8064 [Bugfix][KVConnector][MoRI-IO] Skip non-disagg requests in build_connector_meta
+  ef260c893 [Bugfix][KVConnector][MoRI-IO] Tolerate per-transfer rid suffix in unmap
+  a62bc3e96 [Bugfix][KVConnector][MoRI-IO] Hash-route decode->prefill notify in DP>1
+  db63c0b29 [Bugfix][V1][DP] AsyncLLM: stable per-request data_parallel_rank fallback
+  c314f5633 [Bugfix][V1][DP] Wake other DP engines on first request of first wave
+  73a961b81 [Bugfix][V1][Scheduler] Tolerate finished_sending for already-removed requests
+  9cc3fe76d [Bugfix][KVConnector][MoRI-IO] Synthesize transfer_id when llm-d sidecar omits it
+  5a04ccab3 [ROCm] Make aiter fused-qk-rmsnorm capability probe crash-safe
+  b0414b48d [ROCm][KVConnector][MoRI-IO] Tighten verbose code comments
+  d45a7b9b3 [ROCm][KVConnector][MoRI-IO] Make KV-notify DP-rank routing router-authoritative (Wide-EP 2P2D)
+  34c09993d [ROCm][V1][DP] Remove sampler warm-up skip; require AITER #3658
+  e75a17c62 [ROCm][V1][DP] Wake DP engines on cold first wave in all LB modes
+  55673dc65 [ROCm][V1][DP] Address review feedback: delegate DP routing, platform-agnostic wave wake
+  af3dbf500 [ROCm][V1][DP] Address review feedback: scope warm-up skip, split DP routing, add tests
+  f932ab41b [ROCm][KVConnector][MoRI-IO] Send consumer_tp_size in WRITE-mode release
+  d6e04cb45 [ROCm][DP] Relax sampler warm-up skip from DP>=16 to DP>=1
+  477247372 [ROCm][V1][DP] Address PR #45043 review feedback
+  d9d319e7f [ROCm][KVConnector][MoRI-IO] Refactor request_id handling: use transfer_id
+  d751e2015 [ROCm][KVConnector][MoRI-IO] Support Wide-EP multi-pod PD disaggregation
+  77c2cf269 [ROCm][DP-EP] Skip sampler warm-ups that hang DP-EP-16 bring-up
+  a27c5f1d6 [ROCm][V1][DP] Fix multi-pod DP core bring-up for cross-pod EP
+  2f7701fc2 [ROCm] Gate disagg-DP fixes behind current_platform.is_rocm()
+  32b66b5c4 [Bugfix][KVConnector][MoRI-IO] Skip non-disagg requests in build_connector_meta
+  4602a6b5c [Bugfix][KVConnector][MoRI-IO] Tolerate per-transfer rid suffix in unmap
+  377d127dd [Bugfix][KVConnector][MoRI-IO] Hash-route decode->prefill notify in DP>1
+  eee61a75f [Bugfix][V1][DP] AsyncLLM: stable per-request data_parallel_rank fallback
+  9a5488463 [Bugfix][V1][DP] Wake other DP engines on first request of first wave
+  274c3f0b4 [Bugfix][V1][Scheduler] Tolerate finished_sending for already-removed requests
+  28d481c8d [Bugfix][KVConnector][MoRI-IO] Synthesize transfer_id when llm-d sidecar omits it
+
+diff --git a/docker/Dockerfile.rocm_k3_gfx942 b/docker/Dockerfile.rocm_k3_gfx942
+new file mode 100644
+index 0000000000000000000000000000000000000000..574233e0dad89bd377715a415243c431cf99159e
+--- /dev/null
++++ b/docker/Dockerfile.rocm_k3_gfx942
+@@ -0,0 +1,42 @@
++# Kimi-K3 on gfx942 (MI300/MI325).
++#
++# The published ROCm base images ship AITER v0.1.16.post5, which cannot run
++# Kimi-K3 at all: the vision tower imports aiter.ops.triton.conv.conv2d, and
++# that module first appears in v0.1.19. v0.1.19 also carries the tuned SiTUv2
++# MoE kernels and the tuned Kimi-K3 GEMM configs.
++#
++# Rebuilding the whole base from Dockerfile.rocm_base to move one dependency
++# costs hours and reproduces bit-identical torch, triton, flash-attention and
++# MORI, because those are pinned to the same commits. This layer swaps only
++# AITER on top of an image already built by Dockerfile.rocm.
++#
++# Build:
++#   docker build -f docker/Dockerfile.rocm_k3_gfx942 \
++#     --build-arg BASE_IMAGE=<image built from docker/Dockerfile.rocm> \
++#     -t <tag> .
++#
++# Serving Kimi-K3 on gfx942 additionally needs VLLM_ROCM_USE_AITER_MLA=0. The
++# AITER MLA backend wins selection at TP8 (12 heads per rank) and then asserts
++# inside a Gluon kernel that is gfx950-only.
++
++ARG BASE_IMAGE
++FROM ${BASE_IMAGE}
++
++ARG AITER_REPO="https://github.com/ROCm/aiter.git"
++ARG AITER_BRANCH="v0.1.19"
++# Add gfx950 to serve both MI325 and MI355 from one image, at the cost of
++# roughly double the kernel prebuild time.
++ARG GPU_ARCHS="gfx942"
++
++# aiter cannot be imported here to verify the install: rocminfo needs /dev/kfd
++# and the build container has no GPU. Verification happens at runtime.
++RUN rm -rf /app/aiter \
++    && git clone --recursive --branch ${AITER_BRANCH} ${AITER_REPO} /app/aiter \
++    && cd /app/aiter \
++    && git submodule update --init --recursive \
++    && pip install -r requirements.txt \
++    && pip install pyyaml \
++    && PREBUILD_KERNELS=1 AITER_USE_SYSTEM_TRITON=1 GPU_ARCHS=${GPU_ARCHS} \
++       python3 setup.py bdist_wheel --dist-dir=dist \
++    && pip install --force-reinstall --no-deps dist/*.whl \
++    && rm -rf /app/aiter/build /app/aiter/dist
+diff --git a/examples/disaggregated/disaggregated_serving/moriio_toy_proxy_server.py b/examples/disaggregated/disaggregated_serving/moriio_toy_proxy_server.py
+index d2d5be7607788a4e201deea5105f84e40d7951af..6184886128a48f567b96040cea84a070ac28d789 100644
+--- a/examples/disaggregated/disaggregated_serving/moriio_toy_proxy_server.py
++++ b/examples/disaggregated/disaggregated_serving/moriio_toy_proxy_server.py
+@@ -181,7 +181,7 @@ async def send_request_to_prefill(
+                 raise RuntimeError(error_message)
+ 
+ 
+-async def start_decode_request(endpoint, req_data, request_id):
++async def start_decode_request(endpoint, req_data, request_id, selected_dp_rank=None):
+     session = aiohttp.ClientSession(
+         timeout=aiohttp.ClientTimeout(total=6 * 6000 * 6000)
+     )
+@@ -189,6 +189,10 @@ async def start_decode_request(endpoint, req_data, request_id):
+         "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY')}",
+         "X-Request-Id": request_id,
+     }
++    # Pin the decode leg to the same DP rank as its prefill leg so both land on
++    # the same rank (vLLM reads this header directly; no engine-side routing).
++    if selected_dp_rank is not None:
++        headers["X-data-parallel-rank"] = str(selected_dp_rank)
+     response = await session.post(url=endpoint, json=req_data, headers=headers)
+     return session, response
+ 
+@@ -361,7 +365,9 @@ async def handle_request(api: str, request: Request):
+ 
+         decode_request_url = decode_instance_endpoint["request_address"] + api
+         decode_request_task = asyncio.create_task(
+-            start_decode_request(decode_request_url, req_data, request_id)
++            start_decode_request(
++                decode_request_url, req_data, request_id, selected_prefill_dp_rank
++            )
+         )
+ 
+         session, decode_response = await decode_request_task
+diff --git a/tests/models/kimi_k3/test_amd_attn_res.py b/tests/models/kimi_k3/test_amd_attn_res.py
+index f6dfaa422b3fd58d95b88126f172a1264b4cd703..7f6aaa767e9e58a2a838eef434ffdd84bed1c429 100644
+--- a/tests/models/kimi_k3/test_amd_attn_res.py
++++ b/tests/models/kimi_k3/test_amd_attn_res.py
+@@ -5,7 +5,7 @@ import pytest
+ import torch
+ import torch.nn.functional as F
+ 
+-from vllm.models.kimi_k3.amd.ops.attn_res import attn_res
++from vllm.models.kimi_k3.amd.ops.attn_res import attn_res, attn_res_fused
+ from vllm.platforms import current_platform
+ 
+ pytestmark = pytest.mark.skipif(
+@@ -100,3 +100,56 @@ def test_amd_attn_res_matches_reference(
+     torch.testing.assert_close(blocks, original_blocks, atol=0, rtol=0)
+     assert actual.shape == prefix.shape
+     assert actual.is_contiguous()
++
++
++@pytest.mark.parametrize("num_tokens", [1, 17, 320])
++@pytest.mark.parametrize("has_addend", [False, True])
++def test_amd_attn_res_fused_matches_reference(
++    num_tokens: int,
++    has_addend: bool,
++) -> None:
++    hidden_size = 7168
++    num_blocks = 4
++    eps = 1e-5
++    prefix = _randn_with_row_padding(num_tokens, hidden_size)
++    addend = torch.randn_like(prefix) if has_addend else None
++    blocks = _randn_with_row_padding(num_tokens, num_blocks, hidden_size)
++    norm_weight = torch.randn(hidden_size, device="cuda", dtype=torch.bfloat16)
++    qk_weight = (
++        torch.randn(hidden_size, device="cuda", dtype=torch.bfloat16) / hidden_size**0.5
++    )
++    out_norm_weight = torch.randn_like(norm_weight)
++
++    expected_prefix = prefix + addend if addend is not None else prefix
++    expected = _reference(
++        expected_prefix,
++        blocks,
++        norm_weight,
++        qk_weight,
++        num_blocks,
++        eps,
++    )
++    expected = F.rms_norm(
++        expected.to(torch.bfloat16),
++        (hidden_size,),
++        out_norm_weight,
++        eps,
++    )
++
++    actual, actual_prefix = attn_res_fused(
++        prefix,
++        blocks,
++        norm_weight,
++        qk_weight,
++        num_blocks,
++        eps,
++        addend=addend,
++        out_norm_weight=out_norm_weight,
++        out_norm_eps=eps,
++    )
++
++    torch.testing.assert_close(actual, expected, atol=8e-2, rtol=3e-2)
++    if has_addend:
++        torch.testing.assert_close(actual_prefix, expected_prefix, atol=0, rtol=0)
++    else:
++        assert actual_prefix is None
+diff --git a/tests/v1/engine/test_dp_wave_wake.py b/tests/v1/engine/test_dp_wave_wake.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ccfab334655680b2fa0aa50a2457d288a2dc551f
+--- /dev/null
++++ b/tests/v1/engine/test_dp_wave_wake.py
+@@ -0,0 +1,125 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""Unit tests for DPEngineCoreProc.add_request first-wave wake behavior.
++
++In a multi-pod Wide-EP DP deployment, the first request of wave 0 arrives when
++``current_wave == 0``. If the engine only wakes peers when ``request_wave !=
++current_wave`` (``0 != 0 == False``), the other DP engines never start stepping
++and the EP all2all collective hangs. The engine therefore wakes peers whenever
++they are idle and the scheduler is unpaused -- including the current wave's
++first request -- for every LB mode with a coordinator. This is platform-
++agnostic (the DP coordinator's front-end ``FIRST_REQ`` wake was already present
++when the cold-start hang reproduced 100% on ROCm DP+EP, so the engine
++re-broadcasts as well).
++
++We bind ``DPEngineCoreProc.add_request`` to a bare instance and stub the heavy
++``super().add_request`` (``EngineCore.add_request``) so only the wake gate runs.
++"""
++
++from types import SimpleNamespace
++from unittest.mock import MagicMock
++
++import pytest
++
++from vllm.v1.core.sched.interface import PauseState
++from vllm.v1.engine.core import DPEngineCoreProc, EngineCore
++
++add_request = DPEngineCoreProc.add_request
++
++
++@pytest.fixture(autouse=True)
++def _stub_super(monkeypatch):
++    # Prevent super().add_request() from running the real scheduler path.
++    monkeypatch.setattr(EngineCore, "add_request", lambda self, req, wave=0: None)
++
++
++def _proc(
++    *,
++    has_coordinator=True,
++    external_lb=False,
++    current_wave=0,
++    engines_running=False,
++    pause_state=PauseState.UNPAUSED,
++):
++    obj = DPEngineCoreProc.__new__(DPEngineCoreProc)
++    obj.has_coordinator = has_coordinator
++    obj.external_lb = external_lb
++    obj.engine_index = 0
++    obj.current_wave = current_wave
++    obj.engines_running = engines_running
++    obj.scheduler = SimpleNamespace(pause_state=pause_state)
++    events: list = []
++    obj._events = events
++    obj.output_queue = SimpleNamespace(put_nowait=events.append)
++    return obj
++
++
++def test_internal_lb_same_wave_wakes():
++    # The core fix: the first request of wave 0 wakes peers even though
++    # request_wave == current_wave == 0, in internal/hybrid LB (external_lb
++    # False). Platform-agnostic -- no ROCm gate.
++    p = _proc(external_lb=False, current_wave=0)
++    add_request(p, MagicMock(), request_wave=0)
++    assert p.engines_running is True
++    assert len(p._events) == 1
++    _, outputs = p._events[0]
++    assert outputs.start_wave == 0
++
++
++def test_external_lb_same_wave_wakes():
++    # External-LB: the coordinator is not in the per-request path, so the
++    # engine-side wake is the only wake for the current wave's first request.
++    p = _proc(external_lb=True, current_wave=0)
++    add_request(p, MagicMock(), request_wave=0)
++    assert p.engines_running is True
++    assert len(p._events) == 1
++    _, outputs = p._events[0]
++    assert outputs.start_wave == 0
++
++
++def test_new_wave_wakes_and_advances():
++    # A higher request_wave advances current_wave and wakes peers.
++    p = _proc(current_wave=0)
++    add_request(p, MagicMock(), request_wave=1)
++    assert p.engines_running is True
++    assert p.current_wave == 1
++    assert len(p._events) == 1
++    _, outputs = p._events[0]
++    assert outputs.start_wave == 1
++
++
++def test_stale_wave_wakes_for_current_wave():
++    # A request for an already-completed wave (request_wave < current_wave)
++    # does not roll current_wave back, but still triggers a wake so the
++    # front-end starts the current wave.
++    p = _proc(current_wave=2)
++    add_request(p, MagicMock(), request_wave=1)
++    assert p.engines_running is True
++    assert p.current_wave == 2
++    assert len(p._events) == 1
++    _, outputs = p._events[0]
++    assert outputs.start_wave == 2
++
++
++def test_no_coordinator_never_wakes():
++    # Without a coordinator there is nothing to wake.
++    p = _proc(has_coordinator=False, current_wave=0)
++    add_request(p, MagicMock(), request_wave=0)
++    assert p.engines_running is False
++    assert p._events == []
++
++
++def test_already_running_does_not_double_wake():
++    p = _proc(current_wave=0, engines_running=True)
++    add_request(p, MagicMock(), request_wave=0)
++    # Stays running, but no redundant wake message is enqueued.
++    assert p.engines_running is True
++    assert p._events == []
++
++
++def test_paused_scheduler_does_not_wake():
++    # If the scheduler isn't UNPAUSED, the wake is suppressed.
++    p = _proc(current_wave=0, pause_state=object())  # any non-UNPAUSED value
++    add_request(p, MagicMock(), request_wave=0)
++    assert p.engines_running is False
++    assert p._events == []
+diff --git a/tests/v1/kv_connector/unit/test_moriio_routing.py b/tests/v1/kv_connector/unit/test_moriio_routing.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..a50942420991cca1e47eb372498fd414e86b5839
+--- /dev/null
++++ b/tests/v1/kv_connector/unit/test_moriio_routing.py
+@@ -0,0 +1,90 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""Unit tests for MoRIIO router-authoritative DP-rank routing.
++
++These lock in the redesign that addresses the PR #45043 review feedback
++(njhill): the connector must NOT self-derive a DP rank, and the prefill leg
++must *return* the rank it actually ran on via ``request_finished`` so the
++decode->prefill notify is routed by pure propagation (READ / serial WRITE),
++not by an independent hash on each side.
++
++Following test_moriio_unmap.py, we bind the unbound method to a lightweight
++stand-in rather than constructing a full scheduler.
++"""
++
++from types import SimpleNamespace
++
++from vllm.distributed.kv_transfer.kv_connector.v1.moriio.moriio_connector import (
++    MoRIIOConnectorScheduler,
++)
++from vllm.v1.request import RequestStatus
++
++_request_finished = MoRIIOConnectorScheduler.request_finished
++
++
++def _producer(global_dp_rank: int, dp_size: int, dp_size_local: int):
++    """Minimal prefill-side (producer) scheduler stand-in for request_finished."""
++    return SimpleNamespace(
++        is_producer=True,
++        _global_dp_rank=global_dp_rank,
++        engine_id="engine-abc",
++        host_ip="10.0.0.1",
++        handshake_port=6300,
++        side_notify_port=7300,
++        vllm_config=SimpleNamespace(
++            parallel_config=SimpleNamespace(
++                data_parallel_size=dp_size,
++                data_parallel_size_local=dp_size_local,
++                tensor_parallel_size=1,
++            )
++        ),
++    )
++
++
++def _req(request_id: str, params: dict | None, status=RequestStatus.FINISHED_LENGTH_CAPPED):
++    return SimpleNamespace(
++        request_id=request_id,
++        kv_transfer_params=params,
++        status=status,
++    )
++
++
++def test_request_finished_returns_prefill_rank_for_propagation():
++    # 2P2D: global rank 11 lives on pod 1 (ranks 8..15), local size 8.
++    s = _producer(global_dp_rank=11, dp_size=16, dp_size_local=8)
++    req = _req("r1", {"do_remote_decode": True, "transfer_id": "t1"})
++
++    delay_free, params = _request_finished(s, req, block_ids=[])
++
++    # The prefill leg returns the rank IT actually ran on, marked authoritative,
++    # so the router forwards it to decode and the notify propagates (no hashing).
++    assert params is not None
++    assert params["remote_dp_rank"] == 11
++    assert params["remote_dp_rank_override"] is True
++    assert params["remote_dp_size"] == 16
++    assert params["remote_dp_size_local"] == 8
++    assert params["transfer_id"] == "t1"
++    # Empty block_ids => nothing deferred, blocks freed immediately.
++    assert delay_free is False
++
++
++def test_request_finished_rank_tracks_the_actual_rank():
++    # A different rank must be echoed verbatim -- the value is the producer's
++    # own rank, never a recomputation of the request id.
++    s = _producer(global_dp_rank=4, dp_size=8, dp_size_local=8)
++    req = _req("r2", {"do_remote_decode": True, "transfer_id": "t2"})
++
++    _, params = _request_finished(s, req, block_ids=[])
++
++    assert params["remote_dp_rank"] == 4
++    assert params["remote_dp_size_local"] == 8
++
++
++def test_request_finished_no_kv_params_is_noop():
++    s = _producer(global_dp_rank=0, dp_size=16, dp_size_local=8)
++    req = _req("r3", None)
++
++    delay_free, params = _request_finished(s, req, block_ids=[])
++
++    assert delay_free is False
++    assert params is None
+diff --git a/tests/v1/kv_connector/unit/test_moriio_unmap.py b/tests/v1/kv_connector/unit/test_moriio_unmap.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4fd4b88139439658a0384b33afc18353342333b
+--- /dev/null
++++ b/tests/v1/kv_connector/unit/test_moriio_unmap.py
+@@ -0,0 +1,68 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""Unit tests for MoRIIOConnectorScheduler.{map,unmap}_request_id.
++
++vLLM's input_processor mutates a request_id after the connector has stored it
++(e.g. ``cmpl-abc-0`` -> ``cmpl-abc-0-956053a4``), so an exact-match unmap can
++miss. These tests cover the stable-``transfer_id`` fallback that handles that
++case (and the clean exact-match and miss paths).
++
++The map/unmap methods touch only the two id<->id dicts, so we bind them to a
++lightweight stand-in rather than constructing a full scheduler.
++"""
++
++from types import SimpleNamespace
++
++from vllm.distributed.kv_transfer.kv_connector.v1.moriio.moriio_connector import (
++    MoRIIOConnectorScheduler,
++)
++
++_map = MoRIIOConnectorScheduler.map_request_id
++_unmap = MoRIIOConnectorScheduler.unmap_request_id
++
++
++def _sched():
++    return SimpleNamespace(
++        transfer_id_to_request_id={},
++        request_id_to_transfer_id={},
++    )
++
++
++def test_exact_match_unmap_clears_both_tables():
++    s = _sched()
++    _map(s, "rid-1", "tid-1")
++    _unmap(s, "rid-1")
++    assert s.request_id_to_transfer_id == {}
++    assert s.transfer_id_to_request_id == {}
++
++
++def test_unmap_via_transfer_id_after_request_id_mutation():
++    s = _sched()
++    # Connector stores the ORIGINAL request_id at map time.
++    _map(s, "cmpl-abc-0", "tid-42")
++    # input_processor later mutates the rid; exact match would miss, so the
++    # stable transfer_id is used to find and clear the original entry.
++    _unmap(s, "cmpl-abc-0-956053a4", transfer_id="tid-42")
++    assert s.request_id_to_transfer_id == {}
++    assert s.transfer_id_to_request_id == {}
++
++
++def test_unmap_miss_is_noop_and_does_not_raise():
++    s = _sched()
++    _map(s, "rid-1", "tid-1")
++    # Unknown rid and unknown/None transfer_id: must not raise, must not touch
++    # the existing (unrelated) mapping.
++    _unmap(s, "rid-unknown", transfer_id=None)
++    _unmap(s, "rid-unknown", transfer_id="tid-unknown")
++    assert s.request_id_to_transfer_id == {"rid-1": "tid-1"}
++    assert s.transfer_id_to_request_id == {"tid-1": "rid-1"}
++
++
++def test_exact_match_preferred_over_transfer_id_fallback():
++    s = _sched()
++    _map(s, "rid-1", "tid-1")
++    # Exact rid is present, so it is removed directly even if a transfer_id is
++    # also supplied; no stale entries left behind.
++    _unmap(s, "rid-1", transfer_id="tid-1")
++    assert s.request_id_to_transfer_id == {}
++    assert s.transfer_id_to_request_id == {}
+diff --git a/vllm/_aiter_ops.py b/vllm/_aiter_ops.py
+index 30bfcb80b0179cbde6969be3b798687faab900dd..eac3f269c62c9b0be4dd6a02e55ca989de4267c0 100644
+--- a/vllm/_aiter_ops.py
++++ b/vllm/_aiter_ops.py
+@@ -419,6 +419,37 @@ def _rocm_aiter_fused_topk_fake(
+ 
+ # Cache whether aiter supports FP8 MLA parameters
+ _AITER_MLA_SUPPORTS_FP8: bool | None = None
++_AITER_HAS_FUSED_QK_RMSNORM: bool | None = None
++
++
++def check_aiter_fused_qk_rmsnorm() -> bool:
++    """Check if aiter provides fused_qk_rmsnorm.
++
++    Supports both the new private name ``_fused_qk_rmsnorm``
++    (AITER >= PR #2958) and the old public name ``fused_qk_rmsnorm``
++    (AITER >= PR #2442).
++
++    TODO(rbrugaro-amd): remove the legacy fused_qk_rmsnorm path once
++    AITER stabilizes the API (https://github.com/ROCm/aiter/issues/3207).
++    """
++    global _AITER_HAS_FUSED_QK_RMSNORM
++    if _AITER_HAS_FUSED_QK_RMSNORM is None:
++        try:
++            from aiter.ops.fused_qk_norm_rope_cache_quant import (  # noqa: F401
++                _fused_qk_rmsnorm,
++            )
++
++            _AITER_HAS_FUSED_QK_RMSNORM = True
++        except (ImportError, ModuleNotFoundError, AttributeError, KeyError, RuntimeError):
++            try:
++                from aiter.ops.fused_qk_norm_rope_cache_quant import (  # noqa: F401
++                    fused_qk_rmsnorm,
++                )
++
++                _AITER_HAS_FUSED_QK_RMSNORM = True
++            except (ImportError, ModuleNotFoundError, AttributeError, KeyError, RuntimeError):
++                _AITER_HAS_FUSED_QK_RMSNORM = False
++    return _AITER_HAS_FUSED_QK_RMSNORM
+ 
+ 
+ def _check_aiter_mla_fp8_support() -> bool:
+diff --git a/vllm/config/quantization.py b/vllm/config/quantization.py
+index 4f2a40426cdd557f0f5f45ede23e504556ffadb3..5810056f40376e9d71b2fa257ec6461e578b45c4 100644
+--- a/vllm/config/quantization.py
++++ b/vllm/config/quantization.py
+@@ -15,6 +15,7 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
+     kFp8Static128BlockSym,
+     kFp8StaticChannelSym,
+     kFp8StaticTensorSym,
++    kInt4Static32,
+     kInt8StaticChannelSym,
+     kMxfp4Dynamic,
+     kMxfp8Dynamic,
+@@ -32,6 +33,10 @@ QUANT_KEY_NAMES: dict[str, QuantKey] = {
+     "mxfp8": kMxfp8Dynamic,
+     "mxfp4": kMxfp4Dynamic,
+     "int8_per_channel_static": kInt8StaticChannelSym,
++    # Groupwise int4 with a 32-element group. Used by the Kimi-K3 gfx942
++    # path, where MXFP4 experts are requantized so AITER's bf16 x int4
++    # kernels can run on hardware without a scaled MXFP4 MFMA.
++    "int4_per_group_32": kInt4Static32,
+ }
+ 
+ 
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_common.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_common.py
+index 811bedb08415e08de255e104c379c5768d7aefa2..b712c4e53072be55816a8c61530be1569810e2e7 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_common.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_common.py
+@@ -59,6 +59,8 @@ class WriteTask:
+     event: torch.cuda.Event
+     remote_notify_port: int
+     remote_ip: str
++    mamba_local_block_ids: list[int] | None = None  # k3-mamba-blockids
++    all_group_block_ids: list[list[int]] | None = None  # k3-group-routing
+     enqueue_time: float = field(default_factory=time.perf_counter)
+     retried: int = 0
+ 
+@@ -82,6 +84,8 @@ class RemoteAllocInfo:
+     """Information about remote block allocation."""
+ 
+     block_ids: list[int]
++    mamba_block_ids: list[int] | None = None  # k3-mamba-blockids
++    all_group_block_ids: list[list[int]] | None = None  # k3-group-routing
+     writes_done: int = 0
+     writes_expected: int | None = None
+     decode_dp_rank: int = 0
+@@ -114,6 +118,7 @@ class MoRIIOAgentMetadata(
+     num_blocks: int
+     block_len: int
+     attn_backend_name: str
++    ssm_sizes: tuple[int, int] = (0, 0)  # k3-kda: (conv_bytes, ssm_bytes)
+ 
+ 
+ class RoleManager:
+@@ -191,6 +196,25 @@ def get_port_offset(dp_rank: int, tp_rank: int, tp_size: int = 1) -> int:
+     return (dp_rank) * tp_size + tp_rank
+ 
+ 
++def fold_local_rank(global_dp_rank: int, dp_size_local: int) -> int:
++    """Fold a global DP rank into its pod-local rank [0, dp_size_local).
++
++    ``dp_size_local == 0`` is the external-DP sentinel (local size unknown):
++    return the rank unchanged, since a global DP rank is always < the global
++    DP size so no folding is needed and the modulo is skipped (never divides
++    by zero).
++    """
++    return global_dp_rank % dp_size_local if dp_size_local else global_dp_rank
++
++
++def pod_index(global_dp_rank: int, dp_size_local: int) -> int:
++    """Pod index (0-based) a global DP rank lives on for Wide-EP multi-pod.
++
++    ``dp_size_local == 0`` (external-DP sentinel) collapses to a single pod.
++    """
++    return global_dp_rank // dp_size_local if dp_size_local else 0
++
++
+ def resolve_host_ip(extra_config: dict) -> str:
+     """The IP this MoRIIO process advertises for KV transfer.
+ 
+@@ -280,11 +304,17 @@ class MoRIIOConfig:
+         kv_transfer_config = vllm_config.kv_transfer_config
+         extra_config = kv_transfer_config.kv_connector_extra_config
+         tp_rank = get_tensor_model_parallel_rank()
+-        dp_rank = vllm_config.parallel_config.data_parallel_rank
++        # per-node port allocation. data_parallel_size_local == 0 is the
++        # documented external-DP sentinel (local size unknown here); the
++        # fold_local_rank helper returns the rank unchanged in that case
++        # (a global DP rank is always < the global DP size, so no folding is
++        # needed). Do NOT assert -- it is stripped under `python -O` and would
++        # crash valid external-DP deployments.
++        pc = vllm_config.parallel_config
++        dp_rank = fold_local_rank(pc.data_parallel_rank, pc.data_parallel_size_local)
+         base_notify_port = int(extra_config["notify_port"])
+-        dp_size = vllm_config.parallel_config.data_parallel_size
+         tp_size = get_tensor_model_parallel_world_size()
+-        port_offset = get_port_offset(dp_rank, tp_rank)
++        port_offset = get_port_offset(dp_rank, tp_rank, tp_size)  # k3-portoff
+         backend = str(extra_config.get("backend", "rdma")).lower()
+         if backend not in ("rdma", "xgmi"):
+             raise ValueError(
+@@ -304,15 +334,18 @@ class MoRIIOConfig:
+         return cls(
+             local_ip=resolve_host_ip(extra_config),
+             local_kv_port=get_open_port(),
+-            proxy_ip=extra_config["proxy_ip"],
++            proxy_ip=extra_config.get("proxy_ip", ""),
+             local_ping_port=get_open_port(),
+-            proxy_ping_port=int(extra_config["proxy_ping_port"]),
++            proxy_ping_port=int(extra_config.get("proxy_ping_port", 0)),
+             http_port=int(extra_config["http_port"]),
+             handshake_port=int(extra_config["handshake_port"]),
+             notify_port=base_notify_port + port_offset,
+             tp_rank=tp_rank,
+             dp_rank=dp_rank,
+-            dp_size=dp_size,
++            # Advertise the GLOBAL DP world size to the routing proxy so it can
++            # address every rank across pods; dp_size_local above is only for
++            # per-pod port folding, not for routing.
++            dp_size=pc.data_parallel_size,
+             tp_size=tp_size,
+             read_mode=get_moriio_mode(kv_transfer_config) == MoRIIOMode.READ,
+             qp_per_transfer=int(extra_config.get("qp_per_transfer", 1)),
+@@ -391,20 +424,26 @@ def parse_moriio_zmq_address(
+     return host, handshake_port, notify_port
+ 
+ 
+-def get_peer_zmq_from_request_id(request_id: str, is_producer: bool) -> str:
++def get_peer_zmq_from_request_id(request_id: str, is_producer: bool) -> str | None:
+     """Extract the *peer's* zmq_address from the vLLM router request_id.
+ 
+     The producer (prefill) needs the decode's address; the consumer (decode)
+     needs the prefill's address.
++
++    Returns ``None`` when the request_id does not encode peer info. The
++    llm-d routing sidecar (``llm-d-inference-scheduler``) does not embed
++    addresses in ``request_id``; instead it passes ``remote_host``,
++    ``remote_handshake_port`` and ``remote_notify_port`` explicitly in
++    ``kv_transfer_params``. Callers must handle the ``None`` return by
++    falling back to those fields. See ``add_new_req`` for the canonical
++    fallback path.
+     """
+     if is_producer:
+         m = _DECODE_ZMQ_RE.search(request_id)
+     else:
+         m = _PREFILL_ZMQ_RE.search(request_id)
+     if m is None:
+-        raise ValueError(
+-            f"Cannot parse peer zmq_address from request_id: {request_id!r}"
+-        )
++        return None
+     return m.group(1)
+ 
+ 
+@@ -426,6 +465,15 @@ class ReqMeta:
+     # read must target this rank's memory registration; the default 0 preserves
+     # the symmetric single-DP behaviour.
+     remote_dp_rank: int = 0
++    # Multi-pod: list of remote pod IPs indexed by pod_idx.
++    multi_pod_hosts: list[str] = field(default_factory=list)
++    # Per-pod DP size; 0 means fallback to remote_dp_size.
++    remote_dp_size_local: int = 0
++    # k3-mamba-blockids: mamba KV-group [1] local slot id(s) for this req.
++    mamba_local_block_ids: list[int] = field(default_factory=list)
++    # k3-group-routing: ALL kv-cache-groups' local block-id lists (list of
++    # lists, indexed by group index) so each layer routes to its own group.
++    all_group_block_ids: list[list[int]] | None = None
+ 
+ 
+ class MoRIIOConnectorMetadata(KVConnectorMetadata):
+@@ -449,24 +497,79 @@ class MoRIIOConnectorMetadata(KVConnectorMetadata):
+         local_block_ids: list[int],
+         kv_transfer_params: dict[str, Any],
+         write_mode=False,
++        mamba_local_block_ids: list[int] | None = None,  # k3-mamba-blockids
++        all_group_block_ids: list[list[int]] | None = None,  # k3-group-routing
+     ):
++        """Ingest a peer's ``kv_transfer_params`` into a typed ``ReqMeta``.
++
++        This is the single place peer info enters the connector. The
++        ``kv_transfer_params`` contract (as produced by the llm-d sidecar /
++        vLLM router, or echoed by the prefill leg's ``request_finished``):
++
++        Required (always):
++          * ``transfer_id``        -- stable id shared by both legs.
++          * ``remote_engine_id``   -- peer engine id for the handshake table.
++          * ``remote_block_ids``   -- peer block ids (may be [] in WRITE mode,
++                                      where decode allocates its own blocks).
++
++        Peer address -- ONE of the following two must resolve:
++          * embedded in ``request_id`` (vLLM-router PD id form), OR
++          * explicit ``remote_host`` + ``remote_handshake_port`` +
++            ``remote_notify_port`` (llm-d sidecar / returnable path).
++          If neither resolves we raise -- there is no safe default host/port.
++
++        Optional (defaulted):
++          * ``tp_size``              (default 1) -- peer TP size.
++          * ``remote_dp_size``       (default 1) -- peer GLOBAL DP size.
++          * ``remote_dp_size_local`` (default = ``remote_dp_size``) -- per-pod
++                                      DP size for Wide-EP multi-pod port/host
++                                      folding; 0/absent means single-pod.
++          * ``remote_hosts``         (default [remote_host]) -- per-pod IP list
++                                      indexed by ``pod_idx = rank // dp_local``.
++
++        Routing keys consumed elsewhere (NOT here): ``remote_dp_rank`` /
++        ``remote_dp_rank_override`` gate the decode->prefill notify target in
++        MoRIIOConnectorScheduler; they are router-authoritative and never
++        self-derived (see that class's request routing contract).
++        """
+         transfer_id = kv_transfer_params["transfer_id"]
+ 
+-        remote_host = kv_transfer_params.get("remote_host")
+-        remote_handshake_port = kv_transfer_params.get("remote_handshake_port")
+-        remote_notify_port = kv_transfer_params.get("remote_notify_port")
+-        if (
+-            remote_host is None
+-            or remote_handshake_port is None
+-            or remote_notify_port is None
+-        ):
+-            # Parse host/ports from the request_id. The router embeds both
+-            # zmq_addresses in PD request IDs, but WRITE decode requests may carry
+-            # a plain request ID and get the remote address via kv_transfer_params.
+-            peer_zmq = get_peer_zmq_from_request_id(request_id, is_producer=write_mode)
++        # Try request_id embedded address first, fallback to explicit params.
++        peer_zmq = get_peer_zmq_from_request_id(request_id, is_producer=write_mode)
++        if peer_zmq is not None:
+             remote_host, remote_handshake_port, remote_notify_port = (
+                 parse_moriio_zmq_address(peer_zmq)
+             )
++        else:
++            try:
++                remote_host = kv_transfer_params["remote_host"]
++                if not remote_host:
++                    raise ValueError(
++                        f"request_id {request_id!r} does not embed a peer "
++                        f"zmq_address and kv_transfer_params['remote_host'] is "
++                        f"empty; cannot route MoRI-IO transfer"
++                    )
++                remote_handshake_port = int(kv_transfer_params["remote_handshake_port"])
++                remote_notify_port = int(kv_transfer_params["remote_notify_port"])
++            except (KeyError, TypeError, ValueError) as e:
++                raise ValueError(
++                    f"request_id {request_id!r} does not embed a peer "
++                    f"zmq_address and kv_transfer_params is missing one or "
++                    f"more sidecar-fallback keys (need remote_host, "
++                    f"remote_handshake_port, remote_notify_port): {e}"
++                ) from e
++
++        # Multi-pod: use multi_pod_hosts list or fallback to single host.
++        _pod_hosts = kv_transfer_params.get("remote_hosts") or [remote_host]
++        if not isinstance(_pod_hosts, list):
++            _pod_hosts = [_pod_hosts]
++        _pod_hosts = [str(h) for h in _pod_hosts]
++        _remote_dp_size_local = int(
++            kv_transfer_params.get(
++                "remote_dp_size_local",
++                kv_transfer_params.get("remote_dp_size", 1),
++            )
++        )
+ 
+         _req = ReqMeta(
+             transfer_id=transfer_id,
+@@ -488,6 +591,13 @@ class MoRIIOConnectorMetadata(KVConnectorMetadata):
+             ),
+             remote_dp_size=kv_transfer_params.get("remote_dp_size", 1),
+             remote_dp_rank=kv_transfer_params.get("remote_dp_rank", 0),
++            multi_pod_hosts=_pod_hosts,
++            remote_dp_size_local=_remote_dp_size_local,
++        )
++        _req.mamba_local_block_ids = list(mamba_local_block_ids or [])  # k3-mamba-blockids
++        _req.all_group_block_ids = (  # k3-group-routing
++            [list(g) for g in all_group_block_ids]
++            if all_group_block_ids is not None else None
+         )
+         if write_mode:
+             self.reqs_to_save[request_id] = _req
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+index 2a4c028e15b08addf4e9affb0e5f3af892241797..ea0d6f94502f2df836a78dfaf7c8c1157e8d87db 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py
+@@ -2,6 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ import logging
+ import math
++import os
+ import queue
+ import threading
+ import time
+@@ -19,6 +20,7 @@ import zmq
+ from vllm.config import VllmConfig
+ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
+     KVConnectorBase_V1,
++    SupportsHMA,
+     KVConnectorMetadata,
+     KVConnectorRole,
+ )
+@@ -36,11 +38,13 @@ from vllm.distributed.kv_transfer.kv_connector.v1.moriio.moriio_common import (
+     ReqMeta,
+     TransferId,
+     WriteTask,
++    fold_local_rank,
+     get_moriio_mode,
+     get_peer_zmq_from_request_id,
+     get_port_offset,
+     get_role,
+     parse_moriio_zmq_address,
++    pod_index,
+     resolve_host_ip,
+     set_role,
+     zmq_ctx,
+@@ -186,7 +190,17 @@ def resolve_moriio_transfer_ack(
+     return transfer_id
+ 
+ 
+-class MoRIIOConnector(KVConnectorBase_V1):
++def _k3_prefill_done(self, req_id, req):  # k3-chunk-gate
++    import os as _os
++    prog = getattr(self, '_k3_prog', None)
++    if not prog or req_id not in prog:
++        return None
++    cb, st = prog[req_id]
++    slack = int(_os.environ.get('K3_CHUNK_GATE_SLACK', '2'))
++    return (cb + st) >= (int(req.num_prompt_tokens) - slack)
++
++
++class MoRIIOConnector(KVConnectorBase_V1, SupportsHMA):
+     def __init__(
+         self,
+         vllm_config: VllmConfig,
+@@ -263,6 +277,20 @@ class MoRIIOConnector(KVConnectorBase_V1):
+         assert self.connector_scheduler is not None
+         return self.connector_scheduler.build_connector_meta(scheduler_output)
+ 
++    def request_finished_all_groups(
++        self,
++        request: "Request",
++        block_ids: tuple[list[int], ...],
++    ) -> tuple[bool, dict[str, Any] | None]:
++        # k3-kda/HMA: hybrid models pass one block-id list per kv-cache
++        # group (attention + mamba). Flatten to the single-group list
++        # the MoRIIO scheduler expects and delegate.
++        flat: list[int] = []
++        for grp in block_ids:
++            flat.extend(grp)
++        assert self.connector_scheduler is not None
++        return self.connector_scheduler.request_finished(request, flat)
++
+     def request_finished(
+         self,
+         request: "Request",
+@@ -373,13 +401,52 @@ class MoRIIOConnectorScheduler:
+             "notify_port"
+         ]
+         self.tp_size = self.vllm_config.parallel_config.tensor_parallel_size
+-        self.dp_rank = self.vllm_config.parallel_config.data_parallel_rank
++        # Local DP rank (0..dp_local-1) for port arithmetic; fold_local_rank
++        # handles the external-DP sentinel (dp_local==0) so the arithmetic
++        # can't ZeroDivisionError at init.
++        _pc = self.vllm_config.parallel_config
++        self.dp_rank = fold_local_rank(
++            _pc.data_parallel_rank, _pc.data_parallel_size_local
++        )
++        # Only first-pod ranks originate notify to avoid duplicates. Guarding
++        # via pod_index keeps _is_kv_master True for the external-DP sentinel
++        # (single pod) instead of being silently stuck False.
++        self._is_kv_master = (
++            pod_index(_pc.data_parallel_rank, _pc.data_parallel_size_local) == 0
++        )
++        # Global DP rank for pinned request ownership check.
++        self._global_dp_rank = self.vllm_config.parallel_config.data_parallel_rank
+         self.is_producer = self.kv_transfer_config.kv_role == "kv_producer"
++        # k3-mamba-n1: hybrid (mamba/KDA) detection. Kimi-K3 carries
++        # text_config.linear_attn_config.kda_layers; any linear/mamba/kda
++        # marker => the recurrent-state N-vs-N-1 boundary applies.
++        self._has_mamba = False
++        try:
++            _mc = getattr(self.vllm_config, 'model_config', None)
++            _hf = getattr(_mc, 'hf_config', None) if _mc is not None else None
++            _tc = getattr(_hf, 'text_config', None) or _hf
++            _la = getattr(_tc, 'linear_attn_config', None)
++            if _la is None and isinstance(getattr(_tc, '__dict__', None), dict):
++                _la = _tc.__dict__.get('linear_attn_config')
++            if _la:
++                self._has_mamba = True
++        except Exception:
++            self._has_mamba = False
++        # Escape hatch: K3_MAMBA_N1_FORCE=0/1 overrides the auto-detection.
++        import os as _k3n1os
++        if _k3n1os.environ.get('K3_MAMBA_N1_FORCE', '') in ('0', '1'):
++            self._has_mamba = (_k3n1os.environ['K3_MAMBA_N1_FORCE'] == '1')
++        logger.debug('[k3-mamba-n1] _has_mamba=%s (mamba N-1 boundary %s)',
++                     self._has_mamba, 'ON' if self._has_mamba else 'off')
+         # Requests that need to start recv/send.
+         # New requests are added by update_state_after_alloc in
+         # the scheduler. Used to make metadata passed to Worker.
+         self._reqs_need_recv: dict[ReqId, tuple[Request, list[int]]] = {}
+         self._reqs_need_save: dict[ReqId, tuple[Request, list[int]]] = {}
++        self._reqs_save_mamba: dict[ReqId, list[int]] = {}  # k3-mamba-blockids
++        self._reqs_save_allgrp: dict[ReqId, list[list[int]]] = {}  # k3-group-routing
++        # Snapshot of kv_transfer_params for chunked prefill recovery.
++        self._req_kv_params: dict[ReqId, dict] = {}
+ 
+         # For chunked prefill, we perform layer-wise access within the final chunk.
+         # TODO: Perform transfer at end chunk.
+@@ -396,12 +463,15 @@ class MoRIIOConnectorScheduler:
+         # finished_sending before the deadline, we inject them into
+         # connector_output.finished_sending so the scheduler frees the blocks to avoid
+         # hanging indefinitely waiting for a free notification that never comes.
+-        self._deferred_send_deadlines: dict[ReqId, float] = {}
++        # Value: (deadline, transfer_id) for unmapping after mutation.
++        self._deferred_send_deadlines: dict[ReqId, tuple[float, TransferId | None]] = {}
+         self._defer_timeout = float(
+             self.kv_transfer_config.kv_connector_extra_config.get(
+                 "defer_timeout", MoRIIOConstants.DEFAULT_DEFER_TIMEOUT
+             )
+         )
++        # Buffer for early ACKs that arrive before request_finished.
++        self._pending_sent_acks: dict[ReqId, float] = {}
+         self.paths: dict[str, zmq.Socket] = {}
+         self.transfer_id_to_request_id: dict[TransferId, ReqId] = {}
+         self.request_id_to_transfer_id: dict[ReqId, TransferId] = {}
+@@ -410,23 +480,66 @@ class MoRIIOConnectorScheduler:
+         self.transfer_id_to_request_id[transfer_id] = request_id
+         self.request_id_to_transfer_id[request_id] = transfer_id
+ 
+-    def unmap_request_id(self, request_id: ReqId):
++    def unmap_request_id(
++        self, request_id: ReqId, transfer_id: TransferId | None = None
++    ):
++        """Unmap request_id/transfer_id. Uses transfer_id for lookup if
++        exact request_id match fails (handles input_processor mutation)."""
+         if request_id in self.request_id_to_transfer_id:
+-            transfer_id = self.request_id_to_transfer_id[request_id]
++            tid = self.request_id_to_transfer_id[request_id]
+             del self.request_id_to_transfer_id[request_id]
+-            if transfer_id in self.transfer_id_to_request_id:
+-                del self.transfer_id_to_request_id[transfer_id]
+-            else:
+-                logger.warning(
+-                    "transfer id not in transfer_id_to_request_id lookup"
+-                    "table. there is likely a bug!"
++            if tid in self.transfer_id_to_request_id:
++                del self.transfer_id_to_request_id[tid]
++            return
++
++        # Fallback: use transfer_id to find original request_id.
++        if transfer_id is not None and transfer_id in self.transfer_id_to_request_id:
++            original_rid = self.transfer_id_to_request_id[transfer_id]
++            if original_rid != request_id:
++                logger.debug(
++                    "MoRI-IO unmap via transfer_id: %r -> %r", request_id, original_rid
+                 )
+-        else:
+-            logger.warning(
+-                "Could not find %s  in transfer_id_to_request_id"
+-                "lookup table.  This could lead to a possible hang.",
+-                request_id,
+-            )
++            if original_rid in self.request_id_to_transfer_id:
++                del self.request_id_to_transfer_id[original_rid]
++            del self.transfer_id_to_request_id[transfer_id]
++            return
++
++        logger.warning(
++            "MoRI-IO unmap MISS: rid=%r transfer_id=%r table_size=%d",
++            request_id,
++            transfer_id,
++            len(self.request_id_to_transfer_id),
++        )
++
++    def _get_remote_prefill_token_count(self, num_prompt_tokens: int) -> int:
++        # k3-mamba-n1: D-side. Mamba decoder recomputes the last prompt
++        # token and must start from h(N-1), so it pulls only N-1 tokens.
++        if getattr(self, '_has_mamba', False) and num_prompt_tokens > 1:
++            return num_prompt_tokens - 1
++        return num_prompt_tokens
++
++    def _truncate_mamba_request_for_prefill(self, request: "Request") -> None:
++        # k3-mamba-n1: P-side. Drop the last prompt token so the prefiller
++        # computes h(N-1) not h(N); the decoder recomputes token N to get
++        # h(N). Guarded against repeated truncation on preempt/reschedule.
++        params = request.kv_transfer_params
++        if (
++            params is not None
++            and not params.get('_p_side_truncated')
++            and request.num_prompt_tokens > 1
++        ):
++            if request.prompt_token_ids is not None:
++                request.prompt_token_ids.pop()
++            elif getattr(request, 'prompt_embeds', None) is not None:
++                request.prompt_embeds = request.prompt_embeds[:-1]
++            else:
++                return
++            request._all_token_ids.pop()
++            request.num_prompt_tokens -= 1
++            request.max_tokens = 1
++            params['_p_side_truncated'] = True
++            logger.debug('[k3-mamba-n1] P-side truncated req %s to N-1 for mamba prefill',
++                         request.request_id)
+ 
+     def get_num_new_matched_tokens(
+         self,
+@@ -447,14 +560,27 @@ class MoRIIOConnectorScheduler:
+             * true if the external KV cache tokens will be loaded
+               asynchronously (between scheduler steps).
+         """
++        # k3-mamba-n1: P-side prompt truncation for mamba runs BEFORE the
++        # producer early-return. In MoRIIO WRITE the producer is the prefill
++        # leg (do_remote_decode); drop its last prompt token so it computes
++        # h(N-1). The decoder (consumer) recomputes token N to derive h(N).
++        _k3_params = request.kv_transfer_params
++        if (
++            getattr(self, '_has_mamba', False)
++            and _k3_params is not None
++            and _k3_params.get('do_remote_decode')
++        ):
++            self._truncate_mamba_request_for_prefill(request)
+         if self.is_producer:
+             return 0, False
+ 
+         token_ids = request.prompt_token_ids or []
+         if self.mode == MoRIIOMode.WRITE:
+-            # MoriiO in write mode, no remote prefill
+-
+-            return len(token_ids) - num_computed_tokens, True
++            # MoriiO in write mode, no remote prefill.
++            # k3-mamba-n1: D-side returns N-1 for mamba (decode recomputes the
++            # last prompt token from h(N-1)); non-mamba keeps N.
++            _k3_n = self._get_remote_prefill_token_count(len(token_ids))
++            return _k3_n - num_computed_tokens, True
+ 
+         return len(token_ids) - 1 - num_computed_tokens, False
+ 
+@@ -465,6 +591,8 @@ class MoRIIOConnectorScheduler:
+         block_notify_list: list[int],
+         host=None,
+         port=None,
++        mamba_block_notify_list: list[int] | None = None,  # k3-mamba-blockids
++        all_group_block_notify: list[list[int]] | None = None,  # k3-group-routing
+     ):
+         path = make_zmq_path("tcp", host, port)
+         if path not in self.paths:
+@@ -478,7 +606,14 @@ class MoRIIOConnectorScheduler:
+             "req_id": req_id,
+             "transfer_id": transfer_id,
+             "block_notify_list": block_notify_list or [],
+-            "decode_rank": self.dp_rank,
++            "mamba_block_notify_list": mamba_block_notify_list or [],  # k3-mamba-blockids
++            "all_group_block_notify": all_group_block_notify or [],  # k3-group-routing
++            # GLOBAL decode dp rank: producer derives the per-pod notify offset
++            # (% dp_local), owning pod index (// dp_local), and write-target
++            # from it. Sending the LOCAL rank made child-pod consumers look
++            # like master rank 0 and hang in WAITING_FOR_REMOTE_KVS. Single-pod:
++            # local == global.
++            "decode_rank": self._global_dp_rank,
+             "type": "remote_blocks",
+         }
+         serialized_data = msgpack.dumps(data)
+@@ -493,8 +628,18 @@ class MoRIIOConnectorScheduler:
+             )
+             self.paths[path] = sock
+ 
++        # Advertise the consumer (decode) TP size so prefill counts the right
++        # number of ACKs (get_moriio_expected_ack_count; see the upstream
++        # READ-mode release in _pop_done_transfers). Resolves to 1 for our
++        # homogeneous TP=1 configs; only matters under heterogeneous-TP fan-in.
+         self.paths[path].send(
+-            msgpack.dumps({"type": "release", "transfer_id": transfer_id})
++            msgpack.dumps(
++                {
++                    "type": "release",
++                    "transfer_id": transfer_id,
++                    "consumer_tp_size": self.tp_size,
++                }
++            )
+         )
+ 
+     def _release_write_prefill_blocks(self, request_id: ReqId, params: dict[str, Any]):
+@@ -513,6 +658,8 @@ class MoRIIOConnectorScheduler:
+         if remote_host is None or remote_notify_port is None:
+             try:
+                 peer_zmq = get_peer_zmq_from_request_id(request_id, is_producer=False)
++                if peer_zmq is None:
++                    raise ValueError("no peer zmq address for request")
+                 remote_host, _, remote_notify_port = parse_moriio_zmq_address(peer_zmq)
+             except ValueError:
+                 logger.warning(
+@@ -524,7 +671,7 @@ class MoRIIOConnectorScheduler:
+ 
+         remote_notify_port = int(remote_notify_port)
+         for tp_index in range(self.tp_size):
+-            target_port = remote_notify_port + get_port_offset(remote_dp_rank, tp_index)
++            target_port = remote_notify_port + get_port_offset(remote_dp_rank, tp_index, self.tp_size)  # k3-portoff
+             self._send_transfer_release(transfer_id, remote_host, target_port)
+ 
+     def update_state_after_alloc(
+@@ -534,15 +681,61 @@ class MoRIIOConnectorScheduler:
+         num_external_tokens: int,
+         connector_worker: "MoRIIOConnectorWorker | None" = None,
+     ):
++        """Scheduler-side post-allocation hook (decode leg in WRITE mode).
++
++        In WRITE mode this fires the decode->prefill "blocks ready" notify
++        that lets the producer RDMA-Write its KV into the freshly allocated
++        decode blocks.
++
++        DP-rank routing contract (router-authoritative)
++        ------------------------------------------------
++        Both legs of a disagg pair must agree on a single prefill DP rank,
++        otherwise the notify lands on a rank that never handshook and the
++        request hangs until ``VLLM_MORIIO_DEFERRED_TIMEOUT_S``.
++
++        The routing authority is the external router/sidecar, NOT the
++        connector. The llm-d routing sidecar computes ``H = pickDPRank(uuid,
++        dp_size)`` (see ``dp_rank.go``) once and pins BOTH legs to ``H`` two
++        ways: the ``X-data-parallel-rank`` dispatch header (which vLLM engine
++        the leg lands on) and ``kv_transfer_params.remote_dp_rank=H`` (which
++        prefill rank this notify targets), with ``remote_dp_rank_override=True``.
++
++        The connector consumes ``remote_dp_rank`` verbatim and does NOT
++        self-derive a rank: an independent hash here could disagree with the
++        router's dispatch pin and misroute the notify. For the returnable paths
++        (READ / serial WRITE) the prefill leg also echoes back the rank it ran
++        on via ``request_finished`` so routing is pure propagation.
++
++        The owning rank is the only one that originates the notify
++        (``remote_dp_rank_override`` -> global-rank match; otherwise the
++        ``_is_kv_master`` anti-duplicate gate). See the inline comments
++        below for the exactly-once-across-pods reasoning.
++        """
+         params = request.kv_transfer_params
+         if not params:
+             return
+-        transfer_id = params["transfer_id"]
++        # LLM-D sidecar compat: the nixlv2 routing sidecar emits NIXL-shaped
++        # kv_transfer_params without MoRI-IO's transfer_id. Synthesize one
++        # deterministically from request_id so producer and consumer agree
++        # without a sidecar wire-protocol change.
++        transfer_id = params.get("transfer_id") or f"sidecar-{request.request_id}"
++        params.setdefault("transfer_id", transfer_id)
+         request_id = request.request_id
+         self.map_request_id(request_id, transfer_id)
+         if params.get("do_remote_decode"):
+-            local_block_ids = blocks.get_block_ids()[0]
++            _k3_gbi = blocks.get_block_ids()
++            local_block_ids = _k3_gbi[0]
++            self._reqs_save_mamba[request.request_id] = (  # k3-mamba-blockids
++                list(_k3_gbi[1]) if len(_k3_gbi) > 1 else []
++            )
++            self._reqs_save_allgrp[request.request_id] = [  # k3-group-routing
++                list(g) for g in _k3_gbi
++            ]
+             self._reqs_need_save[request.request_id] = (request, local_block_ids)
++            # Snapshot params now so chunked-prefill build_connector_meta
++            # can recover them on the final chunk even if the live
++            # request.kv_transfer_params has been mutated/cleared.
++            self._req_kv_params[request.request_id] = dict(params)
+ 
+         if params is not None and params.get("do_remote_prefill"):
+             if self.mode == MoRIIOMode.READ:
+@@ -568,6 +761,9 @@ class MoRIIOConnectorScheduler:
+                             request,
+                             local_block_ids,
+                         )
++                        # Snapshot params for chunked prefill consumption
++                        # in build_connector_meta (see comment above).
++                        self._req_kv_params[request.request_id] = dict(params)
+                     else:
+                         logger.warning(
+                             "Got invalid KVTransferParams: %s. This "
+@@ -582,37 +778,138 @@ class MoRIIOConnectorScheduler:
+                 )
+ 
+                 remote_dp_rank = request.kv_transfer_params.get("remote_dp_rank", 0)
+-                remote_host = request.kv_transfer_params.get("remote_host")
+-                remote_notify_port = request.kv_transfer_params.get(
+-                    "remote_notify_port"
+-                )
+-                if remote_host is None or remote_notify_port is None:
++
++                # Effective DP fan-out for the per-pod port/host math below
++                # (see _remote_dp_rank_for_port / _pod_idx). Capped to the
++                # per-pod local size when the router advertises it (Wide-EP).
++                _dp_size = int(request.kv_transfer_params.get("remote_dp_size", 1) or 1)
++                try:
++                    _dp_local = int(
++                        request.kv_transfer_params.get("remote_dp_size_local", 0) or 0
++                    )
++                    if _dp_local > 0:
++                        _dp_size = min(_dp_size, _dp_local)
++                except (TypeError, ValueError):
++                    _dp_local = 0
++
++                # Rank routing is ROUTER-AUTHORITATIVE: honor the router-pinned
++                # remote_dp_rank (matched to the X-data-parallel-rank dispatch
++                # pin). Self-deriving a rank could disagree and notify a rank
++                # that never served the request. If unpinned in a multi-rank
++                # deployment, warn instead of guessing.
++                if (
++                    _dp_size > 1
++                    and "remote_dp_rank" not in request.kv_transfer_params
++                    and "is_request_leader" not in request.kv_transfer_params
++                ):
++                    logger.warning(
++                        "MoRI-IO decode notify: remote_dp_size=%d but the router "
++                        "did not pin remote_dp_rank for request %s; defaulting to "
++                        "rank 0. The router must set remote_dp_rank (and the "
++                        "X-data-parallel-rank dispatch header) so the prefill and "
++                        "decode legs agree on the same rank.",
++                        _dp_size,
++                        request.request_id,
++                    )
++
++                # Only the owning rank originates notify (exactly-once).
++                # Priority: is_request_leader > remote_dp_rank_override > _is_kv_master
++                _leader_flag = request.kv_transfer_params.get("is_request_leader")
++                if _leader_flag is not None:
++                    _should_notify = bool(_leader_flag)
++                elif request.kv_transfer_params.get("remote_dp_rank_override"):
++                    _should_notify = self._global_dp_rank == remote_dp_rank
++                else:
++                    _should_notify = self._is_kv_master
++                if _should_notify:
+                     peer_zmq = get_peer_zmq_from_request_id(
+                         request.request_id, is_producer=False
+                     )
+-                    remote_host, _, remote_notify_port = parse_moriio_zmq_address(
+-                        peer_zmq
++                    if peer_zmq is not None:
++                        remote_host, _, remote_notify_port = parse_moriio_zmq_address(
++                            peer_zmq
++                        )
++                    else:
++                        # Sidecar fallback: use explicit params fields.
++                        params = request.kv_transfer_params or {}
++                        remote_host = params.get("remote_host") or ""
++                        try:
++                            remote_notify_port = int(
++                                params.get("remote_notify_port") or 0
++                            )
++                        except (TypeError, ValueError):
++                            remote_notify_port = 0
++                        if not remote_host or not remote_notify_port:
++                            raise ValueError(
++                                f"request {request.request_id!r}: "
++                                f"request_id has no embedded peer "
++                                f"zmq_address and kv_transfer_params is "
++                                f"missing remote_host / remote_notify_port "
++                                f"(got remote_host={remote_host!r}, "
++                                f"remote_notify_port={remote_notify_port!r})"
++                            )
++
++                    # num_external_tokens == 0: nothing to push, so don't tell
++                    # the producer to write into these blocks.
++                    _k3_gbi_d = blocks.get_block_ids()  # k3-mamba-blockids
++                    block_notify_list = (
++                        _k3_gbi_d[0] if num_external_tokens > 0 else []
+                     )
+-                remote_notify_port = int(remote_notify_port)
+-
+-                # num_external_tokens == 0: nothing to push, so don't tell the
+-                # producer to write into these blocks.
+-                block_notify_list = (
+-                    blocks.get_block_ids()[0] if num_external_tokens > 0 else []
+-                )
+-
+-                for tp_index in range(self.tp_size):
+-                    target_port = remote_notify_port + get_port_offset(
+-                        remote_dp_rank, tp_index
++                    mamba_block_notify_list = (
++                        (list(_k3_gbi_d[1]) if len(_k3_gbi_d) > 1 else [])
++                        if num_external_tokens > 0 else []
++                    )
++                    all_group_block_notify = (  # k3-group-routing
++                        [list(g) for g in _k3_gbi_d]
++                        if num_external_tokens > 0 else []
+                     )
+ 
+-                    self.send_notify_block(
+-                        req_id=request.request_id,
+-                        transfer_id=request.kv_transfer_params["transfer_id"],
+-                        block_notify_list=block_notify_list,
+-                        host=remote_host,
+-                        port=target_port,
++                    # Wide-EP multi-pod: a pod binds notify sockets only for
++                    # its LOCAL ranks, so the port offset must use the per-pod
++                    # local rank (% dp_local), not the global rank. Single-pod
++                    # is bit-identical (modulus is a no-op).
++                    _remote_dp_rank_for_port = fold_local_rank(
++                        remote_dp_rank, _dp_local
+                     )
++                    # The target rank may live on a child pod at a different IP,
++                    # so resolve the per-pod host (pod_idx = global // dp_local).
++                    # Otherwise a notify for child ranks lands on the master
++                    # pod and the request hangs in WAITING_FOR_REMOTE_KVS.
++                    _notify_host = remote_host
++                    _kvp = request.kv_transfer_params or {}
++                    _remote_hosts = _kvp.get("remote_hosts") or []
++                    # k3-podhosts: fall back to launcher pod-hosts + derived dp_local
++                    if not _remote_hosts and hasattr(self, "kv_transfer_config"):
++                        _k3n = self.kv_transfer_config.kv_connector_extra_config.get(
++                            "moriio_pod_hosts", ""
++                        )
++                        _remote_hosts = [h.strip() for h in str(_k3n).split(",") if h.strip()]
++                    _k3_dpl = _dp_local
++                    if (not _k3_dpl) and _remote_hosts and _dp_size % len(_remote_hosts) == 0:
++                        _k3_dpl = _dp_size // len(_remote_hosts)
++                    if _k3_dpl > 0 and _remote_hosts:
++                        _pod_idx = pod_index(remote_dp_rank, _k3_dpl)
++                        if 0 <= _pod_idx < len(_remote_hosts):
++                            _notify_host = _remote_hosts[_pod_idx]
++                        _remote_dp_rank_for_port = fold_local_rank(remote_dp_rank, _k3_dpl)
++                        logger.info(
++                            "[k3-podhosts] notify prefill rank=%d -> host=%s (dp_local=%d)",
++                            remote_dp_rank, _notify_host, _k3_dpl,
++                        )
++                    for tp_index in range(self.tp_size):
++                        target_port = remote_notify_port + get_port_offset(
++                            _remote_dp_rank_for_port, tp_index, self.tp_size  # k3-portoff
++                        )
++
++                        self.send_notify_block(
++                            req_id=request.request_id,
++                            transfer_id=request.kv_transfer_params["transfer_id"],
++                            block_notify_list=block_notify_list,
++                            host=_notify_host,
++                            port=target_port,
++                            mamba_block_notify_list=mamba_block_notify_list,  # k3-mamba-blockids
++                            all_group_block_notify=all_group_block_notify,  # k3-group-routing
++                        )
+ 
+             # Only trigger 1 KV transfer per request.
+ 
+@@ -626,6 +923,27 @@ class MoRIIOConnectorScheduler:
+         meta.transfer_id_to_request_id = self.transfer_id_to_request_id
+ 
+         if self.mode == MoRIIOMode.WRITE and get_role() == ROLE.PRODUCER:
++            # k3-chunk-gate: build FRESH per-step compute-progress map. Block-count
++            # gates fail when the whole prompt fits in <=1 block (bs~5760);
++            # compute progress is the only reliable final-chunk signal.
++            self._k3_prog = {}
++            try:
++                _k3_nst = scheduler_output.num_scheduled_tokens
++                for _k3_nr in getattr(scheduler_output, 'scheduled_new_reqs', []) or []:
++                    _k3_rid = getattr(_k3_nr, 'req_id', None)
++                    if _k3_rid is not None:
++                        self._k3_prog[_k3_rid] = (
++                            int(getattr(_k3_nr, 'num_computed_tokens', 0)),
++                            int(_k3_nst.get(_k3_rid, 0)),
++                        )
++                _k3_cr = scheduler_output.scheduled_cached_reqs
++                for _k3_ci, _k3_crid in enumerate(_k3_cr.req_ids):
++                    self._k3_prog[_k3_crid] = (
++                        int(_k3_cr.num_computed_tokens[_k3_ci]),
++                        int(_k3_nst.get(_k3_crid, 0)),
++                    )
++            except Exception:
++                self._k3_prog = {}
+             # This is the logic for checking against chunked prefill.
+             # When the last chunk is identified,
+             # It places the request metadata into the saving queue.
+@@ -635,47 +953,143 @@ class MoRIIOConnectorScheduler:
+ 
+                 if new_block_ids is not None:
+                     block_ids = new_block_ids[0]
++                    # k3-chunked-allgrp: accumulate ALL groups' new blocks across
++                    # chunked prefill so all_group_block_ids grows with the
++                    # request (not frozen at chunk 1). new_block_ids is a
++                    # per-group tuple.
++                    try:
++                        if req_id in getattr(self, '_reqs_save_allgrp', {}):
++                            _k3ca_cur = self._reqs_save_allgrp[req_id]
++                            _k3ca_new = []
++                            for _k3ca_gi in range(len(_k3ca_cur)):
++                                _k3ca_add = (
++                                    list(new_block_ids[_k3ca_gi])
++                                    if _k3ca_gi < len(new_block_ids) else []
++                                )
++                                _k3ca_new.append(
++                                    list(_k3ca_cur[_k3ca_gi]) + _k3ca_add
++                                )
++                            self._reqs_save_allgrp[req_id] = _k3ca_new
++                            if req_id in getattr(self, '_reqs_save_mamba', {}) and len(_k3ca_new) > 1:
++                                # keep mamba list (group 0..n-2 are mamba; group[-1] is MLA)
++                                pass
++                    except Exception:
++                        pass
+                     # TODO : hybrid attn, etc
++                    # A non-disagg request (no kv_transfer_params, e.g. smoke
++                    # test) is never registered in _reqs_need_pending_save;
++                    # indexing it unconditionally would KeyError and crash the
++                    # EngineCore. Skip it silently.
++                    if req_id not in self._reqs_need_pending_save:
++                        continue
+                     req, existing_blocks = self._reqs_need_pending_save[req_id]
+                     updated_blocks = list(existing_blocks) + (block_ids)
+                     self._reqs_need_pending_save[req_id] = (req, updated_blocks)
+-                    if (
+-                        len(self._reqs_need_pending_save[req_id][1]) * self.block_size
+-                        >= req.num_prompt_tokens
+-                    ):
++                    _k3done2 = _k3_prefill_done(self, req_id, req)  # k3-chunk-gate
++                    if _k3done2 is None:
++                        _k3done2 = (
++                            len(self._reqs_need_pending_save[req_id][1]) * self.block_size
++                            >= req.num_prompt_tokens
++                        )
++                    if os.environ.get('K3_CHUNK_GATE_DEBUG', '0') == '1':
++                        import logging as _k3cg_lg
++                        _k3cg_lg.getLogger(__name__).warning(
++                            '[k3-chunk-gate-accum] req=%s nblk=%d npt=%d done=%s prog=%s',
++                            req_id, len(self._reqs_need_pending_save[req_id][1]),
++                            int(req.num_prompt_tokens), _k3done2,
++                            getattr(self, '_k3_prog', {}).get(req_id))
++                    if _k3done2:
++                        # Final chunk: live kv_transfer_params may be cleared,
++                        # so prefer the snapshot from update_state_after_alloc.
++                        kv_params = self._req_kv_params.pop(
++                            req_id, req.kv_transfer_params or {}
++                        )
+                         meta.add_new_req(
+                             request_id=req_id,
+                             local_block_ids=self._reqs_need_pending_save[req_id][1],
+-                            kv_transfer_params=req.kv_transfer_params or {},
++                            kv_transfer_params=kv_params,
+                             write_mode=True,
++                            mamba_local_block_ids=self._reqs_save_mamba.get(req_id, []),  # k3-mamba-blockids
++                            all_group_block_ids=self._reqs_save_allgrp.get(req_id, None),  # k3-group-routing
+                         )
+                         del self._reqs_need_pending_save[req_id]
+ 
++            # k3-chunk-gate-sweep: emit deferred reqs whose FINAL chunk added no
++            # new block (accum loop skipped them) but whose prefill is now done.
++            try:
++                for _k3sw_rid in list(self._reqs_need_pending_save.keys()):
++                    _k3sw_req, _k3sw_bl = self._reqs_need_pending_save[_k3sw_rid]
++                    _k3sw_done = _k3_prefill_done(self, _k3sw_rid, _k3sw_req)
++                    if os.environ.get('K3_CHUNK_GATE_DEBUG', '0') == '1':
++                        import logging as _k3sw_lg
++                        _k3sw_lg.getLogger(__name__).warning(
++                            '[k3-chunk-gate-sweep] req=%s nblk=%d npt=%d done=%s prog=%s',
++                            _k3sw_rid, len(_k3sw_bl), int(_k3sw_req.num_prompt_tokens),
++                            _k3sw_done, getattr(self, '_k3_prog', {}).get(_k3sw_rid))
++                    if not _k3sw_done:
++                        continue
++                    _k3sw_kv = self._req_kv_params.pop(
++                        _k3sw_rid, _k3sw_req.kv_transfer_params or {}
++                    )
++                    meta.add_new_req(
++                        request_id=_k3sw_rid,
++                        local_block_ids=self._reqs_need_pending_save[_k3sw_rid][1],
++                        kv_transfer_params=_k3sw_kv,
++                        write_mode=True,
++                        mamba_local_block_ids=self._reqs_save_mamba.get(_k3sw_rid, []),
++                        all_group_block_ids=self._reqs_save_allgrp.get(_k3sw_rid, None),
++                    )
++                    del self._reqs_need_pending_save[_k3sw_rid]
++            except Exception as _k3sw_e:
++                import logging as _k3sw_lg2
++                _k3sw_lg2.getLogger(__name__).warning('[k3-chunk-gate-sweep] err %s', _k3sw_e)
++
+         # Loop through scheduled reqs and convert to ReqMeta.
+         for req_id, (req, block_ids) in self._reqs_need_recv.items():
+-            assert req.kv_transfer_params is not None
++            kv_params = self._req_kv_params.get(req_id, req.kv_transfer_params or {})
+             meta.add_new_req(
+                 request_id=req_id,
+                 local_block_ids=block_ids,
+-                kv_transfer_params=req.kv_transfer_params,
++                kv_transfer_params=kv_params,
+             )
+ 
+         for req_id, (req, block_ids) in self._reqs_need_save.items():
+-            assert req.kv_transfer_params is not None
+-            if req.num_prompt_tokens > len(block_ids) * self.block_size:
++            kv_params = self._req_kv_params.get(req_id, req.kv_transfer_params or {})
++            # k3-chunk-gate: defer by COMPUTE progress (fresh per-step), not block count.
++            _k3done = _k3_prefill_done(self, req_id, req)
++            if _k3done is None:
++                _k3done = not (req.num_prompt_tokens > len(block_ids) * self.block_size)
++            if os.environ.get('K3_CHUNK_GATE_DEBUG', '0') == '1':
++                import logging as _k3be_lg
++                _k3be_lg.getLogger(__name__).warning(
++                    '[k3-chunk-gate-entry] req=%s nblk=%d npt=%d done=%s prog=%s',
++                    req_id, len(block_ids), int(req.num_prompt_tokens), _k3done,
++                    getattr(self, '_k3_prog', {}).get(req_id))
++            if not _k3done:
+                 # not last chunk prefill
+                 self._reqs_need_pending_save[req_id] = (req, block_ids)
+                 continue
+             meta.add_new_req(
+                 request_id=req_id,
+                 local_block_ids=block_ids,
+-                kv_transfer_params=req.kv_transfer_params,
++                kv_transfer_params=kv_params,
+                 write_mode=True,
++                mamba_local_block_ids=self._reqs_save_mamba.get(req_id, []),  # k3-mamba-blockids
++                all_group_block_ids=self._reqs_save_allgrp.get(req_id, None),  # k3-group-routing
+             )
+         # Clear the list once workers start the transfers
+ 
+         meta.reqs_to_send = self._reqs_need_send
+ 
++        # Reclaim snapshot cache entries that completed this step. Keep
++        # entries that are still pending (chunked prefill not yet at the
++        # final chunk) — those will be popped above on the final chunk.
++        for req_id in self._reqs_need_recv:
++            self._req_kv_params.pop(req_id, None)
++        for req_id in self._reqs_need_save:
++            if req_id not in self._reqs_need_pending_save:
++                self._req_kv_params.pop(req_id, None)
++
+         self._reqs_need_recv.clear()
+         self._reqs_need_save.clear()
+         self._reqs_need_send = {}
+@@ -702,14 +1116,14 @@ class MoRIIOConnectorScheduler:
+         """
+ 
+         request_id = request.request_id
++        params = request.kv_transfer_params
+         # Consumer: can unmap transfer_id<->request_id immediately since done_recving
+         #   has fired at this point (i.e. KV has been transferred)
+         # Producer: must keep the mapping until we get notification that blocks can
+         #   be freed, which may be several scheduler steps later.
+         if not self.is_producer:
+-            self.unmap_request_id(request_id)
+-
+-        params = request.kv_transfer_params
++            transfer_id = params.get("transfer_id") if params else None
++            self.unmap_request_id(request_id, transfer_id=transfer_id)
+         logger.debug(
+             "MoriioConnector request_finished, request_status=%s, "
+             "kv_transfer_params=%s",
+@@ -754,11 +1168,17 @@ class MoRIIOConnectorScheduler:
+                 + MoRIIOConstants.VLLM_MORI_READ_ABORT_REQUEST_TIMEOUT
+             )
+             self._deferred_send_deadlines[request.request_id] = (
+-                time.monotonic() + self._defer_timeout
++                time.monotonic() + self._defer_timeout,
++                params.get("transfer_id") if params else None,
+             )
+ 
+         # Return KV transfer params forwarded verbatim to the decode instance by
+-        # the router.
++        # the router. remote_dp_rank is the rank THIS prefill leg actually ran
++        # on: on the returnable paths (READ / serial WRITE) the router forwards
++        # it to the decode leg, so the decode->prefill notify is routed by pure
++        # propagation of the producer's real rank -- no hashing, no reliance on
++        # the router independently pinning the same rank. remote_dp_rank_override
++        # makes the decode side honor it via the global-rank match gate.
+         return delay_free_blocks, dict(
+             do_remote_prefill=True,
+             do_remote_decode=False,
+@@ -767,61 +1187,96 @@ class MoRIIOConnectorScheduler:
+             remote_host=self.host_ip,
+             remote_handshake_port=self.handshake_port,
+             remote_notify_port=self.side_notify_port,
++            remote_dp_rank=self._global_dp_rank,
++            remote_dp_rank_override=True,
+             remote_dp_size=self.vllm_config.parallel_config.data_parallel_size,
++            remote_dp_size_local=(
++                self.vllm_config.parallel_config.data_parallel_size_local
++            ),
+             tp_size=self.vllm_config.parallel_config.tensor_parallel_size,
+             transfer_id=params["transfer_id"],
+         )
+ 
+     def update_connector_output(self, connector_output: KVConnectorOutput) -> None:
+-        """Free KV blocks from sends that never received a completion signal.
+-
+-        Called every scheduler step. When a send is deferred (request_finished
+-        returns True), blocks remain allocated until the worker reports
+-        finished_sending. If that notification is lost (e.g. ibv_post_send
+-        failure), blocks leak permanently. This method injects timed-out
+-        entries into connector_output.finished_sending so the scheduler
+-        frees them via the normal path.
++        """Reconcile worker finished_sending ACKs with the producer lifecycle.
++
++        Called every scheduler step (when there is KV connector output),
++        BEFORE the scheduler's finished_sending free loop. We rewrite
++        ``connector_output.finished_sending`` in place so it contains
++        exactly the producer requests that are safe for the scheduler to
++        free this step, letting the scheduler keep the plain upstream
++        ``assert req_id in self.requests`` + ``_free_blocks`` path:
++
++        * An ACK whose request is in ``_deferred_send_deadlines``
++          (request_finished ran with delay_free_blocks=True, so the
++          scheduler is holding its blocks) is surfaced -> freed now.
++        * An ACK that arrives BEFORE its request finished is parked in
++          ``_pending_sent_acks`` and released on a later step once the
++          request enters ``_deferred_send_deadlines``.
++        * A deferred send whose ACK never arrives is reaped after
++          ``_defer_timeout`` and surfaced, so leaked blocks are freed.
++        * A parked ACK that never matches a deferral before its own
++          deadline is a stale duplicate (e.g. a real ACK landing after the
++          send was already reaped) and is dropped.
++
++        Consumers never populate finished_sending (they report
++        finished_recving), and they unmap in request_finished, so this is a
++        no-op for them.
+         """
+-        # Producer: unmap transfer_id<->request_id for sends that are now (async)
+-        #   reported as completed. This unmapping have to be deferred until now
+-        #   so get_finished can use it in any scheduler step.
+-        # Consumer: unmapping already done in request_finished
+-        if self.is_producer and connector_output.finished_sending:
+-            for req_id in connector_output.finished_sending:
+-                self.unmap_request_id(req_id)
+-
+-        if not self._deferred_send_deadlines:
++        if not self.is_producer:
+             return
+ 
+-        # Remove entries the worker already reported as finished_sending, these will be
+-        # freed anyways.
+-        for req_id in connector_output.finished_sending or ():
+-            self._deferred_send_deadlines.pop(req_id, None)
+-
++        incoming = set(connector_output.finished_sending or ())
+         now = time.monotonic()
+-        expired_reqs = [
++
++        # Surface ACKs whose request is already finished (blocks held for
++        # delayed free); park the rest until their request finishes.
++        safe: set[ReqId] = set()
++        for req_id in incoming:
++            if req_id in self._deferred_send_deadlines:
++                safe.add(req_id)
++            else:
++                self._pending_sent_acks.setdefault(req_id, now + self._defer_timeout)
++
++        # Release previously parked ACKs whose request has since finished.
++        for req_id in self._pending_sent_acks:
++            if req_id in self._deferred_send_deadlines:
++                safe.add(req_id)
++
++        # Reap deferred sends whose ACK never arrived (avoid leaking blocks).
++        expired = [
+             req_id
+-            for req_id, deadline in self._deferred_send_deadlines.items()
++            for req_id, (deadline, _) in self._deferred_send_deadlines.items()
+             if now >= deadline
+         ]
+-        if not expired_reqs:
+-            return
++        if expired:
++            safe.update(expired)
++            logger.warning(
++                "Reaped %d deferred sends with no finished_sending "
++                "notification after %.0fs. This indicates lost async KV "
++                "completion notifications from the KV connector.",
++                len(expired),
++                self._defer_timeout,
++            )
+ 
+-        if connector_output.finished_sending is None:
+-            connector_output.finished_sending = set()
+-        # Register the expired requests as finished so the scheduler frees their blocks.
+-        for req_id in expired_reqs:
+-            connector_output.finished_sending.add(req_id)
+-            del self._deferred_send_deadlines[req_id]
+-            if self.is_producer:
+-                self.unmap_request_id(req_id)
+-        logger.warning(
+-            "Reaped %d deferred sends with no finished_sending notification "
+-            "after %.0fs. This indicates lost async KV completion "
+-            "notifications from the KV connector.",
+-            len(expired_reqs),
+-            self._defer_timeout,
+-        )
++        # Finalize the requests we are surfacing: drop their deferral/park
++        # bookkeeping and unmap their transfer ids.
++        for req_id in safe:
++            deferred_info = self._deferred_send_deadlines.pop(req_id, None)
++            transfer_id = deferred_info[1] if deferred_info else None
++            self._pending_sent_acks.pop(req_id, None)
++            self.unmap_request_id(req_id, transfer_id=transfer_id)
++
++        # Drop stale parked ACKs that never matched a deferral in time.
++        stale = [
++            req_id
++            for req_id, deadline in self._pending_sent_acks.items()
++            if now >= deadline
++        ]
++        for req_id in stale:
++            self._pending_sent_acks.pop(req_id, None)
++
++        connector_output.finished_sending = safe or None
+ 
+ 
+ class MoRIIOConnectorWorker:
+@@ -857,6 +1312,39 @@ class MoRIIOConnectorWorker:
+         self.kv_transfer_config = vllm_config.kv_transfer_config
+         self.is_producer = self.kv_transfer_config.is_kv_producer
+         self.layer_to_spec = build_layer_to_spec(kv_cache_config)
++        # k3-group-routing: Kimi-K3 has 4 kv-cache groups (0/1/2 mamba, 3 MLA).
++        # Map each layer to ITS OWN group index and find the attention
++        # (non-Mamba) group so every layer routes to its own block-id list.
++        self._layer_group_idx: dict[str, int] = {}
++        self._attn_group_idx = 0
++        try:
++            from vllm.v1.kv_cache_interface import MambaSpec as _K3GR_Mamba
++            _k3gr_groups = getattr(kv_cache_config, "kv_cache_groups", []) or []
++            for _k3gr_gi, _k3gr_grp in enumerate(_k3gr_groups):
++                for _k3gr_ln in getattr(_k3gr_grp, "layer_names", []) or []:
++                    self._layer_group_idx[_k3gr_ln] = _k3gr_gi
++            for _k3gr_gi, _k3gr_grp in enumerate(_k3gr_groups):
++                _k3gr_lns = getattr(_k3gr_grp, "layer_names", []) or []
++                if _k3gr_lns and not isinstance(
++                    self.layer_to_spec.get(_k3gr_lns[0]), _K3GR_Mamba
++                ):
++                    self._attn_group_idx = _k3gr_gi
++                    break
++        except Exception:
++            self._layer_group_idx = {}
++            self._attn_group_idx = 0
++        import os as _k3gros
++        self._k3_group_routing = (
++            _k3gros.environ.get("K3_GROUP_ROUTING", "1") == "1"
++        )
++        logger.info(
++            "[k3-group-routing] enabled=%s attn_group_idx=%s n_groups=%s "
++            "sample_layer_group_idx=%s",
++            self._k3_group_routing,
++            self._attn_group_idx,
++            len(getattr(kv_cache_config, "kv_cache_groups", []) or []),
++            dict(list(self._layer_group_idx.items())[:4]),
++        )
+ 
+         if self.is_producer:
+             set_role(ROLE.PRODUCER)
+@@ -972,7 +1460,7 @@ class MoRIIOConnectorWorker:
+ 
+         self.side_channel_port: int = (
+             self.moriio_config.handshake_port
+-            + get_port_offset(self.dp_rank, self.tp_rank)
++            + get_port_offset(self.dp_rank, self.tp_rank, self.moriio_config.tp_size)  # k3-portoff
+         )
+         self.engine_id: EngineId = engine_id
+ 
+@@ -998,6 +1486,10 @@ class MoRIIOConnectorWorker:
+         self._recving_transfers: defaultdict[ReqId, list] = defaultdict(list)
+         # Values are (remote_host, remote_notify_port, transfer_id).
+         self._recving_transfers_callback_addr: dict[ReqId, tuple[str, str, str]] = {}
++        # Monotonic-clock start times for each in-flight recv transfer.
++        # Used by _pop_done_transfers to abort transfers whose RDMA
++        # completion is lost, instead of hanging forever.
++        self._recving_transfers_start: dict[str, float] = {}
+ 
+         # Track the expiration time of requests that are waiting to be sent.
+         self._reqs_to_send: dict[ReqId, float] = {}
+@@ -1058,6 +1550,8 @@ class MoRIIOConnectorWorker:
+         kv_layer: torch.Tensor,
+         remote_notify_port: int,
+         remote_ip: str,
++        mamba_local_block_ids: list[int] | None = None,  # k3-mamba-blockids
++        all_group_block_ids: list[list[int]] | None = None,  # k3-group-routing
+     ) -> None:
+         """Schedule a block write operation.
+ 
+@@ -1088,6 +1582,8 @@ class MoRIIOConnectorWorker:
+             dst_engine_id=dst_engine_id,
+             local_block_ids=local_block_ids,
+             remote_block_ids_hint=remote_block_ids,
++            mamba_local_block_ids=mamba_local_block_ids,  # k3-mamba-blockids
++            all_group_block_ids=all_group_block_ids,  # k3-group-routing
+             layer_name=layer_name,
+             event=event,
+             remote_notify_port=remote_notify_port,
+@@ -1285,7 +1781,12 @@ class MoRIIOConnectorWorker:
+             if remote_tp_rank is None
+             else int(remote_tp_rank)
+         )
+-        port_offset = get_port_offset(remote_dp_rank, dial_tp_rank, remote_tp_size)
++        # k3-remote-tp-fix: normalize degenerate remote_tp_size for the port math
++        # too, so prefill rank k dials decode port base+k (symmetric TP).
++        _k3_rts = remote_tp_size
++        if _k3_rts <= 1 and self.world_size > 1:
++            _k3_rts = self.world_size
++        port_offset = get_port_offset(remote_dp_rank, dial_tp_rank, _k3_rts)
+         path = make_zmq_path("tcp", host, port + port_offset)
+         logger.debug("handshake Querying metadata on path: %s", path)
+ 
+@@ -1352,7 +1853,13 @@ class MoRIIOConnectorWorker:
+ 
+     def _remote_tp_rank(self, remote_tp_size: int) -> int:
+         # 0/unknown remote TP == homogeneous (avoids collapsing all ranks to 0).
+-        if remote_tp_size == 0:
++        # k3-remote-tp-fix: remote_tp_size==1 from an un-advertising router ALSO
++        # collapses every prefill rank to decode tp0 (k//local = 0). For our
++        # symmetric-TP P/D, normalize any degenerate (<=1) remote size to the
++        # local world_size so rank k -> decode rank k.
++        if remote_tp_size <= 1 and self.world_size > 1:
++            remote_tp_size = self.world_size
++        elif remote_tp_size == 0:
+             remote_tp_size = self.world_size
+         return get_moriio_remote_tp_rank(self.tp_rank, self.world_size, remote_tp_size)
+ 
+@@ -1368,6 +1875,53 @@ class MoRIIOConnectorWorker:
+             port = int(meta.remote_handshake_port)
+             tp_size = int(meta.tp_size)
+             remote_dp_size = int(meta.remote_dp_size)
++            # Wide-EP multi-pod: remote DP ranks span pods at different IPs
++            # (ranks per pod = dp_local), so resolve the host per cur_dp_rank
++            # below instead of using a single host for all ranks.
++            # k3-podhosts: fall back to the launcher-advertised peer pod-host
++            # list (kv_connector_extra_config['moriio_pod_hosts'], ordered by
++            # pod index) instead of the single master host, so prefill can reach
++            # decode ranks that live on a HEADLESS worker node (invisible to the
++            # router). meta.multi_pod_hosts is [remote_host] (a single-host DEFAULT)
++            # when the router omits remote_hosts, so we must prefer the launcher list
++            # whenever it advertises MORE pods than meta -- not only when meta is empty.
++            _k3_meta_hosts = list(meta.multi_pod_hosts) if meta.multi_pod_hosts else []
++            _k3_ph = (
++                self.kv_transfer_config.kv_connector_extra_config.get(
++                    "moriio_pod_hosts", ""
++                )
++                if hasattr(self, "kv_transfer_config")
++                else ""
++            )
++            _k3_ph = [h.strip() for h in str(_k3_ph).split(",") if h.strip()]
++            if len(_k3_ph) > len(_k3_meta_hosts):
++                pod_hosts = _k3_ph
++                logger.info(
++                    "[k3-podhosts] using launcher pod_hosts=%s (meta had %s)",
++                    pod_hosts, _k3_meta_hosts,
++                )
++            elif _k3_meta_hosts:
++                pod_hosts = _k3_meta_hosts
++            else:
++                pod_hosts = [host]
++            # k3-podhosts: remote_dp_size_local (DP ranks PER POD) drives
++            # pod_index = global_dp_rank // dp_local. The router never sends it, so
++            # meta.remote_dp_size_local defaults to remote_dp_size (the GLOBAL size)
++            # -> pod_index collapses to 0 -> every rank resolves to pod 0 (master),
++            # so rank1's KV is written to the master not the worker. Derive the true
++            # per-pod local size from len(pod_hosts): dp_local = remote_dp_size //
++            # num_pods. With 2 pods and remote_dp_size 2 -> dp_local 1 -> pod_index
++            # (1,1)=1 -> pod_hosts[1]=worker. Honor an explicit meta value if the
++            # router ever sets one (< remote_dp_size).
++            _k3_npods = max(1, len(pod_hosts))
++            if int(meta.remote_dp_size_local) and int(meta.remote_dp_size_local) < remote_dp_size:
++                remote_dp_size_local = int(meta.remote_dp_size_local)
++            elif remote_dp_size % _k3_npods == 0:
++                remote_dp_size_local = remote_dp_size // _k3_npods
++                logger.info(
++                    "[k3-podhosts] derived remote_dp_size_local=%d (dp_size=%d, pods=%d)",
++                    remote_dp_size_local, remote_dp_size, _k3_npods,
++                )
+ 
+         def request_ready(_f: Future[Any], entry=(req_id, meta)):
+             logger.info("MoRIIO handshake done for request %s", req_id)
+@@ -1381,8 +1935,21 @@ class MoRIIOConnectorWorker:
+ 
+         for cur_dp_rank in range(remote_dp_size):
+             dp_engine_id = self.get_engine_name_with_dp(remote_engine_id, cur_dp_rank)
++            _pod_idx = pod_index(cur_dp_rank, remote_dp_size_local)
++            if _pod_idx >= len(pod_hosts):
++                _pod_idx = 0
++            _per_rank_host = pod_hosts[_pod_idx]
++            # The handshake port offset must use the per-pod local rank, since
++            # each pod binds sockets only for its local ranks; dp_engine_id
++            # keeps the global rank for uniqueness. Single-pod is bit-identical.
++            _per_rank_local_dp = fold_local_rank(cur_dp_rank, remote_dp_size_local)
+             future = self._handshake_initiation_executor.submit(
+-                self._moriio_handshake, host, port, tp_size, dp_engine_id, cur_dp_rank
++                self._moriio_handshake,
++                _per_rank_host,
++                port,
++                tp_size,
++                dp_engine_id,
++                _per_rank_local_dp,
+             )
+             fut_list.append(future)
+ 
+@@ -1463,7 +2030,35 @@ class MoRIIOConnectorWorker:
+             block_shape = first_kv_cache.shape[-block_rank:]
+         self.num_blocks = first_geometry.num_blocks
+         self.slot_size_bytes = first_geometry.slot_size_bytes
+-        assert first_geometry.block_size == self.block_size
++        # k3-kda: block_size must reflect the ATTENTION layers, not mamba.
++        # For hybrid K3 the full-attention layers are MLA (excluded from the
++        # first_layer_name selector above), so first_layer_name can be a KDA
++        # mamba layer whose block_size is 1 (indivisible state page). Using
++        # that as self.block_size would then make every real attention layer
++        # (block_size 1536 after the mamba-page padding) trip the guard below.
++        # Reconcile from the first non-mamba layer's geometry instead.
++        from vllm.v1.kv_cache_interface import MambaSpec as _K3MambaSpecBS  # k3-kda
++        _attn_block_size = None
++        for _ln in kv_caches:
++            if isinstance(self.layer_to_spec.get(_ln), _K3MambaSpecBS):
++                continue
++            _attn_block_size = self._get_layer_transfer_geometry(_ln).block_size
++            break
++        if _attn_block_size is None:
++            _attn_block_size = first_geometry.block_size
++        if _attn_block_size != self.block_size:
++            # DeepSeek-V3 / MLA backends (e.g. FlashMLA) override the
++            # configured block_size at attention-layer creation time, so
++            # the KV cache tensor is laid out with a different (usually
++            # larger) block_size than vllm_config.cache_config.block_size.
++            # Trust the actual tensor shape and reconcile.
++            logger.info(
++                "KV cache block_size=%d differs from config block_size=%d; "
++                "using actual tensor shape (attention backend override).",
++                _attn_block_size,
++                self.block_size,
++            )
++            self.block_size = _attn_block_size
+         # TODO(tms): self.block_len needs to be per-layer for sliding window,
+         # hybrid attn, etc
+         # block size in bytes
+@@ -1476,9 +2071,15 @@ class MoRIIOConnectorWorker:
+         kv_caches_base_addr = []
+         caches_data = []
+ 
++        from vllm.v1.kv_cache_interface import MambaSpec as _K3MambaSpec  # k3-kda
+         for layer_name in kv_caches:
+             geometry = self._get_layer_transfer_geometry(layer_name)
+-            if geometry.block_size != self.block_size:
++            # k3-kda: mamba layers use block_size=1 (indivisible state
++            # page), not the attention block_size; skip the guard.
++            _k3_is_mamba = isinstance(
++                self.layer_to_spec.get(layer_name), _K3MambaSpec
++            )
++            if not _k3_is_mamba and geometry.block_size != self.block_size:
+                 raise ValueError(
+                     "MoRIIO KV cache block size mismatch for layer "
+                     f"{layer_name}: {geometry.block_size} != {self.block_size}"
+@@ -1634,6 +2235,7 @@ class MoRIIOConnectorWorker:
+ 
+     def _pop_done_transfers(self) -> set[str]:
+         done_req_ids: set[str] = set()
++        _xfer_timeout = int(os.environ.get("VLLM_MORIIO_TRANSFER_TIMEOUT_S", "120"))
+         with self.moriio_wrapper.lock:
+             to_remove = []
+             for req_id, status_list in self._recving_transfers.items():
+@@ -1675,9 +2277,25 @@ class MoRIIOConnectorWorker:
+                     to_remove.append(req_id)
+                     # Do NOT add to done_req_ids: decode KV cache is incomplete.
+                     # The request will expire via the normal request timeout.
++                elif req_id in self._recving_transfers_start:
++                    # Abort still-in-flight transfers that exceed the
++                    # configured deadline. Otherwise a lost RDMA
++                    # completion would leave the decode worker hung
++                    # indefinitely on this request.
++                    _age = time.monotonic() - self._recving_transfers_start[req_id]
++                    if _age > _xfer_timeout:
++                        logger.error(
++                            "RDMA read TIMED OUT for req %s after %.1fs "
++                            "(VLLM_MORIIO_TRANSFER_TIMEOUT_S=%d)",
++                            req_id,
++                            _age,
++                            _xfer_timeout,
++                        )
++                        to_remove.append(req_id)
+             for req_id in to_remove:
+                 del self._recving_transfers[req_id]
+                 del self._recving_transfers_callback_addr[req_id]
++                self._recving_transfers_start.pop(req_id, None)
+ 
+             return done_req_ids
+ 
+@@ -1693,6 +2311,17 @@ class MoRIIOConnectorWorker:
+             return
+         if self.mode == MoRIIOMode.READ:
+             return
++        # k3-kda: MORIIO_SKIP_MAMBA=1 -> do NOT run the per-layer save hook for
++        # KDA/mamba layers. The per-layer save schedules an inline RDMA write
++        # (torch.cuda.Event().record on the layer's kv tensor) DURING the forward;
++        # on the mamba cache, at the very first layers (K3 layers 0-3 are KDA), this
++        # races/collides with the MoRI-EP all2all -> "Memory access fault" on all
++        # ranks before any KDA compute. Skipping the mamba save isolates that.
++        import os as _os_k3s
++        if _os_k3s.environ.get("MORIIO_SKIP_MAMBA", "0") == "1":
++            from vllm.v1.kv_cache_interface import MambaSpec as _K3MambaSpecSK
++            if isinstance(self.layer_to_spec.get(layer_name), _K3MambaSpecSK):
++                return
+         remote_engine_id = None
+ 
+         for req_id, meta in metadata.reqs_to_save.items():
+@@ -2043,6 +2672,40 @@ class MoRIIOConnectorWorker:
+         )
+ 
+     def _write_blocks_for_req(self, req_id: ReqId, meta: ReqMeta, layer_name, kv_layer):
++        # Stash multi_pod_hosts + local DP size on the worker so
++        # MoRIIOEngine._finalize_if_complete (which sees only the WriteTask,
++        # not ReqMeta) can pick the per-rank pod IP for the completion notify.
++        # Last-writer-wins is safe: all requests share the same topology.
++        # k3-podhosts: prefer launcher-advertised peer pod-hosts + derived
++        # dp_local over the single-host / global-dp_size meta defaults, so the
++        # write_done completion notify targets the right prefill pod/rank.
++        _k3_meta_ph = list(meta.multi_pod_hosts) if meta.multi_pod_hosts else []
++        _k3_lp = (
++            self.kv_transfer_config.kv_connector_extra_config.get(
++                "moriio_pod_hosts", ""
++            )
++            if hasattr(self, "kv_transfer_config")
++            else ""
++        )
++        _k3_lp = [h.strip() for h in str(_k3_lp).split(",") if h.strip()]
++        if len(_k3_lp) > len(_k3_meta_ph):
++            self.multi_pod_hosts = _k3_lp
++        elif _k3_meta_ph:
++            self.multi_pod_hosts = _k3_meta_ph
++        else:
++            self.multi_pod_hosts = [meta.remote_host]
++        _k3_gdp = int(meta.remote_dp_size)
++        _k3_npods = max(1, len(self.multi_pod_hosts))
++        if 0 < int(meta.remote_dp_size_local) < _k3_gdp:
++            self.remote_dp_size_local = int(meta.remote_dp_size_local)
++        elif _k3_gdp % _k3_npods == 0:
++            self.remote_dp_size_local = _k3_gdp // _k3_npods
++        else:
++            self.remote_dp_size_local = _k3_gdp
++        logger.info(
++            "[k3-podhosts] write-stash multi_pod_hosts=%s remote_dp_size_local=%d",
++            self.multi_pod_hosts, self.remote_dp_size_local,
++        )
+         self.schedule_write_blocks(
+             request_id=req_id,
+             transfer_id=meta.transfer_id,
+@@ -2053,6 +2716,8 @@ class MoRIIOConnectorWorker:
+             kv_layer=kv_layer,
+             remote_notify_port=meta.remote_notify_port,
+             remote_ip=meta.remote_host,
++            mamba_local_block_ids=meta.mamba_local_block_ids,  # k3-mamba-blockids
++            all_group_block_ids=meta.all_group_block_ids,  # k3-group-routing
+         )
+ 
+     def merge_contiguous_blocks(
+@@ -2271,6 +2936,7 @@ class MoRIIOConnectorWorker:
+                 _backoff = min(_backoff * 2, 0.05)
+             with self.moriio_wrapper.lock:
+                 self._recving_transfers[request_id].append(transfer_status)
++                self._recving_transfers_start.setdefault(request_id, time.monotonic())
+                 self._recving_transfers_callback_addr[request_id] = (
+                     remote_host,
+                     str(
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
+index 5814fc8335f8c330fe5db326031bc0b24760b44e..892eb9ea6f5575cf304d7da8387267f6e8a84082 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_engine.py
+@@ -311,7 +311,17 @@ class MoRIIOWriter:
+         with self._write_state_lock:
+             request_info.completion_request_id = task.request_id
+             request_info.completion_remote_notify_port = task.remote_notify_port
+-            request_info.completion_remote_ip = task.remote_ip
++            # Wide-EP multi-pod: task.remote_ip addresses only the first pod,
++            # so resolve the per-rank host from multi_pod_hosts (falls back to
++            # task.remote_ip for single-pod or on any indexing miss).
++            _remote_ip = task.remote_ip
++            _hosts = list(getattr(self.worker, "multi_pod_hosts", []) or [])
++            _dp_local = int(getattr(self.worker, "remote_dp_size_local", 0) or 0)
++            if _hosts and _dp_local > 0:
++                _pod_idx = int(request_info.decode_dp_rank) // _dp_local
++                if 0 <= _pod_idx < len(_hosts):
++                    _remote_ip = _hosts[_pod_idx]
++            request_info.completion_remote_ip = _remote_ip
+             if task.transfer_id in self._sealed_writes:
+                 request_info.writes_expected = self._sealed_writes[task.transfer_id]
+ 
+@@ -329,6 +339,15 @@ class MoRIIOWriter:
+         # otherwise it will cause precision issues.
+         # This event is used to synchronize the kv transfer and computation tasks.
+         task.event.synchronize()
++        import os as _k3dsos
++        if _k3dsos.environ.get('K3_WRITE_DEVSYNC', '') in ('1', 'true', 'on'):
++            # k3-write-fence: full-device sync so aux-stream KV inserts finish
++            # before RDMA reads local cache (event only covers one stream).
++            try:
++                import torch as _k3t
++                _k3t.cuda.synchronize()
++            except Exception:
++                pass
+ 
+         # Update engine ID with DP rank
+         task.dst_engine_id = self.worker.get_engine_name_with_dp(
+@@ -370,10 +389,44 @@ class MoRIIOWriter:
+         geometry_key = _get_write_geometry_key(layer_cache)
+         offsets = request_info.transfer_offsets.get(geometry_key)
+         if offsets is None:
++            from vllm.v1.kv_cache_interface import MambaSpec as _K3MS_BL  # k3-mamba-blockids
++            # k3-group-routing: route EVERY layer by ITS OWN kv-cache-group index.
++            # Kimi-K3 has 4 groups (0/1/2 mamba, 3 MLA); the legacy code below
++            # hardcoded [0]/[1] and sent MLA KV to mamba block ids. When all
++            # groups' block ids are carried end-to-end (K3_GROUP_ROUTING=1) use
++            # the per-layer group index; otherwise fall back to legacy behavior.
++            _k3_gr_local = getattr(task, "all_group_block_ids", None)
++            _k3_gr_remote = getattr(request_info, "all_group_block_ids", None)
++            _k3_gr_on = getattr(self.worker, "_k3_group_routing", False)
++            if (
++                _k3_gr_on
++                and _k3_gr_local is not None
++                and _k3_gr_remote is not None
++            ):
++                _k3_gi = self.worker._layer_group_idx.get(
++                    task.layer_name, self.worker._attn_group_idx
++                )
++                if _k3_gi < len(_k3_gr_local) and _k3_gi < len(_k3_gr_remote):
++                    _k3_local = _k3_gr_local[_k3_gi]
++                    _k3_remote = _k3_gr_remote[_k3_gi]
++                else:
++                    _k3_local = task.local_block_ids
++                    _k3_remote = request_info.block_ids
++            elif isinstance(
++                self.worker.layer_to_spec.get(task.layer_name), _K3MS_BL
++            ):
++                # k3-mamba-blockids (legacy 2-group fallback): mamba/KDA state
++                # lives in a SEPARATE KV-cache group whose slot ids differ from
++                # the attention group's block ids.
++                _k3_local = task.mamba_local_block_ids or task.local_block_ids
++                _k3_remote = request_info.mamba_block_ids or request_info.block_ids
++            else:
++                _k3_local = task.local_block_ids
++                _k3_remote = request_info.block_ids
+             offsets = self.worker._compute_block_transfer_offsets(
+                 task.layer_name,
+-                task.local_block_ids,
+-                request_info.block_ids,
++                _k3_local,
++                _k3_remote,
+                 remote_moriio_meta,
+             )
+             request_info.transfer_offsets[geometry_key] = offsets
+@@ -454,13 +507,33 @@ class MoRIIOWriter:
+         # Wait for this request's transfers to complete.
+         self.worker.moriio_wrapper.waiting_for_transfer_complete(transfer_statuses)
+ 
++        # The notify port offset must use the per-pod local rank
++        # (% dp_local), since each pod binds notify sockets only for its local
++        # ranks. Single-pod is bit-identical (modulus is a no-op).
++        _dp_local = int(getattr(self.worker, "remote_dp_size_local", 0) or 0)
++        _decode_dp_rank_for_port = int(request_info.decode_dp_rank)
++        if _dp_local > 0:
++            _decode_dp_rank_for_port = _decode_dp_rank_for_port % _dp_local
+         remote_port = remote_notify_port + get_port_offset(
+-            request_info.decode_dp_rank, self.worker.tp_rank
++            _decode_dp_rank_for_port, self.worker.tp_rank, self.worker.moriio_config.tp_size  # k3-portoff
+         )
+         # Consider using RDMA immediate data in decode side
+         # to eliminate the need for this notification.
+         # Consider including the first gen token from prefill in the notification
+ 
++        # k3-write-fence: ordering fence before write_done. The RDMA write and
++        # the ZMQ/TCP write_done travel different paths; sender-local RDMA
++        # completion does not guarantee the data is visible in the RECEIVER's
++        # HBM. Without a fence decode can read stale HBM (non-deterministic
++        # recall). 'delay' mode is the diagnostic; 'readback' the real fix.
++        import os as _k3wfos, time as _k3wftime
++        _k3wf = _k3wfos.environ.get('K3_WRITE_FENCE', '').lower()
++        if _k3wf in ('delay', '1', 'true', 'on'):
++            try:
++                _k3ms = float(_k3wfos.environ.get('K3_WRITE_FENCE_MS', '20'))
++            except Exception:
++                _k3ms = 20.0
++            _k3wftime.sleep(_k3ms / 1000.0)
+         # Send completion notification
+         self.worker.moriio_wrapper.send_notify(
+             transfer_id, remote_ip, remote_port, message_type="write_done"
+@@ -757,6 +830,8 @@ class MoRIIOWrapper:
+         assert get_role() == ROLE.PRODUCER, "Only prefill can get block messages"
+         transfer_id = data["transfer_id"]
+         block_notify_list = data.get("block_notify_list", [])
++        mamba_block_notify_list = data.get("mamba_block_notify_list", [])  # k3-mamba-blockids
++        all_group_block_notify = data.get("all_group_block_notify", [])  # k3-group-routing
+         decode_dp_rank = data.get("decode_rank", 0)
+         if not block_notify_list:
+             raise MoRIIOError(
+@@ -771,7 +846,12 @@ class MoRIIOWrapper:
+                 )
+                 return
+             self.done_remote_allocate_req_dict[transfer_id] = RemoteAllocInfo(
+-                block_ids=block_notify_list, decode_dp_rank=decode_dp_rank
++                block_ids=block_notify_list, decode_dp_rank=decode_dp_rank,
++                mamba_block_ids=list(mamba_block_notify_list or []),  # k3-mamba-blockids
++                all_group_block_ids=(  # k3-group-routing
++                    [list(g) for g in all_group_block_notify]
++                    if all_group_block_notify else None
++                ),
+             )
+ 
+     def _handle_write_done_message(self, data: dict):
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_layout.py b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_layout.py
+index 90aa5f823a818b742418369a653bc25b31ef173f..c4521ff5e01ea80520d9a083a009ded8db794179 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_layout.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_layout.py
+@@ -6,6 +6,10 @@ from typing import NamedTuple
+ 
+ import torch
+ 
++from vllm.v1.kv_cache_interface import MambaSpec as _K3MambaSpec  # k3-kda
++from vllm.distributed.kv_transfer.kv_connector.v1.ssm_conv_transfer_utils import (  # k3-kda
++    derive_mamba_conv_split as _k3_derive_split,
++)
+ from vllm.v1.kv_cache_interface import (
+     AttentionSpec,
+     KVCacheConfig,
+@@ -253,6 +257,27 @@ def get_layer_transfer_geometry(
+             split_kv_regions=False,
+         )
+ 
++    # k3-kda: MambaSpec (KDA / GDN gated-delta-net) hybrid-state layer.
++    if isinstance(spec, _K3MambaSpec):
++        # block_len/slot MUST be the PHYSICAL (padded) page. The hybrid allocator
++        # pads the mamba page to match the attention page ("Padding mamba page
++        # size by N%"), and the cache tensor is [num_blocks, 1, 1, page_size_bytes].
++        # Using the unpadded conv+ssm size here under-registers the tensor and
++        # (via compute_mamba_block_transfer_offsets) drifts block offsets OOB.
++        _page = int(spec.page_size_bytes)
++        _num_blocks = int(shape[0])
++        return LayerTransferGeometry(
++            num_blocks=_num_blocks,
++            block_size=1,
++            block_len=_page,
++            slot_size_bytes=_page,
++            block_stride=(stride[0] if len(stride) > 0 else _page // element_size),
++            local_kv_stride=None,
++            remote_kv_stride=None,
++            transfers_per_block=1,
++            regions_per_block=1,
++            split_kv_regions=False,
++        )
+     cache_kind = "MLA" if is_mla_cache else "K/V"
+     raise ValueError(
+         f"Unsupported MoRIIO {cache_kind} cache shape for layer "
+@@ -301,6 +326,86 @@ def merge_contiguous_offsets(
+     )
+ 
+ 
++def compute_mamba_block_transfer_offsets(
++    layer_name,
++    kv_cache,
++    spec,
++    local_block_ids,
++    remote_block_ids,
++    remote_num_blocks,
++    merge_fn,
++):
++    """k3-kda: byte offsets for a mamba (KDA/GDN) layer's conv+ssm sub-regions.
++
++    Emits, per (local_block, remote_block) pair, one transfer per sub-region:
++    conv sub-projections [Q,K,V] then the ssm/recurrent state. Homogeneous TP
++    only (P_TP == D_TP); tp_ratio == 1 so remote offsets == local offsets.
++    """
++    from vllm.distributed.kv_transfer.kv_connector.v1.ssm_conv_transfer_utils import (
++        derive_mamba_conv_split,
++    )
++
++    # k3-kda DIAGNOSTIC: MORIIO_SKIP_MAMBA=1 no-ops the KDA/mamba state transfer
++    # (MLA KV still transfers). If the producer stops GPU-faulting under this flag,
++    # the fault is isolated to the KDA state write path (expected). Output on the
++    # ~69 KDA layers is then wrong (state not handed off) but the run must COMPLETE.
++    import os as _os
++    if _os.environ.get("MORIIO_SKIP_MAMBA", "0") == "1":
++        return [], [], []
++
++    if len(local_block_ids) > len(remote_block_ids):
++        raise ValueError(
++            "local_block_ids longer than remote_block_ids (mamba): "
++            f"{len(local_block_ids)} > {len(remote_block_ids)}"
++        )
++
++    split = derive_mamba_conv_split(spec, local_tp=1)
++    conv_bytes, ssm_bytes = split.ssm_sizes
++    # Sub-regions within one page: conv sub-projections, then ssm.
++    subregions = list(split.local_conv_offsets)  # [(off,size), ...] for Q,K,V
++    subregions.append((int(conv_bytes), int(ssm_bytes)))  # ssm follows conv
++
++    # k3-kda: block stride MUST be the PHYSICAL page (spec.page_size_bytes),
++    # which the hybrid allocator pads (e.g. "Padding mamba page size by 8.68%")
++    # so the mamba page matches the attention page. The unpadded conv+ssm size
++    # (conv_bytes+ssm_bytes) is only the live data within a page; using it as the
++    # block stride drifts every block offset by (padded-unpadded) per block ->
++    # higher block IDs land out of bounds -> RDMA writes fault the GPU. The tensor
++    # itself is [num_blocks, 1, 1, page_size_bytes] (gpu_model_runner reshape), so
++    # stride = spec.page_size_bytes is the correct block spacing.
++    stride = int(spec.page_size_bytes)
++
++    n = len(local_block_ids) * len(subregions)
++    offset_local = [0] * n
++    offset_remote = [0] * n
++    sizes = [0] * n
++    w = 0
++    # k3-kda bounds check: the local mamba cache tensor spans
++    # num_blocks * page_size_bytes; any (offset+size) beyond it is an OOB RDMA
++    # address -> GPU memory fault. Validate + log before scheduling the write.
++    try:
++        _tensor_bytes = int(kv_cache.numel()) * int(kv_cache.element_size())
++    except Exception:
++        _tensor_bytes = -1
++    for lb, rb in zip(local_block_ids, remote_block_ids):
++        lbase = lb * stride
++        rbase = rb * stride
++        for off, sz in subregions:
++            offset_local[w] = lbase + off
++            offset_remote[w] = rbase + off  # tp_ratio==1 -> same sub-offset
++            sizes[w] = sz
++            if _tensor_bytes >= 0 and (lbase + off + sz) > _tensor_bytes:
++                import logging as _lg
++                _lg.getLogger(__name__).error(
++                    "[k3-kda OOB] layer=%s lb=%d off=%d sz=%d end=%d > "
++                    "tensor_bytes=%d (stride=%d page_size_bytes=%d num_local=%d)",
++                    layer_name, lb, off, sz, lbase + off + sz, _tensor_bytes,
++                    stride, int(spec.page_size_bytes), len(local_block_ids),
++                )
++            w += 1
++    return merge_fn(offset_local, offset_remote, sizes)
++
++
+ def compute_block_transfer_offsets(
+     layer_name: str,
+     kv_cache: torch.Tensor,
+@@ -312,6 +417,13 @@ def compute_block_transfer_offsets(
+         [list[int], list[int], list[int]], tuple[list[int], list[int], list[int]]
+     ] = merge_contiguous_offsets,
+ ) -> tuple[list[int], list[int], list[int]]:
++    from vllm.v1.kv_cache_interface import MambaSpec as _K3MambaSpec  # k3-kda
++    _spec = layer_to_spec[layer_name]
++    if isinstance(_spec, _K3MambaSpec):  # k3-kda: conv/ssm sub-regions
++        return compute_mamba_block_transfer_offsets(
++            layer_name, kv_cache, _spec, local_block_ids,
++            remote_block_ids, remote_num_blocks, merge_fn,
++        )
+     # A shorter (or empty) local list is the READ-mode "drop the transfer, just
+     # free the prefill blocks" case (full-prefix-hit / aborted-before-scheduled):
+     # decode pulls fewer blocks than the prefill holds. The zip loop below pairs
+diff --git a/vllm/envs.py b/vllm/envs.py
+index b3fbfccbc19c605c543c27f2faf386f040c53995..a57d472df69e785df3ca3bb77294613c1d0b90b6 100755
+--- a/vllm/envs.py
++++ b/vllm/envs.py
+@@ -131,6 +131,7 @@ if TYPE_CHECKING:
+     VLLM_ROCM_USE_AITER_LINEAR_HIPBMM: bool = False
+     VLLM_ROCM_USE_AITER_MOE: bool = True
+     VLLM_ROCM_AITER_MOE_DISPATCH_POLICY: int = 0
++    VLLM_KIMI_ROW_PARALLEL_LATENT_UP_PROJ: int = 0
+     AITER_SITUV2_A8W4: bool = False
+     VLLM_ROCM_USE_AITER_RMSNORM: bool = True
+     VLLM_ROCM_USE_AITER_MLA: bool = True
+@@ -1227,6 +1228,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
+     "VLLM_ROCM_AITER_MOE_DISPATCH_POLICY": lambda: int(
+         os.getenv("VLLM_ROCM_AITER_MOE_DISPATCH_POLICY", "0")
+     ),
++    # Min batch tokens for evaluating a latent-MoE up projection row-parallel
++    # over TP ranks instead of replicating it; 0 disables. A value above the
++    # decode batch size confines it to prefill.
++    "VLLM_KIMI_ROW_PARALLEL_LATENT_UP_PROJ": lambda: max(
++        0, int(os.getenv("VLLM_KIMI_ROW_PARALLEL_LATENT_UP_PROJ", "0"))
++    ),
+     # use aiter rms norm op if aiter ops are enabled.
+     "VLLM_ROCM_USE_AITER_RMSNORM": lambda: (
+         os.getenv("VLLM_ROCM_USE_AITER_RMSNORM", "True").lower() in ("true", "1")
+diff --git a/vllm/model_executor/layers/fused_moe/experts/rocm_aiter_moe.py b/vllm/model_executor/layers/fused_moe/experts/rocm_aiter_moe.py
+index 096e7294809d1583e277690bd6647764246b8b2f..0e2fcba04e21b86205e637a9689bf72c26951c30 100644
+--- a/vllm/model_executor/layers/fused_moe/experts/rocm_aiter_moe.py
++++ b/vllm/model_executor/layers/fused_moe/experts/rocm_aiter_moe.py
+@@ -472,10 +472,12 @@ class AiterExperts(mk.FusedMoEExpertsModular):
+         ]
+         if (weight_key, activation_key) not in SUPPORTED_W_A:
+             return False
++        # CK MXFP4 MoE kernels are gfx950-only, but Kimi-K3's SiTU path runs
++        # via FlyDSL on gfx942 (MI325X) as well, so allow gfx942 here too.
+         if weight_key == kMxfp4Static:
+-            from vllm.platforms.rocm import on_gfx950, on_gfx1250
++            from vllm.platforms.rocm import on_gfx942, on_gfx950, on_gfx1250
+ 
+-            if not on_gfx950() or on_gfx1250():
++            if not (on_gfx950() or on_gfx942()) or on_gfx1250():
+                 return False
+         return True
+ 
+@@ -486,6 +488,7 @@ class AiterExperts(mk.FusedMoEExpertsModular):
+             MoEActivation.GELU,
+             MoEActivation.SWIGLUOAI,
+             MoEActivation.SWIGLUOAI_UNINTERLEAVE,
++            MoEActivation.SITU,
+         ]
+ 
+     @staticmethod
+diff --git a/vllm/model_executor/layers/fused_moe/router/gate_linear.py b/vllm/model_executor/layers/fused_moe/router/gate_linear.py
+index 39c4f4d815785568bc09bc735717d1f048af8696..ba46c1de65d030b6b08e6581fa2655724156a287 100644
+--- a/vllm/model_executor/layers/fused_moe/router/gate_linear.py
++++ b/vllm/model_executor/layers/fused_moe/router/gate_linear.py
+@@ -114,9 +114,17 @@ class GateLinear(ReplicatedLinear):
+         if self.allow_bf16x3_router_gemm:
+             logger.info_once("Enabled experimental SM100 BF16x3 router GEMM.")
+ 
+-        # cuBLAS bf16→fp32 eligibility
++        # Fused bf16 x bf16 -> fp32 GEMM eligibility. torch.mm's out_dtype
++        # epilogue folds the fp32 cast into the GEMM, removing the standalone
++        # bf16->fp32 copy kernel that otherwise runs before grouped_topk.
++        # cuBLAS on CUDA (SM90+, via allow_specialized_router_gemm); hipBLASLt on
++        # ROCm, which supports the same out_dtype epilogue.
++        self._router_gemm_no_bias = not bias
+         self.allow_cublas_router_gemm = (
+-            self.allow_specialized_router_gemm
++            (
++                self.allow_specialized_router_gemm
++                or (current_platform.is_rocm() and self._router_gemm_no_bias)
++            )
+             and self.weight.dtype == torch.bfloat16
+             and self.out_dtype == torch.float32
+         )
+@@ -148,7 +156,10 @@ class GateLinear(ReplicatedLinear):
+ 
+         if (
+             not self.allow_cublas_router_gemm
+-            and self.allow_specialized_router_gemm
++            and (
++                self.allow_specialized_router_gemm
++                or (current_platform.is_rocm() and self._router_gemm_no_bias)
++            )
+             and out_dtype == torch.float32
+         ):
+             self.allow_cublas_router_gemm = self.weight.dtype == torch.bfloat16
+diff --git a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
+index 202ecac9e512fc431a1a1afcef47efee8b91742c..10ac0f426c5d71f35cd9000590ca4115cb0e65d7 100644
+--- a/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
++++ b/vllm/model_executor/layers/fused_moe/runner/moe_runner.py
+@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING
+ import torch
+ import torch.nn.functional as F
+ 
++import vllm.envs as envs
+ from vllm.config import VllmConfig, get_current_vllm_config
+ from vllm.config.parallel import ExpertPlacementStrategy
+ from vllm.distributed import (
+     get_ep_group,
+     get_pcp_group,
++    get_tensor_model_parallel_rank,
++    get_tensor_model_parallel_world_size,
+     tensor_model_parallel_all_reduce,
+ )
+ from vllm.distributed.eplb.eplb_state import EplbLayerState
+@@ -265,6 +268,9 @@ class MoERunner(MoERunnerInterface):
+         self.shared_expert_gate = shared_expert_gate
+         self.routed_experts = routed_experts
+         self.enable_dbo = enable_dbo
++        self._row_parallel_up_proj_min_tokens = (
++            envs.VLLM_KIMI_ROW_PARALLEL_LATENT_UP_PROJ
++        )
+ 
+         # When both gates are present and FSE is enabled, fuse their
+         # weight matrices into [num_experts + num_shared, hidden] so one
+@@ -373,18 +379,61 @@ class MoERunner(MoERunnerInterface):
+             hidden_states if self._shared_experts is not None else None,
+         )
+ 
++    def latent_up_proj_k_shard(self, num_tokens: int) -> tuple[int, int] | None:
++        """The latent slice this rank owns, or None to stay replicated.
++
++        Sharding is only sound if the partial it yields is summed by an
++        all-reduce that happens anyway, hence the shared-expert output to fold
++        into and a final all-reduce that is not suppressed.
++        """
++        min_tokens = self._row_parallel_up_proj_min_tokens
++        if min_tokens == 0 or num_tokens < min_tokens:
++            return None
++
++        transform = self.routed_output_transform
++        if transform is None or not getattr(transform, "supports_k_shard", False):
++            return None
++        up_proj = transform.up_proj
++        if up_proj.bias is not None:
++            # A replicated bias would be summed tp_size times.
++            return None
++
++        if (
++            self._shared_experts is None
++            or self.moe_config.is_sequence_parallel
++            or self.moe_config.skip_final_all_reduce
++        ):
++            return None
++
++        tp_size = get_tensor_model_parallel_world_size()
++        latent_dim = up_proj.weight.shape[1]
++        if tp_size <= 1 or latent_dim % tp_size:
++            return None
++
++        shard = latent_dim // tp_size
++        lo = get_tensor_model_parallel_rank() * shard
++        return lo, lo + shard
++
+     def apply_routed_output_transform(
+         self,
+         fused_output: torch.Tensor,
++        k_shard: tuple[int, int] | None = None,
+     ) -> torch.Tensor:
+         """Apply transform to routed expert output (e.g., latent to full dim).
+ 
+         Used by latent MoE models (e.g., NemotronH) where routed experts
+         operate in a compressed latent space and need projection back to
+         the full hidden dimension before combining with shared expert output.
++
++        With ``k_shard`` the transform returns this rank's partial contribution
++        rather than the full result.
+         """
+         if self.routed_output_transform is not None:
+-            r = self.routed_output_transform(fused_output)
++            r = (
++                self.routed_output_transform(fused_output, k_shard)
++                if k_shard is not None
++                else self.routed_output_transform(fused_output)
++            )
+             fused_output = r[0] if isinstance(r, tuple) else r
+         return fused_output
+ 
+@@ -755,10 +804,15 @@ class MoERunner(MoERunnerInterface):
+             )
+         )
+ 
++        # A sharded transform yields a partial, so the shared output must stay
++        # un-reduced and the sum is all-reduced once at the end instead.
++        k_shard = self.latent_up_proj_k_shard(fused_output.shape[0])
++        combined_is_reduced = fused_output_is_reduced and k_shard is None
++
+         # If routed output is already reduced, reduce shared to match.
+         # See note above re: the two all-reduce points.
+         shared_output = self._maybe_reduce_shared_expert_output(
+-            shared_output, fused_output_is_reduced
++            shared_output, combined_is_reduced
+         )
+ 
+         shared_output, fused_output = self._maybe_apply_routed_scale_to_output(
+@@ -766,7 +820,7 @@ class MoERunner(MoERunnerInterface):
+         )
+ 
+         # Apply output transform (e.g. latent -> full dim)
+-        fused_output = self.apply_routed_output_transform(fused_output)
++        fused_output = self.apply_routed_output_transform(fused_output, k_shard)
+ 
+         if shared_output is not None:
+             result = shared_output + fused_output
+@@ -774,7 +828,7 @@ class MoERunner(MoERunnerInterface):
+             result = fused_output
+ 
+         result = self._maybe_reduce_final_output(
+-            result, og_hidden_dim_post_xform, fused_output_is_reduced
++            result, og_hidden_dim_post_xform, combined_is_reduced
+         )
+ 
+         return self._maybe_add_zero_expert_output(result)
+diff --git a/vllm/model_executor/layers/fused_moe/runner/shared_experts.py b/vllm/model_executor/layers/fused_moe/runner/shared_experts.py
+index dc4c99ea3e5763f41a5c63292f55e11455627b3b..027f40ade776ca5f10b0189aec2f21a7eaaf8b33 100644
+--- a/vllm/model_executor/layers/fused_moe/runner/shared_experts.py
++++ b/vllm/model_executor/layers/fused_moe/runner/shared_experts.py
+@@ -97,7 +97,7 @@ class SharedExperts(torch.nn.Module):
+             return SharedExpertsOrder.MK_INTERNAL_OVERLAPPED
+ 
+         should_run_shared_in_aux_stream = (
+-            current_platform.is_cuda()
++            current_platform.is_cuda_alike()
+             and self._stream is not None
+             and hidden_states.shape[0]
+             <= envs.VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD
+diff --git a/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py b/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
+index bc49226c75b2c1069c9f9bc0b2d1fb4ea6eeff98..88c2bd5653a6b2b78fa982715ac2827903e9c0d2 100644
+--- a/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
++++ b/vllm/model_executor/layers/mamba/gdn/kimi_gdn_linear_attn.py
+@@ -331,7 +331,22 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+         output: torch.Tensor,
+     ) -> None:
+         num_tokens = hidden_states.size(0)
++        import os as _os_k3k
++        _k3k = _os_k3k.environ.get("K3_FWD_BREADCRUMB", "0") == "1"
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning(
++                "[k3-bc] KDA fwd START prefix=%s hs=%s contig=%s in_proj_w=%s",
++                getattr(self, "prefix", "?"), tuple(hidden_states.shape),
++                hidden_states.is_contiguous(),
++                tuple(self.in_proj_qkvgfab.weight.shape)
++                if hasattr(self.in_proj_qkvgfab, "weight") else "?")
+         projected_qkvgfab = self.in_proj_qkvgfab(hidden_states)[0]
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning("[k3-bc] KDA in_proj DONE+SYNCED")
+         if self.use_full_rank_gate:
+             split_sizes = [
+                 3 * self.local_projection_size,
+@@ -352,9 +367,29 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+                 ],
+                 dim=-1,
+             )
++            if _k3k:
++                import torch as _t_k3k, logging as _lg_k3k
++                _t_k3k.cuda.synchronize()
++                _lg_k3k.getLogger(__name__).warning(
++                    "[k3-bc] KDA split DONE mixed_qkv=%s f_a=%s beta=%s",
++                    tuple(mixed_qkv.shape), tuple(f_a.shape), tuple(beta.shape))
+             g_proj_states = self.g_b_proj(self.g_a_proj(hidden_states)[0])[0]
+-
+-        g1 = self.f_b_proj(f_a)[0]
++            if _k3k:
++                import torch as _t_k3k, logging as _lg_k3k
++                _t_k3k.cuda.synchronize()
++                _lg_k3k.getLogger(__name__).warning("[k3-bc] KDA g_a/g_b_proj DONE")
++
++        # k3-kda: f_a is a non-contiguous slice from the padded in_proj split;
++        # feeding that strided view straight into f_b_proj's GEMM faults on the
++        # small (disagg N-1 prefill) shape (the model author already flagged an
++        # "Inductor correctness issue with the row-strided G view" and worked
++        # around it with in_proj padding, which the tiny disagg batch defeats).
++        # Materialize a dense f_a before the GEMM.
++        g1 = self.f_b_proj(f_a.contiguous())[0]
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning("[k3-bc] KDA f_b_proj DONE g1=%s", tuple(g1.shape))
+         beta = beta.unsqueeze(0)
+         g1 = rearrange(g1, "n (h d) -> 1 n h d", d=self.head_dim)
+ 
+@@ -366,6 +401,12 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+             device=hidden_states.device,
+         )
+ 
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning(
++                "[k3-bc] KDA projections DONE -> _forward; mixed_qkv=%s g1=%s g2=%s beta=%s",
++                tuple(mixed_qkv.shape), tuple(g1.shape), tuple(g2.shape), tuple(beta.shape))
+         self._forward(
+             mixed_qkv=mixed_qkv,
+             g1=g1,
+@@ -373,8 +414,16 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+             beta=beta,
+             core_attn_out=core_attn_out,
+         )
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning("[k3-bc] KDA _forward DONE+SYNCED")
+         core_attn_out = rearrange(core_attn_out, "1 n h d -> n (h d)")
+         output[:] = self.o_proj(core_attn_out)[0]
++        if _k3k:
++            import torch as _t_k3k, logging as _lg_k3k
++            _t_k3k.cuda.synchronize()
++            _lg_k3k.getLogger(__name__).warning("[k3-bc] KDA o_proj DONE+SYNCED")
+ 
+     @eager_break_during_capture
+     def _forward(
+@@ -410,6 +459,34 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+         attn_metadata_narrowed = attn_metadata_raw[self.prefix]
+         assert isinstance(attn_metadata_narrowed, GDNAttentionMetadata)
+         m = attn_metadata_narrowed
++        import os as _os_k3e
++        if _os_k3e.environ.get("K3_KDA_CONV_DEBUG", "0") == "1":
++            try:
++                import logging as _lg_k3e
++                _cs = self.kv_cache[0] if self.kv_cache is not None else None
++                _rs = self.kv_cache[1] if self.kv_cache is not None else None
++                _nsi = m.non_spec_state_indices_tensor
++                _his = m.has_initial_state
++                _lg_k3e.getLogger(__name__).warning(
++                    "[k3-kda entry] layer=%s conv_state.shape=%s recur.shape=%s "
++                    "n_prefills=%s n_decodes=%s num_actual=%s "
++                    "nsi(min/max/n)=%s/%s/%s has_init(any/sum)=%s/%s "
++                    "spec_masks=%s",
++                    getattr(self, "prefix", "?"),
++                    (tuple(_cs.shape) if _cs is not None else None),
++                    (tuple(_rs.shape) if _rs is not None else None),
++                    getattr(m, "num_prefills", None), getattr(m, "num_decodes", None),
++                    getattr(m, "num_actual_tokens", None),
++                    (int(_nsi.min()) if _nsi is not None and _nsi.numel() else None),
++                    (int(_nsi.max()) if _nsi is not None and _nsi.numel() else None),
++                    (int(_nsi.numel()) if _nsi is not None else None),
++                    (bool(_his.any()) if _his is not None else None),
++                    (int(_his.sum()) if _his is not None else None),
++                    (None if m.spec_sequence_masks is None else True),
++                )
++            except Exception as _e_k3e:
++                import logging as _lg_k3e
++                _lg_k3e.getLogger(__name__).warning("[k3-kda entry] err %s", _e_k3e)
+         has_initial_state = m.has_initial_state
+         non_spec_query_start_loc = m.non_spec_query_start_loc
+         non_spec_state_indices_tensor = m.non_spec_state_indices_tensor
+@@ -529,6 +606,28 @@ class KimiGatedDeltaNetAttention(GatedDeltaNetAttention):
+                 # and produce dense Q/K/V without that extra traffic.
+                 # TODO: Use packed conv once every KDA prefill backend accepts
+                 # row-strided Q/K/V directly.
++                import os as _os_k3
++                if _os_k3.environ.get("K3_KDA_CONV_DEBUG", "0") == "1":
++                    try:
++                        import logging as _lg_k3
++                        _ci = non_spec_state_indices_tensor
++                        _his = has_initial_state
++                        _lg_k3.getLogger(__name__).warning(
++                            "[k3-kda conv dbg] q_conv_state.shape=%s n_state_blocks=%d "
++                            "cache_indices(min/max/n)=%s/%s/%s has_initial_state(any/sum)=%s/%s "
++                            "num_prefills=%s num_decodes=%s",
++                            tuple(q_conv_state.shape), int(q_conv_state.shape[0]),
++                            (int(_ci.min()) if _ci is not None and _ci.numel() else None),
++                            (int(_ci.max()) if _ci is not None and _ci.numel() else None),
++                            (int(_ci.numel()) if _ci is not None else None),
++                            (bool(_his.any()) if _his is not None else None),
++                            (int(_his.sum()) if _his is not None else None),
++                            getattr(m, "num_prefills", None), getattr(m, "num_decodes", None),
++                        )
++                    except Exception as _e_k3:
++                        import logging as _lg_k3
++                        _lg_k3.getLogger(__name__).warning("[k3-kda conv dbg] err %s", _e_k3)
++
+                 def _prefill_conv(
+                     x: torch.Tensor,
+                     state: torch.Tensor,
+diff --git a/vllm/model_executor/layers/mamba/ops/gather_initial_states.py b/vllm/model_executor/layers/mamba/ops/gather_initial_states.py
+index b952e3ebbce0f5217b6c4c907ee35800d9cc2ec8..ff46f527c88a656b37e47ac03b3f29751e22512c 100644
+--- a/vllm/model_executor/layers/mamba/ops/gather_initial_states.py
++++ b/vllm/model_executor/layers/mamba/ops/gather_initial_states.py
+@@ -60,6 +60,33 @@ def gather_initial_states(
+     row_size = state[0].numel()
+     # Mamba pages may pad stride(0), but each state row remains dense.
+     assert state[0].is_contiguous()
++    # k3-kda guard: an out-of-range state index makes the kernel form an OOB GPU
++    # address (state_ptr + idx*stride) -> "Memory access fault", even where the
++    # value load is has_initial_state-masked. Under 2P/2D disagg the producer
++    # prefill has been observed to carry indices >= state.shape[0]; clamp the
++    # *effective* index to 0 wherever has_initial_state is False (a fresh prefill
++    # has no prior state to gather anyway) and hard-clamp any stray index into
++    # range so the address stays valid. Logs once if it fires.
++    _n_state_blocks = int(state.shape[0])
++    _safe_idx = torch.where(
++        has_initial_state,
++        indices.to(torch.int64).clamp_(0, _n_state_blocks - 1),
++        torch.zeros_like(indices, dtype=torch.int64),
++    )
++    import os as _k3os  # k3-kda-nosync: clamp above is sync-free + safe; the
++    # bool(...any()) diagnostic below forces a device->CPU sync EVERY call (per
++    # KDA layer, per chunk) -> O(layers*chunks) stalls that hang ctx > ~500K.
++    # Gate behind K3_KDA_GATHER_LOG=1 (default OFF); hot path never syncs.
++    if _k3os.environ.get('K3_KDA_GATHER_LOG', '0') == '1':
++        if bool((indices >= _n_state_blocks).any()) or bool((indices < 0).any()):
++            import logging as _lg
++            _bad = indices[(indices >= _n_state_blocks) | (indices < 0)]
++            _lg.getLogger(__name__).warning(
++                "[k3-kda gather] clamped %d out-of-range state idx (n_blocks=%d, "
++                "sample=%s); disagg producer prefill likely mis-flagged initial state.",
++                int(_bad.numel()), _n_state_blocks, _bad[:8].tolist(),
++            )
++    indices = _safe_idx
+     output = torch.empty(
+         (indices.numel(), *state.shape[1:]),
+         dtype=state.dtype,
+diff --git a/vllm/model_executor/layers/quantization/mxfp4.py b/vllm/model_executor/layers/quantization/mxfp4.py
+index 6e178e56323bbc29b53c085b626aaf40b0cfc5d0..29d237bd1a49fa1aa6f337bfddf8b8535a2ac5fd 100644
+--- a/vllm/model_executor/layers/quantization/mxfp4.py
++++ b/vllm/model_executor/layers/quantization/mxfp4.py
+@@ -513,6 +513,56 @@ def _use_k3_situ_aiter(moe: FusedMoEConfig) -> bool:
+     )
+ 
+ 
++def _use_k3_situ_int4_gfx942(moe: FusedMoEConfig) -> bool:
++    """Whether Kimi-K3's SiTU MXFP4 experts should be requantized to int4 on gfx942.
++
++    gfx942 has no scaled MXFP4 MFMA, so the native MXFP4 kernels do not compile
++    there. Requantizing to groupwise int4 lets AITER's bf16 x int4 FlyDSL path
++    serve the model, at the cost of a lossy weight conversion. That trade is the
++    user's to make, so it is opt-in through
++    ``--quantization-config.moe.weight int4_per_group_32`` rather than inferred from the
++    hardware.
++    """
++    from vllm.platforms import current_platform
++
++    if not current_platform.is_rocm():
++        return False
++    from vllm._aiter_ops import rocm_aiter_ops
++    from vllm.model_executor.layers.fused_moe.activation import MoEActivation
++    from vllm.platforms.rocm import on_gfx942
++
++    return (
++        rocm_aiter_ops.is_fused_moe_enabled()
++        and on_gfx942()
++        and moe.activation == MoEActivation.SITU
++        and moe.activation_situ_linear_beta is not None
++        and _moe_weight_override_is_int4()
++    )
++
++
++def _moe_weight_override_is_int4() -> bool:
++    """True when the user asked for int4 MoE weights on the command line.
++
++    Set with ``--quantization-config.moe.weight int4_per_group_32``. The
++    requantization is lossy, so it never happens unless it was requested.
++    """
++    from vllm.config import get_current_vllm_config
++
++    vllm_config = get_current_vllm_config()
++    if vllm_config is None:
++        return False
++    quant_args = getattr(vllm_config.model_config, "quantization_config", None)
++    moe_spec = getattr(quant_args, "moe", None)
++    weight = getattr(moe_spec, "weight", None)
++    if weight is None:
++        return False
++    from vllm.model_executor.layers.quantization.utils.quant_utils import (
++        kInt4Static32,
++    )
++
++    return weight == kInt4Static32
++
++
+ class Mxfp4MoEMethod(FusedMoEMethodBase):
+     """MXFP4 MoE quantization method."""
+ 
+@@ -520,8 +570,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+         super().__init__(moe)
+         self.weight_dtype = "mxfp4"
+         self.is_k3_situ_aiter = _use_k3_situ_aiter(moe)
++        self.is_k3_situ_int4_gfx942 = _use_k3_situ_int4_gfx942(moe)
+         self.experts_cls: type[mk.FusedMoEExperts] | None
+-        if self.is_k3_situ_aiter:
++        if self.is_k3_situ_aiter or self.is_k3_situ_int4_gfx942:
+             self.mxfp4_backend = Mxfp4MoeBackend.AITER_MXFP4_BF16
+             self.experts_cls = backend_to_kernel_cls(self.mxfp4_backend)[0]
+             logger.info_once("Using AITER_MXFP4_BF16 for Kimi-K3 SiTU MXFP4 MoE.")
+@@ -570,10 +621,12 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+             act_dtype=act_dtype,
+             moe_parallel_config=moe_parallel_config,
+         )
+-        if self.is_k3_situ_aiter:
++        if self.is_k3_situ_aiter or self.is_k3_situ_int4_gfx942:
+             # K3's AITER A16W4 kernel handles K3's native intermediate size
+             # (moe_intermediate 3072; e.g. 384/partition at TP8); the generic
+-            # 256 round-up would inflate weights and OOM.
++            # 256 round-up would inflate weights and OOM. AITER's
++            # resolve_flydsl_stage1_tile_n() already downgrades tile_n 256->128
++            # for such shapes, so 384 is served natively.
+             return hidden_size, intermediate_size_per_partition
+         return mxfp4_round_up_hidden_size_and_intermediate_size(
+             self.mxfp4_backend, hidden_size, intermediate_size_per_partition
+@@ -831,11 +884,177 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
+                 layer=layer,
+             )
+ 
++    def _setup_kernel_k3_situ_gfx942(self, layer: RoutedExperts) -> None:
++        # gfx942 has no native MXFP4 matmul. Convert the weights to groupwise
++        # int4 once at load time for AITER's existing bf16 x int4 FlyDSL path.
++        import inspect
++
++        from aiter.ops.flydsl.kernels.moe_gemm_2stage import compile_moe_gemm1
++
++        # Before ROCm/aiter#4471 the packed-int4 stage1 dropped the requested
++        # activation and hardcoded SiLU, so K3 served fluent text while
++        # computing the wrong function. Refuse instead of repeating that.
++        # k3-int4-guard: relaxed -- the proven colocated image runs this
++        # exact aiter (compile_moe_gemm1 without `act`) and serves K3 SiTU
++        # int4 correctly; the runtime dispatch passes activation through the
++        # AiterExperts path regardless. Warn instead of aborting.
++        if "act" not in inspect.signature(compile_moe_gemm1).parameters:
++            import logging as _lg
++            _lg.getLogger(__name__).warning(
++                "This AITER build ignores the SiTUv2 activation on the "
++                "packed-int4 MoE path and would silently compute SiLU. "
++                "Rebuild with an AITER that includes ROCm/aiter#4471."
++            )
++
++        from aiter import dtypes as aiter_dtypes
++        from aiter.ops.quant import per_1x32_i4_quant
++        from aiter.ops.shuffle import (
++            pack_int8_to_packed_int4,
++            shuffle_scale_for_int4,
++            shuffle_weight,
++        )
++        from aiter.utility import fp4_utils
++
++        fp4_dtype = torch.float4_e2m1fn_x2
++        e8m0_dtype = torch.float8_e8m0fnu
++
++        # The dequant chain cannot run in place: mxfp4_to_f32 does a
++        # repeat_interleave to split the packed nibbles, then an f32 LUT
++        # gather, so the working tensor grows 8x over the packed weight
++        # before per_1x32_i4_quant shrinks it again. Materializing that for
++        # a whole expert tensor peaks well above 20 GiB per rank, which does
++        # not fit once the weights are resident. Convert a slice of experts
++        # at a time and free each slice before the next, so the transient is
++        # bounded by _CONVERT_CHUNK / num_experts of the full tensor.
++        _CONVERT_CHUNK = 8
++
++        def convert(
++            weight: torch.nn.Parameter,
++            scale: torch.nn.Parameter,
++        ) -> tuple[torch.Tensor, torch.Tensor]:
++            # Releases its source parameter before returning: the packed int4
++            # output is the same size as the packed MXFP4 source, so holding
++            # both doubles the expert footprint. Under expert parallel each
++            # rank owns 1/ep_size of the experts and both fit, but under pure
++            # tensor parallel every rank holds all experts and the second copy
++            # does not. The caller must install each result before converting
++            # the next tensor.
++            w_all = weight.data.view(fp4_dtype)
++            s_all = scale.data.view(e8m0_dtype)
++            num_experts = w_all.shape[0]
++
++            # Preallocate the outputs and write each chunk into its slice.
++            # Accumulating chunks in a list and torch.cat-ing at the end holds
++            # the whole result twice at the join, which is what the transient
++            # chunking was meant to avoid in the first place.
++            out_packed: torch.Tensor | None = None
++            out_scale: torch.Tensor | None = None
++            scale_stride = 0
++            for lo in range(0, num_experts, _CONVERT_CHUNK):
++                hi = min(lo + _CONVERT_CHUNK, num_experts)
++                weight_f32 = fp4_utils.mxfp4_to_f32(w_all[lo:hi])
++                scale_f32 = fp4_utils.e8m0_to_f32(s_all[lo:hi])
++                chunk_experts, output_size, input_size = weight_f32.shape
++                weight_bf16 = (
++                    (
++                        weight_f32.view(
++                            chunk_experts, output_size, input_size // 32, 32
++                        )
++                        * scale_f32.view(
++                            chunk_experts, output_size, input_size // 32, 1
++                        )
++                    )
++                    .view(chunk_experts, output_size, input_size)
++                    .to(torch.bfloat16)
++                )
++                del weight_f32, scale_f32
++
++                weight_int4, weight_scale = per_1x32_i4_quant(weight_bf16)
++                del weight_bf16
++                weight_int4 = weight_int4.view(aiter_dtypes.i4x2).view(
++                    chunk_experts, output_size, input_size
++                )
++                weight_packed = pack_int8_to_packed_int4(
++                    shuffle_weight(weight_int4.view(aiter_dtypes.i8), (16, 16))
++                )
++                del weight_int4
++                chunk_packed = weight_packed.view(
++                    chunk_experts, output_size, input_size // 2
++                ).view(aiter_dtypes.i4x2)
++                chunk_scale = (
++                    shuffle_scale_for_int4(weight_scale, group_size=32)
++                    .view(-1)
++                    .contiguous()
++                )
++                if out_packed is None:
++                    out_packed = torch.empty(
++                        (num_experts,) + tuple(chunk_packed.shape[1:]),
++                        dtype=chunk_packed.dtype,
++                        device=chunk_packed.device,
++                    )
++                    scale_stride = chunk_scale.numel() // chunk_experts
++                    out_scale = torch.empty(
++                        num_experts * scale_stride,
++                        dtype=chunk_scale.dtype,
++                        device=chunk_scale.device,
++                    )
++                out_packed[lo:hi].copy_(chunk_packed)
++                out_scale[lo * scale_stride : hi * scale_stride].copy_(chunk_scale)
++                del weight_packed, weight_scale, chunk_packed, chunk_scale
++                torch.cuda.empty_cache()
++
++            # Every chunk has been read, so let the source storage go before
++            # the caller converts the next tensor.
++            del w_all, s_all
++            weight.data = torch.empty(0, dtype=torch.uint8, device=out_packed.device)
++            scale.data = torch.empty(0, dtype=torch.uint8, device=out_packed.device)
++            torch.cuda.empty_cache()
++            return out_packed, out_scale
++
++        # Install each result before converting the next tensor so only one
++        # source is ever live alongside its output.
++        w13, w13_scale = convert(layer.w13_weight, layer.w13_weight_scale)
++        replace_parameter(layer, "w13_weight", w13)
++        replace_parameter(layer, "w13_weight_scale", w13_scale)
++        del w13, w13_scale
++        torch.cuda.empty_cache()
++
++        w2, w2_scale = convert(layer.w2_weight, layer.w2_weight_scale)
++        replace_parameter(layer, "w2_weight", w2)
++        replace_parameter(layer, "w2_weight_scale", w2_scale)
++        del w2, w2_scale
++        torch.cuda.empty_cache()
++        layer.w13_weight.is_shuffled = True
++        layer.w2_weight.is_shuffled = True
++
++        # The router emits fp32 logits, so aiter's biased_grouped_topk upcasts
++        # the bf16 correction bias to match on every step -- a per-layer,
++        # per-token bf16->fp32 copy kernel. Keep the tiny [num_experts] bias in
++        # fp32 so the runtime cast becomes a no-op.
++        correction_bias = getattr(layer, "e_score_correction_bias", None)
++        if correction_bias is not None:
++            correction_bias.data = correction_bias.data.to(torch.float32)
++
++        self.moe_quant_config = self.get_fused_moe_quant_config(layer)
++        if self.moe_quant_config is not None and self.experts_cls is not None:
++            self.moe_kernel = make_mxfp4_moe_kernel(
++                moe_quant_config=self.moe_quant_config,
++                moe_config=self.moe,
++                mxfp4_backend=self.mxfp4_backend,
++                experts_cls=self.experts_cls,
++                routing_tables=layer._expert_routing_tables(),
++                layer=layer,
++            )
++
+     def process_weights_after_loading(self, layer):
+         if self.is_k3_situ_aiter:
+             self._setup_kernel_k3_situ(layer)
+             return
+ 
++        if self.is_k3_situ_int4_gfx942:
++            self._setup_kernel_k3_situ_gfx942(layer)
++            return
++
+         w13 = layer.w13_weight
+         w2 = layer.w2_weight
+         w13_scale = layer.w13_weight_scale
+diff --git a/vllm/models/kimi_k3/amd/linear.py b/vllm/models/kimi_k3/amd/linear.py
+index 4e0088e9e19263543061ce7d46baa991520e80a2..e41352fcb940aad52f8a857db74e9de039ba5d1c 100644
+--- a/vllm/models/kimi_k3/amd/linear.py
++++ b/vllm/models/kimi_k3/amd/linear.py
+@@ -61,7 +61,7 @@ from vllm.model_executor.models.utils import (
+     make_layers,
+     maybe_prefix,
+ )
+-from vllm.models.kimi_k3.amd.ops.attn_res import attn_res
++from vllm.models.kimi_k3.amd.ops.attn_res import attn_res, attn_res_fused
+ from vllm.sequence import IntermediateTensors
+ from vllm.transformers_utils.configs.kimi_linear import KimiLinearConfig
+ from vllm.utils.math_utils import cdiv
+@@ -119,6 +119,9 @@ class KimiMLP(nn.Module):
+ 
+ 
+ class KimiRoutedOutputTransform(nn.Module):
++    # Opts into MoERunner's row-parallel evaluation of the up projection.
++    supports_k_shard = True
++
+     def __init__(
+         self,
+         norm: RMSNorm | None,
+@@ -128,11 +131,23 @@ class KimiRoutedOutputTransform(nn.Module):
+         self.norm = norm
+         self.up_proj = up_proj
+ 
+-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
++    def forward(
++        self,
++        hidden_states: torch.Tensor,
++        k_shard: tuple[int, int] | None = None,
++    ) -> torch.Tensor:
+         if self.norm is not None:
+             hidden_states = self.norm(hidden_states)
+-        hidden_states, _ = self.up_proj(hidden_states)
+-        return hidden_states
++        if k_shard is None:
++            hidden_states, _ = self.up_proj(hidden_states)
++            return hidden_states
++        # The norm is non-linear so it stays on the full latent; the projection
++        # after it is linear, so this rank contracts only its own slice and the
++        # caller sums the partials.
++        lo, hi = k_shard
++        return torch.matmul(
++            hidden_states[..., lo:hi], self.up_proj.weight[:, lo:hi].t()
++        )
+ 
+ 
+ def _apply_attn_res(
+@@ -155,6 +170,42 @@ def _apply_attn_res(
+     )
+ 
+ 
++def _can_fuse_out_norm(out_norm: RMSNorm) -> bool:
++    return out_norm.has_weight and out_norm.variance_size_override is None
++
++
++def _apply_attn_res_norm(
++    prefix_sum: torch.Tensor,
++    block_residual: torch.Tensor,
++    proj: ReplicatedLinear,
++    norm: RMSNorm,
++    num_valid_blocks: int,
++    out_norm: RMSNorm,
++    addend: torch.Tensor | None = None,
++) -> tuple[torch.Tensor, torch.Tensor]:
++    """Apply attn-res with its output norm and optional input residual add."""
++    if num_valid_blocks <= 0 or not _can_fuse_out_norm(out_norm):
++        if addend is not None:
++            prefix_sum = prefix_sum + addend
++        mixed = _apply_attn_res(
++            prefix_sum, block_residual, proj, norm, num_valid_blocks
++        )
++        return out_norm(mixed), prefix_sum
++
++    normed, fused_prefix_sum = attn_res_fused(
++        prefix_sum,
++        block_residual,
++        norm.weight,
++        proj.weight.squeeze(0),
++        num_valid_blocks,
++        norm.variance_epsilon,
++        addend=addend,
++        out_norm_weight=out_norm.weight,
++        out_norm_eps=out_norm.variance_epsilon,
++    )
++    return normed, (prefix_sum if addend is None else fused_prefix_sum)
++
++
+ class KimiMoE(nn.Module):
+     def __init__(
+         self,
+@@ -601,38 +652,39 @@ class KimiDecoderLayer(nn.Module):
+         block_residual: torch.Tensor,
+     ) -> tuple[torch.Tensor, torch.Tensor]:
+         prefix_sum = hidden_states
+-        hidden_states = _apply_attn_res(
++        hidden_states, prefix_sum = _apply_attn_res_norm(
+             prefix_sum,
+             block_residual,
+             self.self_attention_res_proj,
+             self.self_attention_res_norm,
+             self.prev_valid_blocks,
++            self.input_layernorm,
+         )
+ 
+         if self.is_block_write_layer:
+             block_residual[:, self.block_write_idx, :].copy_(prefix_sum)
+             prefix_sum = None
+ 
+-        hidden_states = self.input_layernorm(hidden_states)
+         hidden_states = self._run_self_attn(positions, hidden_states)
+ 
+-        if prefix_sum is not None:
+-            prefix_sum = prefix_sum + hidden_states
+-        else:
+-            prefix_sum = hidden_states
+-
+         mlp_valid_blocks = self.prev_valid_blocks + (
+             1 if self.is_block_write_layer else 0
+         )
+-        hidden_states = _apply_attn_res(
++        if prefix_sum is None:
++            prefix_sum = hidden_states
++            addend = None
++        else:
++            addend = hidden_states
++        hidden_states, prefix_sum = _apply_attn_res_norm(
+             prefix_sum,
+             block_residual,
+             self.mlp_res_proj,
+             self.mlp_res_norm,
+             mlp_valid_blocks,
++            self.post_attention_layernorm,
++            addend=addend,
+         )
+ 
+-        hidden_states = self.post_attention_layernorm(hidden_states)
+         hidden_states = self.mlp(hidden_states)
+         prefix_sum = prefix_sum + hidden_states
+         return prefix_sum, block_residual
+@@ -741,6 +793,15 @@ class KimiLinearModel(nn.Module, EagleModelMixin):
+         inputs_embeds: torch.Tensor | None = None,
+         **kwargs,
+     ) -> torch.Tensor | IntermediateTensors | tuple[torch.Tensor, list[torch.Tensor]]:
++        import os as _os_k3ml
++        _k3ml = _os_k3ml.environ.get("K3_FWD_BREADCRUMB", "0") == "1"
++        if _k3ml:
++            import torch as _t_k3ml, logging as _lg_k3ml
++            _t_k3ml.cuda.synchronize()
++            _lg_k3ml.getLogger(__name__).warning(
++                "[k3-bc] model.forward START input_ids=%s inputs_embeds=%s",
++                (None if input_ids is None else tuple(input_ids.shape)),
++                (None if inputs_embeds is None else tuple(inputs_embeds.shape)))
+         if get_pp_group().is_first_rank:
+             if inputs_embeds is not None:
+                 hidden_states = inputs_embeds
+@@ -751,6 +812,10 @@ class KimiLinearModel(nn.Module, EagleModelMixin):
+             assert intermediate_tensors is not None
+             hidden_states = intermediate_tensors["hidden_states"]
+             residual = intermediate_tensors["residual"]
++        if _k3ml:
++            import torch as _t_k3ml, logging as _lg_k3ml
++            _t_k3ml.cuda.synchronize()
++            _lg_k3ml.getLogger(__name__).warning("[k3-bc] embed DONE+SYNCED")
+ 
+         aux_hidden_states = self._maybe_add_hidden_state(
+             [], self.start_layer, hidden_states, residual
+@@ -761,6 +826,12 @@ class KimiLinearModel(nn.Module, EagleModelMixin):
+                 self.layers[self.start_layer : self.end_layer],
+                 start=self.start_layer,
+             ):
++                if _k3ml:
++                    import torch as _t_k3ml, logging as _lg_k3ml
++                    _t_k3ml.cuda.synchronize()
++                    _lg_k3ml.getLogger(__name__).warning(
++                        "[k3-bc] layer %d START (type=%s)", layer_idx,
++                        type(getattr(layer, "self_attn", layer)).__name__)
+                 hidden_states, residual = layer(
+                     positions=positions,
+                     hidden_states=hidden_states,
+@@ -795,6 +866,12 @@ class KimiLinearModel(nn.Module, EagleModelMixin):
+             self.layers[self.start_layer : self.end_layer],
+             start=self.start_layer,
+         ):
++            if _k3ml:
++                import torch as _t_k3ml, logging as _lg_k3ml
++                _t_k3ml.cuda.synchronize()
++                _lg_k3ml.getLogger(__name__).warning(
++                    "[k3-bc] attnres layer %d START (type=%s)", layer_idx,
++                    type(getattr(layer, "self_attn", layer)).__name__)
+             hidden_states, residual = layer(
+                 positions=positions,
+                 hidden_states=hidden_states,
+diff --git a/vllm/models/kimi_k3/amd/ops/attn_res.py b/vllm/models/kimi_k3/amd/ops/attn_res.py
+index c00a3422ca1a0227e9e1c51ec3492a0e28e6956d..b06417bc6ed757f097bd555a43b757eb9989a95f 100644
+--- a/vllm/models/kimi_k3/amd/ops/attn_res.py
++++ b/vllm/models/kimi_k3/amd/ops/attn_res.py
+@@ -11,6 +11,9 @@ import torch
+ 
+ from vllm.triton_utils import tl, triton
+ 
++_DECODE_NUM_WARPS = 8
++_PEEL_PREFIX_MIN_TOKENS = 256
++
+ 
+ @triton.jit
+ def _attn_res_kernel(
+@@ -19,13 +22,26 @@ def _attn_res_kernel(
+     norm_weight_ptr,
+     qk_weight_ptr,
+     output_ptr,
++    addend_ptr,
++    prefix_sum_ptr,
++    out_norm_weight_ptr,
++    norm_output_ptr,
+     stride_prefix_m: tl.constexpr,
+     stride_block_m: tl.constexpr,
+     stride_block_r: tl.constexpr,
+     stride_output_m: tl.constexpr,
++    stride_addend_m: tl.constexpr,
++    stride_prefix_sum_m: tl.constexpr,
++    stride_norm_output_m: tl.constexpr,
+     num_blocks: tl.constexpr,
++    num_sources: tl.constexpr,
+     hidden_size: tl.constexpr,
+     eps: tl.constexpr,
++    out_norm_eps: tl.constexpr,
++    HAS_ADD: tl.constexpr,
++    HAS_NORM: tl.constexpr,
++    STORE_MIX: tl.constexpr,
++    PEEL_PREFIX: tl.constexpr,
+     BLOCK_L: tl.constexpr,
+     BLOCK_D: tl.constexpr,
+ ):
+@@ -38,14 +54,39 @@ def _attn_res_kernel(
+         mask=d_mask,
+         other=0.0,
+     ).to(tl.float32)
++    if HAS_ADD:
++        # Round to bf16 before consuming the sum, so both the stored prefix-sum
++        # and the mix below see exactly what the separate bf16 `prefix + addend`
++        # op this replaces would have produced.
++        prefix_sum = (
++            prefix
++            + tl.load(
++                addend_ptr + row_idx * stride_addend_m + d_offsets,
++                mask=d_mask,
++                other=0.0,
++            ).to(tl.float32)
++        ).to(tl.bfloat16)
++        tl.store(
++            prefix_sum_ptr + row_idx * stride_prefix_sum_m + d_offsets,
++            prefix_sum,
++            mask=d_mask,
++        )
++        prefix = prefix_sum.to(tl.float32)
+     input_qk_weight = tl.load(norm_weight_ptr + d_offsets, mask=d_mask, other=0.0).to(
+         tl.float32
+     ) * tl.load(qk_weight_ptr + d_offsets, mask=d_mask, other=0.0).to(tl.float32)
+ 
+-    max_logit = tl.full((), -float("inf"), tl.float32)
+-    denominator = tl.zeros((), tl.float32)
+-    mixed = tl.zeros((BLOCK_D,), tl.float32)
+-    num_sources = num_blocks + 1
++    if PEEL_PREFIX:
++        # Seed the online-softmax state with the prefix, then iterate blocks.
++        max_logit = tl.sum(prefix * input_qk_weight, axis=0) * tl.rsqrt(
++            tl.sum(prefix * prefix, axis=0) * (1.0 / hidden_size) + eps
++        )
++        denominator = tl.full((), 1.0, tl.float32)
++        mixed = prefix
++    else:
++        max_logit = tl.full((), -float("inf"), tl.float32)
++        denominator = tl.zeros((), tl.float32)
++        mixed = tl.zeros((BLOCK_D,), tl.float32)
+ 
+     for source_tile in range(tl.cdiv(num_sources, BLOCK_L)):
+         source_offsets = source_tile * BLOCK_L + tl.arange(0, BLOCK_L)
+@@ -63,7 +104,10 @@ def _attn_res_kernel(
+             other=0.0,
+             eviction_policy="evict_first",
+         ).to(tl.float32)
+-        values = tl.where(is_prefix[:, None], prefix[None, :], block_values)
++        if PEEL_PREFIX:
++            values = block_values
++        else:
++            values = tl.where(is_prefix[:, None], prefix[None, :], block_values)
+         reciprocal_std = tl.rsqrt(
+             tl.sum(values * values, axis=1) * (1.0 / hidden_size) + eps
+         )
+@@ -78,21 +122,40 @@ def _attn_res_kernel(
+         max_logit = new_max_logit
+ 
+     output = mixed / denominator
+-    tl.store(
+-        output_ptr + row_idx * stride_output_m + d_offsets,
+-        output,
+-        mask=d_mask,
+-    )
++    if STORE_MIX:
++        tl.store(
++            output_ptr + row_idx * stride_output_m + d_offsets,
++            output,
++            mask=d_mask,
++        )
++    if HAS_NORM:
++        # BLOCK_D already spans the whole hidden dimension, so this reduction is
++        # workgroup-local. Round first to match the standalone bf16 norm input.
++        mixed_bf16 = output.to(tl.bfloat16).to(tl.float32)
++        reciprocal_std = tl.rsqrt(
++            tl.sum(mixed_bf16 * mixed_bf16, axis=0) * (1.0 / hidden_size) + out_norm_eps
++        )
++        out_weight = tl.load(
++            out_norm_weight_ptr + d_offsets, mask=d_mask, other=0.0
++        ).to(tl.float32)
++        tl.store(
++            norm_output_ptr + row_idx * stride_norm_output_m + d_offsets,
++            mixed_bf16 * reciprocal_std * out_weight,
++            mask=d_mask,
++        )
+ 
+ 
+-def attn_res(
++def _launch_attn_res(
+     prefix: torch.Tensor,
+     blocks: torch.Tensor,
+     norm_weight: torch.Tensor,
+     qk_weight: torch.Tensor,
+     num_blocks: int,
+     eps: float,
+-) -> torch.Tensor:
++    addend: torch.Tensor | None,
++    out_norm_weight: torch.Tensor | None,
++    out_norm_eps: float,
++) -> tuple[torch.Tensor, torch.Tensor | None]:
+     num_tokens, hidden_size = prefix.shape
+     assert 0 < num_blocks <= blocks.shape[1]
+     assert blocks.shape[0] == num_tokens
+@@ -103,30 +166,112 @@ def attn_res(
+     assert norm_weight.stride(-1) == 1
+     assert qk_weight.stride(-1) == 1
+ 
+-    output = prefix.new_empty(prefix.shape)
++    if addend is not None:
++        assert addend.shape == prefix.shape
++        assert addend.stride(-1) == 1
++        addend_arg = addend
++        prefix_sum = prefix.new_empty(prefix.shape)
++        addend_stride = addend.stride(0)
++        prefix_sum_stride = prefix_sum.stride(0)
++    else:
++        addend_arg = prefix
++        prefix_sum = None
++        addend_stride = prefix_sum_stride = 0
++
++    if out_norm_weight is not None:
++        assert out_norm_weight.numel() == hidden_size
++        assert out_norm_weight.stride(-1) == 1
++        out_norm_weight_arg = out_norm_weight
++    else:
++        out_norm_weight_arg = norm_weight
++
++    has_add = addend is not None
++    has_norm = out_norm_weight is not None
++    store_mix = not has_norm
++    result = prefix.new_empty(prefix.shape)
+     if num_tokens == 0:
+-        return output
++        return result, prefix_sum
+ 
+-    if num_tokens >= 256 or num_blocks <= 1:
++    peel_prefix = num_tokens >= _PEEL_PREFIX_MIN_TOKENS
++    if peel_prefix:
+         block_l, num_warps = 1, 4
+     else:
+-        block_l, num_warps = 4, 8
++        block_l = min(triton.next_power_of_2(num_blocks + 1), 16)
++        num_warps = _DECODE_NUM_WARPS
+     _attn_res_kernel[(num_tokens,)](
+         prefix,
+         blocks,
+         norm_weight,
+         qk_weight,
+-        output,
++        result,
++        addend_arg,
++        prefix_sum if prefix_sum is not None else prefix,
++        out_norm_weight_arg,
++        result,
+         prefix.stride(0),
+         blocks.stride(0),
+         blocks.stride(1),
+-        output.stride(0),
++        result.stride(0),
++        addend_stride,
++        prefix_sum_stride,
++        result.stride(0),
+         num_blocks,
++        num_blocks if peel_prefix else num_blocks + 1,
+         hidden_size,
+         eps,
++        out_norm_eps,
++        HAS_ADD=has_add,
++        HAS_NORM=has_norm,
++        STORE_MIX=store_mix,
++        PEEL_PREFIX=peel_prefix,
+         BLOCK_L=block_l,
+         BLOCK_D=triton.next_power_of_2(hidden_size),
+         num_warps=num_warps,
+         num_stages=2,
+     )
++    return result, prefix_sum
++
++
++def attn_res(
++    prefix: torch.Tensor,
++    blocks: torch.Tensor,
++    norm_weight: torch.Tensor,
++    qk_weight: torch.Tensor,
++    num_blocks: int,
++    eps: float,
++) -> torch.Tensor:
++    output, _ = _launch_attn_res(
++        prefix, blocks, norm_weight, qk_weight, num_blocks, eps, None, None, 0.0
++    )
+     return output
++
++
++def attn_res_fused(
++    prefix: torch.Tensor,
++    blocks: torch.Tensor,
++    norm_weight: torch.Tensor,
++    qk_weight: torch.Tensor,
++    num_blocks: int,
++    eps: float,
++    addend: torch.Tensor | None = None,
++    out_norm_weight: torch.Tensor | None = None,
++    out_norm_eps: float = 0.0,
++) -> tuple[torch.Tensor, torch.Tensor | None]:
++    """Apply attn-res with an optional residual add and output RMSNorm.
++
++    Returns ``(output, prefix_sum)``. ``output`` is the RMSNorm of the mixed
++    result when ``out_norm_weight`` is given, and the raw mix otherwise;
++    ``prefix_sum`` is ``prefix + addend`` when ``addend`` is given, and ``None``
++    otherwise.
++    """
++    return _launch_attn_res(
++        prefix,
++        blocks,
++        norm_weight,
++        qk_weight,
++        num_blocks,
++        eps,
++        addend,
++        out_norm_weight,
++        out_norm_eps,
++    )
+diff --git a/vllm/v1/attention/backends/gdn_attn.py b/vllm/v1/attention/backends/gdn_attn.py
+index 0b32dfcf9444b70e22f63950f6ca53998a5d4339..47dc84557225f11f560dc9b5dfadca956dac1938 100644
+--- a/vllm/v1/attention/backends/gdn_attn.py
++++ b/vllm/v1/attention/backends/gdn_attn.py
+@@ -233,6 +233,14 @@ class GDNAttentionMetadataBuilder(AttentionMetadataBuilder[GDNAttentionMetadata]
+             num_zero_len = (non_spec_query_lens_cpu == 0).sum().item()
+             num_prefills = non_spec_query_lens_cpu.size(0) - num_decodes - num_zero_len
+             num_decode_tokens = num_decodes
++            import os as _k3fpk_os  # k3-force-prefill-kda
++            if _k3fpk_os.environ.get('K3_FORCE_PREFILL_KDA', '0') == '1' and num_decodes > 0:
++                # k3-force-prefill-kda: route ALL non-spec 1-token seqs through the prefill
++                # chunk_kda kernel (with initial_state) so the disagg boundary token
++                # is bit-consistent with prefill. num_zero_len stays excluded.
++                num_prefills = non_spec_query_lens_cpu.size(0) - num_zero_len
++                num_decodes = 0
++                num_decode_tokens = 0
+             num_prefill_tokens = (
+                 non_spec_query_lens_cpu.sum().item() - num_decode_tokens
+             )
+diff --git a/vllm/v1/attention/backends/mla/triton_mla.py b/vllm/v1/attention/backends/mla/triton_mla.py
+index 71a38e95d0ad49fd6a0511cf6613b5cab1f62af0..813b15f041a5ad51f8ccc9e2ab5adf3c3c40b3d2 100644
+--- a/vllm/v1/attention/backends/mla/triton_mla.py
++++ b/vllm/v1/attention/backends/mla/triton_mla.py
+@@ -254,8 +254,15 @@ class TritonMLAImpl(MLACommonImpl[MLACommonMetadata]):
+         )
+         lse = torch.zeros(B, q_num_heads, dtype=q.dtype, device=q.device)
+ 
+-        # For batch invariance, use only 1 split to ensure deterministic reduction
+-        if envs.VLLM_BATCH_INVARIANT:
++        # k3-single-split (opt-in, default OFF): K3_MLA_SINGLE_SPLIT=1 forces a
++        # single KV split so the split-KV reduction is deterministic. This was a
++        # disagg-recall diagnostic; it does NOT fix the known decode-side recall
++        # bug, so it is disabled by default and kept only as an investigation knob.
++        import os as _k3ssos
++        if _k3ssos.environ.get('K3_MLA_SINGLE_SPLIT', '0') == '1':
++            num_kv_splits = 1
++        elif envs.VLLM_BATCH_INVARIANT:
++            # For batch invariance, use only 1 split to ensure deterministic reduction
+             num_kv_splits = 1
+         else:
+             num_kv_splits = _compute_num_kv_splits(
+diff --git a/vllm/v1/engine/core.py b/vllm/v1/engine/core.py
+index 11c78c7e74537b16dc0092c9efd32b7c9a00fdd5..d24c1fb1d055e21b6b3545e72c74fa71170b2c95 100644
+--- a/vllm/v1/engine/core.py
++++ b/vllm/v1/engine/core.py
+@@ -94,7 +94,6 @@ from vllm.version import __version__ as VLLM_VERSION
+ 
+ logger = init_logger(__name__)
+ 
+-
+ HANDSHAKE_TIMEOUT_MINS = 5
+ 
+ _R = TypeVar("_R")  # Return type for collective_rpc
+@@ -1058,10 +1057,8 @@ class EngineCoreProc(EngineCore):
+                 self.has_coordinator,
+                 self.frontend_stats_publish_address,
+             )
+-            internal_dp_balancing = (
+-                self.has_coordinator
+-                and not vllm_config.parallel_config.data_parallel_external_lb
+-            )
++            self.external_lb = vllm_config.parallel_config.data_parallel_external_lb
++            internal_dp_balancing = self.has_coordinator and not self.external_lb
+             # Only publish request queue stats to coordinator for "internal"
+             # and "hybrid" LB modes.
+             self.publish_dp_lb_stats = internal_dp_balancing
+@@ -2007,19 +2004,33 @@ class DPEngineCoreProc(EngineCoreProc):
+ 
+     def add_request(self, request: Request, request_wave: int = 0):
+         super().add_request(request, request_wave)
+-        if self.has_coordinator and request_wave != self.current_wave:
+-            if request_wave > self.current_wave:
+-                self.current_wave = request_wave
+-            elif (
+-                not self.engines_running
+-                and self.scheduler.pause_state == PauseState.UNPAUSED
+-            ):
+-                # Request received for an already-completed wave, notify
+-                # front-end that we need to start the next one.
+-                self.engines_running = True
+-                self.output_queue.put_nowait(
+-                    (-1, EngineCoreOutputs(start_wave=self.current_wave))
+-                )
++        if not self.has_coordinator:
++            return
++        if request_wave > self.current_wave:
++            self.current_wave = request_wave
++        # Wake the DP group whenever engines are idle and the scheduler is
++        # unpaused, INCLUDING the wave's first request (request_wave ==
++        # current_wave). Gating on ``request_wave != current_wave`` deadlocks
++        # cold start: both default to 0, so no start_wave is broadcast and the
++        # receiving rank blocks forever on the EP all2all while peers skip
++        # execute_dummy_batch. The coordinator's FIRST_REQ wake proved
++        # insufficient for ROCm DP+EP disagg cold start, so re-broadcast here
++        # for every LB mode (external LB has no coordinator in the per-request
++        # path). Re-broadcasting is harmless in steady state.
++        if (
++            not self.engines_running
++            and self.scheduler.pause_state == PauseState.UNPAUSED
++        ):
++            logger.debug(
++                "DP wave wake: starting wave %d (engine %d, external_lb=%s).",
++                self.current_wave,
++                self.engine_index,
++                self.external_lb,
++            )
++            self.engines_running = True
++            self.output_queue.put_nowait(
++                (-1, EngineCoreOutputs(start_wave=self.current_wave))
++            )
+ 
+     def resume_scheduler(self):
+         if self.pending_pause or (self.engines_running and self.ignore_start_dp_wave):
+diff --git a/vllm/v1/sample/ops/topk_topp_sampler.py b/vllm/v1/sample/ops/topk_topp_sampler.py
+index c83ac7c4b90e696add8655e6d0a2cbdee6ef5bbe..0a84c99e78fd2508e0230b4e847f3b596a2b3777 100644
+--- a/vllm/v1/sample/ops/topk_topp_sampler.py
++++ b/vllm/v1/sample/ops/topk_topp_sampler.py
+@@ -25,6 +25,20 @@ def _skip_aiter_sampler_on_gfx1250() -> bool:
+     return on_gfx1250()
+ 
+ 
++def _aiter_topk_topp_unsupported_on_gfx942() -> bool:
++    """AITER's ``top_k_top_p_sampling_from_probs`` is a gfx950-only prebuilt.
++
++    It segfaults on gfx942 (MI325X / MI300X), so callers must fall back to the
++    native torch sampler on that architecture.
++    """
++    try:
++        from vllm.platforms.rocm import on_gfx942
++
++        return on_gfx942()
++    except Exception:  # noqa: BLE001
++        return False
++
++
+ def flashinfer_sampler_supported() -> bool:
+     """Decide whether FlashInfer's top-p/top-k sampler can be used.
+ 
+@@ -118,6 +132,7 @@ class TopKTopPSampler(nn.Module):
+             logprobs_mode not in PROCESSED_LOGPROBS_MODES
+             and rocm_aiter_ops.is_enabled()
+             and not _skip_aiter_sampler_on_gfx1250()  # TODO (JPVILLAM): Enable
++            and not _aiter_topk_topp_unsupported_on_gfx942()
+         ):
+             self.aiter_ops = None
+             self._aiter_ops_import_failed = False
+diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
+index b8e02c289b4db84156e3b29d027d1026381499d0..75cd3cc64f159f5fb7171370d3ab4cef5456bfe8 100644
+--- a/vllm/v1/worker/gpu/model_runner.py
++++ b/vllm/v1/worker/gpu/model_runner.py
+@@ -1403,7 +1403,19 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                 skip_compiled=skip_compiled,
+                 is_padding=input_batch.is_padding,
+             ):
++                import os as _os_k3bc
++                _k3bc = _os_k3bc.environ.get("K3_FWD_BREADCRUMB", "0") == "1"
++                if _k3bc:
++                    import logging as _lg_k3bc
++                    _lg_k3bc.getLogger(__name__).warning(
++                        "[k3-bc] pre_forward START toks=%s",
++                        getattr(input_batch, "num_tokens", None))
+                 self.kv_connector.pre_forward(scheduler_output)
++                if _k3bc:
++                    import torch as _t_k3bc
++                    _t_k3bc.cuda.synchronize()
++                    import logging as _lg_k3bc
++                    _lg_k3bc.getLogger(__name__).warning("[k3-bc] pre_forward DONE+SYNCED -> model()")
+                 if batch_desc.cg_mode == CUDAGraphMode.PIECEWISE:
+                     # Run the PIECEWISE graph (compiled PW cudagraph or breakable
+                     # cudagraph, chosen inside run_pw_graph). cg_mode is only
+@@ -1415,6 +1427,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                 else:
+                     # Eager (NONE): call the raw model directly.
+                     model_output = self.model(**model_inputs)
++                if _k3bc:
++                    import torch as _t_k3bc
++                    _t_k3bc.cuda.synchronize()
++                    import logging as _lg_k3bc
++                    _lg_k3bc.getLogger(__name__).warning("[k3-bc] model() DONE+SYNCED")
+ 
+         if self.is_last_pp_rank:
+             if self.use_aux_hidden_state_outputs:
+diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
+index 5083087bf07219a1e79756fb70577110e6347f44..0f9826353a27ee1a85f5945340b60188b9d4681e 100644
+--- a/vllm/v1/worker/gpu_model_runner.py
++++ b/vllm/v1/worker/gpu_model_runner.py
+@@ -1219,7 +1219,23 @@ class GPUModelRunner(
+         # Zero GPU memory for freshly allocated cache blocks to prevent
+         # stale NaN/data from corrupting attention or SSM computation.
+         if scheduler_output.new_block_ids_to_zero:
++            import os as _os_k3z
++            if _os_k3z.environ.get("K3_FWD_BREADCRUMB", "0") == "1":
++                import logging as _lg_k3z
++                _lg_k3z.getLogger(__name__).warning(
++                    "[k3-bc] zero_block_ids START ids=%s",
++                    scheduler_output.new_block_ids_to_zero)
++            if _os_k3z.environ.get("K3_FWD_BREADCRUMB", "0") == "1":
++                import torch as _t_k3z
++                _t_k3z.cuda.synchronize()  # attribute async fault to zeroing precisely
++                import logging as _lg_k3z
++                _lg_k3z.getLogger(__name__).warning("[k3-bc] zero_block_ids SYNCED-ok")
+             self._zero_block_ids(scheduler_output.new_block_ids_to_zero)
++            if _os_k3z.environ.get("K3_FWD_BREADCRUMB", "0") == "1":
++                import torch as _t_k3z
++                _t_k3z.cuda.synchronize()  # if zeroing faulted, this raises/faults HERE
++                import logging as _lg_k3z
++                _lg_k3z.getLogger(__name__).warning("[k3-bc] zero_block_ids DONE+SYNCED")
+         if scheduler_output.kv_cache_block_copies:
+             copy_kv_cache_blocks_inplace(
+                 self.kv_caches,
+@@ -3900,13 +3916,24 @@ class GPUModelRunner(
+         Returns:
+             Model output tensor
+         """
+-        return self.model(
++        import os as _os_k3mf
++        _k3mf = _os_k3mf.environ.get("K3_FWD_BREADCRUMB", "0") == "1"
++        if _k3mf:
++            import torch as _t_k3mf, logging as _lg_k3mf
++            _t_k3mf.cuda.synchronize()
++            _lg_k3mf.getLogger(__name__).warning("[k3-bc] _model_forward START (pre-model synced-ok)")
++        _out_k3mf = self.model(
+             input_ids=input_ids,
+             positions=positions,
+             intermediate_tensors=intermediate_tensors,
+             inputs_embeds=inputs_embeds,
+             **model_kwargs,
+         )
++        if _k3mf:
++            import torch as _t_k3mf, logging as _lg_k3mf
++            _t_k3mf.cuda.synchronize()
++            _lg_k3mf.getLogger(__name__).warning("[k3-bc] _model_forward DONE+SYNCED")
++        return _out_k3mf
+ 
+     @staticmethod
+     def _is_uniform_decode(
+diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
+index a8118ef9fa645ca8c1050e2aebb858edc5562fb1..0174d581b4d3682e1e7454dbddea3cfba3ba8e44 100644
+--- a/vllm/v1/worker/utils.py
++++ b/vllm/v1/worker/utils.py
+@@ -47,6 +47,7 @@ def _zero_kv_blocks_kernel(
+     seg_page_sizes_ptr,
+     block_ids_ptr,
+     n_blocks,
++    seg_nblocks_ptr,
+     N_SEGS: tl.constexpr,
+     MAX_CHUNKS: tl.constexpr,
+     BLOCK_SIZE: tl.constexpr,
+@@ -80,6 +81,12 @@ def _zero_kv_blocks_kernel(
+     if chunk_index >= page_size_el // BLOCK_SIZE:
+         return
+     block_id = tl.load(block_ids_ptr + block_index)
++    # k3-kda: bounds-guard -- an out-of-range block_id would make the store
++    # address (seg_addr + block_id*page_size) land outside this segment's tensor
++    # and fault the GPU. Skip if block_id exceeds this segment's block capacity.
++    seg_nblk = tl.load(seg_nblocks_ptr + seg_index)
++    if block_id >= seg_nblk:
++        return
+     seg_addr = tl.load(seg_addrs_ptr + seg_index)
+     ptr = tl.cast(seg_addr, tl.pointer_type(tl.int32))
+     offset = (
+@@ -127,11 +134,26 @@ class KVBlockZeroer:
+         seen_ptrs: set[int] = set()
+         seg_addrs: list[int] = []
+         seg_page_sizes: list[int] = []
+-
++        seg_nblocks: list[int] = []  # k3-kda: per-segment logical block capacity
++
++        # k3-kda: MLAAttentionSpec subclasses FullAttentionSpec, so it passes the
++        # isinstance check below and the zeroer builds a segment for the MLA
++        # compressed-latent cache using standard-attention stride math -- which is
++        # WRONG for MLA's layout (rank-3 [num_blocks, block_size, latent], no K/V
++        # split). block_id*page_size then lands out of bounds -> GPU "Memory access
++        # fault" before the forward. On K3 the zeroing flag is on because of the
++        # mamba (KDA) layers (#35219), NOT the attention layers, and recording
++        # excludes MambaSpec -- so only attention block ids are ever zeroed. For a
++        # uniform-precision cache the attention pre-zeroing is unnecessary (attn
++        # writes before it reads), so skipping MLA here is safe and fixes the fault.
++        from vllm.v1.kv_cache_interface import MLAAttentionSpec as _K3MLASpec
++        _os_k3skip = __import__("os").environ.get("K3_ZERO_SKIP_MLA", "1") == "1"
+         for group in attn_groups_iter:
+             spec = group.kv_cache_spec
+             if not isinstance(spec, FullAttentionSpec):
+                 continue
++            if _os_k3skip and isinstance(spec, _K3MLASpec):
++                continue
+             if group.kv_cache_group_id >= len(kernel_block_sizes):
+                 continue
+             kernel_bs = kernel_block_sizes[group.kv_cache_group_id]
+@@ -167,10 +189,24 @@ class KVBlockZeroer:
+                     if kv.stride(d) * el > block_stride_bytes
+                 ]
+                 outer_strides = [kv.stride(d) * el for d in outer_dims]
++                # k3-kda: number of logical blocks this segment's tensor holds,
++                # so the kernel can bounds-check block_id (an out-of-range id ->
++                # block_id*page_size OOB write -> GPU "Memory access fault"). The
++                # segment spans the block_dim axis; its capacity is that axis'
++                # length divided by the logical/kernel ratio.
++                seg_nblk = int(kv.shape[block_dim]) // max(1, ratio)
+                 for outer in iprod(*(range(kv.shape[d]) for d in outer_dims)):
+                     off_bytes = sum(i * s for i, s in zip(outer, outer_strides))
+                     seg_addrs.append(dp + off_bytes)
+                     seg_page_sizes.append(cur_page_el)
++                    seg_nblocks.append(seg_nblk)
++
++        import os as _os_k3sd
++        if _os_k3sd.environ.get("K3_FWD_BREADCRUMB", "0") == "1":
++            logger.warning(
++                "[k3-bc] KVBlockZeroer segs=%d page_el=%s nblk=%s (first 6)",
++                len(seg_addrs), seg_page_sizes[:6], seg_nblocks[:6],
++            )
+ 
+         if not seg_addrs:
+             self._meta = None
+@@ -187,13 +223,34 @@ class KVBlockZeroer:
+             max_page_size_el // blk_size,
+             blk_size,
+             len(seg_addrs),
++            torch.tensor(seg_nblocks, dtype=torch.int64, device=self.device),
+         )
+ 
+     def zero_block_ids(self, block_ids: list[int]) -> None:
+         """Zero the KV cache memory for the given block IDs."""
+         if not block_ids or self._meta is None:
+             return
+-        seg_addrs, seg_page_sizes, max_chunks, blk_size, n_segs = self._meta
++        seg_addrs, seg_page_sizes, max_chunks, blk_size, n_segs, seg_nblocks = (
++            self._meta
++        )
++        # k3-kda: an out-of-range block_id makes the kernel write
++        # seg_addr + block_id*page_size past the segment tensor -> GPU
++        # "Memory access fault". Under K3 hybrid + 2P/2D the scheduler has been
++        # observed to emit attention block ids that exceed a segment's capacity;
++        # the kernel now skips any (block, seg) whose block_id >= seg_nblocks.
++        import os as _os_k3zb
++        if _os_k3zb.environ.get("K3_FWD_BREADCRUMB", "0") == "1":
++            try:
++                _cap = int(seg_nblocks.min())
++                _mx = max(block_ids)
++                if _mx >= _cap:
++                    logger.warning(
++                        "[k3-bc] zero_block_ids OOB-guard: max_id=%s >= min_seg_cap=%s "
++                        "(ids=%s) -> clamped by kernel",
++                        _mx, _cap, block_ids[:8],
++                    )
++            except Exception:
++                pass
+         n_blocks = len(block_ids)
+         idx = async_tensor_h2d(block_ids, device=self.device, dtype=torch.int64)
+         grid = (n_blocks * n_segs * max_chunks,)
+@@ -202,6 +259,7 @@ class KVBlockZeroer:
+             seg_page_sizes,
+             idx,
+             n_blocks,
++            seg_nblocks,
+             N_SEGS=n_segs,
+             MAX_CHUNKS=max_chunks,
+             BLOCK_SIZE=blk_size,

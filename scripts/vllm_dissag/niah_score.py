@@ -1,4 +1,4 @@
-# Shared NIAH haystack + scoring. Used by benchmark_niah.py (live) and
+# Shared NIAH haystack + scoring. Used by benchmark_niah_methods.py (live) and
 # regrade_niah.py (offline). Word lists live here so the two cannot drift.
 #
 # Live bag verdict (found= / decoys= / verdict=) stays presence-based so new

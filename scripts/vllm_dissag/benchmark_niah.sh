@@ -44,19 +44,37 @@ if [ "$_ready" != 1 ]; then
     curl -s -D - "http://127.0.0.1:${BENCHMARK_PORT}/ready" >&2 || true
 fi
 
-# The server registers the model under its path (served_model_name = MODEL_PATH).
-# Uses /v1/completions with stream + x-request-id (disagg protocol).
+# The model tag to request MUST equal the server's served_model_name, or every
+# request 404s and the whole sweep is recorded as FAILURE. vllm_dissag serves the
+# recipe's --served-model-name when it sets one (Kimi-K3-MXFP4: "kimi-k3"), else
+# MODEL_PATH; vllm_disagg.sh resolves that into SERVED_MODEL_NAME. vllm_multinode
+# exports NIAH_MODEL to match its own --served-model-name.
 # NIAH_WARMUP=1 (harness default): first-hit JIT compiles off the scored path so a cold
 # boot does not produce false 0/10 or timeouts on the first scored request.
-NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}" \
-NIAH_MODEL="${MODEL_PATH}" \
-NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
-NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
-NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
-NIAH_WARMUP="${NIAH_WARMUP:-1}" \
-NIAH_SEEDS="${NIAH_SEEDS:-0,1,2}" \
-  python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
-# Includes harness failure: python exits 1 when every request is NO-RESULT.
+if [[ -n "${NIAH_METHOD:-}" ]]; then
+    # The prompt-method harness (DeepSeek-V4 via run_wideep.sh, which sets NIAH_METHOD):
+    # /v1/completions with stream + x-request-id (disagg protocol), decoy-aware scoring.
+    NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}" \
+    NIAH_MODEL="${NIAH_MODEL:-${SERVED_MODEL_NAME:-${MODEL_PATH}}}" \
+    NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
+    NIAH_MAXTOK="${NIAH_MAXTOK:-2048}" \
+    NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
+    NIAH_WARMUP="${NIAH_WARMUP:-1}" \
+    NIAH_SEEDS="${NIAH_SEEDS:-0,1,2}" \
+      python3 "${DIR}/benchmark_niah_methods.py" 2>&1 | tee -a "${LOG}"
+else
+    # The chat harness: reads the reasoning trace as well as the answer, records
+    # finish_reason, and leaves max_tokens to benchmark_niah.py (8192: a reasoning model
+    # needs room for its trace before the answer).
+    NIAH_URL="http://127.0.0.1:${BENCHMARK_PORT}/v1/chat/completions" \
+    NIAH_MODEL="${NIAH_MODEL:-${SERVED_MODEL_NAME:-${MODEL_PATH}}}" \
+    NIAH_WORDS="${NIAH_WORDS:-2000,8000,20000,35000}" \
+    NIAH_SEEDS="${NIAH_SEEDS:-0,1,2}" \
+    NIAH_TIMEOUT="${NIAH_TIMEOUT:-1800}" \
+    NIAH_WARMUP="${NIAH_WARMUP:-1}" \
+      python3 "${DIR}/benchmark_niah.py" 2>&1 | tee -a "${LOG}"
+fi
+# Includes harness failure: a harness exits 1 when every request is NO-RESULT.
 niah_rc=${PIPESTATUS[0]}
 
 # Generate madengine perf.csv rows from NIAH results (mirrors benchmark_xPyD.sh)

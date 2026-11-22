@@ -1,0 +1,24 @@
+{
+ "path": [
+  "vllm_multinode",
+  "refused",
+  1
+ ],
+ "catalog": "vllm_multinode",
+ "card": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+ "snapshot": {
+  "card": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+  "catalog": "vllm_multinode",
+  "inputs": {
+   "nodes": 2,
+   "gpu_arch": "gfx942"
+  },
+  "exit_code": 1,
+  "calls": [],
+  "ranks": [],
+  "stderr_tail": [
+   "Error: MAD_CONFIG=mad-config.kimi-k3.yaml is a madengine layered config, which plain sbatch does not read.",
+   "       Run this card through madengine, or set MODEL_NAME and the file's other values yourself (docs/configuration.md)."
+  ]
+ }
+}
