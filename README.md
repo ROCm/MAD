@@ -4,6 +4,9 @@
 
 MAD is a platform that consists of curated list of AI models that allow us to run on various GPU architectures seamlessly while tracking performance and generating dashboards for insights.
 
+**Documentation:** start at [docs/README.md](docs/README.md). It takes you from running your first
+model to running, configuring and extending the multinode inference workloads.
+
 ## Blueprints
 
 This repository provides state-of-the-art deep learning recipes for training, inference and easy deployment on AMD Instinct GPUs.
