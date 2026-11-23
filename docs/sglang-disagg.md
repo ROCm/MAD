@@ -272,8 +272,12 @@ reference.
 | `compat` | Flags SGLang renamed or removed, applied only where the installed SGLang no longer accepts the name written in the recipe. |
 
 `defaults` and each model entry are layered, later keys winning: `base` (every role and mode),
-`modes.<tp|dp_ep>`, `roles.<prefill|decode>` (every mode), `roles.<role>.<tp|dp_ep>`. Precedence,
-lowest first: `defaults`, the model, the backend, overlays, then `EXTRA_SERVER_ARGS`,
+`modes.<tp|dp_ep>`, `roles.<prefill|decode>` (every mode), `roles.<role>.<tp|dp_ep>`. A model
+entry can also carry `archs: {<gfx arch>: <entry>}`: on that GPU architecture (`PERF_GPU_ARCH`,
+which `run_xPyD_models.slurm` detects on the allocation), a further entry of the same shape,
+`env:` included, applies over the model's own; on any other architecture it is ignored, and
+`render.py` reports when the architecture is unknown. Precedence, lowest first: `defaults`, the
+model, its `archs.<arch>`, the backend, overlays, then `EXTRA_SERVER_ARGS`,
 `EXTRA_PREFILL_ARGS` and `EXTRA_DECODE_ARGS` (`EXTRA_ROUTER_ARGS` for the router). `true` is a bare
 flag, a list is several values, `"A..B"` is the integers A to B, and `false` or `null` removes a flag.
 

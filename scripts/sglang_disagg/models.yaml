@@ -21,8 +21,10 @@
 #                               `tp:` / `dp_ep:` sub-blocks to one mode
 #   extends: <model>            start from another model's entry
 #   env: {NAME: value}          (models only) exported before both roles' servers start
+#   archs: {gfx950: {...}}      (models only) on that GPU architecture, a further entry
+#                               (base / modes / roles / env) over the model's own
 #
-# Precedence, lowest first: defaults, the model, the backend's `args`, overlays,
+# Precedence, lowest first: defaults, the model, its archs.<arch>, the backend's `args`, overlays,
 # EXTRA_SERVER_ARGS / EXTRA_PREFILL_ARGS / EXTRA_DECODE_ARGS. `true` is a bare flag,
 # a list is several values, "A..B" is the integers A to B. `false` or `null` removes
 # a flag; under `extends`, `null` drops the value inherited from the parent.

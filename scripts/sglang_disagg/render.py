@@ -16,6 +16,8 @@ them into the container (defaults in brackets):
   MODEL_PATH, IB_DEVICES (--disaggregation-ib-device), HOST_IP (this node's --host,
   else its IPADDRS entry), DIST_INIT_PORT [5757]
   BENCHMARK_SCRIPT, ENABLE_RADIX_CACHE, ENABLE_SERVER_METRICS  select overlays
+  PERF_GPU_ARCH (else MAD_GPU_ARCH)  the GPU architecture (gfx942, gfx950, ...): selects a
+                        model's archs.<arch> block; run_xPyD_models.slurm detects it
   EXTRA_SERVER_ARGS, EXTRA_PREFILL_ARGS, EXTRA_DECODE_ARGS, EXTRA_ROUTER_ARGS
   MAD_TOPO_ROLE / _ROLE_INDEX / _ROUTER   the launcher's topology for this node: when
                         given, it decides the node's role (as in the other role scripts)
@@ -64,6 +66,7 @@ LAUNCHER_FLAGS = frozenset({
 _RANGE = re.compile(r"\s*(\d+)\s*\.\.\s*(\d+)\s*")
 _OPTION = re.compile(r"(?<![\w-])--[A-Za-z0-9][A-Za-z0-9-]*")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_GFX_ARCH = re.compile(r"gfx[0-9a-f]+")
 
 Flags = Dict[str, object]
 
@@ -161,10 +164,26 @@ class Catalog:
             raise RenderError(f"unknown KV_TRANSFER_BACKEND {name!r}; models.yaml backends: {', '.join(self.backends)}")
         return self.backends[name] or {}
 
-    def server_flags(self, name: str, mode: str, role: str, backend: str, overlays=()) -> Flags:
+    def archs_for(self, name: str) -> List[str]:
+        """The GPU architectures the model's entry has an `archs:` block for."""
+        archs = self.model(name).get("archs") or {}
+        if not isinstance(archs, dict):
+            raise RenderError(f"models.{name}.archs: expected a map of <gfx arch>: entry")
+        for arch, block in archs.items():
+            if not isinstance(arch, str) or not _GFX_ARCH.fullmatch(arch):
+                raise RenderError(f"models.{name}.archs: {arch!r} is not a GPU architecture (gfx942, gfx950, ...)")
+            if not isinstance(block, dict):
+                raise RenderError(f"models.{name}.archs.{arch}: expected a map")
+        return list(archs)
+
+    def _arch_block(self, name: str, arch: str) -> Dict:
+        return (self.model(name).get("archs") or {}).get(arch) or {} if arch in self.archs_for(name) else {}
+
+    def server_flags(self, name: str, mode: str, role: str, backend: str, overlays=(), arch: str = "") -> Flags:
         acc: Flags = {}
         _apply(acc, _resolve_layer(self.defaults, mode, role, "defaults"))
         _apply(acc, _resolve_layer(self.model(name), mode, role, f"models.{name}"))
+        _apply(acc, _resolve_layer(self._arch_block(name, arch), mode, role, f"models.{name}.archs.{arch}"))
         _apply(acc, _flag_map(self.backend(backend).get("args"), f"backends.{backend}.args"))
         for overlay in overlays:
             if overlay not in self.overlays:
@@ -172,19 +191,22 @@ class Catalog:
             _apply(acc, _flag_map(self.overlays[overlay], f"overlays.{overlay}"))
         return acc
 
-    def server_env(self, name: str) -> Dict[str, str]:
-        """The model's `env:` map, as the strings its servers are started with."""
-        block = self.model(name).get("env") or {}
-        if not isinstance(block, dict):
-            raise RenderError(f"models.{name}.env: expected a map of NAME: value")
+    def server_env(self, name: str, arch: str = "") -> Dict[str, str]:
+        """The model's `env:` map, then its `archs.<arch>.env`, as the strings its servers
+        are started with."""
         out = {}
-        for key, value in block.items():
-            # YAML reads unquoted ON/OFF/YES/NO keys as booleans.
-            if not isinstance(key, str) or not _ENV_NAME.fullmatch(key):
-                raise RenderError(f"models.{name}.env: {key!r} is not an environment variable name")
-            if value is None or isinstance(value, (dict, list)):
-                raise RenderError(f"models.{name}.env.{key}: expected a scalar value")
-            out[str(key)] = str(value).lower() if isinstance(value, bool) else str(value)
+        for where, block in ((f"models.{name}.env", self.model(name).get("env")),
+                             (f"models.{name}.archs.{arch}.env", self._arch_block(name, arch).get("env"))):
+            block = block or {}
+            if not isinstance(block, dict):
+                raise RenderError(f"{where}: expected a map of NAME: value")
+            for key, value in block.items():
+                # YAML reads unquoted ON/OFF/YES/NO keys as booleans.
+                if not isinstance(key, str) or not _ENV_NAME.fullmatch(key):
+                    raise RenderError(f"{where}: {key!r} is not an environment variable name")
+                if value is None or isinstance(value, (dict, list)):
+                    raise RenderError(f"{where}.{key}: expected a scalar value")
+                out[key] = str(value).lower() if isinstance(value, bool) else str(value)
         return out
 
     def compat(self, flags: Flags, options: Optional[Set[str]]) -> Tuple[Flags, List[str]]:
@@ -273,6 +295,7 @@ class Settings:
     extra_all: List[str]
     extra_role: Dict[str, List[str]]
     extra_router: List[str]
+    gpu_arch: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str], require_ips: bool = True) -> "Settings":
@@ -316,6 +339,7 @@ class Settings:
             extra_role={"prefill": shlex.split(env.get("EXTRA_PREFILL_ARGS", "")),
                         "decode": shlex.split(env.get("EXTRA_DECODE_ARGS", ""))},
             extra_router=shlex.split(env.get("EXTRA_ROUTER_ARGS", "")),
+            gpu_arch=env.get("PERF_GPU_ARCH") or env.get("MAD_GPU_ARCH") or "",
         )
 
 
@@ -410,9 +434,18 @@ def validate(cat: Catalog, s: Settings):
         raise RenderError(f"KV_TRANSFER_BACKEND={s.backend} is not validated with mode {s.mode} "
                           f"(models.yaml backends.{s.backend}.modes: {', '.join(backend_modes)})")
     for role in ROLES:
-        cat.server_flags(s.model, s.mode, role, s.backend, s.overlays)
-    cat.server_env(s.model)
+        cat.server_flags(s.model, s.mode, role, s.backend, s.overlays, s.gpu_arch)
+    cat.server_env(s.model, s.gpu_arch)
     return build_topology(s)
+
+
+def arch_note(cat: Catalog, s: Settings) -> Optional[str]:
+    """Why the model's architecture overrides are not in effect, when they are not."""
+    archs = cat.archs_for(s.model)
+    if archs and not s.gpu_arch:
+        return (f"GPU architecture unknown (PERF_GPU_ARCH unset): {s.model}'s overrides for "
+                f"{', '.join(archs)} are not applied")
+    return None
 
 
 # --------------------------------------------------------------------------- commands
@@ -428,7 +461,8 @@ def server_argv(cat: Catalog, s: Settings, node: Node, options: Optional[Set[str
                  "--nnodes", str(node.nnodes), "--node-rank", str(node.node_rank)]
     if s.ib_devices:
         argv += ["--disaggregation-ib-device", s.ib_devices]
-    flags, compat_notes = cat.compat(cat.server_flags(s.model, s.mode, node.role, s.backend, s.overlays), options)
+    flags, compat_notes = cat.compat(
+        cat.server_flags(s.model, s.mode, node.role, s.backend, s.overlays, s.gpu_arch), options)
     if notes is not None:
         notes.extend(compat_notes)
     return argv + flags_to_argv(flags) + s.extra_all + s.extra_role[node.role]
@@ -455,7 +489,8 @@ def shell_vars(cat: Catalog, s: Settings, node: Node, leaders,
              f"IP_FIRST_PREFILL={leaders['prefill'][0]}", f"IP_FIRST_DECODE={leaders['decode'][0]}"]
     if node.role != "router":
         lines.append(f"SERVER_ARGV={_bash_array(server_argv(cat, s, node, options, notes))}")
-        lines += [f"export {key}={shlex.quote(value)}" for key, value in cat.server_env(s.model).items()]
+        lines += [f"export {key}={shlex.quote(value)}"
+                  for key, value in cat.server_env(s.model, s.gpu_arch).items()]
     if node.runs_router:
         lines.append(f"ROUTER_ARGV={_bash_array(router_argv(s, leaders))}")
     return lines
@@ -467,7 +502,7 @@ def print_plan(cat: Catalog, s: Settings, nodes, leaders, options, as_json: bool
         node = nodes[rank]
         row = asdict(node)
         if node.role != "router":
-            row["server_env"] = cat.server_env(s.model)
+            row["server_env"] = cat.server_env(s.model, s.gpu_arch)
             row["server_cmd"] = ["python3", "-m", "sglang.launch_server"] + server_argv(cat, s, node, options)
         if node.runs_router:
             row["router_cmd"] = ["python3", "-m", "sglang_router.launch_router"] + router_argv(s, leaders)
@@ -476,7 +511,11 @@ def print_plan(cat: Catalog, s: Settings, nodes, leaders, options, as_json: bool
         print(json.dumps(rows, indent=2))
         return
     print(f"model={s.model} mode={s.mode} backend={s.backend} xP={s.xp} yD={s.yd} "
-          f"router={'own node' if s.router_node else 'node 0'} overlays={','.join(s.overlays) or '-'}")
+          f"router={'own node' if s.router_node else 'node 0'} overlays={','.join(s.overlays) or '-'} "
+          f"arch={s.gpu_arch or '-'}")
+    note = arch_note(cat, s)
+    if note:
+        print(f"note: {note}")
     for row in rows:
         print(f"\n[node {row['rank']}] {row['ip']}  {row['role']} {row['role_index']}"
               f"{' + router' if row['runs_router'] and row['role'] != 'router' else ''}")
@@ -499,9 +538,12 @@ def cmd_check(cat: Catalog, options: Optional[Set[str]]) -> int:
                 if mode not in ((spec or {}).get("modes") or MODES):
                     continue
                 for role in ROLES:
-                    flags, _ = cat.compat(cat.server_flags(name, mode, role, backend, list(cat.overlays)), options)
-                    for flag in flags:
-                        used.setdefault(flag, set()).add(f"{name}/{mode}/{role}/{backend}")
+                    for arch in [""] + cat.archs_for(name):
+                        flags, _ = cat.compat(cat.server_flags(name, mode, role, backend,
+                                                               list(cat.overlays), arch), options)
+                        for flag in flags:
+                            used.setdefault(flag, set()).add(
+                                f"{name}{'@' + arch if arch else ''}/{mode}/{role}/{backend}")
     for flag in LAUNCHER_FLAGS:
         used.setdefault(flag, set()).add("launcher")
     unknown = sorted(flag for flag in used if flag not in options)
@@ -553,6 +595,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         node, placement = this_node(nodes, s, args.rank, env)
         if placement:
             print(f"[topology] {placement}", file=sys.stderr)
+        note = arch_note(cat, s)
+        if note:
+            print(f"[render] {note}", file=sys.stderr)
         notes: List[str] = []
         lines = shell_vars(cat, s, node, leaders, options, notes)
         for note in notes:

@@ -95,6 +95,42 @@ class Catalog(unittest.TestCase):
                 with self.assertRaisesRegex(render.RenderError, "not an environment variable name"):
                     cat.server_env(bad)
 
+    ARCH_YAML = ("backends:\n  mori: {}\nmodels:\n"
+                 "  M:\n    env: {A: model}\n    base: {--x: 1, --y: 1}\n"
+                 "    archs:\n      gfx950:\n        env: {A: arch, B: arch}\n        base: {--x: 2}\n"
+                 "        roles: {decode: {tp: {--z: 3}}}\n")
+
+    def test_arch_block_applies_on_its_architecture_only(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write(self.ARCH_YAML)
+            tmp.flush()
+            cat = render.Catalog(Path(tmp.name))
+            self.assertEqual(cat.server_flags("M", "tp", "decode", "mori", (), "gfx950"),
+                             {"--x": 2, "--y": 1, "--z": 3})
+            self.assertEqual(cat.server_flags("M", "tp", "prefill", "mori", (), "gfx950"), {"--x": 2, "--y": 1})
+            for arch in ("gfx942", ""):
+                self.assertEqual(cat.server_flags("M", "tp", "decode", "mori", (), arch), {"--x": 1, "--y": 1})
+                self.assertEqual(cat.server_env("M", arch), {"A": "model"})
+            self.assertEqual(cat.server_env("M", "gfx950"), {"A": "arch", "B": "arch"})
+
+    def test_arch_comes_from_the_launcher_and_its_absence_is_reported(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write(self.ARCH_YAML)
+            tmp.flush()
+            cat = render.Catalog(Path(tmp.name))
+            s = settings(MODEL_NAME="M", PERF_GPU_ARCH="gfx950")
+            self.assertEqual(s.gpu_arch, "gfx950")
+            self.assertIsNone(render.arch_note(cat, s))
+            self.assertIn("not applied", render.arch_note(cat, settings(MODEL_NAME="M")))
+        self.assertIsNone(render.arch_note(CAT, settings()))
+
+    def test_arch_names_are_checked(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write("models:\n  M: {archs: {mi355x: {base: {--x: 1}}}}\n")
+            tmp.flush()
+            with self.assertRaisesRegex(render.RenderError, "not a GPU architecture"):
+                render.Catalog(Path(tmp.name)).archs_for("M")
+
     def test_ranges_and_lists_expand(self):
         self.assertEqual(render.flags_to_argv({"--a": "1..3", "--b": [4, 5], "--c": True}),
                          ["--a", "1", "2", "3", "--b", "4", "5", "--c"])
@@ -206,11 +242,20 @@ class Compat(unittest.TestCase):
         for name in CAT.names():
             for mode in CAT.modes_for(name):
                 for role in render.ROLES:
-                    every |= set(CAT.server_flags(name, mode, role, "mori", list(CAT.overlays)))
+                    for arch in [""] + CAT.archs_for(name):
+                        every |= set(CAT.server_flags(name, mode, role, "mori", list(CAT.overlays), arch))
         every |= render.LAUNCHER_FLAGS | {"--disaggregation-transfer-backend"}
         self.assertEqual(render.cmd_check(CAT, every), 0)
         self.assertEqual(render.cmd_check(CAT, every - {"--attention-backend"}), 1)
         self.assertEqual(render.cmd_check(CAT, None), 1)
+
+    def test_check_covers_arch_blocks(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml") as tmp:
+            tmp.write("backends:\n  mori: {}\nmodels:\n  M: {archs: {gfx950: {base: {--only-on-950: 1}}}}\n")
+            tmp.flush()
+            cat = render.Catalog(Path(tmp.name))
+            self.assertEqual(render.cmd_check(cat, render.LAUNCHER_FLAGS | {"--only-on-950"}), 0)
+            self.assertEqual(render.cmd_check(cat, set(render.LAUNCHER_FLAGS)), 1)
 
 
 if __name__ == "__main__":
