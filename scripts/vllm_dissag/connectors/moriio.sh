@@ -309,6 +309,16 @@ connector_launch_worker() {
 
     connector_setup_env "${EP_BACKEND:-mori}"
 
+    # Per-leg env, opt-in via models.yaml env (or submit time): PREFILL_EXTRA_ENV / DECODE_EXTRA_ENV =
+    # "KEY=VAL KEY=VAL", whitespace-separated (values cannot contain spaces), exported only on that leg.
+    # local -x: visible to the vllm serve started below, not to the router/benchmark this shell runs after.
+    local _leg_env="${PREFILL_EXTRA_ENV:-}"
+    [[ "$log_prefix" == "decode" ]] && _leg_env="${DECODE_EXTRA_ENV:-}"
+    local _kv _leg_kvs=()
+    read -ra _leg_kvs <<<"${_leg_env}"
+    for _kv in "${_leg_kvs[@]}"; do local -x "$_kv"; done
+    [[ "${DRY_RUN:-0}" == "1" && -n "${_leg_env}" ]] && echo "===LEGENV log_prefix=${log_prefix} ${_leg_env}==="
+
     # Patch PyTorch default_pg_timeout (DP Gloo groups) — wideEP only.
     if parallelism_is_wide_ep; then
         local _timeout_s="${DISTRIBUTED_TIMEOUT_SECONDS:-7200}"

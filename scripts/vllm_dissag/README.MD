@@ -40,9 +40,9 @@ neither → combo 1.
 
 Use these exact `MODEL_NAME` values (defined in `models.yaml` + the slurm allowlists).
 The **Combos** column lists which of the 4 valid combos above each model may run in; the
-slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family and
-`GLM-5.1-FP8` are **wideEP-only** (TP is rejected — their recipes need the wideEP serve
-path).
+slurm gate rejects any other pairing. Dense models are TP-only; the DeepSeek family,
+`GLM-5.1-FP8` and the `GLM-5.3-Flash-*-gfx942` cards are **wideEP-only** (TP is rejected — their
+recipes need the wideEP serve path).
 
 | Model | Type | Combos (by #) | Notes |
 |-------|------|---------------|-------|
@@ -57,6 +57,8 @@ path).
 | `DeepSeek-V4-Flash-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `DeepSeek-V4-Pro-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `GLM-5.3-Flash-FP8-gfx942` | MoE + DSA + KDA | 3 (moriio wideEP only) | gfx942 (MI300X / MI325X); own image (`glmv53flash.gfx942` Dockerfile); 1P/1D EP8, MTP on both legs, FULL_AND_PIECEWISE decode; NIAH 256K / 512K / 750K |
+| `GLM-5.3-Flash-MXFP4-gfx942` | MoE + DSA + KDA | 3 (moriio wideEP only) | same image and recipe as the FP8 card; MXFP4 experts as exact FP8 blocks on prefill, 4-bit on decode |
 
 ## Prerequisites
 
@@ -79,8 +81,8 @@ docker build -t <your-registry>/vllm-disagg:local \
 ```
 
 That image serves all connectors for every model in the table above **except**
-`GLM-5.1-FP8`, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and benchmarks
-on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
+`GLM-5.1-FP8`, the `GLM-5.3-Flash-*-gfx942` cards, and `amd-Llama-3.3-70B-Instruct-FP8-KV`, which boots and
+benchmarks on it but answers incorrectly (see the `dsv4` image below). `WITH_NIXL=1` (default)
 builds every transport (moriio TP/wideEP + rixl NIXL TP + DeepEP wideEP); add
 `--build-arg WITH_NIXL=0` for a lean MoRI-EP-only image (moriio + deepep-from-base,
 faster build).
@@ -151,6 +153,35 @@ settings come from the environment: `PARTITION`, `ACCOUNT`, `QOS`.
 Prompt defaults are handled per model and should not be set by hand — the Flash
 NIAH branch primes the answer stem (`NIAH_LIST_PRIME=1.`) and the Pro branch runs
 unprimed. The MoRI dispatch trim and `DSV4_ENABLE_HMA=0` are hardcoded and cannot be overridden.
+
+`GLM-5.3-Flash-FP8-gfx942` and `GLM-5.3-Flash-MXFP4-gfx942` (MI300X / MI325X, gfx942) share their own
+image. Its vLLM, AITER and vllm-router come from `glm53-flash-gfx942*` fork branches that carry every
+GLM-5.3 fix in-source; the build fails if one is missing:
+
+```bash
+docker build --ulimit nofile=1048576:1048576 -t <your-registry>/vllm-disagg:glmv53flash-gfx942 \
+  -f docker/vllm_disagg_inference.glmv53flash.gfx942.ubuntu.amd.Dockerfile .
+```
+
+Their `models.yaml` entries run MoRIIO in READ mode (`MORIIO_READ_MODE=1`, an opt-in in
+`connectors/moriio.sh`), MTP on both legs, and route both legs with `consistent_hash`
+(`ROUTER_PREFILL_POLICY` / `ROUTER_DECODE_POLICY`, also opt-ins; the default is `round_robin`,
+and both can be overridden at submit time) so an agentic session stays on one DP rank and hits its prefix cache; aiperf
+sends the session header the router keys on via `AIPERF_HTTP_X_SESSION_ID_FROM_CORRELATION_ID`.
+`..._long_context` runs 256K/1K and 512K/1K at c=1 and c=8 with per-shape warm-ups. The checkpoint
+directory is `GLM-5.3-Flash-FP8`, not the recipe key: the `models.json` cards set
+`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-FP8`, and a direct `sbatch` must export it too. On MI325X (Broadcom NICs) submit with `MORI_RDMA_DEVICES` and
+`NCCL_IB_HCA` set to `rdma0,...,rdma7` and `MORI_SOCKET_IFNAME=eno0` (not validated on these cards). The harness
+defaults match ConnectX-7 hosts.
+Short prompts (under ~2K tokens) need vLLM `6a0cb9395797` or later on the fork branch: earlier pins zeroed the decode
+leg's freshly allocated KV blocks after the MoRIIO READ had already filled them, so short requests looped or
+answered wrongly. Long-context results are unchanged.
+
+`GLM-5.3-Flash-MXFP4-gfx942` serves the AMD Quark MXFP4 checkpoint (`MODEL_WEIGHTS_NAME=GLM-5.3-Flash-MXFP4`)
+with the FP8 card's flags. gfx942 has no FP4 matrix math, so every MXFP4 expert converts exactly to FP8 128x128
+blocks at load: prefill runs routed and shared experts on the FP8 block paths, and decode keeps the routed experts
+4-bit (FlyDSL W4A16, exact e2m1 decode), which leaves more KV cache per GPU. The prefill-only switch goes through
+`PREFILL_EXTRA_ENV` (with `DECODE_EXTRA_ENV`, a per-leg `KEY=VAL ...` opt-in in `connectors/moriio.sh`).
 
 Then `export DOCKER_IMAGE_NAME=<tag>` (or a published image) before submitting. The slurm
 `docker pull`s the image on every node, so a local-only tag must be pushed to a registry the nodes
@@ -425,7 +456,7 @@ It is a drop-in alternative to the default `benchmark_xPyD.sh` concurrency sweep
 
 > **Breaking change:** the legacy `AGENTIC` env shorthand has been removed. Use `BENCHMARK_SCRIPT=agentic` instead.
 
-The four validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
+The validated agentic configurations are declared as first-class, `agentic`-tagged `models.json` entries. Discover them with:
 
 ```bash
 madengine run --tags agentic
@@ -439,6 +470,10 @@ madengine run --tags agentic
 | sglang | DeepSeek-V3 | mori_dp | `pyt_sglang_disagg_mori_dp_agentic_deepseek-v3` |
 | vllm | DeepSeek-V3 | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3` |
 | vllm | DeepSeek-V3-5layer | mori | `pyt_vllm_disagg_mori_agentic_deepseek-v3-5layer` |
+| vllm | GLM-5.3-Flash-FP8-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942` (conformance_256k) |
+| vllm | GLM-5.3-Flash-FP8-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-fp8_gfx942_512k` (conformance_512k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942` (conformance_256k) |
+| vllm | GLM-5.3-Flash-MXFP4-gfx942 | mori | `pyt_vllm_disagg_mori_agentic_glm-5.3-flash-mxfp4_gfx942_512k` (conformance_512k) |
 
 **vLLM specifics.** aiperf targets `AGENTIC_PORT`, which the launcher auto-resolves to the proxy/router port `BENCHMARK_PORT` (set by `connector_start_proxy`: `ROUTER_PORT` for `vllm_router`, `PROXY_PORT` for the toy proxy). Because the vLLM PD router 503s on `GET /v1/models` under MoRIIO service discovery (empty HTTP worker registry) while the shared harness gates readiness/served-model on `/v1/models`, the launcher starts a tiny stdlib shim (`agentic_models_shim.py`) on `BENCHMARK_PORT+1` that answers `/v1/models` (gated on the router's `/health`) and stream-proxies everything else; `AGENTIC_PORT` is then pointed at the shim. Both are byte-for-byte no-ops for the default sweep (guarded by `BENCHMARK_SCRIPT=agentic`).
 
