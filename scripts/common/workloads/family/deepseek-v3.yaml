@@ -1,0 +1,5 @@
+# DeepSeek-V3 / R1 family: 671B MoE (37B active), FP8 weights and KV.
+version: 2
+defaults: [../serve/vllm-disagg-wide-ep.yaml]
+model:
+  env: {MODEL_NAME: DeepSeek-V3}

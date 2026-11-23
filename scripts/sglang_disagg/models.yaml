@@ -23,27 +23,43 @@
 # --- Dense Llama / Qwen ---
 
 Llama-3.1-8B-Instruct:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: bf16, activations: bf16}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
     tp: "--disable-cuda-graph"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
 
 Qwen3-32B:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: bf16, activations: bf16}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
     tp: "--disable-cuda-graph"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
 
 amd-Llama-3.3-70B-Instruct-FP8-KV:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
   prefill:
     tp: "--disable-cuda-graph"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
 
 Llama-3.1-405B-Instruct-FP8-KV:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.65"
   prefill:
     tp: "--disable-cuda-graph --disable-radix-cache"
@@ -53,13 +69,21 @@ Llama-3.1-405B-Instruct-FP8-KV:
 # --- MoE ---
 
 Mixtral-8x7B-Instruct-v0.1:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: bf16, activations: bf16}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   prefill:
     tp: "--disable-cuda-graph"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
 
 DeepSeek-V3:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   # --enable-dp-attention-local-control-broadcast on both roles: forces all DP ranks to
   # step together so idle ranks enter the MoRI EP collective. prefill/decode dp use the
@@ -69,15 +93,19 @@ DeepSeek-V3:
     tp: "--disable-cuda-graph"
     dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3) --mem-fraction-static 0.65"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
     dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"
 
 DeepSeek-R1:
+  roles:                                # what every role needs (scripts/common/recipe/recipe.py)
+    default: {quantization: {weights: fp8, activations: fp8}}
+    prefill: {}
+    decode: {}
   base_flags: "--attention-backend aiter --watchdog-timeout 1000000 --mem-fraction-static 0.73"
   dp_flags: "--moe-a2a-backend mori --enable-dp-attention --enable-dp-lm-head --moe-dense-tp-size 1 --enable-dp-attention-local-control-broadcast"
   prefill:
     tp: "--disable-cuda-graph"
     dp: "--max-running-requests 8192 --cuda-graph-bs $(seq 1 3)"
   decode:
-    tp: "--disable-radix-cache --cuda-graph-bs $(seq 1 512)"
+    tp: "--disable-radix-cache --cuda-graph-bs 8 16 32 64 128 256 512"
     dp: "--max-running-requests 8192 --cuda-graph-bs 1 2 4 8 16 24 32 48 64 96 128"

@@ -1,0 +1,14 @@
+# Reproduction of pyt_vllm_disagg_mori_kimi-k3-mxfp4 (MI300X) and its MI355X twin: the same engine
+# commands on each GPU (a test holds them equal).
+# Kimi-K3 (MoE, MXFP4), 2 prefill + 2 decode nodes, wide EP, on whatever GPU the job lands on: the
+# recipe's gfx942 variant (int4 conversion added by its roles) or gfx950 variant (native MXFP4).
+# Measures long-context retrieval (NIAH). The example's own best-known registry shows a measured
+# configuration laid over the recipe by default (MAD_BEST_CONFIG=0 runs the recipe as written).
+version: 2
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/kimi-k3.yaml, ../../../common/workloads/bench/niah.yaml]
+model:
+  env:
+    MODEL_NAME: Kimi-K3-MXFP4
+    xP: "2"
+    yD: "2"
+    MAD_BEST_REGISTRY: vllm_dissag/workloads/e2e/best_known.example.jsonl   # relative to scripts/

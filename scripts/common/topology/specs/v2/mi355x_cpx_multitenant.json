@@ -1,0 +1,3 @@
+{"engine": "vllm", "layout": "colocated", "platform": "mi355x-ubb-8", "partition": "CPX",
+ "about": "MI355X in CPX: 64 logical GPUs per node as eight independent TP-8 servers (multi-tenant); expressible, not yet runnable",
+ "roles": [{"name": "server", "nodes": 1, "parallel": {"mode": "replicas", "tp": 8}}]}

@@ -1,0 +1,7 @@
+# Demo: shows embedding replicas; not run yet.
+# An embedding model: TP-1 pooling servers on every GPU behind a router, embeddings throughput and
+# latency per concurrency.
+version: 2
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/serve/replicas.yaml, ../../../common/workloads/bench/embeddings.yaml]
+model:
+  env: {MODEL_NAME: Qwen3-Embedding-8B, COLOCATED_EXTRA_ARGS: "--runner pooling"}

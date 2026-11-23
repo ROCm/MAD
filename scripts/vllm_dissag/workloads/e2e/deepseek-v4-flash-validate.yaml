@@ -1,0 +1,13 @@
+# Reproduction of `run_wideep.sh validate dsv4fls ep32` (develop's DeepSeek-V4 submit script) as a
+# card: the same engine commands on every node (a test holds them equal).
+# DeepSeek-V4-Flash-FP8, 4 prefill + 4 decode nodes (EP32 per role), MoRI-EP + MoRI-IO, on gfx942,
+# with the DeepSeek-V4 image (compat/images/vllm-dsv4.yaml). One allocation: curl, NIAH, smoke.
+version: 2
+defaults: [../../../common/workloads/base.yaml, ../../../common/workloads/family/deepseek-v4.yaml,
+           ../../../common/workloads/bench/validate.yaml]
+model:
+  env:
+    MODEL_NAME: DeepSeek-V4-Flash-FP8
+    xP: "4"
+    yD: "4"
+    NIAH_LIST_PRIME: "1."     # Flash: token 1 given, not sampled (unprimed Flash answers `0`)

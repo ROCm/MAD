@@ -1,0 +1,37 @@
+# Facts about the DeepSeek-V4 family (Flash and Pro) that hold for every workload of it: what
+# run_wideep.sh sets for a DeepSeek-V4 run, as data. The engine settings (KV dtype fp8_e4m3, AITER
+# MLA on, MoRI heap, CUDA-graph modes, HMA off, the curl suite) are the recipe's (models.yaml),
+# not repeated here.
+version: 2
+defaults: [../serve/vllm-disagg-wide-ep.yaml]
+model:
+  env:
+    PROXY_TYPE: vllm_router              # the image bakes /usr/local/bin/vllm-router
+    ROUTER_SKIP_MORIIO_DP_SIZE: "0"      # 2P2D KV notify needs --moriio-dp-size
+    MORI_PROXY_PING_PORT: "31367"        # below ip_local_port_range: prefill's sockets cannot take it
+    LOG_WAIT_TIMEOUT_SECONDS: "10800"    # EP16+ boot over NFS with AITER JIT exceeds the default gate
+    VLLM_LOGGING_LEVEL: DEBUG
+    PYTHONUNBUFFERED: "1"
+    DSV4_TRANSFER_ATTN: "1"
+    DSV4_STORAGE_UPSTREAM_SPAN: "0"
+    DSV4_EAGER: "0"                      # 1: decode cudagraph NONE + quant_fp8 (never --enforce-eager)
+    # NIAH as DeepSeek-V4 measures it (benchmark_niah_methods.py): the hybrid method (system + user
+    # through the DeepSeek template, the ask restated after the haystack), the six-rung ladder,
+    # answers capped at 512 tokens (~1 s/token: 2048 x 18 requests overruns 8 h).
+    NIAH_METHOD: hybrid
+    NIAH_WORDS: "2000,8000,16000,20000,28000,35000"
+    NIAH_SEEDS: "0"
+    NIAH_MAXTOK: "512"
+    NIAH_WARMUP: "0"
+    NIAH_TIMEOUT: "1800"
+    NIAH_PAIR_SLEEP_S: "30"
+    NIAH_WARMUP_SCORE_SLEEP_S: "5"
+    NIAH_DS_WRAP: "0"
+    NIAH_TERSE: "0"
+    NIAH_STOP_BLANK: "0"
+    NIAH_MIN_TOKENS: "0"
+    NIAH_STOP: ""
+    NIAH_LOGPROBS: "0"
+    # The smoke sweep: 1024/1024; con=64+ stalls with 32 decode slots (8 DP ranks x 4 seqs).
+    BENCHMARK_COMBINATIONS: 1024/1024
+    BENCHMARK_CON: "1 8 16 32"

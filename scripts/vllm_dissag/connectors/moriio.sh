@@ -64,27 +64,29 @@ connector_setup_env() {
     export VLLM_USE_V1=1
     export VLLM_ALL2ALL_BACKEND=mori
 
-    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
-    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-eth0}}"
+    # Fabric fallbacks: the detected family's values from the launcher (MAD_FABRIC_*).
+    export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-${MAD_FABRIC_IFACE:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}}}"
+    export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-${MORI_SOCKET_IFNAME:-${MAD_FABRIC_IFACE}}}"
 
     export VLLM_ENGINE_READY_TIMEOUT_S="${VLLM_ENGINE_READY_TIMEOUT_S:-10800}"
     export VLLM_RINGBUFFER_WARNING_INTERVAL="${VLLM_RINGBUFFER_WARNING_INTERVAL:-3600}"
     export VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS="${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600}"
     export VLLM_RPC_TIMEOUT="${VLLM_RPC_TIMEOUT:-300000}"
 
-    export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
-    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
+    export NCCL_IB_HCA="${NCCL_IB_HCA:-${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}}"
+    export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-${MAD_FABRIC_GID}}"
     export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-3}"
     export NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-1}"
-    export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-3}"
-    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9}"
-    # MoRI RDMA QoS — TC=41 (RoCE DSCP for lossless RDMA), SL=0. Override per-cluster.
-    export MORI_RDMA_TC="${MORI_RDMA_TC:-41}"
-    export MORI_RDMA_SL="${MORI_RDMA_SL:-0}"
+    export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-${MAD_FABRIC_GID}}"
+    export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${MAD_FABRIC_RAILS}}"
+    # MoRI RDMA QoS: the fabric's (compat/hardware.yaml fabrics rdma_qos). Override per site.
+    export MORI_RDMA_TC="${MORI_RDMA_TC:-${MAD_FABRIC_RDMA_TC}}"
+    export MORI_RDMA_SL="${MORI_RDMA_SL:-${MAD_FABRIC_RDMA_SL}}"
 
     export MORI_NUM_QP_PER_PE="${MORI_NUM_QP_PER_PE:-4}"
-    export VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
-    export VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+    # VLLM_MORIIO_QP_PER_TRANSFER / _NUM_WORKERS / _POST_BATCH_SIZE are not read from the
+    # environment by the MoRIIO connector ("deprecated and ignored"); they go into
+    # kv_connector_extra_config (_moriio_build_kv_transfer_config), and only when set.
 
     export VLLM_MORIIO_TRANSFER_TIMEOUT_S="${VLLM_MORIIO_TRANSFER_TIMEOUT_S:-600}"
     export VLLM_MORIIO_DEFERRED_TIMEOUT_S="${VLLM_MORIIO_DEFERRED_TIMEOUT_S:-1800}"
@@ -135,25 +137,54 @@ connector_setup_env() {
     export MORI_SHMEM_HEAP_SIZE="${MORI_SHMEM_HEAP_SIZE:-17179869184}"
 }
 
-# Multi-node wideEP role (xP>1 or yD>1): each role is ONE DP group spanning nodes behind its
+# Multi-node wideEP role (xP>1 or yD>1), the layout DeepSeek-V4 runs (MORIIO_MULTINODE=1 asks for it
+# with any model; =0 turns it off): each role is ONE DP group spanning nodes behind its
 # master's URL. Child nodes get the MoRI-IO connector and the router is given every node's IP plus
 # the full rank range (connector_start_proxy), so DP ranks on every node serve. 1P1D is unchanged.
-# The router needs the --moriio-* flags from vllm-project/router PR #458.
+# The router needs the --moriio-* flags from vllm-project/router PR #458. TP-within-EP
+# (EP_TP_SIZE>1) reaches its nodes through the connector's pod-host list and --moriio-dp-size
+# instead (connector_start_proxy), so it is not this layout.
 _moriio_multi_node() {
-    parallelism_is_wide_ep && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
+    local _want="${MORIIO_MULTINODE:-}"
+    [[ -z "${_want}" ]] && case "${MODEL_NAME:-}" in DeepSeek-V4-*) _want=1 ;; *) _want=0 ;; esac
+    [[ "${_want}" == "1" ]] && parallelism_is_wide_ep && (( ${EP_TP_SIZE:-1} <= 1 )) \
+        && { [ "${xP}" -gt 1 ] || [ "${yD}" -gt 1 ]; }
 }
 
 _moriio_build_kv_transfer_config() {
     local kv_role="$1"
-    local read_mode_val="false"
-    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && read_mode_val="true"
-    # DSV4: some image builds ignore VLLM_MORIIO_QP_PER_TRANSFER env; extra_config is the path.
-    # GLM / DSV3 stay on the original extra_config (their images still honor the env).
-    local extra='"read_mode":'"${read_mode_val}"',"proxy_ip":"'"${MASTER_ADDR}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'
+    # MORIIO_READ_MODE=1 selects the connector's READ mode; otherwise the key is left out and
+    # the connector runs its default (WRITE), as every config did before the key existed.
+    local _read_mode=""
+    [[ "${MORIIO_READ_MODE:-0}" == "1" ]] && _read_mode='"read_mode":true,'
+    # DeepSeek-V4 images ignore the VLLM_MORIIO_* environment, so its transfer tuning has
+    # defaults here (4 QPs, 4 workers, unbatched posts); any model can set them.
     if [ "${MODEL_NAME:-}" = "DeepSeek-V4-Flash-FP8" ] || [ "${MODEL_NAME:-}" = "DeepSeek-V4-Pro-FP8" ]; then
-        extra="${extra},\"qp_per_transfer\":${VLLM_MORIIO_QP_PER_TRANSFER:-4},\"num_workers\":${VLLM_MORIIO_NUM_WORKERS:-4},\"post_batch_size\":${VLLM_MORIIO_POST_BATCH_SIZE:--1}"
+        local VLLM_MORIIO_QP_PER_TRANSFER="${VLLM_MORIIO_QP_PER_TRANSFER:-4}"
+        local VLLM_MORIIO_NUM_WORKERS="${VLLM_MORIIO_NUM_WORKERS:-4}"
+        local VLLM_MORIIO_POST_BATCH_SIZE="${VLLM_MORIIO_POST_BATCH_SIZE:--1}"
     fi
-    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${extra}"'}}'
+    # Peer-pool node list. A kv_producer (prefill) handshakes the DECODE pool, a
+    # kv_consumer (decode) notifies the PREFILL pool. The driver fills them only
+    # when EP_TP_SIZE>1 (see vllm_disagg.sh); otherwise the key is omitted and the
+    # emitted config is byte-identical to the historical one.
+    local _peer=""
+    if [[ "${kv_role}" == "kv_producer" ]]; then _peer="${DECODE_POD_HOSTS:-}"; else _peer="${PREFILL_POD_HOSTS:-}"; fi
+    local _pod_hosts=""
+    [[ -n "${_peer}" ]] && _pod_hosts=',"moriio_pod_hosts":"'"${_peer}"'"'
+    # Transfer tuning. The connector reads these keys only from this config: the
+    # VLLM_MORIIO_* environment variables of the same names are "deprecated and
+    # ignored" by it, so for a long time the 2 QPs / 4 workers set in moriio.env and in
+    # recipes never took effect, and every run used its defaults (1 / 1 / -1). Each key
+    # is emitted only when its variable is set, so the default config is unchanged.
+    local _tune="" _k _v
+    for _k in QP_PER_TRANSFER:qp_per_transfer NUM_WORKERS:num_workers POST_BATCH_SIZE:post_batch_size; do
+        _v="VLLM_MORIIO_${_k%%:*}"; _v="${!_v:-}"
+        [[ -z "${_v}" ]] && continue
+        [[ "${_v}" =~ ^-?[0-9]+$ ]] || { echo "Error: VLLM_MORIIO_${_k%%:*}='${_v}' is not an integer." >&2; exit 1; }
+        _tune+=',"'"${_k#*:}"'":'"${_v}"
+    done
+    echo '{"kv_connector":"MoRIIOConnector","kv_role":"'"${kv_role}"'","kv_port":"'"${KV_PORT}"'","kv_connector_extra_config":{'"${_read_mode}"'"proxy_ip":"'"${ROUTER_ADDR:-${MASTER_ADDR}}"'","proxy_port":"'"${PROXY_PORT}"'","proxy_ping_port":"'"${PROXY_PING_PORT}"'","http_port":"'"${SERVE_PORT}"'","local_ping_port":"'"${LOCAL_PING_PORT}"'","handshake_port":"'"${HANDSHAKE_PORT}"'","notify_port":"'"${NOTIFY_PORT}"'"'"${_pod_hosts}${_tune}"'}}'
 }
 
 # The DSV4 image bakes /usr/local/bin/vllm-router. ROUTER_BOOT_INSTALL is an
@@ -483,35 +514,56 @@ LMCACHE_BROADCAST_PATCH
     # Per-model flags from models.yaml (driver-exported; empty if none).
     local model_args=()
     local _mc; if [[ "$log_prefix" == "prefill" ]]; then _mc="${MODEL_CONFIG_PREFILL:-}"; else _mc="${MODEL_CONFIG_DECODE:-}"; fi
-    [[ -n "$_mc" ]] && eval "model_args=(${_mc})"
+    _model_config_to_array "$_mc" model_args
 
     if parallelism_is_wide_ep; then
         # ---- WIDE_EP=1 (MoriEP) ----
         # Per-role all2all: prefill=high_throughput, decode=low_latency. The
         # v1.2.0 image rejects the bare "mori" alias; these names are required.
+        # TP-within-EP models (EP_TP_SIZE>1) run TP inside each EP pool (not -tp 1).
         local _all2all="${PREFILL_MORI_BACKEND}"
         [[ "$log_prefix" == "decode" ]] && _all2all="${DECODE_MORI_BACKEND}"
 
+        # TP-within-EP: EP_TP_SIZE>1 runs TP inside each EP pool (e.g. TP2xDP8->EP16);
+        # unset/1 keeps the historical -tp 1 wideEP layout. dp_size and
+        # DP_PARALLEL_SIZE_LOCAL arrive already sized for it (vllm_disagg.sh
+        # topology math), so nothing here divides them again.
+        local _ep_tp="${EP_TP_SIZE:-1}"
+        local _tp_flag=(-tp 1)
+        (( _ep_tp > 1 )) && _tp_flag=(--tensor-parallel-size "${_ep_tp}")
+
         local extra_args=() kv_args=()
+        local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
         if [[ "$role" == "master" ]]; then
-            extra_args+=(--api-server-count=${_GPUS_PER_NODE})
-            local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
-            # KV_OFFLOAD wrap; wideEP is tp1 per DP rank, so the pool is split per rank.
-            local _OFFLOAD_TP_WORLD=1
-            kv_config=$(kv_offload_wrap "${kv_config}")
-            kv_args+=(--kv-transfer-config "${kv_config}")
+            # api-server-count MUST be <= data-parallel-size: the frontend DP
+            # load-balancer round-robins over data_parallel_rank [0, count), so a
+            # count above dp_size sends requests to ranks that do not exist. At
+            # TP1 dp_size >= GPUS_PER_NODE and this resolves to GPUS_PER_NODE
+            # exactly as before; at TP>1 (dp_size = GPUS_PER_NODE/TP per node) it
+            # correctly clamps down.
+            local _api_servers="${_GPUS_PER_NODE}"
+            [ "${dp_size}" -lt "${_api_servers}" ] && _api_servers="${dp_size}"
+            extra_args+=(--api-server-count=${_api_servers})
+            # KV_OFFLOAD wrap; the offload pool is split per DP rank of EP_TP_SIZE GPUs.
+            local _OFFLOAD_TP_WORLD="${_ep_tp}"
+            kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${kv_config}")")
         else
             extra_args+=(--data-parallel-start-rank "${dp_start_rank}" --headless)
-            # Child ranks need the connector too: the prefill side handshakes with EVERY remote DP
-            # rank (range(remote_dp_size)) and only sets write_ready_flags once all complete. Without a
-            # connector on this node, ranks >= GPUS_PER_NODE never answer and the first write wedges
-            # (write_ready_flags timeout). proxy_ip is emptied so these ranks do NOT heartbeat-register
-            # with the router (the child has no HTTP server; a phantom worker would get requests).
-            local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}" \
-                | sed -E 's/"proxy_ip":"[^"]*"/"proxy_ip":""/')
-            local _OFFLOAD_TP_WORLD=1
-            kv_config=$(kv_offload_wrap "${kv_config}")
-            kv_args+=(--kv-transfer-config "${kv_config}")
+            # TP-within-EP (EP_TP_SIZE>1) headless workers host real DP ranks that the router
+            # addresses through the pod-host list, so they carry the master's config. In the
+            # multi-node layout (_moriio_multi_node: DeepSeek-V4, or MORIIO_MULTINODE=1) child ranks
+            # carry it too -- the prefill side handshakes with EVERY remote DP rank and only sets
+            # write_ready_flags once all complete -- with proxy_ip emptied so they do NOT
+            # heartbeat-register with the router (no HTTP server; a phantom worker would get
+            # requests). Otherwise the router targets master-node ranks only and children carry none.
+            local _child_kv=""
+            if (( _ep_tp > 1 )); then
+                _child_kv="${kv_config}"
+            elif _moriio_multi_node; then
+                _child_kv="$(sed -E 's/"proxy_ip":"[^"]*"/"proxy_ip":""/' <<<"${kv_config}")"
+            fi
+            local _OFFLOAD_TP_WORLD="${_ep_tp}"
+            [[ -n "${_child_kv}" ]] && kv_args+=(--kv-transfer-config "$(kv_offload_wrap "${_child_kv}")")
         fi
 
         local _prefix_cache_arg; _prefix_cache_arg="$(kv_prefix_cache_arg)"
@@ -525,16 +577,19 @@ LMCACHE_BROADCAST_PATCH
         local _kvdtype="${KV_CACHE_DTYPE:-fp8}"
         local mem_args=()
         [[ -n "${KV_CACHE_MEMORY_BYTES:-}" ]] && mem_args+=(--kv-cache-memory-bytes "${KV_CACHE_MEMORY_BYTES}")
+        local _max_batched=()
+        [[ -n "${MAX_NUM_BATCHED_TOKENS:-}" ]] && _max_batched=(--max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}")
         # Optional context cap. Only emitted when a model recipe / submit sets it;
         # the connector stays model-agnostic (no default). Needed for MLA models
         # whose default max_model_len makes the TritonMLA attn-logits workspace OOM.
         local mml_args=()
-        [[ -n "${MAX_MODEL_LEN:-}" ]] && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
+        [[ -n "${MAX_MODEL_LEN:-}" ]] && ! _recipe_sets_flag --max-model-len "${log_prefix}" \
+        && mml_args+=(--max-model-len "${MAX_MODEL_LEN}")
 
         if [[ "${DRY_RUN:-0}" == "1" ]]; then
             _dryrun_emit "moriio" "${log_prefix}" "${role}" \
                 vllm serve "${MODEL_PATH}" \
-                    -tp 1 \
+                    "${_tp_flag[@]}" \
                     --data-parallel-size "${dp_size}" \
                     --data-parallel-size-local "${DP_PARALLEL_SIZE_LOCAL}" \
                     --data-parallel-address "${dp_addr}" \
@@ -550,12 +605,13 @@ LMCACHE_BROADCAST_PATCH
                     "${mml_args[@]}" \
                     --trust-remote-code \
                     --distributed-timeout-seconds "${DISTRIBUTED_TIMEOUT_SECONDS:-7200}" \
+                    "${_max_batched[@]}" \
                     "${exec_args[@]}" "${extra_args[@]}" "${kv_args[@]}" "${model_args[@]}"
             WORKER_PID=0; return 0
         fi
 
         vllm serve ${MODEL_PATH} \
-            -tp 1 \
+            "${_tp_flag[@]}" \
             --data-parallel-size "${dp_size}" \
             --data-parallel-size-local ${DP_PARALLEL_SIZE_LOCAL} \
             --data-parallel-address "${dp_addr}" \
@@ -571,6 +627,7 @@ LMCACHE_BROADCAST_PATCH
             "${mml_args[@]}" \
             --trust-remote-code \
             --distributed-timeout-seconds ${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
+            "${_max_batched[@]}" \
             "${exec_args[@]}" \
             "${extra_args[@]}" \
             "${kv_args[@]}" \
@@ -585,7 +642,7 @@ LMCACHE_BROADCAST_PATCH
     # is a full server; the kv-transfer-config is attached on all nodes (no DP
     # master/child split). kv-cache-dtype/block-size come from models.yaml.
     local kv_config; kv_config=$(_moriio_build_kv_transfer_config "${kv_role}")
-    local _tp_size="${IO_TP_SIZE:-${GENERIC_TP_SIZE:-8}}"
+    local _tp_size="${IO_TP_SIZE:-${GENERIC_TP_SIZE:-${GPUS_PER_NODE}}}"
 
     # KV_OFFLOAD wrap; one TP engine spans _tp_size ranks. (moriio+TP offload: not yet validated.)
     local _OFFLOAD_TP_WORLD="${_tp_size}"
@@ -739,9 +796,15 @@ connector_start_proxy() {
             --log-level "${VLLM_ROUTER_LOG_LEVEL:-info}"
             --prometheus-port "${_PROMETHEUS_PORT}"
         )
-        # Ravi 2P2D KV-notify: --moriio-dp-size = prefill DP world. Latest
-        # upstream may have folded this into discovery; pass it only if present.
-        if [[ "${ROUTER_SKIP_MORIIO_DP_SIZE:-1}" != "1" ]] && \
+        # TP-within-EP (EP_TP_SIZE>1): the router must be told the prefill pool's DP width,
+        # which it can no longer infer as nodes x GPUS_PER_NODE (taken from the driver's
+        # PREFILL_DP_SIZE, so it follows xP and EP_TP_SIZE). Otherwise --moriio-dp-size is
+        # opt-in (ROUTER_SKIP_MORIIO_DP_SIZE=0): latest upstream may have folded it into
+        # discovery, so it is passed only if the binary has it.
+        if (( ${EP_TP_SIZE:-1} > 1 )); then
+            _router_args+=(--moriio-dp-size "${PREFILL_DP_SIZE}")
+            echo "  --moriio-dp-size ${PREFILL_DP_SIZE} (TP-within-EP)"
+        elif [[ "${ROUTER_SKIP_MORIIO_DP_SIZE:-1}" != "1" ]] && \
            "${ROUTER_BIN}" --help 2>&1 | grep -q -- '--moriio-dp-size'; then
             _router_args+=(--moriio-dp-size "${PREFILL_DP_SIZE}")
             echo "  --moriio-dp-size ${PREFILL_DP_SIZE}"

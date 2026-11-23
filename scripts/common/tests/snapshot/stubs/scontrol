@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stand-in scontrol: only `show hostnames LIST` (comma lists).
+[ "$1 $2" = "show hostnames" ] && tr , '\n' <<<"$3"
+exit 0

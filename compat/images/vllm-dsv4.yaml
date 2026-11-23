@@ -1,0 +1,33 @@
+# The vllm-dsv4 stack: a card selects it with "image_spec": "${images.vllm-dsv4}".
+# DeepSeek-V4 (Flash and Pro) MoRI-EP wide-EP disaggregated stack, gfx942: the upstream vLLM ROCm 7.2
+# nightly at vLLM 83c078d (ROCm 7.2.3, torch, triton, AITER v0.1.26, flydsl 0.4.0, MoRI
+# v1.2.3.post1 and the NIC libraries all from the base; nothing rebuilt), vllm-router at 37b37a43,
+# and the four DeepSeek-V4 patches baked into the installed vLLM. The same image as
+# docker/vllm_disagg_gfx942_inference.dsv4.ubuntu.amd.Dockerfile, as a spec over the matrix.
+base:
+  gfx942: vllm/vllm-openai-rocm:nightly-rocm72-83c078d955cd6e0c63d3b12abe669c8de936a370
+system_packages:
+- git
+- curl
+- ca-certificates
+- libssl-dev
+- pkg-config
+setup:
+- sed -i -E 's#http://(archive|security)\.ubuntu\.com#https://\1.ubuntu.com#g' /etc/apt/sources.list $(ls /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null) || true
+- 'python3 -c ''import importlib.util as u; m = [n for n in ("mori", "aiter", "vllm.third_party.triton_kernels") if u.find_spec(n) is None]; assert not m, m'''
+components:
+  vllm-router: 37b37a43@dsv4
+  vllm-dsv4-patches: 64fe5a00@dsv4
+order:
+- vllm-router
+- vllm-dsv4-patches
+env:
+  SKIP_RUNTIME_PATCH: '1'               # the patches are baked; the launcher applies none at boot
+  HSA_ENABLE_IPC_MODE_LEGACY: '0'       # the base sets 1 for UCX rocm_ipc; MoRI-IO was validated with 0
+  AITER_JIT_DIR: /opt/vllm_cache/aiter_jit
+  VLLM_CACHE_ROOT: /opt/vllm_cache/vllm
+  TRITON_CACHE_DIR: /opt/vllm_cache/triton
+  COMGR_CACHE_DIR: /opt/vllm_cache/comgr
+finish:
+- vllm-router --help 2>&1 | grep -q moriio
+- rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori

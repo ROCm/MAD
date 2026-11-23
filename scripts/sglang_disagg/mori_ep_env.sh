@@ -9,12 +9,14 @@
 # USE_CX7_NICS=0 — use mlx5_1 100G management NIC
 USE_CX7_NICS="${USE_CX7_NICS:-1}"
 
+# The NICs: the fabric's rails, or its KV NIC (the management NIC on cx7), from the launcher
+# (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics).
 if [[ "$USE_CX7_NICS" == "1" ]]; then
-    _DEFAULT_IB="mlx5_0,mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_7,mlx5_8,mlx5_9"
-    echo "[mori_ep_env] NIC mode: CX7 multi-rail (${_DEFAULT_IB}) — same-rail nodes required"
+    _DEFAULT_IB="${MAD_FABRIC_RAILS:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}"
+    echo "[mori_ep_env] NIC mode: multi-rail (${_DEFAULT_IB}) — same-rail nodes required"
 else
-    _DEFAULT_IB="mlx5_1"
-    echo "[mori_ep_env] NIC mode: mlx5_1 management NIC — cross-rail safe"
+    _DEFAULT_IB="${MAD_FABRIC_KV_NIC:?the fabric: run through the launcher (cluster.sh MAD_FABRIC_*, compat/hardware.yaml fabrics)}"
+    echo "[mori_ep_env] NIC mode: ${_DEFAULT_IB} (one NIC) — cross-rail safe"
 fi
 
 # =============================================================
@@ -27,50 +29,20 @@ export IB_DEVICES="${IB_DEVICES:-${_DEFAULT_IB}}"
 # =============================================================
 export NCCL_IB_HCA="${NCCL_IB_HCA:-${_DEFAULT_IB}}"
 
-# Critical: RoCE v2 with IPv4 routing (GID index 3 is typical)
-export NCCL_IB_GID_INDEX="${NCCL_IB_GID_INDEX:-3}"
-
-# Allow NCCL to use multiple NICs per GPU when beneficial
-export NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-1}"
-
-# GPUDirect RDMA - level 3 enables PXB (PCI Bridge) crossing
-export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-3}"
-
-# Use IB transport (force IB over Socket)
-export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-0}"
-
-# Multiple QPs per connection for CX7 - improves parallelism
-# CX7 NDR can saturate with more QPs (default is 1, recommend 4-8)
-export NCCL_IB_QPS_PER_CONNECTION="${NCCL_IB_QPS_PER_CONNECTION:-4}"
-
-# Split data across QPs for better load balancing
-export NCCL_IB_SPLIT_DATA_ON_QPS="${NCCL_IB_SPLIT_DATA_ON_QPS:-1}"
-
-# Increase chunk size to better utilize CX7 bandwidth (default 128KB)
-# For NDR 400G, larger chunks reduce overhead
-export NCCL_BUFFSIZE="${NCCL_BUFFSIZE:-8388608}"   # 8MB buffer
-
-# Timeout for IB operations (increase for large clusters)
-export NCCL_IB_TIMEOUT="${NCCL_IB_TIMEOUT:-22}"
-export NCCL_IB_RETRY_CNT="${NCCL_IB_RETRY_CNT:-7}"
-
-# Service Level for QoS (if your fabric uses SL-based QoS)
-export NCCL_IB_SL="${NCCL_IB_SL:-0}"
-
-# Traffic Class for RoCE QoS (DSCP 26 = AF31, common for RDMA)
-export NCCL_IB_TC="${NCCL_IB_TC:-106}"  # = DSCP 26 << 2
-
-# PCIe relaxed ordering for better performance
-export NCCL_IB_PCI_RELAXED_ORDERING="${NCCL_IB_PCI_RELAXED_ORDERING:-1}"
-
-# Adaptive routing (if fabric supports it)
-export NCCL_IB_ADAPTIVE_ROUTING="${NCCL_IB_ADAPTIVE_ROUTING:-1}"
-
-# Enable NCCL topology auto-detection
-export NCCL_TOPO_DUMP_FILE="${NCCL_TOPO_DUMP_FILE:-/tmp/nccl_topo.xml}"
-
-export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
-export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,NET,GRAPH}"
+# The constant defaults (NCCL tuning, MoRI QPs, timeouts, runtime switches) are data:
+# connectors/mori.env, applied as `${KEY:-VALUE}` like the lines around it.
+_MORI_ENV_FILE="$(dirname "${BASH_SOURCE[0]}")/connectors/mori.env"
+if [[ -f "$_MORI_ENV_FILE" ]]; then
+    while IFS= read -r _line; do
+        [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+        _k="${_line%%=*}"
+        [[ -n "${!_k:-}" ]] || printf -v "$_k" '%s' "${_line#*=}"
+        export "${_k?}"
+    done < "$_MORI_ENV_FILE"
+    unset _line _k
+else
+    echo "[mori_ep_env] WARN: ${_MORI_ENV_FILE} not found; NCCL/MoRI tuning defaults not applied" >&2
+fi
 
 # =============================================================
 # MORI CONFIGURATION - Use all CX7 NICs for expert parallelism
@@ -79,10 +51,7 @@ export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT,NET,GRAPH}"
 export MORI_RDMA_DEVICES="${MORI_RDMA_DEVICES:-${_DEFAULT_IB}}"
 
 # Match NCCL GID index for consistency
-export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-3}"
-
-# QPs per connection for MoRI (similar reasoning as NCCL)
-export MORI_QPS_PER_CONNECTION="${MORI_QPS_PER_CONNECTION:-4}"
+export MORI_IB_GID_INDEX="${MORI_IB_GID_INDEX:-${NCCL_IB_GID_INDEX}}"
 
 # =============================================================
 # SOCKET INTERFACE - Keep mlx5_1 IP-side for control plane
@@ -92,20 +61,7 @@ export GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME:-$(ip route | grep '^default' | a
 export NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME:-${GLOO_SOCKET_IFNAME}}
 export MORI_SOCKET_IFNAME=${MORI_SOCKET_IFNAME:-${GLOO_SOCKET_IFNAME}}
 
-# =============================================================
-# TIMEOUTS - Adjusted for larger fabric
-# =============================================================
-export GLOO_TIMEOUT_MS="${GLOO_TIMEOUT_MS:-300000}"
-export TORCH_DIST_INIT_BARRIER_TIMEOUT="${TORCH_DIST_INIT_BARRIER_TIMEOUT:-300}"
-export SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT="${SGLANG_DISAGGREGATION_BOOTSTRAP_TIMEOUT:-1200}"
-export SGLANG_DISAGGREGATION_WAITING_TIMEOUT="${SGLANG_DISAGGREGATION_WAITING_TIMEOUT:-1200}"
-
-# =============================================================
-# RUNTIME OPTIMIZATIONS
-# =============================================================
-export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
-export SGLANG_USE_AITER="${SGLANG_USE_AITER:-1}"
-export SGLANG_ROUTER_STDOUT_LOGS="${SGLANG_ROUTER_STDOUT_LOGS:-0}"
+# Timeouts and runtime switches: connectors/mori.env (above).
 
 if [[ -d /sgl-workspace/aiter ]]; then
     export PYTHONPATH="/sgl-workspace/aiter:${PYTHONPATH:-}"

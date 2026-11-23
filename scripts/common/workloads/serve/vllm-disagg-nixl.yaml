@@ -1,0 +1,4 @@
+# vLLM prefill/decode disaggregation over the rixl connector (NIXL), tensor parallel: no MoRI, no DeepEP.
+version: 2
+model:
+  env: {RUN_MORI: "0", RUN_DEEPEP: "0"}

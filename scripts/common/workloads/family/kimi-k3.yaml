@@ -1,0 +1,6 @@
+# Facts about the Kimi-K3 family that hold for every workload of it: 1.5 TB of weights read from
+# local NVMe only (shared storage does not finish in the partition's time).
+version: 2
+defaults: [../serve/vllm-disagg-wide-ep.yaml]
+model:
+  env: {REQUIRE_LOCAL_WEIGHTS: "1"}

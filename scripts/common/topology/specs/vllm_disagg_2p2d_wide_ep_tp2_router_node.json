@@ -1,0 +1,11 @@
+{
+  "engine": "vllm",
+  "layout": "disagg",
+  "gpus_per_node": 8,
+  "roles": [
+    {"name": "prefill", "nodes": 2, "parallel": {"mode": "wide_ep", "ep_tp": 2}},
+    {"name": "decode",  "nodes": 2, "parallel": {"mode": "wide_ep", "ep_tp": 2}},
+    {"name": "router",  "nodes": 1}
+  ],
+  "router": {"host": "router", "index": 0}
+}

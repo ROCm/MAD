@@ -1,0 +1,351 @@
+[
+    {
+        "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "0",
+            "AITER_SITUV2_A8W4": "1",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_mi300x_pp2xtp8_way4",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference",
+            "way4"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "mad-config.kimi-k3.yaml",
+            "BENCHMARK_SCRIPT": "niah"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_mi300x_wideep_allgather",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "1",
+            "ALL2ALL_BACKEND": "allgather_reducescatter",
+            "AITER_SITUV2_A8W4": "1",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_mi300x_wideep_moriep",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "mori_ep",
+            "inference"
+        ],
+        "timeout": -1,
+        "skip_gpu_arch": "gfx950",
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "gpus_per_node": 8,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+                        "GPU_ARCHS": "gfx942",
+"DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "1",
+            "ALL2ALL_BACKEND": "mori_low_latency",
+            "AITER_SITUV2_A8W4": "1",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048 --quantization-config '{\"moe\":{\"weight\":\"int4_per_group_32\"}}'",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_pp2xtp8",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference",
+            "any_gpu"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "0",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_wideep_allgather",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "inference",
+            "any_gpu"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "1",
+            "ALL2ALL_BACKEND": "allgather_reducescatter",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_vllm_kimi-k3_wideep_moriep",
+        "url": "",
+        "image_spec": "${images.vllm-kimi-k3}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Kimi-K3.csv",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_multinode",
+            "mori_ep",
+            "inference",
+            "any_gpu"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 2
+        },
+        "slurm": {
+            "nodes": 2,
+            "time": "24:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Kimi-K3",
+            "TP_SIZE": "8",
+            "PP_SIZE": "2",
+            "ENABLE_EP": "1",
+            "ALL2ALL_BACKEND": "mori_low_latency",
+            "COLOCATED_EXTRA_ARGS": "--reasoning-parser kimi_k3 --mm-encoder-tp-mode data --safetensors-load-strategy prefetch --max-model-len 1000000 --max-num-seqs 8 --max-num-batched-tokens 2048",
+            "BENCHMARK_SCRIPT": "niah",
+            "NIAH_WORDS": "10000,50000,100000,200000",
+            "REQUIRE_LOCAL_WEIGHTS": "1"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_e2e_qwen3-32b_replicas_lora",
+        "url": "",
+        "image_spec": "${images.vllm-per-gpu}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3-32B-LoRA.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "demo",
+            "any_gpu",
+            "vllm_multinode"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 1
+        },
+        "slurm": {
+            "nodes": 1,
+            "time": "06:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/qwen3-32b-replicas-lora.yaml"
+        },
+        "args": ""
+    },
+    {
+        "name": "pyt_e2e_qwen3-embedding_replicas",
+        "url": "",
+        "image_spec": "${images.vllm-per-gpu}",
+        "scripts": "run_multinode.slurm",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "multiple_results": "perf_Qwen3-Embedding-8B.csv",
+        "tags": [
+            "pyt",
+            "e2e_example",
+            "demo",
+            "any_gpu",
+            "vllm_multinode"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi",
+            "nnodes": 1
+        },
+        "slurm": {
+            "nodes": 1,
+            "time": "06:00:00"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MAD_CONFIG": "workloads/e2e/qwen3-embedding-replicas.yaml"
+        },
+        "args": ""
+    }
+]

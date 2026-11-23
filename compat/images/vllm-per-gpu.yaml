@@ -1,0 +1,29 @@
+# The vllm-per-gpu stack: a card selects it with "image_spec": "${images.vllm-per-gpu}".
+# The vLLM DI stack of each GPU, composed from the stacks the matrix already has: on gfx942 the
+# validated mori121 builds (what the DeepSeek-V3 and Llama cards run), on gfx950 the builds the
+# matrix's gfx950 vLLM is validated with (the Kimi-K3 stack's). No build of its own: one card runs
+# on either GPU with that GPU's stack.
+extends: ${images.vllm-mori121}
+base:
+  gfx950: rocm/vllm-dev:ci_base-0fcd9b99cc9d63202da4c858d8ebc6582c9e2491@sha256:c08a4e70734b41c8f5a876af07d8b3f705cecd262d21e5f6483ad48ca554d298
+variants:
+  gfx950:
+    components:
+      mori: fe12a11a@di
+      amd-aiter: 68e42f5f@di
+      flydsl: 0.2.4@di
+      vllm: 9a7ae4b8+cd0d2656@di
+    env:
+      NVCC_THREADS: '8'
+    setup:
+    - sed -i 's|http://|https://|g' /etc/apt/sources.list 2>/dev/null || true
+    - sed -i 's|http://|https://|g' /etc/apt/sources.list.d/*.list 2>/dev/null || true
+    - printf '%s\n' 'setuptools<80' > /etc/pip-constraints.txt
+    - pip install meson==0.64.0 'pybind11[global]' tqdm prettytable
+    finish:
+    - pip install pyyaml
+    - python3 -c 'import aiter.ops.triton.conv'
+    - test -x /usr/local/ucx/bin/ucx_info
+    - 'python3 -c ''import mori, mori.io, mori.ops, aiter, vllm; print("stack OK: vllm", vllm.__version__)'''
+    - vllm-router --help 2>&1 | grep -q moriio
+    - rm -rf /root/.mori /tmp/mori_jit_* && mkdir -p /root/.mori

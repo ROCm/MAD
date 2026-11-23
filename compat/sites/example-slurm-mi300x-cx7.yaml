@@ -1,0 +1,7 @@
+# An example site profile (example-slurm-mi300x-cx7): a run names it with MAD_CLUSTER=example-slurm-mi300x-cx7.
+scheduler: slurm
+platform: mi300x-oam-8
+fabric: cx7
+env:
+  SHARED_MOUNT: /shared_inference
+  NVME_ROOT: /mnt/nvme

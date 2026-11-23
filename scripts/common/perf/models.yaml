@@ -1,0 +1,16 @@
+# Architecture facts the performance model needs, from each model's public configuration.
+# kv_elems_per_token: KV-cache elements one token keeps, over all layers.
+DeepSeek-V3:
+  total_params_b: 671
+  active_params_b: 37
+  hidden: 7168
+  experts_per_token: 8
+  kv_elems_per_token: 35136      # 61 layers x (512 latent + 64 rope), MLA
+  source: DeepSeek-V3 config.json (public)
+Llama-3.1-405B:
+  total_params_b: 405
+  active_params_b: 405
+  hidden: 16384
+  experts_per_token: 0
+  kv_elems_per_token: 258048     # 126 layers x 2 (K, V) x 8 KV heads x 128
+  source: Llama-3.1-405B config.json (public)

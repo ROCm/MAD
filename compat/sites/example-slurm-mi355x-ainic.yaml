@@ -1,0 +1,7 @@
+# An example site profile (example-slurm-mi355x-ainic): a run names it with MAD_CLUSTER=example-slurm-mi355x-ainic.
+scheduler: slurm
+platform: mi355x-ubb-8
+fabric: ainic
+env:
+  SHARED_MOUNT: /shared
+  NVME_ROOT: /mnt/nvme

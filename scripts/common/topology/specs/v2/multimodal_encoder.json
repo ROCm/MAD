@@ -1,0 +1,6 @@
+{"engine": "vllm", "layout": "disagg", "platform": "mi355x-ubb-8",
+ "about": "Multimodal: a vision encoder role feeding prefill/decode (encoder disaggregation); expressible, not yet runnable",
+ "roles": [{"name": "encoder", "nodes": 1, "parallel": {"mode": "replicas", "tp": 1}},
+           {"name": "prefill", "nodes": 1, "parallel": {"mode": "wide_ep", "ep_tp": 1}},
+           {"name": "decode", "nodes": 1, "parallel": {"mode": "wide_ep", "ep_tp": 1}}],
+ "router": {"host": "prefill", "index": 0}}

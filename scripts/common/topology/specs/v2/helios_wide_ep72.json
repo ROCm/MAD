@@ -1,0 +1,6 @@
+{"engine": "vllm", "layout": "disagg", "platform": "mi455x-helios-tray", "strict": true,
+ "about": "Helios: prefill and decode each a 72-GPU wide-EP pool in its own rack (scale-up domain); KV over scale-out",
+ "roles": [{"name": "prefill", "gpus": 72, "parallel": {"mode": "wide_ep", "ep_tp": 1}},
+           {"name": "decode",  "gpus": 72, "parallel": {"mode": "wide_ep", "ep_tp": 1}}],
+ "router": {"host": "prefill", "index": 0},
+ "placement": [{"same_domain": ["prefill"]}, {"same_domain": ["decode"]}, {"spread_domains": ["prefill", "decode"]}]}

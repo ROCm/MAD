@@ -7,7 +7,9 @@
 # NCCL ibv_modify_qp timeouts on cross-rail node pairs.
 #
 # --switches=2: allow up to 2 IB switches (rails). select_same_rail_nodes() below
-# enforces per-role rail consistency. Set --switches=1 to force single rail.
+# verifies the allocation actually landed on one leaf whenever USE_CX7_NICS=1, and
+# aborts before any GPU time is spent if it did not. Set --switches=1 to ask the
+# scheduler for a single rail up front instead of checking after the fact.
 #SBATCH --switches=2
 #SBATCH --gres=gpu:8      # Request 8 GPUs and 8 NICs (use --gres if specific GPU resources are needed)
 #SBATCH --time=24:00:00         # Set a time limit for the job (HH:MM:SS)
@@ -77,20 +79,7 @@ model_allows_mori_ep() {
     done
     return 1
 }
-
-# ---------------------------------------------------------------------------
-# Run file: always use sglang_disagg_mori_io_ep.sh (unified launcher).
-# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake).
-# RUN_MORI=1: uses mori IO (default).
-# ---------------------------------------------------------------------------
-RUN_FILE="sglang_disagg_mori_io_ep.sh"
-_run_mori="${RUN_MORI:-0}"
-if [[ "$_run_mori" == "1" ]]; then
-    echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
-else
-    export KV_TRANSFER_BACKEND="mooncake"
-    echo "RUN_MORI=0: using $RUN_FILE with Mooncake (KV_TRANSFER_BACKEND=mooncake)"
-fi
+RUN_FILE="sglang_disagg_mori_io_ep.sh"          # the one role script (backend chosen below)
 if [[ ! -f "$RUN_FILE" ]]; then
     echo "Error: '$RUN_FILE' not found in $(pwd)." >&2
     exit 1
@@ -101,10 +90,51 @@ if test -z "${DOCKER_IMAGE_NAME:-}"; then
   exit 1
 fi
 
-# Set current directory to be REPO directory with all relevant scripts
-export MOONCAKE_REPO_DIR=$(pwd)
-LOG_PATH="${LOG_PATH:-/shared_inference/${USER}/model_blog_logs}"
+# This launcher's directory. Under sbatch the scheduler runs a copy of this script
+# from its spool directory (SLURM's slurmd, Spur's /var/spool/spur), so the script's
+# own path is not the repo: then the submit directory names it, as
+# `cd <MAD>/scripts/sglang_disagg && sbatch ...` or `sbatch scripts/sglang_disagg/...` from the root.
+_resolve_launcher_dir() {
+    local _d
+    for _d in "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)" \
+              "${SLURM_SUBMIT_DIR:+$SLURM_SUBMIT_DIR/scripts/sglang_disagg}" "${SLURM_SUBMIT_DIR:-}" "$PWD"; do
+        [[ -n "$_d" && -f "$_d/sglang_disagg_mori_io_ep.sh" ]] && { (cd "$_d" && pwd); return 0; }
+    done
+    echo "Error: cannot find scripts/sglang_disagg (looked next to this script, in SLURM_SUBMIT_DIR and in $PWD);" \
+         "run sbatch from MAD/scripts/sglang_disagg or from the MAD root" >&2
+    return 1
+}
+SCRIPT_DIR="$(_resolve_launcher_dir)" || exit 1
+# The directory with all the role scripts, mounted into the containers.
+export MOONCAKE_REPO_DIR="$SCRIPT_DIR"
+LOG_PATH="${LOG_PATH:-${SHARED_MOUNT:-/shared_inference}/${USER}/model_blog_logs}"
 
+# Configuration layers (common/config/layers.sh): what was set at submit time is
+# recorded first, so later layers can tell a chosen value from a default.
+. "${MOONCAKE_REPO_DIR}/../common/config/layers.sh"
+config_begin
+# A topology spec file, when given (MAD_TOPOLOGY), sets this launcher's settings
+# before the defaults below; see common/topology/apply.sh.
+export MAD_LAUNCHER="${MAD_LAUNCHER:-sglang_disagg}"   # which launcher (best-known records name it)
+# The card's workload file (MAD_CONFIG), as madengine applies it -- read here so the card
+# runs the same without madengine (common/config/workload.py).
+config_apply_workload "${SCRIPT_DIR}" || exit 1   # sets RECIPES_YAML, CONNECTORS_DIR
+
+# Transfer backend, from RUN_MORI -- after the workload file, which may set it.
+# ---------------------------------------------------------------------------
+# Run file: always sglang_disagg_mori_io_ep.sh (unified launcher, set above).
+# RUN_MORI=0: sets KV_TRANSFER_BACKEND=mooncake (Mooncake).
+# RUN_MORI=1: uses mori IO (default).
+# ---------------------------------------------------------------------------
+_run_mori="${RUN_MORI:-0}"
+if [[ "$_run_mori" == "1" ]]; then
+    echo "RUN_MORI=1: using $RUN_FILE with MoRI IO for model '$MODEL_NAME'"
+else
+    export KV_TRANSFER_BACKEND="mooncake"
+    echo "RUN_MORI=0: using $RUN_FILE with Mooncake (KV_TRANSFER_BACKEND=mooncake)"
+fi
+. "${MOONCAKE_REPO_DIR}/../common/topology/apply.sh" sglang_disagg
+config_layer topology
 xP="${xP:-1}" #-> Number of Prefill Servers
 yD="${yD:-1}" #-> Number of Decode Servers
 DP_MODE="${DP_MODE:-0}" #-> mori_io_ep: 1=dp flags + --dp-size/--ep-size; 0=tp flags, omit dp/ep CLI flags
@@ -128,8 +158,57 @@ esac
 export BENCHMARK_SCRIPT BENCHMARK_SCRIPT_FILE
 echo "BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' -> $BENCHMARK_SCRIPT_FILE"
 
-MODEL_NAME="${MODEL_NAME:-None}"
-MODEL_DIR="${MODEL_DIR:-"/shared_inference/models_blog/"}"
+# Site config: filesystem roots, partition, fabric device, ports, timeouts.
+# Sourced, so `environment > these defaults`, which is what lets plain
+# sbatch and madengine drive this script identically -- both speak only
+# environment variables, and this file just fills what neither of them set.
+# Model-specific performance flags stay in models.yaml, not here.
+MAD_SCRIPTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [ ! -f "${MAD_SCRIPTS_DIR}/common/cluster.sh" ]; then
+    echo "Error: missing ${MAD_SCRIPTS_DIR}/common/cluster.sh" >&2
+    exit 1
+fi
+# Fabric settings the caller passed (card env_vars, madengine, sbatch --export),
+# recorded BEFORE cluster.sh fills in its fallbacks. See SGLANG_FABRIC_ENV_ARGS.
+_FABRIC_VARS="NCCL_IB_HCA NCCL_IB_GID_INDEX NCCL_SOCKET_IFNAME GLOO_SOCKET_IFNAME MORI_RDMA_DEVICES MORI_IB_GID_INDEX MORI_SOCKET_IFNAME IB_DEVICES IBDEVICES RCCL_AINIC_ROCE"
+_FABRIC_PASSED=""
+for _v in $_FABRIC_VARS; do [ -n "${!_v:-}" ] && _FABRIC_PASSED="$_FABRIC_PASSED $_v"; done
+# Node shape the container sizes its servers from (sglang_disagg_mori_io_ep.sh). GPUS_PER_NODE
+# always: cluster.sh takes it from the run's platform (compat/hardware.yaml platforms), and the
+# container no longer assumes 8. GENERIC_TP_SIZE (TP mode; the container defaults it to
+# GPUS_PER_NODE) when the caller set it.
+_SHAPE_PASSED="GPUS_PER_NODE"
+for _v in GENERIC_TP_SIZE; do [ -n "${!_v:-}" ] && _SHAPE_PASSED="$_SHAPE_PASSED $_v"; done
+. "${MAD_SCRIPTS_DIR}/common/cluster.sh"
+config_layer site
+. "${MAD_SCRIPTS_DIR}/common/launcher/launcher_lib.sh"
+# SGLang recipes carry no env: block (flags only), so there is no recipe layer here.
+
+# The container sets its own fabric defaults (mori_ep_env.sh, connectors/mori.env),
+# which name one CX7 cluster's NICs and GID 3. Forward into it:
+#   - every fabric value the caller passed, on any cluster, so an override reaches
+#     the container the way it reaches every other launcher;
+#   - on ainic / thor2, also what cluster.sh derived, since the container defaults
+#     are wrong there.
+# On cx7 / unknown, cluster.sh-only values are NOT forwarded: the container keeps
+# the defaults it has always run with on that fabric.
+_FABRIC_FWD="$_FABRIC_PASSED"
+[ "${CLUSTER_FABRIC_DERIVED:-0}" = 1 ] && _FABRIC_FWD="$_FABRIC_VARS"   # cluster.sh derived this fabric (catalog rails)
+# IB_DEVICES is what the container hands sglang as --disaggregation-ib-device. A
+# caller or cluster.sh naming the rails as MORI_RDMA_DEVICES means the same NICs.
+if [ -z "${IB_DEVICES:-}" ] && [ -n "${MORI_RDMA_DEVICES:-}" ]; then
+    case " $_FABRIC_FWD " in *" MORI_RDMA_DEVICES "*) export IB_DEVICES="$MORI_RDMA_DEVICES" ;; esac
+fi
+# MoRI reads its own GID index; one fabric has one GID.
+if [ -z "${MORI_IB_GID_INDEX:-}" ] && [ -n "${NCCL_IB_GID_INDEX:-}" ]; then
+    case " $_FABRIC_FWD " in *" NCCL_IB_GID_INDEX "*) export MORI_IB_GID_INDEX="$NCCL_IB_GID_INDEX" ;; esac
+fi
+SGLANG_FABRIC_ENV_ARGS=""
+for _v in $_FABRIC_FWD $_SHAPE_PASSED; do
+    [ -n "${!_v:-}" ] && SGLANG_FABRIC_ENV_ARGS="$SGLANG_FABRIC_ENV_ARGS -e $_v=${!_v}"
+done
+export SGLANG_FABRIC_ENV_ARGS
+echo "[fabric] ${CLUSTER_ARCHETYPE:-unknown}; forwarded to the container:${SGLANG_FABRIC_ENV_ARGS:- none (container defaults)}"
 
 validate_model_name() {
   local is_valid_model=false
@@ -164,203 +243,118 @@ echo "Looking for model: $MODEL_NAME"
 echo "Checking model availability across all allocated nodes..."
 
 # Get all allocated nodes
-ALL_NODES=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
+ALL_NODES=$(cluster_expand_nodelist "$SLURM_JOB_NODELIST")
 TOTAL_NODES=$(echo "$ALL_NODES" | wc -l)
 
 echo "Total allocated nodes: $TOTAL_NODES"
 echo "Nodes: $(echo "$ALL_NODES" | tr '\n' ' ')"
 
-# Function to check model path on all nodes
-check_model_path() {
-    local path=$1
-    local check_name=$2
-    
-    echo "Checking $check_name: $path"
-    
-    # Run check on all nodes in parallel
-    srun --nodes=$SLURM_NNODES --ntasks=$SLURM_NNODES /bin/bash -c "
-        if [ -d '$path' ]; then 
-            echo \"\$(hostname): ✓ Found $path\"
-            exit 0
-        else 
-            echo \"\$(hostname): ✗ Missing $path\"
-            exit 1
-        fi
-    "
-    
-    # Check if all nodes succeeded (exit code 0)
-    local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo "✓ $check_name available on ALL nodes"
+# ------------------------
+# Same-rail placement check
+# ------------------------
+# mori_ep_env.sh selects the 8x CX7 400G rail NICs when USE_CX7_NICS=1, and those
+# require same-rail nodes; a cross-rail pair makes NCCL time out inside
+# ibv_modify_qp. base_flags carries --watchdog-timeout 1000000, so that timeout is a
+# hang, not a failure: the job would sit burning its allocation to the time limit.
+# Detect it in seconds instead, before any container starts.
+#
+# Bypass with REQUIRE_SAME_RAIL=0. Worth knowing: this reads SLURM's topology tree,
+# which is only as good as topology.conf. If that describes the management network
+# rather than the CX7 fabric, this check is conservative rather than correct.
+select_same_rail_nodes() {
+    if [ "${USE_CX7_NICS:-0}" != "1" ]; then
+        echo "[rail] USE_CX7_NICS != 1: mlx5_1 is cross-rail safe, no rail check needed"
         return 0
-    else
-        echo "✗ $check_name NOT available on all nodes"
-        return 1
     fi
+    if [ "${REQUIRE_SAME_RAIL:-1}" != "1" ]; then
+        echo "[rail] REQUIRE_SAME_RAIL=0: skipping the same-rail check"
+        return 0
+    fi
+
+    local topo
+    topo=$(scontrol show topology 2>/dev/null)
+    if [ -z "$topo" ]; then
+        echo "[rail] WARNING: no SLURM topology reported; cannot verify same-rail placement"
+        return 0
+    fi
+
+    local node line leaf leafname nodelist members first_leaf="" mismatch=0
+    for node in $ALL_NODES; do
+        leaf=""
+        while IFS= read -r line; do
+            case "$line" in *Level=0*) ;; *) continue ;; esac
+            leafname=${line#*SwitchName=}; leafname=${leafname%% *}
+            nodelist=${line#*Nodes=};      nodelist=${nodelist%% *}
+            members=$(cluster_expand_nodelist "$nodelist" 2>/dev/null)
+            if echo "$members" | grep -qx -- "$node"; then
+                leaf="$leafname"
+                break
+            fi
+        done <<< "$topo"
+
+        if [ -z "$leaf" ]; then
+            echo "[rail] WARNING: $node is in no Level=0 switch; cannot verify placement"
+            return 0
+        fi
+        echo "[rail] $node -> $leaf"
+        if [ -z "$first_leaf" ]; then
+            first_leaf="$leaf"
+        elif [ "$leaf" != "$first_leaf" ]; then
+            mismatch=1
+        fi
+    done
+
+    if [ "$mismatch" -eq 1 ]; then
+        echo ""
+        echo "✗ FATAL ERROR: the allocated nodes span more than one leaf switch, and"
+        echo "  USE_CX7_NICS=1 selects the 8x CX7 400G rail NICs, which require same-rail"
+        echo "  nodes (scripts/sglang_disagg/mori_ep_env.sh:8-16). A cross-rail pair hangs"
+        echo "  in NCCL ibv_modify_qp rather than failing, so this run is stopped now"
+        echo "  instead of burning the allocation."
+        echo ""
+        echo "  Resubmit (placement is not pinned), or set --switches=1 in the #SBATCH"
+        echo "  directives, or set USE_CX7_NICS=0 for the cross-rail-safe mlx5_1"
+        echo "  management NIC, or set REQUIRE_SAME_RAIL=0 to bypass this check."
+        exit 1
+    fi
+
+    echo "[rail] all $TOTAL_NODES nodes on leaf $first_leaf; CX7 rail NICs are safe"
 }
 
-# Check /mnt/m2m_nobackup/models_blog first
-MODEL_PATH_1="/mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-if check_model_path "$MODEL_PATH_1" "/mnt/m2m_nobackup/models_blog"; then
-    MODEL_PATH="$MODEL_PATH_1"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-# Check /shared_inference/models_blog
-elif check_model_path "/shared_inference/models_blog/$MODEL_NAME" "/shared_inference/models_blog"; then
-    MODEL_PATH="/shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-elif check_model_path "$MODEL_DIR/$MODEL_NAME" "$MODEL_DIR"; then
-    MODEL_PATH="$MODEL_DIR/$MODEL_NAME"
-    echo ""
-    echo "✓ Selected MODEL_PATH: $MODEL_PATH (available on all nodes)"
-else
-    echo ""
-    echo "✗ FATAL ERROR: Model '$MODEL_NAME' not found on ALL allocated nodes in either:"
-    echo "  - /mnt/m2m_nobackup/models_blog/$MODEL_NAME"
-    echo "  - /shared_inference/models_blog/$MODEL_NAME"
-    echo ""
-    echo "Model must be accessible from all nodes for distributed execution."
-    echo "Please ensure the model is available on all allocated nodes."
-    exit 1
-fi
+select_same_rail_nodes
+
+
+# Walk the candidate list from cluster.sh: local NVMe, then shared NFS, then an
+# explicit MODEL_DIR. Requires the weights on EVERY allocated node -- all ranks
+# load from one path, so a partial hit fails the run deep into bring-up.
+# Detects the allocation's GPU arch (and enforces GPU_ARCHS when the card sets it),
+# before the weights probe. See cluster_require_gpu_arch in cluster.sh.
+cluster_require_gpu_arch "${MODEL_NAME}" "${GPU_ARCHS:-}" || exit 1
+config_recipe_file "${RECIPES_YAML}" "${MODEL_NAME}" || exit 1
+cluster_check_recipe "${RECIPES_YAML}" "${MODEL_NAME}" sglang || exit 1
+cluster_resolve_model_path || exit 1
+cluster_resolve_role_artifacts || exit 1
 
 echo "Final MODEL_PATH: $MODEL_PATH"
 echo ""
 
 
 # Calculate NUM_NODES based on xP and yD
-# The proxy/router runs on the first prefill node (NODE_RANK=0), so no extra node is needed.
-NUM_NODES=$((xP + yD))
-echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD) DP_MODE=$DP_MODE"
+# The proxy/router runs on the first prefill node (NODE_RANK=0), unless ROUTER_NODE=1
+# gives it (and the benchmark client) a node of its own, after the decode nodes.
+export ROUTER_NODE="${ROUTER_NODE:-0}"   # node.sh resolves each rank with it
+case "$ROUTER_NODE" in 0|1) ;; *) echo "ERROR: ROUTER_NODE=${ROUTER_NODE} (0 or 1)" >&2; exit 1 ;; esac
+NUM_NODES=$((xP + yD + ROUTER_NODE))
+echo "Calculated NUM_NODES: $NUM_NODES (xP=$xP + yD=$yD + ROUTER_NODE=$ROUTER_NODE) DP_MODE=$DP_MODE"
 
-# ------------------------
-# Extract NUM_NODES from SLURM allocation and select nodes
-# ------------------------
-echo "Original SLURM allocation:"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-
-FULL_NODELIST=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
-AVAILABLE_COUNT=$(echo "$FULL_NODELIST" | wc -l)
-
-if (( AVAILABLE_COUNT < NUM_NODES )); then
-    echo "ERROR: Need ${NUM_NODES} nodes (xP=${xP} + yD=${yD}) but only ${AVAILABLE_COUNT} allocated." >&2
-    exit 1
-fi
-
-# Pick the first NUM_NODES nodes from the allocation and sort alphabetically.
-# srun assigns PROCID=0 to the alphabetically-first hostname regardless of --nodelist order.
-# IPADDRS[0..xP-1] = prefill, IPADDRS[xP..] = decode, so the sorted order must match.
-SELECTED_NODES=$(echo "$FULL_NODELIST" | head -n "$NUM_NODES" | sort)
-SELECTED_NODELIST_STR=$(echo "$SELECTED_NODES" | tr '\n' ',' | sed 's/,$//')
-
-# Create new nodelist in SLURM format
-# This is a simplified approach - for complex ranges, you might need more sophisticated parsing
-NEW_SLURM_NODELIST=$(echo "$SELECTED_NODES" | paste -sd, | sed 's/,/,/g')
-
-# Update SLURM environment variables
-export SLURM_NNODES=$NUM_NODES
-export SLURM_NTASKS=$NUM_NODES
-export SLURM_JOB_NUM_NODES=$NUM_NODES
-export SLURM_NPROCS=$NUM_NODES
-export SLURM_JOB_NODELIST="$NEW_SLURM_NODELIST"
-export SLURM_NODELIST="$NEW_SLURM_NODELIST"
-
-# Keep other SLURM variables as they were or set defaults
-export SLURM_TASKS_PER_NODE="1(x$NUM_NODES)"
-export SLURM_SUBMIT_DIR="${SLURM_SUBMIT_DIR:-/home/ravgupta}"
-export SLURM_CLUSTER_NAME="${SLURM_CLUSTER_NAME:-m2m}"
-export SLURM_JOB_CPUS_PER_NODE="${SLURM_JOB_CPUS_PER_NODE}"
-export SLURM_JOB_PARTITION="${SLURM_JOB_PARTITION:-amd-rccl}"
-export SLURM_JOBID="${SLURM_JOBID:-$SLURM_JOB_ID}"
-export SLURM_JOB_QOS="${SLURM_JOB_QOS:-normal}"
-export SLURM_JOB_ACCOUNT="${SLURM_JOB_ACCOUNT:-amd-rccl}"
-export SLURM_NTASKS_PER_NODE=1
-export SLURM_SUBMIT_HOST="${SLURM_SUBMIT_HOST}"
-export SLURM_JOB_ID="${SLURM_JOB_ID}"
-export SLURM_CONF="${SLURM_CONF:-/etc/slurm/slurm.conf}"
-export SLURM_JOB_NAME="${SLURM_JOB_NAME:-${xP}p${yD}d_bench-serving}"
-
-echo ""
-echo "Updated SLURM Environment Variables:"
-echo "SLURM_JOB_ID: $SLURM_JOB_ID"
-echo "SLURM_JOB_NODELIST: $SLURM_JOB_NODELIST"
-echo "SLURM_NNODES: $SLURM_NNODES"
-echo "SLURM_NTASKS: $SLURM_NTASKS"
-echo "SLURM_TASKS_PER_NODE: $SLURM_TASKS_PER_NODE"
-echo "SLURM_JOB_CPUS_PER_NODE: $SLURM_JOB_CPUS_PER_NODE"
-echo "SLURM_JOB_PARTITION: $SLURM_JOB_PARTITION"
-echo "SLURM_JOB_NUM_NODES: $SLURM_JOB_NUM_NODES"
-echo "SLURM_JOBID: $SLURM_JOBID"
-echo "SLURM_JOB_QOS: $SLURM_JOB_QOS"
-echo "SLURM_NODELIST: $SLURM_NODELIST"
-echo "SLURM_JOB_ACCOUNT: $SLURM_JOB_ACCOUNT"
-echo "SLURM_NPROCS: $SLURM_NPROCS"
-echo "SLURM_SUBMIT_HOST: $SLURM_SUBMIT_HOST"
-echo "SLURM_CONF: $SLURM_CONF"
-echo "SLURM_JOB_NAME: $SLURM_JOB_NAME"
-echo "SLURM_NTASKS_PER_NODE: $SLURM_NTASKS_PER_NODE"
-echo "SLURM_SUBMIT_DIR: $SLURM_SUBMIT_DIR"
-echo "SLURM_CLUSTER_NAME: $SLURM_CLUSTER_NAME"
-echo "ulimit: $(ulimit -a)"
-echo ""
-echo "Selected nodes for execution:"
-echo "$SELECTED_NODES"
-echo ""
-
-# Node information
+# The first NUM_NODES nodes of the allocation, the SLURM_* view narrowed to them, and
+# their addresses (common/launcher/launcher_lib.sh). Nodes are multi-homed: the address
+# on the fabric subnet (FABRIC_SUBNET_PREFIX, a cluster.sh site fact) is preferred, as a
+# barrier across subnets hangs; the first address otherwise.
+launcher_select_nodes "$NUM_NODES" "${xP}p${yD}d_bench-serving"
 USER_NAME=$(whoami)
-MASTER_NODE=$(echo "$SELECTED_NODES" | head -n 1)
-MASTER_ADDR=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$MASTER_NODE" bash -c 'hostname -I')
-# Prefer the fabric-subnet IP: nodes are multi-homed and picking the first
-# hostname -I address can land on a different subnet, which hangs the socket
-# barrier on mixed-subnet coordination. The preferred subnet prefix is
-# overridable via FABRIC_SUBNET_PREFIX (default "10.158." for the OCI
-# useocpm2m fabric); setting it empty is not intended (an empty prefix would
-# match every address), so when it is empty we skip the prefix match and go
-# straight to the first-address fallback. Fall back to the first address if no
-# matching address is present; fail fast if empty.
-FABRIC_SUBNET_PREFIX="${FABRIC_SUBNET_PREFIX:-10.158.}"
-# Escape regex-special chars so the prefix is matched literally, anchored at start.
-FABRIC_SUBNET_RE="^$(printf '%s' "$FABRIC_SUBNET_PREFIX" | sed 's/[.[\*^$]/\\&/g')"
-MASTER_ADDR_RAW="$MASTER_ADDR"
-if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
-    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
-else
-    MASTER_ADDR=""
-fi
-if [ -z "$MASTER_ADDR" ]; then
-    MASTER_ADDR=$(echo "$MASTER_ADDR_RAW" | awk '{print $1}')
-fi
-if [ -z "$MASTER_ADDR" ]; then
-    echo "ERROR: could not resolve MASTER_ADDR for node '$MASTER_NODE' from 'hostname -I' output: '$MASTER_ADDR_RAW'" >&2
-    exit 1
-fi
 MASTER_PORT=39566  # Choose an open port
-
-IPS=()
-
-for NODE in $SELECTED_NODES; do
-    IP=$(srun --nodes=1 --ntasks=1 --time=00:20:00 --nodelist="$NODE" bash -c 'hostname -I')
-    IP_RAW="$IP"
-    if [ -n "$FABRIC_SUBNET_PREFIX" ]; then
-        IP=$(echo "$IP_RAW" | tr ' ' '\n' | grep -E "$FABRIC_SUBNET_RE" | head -1)
-    else
-        IP=""
-    fi
-    if [ -z "$IP" ]; then
-        IP=$(echo "$IP_RAW" | awk '{print $1}')
-    fi
-    if [ -z "$IP" ]; then
-        echo "ERROR: could not resolve IP for node '$NODE' from 'hostname -I' output: '$IP_RAW'" >&2
-        exit 1
-    fi
-    IPS+=("$IP")
-done
-
-echo "Selected node IPs: ${IPS[*]}" | sed 's/ /,/g'
+launcher_node_ips "$FABRIC_SUBNET_PREFIX"
 
 MOONCAKE_COOKBOOK_PATH="/opt/mooncake-cookbook"
 BENCHMARK_FILE="${BENCHMARK_FILE:-$MOONCAKE_COOKBOOK_PATH/disagg_blog_p1/models_blog/run_xPyD_models.slurm}"
@@ -377,6 +371,7 @@ echo "SKIP_BENCHMARK=${SKIP_BENCHMARK} SKIP_CURL_TEST=${SKIP_CURL_TEST} (sglang_
 
 if [ ! -d "$LOG_PATH" ]; then
     mkdir -p "$LOG_PATH"
+cluster_mark_dir "$LOG_PATH" "per-job logs from sglang disaggregated runs (one directory per SLURM job id)"
     echo "Created directory: $LOG_PATH"
 else
     echo "Directory already exists: $LOG_PATH"
@@ -394,8 +389,12 @@ export yD=$yD
 export DP_MODE=$DP_MODE
 export MODEL_NAME=$MODEL_NAME
 export USER_NAME=$USER_NAME
-export IPADDRS="$(echo "${IPS[*]}" | sed 's/ /,/g')"
-export BENCHMARK_ITR=${BENCHMARK_ITR:-2}
+export IPADDRS          # launcher_node_ips
+# Default 1, not 2. The 2 was never honoured: benchmark_xPyD.sh looped over the literal
+# "{1..$BENCHMARK_ITR}", so every run so far has swept once. Now that the loop works,
+# leaving the default at 2 would double every sweep's wall clock as a side effect of a
+# bug fix. 1 preserves observed behaviour and matches vllm_dissag/benchmark_xPyD.sh:5.
+export BENCHMARK_ITR=${BENCHMARK_ITR:-1}
 export SKIP_BENCHMARK
 export SKIP_CURL_TEST
 
@@ -405,84 +404,34 @@ export RUN_FILE_FULL="$MOONCAKE_COOKBOOK_PATH/${RUN_FILE}"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="$(eval echo "$AGENTIC_CONFIG")"
 
-# Use only the selected nodes for srun execution
-SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
-echo "Rank $SLURM_PROCID on $(hostname)";
-docker ps -q | xargs --no-run-if-empty docker stop;
-docker run --rm \
-    --device /dev/dri \
-    --device /dev/kfd \
-    --device /dev/infiniband \
-    --network host \
-    --ipc host \
-    --group-add video \
-    --cap-add SYS_PTRACE \
-    --security-opt seccomp=unconfined \
-    --privileged \
-    -v $HOME:$HOME \
-    -v /shared_inference:/shared_inference \
-    -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
-    -v $HOME/.ssh:/root/.ssh \
-    --shm-size 64G \
-    -v ${LOG_PATH}:/run_logs \
-    -v $MOONCAKE_REPO_DIR:$MOONCAKE_COOKBOOK_PATH \
-    -e SLURM_JOB_ID=$SLURM_JOB_ID \
-    -e SLURM_JOB_NODELIST=$SLURM_JOB_NODELIST \
-    -e NNODES=$NNODES \
-    -e NODE_RANK=$SLURM_PROCID \
-    -e MASTER_ADDR=$MASTER_ADDR \
-    -e MASTER_PORT=$MASTER_PORT \
-    -e MODEL_PATH=$MODEL_PATH \
-    -e MOONCAKE_COOKBOOK_PATH=$MOONCAKE_COOKBOOK_PATH \
-    -e xP=$xP \
-    -e yD=$yD \
-    -e DP_MODE=$DP_MODE \
-    -e USER_NAME=$USER_NAME \
-    -e MODEL_NAME=$MODEL_NAME \
-    -e BENCHMARK_FILE=$BENCHMARK_FILE \
-    -e IPADDRS=$IPADDRS \
-    -e BENCHMARK_ITR=$BENCHMARK_ITR \
-    -e SKIP_BENCHMARK=$SKIP_BENCHMARK \
-    -e SKIP_CURL_TEST=$SKIP_CURL_TEST \
-    ${KV_TRANSFER_BACKEND:+-e KV_TRANSFER_BACKEND=$KV_TRANSFER_BACKEND} \
-    -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-1024/1024 8192/1024}" \
-    -e DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME:-unknown} \
-    -e USE_CX7_NICS=${USE_CX7_NICS:-0} \
-    ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
-    ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
-    -e MOONCAKE_REPO_DIR="$MOONCAKE_REPO_DIR" \
-    ${AGENTIC_CONC:+-e AGENTIC_CONC=$AGENTIC_CONC} \
-    ${DURATION:+-e DURATION=$DURATION} \
-    ${AGENTIC_PORT:+-e AGENTIC_PORT=$AGENTIC_PORT} \
-    ${MODEL_PREFIX:+-e MODEL_PREFIX=$MODEL_PREFIX} \
-    ${WEKA_LOADER_OVERRIDE:+-e WEKA_LOADER_OVERRIDE=$WEKA_LOADER_OVERRIDE} \
-    ${AIPERF_UNSAFE_OVERRIDE:+-e AIPERF_UNSAFE_OVERRIDE=$AIPERF_UNSAFE_OVERRIDE} \
-    ${AGENTIC_CACHE_WARMUP_DURATION:+-e AGENTIC_CACHE_WARMUP_DURATION=$AGENTIC_CACHE_WARMUP_DURATION} \
-    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
-    ${AGENTIC_CONFIG:+-e AGENTIC_CONFIG=$AGENTIC_CONFIG} \
-    ${AGENTIC_WORKLOAD:+-e AGENTIC_WORKLOAD=$AGENTIC_WORKLOAD} \
-    ${SUITE_CORPUS_DIR:+-e SUITE_CORPUS_DIR=$SUITE_CORPUS_DIR} \
-    ${AIPERF_PIN:+-e AIPERF_PIN=$AIPERF_PIN} \
-    ${AGENTIC_UTILS_PIN:+-e AGENTIC_UTILS_PIN=$AGENTIC_UTILS_PIN} \
-    ${SUITE_CORPUS_FORCE:+-e SUITE_CORPUS_FORCE=$SUITE_CORPUS_FORCE} \
-    ${AGENTIC_STRICT_CONTEXT:+-e AGENTIC_STRICT_CONTEXT=$AGENTIC_STRICT_CONTEXT} \
-    ${AGENTIC_HF_ISL_TAIL:+-e AGENTIC_HF_ISL_TAIL=$AGENTIC_HF_ISL_TAIL} \
-    ${HF_HOME:+-e HF_HOME=$HF_HOME} \
-    ${ENABLE_SERVER_METRICS:+-e ENABLE_SERVER_METRICS=$ENABLE_SERVER_METRICS} \
-    ${ENABLE_RADIX_CACHE:+-e ENABLE_RADIX_CACHE=$ENABLE_RADIX_CACHE} \
-    ${DRY_RUN:+-e DRY_RUN=$DRY_RUN} \
-    ${AGENTIC_ALLOW_UV_INSTALL:+-e AGENTIC_ALLOW_UV_INSTALL=$AGENTIC_ALLOW_UV_INSTALL} \
-    ${AGENTIC_UV_VERSION:+-e AGENTIC_UV_VERSION=$AGENTIC_UV_VERSION} \
-    --ulimit nofile=1048576:1048576 \
-    --name $DOCKER_CONT_NAME \
-    --entrypoint /bin/bash \
-    $DOCKER_IMAGE_NAME -c "
-        set -o pipefail
-        mkdir -p /run_logs/${SLURM_JOB_ID}
-        $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_sglang_bench_serving.sh_NODE${SLURM_PROCID}.log
-    "
-'
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+# The container's own defaults (connectors/mori.env, applied by mori_ep_env.sh to names
+# it was not given), for the record. A workload file's connector env (CONNECTORS_DIR, from its
+# `connectors:` section) reaches the container as -e for each value that differs from the
+# container's own file; the rest the container applies itself, the same.
+declare -A _mori_default=()
+while IFS= read -r _line; do
+    [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && _mori_default[${_line%%=*}]="${_line#*=}"
+done < "${MOONCAKE_REPO_DIR}/connectors/mori.env"
+SGLANG_CONNECTOR_ENV_ARGS=""
+while IFS= read -r _line; do
+    [[ "$_line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+    _k="${_line%%=*}"; _v="${_line#*=}"
+    [[ -n "${!_k:-}" ]] && continue
+    if [[ ! -v "_mori_default[$_k]" || "${_mori_default[$_k]}" != "$_v" ]]; then
+        SGLANG_CONNECTOR_ENV_ARGS+=" -e ${_k}=${_v}"
+        config_note "$_k" "$_v" connector-env
+    else
+        config_note "$_k" "$_v" container-default
+    fi
+done < "${CONNECTORS_DIR}/mori.env"
+export SGLANG_CONNECTOR_ENV_ARGS
+unset _mori_default
+# Every selected node runs node.sh, then the containers are removed; rank 0 gives the
+# job's verdict (common/launcher/launcher_lib.sh, cluster_job_verdict). SKIP_BENCHMARK=1
+# serves without benchmarking, so it has no results to require.
+launcher_run_nodes "${MOONCAKE_REPO_DIR}/node.sh" 'docker stop $DOCKER_CONT_NAME; docker rm -f $DOCKER_CONT_NAME'
+_require_csv=1
+[ "${SKIP_BENCHMARK}" = "1" ] && _require_csv=0
+launcher_verdict "$_require_csv" || exit $?
 
