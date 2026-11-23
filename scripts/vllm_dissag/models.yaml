@@ -439,6 +439,9 @@ Muse-Spark-Open-816B-A42B-Quark-MXFP4:
     DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
     GPU_MEMORY_UTILIZATION: "0.9"
     KV_CACHE_MEMORY_BYTES: "68719476736"
+    # NIAH: the bare product prompt makes this chat model echo the prompt on some
+    # requests (0/10); render the ask with its own chat template instead.
+    NIAH_METHOD: "template"
   tp_flags: "--language-model-only --dtype bfloat16 --attention-backend ROCM_AITER_FA --disable-hybrid-kv-cache-manager --block-size 32 --max-model-len 32768 --max-num-seqs 128 --max-num-batched-tokens 8192 --reasoning-parser muse --tool-call-parser muse --enable-auto-tool-choice"
   prefill:
     tp: "--tensor-parallel-size 8"
