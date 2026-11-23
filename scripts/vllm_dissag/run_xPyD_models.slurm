@@ -90,6 +90,7 @@ VALID_MODELS=( \
     "GLM-5.1-FP8" \
     "DeepSeek-V4-Flash-FP8" \
     "DeepSeek-V4-Pro-FP8" \
+    "Muse-Spark-Open-816B-A42B-Quark-MXFP4" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -592,6 +593,14 @@ _EP_WIDTH=$(( yD * ${GPUS_PER_NODE:-8} ))
 if [ "$_EP_WIDTH" -ge 32 ]; then _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.70; else _GPU_MEM_UTIL_LAUNCHER_DEFAULT=0.8; fi
 echo "GPU_MEMORY_UTILIZATION launcher fallback: ${_GPU_MEM_UTIL_LAUNCHER_DEFAULT} (decode EP width ${_EP_WIDTH})"
 
+# DOCKER_PRIVILEGED=0 for clusters whose docker authz plugin rejects --privileged (e.g.
+# Crusoe Spur): grant only the memlock capability and the render group RDMA + GPU need.
+if [ "${DOCKER_PRIVILEGED:-1}" = "1" ]; then
+    _PRIV_ARGS="--privileged"
+else
+    _PRIV_ARGS="--cap-add IPC_LOCK --group-add $(getent group render | cut -d: -f3)"
+fi
+
 docker run --rm \
     --device /dev/dri \
     --device /dev/kfd \
@@ -601,10 +610,11 @@ docker run --rm \
     --group-add video \
     --cap-add SYS_PTRACE \
     --security-opt seccomp=unconfined \
-    --privileged \
+    ${_PRIV_ARGS} \
     -v $HOME:$HOME \
     -v /shared_inference:/shared_inference \
     -v /mnt/m2m_nobackup:/mnt/m2m_nobackup \
+    -v ${MODEL_PATH}:${MODEL_PATH}:ro \
     -v $HOME/.ssh:/root/.ssh \
     --shm-size ${DOCKER_SHM_SIZE:-256G} \
     --ulimit nofile=524288:524288 \
@@ -681,7 +691,7 @@ docker run --rm \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
-    -e KV_CACHE_MEMORY_BYTES="${KV_CACHE_MEMORY_BYTES:-}" \
+    ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
     ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
     ${ENABLE_PREFIX_CACHING:+-e ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \

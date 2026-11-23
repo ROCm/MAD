@@ -342,6 +342,40 @@
         "args": "-N 2 -n 2"
     },
     {
+        "name": "pyt_vllm_disagg_moriio_muse-spark-open-mxfp4",
+        "dockerfile": "../../docker/vllm_disagg_inference.musespark",
+        "scripts": "run_xPyD_models.slurm",
+        "url": "",
+        "data": "huggingface",
+        "n_gpus": "-1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "",
+        "skip_gpu_arch": "gfx942",
+        "tags": [
+            "pyt",
+            "vllm",
+            "vllm_disagg",
+            "moriio",
+            "inference"
+        ],
+        "timeout": -1,
+        "distributed": {
+            "launcher": "slurm_multi"
+        },
+        "env_vars": {
+            "DOCKER_IMAGE_NAME": "<supply-your-image>",
+            "MODEL_NAME": "Muse-Spark-Open-816B-A42B-Quark-MXFP4",
+            "xP": "1",
+            "yD": "1",
+            "CONNECTOR": "moriio",
+            "WIDE_EP": "0",
+            "MORI_GPU_ARCHS": "gfx950",
+            "DISABLE_HOST_RDMA_MOUNTS": "1",
+            "BENCHMARK_COMBINATIONS": "1024/1024"
+        },
+        "args": "-N 2 -n 2"
+    },
+    {
         "name": "pyt_vllm_disagg_deepep_deepseek-v3",
         "dockerfile": "../../docker/vllm_disagg_inference",
         "scripts": "run_xPyD_models.slurm",

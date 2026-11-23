@@ -414,3 +414,36 @@ GLM-5.1-FP8:
     # prompt length: smaller values cut per-token latency but inflate TTFT sharply;
     # 2048 was the balance point.
     dp: "--max-num-batched-tokens 2048"
+
+# ============================ MoE + sliding window (TP only) ============================
+
+# Muse-Spark-Open-816B-A42B-Quark-MXFP4 (amd/Muse-Spark-Open-816B-A42B-Quark-MXFP4, arch
+# MuseSparkForConditionalGeneration): 62 MoE layers, 256 experts top-8, GQA 128q/16kv
+# head_dim 64; 46 of the 62 layers use a 2048-token sliding window. Quark OCP-MXFP4 W4A4,
+# MI355X (gfx950) only. Own image: docker/vllm_disagg_inference.musespark (vLLM >= v0.34.0).
+#
+# moriio+TP only (combo 2). vLLM's ROCm Muse Spark MoE raises "requires DP1 and PCP1"
+# for every quantization, so the MoRI-EP wideEP path (-tp 1 + DP) cannot boot.
+#
+#   --disable-hybrid-kv-cache-manager  MoRIIO WRITE mode rejects sliding-window KV groups
+#                                      under HMA; with it off every layer keeps full KV.
+#   --block-size 32                    AITER FA splits the default 64-token block into
+#                                      32-token kernel blocks, which MoRIIO cannot register.
+#   --language-model-only              text only; the vision/audio towers are not loaded.
+Muse-Spark-Open-816B-A42B-Quark-MXFP4:
+  env:
+    VLLM_ROCM_USE_AITER: "1"
+    VLLM_ROCM_MUSE_MOE_REDUCE_DTYPE: "bf16"
+    VLLM_USE_BREAKABLE_CUDAGRAPH: "1"
+    PREFILL_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    DECODE_CUDAGRAPH_MODE: "FULL_AND_PIECEWISE"
+    GPU_MEMORY_UTILIZATION: "0.9"
+    KV_CACHE_MEMORY_BYTES: "68719476736"
+    # NIAH: the bare product prompt makes this chat model echo the prompt on some
+    # requests (0/10); render the ask with its own chat template instead.
+    NIAH_METHOD: "template"
+  tp_flags: "--language-model-only --dtype bfloat16 --attention-backend ROCM_AITER_FA --disable-hybrid-kv-cache-manager --block-size 32 --max-model-len 32768 --max-num-seqs 128 --max-num-batched-tokens 8192 --reasoning-parser muse --tool-call-parser muse --enable-auto-tool-choice"
+  prefill:
+    tp: "--tensor-parallel-size 8"
+  decode:
+    tp: "--tensor-parallel-size 8"

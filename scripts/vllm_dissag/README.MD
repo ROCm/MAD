@@ -57,6 +57,7 @@ path).
 | `DeepSeek-V4-Flash-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `DeepSeek-V4-Pro-FP8` | MoE | 3 (moriio wideEP) | own image (`dsv4` Dockerfile); MoRI-EP only; submit via `run_wideep.sh` |
 | `GLM-5.1-FP8` | MoE + DSA | 3 (moriio wideEP only) | own image (`glmv5.1` Dockerfile); 2P/2D EP16 and 4P/4D EP32 validated on the current pins (NIAH ~93-97%) |
+| `Muse-Spark-Open-816B-A42B-Quark-MXFP4` | MoE + sliding window | 2 (moriio TP only) | MI355X only; own image (`musespark` Dockerfile, vLLM >= v0.34.0). wideEP is blocked in vLLM: the ROCm Muse Spark MoE requires DP1 |
 
 ## Prerequisites
 
@@ -121,6 +122,24 @@ usual way, pointing at that image:
 export DOCKER_IMAGE_NAME=<your-registry>/vllm-disagg:dsv4
 export CONNECTOR=moriio WIDE_EP=0 MODEL_NAME=amd-Llama-3.3-70B-Instruct-FP8-KV
 ```
+
+`Muse-Spark-Open-816B-A42B-Quark-MXFP4` (MI355X) also has its own image: the
+`vllm/vllm-openai-rocm:v0.34.0` release plus vllm-router. Older vLLM does not register
+the model.
+
+```bash
+docker build -t <your-registry>/vllm-disagg:musespark \
+  -f docker/vllm_disagg_inference.musespark.ubuntu.amd.Dockerfile .
+```
+
+Its card runs `CONNECTOR=moriio WIDE_EP=0` (TP8 per role) with `MORI_GPU_ARCHS=gfx950` and
+`DISABLE_HOST_RDMA_MOUNTS=1`: the base image ships its own AINIC rdma-core userspace, and
+mounting the host's libibverbs over it leaves the container with no usable RDMA device.
+On clusters whose docker authz plugin rejects `--privileged`, also set
+`DOCKER_PRIVILEGED=0`. On clusters that keep the
+weights elsewhere, set `MODEL_DIR` to the directory that holds
+`Muse-Spark-Open-816B-A42B-Quark-MXFP4`; the slurm mounts the selected model path into
+the container.
 
 ### Launching DSV4 jobs
 

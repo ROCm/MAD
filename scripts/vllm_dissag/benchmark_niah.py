@@ -76,11 +76,18 @@ WORDS = [int(x) for x in os.environ.get("NIAH_WORDS", "2000,8000,20000,35000").s
 # those `<｜User｜>` / `<｜Assistant｜>` tokens are literal text to a non-DeepSeek
 # tokenizer. The DSV4 wrapper sets NIAH_METHOD explicitly, so it never relies on
 # this default; every other model gets a prompt its own tokenizer understands.
+# `template` is hybrid's ask rendered with the served model's own chat template
+# (tokenizer.apply_chat_template), for chat models that are neither DeepSeek nor
+# base-model-like. NIAH_TEMPLATE_KWARGS (JSON) is passed to the template; the
+# default keeps reasoning minimal so the answer is not buried behind thinking.
 METHOD = os.environ.get("NIAH_METHOD", "product").strip().lower()
-if METHOD not in ("hybrid", "pr176", "product"):
-    print("NIAH_METHOD must be hybrid, pr176 or product (got %r)" % METHOD,
+if METHOD not in ("hybrid", "pr176", "product", "template"):
+    print("NIAH_METHOD must be hybrid, pr176, product or template (got %r)" % METHOD,
           file=sys.stderr)
     sys.exit(2)
+TEMPLATE_KWARGS = json.loads(os.environ.get(
+    "NIAH_TEMPLATE_KWARGS", '{"enable_thinking": false, "reasoning_effort": "minimal"}'))
+_TOKENIZER = []
 # Both chat-template modes share prompt scaffolding and the recall headline.
 _CHAT = METHOD in ("hybrid", "pr176")
 
@@ -153,7 +160,7 @@ LIST_PRIME = os.environ.get("NIAH_LIST_PRIME", "")
 # historical 64-token DSV4 handicap. 27 Aug: 512 rather than PR-176's 2048
 # because DSV4-Pro runs ~1 s/token, so 2048 x 18 requests overruns the 8h
 # assoc walltime. It is a cap, not a target — raise with NIAH_MAXTOK.
-MAXTOK = int(os.environ.get("NIAH_MAXTOK", "512" if _CHAT else "64"))
+MAXTOK = int(os.environ.get("NIAH_MAXTOK", "512" if _CHAT or METHOD == "template" else "64"))
 # Product NIAH is the BARE completion for every model, DeepSeek-V4 included:
 # GLM, DSV3 and Hy3 were all graded on it, so a
 # wrapped DSV4 score is not comparable to any of them. Opt in with
@@ -306,6 +313,20 @@ def make_prompt(n_words, seed=0):
     NIAH_DS_WRAP=1 and NIAH_TERSE=1 is a diagnostic stem.
     """
     haystack = make_haystack(n_words, seed)
+    if METHOD == "template":
+        if not _TOKENIZER:
+            from transformers import AutoTokenizer
+            _TOKENIZER.append(AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True))
+        # The prime is the open assistant turn, so the template writes the model's
+        # own reply header (e.g. Muse's `to=user`) in front of it.
+        messages = [
+            {"role": "system", "content": PR176_SYSTEM},
+            {"role": "user", "content": PR176_USER_PREFIX + haystack + HYBRID_TAIL},
+            {"role": "assistant", "content": HYBRID_PRIME + LIST_PRIME},
+        ]
+        return _TOKENIZER[0].apply_chat_template(
+            messages, tokenize=False, continue_final_message=True, **TEMPLATE_KWARGS
+        )
     if _CHAT:
         # PR-176 posts these as `messages` to /v1/chat/completions and lets the
         # server apply the template. We cannot: the MoRIIO router needs
@@ -674,6 +695,10 @@ def main():
             print("[niah] WARN NIAH_DS_WRAP/NIAH_TERSE are set but do not apply "
                   "under method=%s; use NIAH_METHOD=product for those." % METHOD,
                   flush=True)
+    elif METHOD == "template":
+        print("[niah] method=template: hybrid's ask rendered with the model's own chat "
+              "template (kwargs=%s). Not comparable to product or DeepSeek-template rows."
+              % json.dumps(TEMPLATE_KWARGS), flush=True)
     else:
         print("[niah] method=product: bare continuation, comparable to GLM / "
               "DSV3 / Hy3 and the DSV4 product rows. "
