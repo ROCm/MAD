@@ -89,6 +89,8 @@ VALID_MODELS=( \
     "Qwen3-30B-A3B" \
     "Kimi-K3-MXFP4" \
     "GLM-5.1-FP8" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=moriio WIDE_EP=1 (MoRI-EP; legacy RUN_MORI=1)
@@ -98,6 +100,8 @@ MORI_EP_VALID_MODELS=( \
     "DeepSeek-R1" \
     "Kimi-K3-MXFP4" \
     "GLM-5.1-FP8" \
+    "DeepSeek-V4-Flash-FP8" \
+    "DeepSeek-V4-Pro-FP8" \
 )
 
 # Models allowed for CONNECTOR=rixl WIDE_EP=1 EP_BACKEND=deepep (legacy RUN_DEEPEP=1)
@@ -184,7 +188,7 @@ WIDE_EP="${WIDE_EP:-0}"
 # in TP mode is unsupported — the TP argv would double the model's own
 # --compilation-config and drop the mandatory +quant_fp8 op. Reject early.
 # GLM-5.1-FP8 (MLA+DSA) is validated only under MoRI-EP wideEP; moriio+TP is untested.
-WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "Kimi-K3-MXFP4" "GLM-5.1-FP8" )
+WIDE_EP_ONLY_MODELS=( "DeepSeek-V3" "DeepSeek-V3-5layer" "DeepSeek-R1" "GLM-5.1-FP8" "DeepSeek-V4-Flash-FP8" "DeepSeek-V4-Pro-FP8" "Kimi-K3-MXFP4" )
 model_is_wide_ep_only() {
   local m="$1"
   for x in "${WIDE_EP_ONLY_MODELS[@]}"; do [[ "$m" == "$x" ]] && return 0; done
@@ -214,8 +218,11 @@ elif [[ "$WIDE_EP" == "1" && "${CONNECTOR}" == "rixl" ]]; then
   fi
 fi
 
-export CONNECTOR WIDE_EP EP_BACKEND
-echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>}) for model '$MODEL_NAME'"
+# Tiered prefix caching overlay (orthogonal axis; default none). Forwarded to the container.
+KV_OFFLOAD="${KV_OFFLOAD:-none}"
+OFFLOAD_BACKEND="${OFFLOAD_BACKEND:-native}"
+export CONNECTOR WIDE_EP EP_BACKEND KV_OFFLOAD OFFLOAD_BACKEND
+echo "Launcher: $RUN_FILE  (CONNECTOR=${CONNECTOR} WIDE_EP=${WIDE_EP} EP_BACKEND=${EP_BACKEND:-<n/a>} KV_OFFLOAD=${KV_OFFLOAD} OFFLOAD_BACKEND=${OFFLOAD_BACKEND}) for model '$MODEL_NAME'"
 
 # ---------------------------------------------------------------------------
 # Connector platform env: per-connector <connector>.env holds the ROCm-7.2.3
@@ -459,13 +466,16 @@ BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS:-}"
 # The launcher/connectors auto-enable prefix caching + server /metrics when
 # BENCHMARK_SCRIPT=agentic.
 #   niah                   -> benchmark_niah.sh         (needle-in-a-haystack; NIAH_WORDS)
+#   validate               -> benchmark_validate.sh     (niah then smoke; curl already ran)
 BENCHMARK_SCRIPT="${BENCHMARK_SCRIPT:-sweep}"
 case "$BENCHMARK_SCRIPT" in
     sweep)        BENCHMARK_SCRIPT_FILE="benchmark_xPyD.sh" ;;
     long_context) BENCHMARK_SCRIPT_FILE="benchmark_long_context.sh" ;;
     agentic)      BENCHMARK_SCRIPT_FILE="benchmark_agentic.sh" ;;
     niah)         BENCHMARK_SCRIPT_FILE="benchmark_niah.sh" ;;
-    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah)" >&2; exit 1 ;;
+    validate)     BENCHMARK_SCRIPT_FILE="benchmark_validate.sh" ;;
+    multiturn)    BENCHMARK_SCRIPT_FILE="benchmark_multiturn.sh" ;;
+    *) echo "Error: invalid BENCHMARK_SCRIPT='$BENCHMARK_SCRIPT' (valid: sweep, long_context, agentic, niah, validate, multiturn)" >&2; exit 1 ;;
 esac
 if [[ ! -f "$BENCHMARK_SCRIPT_FILE" ]]; then
     echo "Error: selected benchmark script '$BENCHMARK_SCRIPT_FILE' not found in $(pwd)." >&2
@@ -513,7 +523,11 @@ export RUN_FILE_FULL="$NIXL_COOKBOOK_PATH/${RUN_FILE}"
 # Use only the selected nodes for srun execution
 SELECTED_NODELIST_SRUN=$(echo "$SELECTED_NODES" | paste -sd,)
 
-srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
+rm -f "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL"
+# --kill-on-bad-exit: a node that exits on BOOT_FATAL takes the step down, and the
+# cleanup srun below then stops every container. A bare scancel would skip that
+# cleanup and leave containers holding GPUs after their docker client is killed.
+srun --kill-on-bad-exit=1 --nodelist="$SELECTED_NODELIST_SRUN" bash -c '
 echo "Rank $SLURM_PROCID on $(hostname)";
 docker ps -q | xargs --no-run-if-empty docker stop;
 docker rm -f $DOCKER_CONT_NAME 2>/dev/null || true;
@@ -521,7 +535,13 @@ fuser -k ${BARRIER_PORT:-5000}/tcp 2>/dev/null || true;
 fuser -k 2222/tcp 2>/dev/null || true;
 fuser -k 15000/tcp 2>/dev/null || true;
 sleep 2;
-docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+if [ "${FORCE_FRESH_IMAGE:-0}" = "1" ]; then
+  echo "[image] FORCE_FRESH_IMAGE=1: pulling latest $DOCKER_IMAGE_NAME on $(hostname), stale cache will NOT be used";
+  docker pull $DOCKER_IMAGE_NAME || { echo "[image] FATAL: docker pull failed; refusing to run on a possibly-stale cached image" >&2; exit 1; };
+  echo "[image] now using $(docker image inspect --format {{.Id}} $DOCKER_IMAGE_NAME 2>/dev/null)";
+else
+  docker pull $DOCKER_IMAGE_NAME 2>/dev/null || true;
+fi
 
 # --- Create host-local compilation cache dirs (ext4, survives container restarts) ---
 mkdir -p /tmp/vllm_cache/{aiter_jit,triton,vllm,comgr} 2>/dev/null || true;
@@ -558,29 +578,40 @@ else
     _JIT_CACHE_MOUNT="";
 fi
 
-# --- Build host RDMA library mounts ---
+# --- Host RDMA library mounts ---
+# Bind-mount the host rdma-core user libs (libibverbs/librdmacm + the mlx5/ionic/bnxt/efa/hns
+# providers + /etc/libibverbs.d) into the container so its NIC enumeration matches the host.
+# Set DISABLE_HOST_RDMA_MOUNTS=1 to skip this when host and container rdma-core ABI versions
+# differ: a self-consistent container stack (e.g. the matching rdma-core in a v0.26.0 image)
+# would otherwise be shadowed by the host libs and break enumeration.
+# (Keep this block free of apostrophes: it runs inside a single-quoted srun bash -c.)
 _RDMA_MOUNTS=""
 _LIBDIR=/usr/lib/x86_64-linux-gnu
 
-for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
-    [ -e "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
-done
-for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
-    [ -e "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
-done
-
-for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
-    for _vlib in $_LIBDIR/${_pattern}; do
-        # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
-        # matching one of these globs, and docker then bind-mounts a directory onto a
-        # file target -> "not a directory" -> container create exit 125.
+if [ "${DISABLE_HOST_RDMA_MOUNTS:-0}" != "1" ]; then
+    for _lib in libibverbs.so libibverbs.so.1 librdmacm.so librdmacm.so.1; do
+        [ -f "$_LIBDIR/$_lib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/$_lib:$_LIBDIR/$_lib:ro"
+    done
+    for _vlib in $_LIBDIR/libibverbs.so.1.* $_LIBDIR/librdmacm.so.1.*; do
+        # Require a regular file (see libmlx5 loop below): a dirty node can have a
+        # stray directory named like a versioned .so (e.g. libibverbs.so.1.14.39.0),
+        # which `-e` accepts and docker then bind-mounts dir-onto-file -> exit 125.
         [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
     done
-done
 
-[ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
-[ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
-echo "[host-rdma] mounts: $_RDMA_MOUNTS"
+    for _pattern in libmlx5.so* libionic*.so* libbnxt_re*.so* libefa.so* libhns.so*; do
+        for _vlib in $_LIBDIR/${_pattern}; do
+            # Require a regular file AFTER symlink resolution: `-e` also accepts a directory
+            # matching one of these globs, and docker then bind-mounts a directory onto a
+            # file target -> "not a directory" -> container create exit 125.
+            [ -f "$_vlib" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_vlib:$_vlib:ro"
+        done
+    done
+
+    [ -d "$_LIBDIR/libibverbs" ] && _RDMA_MOUNTS="$_RDMA_MOUNTS -v $_LIBDIR/libibverbs:$_LIBDIR/libibverbs:ro"
+    [ -d /etc/libibverbs.d ]     && _RDMA_MOUNTS="$_RDMA_MOUNTS -v /etc/libibverbs.d:/etc/libibverbs.d:ro"
+fi
+echo "[host-rdma] mounts: ${_RDMA_MOUNTS:-(none)}"
 # AGENTIC_CONFIG may use $HOME (e.g. from models.json); expand at submit time.
 [ -n "${AGENTIC_CONFIG:-}" ] && AGENTIC_CONFIG="${AGENTIC_CONFIG/#$HOME/$HOME}"
 
@@ -658,30 +689,83 @@ docker run --rm \
     -e BENCHMARK_COMBINATIONS="${BENCHMARK_COMBINATIONS}" \
     ${BENCHMARK_PORT:+-e BENCHMARK_PORT=$BENCHMARK_PORT} \
     ${PROXY_TYPE:+-e PROXY_TYPE=$PROXY_TYPE} \
+    ${HOLD_AFTER_READY:+-e HOLD_AFTER_READY=$HOLD_AFTER_READY} \
     ${ROUTER_PORT:+-e ROUTER_PORT=$ROUTER_PORT} \
     -e IPADDRS=$IPADDRS \
     ${CONNECTOR:+-e CONNECTOR=$CONNECTOR} \
     ${WIDE_EP:+-e WIDE_EP=$WIDE_EP} \
     ${EP_BACKEND:+-e EP_BACKEND=$EP_BACKEND} \
     ${BARRIER_PORT:+-e BARRIER_PORT=$BARRIER_PORT} \
+    ${KV_OFFLOAD:+-e KV_OFFLOAD=$KV_OFFLOAD} \
+    ${OFFLOAD_BACKEND:+-e OFFLOAD_BACKEND=$OFFLOAD_BACKEND} \
+    ${OFFLOAD_CPU_BYTES_PER_NODE:+-e OFFLOAD_CPU_BYTES_PER_NODE=$OFFLOAD_CPU_BYTES_PER_NODE} \
+    ${LMCACHE_MAX_LOCAL_CPU_SIZE:+-e LMCACHE_MAX_LOCAL_CPU_SIZE=$LMCACHE_MAX_LOCAL_CPU_SIZE} \
+    ${OFFLOAD_DISK_PATH:+-e OFFLOAD_DISK_PATH=$OFFLOAD_DISK_PATH} \
+    ${LMCACHE_MAX_LOCAL_DISK_SIZE:+-e LMCACHE_MAX_LOCAL_DISK_SIZE=$LMCACHE_MAX_LOCAL_DISK_SIZE} \
+    ${PYTHONHASHSEED:+-e PYTHONHASHSEED=$PYTHONHASHSEED} \
+    ${PROMETHEUS_MULTIPROC_DIR:+-e PROMETHEUS_MULTIPROC_DIR=$PROMETHEUS_MULTIPROC_DIR} \
+    ${MORIIO_READ_MODE:+-e MORIIO_READ_MODE=$MORIIO_READ_MODE} \
+    ${ROUTER_POLICY:+-e ROUTER_POLICY=$ROUTER_POLICY} \
+    ${ROUTER_PREFILL_POLICY:+-e ROUTER_PREFILL_POLICY=$ROUTER_PREFILL_POLICY} \
+    ${ROUTER_DECODE_POLICY:+-e ROUTER_DECODE_POLICY=$ROUTER_DECODE_POLICY} \
+    ${ROUTER_INTRA_NODE_DP:+-e ROUTER_INTRA_NODE_DP=$ROUTER_INTRA_NODE_DP} \
+    ${PREFILL_EXTRA_FLAGS:+-e PREFILL_EXTRA_FLAGS="$PREFILL_EXTRA_FLAGS"} \
+    ${DECODE_EXTRA_FLAGS:+-e DECODE_EXTRA_FLAGS="$DECODE_EXTRA_FLAGS"} \
     ${RUN_MORI:+-e RUN_MORI=$RUN_MORI} \
     ${RUN_DEEPEP:+-e RUN_DEEPEP=$RUN_DEEPEP} \
     ${VLLM_ALL2ALL_BACKEND:+-e VLLM_ALL2ALL_BACKEND=$VLLM_ALL2ALL_BACKEND} \
     ${PREFILL_MORI_BACKEND:+-e PREFILL_MORI_BACKEND=$PREFILL_MORI_BACKEND} \
     ${DECODE_MORI_BACKEND:+-e DECODE_MORI_BACKEND=$DECODE_MORI_BACKEND} \
     ${KV_BLOCK_SIZE:+-e KV_BLOCK_SIZE=$KV_BLOCK_SIZE} \
-    ${KV_CACHE_MEMORY_BYTES:+-e KV_CACHE_MEMORY_BYTES=$KV_CACHE_MEMORY_BYTES} \
+    -e KV_CACHE_MEMORY_BYTES="${KV_CACHE_MEMORY_BYTES:-}" \
+    ${MAX_MODEL_LEN:+-e MAX_MODEL_LEN=$MAX_MODEL_LEN} \
+    ${ENABLE_PREFIX_CACHING:+-e ENABLE_PREFIX_CACHING=$ENABLE_PREFIX_CACHING} \
     ${VLLM_ROCM_USE_AITER_MLA:+-e VLLM_ROCM_USE_AITER_MLA=$VLLM_ROCM_USE_AITER_MLA} \
     ${ROUTER_BINARY:+-e ROUTER_BINARY=$ROUTER_BINARY} \
+    ${ROUTER_BOOT_INSTALL:+-e ROUTER_BOOT_INSTALL=$ROUTER_BOOT_INSTALL} \
+    ${ROUTER_REPO:+-e ROUTER_REPO=$ROUTER_REPO} \
+    ${ROUTER_REF:+-e ROUTER_REF=$ROUTER_REF} \
+    ${RUST_TOOLCHAIN:+-e RUST_TOOLCHAIN=$RUST_TOOLCHAIN} \
+    ${ROUTER_SKIP_MORIIO_DP_SIZE:+-e ROUTER_SKIP_MORIIO_DP_SIZE=$ROUTER_SKIP_MORIIO_DP_SIZE} \
     ${KV_CACHE_DTYPE:+-e KV_CACHE_DTYPE=$KV_CACHE_DTYPE} \
     ${MORIIO_TOY_PROXY:+-e MORIIO_TOY_PROXY=$MORIIO_TOY_PROXY} \
     ${BENCHMARK_SCRIPT:+-e BENCHMARK_SCRIPT=$BENCHMARK_SCRIPT} \
     ${BENCHMARK_SCRIPT_FILE:+-e BENCHMARK_SCRIPT_FILE=$BENCHMARK_SCRIPT_FILE} \
+    ${MT_SWEEP:+-e MT_SWEEP="$MT_SWEEP"} \
+    ${MT_PREFIX_LEN:+-e MT_PREFIX_LEN=$MT_PREFIX_LEN} \
+    ${MT_PREFIX_LEN_LIST:+-e MT_PREFIX_LEN_LIST=$MT_PREFIX_LEN_LIST} \
+    ${MT_CON_LIST:+-e MT_CON_LIST=$MT_CON_LIST} \
+    ${MT_Q1_LEN:+-e MT_Q1_LEN=$MT_Q1_LEN} \
+    ${MT_Q2_LEN:+-e MT_Q2_LEN=$MT_Q2_LEN} \
+    ${MT_OSL1:+-e MT_OSL1=$MT_OSL1} \
+    ${MT_OSL2:+-e MT_OSL2=$MT_OSL2} \
+    ${MT_NUM_PROMPTS:+-e MT_NUM_PROMPTS=$MT_NUM_PROMPTS} \
+    ${MT_SEED:+-e MT_SEED=$MT_SEED} \
+    ${MT_DRYRUN:+-e MT_DRYRUN=$MT_DRYRUN} \
     ${NIAH_WORDS:+-e NIAH_WORDS=$NIAH_WORDS} \
     ${NIAH_SEEDS:+-e NIAH_SEEDS=$NIAH_SEEDS} \
+    ${NIAH_HALT_ON_FAIL:+-e NIAH_HALT_ON_FAIL=$NIAH_HALT_ON_FAIL} \
     ${NIAH_WARMUP:+-e NIAH_WARMUP=$NIAH_WARMUP} \
     ${NIAH_MAXTOK:+-e NIAH_MAXTOK=$NIAH_MAXTOK} \
     ${NIAH_TIMEOUT:+-e NIAH_TIMEOUT=$NIAH_TIMEOUT} \
+    ${NIAH_METHOD:+-e NIAH_METHOD=$NIAH_METHOD} \
+    ${NIAH_LIST_PRIME:+-e NIAH_LIST_PRIME=$NIAH_LIST_PRIME} \
+    ${NIAH_STOP:+-e NIAH_STOP=$NIAH_STOP} \
+    ${NIAH_LOGPROBS:+-e NIAH_LOGPROBS=$NIAH_LOGPROBS} \
+    ${NIAH_TERSE:+-e NIAH_TERSE=$NIAH_TERSE} \
+    ${NIAH_STOP_BLANK:+-e NIAH_STOP_BLANK=$NIAH_STOP_BLANK} \
+    ${NIAH_PAIR_SLEEP_S:+-e NIAH_PAIR_SLEEP_S=$NIAH_PAIR_SLEEP_S} \
+    ${NIAH_WARMUP_SCORE_SLEEP_S:+-e NIAH_WARMUP_SCORE_SLEEP_S=$NIAH_WARMUP_SCORE_SLEEP_S} \
+    ${NIAH_DS_WRAP:+-e NIAH_DS_WRAP=$NIAH_DS_WRAP} \
+    ${NIAH_MIN_TOKENS:+-e NIAH_MIN_TOKENS=$NIAH_MIN_TOKENS} \
+    ${DSV4_ENABLE_HMA:+-e DSV4_ENABLE_HMA=$DSV4_ENABLE_HMA} \
+    ${DSV4_TRANSFER_ATTN:+-e DSV4_TRANSFER_ATTN=$DSV4_TRANSFER_ATTN} \
+    ${DSV4_STORAGE_UPSTREAM_SPAN:+-e DSV4_STORAGE_UPSTREAM_SPAN=$DSV4_STORAGE_UPSTREAM_SPAN} \
+    ${DSV4_EAGER:+-e DSV4_EAGER=$DSV4_EAGER} \
+    ${CONTAINER_BARRIER_TIMEOUT_SECONDS:+-e CONTAINER_BARRIER_TIMEOUT_SECONDS=$CONTAINER_BARRIER_TIMEOUT_SECONDS} \
+    ${PY_BOOT_DEPS:+-e PY_BOOT_DEPS=$PY_BOOT_DEPS} \
+    -e SKIP_RUNTIME_PATCH=${SKIP_RUNTIME_PATCH:-1} \
+    ${STEP_SEC_PER_TOK:+-e STEP_SEC_PER_TOK=$STEP_SEC_PER_TOK} \
     ${SHAPE_WARMUP:+-e SHAPE_WARMUP=$SHAPE_WARMUP} \
     ${USE_INDUCTOR_GRAPH_PARTITION:+-e USE_INDUCTOR_GRAPH_PARTITION=$USE_INDUCTOR_GRAPH_PARTITION} \
     ${PREFILL_CUDAGRAPH_MODE:+-e PREFILL_CUDAGRAPH_MODE=$PREFILL_CUDAGRAPH_MODE} \
@@ -725,6 +809,7 @@ docker run --rm \
     -e DISTRIBUTED_TIMEOUT_SECONDS=${DISTRIBUTED_TIMEOUT_SECONDS:-7200} \
     -e VLLM_RPC_TIMEOUT=${VLLM_RPC_TIMEOUT:-300000} \
     -e VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS=${VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS:-3600} \
+    ${VLLM_LOGGING_LEVEL:+-e VLLM_LOGGING_LEVEL=$VLLM_LOGGING_LEVEL} \
     ${CONNECTOR_ENV_ARGS} \
     ${VLLM_CUDAGRAPH_MODE:+-e VLLM_CUDAGRAPH_MODE=$VLLM_CUDAGRAPH_MODE} \
     ${CUDAGRAPH_CAPTURE_SIZES:+-e CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES"} \
@@ -733,6 +818,12 @@ docker run --rm \
         mkdir -p /run_logs/${SLURM_JOB_ID}
         $RUN_FILE_FULL 2>&1 | tee /run_logs/${SLURM_JOB_ID}/pd_vllm_bench_NODE${SLURM_PROCID}.log
     "
+_rc=$?
+if [ -f "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL" ]; then
+    echo "BOOT_FATAL on $(hostname): $(cat "$LOG_PATH/$SLURM_JOB_ID/BOOT_FATAL"); ending the step";
+    exit 3;
+fi
+exit $_rc
 '
 srun --nodelist="$SELECTED_NODELIST_SRUN" bash -c 'docker stop $DOCKER_CONT_NAME 2>/dev/null || true; docker rm $DOCKER_CONT_NAME 2>/dev/null || true'
 

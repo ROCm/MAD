@@ -2,7 +2,7 @@
 Discover Primus example configs as madengine models (optional).
 
 Convention-based: globs examples/*/configs/**/*.yaml from the Primus submodule (scripts/Primus),
-so all launchers (megatron, megatron_bridge, torchtitan, maxtext, moe_package, etc.) are
+so all launchers (megatron, megatron_bridge, torchtitan, maxtext, worldmirror, etc.) are
 discovered. New launchers added under examples/<name>/configs/ are picked up automatically.
 All discovered models use the same dockerfile and run.sh; args pass --config_path <relpath>.
 For SLURM/K8s, supply distributed (launcher, nnodes, primus.config_path) via additional_context.
@@ -47,10 +47,9 @@ def precision_from_config_name(short_name: str) -> str:
 def list_models():
     # Default/smoke-test entry -> "primus_train/default". Lives here (not root models.json)
     # so this directory has one registration file, per madengine's models.json vs.
-    # get_models_json.py rule. HSA_NO_SCRATCH_RECLAIM and the other arch-specific perf env
-    # are not modeled here: madengine reads no per-model env field on the local Docker path
-    # (CustomModel has none, and get_env_arg only consumes context docker_env_vars), so
-    # run.sh applies them itself from MAD_SYSTEM_GPU_ARCHITECTURE at launch time.
+    # get_models_json.py rule. Arch-specific perf env is owned by Primus
+    # (runner/helpers/envs/ plus YAML env:). run.sh only maps MAD GPU context to
+    # PRIMUS_GPU_MODEL so primus-cli loads the matching GPU file.
     models = [
         CustomModel(
             name="default",
@@ -61,6 +60,8 @@ def list_models():
             owner="mad.support@amd.com",
             tags=["training", "primus", "megatron", "pretrain"],
             args="",
+            # run.sh writes this CSV and prints no performance: line.
+            multiple_results="primus_perf_output.csv",
         )
     ]
     if not os.path.isdir(PRIMUS_ROOT):

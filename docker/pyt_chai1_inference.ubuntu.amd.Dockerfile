@@ -27,6 +27,42 @@
 ARG BASE_DOCKER=rocm/pytorch:latest
 FROM $BASE_DOCKER
 USER root
+
+# Additional step for base images that ship setup_pytorch_env.
+# Those images ship their own setup command, which populates the workspace and
+# creates a version-qualified venv at /opt/venv-py<X.Y>. Guard on the command
+# itself rather than on the workspace directory, so this same Dockerfile still
+# builds against a plain upstream base, which does not ship that command.
+# The venv path carries the python version, but the ENV PATH below cannot run
+# $(...) to discover it -- so the unversioned /opt/venv symlink is created here.
+RUN if command -v setup_pytorch_env >/dev/null 2>&1; then \
+        echo "setup_pytorch_env found. Running env setup..."; \
+        setup_pytorch_env --qa || { \
+            echo "Setup failed."; \
+            exit 1; \
+        }; \
+        echo "Setup successful."; \
+        PY_VERSION="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"; \
+        if [ -e /opt/venv ]; then \
+            echo "/opt/venv already exists."; \
+        elif [ -d "/opt/venv-py${PY_VERSION}" ]; then \
+            ln -s "/opt/venv-py${PY_VERSION}" /opt/venv || { \
+                echo "Failed to link /opt/venv -> /opt/venv-py${PY_VERSION}."; \
+                exit 1; \
+            }; \
+            echo "Created /opt/venv -> /opt/venv-py${PY_VERSION}"; \
+        else \
+            echo "No supported virtual environment found at /opt/venv-py${PY_VERSION}."; \
+            exit 1; \
+        fi; \
+    else \
+        echo "setup_pytorch_env is not on PATH."; \
+        echo "Nothing to set up."; \
+    fi
+
+# Update PATH to include the virtual environment's bin directory
+ENV PATH="/opt/venv/bin:${PATH}"
+
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p $WORKSPACE_DIR
 WORKDIR $WORKSPACE_DIR
@@ -49,8 +85,10 @@ RUN pip3 install filelock requests #  predict_structure.py imports & runs
 # Install pip-tools to compile the requirements.in file into requirements.txt
 RUN pip install pip-tools
 
-# ROCm gpg key
-RUN wget -q -O - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
+# ROCm apt key. apt-key needs gpg-agent, which slim base images do not
+# ship; gpg --dearmor works without it and needs no sudo.
+RUN mkdir -p /etc/apt/trusted.gpg.d && \
+    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --batch --yes --dearmor -o /etc/apt/trusted.gpg.d/rocm.gpg
 RUN apt update && apt install -y \
     unzip \
     jq

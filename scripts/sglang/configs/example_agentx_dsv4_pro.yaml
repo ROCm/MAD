@@ -1,0 +1,72 @@
+# AgentX agentic trace-replay config for DeepSeek-V4-Pro (single-node sglang).
+#
+#   python3 run_sglang.py --config configs/example_agentx_dsv4_pro.yaml --benchmark agentic
+#
+# Replays real Claude Code sessions from the SemiAnalysis AgentX v1.0 corpus
+# instead of the random ISL/OSL sweep in configs/default.yaml. Engine tuning
+# (attention backend, FP4 indexer, env) is gap-filled from perf.yaml's
+# arch_overrides, exactly as for the perf sweep -- only the run shape and the
+# replay plan live here.
+#
+# Two things differ from the perf sweep and both are deliberate:
+#   * tp 8. AgentX v1.0 has a ~142k median input tokens per request
+#     (vs at most 8192 in the sweep), so the KV budget is the binding constraint.
+#   * The radix prefix cache stays ON (run_agentic does not pass
+#     --disable-radix-cache). AgentX exists to measure KV prefix reuse; a
+#     cache-free run reports a meaningless number. gpu_cache_hit_rate in the
+#     result JSON is the check that it actually took effect.
+
+- benchmark: agentic
+  hf_pipeline_tag: text-generation
+  model: deepseek-ai/DeepSeek-V4-Pro
+  tp: 8
+  dtype: auto
+  # Use the released harness that https://inferencex.semianalysis.com/agentx
+  # documents (agentx-harness==1.0.7). Set to 'aiperf' for the pinned
+  # InferenceX source build instead; both drive the same engine.
+  agentic_harness: agentx
+  result_dir: /myworkspace/agentx_results_dsv4_pro
+  extra_args:
+    # DSV4 Pro's native window (max_position_embeddings 1048576): the full
+    # AgentX corpus below has per-turn inputs up to ~990k tokens.
+    --context-length: 1048576
+  env:
+    # AIPerf keeps one pooled connection per agent session across turns, and
+    # Uvicorn's 5 s default keep-alive closes it during inter-turn idle gaps.
+    # This env reaches the server only: also export
+    # AIPERF_HTTP_TCP_USER_TIMEOUT=900000 into the container, because multi-MB
+    # 1M-token request bodies can stay unacknowledged past AIPerf's 30 s default.
+    SGLANG_TIMEOUT_KEEP_ALIVE: '900'
+
+  agentic:
+    serving:
+      model: auto            # resolve the served id from /v1/models
+      port: 8000
+      # Pinned to the served window above so context gating is exact rather
+      # than inferred. The full corpus ISL tail rounds up to 1048576, so this is
+      # OK, not WARN.
+      max_model_len: 1048576
+      # Monolith: the server IS the metrics endpoint (--enable-metrics serves
+      # /metrics on the serving port). Without this the harness never scrapes it
+      # and gpu_cache_hit_rate -- the check that the radix cache actually came
+      # on -- is absent from the result. Also gives the context-window probe in
+      # benchmark_agentic.sh a real endpoint to confirm 1048576 against.
+      server_metrics: 127.0.0.1:8000
+    run:
+      # AgentX concurrency counts concurrent agent CLIENTS, each holding a long
+      # multi-turn session -- not a request batch. Our own perf sweep on this
+      # node showed median TTFT going 0.93s -> 20.9s between concurrency 64 and
+      # 128 at only 8192-token inputs, so the useful range here is small.
+      concurrency: [2, 4, 8]
+      # Scenario floor for a valid submission. The published methodology
+      # profiles for one hour; 900 is the bring-up setting. Raise to 3600 for a
+      # submission-grade sweep and budget ~4h+ for three points.
+      duration: 900
+    workloads:
+      - name: agentx_1m
+        source: hf
+        # The full AgentX v1.0 corpus (393 sessions). Named explicitly rather
+        # than relying on the MODEL_PREFIX default. For the 256k-capped variant,
+        # use semianalysis_cc_traces_weka_062126_256k and set --context-length
+        # and max_model_len to 262144.
+        loader: semianalysis_cc_traces_weka_062126
