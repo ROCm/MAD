@@ -60,7 +60,10 @@ do
         esac
 done
 
-# Add model-caching to resolve the hf multi processing error
+# Add model-caching to resolve the hf multi processing error.
+# huggingface_hub's XET token request 404s for gpt2 and aborts the download
+# before training starts. HF_TOKEN is used when madengine forwards it.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 hf download gpt2
 
 torchrun --nproc_per_node="$MAD_RUNTIME_NGPUS" $HF_PATH/examples/pytorch/language-modeling/run_clm.py --output_dir output \
