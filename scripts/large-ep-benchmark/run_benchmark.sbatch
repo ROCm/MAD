@@ -78,7 +78,6 @@ docker stop ep-bench;
 sleep 10;
 docker rm ep-bench;
 sleep 10;
-docker stop $(docker ps -aq) && docker rm $(docker ps -aq);
 sleep 30;
 docker pull $DOCKER_IMAGE;    
 docker run --rm \
