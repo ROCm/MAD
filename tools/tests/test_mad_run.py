@@ -70,12 +70,34 @@ class MadRunStartTest(unittest.TestCase):
             (["madengine", "nan"], "only 'madengine nan exec|group|replay|package'"),
             (["madengine", "report", "x"], "can be started"),
             (["bash", "-c", "true"], "only madengine commands"),
+            (["bash", "nan_hunts/h/verify-G1/repro-G1/run.sh", "extra"], "only madengine commands"),
         ]
         for cmd, needle in cases:
             r = self.helper("start", "x1", "--", *cmd)
             self.assertEqual(r.returncode, 2, cmd)
             self.assertIn(needle, r.stderr, cmd)
         self.assertFalse((self.cwd / ".mad-runs").exists() and any((self.cwd / ".mad-runs").iterdir()))
+
+    def test_the_extracted_reproducer_run_sh_starts(self) -> None:
+        script = self.cwd / "nan_hunts" / "h" / "verify-G1" / "repro-G1" / "run.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/bash\necho shipped-reproducer\n")
+        r = self.helper("start", "v1", "--", "bash", str(script.relative_to(self.cwd)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = self.finished("v1")
+        self.assertIn("MAD_RUN_STATUS=succeeded", out)
+        self.assertIn("shipped-reproducer", out)
+
+    def test_a_shipped_script_runs_from_its_dir_in_an_empty_environment(self) -> None:
+        script = self.cwd / "nan_hunts" / "h" / "verify-fix" / "fix" / "validate.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text('#!/bin/bash\necho "pwd=$PWD leak=${LEAK:-none} home=${HOME:+set}"\n')
+        self.env["LEAK"] = "investigation"
+        r = self.helper("start", "v2", "--", "bash", str(script.relative_to(self.cwd)))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = self.finished("v2")
+        self.assertIn("MAD_RUN_STATUS=succeeded", out)
+        self.assertIn(f"pwd={script.parent.resolve()} leak=none home=set", out)
 
 
 if __name__ == "__main__":
