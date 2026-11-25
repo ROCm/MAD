@@ -268,6 +268,23 @@ refuses a directory that has both.
 
 2. **Save documentation**
 
+### Step 6b: Register a New Directory on the Recipes Site
+
+Workload-specific layout only: `{script_dir}` is a new registry directory,
+which the MAD Recipes site (`dashboard/`) needs to be told about. Add an entry
+under `frameworks:` in `dashboard/status.yaml`, keyed by the directory name
+without `scripts/`, after the entries of the same workload:
+
+```yaml
+  {model_name}: {name: PyTorch inference, workload: inference, readme: {script_dir}/README.md}
+```
+
+Reuse an existing `name` (e.g. `PyTorch inference`, `PyTorch training`) when the
+model belongs with that group; `workload` is `inference`, `training` or
+`microbenchmark`. `status.yaml` is public, so it holds no unreleased plans.
+Without the entry the site still lists the model, under its bare directory
+name, and the build prints a warning.
+
 ### Step 7: Validate Configuration
 
 1. **Run validation tools:**
@@ -278,6 +295,9 @@ refuses a directory that has both.
    - `madengine discover --tags {model_name}` must list exactly the new model,
      named `{dir}/{model_name}`. This is what `madengine run` will see. If
      madengine is not installed, say so and skip this check.
+   - If `jinja2` is installed, `python3 tools/dashboard/build.py --out /tmp/mad_site --offline`
+     must finish without a `not in status.yaml frameworks` warning for
+     `{script_dir}`. Skip this check when `jinja2` is missing.
 
 2. **Check for errors:**
    - Missing required fields
@@ -322,13 +342,15 @@ Generated files:
 - docker/{dockerfile_name}.ubuntu.amd.Dockerfile   (workload-specific layout only)
 - {script_dir}/run.sh                              (workload-specific layout only)
 - {script_dir}/README.md                           (workload-specific layout only)
+- dashboard/status.yaml (frameworks entry)          (workload-specific layout only)
 
 Validation: All checks passed ✓
 
 Next steps:
 1. Review the generated files
 2. Test: madengine run --tags {model_name}
-3. Commit changes to git
+3. Commit changes to git; if a "Model onboarding" issue tracks this
+   model, add `Closes #<issue>` to the PR description
 ```
 
 ## Agent Notes

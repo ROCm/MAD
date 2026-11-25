@@ -1,0 +1,35 @@
+# Display order of model pages inside each framework on the Models page, highest priority first.
+#
+# PLACEHOLDER: no ranking yet, so every framework stays in alphabetical order. Fill in the
+# frameworks you want ordered; leave the rest out.
+#
+# How it works
+#   - The key is a framework slug: the part of a recipe URL after /models/ and before the model
+#     (vllm, sglang, primus-megatron, ...).
+#   - Each entry is a page slug: the rest of the URL, e.g. /models/vllm/deepseek-r1-0528 is
+#     `deepseek-r1-0528`. A page holds all of a model's variants (FP8, FP4, MI300X, MI355X, ...).
+#   - Position in the list is the rank. To raise a model's priority, move its line up.
+#   - Shell globs work (`deepseek-v4-*`). The first entry that matches a page wins.
+#   - Pages not listed follow the listed ones, alphabetically, so a new model is never hidden.
+#   - The build warns about entries that match no page (renamed or removed models), and
+#     `build.py --strict` fails on that. An unknown framework slug is an error.
+#
+# To see the slugs and the current order:
+#   python3 tools/dashboard/build.py --list-pages
+#
+# THIS FILE IS PUBLIC (the order is visible on the published site).
+#
+# Example (delete the leading '#' and edit):
+#
+# vllm:
+#   - deepseek-r1-0528
+#   - deepseek-v4-*
+#   - kimi-k3
+#   - gpt-oss-120b
+#   - llama-3.3-70b-instruct
+# sglang:
+#   - deepseek-r1
+#   - deepseek-v4-*
+# primus-megatron:
+#   - llama2-70b-pretrain
+#   - deepseek-v3-pretrain
