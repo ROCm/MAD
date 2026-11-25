@@ -1,20 +1,23 @@
 ---
-name: mad-debug-nan
-description: Debug a NaN, inf, or loss/gradient blow-up in a MAD PyTorch model — capture the op that first produced it with madengine's nan_doctor tool, replay it without the model, and package a standalone reproducer; optionally root-cause it and propose a fix. Use when a MAD model NaNs and the user wants to find out why.
+name: mad-debug-numeric
+description: Debug a numeric failure in a MAD PyTorch model — a NaN, an Inf, a loss/gradient spike or a wrong finite value — capture the op that first produced it with madengine's nan_doctor tool, replay it without the model, and package a standalone reproducer; then root-cause it and propose a fix. Use when a MAD model NaNs, explodes or outputs wrong values and the user wants to find out why.
 argument-hint: "<tag> [--intake FILE] [-c '<context json>']"
 disable-model-invocation: true
 context: fork
-agent: mad-nan-doctor
+agent: mad-numeric-doctor
 allowed-tools: Bash(madengine discover *) Bash(madengine nan *) Bash(rocm-smi *) Bash(amd-smi *) Bash(docker images *) Bash(bash .claude/skills/mad-common/preflight.sh) Bash(bash .claude/skills/mad-common/mad-run.sh *) Read Edit Write Grep Glob
 ---
 
-# Debug a NaN
+# Debug a numeric failure
 
-A ladder, each rung narrowing the search and able to end it: learn how the model runs,
-measure the NaN, capture a capsule from the live model, replay it without the model,
-package what reproduces (step 6: the reproducer is finished -- the NaN is **not** fixed
-yet), and -- optional, budgeted, most expensive -- root-cause the NaN from that reproducer
-(step 7) and fix it (step 8). Every investigation closes with step 9.
+A numeric failure is a NaN, an Inf, a magnitude spike or a wrong finite value; the steps
+below say "NaN" for all of them unless a step says otherwise (a magnitude or wrong-value
+signal: `step4-explode.md`). A ladder, each rung narrowing the search and able to end it:
+learn how the model runs, check that it runs and measure the failure, capture a capsule
+from the live model, replay it without the model, package what reproduces (step 6: the
+reproducer is finished -- the failure is **not** fixed yet), and -- on by default,
+budgeted, most expensive -- root-cause the failure from that reproducer (step 7) and fix
+it (step 8). Every investigation closes with step 9.
 
 Debug `$ARGUMENTS`. The model tag is the first whitespace-delimited token. `--intake FILE`
 answers step 1 from a file (`step1-intake.md`; the `mad-nan-hunt` workflow writes one);
@@ -27,34 +30,50 @@ root and stop if it fails.
 bash .claude/skills/mad-common/preflight.sh
 ```
 
-**First output of every investigation, right after step 0:** print the block below to the
-user verbatim -- the notice, then the overview table. Once per investigation (not again
-after a compaction or on resume). Run step 0 silently, then **end that turn with the block
-plus step 1's question 1 (the model tag, if `$ARGUMENTS` has none), with no tool call after
-it**. Given an intake file: print the block, then go straight on with `step1-intake.md`.
+**Few words, one question.** The user reads as little and answers as little as possible:
+by default the only question is step 1's question 1 (the model); every other choice takes
+its default (`step1-ask.md`). **First output of every investigation, right after step 0:**
+one line saying what the skill will do, then question 1 (if `$ARGUMENTS` names no model)
+-- no scope notice, no overview table:
 
 ```markdown
-> **⚠️ Scope of this version:** mad-debug-nan focuses on generating a **mini-reproducer**
-> -- a standalone package that triggers the NaN without the model (steps 0-6).
-> **Root-causing (step 7) and bug-fixing (step 8) are experimental** and therefore
-> optional: they run only if you ask for them, within a time budget you set, and a fix is
-> proposed, never applied. **PyTorch only:** a JAX, TensorFlow or other non-PyTorch model
+I'll first generate a standalone mini-reproducer for the numeric failure, then
+root-cause and fix it, using defaults throughout (say *show the steps* or *ask me the
+options* at any time). How do I run the model?
+```
+
+Once per investigation (not again after a compaction or on resume). Run step 0 silently,
+then **end that turn with those lines, with no tool call after them**. Given a model in
+`$ARGUMENTS`: the first line only, then go on. Given an intake file: go straight on with
+`step1-intake.md`.
+
+**The block below is shown only on request** -- the user asks for the steps, the scope,
+what the skill does or what it supports ("show the steps", "what will you do?"): print it
+verbatim, the notice first, then the overview table; never a summary in its place. A gate
+warning (step 0) is not this block: it prints whenever its gate fires.
+
+```markdown
+> **⚠️ Scope of this version:** mad-debug-numeric focuses on generating a **mini-reproducer**
+> -- a standalone package that triggers the NaN, Inf or wrong value without the model
+> (steps 1-6). **Root-causing (step 7) and bug-fixing (step 8) are experimental**: they run
+> by default within a default time budget (1-4 h each) -- say so if you want to stop at the
+> reproducer or set your own budget -- and a fix is proposed, never applied. **PyTorch only:** a JAX, TensorFlow or other non-PyTorch model
 > is detected and the skill stops there. **AMD Instinct MI300X or newer only:** the skill
 > is tested on MI300X-class (gfx942) and MI350X/MI355X (gfx950) GPUs; on any other GPU you
 > get a warning, because the skill is likely not to work there.
 
 | step | what it does | optional? |
 |---|---|---|
-| 1 | **Ask** how the model runs (run command, NaN signal) and your preferences; create the artifact dir and ledger | required |
-| 2 | **Run** the model once to see that it NaNs in this environment; a few runs also measure the NaN rate. You CAN **skip** it and go to the capture (4) | optional (default: skip) |
-| 3 | If the NaN rate is too low, **increase** it (e.g. by oversubscribing the GPUs) | interactive only; skipped if step 2 is |
+| 1 | **Ask** which model to run; derive the NaN signal from it; create the artifact dir and ledger | required |
+| 2 | **Run** the model once to see that it NaNs in this environment; a few runs also measure the NaN rate. You CAN **skip** it and go to the capture (4). No NaN line at all (the outputs may be silently wrong): **compare** the model's outputs across configurations -- graphs, compilation, fused ops, attention backend -- to find the one that is wrong | optional (default: skip); the comparison only when there is no signal |
+| 3 | If the NaN rate is too low, **increase** it (e.g. by oversubscribing the GPUs) | optional (default: off), interactive only; skipped if step 2 is |
 | 4 | **Capture** the chain of ops that produced the NaN as a capsule from the model run | required |
 | 5 | **Replay** the capsules without the model to confirm they reproduce | required |
-| 5N | **Fallback**: write a **standalone repro** if no capsule exists or none replays | automatic, only if needed |
+| 5N | **Fallback**: write a **standalone repro** if no capsule exists, none replays, or the capture cannot reach the model | automatic, only if needed |
 | 6 | **Package** the reproducer (directory + tarball + README). Ends reproducer generation; the NaN is not fixed yet | required |
-| 7 | **Root-cause** the NaN from the reproducer (experimental) | optional, budgeted |
-| 8 | **Fix** it and validate the fix on the reproducer, or find a model-level **workaround** (experimental) | optional, budgeted; needs a root cause from 7 |
-| 9 | **Restore** sources, hand over the artifacts, **report** with a timing table | required |
+| 7 | **Root-cause** the NaN from the reproducer (experimental) | required (default), budgeted; you can turn it off |
+| 8 | **Fix** it and validate the fix on the reproducer, or find a model-level **workaround** (experimental) | required (default), budgeted; needs a root cause from 7 |
+| 9 | **Restore** sources, hand over the artifacts, **report** with a timing table, and the result card (`result.json`) | required |
 ```
 
 **GPUs.** AMD Instinct GFX9: MI300X (gfx942) and MI350X/MI355X (gfx950). The tools read the
@@ -67,12 +86,12 @@ re-derived from the device in use, never carried over from another.
 | step | read | conditional: only when |
 |---|---|---|
 | 1 | `step1-ask.md` and `env-madengine.md`; **given an intake file** `step1-intake.md` instead of `step1-ask.md` | `step1-contention.md`: the workload runs several processes per GPU of its own |
-| 2 | `step2-rate.md` | |
+| 2 | `step2-rate.md` | `step2-diff.md`: no `<NAN_SIGNAL>` at all -- the model prints nothing when it is wrong and the user suspects silently wrong outputs, or asks to compare configurations (differential mode makes the signal) |
 | first model run (2, 3, 4) | `waves.md` | |
 | 3 | `step3-raise.md` | |
-| 4 | `step4-run.md` | `step4-capture.md`: the nan_doctor tool cannot see the loop (no optimizer step, a framework that owns the loop) or its knobs change. `step4-capture-memory.md`: an OOM, snapshot-skip lines to judge. `step4-capture-speed.md`: setup dominates time to capsule. `step4-distributed.md`: ONE job over several ranks (torchrun, FSDP/TP/EP/PP, any node count). `step4-explode.md`: the signal is a magnitude (grad norm / loss spike), or finite spikes precede a rare NaN |
+| 4 | `step4-run.md` | `step4-capture.md`: the nan_doctor tool cannot see the loop (no optimizer step, a framework that owns the loop) or its knobs change. `step4-capture-memory.md`: an OOM, snapshot-skip lines to judge. `step4-capture-speed.md`: setup dominates time to capsule. `step4-distributed.md`: ONE job over several ranks (torchrun, FSDP/TP/EP/PP, any node count). `step4-explode.md`: the signal is a magnitude (grad norm / loss spike) or a wrong finite value (no NaN at all), or finite spikes precede a rare NaN |
 | 5 | `step5-read.md` | `step5-run.md`: running 5a/5b. `step5-replay-env.md`: an `env:` banner not `matches capture`. `step5-replay-guardrail.md`: walk non-finite with no `DIVERGED`, or reproduces at concurrency 1. `contention-replay.md`: a single-process replay outside 5b. `step5-pressure.md`: 5b `NOT_SET_UP`, or `NOT_REPRODUCED` while the model reproduces, or a step-1 `TRIGGER` hint. `step4-distributed.md` (*Reading*, *Replay ladder*): world size > 1 |
-| 5N | `step5n-native.md` | entered only from the exits it lists: no capsule (4), or G1 (the largest group) did not reproduce (5). `step5n-compiled.md`: N1 finds the NaN may be born inside torch.compile'd code |
+| 5N | `step5n-native.md` | entered only from the exits it lists: no capsule (4), G1 (the largest group) did not reproduce (5), or a setup the capture cannot reach (1/4: `CAPTURE_UNREACHABLE`). `step5n-compiled.md`: N1 finds the NaN may be born inside torch.compile'd code |
 | 6 | `step6-finish.md` | `step6-build.md`: building a package |
 | 7 | `step7-rootcause.md` | `step7-recipe-sweep.md`: the reproducer's NaN is non-deterministic (recipe track (b)) |
 | 8 | `step8-fix.md` | entered only with a valid `<ROOT_CAUSE>` from step 7 |
@@ -126,23 +145,29 @@ re-derived from the device in use, never carried over from another.
    $LG start step4;  $LG note step4 "<text>";  $LG job step4 <run-id> "<what>"   # quote: ( ) break the shell
    $LG wait step4 start <question>;  $LG wait step4 end
    $LG end step4     # compute / waiting-user / other
+   $LG skip step2 "<why>"   # a step not run: no start/end; the table lists it as skipped
    $LG table         # step 9
    ```
 
    Record **every** long run with `job`; relay the `TELL USER:` line `end` prints. Tag
-   steps 5b-8 per group (`step6[G1]`); a re-entered step gets a new `start`.
+   steps 5b-8 per group (`step6[G1]`, `[native]` for 5N's package); a bare `start step6`
+   is refused. A re-entered step gets a new `start`.
 8. **No skipping ahead, per group**: a group may go to 6-8 while others are in 5b; step 9
-   waits for every replayed group (`<GROUPS_TO_REPLAY>`) -- and, if G1 did not reproduce,
-   for step 5N's verdict. Step 7 only from a finished step-6 reproducer, after lower rungs
-   ruled out an upstream NaN and fp32 overflow; step 8 only with a valid `<ROOT_CAUSE>`.
+   waits for every replayed group (`<GROUPS_TO_REPLAY>`) -- and, if G1 did not reproduce or
+   the capture could not reach the model, for step 5N's verdict. Step 7 only from a
+   finished step-6 reproducer -- whatever its verdict: a kernel / library fault and a
+   model / numerics bug (undefined arithmetic, an overflow, a bad config or input) both go
+   on to 7-8; step 8 only with a valid `<ROOT_CAUSE>`.
 9. **Spend tokens on decisions, not output.**
    * Read each step's file once; after a compaction re-read `<LEDGER>` first, then only the
      current step's file.
    * **One call per question, not per grep**: batch independent reads into one command
      (every call re-reads the whole context). A capsule:
      `<GPU_EXEC> python3 -m nan_doctor_rt.capsule_info <pt>` (op, dirty operands, each
-     operand's dtype/shape/stride and small integer values, chain, origin/settle, model
-     frames, CPU+fp64 re-run of a pointwise op -- the 0/0 false-positive check) instead of
+     operand's dtype/shape/stride and small integer values, the `rows` line -- zero /
+     non-finite rows and the ids that fed them --, chain, origin/settle, model frames,
+     CPU+fp64 re-run of a pointwise op -- the 0/0 false-positive check;
+     `nan_doctor_rt.capsule_operands` to load its operands in an experiment) instead of
      ad-hoc `torch.load` scripts.
    * **Never read a model source whole**: map it with `madengine nan capture-points`
      (step 4) and read the windows it names.
@@ -160,17 +185,28 @@ re-derived from the device in use, never carried over from another.
      rather than echoing files or JSON.
 10. **Report, then keep climbing.** When a rung yields a result, report it in a line or two
     and continue *in the same turn* to the next rung that needs no user decision (a
-    reproducing 5b -> step 6 -> step 9 once every replayed group has a verdict, unless
-    steps 7-8 were wanted; no capsule, or G1 clean -> step 5N -> 6). Never end a turn on
-    "next I'll ...". Stop only for a user decision (beyond the step-1 budget, the step-7/8
-    time budgets, the sweep plan's cost, an unresolvable CHECK) or to wait on a run.
-    Inside a step-7/8 loop, keep iterating until it ends.
+    reproducing 5b -> step 6 -> step 7 -> step 8 -> step 9, unless the user turned steps
+    7-8 off -- then step 6 -> step 9 once every replayed group has a verdict; no capsule,
+    G1 clean, or a capture that cannot reach the model -> step 5N -> 6). Never end a turn
+    on "next I'll ...". Stop only for a user decision (compute beyond the step-1 estimate
+    or its threshold, an extension of a spent step-7/8 budget, an unresolvable CHECK, a
+    model that does not run by itself -- `step2-rate.md`) or to wait on a run. Inside a
+    step-7/8 loop, keep iterating until it ends. **One status line per milestone, also
+    between rungs** (the capture run started / caught a capsule, a replay landed, a setup
+    problem and its fix): never more than ~5 tool calls, or a few minutes of setup, without
+    a line the user can see. One line, not a report.
 11. **Talk to the user in their terms, not the skill's.** Say "the capture run" for the
     madengine run with the `nan_doctor` tool, and, the first time, what it does: it runs
     the model until a NaN outlives its step, and saves the op that made it.
 12. **Fixes are proposals.** Never edit a tracked MAD file, the model's registry entry, or
     the image to fix a NaN; step 8 produces a proposal and its validation on the
     reproducer.
+13. **Two announcements are never skipped, however few words the rest uses**: a model
+    that does not run by itself (step 2, `step2-rate.md` *The model does not run*), and
+    the hand-over from the finished reproducer to root-causing and fixing (step 6,
+    `step6-finish.md` *Then*). Each is a short, clearly marked block of its own, not a
+    clause inside a status line. The hand-over is printed before step 7 starts and
+    repeated at the top of the step-9 report.
 
 ## Placeholders
 
@@ -178,7 +214,8 @@ re-derived from the device in use, never carried over from another.
 |---|---|---|
 | `<MAD_ROOT>` | the MAD repository root, where every command runs | 0 |
 | `<ARTIFACT_DIR>`, `<LEDGER>` | rule 3, rule 4 | 1 |
-| `<RUN_SCRIPT>`, `<NAN_SIGNAL>`, `<GPU_EXEC>`, `<IMAGE>` | the model's `madengine run` command; how its output shows a NaN (or a threshold regex on a logged magnitude, `step4-explode.md`); rule 1; the model's image | 1 |
+| `<RUN_SCRIPT>`, `<NAN_SIGNAL>`, `<GPU_EXEC>`, `<IMAGE>` | the model's `madengine run` command; how its output shows a NaN (or a threshold regex on a logged magnitude, or the model's own wrong-value line, `step4-explode.md`; no signal at all: `ND_DIFF_HIT`, `step2-diff.md`); rule 1; the model's image | 1 |
+| `<PRIORS>` | `use` (default: earlier investigations of the model order the work -- a prior root cause is re-tested first) or `none` (fresh eyes; `NUMERIC_DOCTOR_NO_PRIORS=1`) | 1 |
 | `<WORLD_SIZE>` | ranks of ONE job; > 1 -> `step4-distributed.md` | 1 |
 | `<ORIGIN_RANKS>` | the job manifest's origin rank(s): whose capsule 5b replays | 5a (world size > 1) |
 | `<NAN_RATE>` | e.g. "3 of 8 runs" **with its environment**; or *unmeasured* (step 2 skipped) | 2 |
@@ -190,8 +227,9 @@ re-derived from the device in use, never carried over from another.
 | `<GROUPS_TO_REPLAY>` | `largest` (default: only the replayable group with the most capsules, G1) or `all` | 1 |
 | `<CAPSULE_FILE>` | a group's representative `.pt` | 5b |
 | `<CAPSULE_ITER_COUNT>`, `<CAPSULE_CONCURRENCY>` | chain runs per copy (1000000); copies per GPU (capture's processes per GPU + 1; one less per OOM, down to 1) | 5b |
-| `<RC_BUDGET>`, `<FIX_BUDGET>` | wall-clock budgets the user gave for the step-7 / step-8 loops | 7, 8 |
+| `<RC_BUDGET>`, `<FIX_BUDGET>` | wall-clock budgets for the step-7 / step-8 loops (defaults, or the user's) | 7, 8 |
 | `<NAN_KIND>` | `deterministic` or `non-deterministic`, from the step-6 reproducer | 7 |
+| `<NAN_ORIGIN>` | `system` (a kernel / library fault) or `model` (overflow, undefined arithmetic: the model's values) -- both go through 7-8 | 7 |
 | `<REPORT_JSON>`, `<ASM_DIR>` | `<ARTIFACT_DIR>/mutations.json`; `<ARTIFACT_DIR>/asm/` | 7 (recipe) |
 | `<MUTATE_ONLY>` | `--mutate-only` flags of the current sweep tier | 7 (recipe) |
 | `<ROOT_CAUSE>` | the step-7 outcome: a validated root cause, or `NO_ROOT_CAUSE` | 7 |
@@ -218,9 +256,9 @@ Static (no torch, no GPU); last line `FRAMEWORK=<f> VERDICT=<v>`:
   or run. End the turn with this warning, filled in, and nothing else of the skill:
 
   ```markdown
-  > **⚠️ mad-debug-nan skipped: the model is not a PyTorch program** -- it runs
+  > **⚠️ mad-debug-numeric skipped: the model is not a PyTorch program** -- it runs
   > <framework> (<the evidence line, e.g. `entry: jax (jax, flax.linen, optax)`>).
-  > mad-debug-nan works only on PyTorch models: it captures the failing op through
+  > mad-debug-numeric works only on PyTorch models: it captures the failing op through
   > PyTorch's dispatcher (`__torch_dispatch__`), saves it as PyTorch tensors and replays
   > it through PyTorch, so on <framework> it would capture nothing and could build no
   > reproducer. Nothing was created or run.
@@ -247,7 +285,7 @@ Last line `GPU=<name> ARCH=<arch> VERDICT=<v>`:
   top of the first output**, then continue:
 
   ```markdown
-  > **⚠️ Untested GPU: <name> (<arch>).** mad-debug-nan is tested only on AMD Instinct
+  > **⚠️ Untested GPU: <name> (<arch>).** mad-debug-numeric is tested only on AMD Instinct
   > MI300X or newer (gfx942, gfx950). All other GPU types are untested, and the skill is
   > likely not to work on them: the capture, replay and kernel tools assume ROCm and the
   > MI300X-class instruction set. Results here may be wrong or missing.
@@ -259,52 +297,57 @@ Last line `GPU=<name> ARCH=<arch> VERDICT=<v>`:
   `<GPU_EXEC>` check, which runs `python3 -m nan_doctor gpu-check --torch` on the model's
   GPUs; an `UNTESTED` there prints the same warning before step 2 or 4 starts.
 
-1. **Ask everything up front, one question at a time with a default** -- or read it from
-   the intake file. Model and run command (then the PyTorch gate; derive the rest from it;
-   then create `<ARTIFACT_DIR>` and `<LEDGER>`), step 2, run geometry, step-7/8 wish,
-   groups to replay (default: largest only), budget.
-2. **Measure** (always optional, ask): >= 8 runs; skipped = *unmeasured* (never a prior
-   run's rate) -> skip 3.
-3. **Raise** (optional, interactive only): skip if high (ledger with environment); else
-   oversubscribe. The automated `mad-nan-hunt` workflow never runs it (it fights the GPU
+1. **Ask** only for the model (then the PyTorch gate; derive the rest from it; then create
+   `<ARTIFACT_DIR>` and `<LEDGER>`) -- or read it from the intake file. Everything else
+   (step 2, run geometry, steps 7-8, groups to replay, budget, priors) takes its default
+   unless the user asks to choose.
+2. **Measure** (optional, default skip): >= 8 runs; skipped = *unmeasured* (never a prior
+   run's rate) -> skip 3. The model must run by itself, else stop and tell the user. No
+   signal at all (silently wrong outputs): differential mode first (`step2-diff.md`) -- its
+   check mode is then `<NAN_SIGNAL>`.
+3. **Raise** (default off, only on request; interactive only): skip if high (ledger with
+   environment); else oversubscribe. The automated `mad-nan-hunt` workflow never runs it (it fights the GPU
    lock).
 4. **Capture**: the model's run with the `nan_doctor` tool, armed after init; stop at the
    first capsule. World size > 1: every rank stops together and rank 0 writes
-   `manifest.json` (origin rank, arrivals). Wrong finite values: `NAN_CAPTURE_BOUNDS` /
-   `NAN_CAPTURE_VERIFY_EVERY`, with a known-good control (`step4-explode.md`).
+   `manifest.json` (origin rank, arrivals). Wrong finite values: twin checks
+   (`NAN_CAPTURE_TWIN_EVERY`), `NAN_CAPTURE_BOUNDS` / `NAN_CAPTURE_VERIFY_EVERY`, with a
+   known-good control (`step4-explode.md`).
 5. **Read** the grouping (`madengine nan group`) and each 5b verdict
    (`madengine nan replay`); with `<GROUPS_TO_REPLAY>=all`, replay the other groups one
    after another (default `largest`: G1 only). World size > 1: `madengine nan group --job`;
    replay the origin rank's capsule (R1), climbing R2/R3/5N only as `step4-distributed.md`
    says. Clean while the model is not: same kernel? then the model, then a synthetic
    training-step stand-in, as co-tenant (`step5-pressure.md`).
-5N. **Native fallback** (automatic): no capsule from 4, or G1 (the largest group) did not
-   reproduce in 5 -> `madengine nan handoff` turns the capsule path's failures into
+5N. **Native fallback** (automatic): no capsule from 4, G1 (the largest group) did not
+   reproduce in 5, or the capture cannot reach the model (`CAPTURE_UNREACHABLE`: skips
+   4-5) -> `madengine nan handoff` turns the capsule path's failures into
    constraints, then write a standalone script at the model's shapes and load, reduce it
    while it NaNs, verdict with an fp64 check; a hit goes to 6.
 6. **Finish the reproducer** (`madengine nan package`) -- each reproducing group's
    directory and tarball (confirm the README's CHECK line), or the native one
    (`repro-native/`). This ends reproducer generation only; the NaN is not root-caused or
-   fixed yet.
-7. **Root-causing** (experimental, optional; the user gives `<RC_BUDGET>` on entry): a loop
-   over the step-6 reproducer, each iteration resuming from the last one's notes; track (a)
-   native LLM debugging always, track (b) a special recipe in parallel when one exists for
-   `<NAN_KIND>` (today: non-deterministic -> the mutation sweep). Ends with `<ROOT_CAUSE>`
-   or `NO_ROOT_CAUSE` when the budget runs out.
-8. **Fixing** (experimental, optional; only with a valid `<ROOT_CAUSE>`; the user gives
-   `<FIX_BUDGET>` on entry): a loop -- resume from the last iteration, propose a fix
-   (native LLM), validate it on the reproducer; a model-level workaround (a component
-   turned off) is a candidate too. Ends with `<FIX>` or `NO_FIX`. A proposal only.
+   fixed yet. Announce the hand-over to root-causing and fixing.
+7. **Root-causing** (experimental, default on, `<RC_BUDGET>` defaulted; a system bug and a
+   model bug alike): a loop over the step-6 reproducer, each iteration resuming from the
+   last one's notes; track (a) native LLM debugging always, track (b) a special recipe in
+   parallel when one exists for `<NAN_KIND>` (system bugs; today: non-deterministic -> the
+   mutation sweep). Ends with `<ROOT_CAUSE>` or `NO_ROOT_CAUSE` when the budget runs out.
+8. **Fixing** (experimental, default on, `<FIX_BUDGET>` defaulted; only with a valid
+   `<ROOT_CAUSE>`): a loop -- resume from the last iteration, propose a fix (native LLM),
+   validate it on the reproducer; a kernel / library fix, a model / config fix, or a
+   model-level workaround (a component turned off). Ends with `<FIX>` or `NO_FIX`. A
+   proposal only.
 9. **Restore and report** (`madengine nan report`): restore any wired source, hand over the
-   artifacts, write the report with the timing table.
+   artifacts, write the report with the timing table and the result card (`result.json`).
 
 ## Agent Notes
 - Claude Code, Cursor and Codex all load this skill (Codex through `.agents/skills/`). Only
   Claude Code substitutes `$ARGUMENTS`; elsewhere it means the text the user gave after the
   skill name.
-- Claude Code runs this skill in the `mad-nan-doctor` subagent. In Cursor, delegate to the
-  `mad-nan-doctor` subagent (Cursor reads `.claude/agents/`); in Codex, spawn the
-  `mad_nan_doctor` agent (`.codex/agents/`). Otherwise run it inline and read
-  `.claude/agents/mad-nan-doctor.md` first for the conventions it assumes.
+- Claude Code runs this skill in the `mad-numeric-doctor` subagent. In Cursor, delegate to the
+  `mad-numeric-doctor` subagent (Cursor reads `.claude/agents/`); in Codex, spawn the
+  `mad_numeric_doctor` agent (`.codex/agents/`). Otherwise run it inline and read
+  `.claude/agents/mad-numeric-doctor.md` first for the conventions it assumes.
 - For an unattended run of steps 1-6 and 9 (plan by default, `--execute` to run), use the
   `mad-nan-hunt` workflow.

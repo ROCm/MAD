@@ -9,6 +9,10 @@
 #
 # Usage (from the MAD repo root):
 #   mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...]
+#   mad-run.sh start <run-id> -- bash <artifact>/verify-<group>/repro-<group>/run.sh
+#   mad-run.sh start <run-id> -- bash <artifact>/verify-fix/fix/validate.sh
+#     (a shipped package's script runs as a vendor would: from its own directory, in an
+#     empty environment but for HOME USER LOGNAME PATH LANG TERM TMPDIR)
 #   mad-run.sh wait <run-id> [max-seconds]    # blocks up to 540s (the default)
 #   mad-run.sh status <run-id>
 #   mad-run.sh stop <run-id>
@@ -63,18 +67,31 @@ report() {
 
 cmd_start() {
   local id="${1:-}"
-  [ $# -ge 2 ] && [ "$2" = "--" ] || die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...]"
+  [ $# -ge 2 ] && [ "$2" = "--" ] || die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...] | bash <artifact>/verify-<group>/repro-<group>/run.sh | bash <artifact>/verify-fix/fix/validate.sh"
   shift 2
-  [ "${1:-}" = madengine ] || die "only madengine commands can be started (got '${1:-}')"
-  case "${2:-}" in
-    run|build) ;;
-    nan)
-      # The GPU-using steps of a NaN investigation: replay and package run containers.
-      case "${3:-}" in
-        exec|group|replay|package) ;;
-        *) die "only 'madengine nan exec|group|replay|package' can be started (got 'madengine nan ${3:-}')" ;;
+  case "${1:-}" in
+    madengine)
+      case "${2:-}" in
+        run|build) ;;
+        nan)
+          # The GPU-using steps of a NaN investigation: replay and package run containers.
+          case "${3:-}" in
+            exec|group|replay|package) ;;
+            *) die "only 'madengine nan exec|group|replay|package' can be started (got 'madengine nan ${3:-}')" ;;
+          esac ;;
+        *) die "only 'madengine run', 'madengine build' and 'madengine nan exec|group|replay|package' can be started (got 'madengine ${2:-}')" ;;
       esac ;;
-    *) die "only 'madengine run', 'madengine build' and 'madengine nan exec|group|replay|package' can be started (got 'madengine ${2:-}')" ;;
+    bash)
+      # Steps 6 and 8 verify a shipped package by running its own script. Nothing else.
+      case "${2:-}" in
+        */verify-*/repro-*/run.sh|*/verify-fix/fix/validate.sh) ;;
+        *) die "only madengine commands can be started (got 'bash ${2:-}')" ;;
+      esac
+      [ $# -eq 2 ] || die "only madengine commands can be started (got 'bash ${2:-} ${3:-}')"
+      local keep=() v
+      for v in HOME USER LOGNAME PATH LANG TERM TMPDIR; do [ -n "${!v:-}" ] && keep+=("$v=${!v}"); done
+      set -- env -i "${keep[@]}" bash -c 'cd -- "${1%/*}" && exec bash "./${1##*/}"' package-run "$2" ;;
+    *) die "only madengine commands can be started (got '${1:-}')" ;;
   esac
   [ -f models.json ] || die "run from the MAD repo root (models.json not found in $(pwd))"
   command -v flock >/dev/null && command -v setsid >/dev/null || die "flock and setsid (util-linux) are required"
@@ -134,5 +151,5 @@ case "${1:-}" in
   wait)   shift; cmd_wait "$@" ;;
   status) shift; report "$(existing_run_dir "${1:-}")" ;;
   stop)   shift; cmd_stop "$@" ;;
-  *) die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...] | wait <run-id> [secs] | status <run-id> | stop <run-id>" ;;
+  *) die "usage: mad-run.sh start <run-id> -- madengine run|build|nan exec|group|replay|package [args...] | bash <artifact>/verify-<group>/repro-<group>/run.sh | bash <artifact>/verify-fix/fix/validate.sh | wait <run-id> [secs] | status <run-id> | stop <run-id>" ;;
 esac

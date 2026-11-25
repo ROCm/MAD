@@ -1,6 +1,7 @@
 # Step 5N: native reproducer (the fallback when no capsule reproduces)
 
-The capsule path saves *one op's values*. When it yields nothing, write the
+The capsule path saves *one op's values*. When it yields nothing -- or cannot run on
+this model at all -- write the
 reproducer yourself: a standalone script that runs the failing computation with
 synthetic data, at the model's shapes, dtypes and load, and NaNs without the model.
 Then go to step 6 (`step6-finish.md`, *Native reproducer*). Not optional, no user
@@ -10,25 +11,30 @@ decision: entering it is automatic; only the step-1 budget bounds it.
 
 | from | exit | first |
 |---|---|---|
+| 1/4 | `CAPTURE_UNREACHABLE`: no capture can see the ops where the NaN is born, so steps 4-5 never run -- the capture preflight calls the setup unsupported (vLLM pipeline parallel > 1 or several nodes, SGLang tp / dp > 1: the model runs in worker processes outside the capture; vLLM TP > 1 on one node IS captured -- `step1-ask.md` *vLLM*) and the supported variant (size 1) does not NaN; or any other setup step 4 demonstrably cannot wire (ledger why) | `<NAN_RATE>` measured at the original setup -- an explicit step 2 (`step2-rate.md`); the model must NaN there. Then ledger step 4 and step 5 as skipped (`capture unreachable: <why>`, `no capture`) and the size-1 run's rate as the first Ruled-out row |
 | 5 | no capsule (empty `<CAPSULE_DIR>`) | the `step5-read.md` *Empty `<CAPSULE_DIR>`* list: fix and re-run a broken capture once (unwritable dir, missing `sync_stop()`, a filter hiding a NaN outside its op class). Fall back when the capture demonstrably ran and the model NaN'd (`<NAN_SIGNAL>` in a capture or control log) yet no capsule settled -- or the re-run also came back empty |
 | 4/5a | no replayable group | -- (every group is an allocator/view false positive or `PROPAGATED` at capture) |
 | 6 | G1 (the largest group) `NOT_REPRODUCED` / `NOT_SET_UP` | `step5-pressure.md` through 5d step 3 -- the fallback starts where that file says "ledger `NOT_REPRODUCED`" |
 | 6 | G1 `PROPAGATED` | -- the bug is upstream of the capsule; the native script chases the producer |
+| 4 | graphs-off capture runs clean, graphs-on controls NaN (vLLM, `step4-run.md`) | `step5n-compiled.md` *Graph-only NaN*: the graph-check run's `GRAPH_CHECK` and `nan_doctor_rt.replay_graph_piece` |
 
 **G1 decides, under either `<GROUPS_TO_REPLAY>`.** `largest`: ledger the other
 groups as N1 evidence. `all`: their 5b runs continue; one that reproduces still goes to
 step 6 and step 5N continues (both reproducers ship).
 
 **Not a trigger:** `FP32_OVERFLOW?` (a finding, reported plainly), G1 reproducing,
-and the model itself not NaN'ing (that is a step-3 problem: re-read `<LEDGER>`,
-re-enter step 3).
+and the model itself not NaN'ing at its original setup (that is a step-3 problem: re-read
+`<LEDGER>`, re-enter step 3; a clean size-1 variant is part of `CAPTURE_UNREACHABLE`, not this).
 
 **World size > 1, a multi-rank native reproducer** (`step4-distributed.md`): when the
 manifest names no origin rank (every NaN arrived through a collective) or the fault is
 in the combination, not an op (a dropped or doubled reduction, wrong placements:
-every op correct, only a cross-rank invariant broken). Write a minimal `torchrun`
+every op correct, only a cross-rank invariant broken), or `CAPTURE_UNREACHABLE` at a
+size > 1 whose size-1 run is clean. Write a minimal `torchrun`
 program at the smallest world size and mesh that still shows it (2 ranks, one mesh
-dimension first), with the model's collectives and shapes; the verdict compares it
+dimension first), with the model's collectives and shapes -- run it with `RANKS=<world size>`
+(`native_run.sh`, N4: one `torchrun` per GPU group, rank 0 prints `NATIVE_RESULT` counting a hit
+on any rank; `native_variants.sh`, N5, the same per variant); the verdict compares it
 against the same program at world size 1 (or the invariant that must hold: replicas
 equal, shard sums equal). N3-N6 apply with "NaNs" read as "breaks the invariant".
 
@@ -45,8 +51,8 @@ madengine nan handoff "$ARTIFACT_DIR"   # summarises what the capsule path tried
 the model's command, when the model NaNs per arm, groups sharing one op and shape);
 the capture **census** over runs; a **Contention** table -- the capture's load
 (other processes on the GPU, what they run, memory) beside every replay's, flagging
-a clean load as **LIGHTER** when it had fewer processes or no backward pass; every
-replay attempt; a **Ruled out** list where each null states the smallest rate it
+a clean load as **LIGHTER** when it had fewer processes or (training) no backward pass; every
+replay attempt, a COLLECTIVE group's torchrun replay included; a **Ruled out** list where each null states the smallest rate it
 excludes (0/1M excludes only >= 3e-6); and **PROPOSED implications**, each with its
 source (e.g. NOT_SET_UP -> "the values are not the trigger"; every clean load
 LIGHTER -> "the sweep never applied the capture's load"). Read it instead of the
@@ -74,11 +80,43 @@ raw artifacts, then:
 
 Ledger one line: suspect (op, or region if none), shapes, contention, env.
 
-**Prior work, before the first candidate** -- one GPU-free grep for the suspect op,
+**`CAPTURE_UNREACHABLE`: no capture ran**, so `handoff.md` has the trigger and the step-2
+facts only -- no capsule, census or attempts. The suspects are what exists at the original
+setup and not in the clean size-1 run: cross-rank collectives (the framework's own
+all-reduce backends too, not only `c10d`), sharded layers, parallel-only code paths and the
+env switches that select them (read them from the model source and the run's start-up log).
+Expect a **multi-rank native reproducer** (*When*, above), top-down (N3) unless one component is
+already the obvious suspect. N2's hooks must run where the model runs -- in the worker
+processes (vLLM: `LLM.collective_rpc` / `apply_model`), not the driver -- else skip N2.
+
+**Prior work, before the first candidate** (skip with `<PRIORS>` = none, `step1-ask.md`
+question 7) -- one GPU-free grep for the suspect op,
 fused-kernel name or Triton/library op across earlier investigations kept beside
 `<ARTIFACT_DIR>` (`grep -lE '<op>|<kernel/function>'` over their root-cause notes and
 ledgers). A hit is a hypothesis (`KEEP +: ... (prior: <path>)`), never a carried-over
 rate; it orders the candidates.
+
+**Leftover memory?** The NaN may come from bytes nobody wrote -- a `torch.empty` buffer a
+kernel reads but no kernel for this arch fills, an out-buffer only partly written. Signs: the
+model NaNs deterministically (every run, the same layer and step) yet the capsule replay is
+`NOT_SET_UP` / clean; the first call of a process is clean; layers before the failing one are
+clean in the same step; the capsule's chain feeds the terminal op from `empty*` rows, or
+`capsule_info` shows an `uninit` operand (its kept value on the args line). Then the first
+candidate is the poison test, before any load sweep (load cannot supply missing bytes):
+`nan_doctor_rt.alloc_poison` runs the model's own command, or the candidate, with every
+`torch.empty*` result filled with a value, one run per value -- the model: its Python command
+prefixed with `python3 -m nan_doctor_rt.alloc_poison --empty <v> --` in a working copy of its
+run script (ledger the path; step 9 restores); a candidate: `from nan_doctor_rt import
+alloc_poison; print(alloc_poison.from_env())` at its top and one N5 variant per value
+(`3|ALLOC_POISON_EMPTY=<v>||`). Values: `0`, `-1`, `nan`, `bits:0x7f7f7f7f`, and the value the
+code means to put there when you can read it (a count: the split count). **The rate follows
+the value** (0 -> every run, the meant value -> none) = a read of uninitialized memory,
+whatever kernel reads it; ledger `KEEP +: uninitialized read (poison <v>: n/N, <w>: m/N)`.
+Same rate under every value: not this. Allocations made in C++ (`at::empty` inside an
+extension) are not wrapped: add `--free-blocks <v>`, which fills the caching allocator's free
+pool first. The candidate (N3) then calls the suspect wrapper after poisoning, and its README
+names the poison value that hits; step 7 names the buffer (`step7-rootcause.md` *Read of
+uninitialized memory*).
 
 **Born in compiled code?** The capsule is `PROPAGATED` with its chain stopped at
 `outside_window` right after a torch.compile'd module, or there is no capsule and most of
@@ -120,19 +158,32 @@ the Ruled-out list (its ledger row is enough).
 * loops `--iters` (default 1000000, the floor) or until killed;
   finiteness of the **suspect output only**, counted per iteration on the device and
   read once per ~1000 iterations (a host read per launch adds stalls under
-  co-tenancy);
+  co-tenancy); **a finite signal** (`step4-explode.md`: the model reports wrong values,
+  no NaN) counts an iteration whose suspect output is off from a higher-precision
+  reference of the same call beyond the op's correct-call error (measure that on a control
+  shape first; `math_refs.value_rel_err` where the op has a `VALUE_CHECKS` entry) -- or, for
+  a race, differs bit-wise from the previous iteration on the same inputs;
 * on a hit: check the inputs were finite, re-run the op in fp64 on the same inputs
   (CPU when it fits), save inputs + output to `native/hit_<k>_<copy>.pt`, print
   `HIT iter=<i> inputs_finite=<b> fp64_ref=<finite|OUT_OF_RANGE|NON-FINITE|unavailable>`
   -- at the positions the GPU output is non-finite: `finite` = finite and within the
   output dtype's range, `OUT_OF_RANGE` = finite in fp64 but beyond it (overflow),
   `NON-FINITE` = non-finite in fp64 too (undefined arithmetic: `0*inf`, `0/0`,
-  `inf-inf`, `sqrt`/`log` of a negative; the capture's `math` origin);
+  `inf-inf`, `sqrt`/`log` of a negative; the capture's `math` origin); for a finite signal
+  `fp64_ref=WRONG_VALUE rel_err=<e>` (the reference finite, the output finite and off from it);
+* on the first hit also the failure signature -- how the output is wrong: `from
+  nan_doctor_rt.failure_signature import signature; print(signature(out, ref64, prev)["line"])`
+  (`ref64` the fp64 reference, `prev` the previous iteration's good output when the loop keeps
+  one); its `SIGNATURE` line goes in the ledger with the hit;
 * last line `NATIVE_RESULT=<hits>/<iters> copy=<c> gpu=<g>`;
 * **the hit path runs only on a hit**, so its bugs surface after the GPU work: keep
   the fp64 / save / report code to plain tensor ops on what the loop already computed
   (no second model call under a different autocast or device), and dry-run it once on
   a forced non-finite value (CPU is enough) before running.
+* **`NATIVE_DISCOVER=1` in the environment: run the suspect call once and exit** -- no reference, no
+  checks, no loop. `nan_doctor_rt.native_sweep --discover` (step 7's sweep of a native reproducer)
+  reads the kernels loaded and dispatched in that one run; a reference computed beside it would
+  name its own GEMMs as suspects.
 
 Two directions -- pick by N1:
 
@@ -146,7 +197,7 @@ Two directions -- pick by N1:
 Contention travels with every rate (SKILL.md rule 6): a solo `0/N` means nothing.
 `bin/native_run.sh` starts `COPIES` copies of the candidate per GPU
 (default 3 = capture's processes per GPU + 1; `HIP_VISIBLE_DEVICES=<g>`, `--copy`,
-`--gpu`) on every GPU, plus `COTENANT` once per GPU when 5c/5d or the handoff's
+`--gpu`) on every GPU (`RANKS=k`: per group of k GPUs, each copy one `torchrun`), plus `COTENANT` once per GPU when 5c/5d or the handoff's
 Contention table say the copies are not the load (the model via `cotenant_loop.sh`,
 else `transformer_hog` with the model's sizes), and prints `NATIVE_TOTAL=`. Run it
 detached through `mad-run.sh` (`env-madengine.md`):
@@ -170,9 +221,10 @@ Wait once (rule 9, `mad-run.sh wait`); read `NATIVE_TOTAL=`, `HIT`, `NO_RESULT` 
 ## N5. Reduce while it reproduces
 
 **One run tests up to eight changes**: `bin/native_variants.sh
-<candidate> <variants file>` (via `madengine nan exec --gpus all -- bash \$NAN_DOCTOR_RT/bin/native_variants.sh ...`, mounted and detached as in N4) runs line *i* of the file on GPU *i*,
+<candidate> <variants file>` (via `madengine nan exec --gpus all -- bash \$NAN_DOCTOR_RT/bin/native_variants.sh ...`, mounted and detached as in N4) runs line *i* of the file on GPU *i*
+(`--env RANKS=k`, a multi-rank candidate: on GPU group *i*, each copy one `torchrun`, at most 8/k lines),
 `<copies>|<env>|<candidate args>|<optional co-tenant>`, and prints one
-`VARIANT_TOTAL` per GPU. Put the unchanged candidate on GPU 0 (this run's own
+`VARIANT_TOTAL` per GPU (group). Put the unchanged candidate on GPU 0 (this run's own
 reference rate), then controls and reductions -- a toggle (TF32, library), solo,
 fewer co-tenants, a lighter co-tenant kind, fewer layers. A candidate whose copies
 double as the load takes a mode flag instead (e.g. copy 0 runs the op, the others
@@ -194,7 +246,7 @@ A deterministic candidate (hits every run, also solo): one run per change.
 
 | verdict | when |
 |---|---|
-| `NATIVE_KERNEL_BUG` | hits, inputs finite, fp64 ref on the saved inputs `finite` |
+| `NATIVE_KERNEL_BUG` | hits, inputs finite, fp64 ref on the saved inputs `finite` -- or `WRONG_VALUE` (a finite signal: the op's output is off from a finite reference) |
 | `NATIVE_UNVERIFIED` | hits, no fp64 reference (`unavailable`), or inputs not checked |
 | `NATIVE_PROPAGATED` | hits, inputs already non-finite -- move the suspect upstream and go back to N3 |
 | `NATIVE_FP32_OVERFLOW` | hits, fp64 ref `OUT_OF_RANGE` -- the true result does not fit the dtype; not a kernel bug |
@@ -213,7 +265,8 @@ load> for <N> runs, never did"); `$LG end step5n`. Every hit goes to step 6 at o
 the reproducer is the deliverable whatever the verdict: `NATIVE_KERNEL_BUG` /
 `NATIVE_UNVERIFIED` as a kernel reproducer; `NATIVE_MATH` / `NATIVE_FP32_OVERFLOW` as a
 model-numerics reproducer whose README says plainly it is not a kernel bug (step 6
-*Native reproducer*). Steps 7-8 are for kernel faults: after a `NATIVE_MATH` /
-`NATIVE_FP32_OVERFLOW` package, go to step 9 and report the arithmetic, the minimal
-candidate and its clean controls (they are the mechanism). `NATIVE_NOT_REPRODUCED` goes
+*Native reproducer*). Steps 7-8 follow for every verdict: after a `NATIVE_MATH` /
+`NATIVE_FP32_OVERFLOW` package the arithmetic and the candidate's clean controls are the
+mechanism's first evidence; step 7 traces where in the model the values come from
+(`step7-rootcause.md` *Model / numerics NaN*). `NATIVE_NOT_REPRODUCED` goes
 to step 9.

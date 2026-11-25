@@ -3,7 +3,19 @@
 `step4-capture.md` first only if there is no validated capture setup yet for this
 model (or its source, arming, filter or cap changed). A `madengine run` command with
 `"tools": [{"name": "nan_doctor"}]` whose ledger shows a passing run is the validated
-setup: state it, don't re-derive it.
+setup: state it, don't re-derive it. **Its knobs come verbatim from that command**
+(its `--additional-context` and environment as it ran), never rebuilt from a ledger
+note: a note abbreviates, and a `NAN_CAPTURE_SUSPEND` that lost its module killed
+every rank at its first step. Neither has the knobs: re-derive them
+(`step4-capture.md`), don't guess. `<PRIORS>`=none (`step1-ask.md` question 7) drops the
+earlier-investigation half: no earlier ledger's command is reused.
+
+**Capture the user's configuration only.** Every capture and control run uses the model
+and context the user named -- not a variant of it (another backend, a debug switch, a
+context meant as a control). A variant's capsules form groups of their own, at other ops,
+and muddy `groups_priority.txt` and the report (two runs with a fused-op backend switched
+to `torch` once added a second group at a downstream GEMM no replay could resolve).
+Variants are step-7 experiments.
 
 ## 4.4 Run with a control arm
 
@@ -34,6 +46,20 @@ run ...`, then `mad-run.sh wait <run-id>` until `MAD_RUN_STATUS=succeeded|failed
 * Never stop a run with a pattern `pkill`: that can hit another session's runs. Stop
   through `mad-run.sh`, then confirm the GPU is empty.
 * Read the wave with `madengine nan waves --capsules <CAPSULE_DIR>` (SKILL.md rule 9).
+
+**vLLM with graphs (its default): capture runs with graph replay off, plus a graph-check
+run.** The capture watches compiled kernels (`step5n-compiled.md`), but a replayed HIP graph
+launches them without Python. So the capture run turns graph replay off and keeps
+`torch.compile` -- no model edit -- and one graphs-on run checks every graph replay for a
+NaN only graphs make (*Graph-only NaN*, `step5n-compiled.md`). In `docker_env_vars` (`<RT>`:
+`step4-capture.md`): capture run `"PYTHONPATH": "<RT>/vllm_graphs", "ND_VLLM_CUDAGRAPH_MODE":
+"NONE"` with the tool; graph-check run (no tool) `"PYTHONPATH": "<RT>/vllm_graphs",
+"ND_GRAPH_CHECK": "1", "ND_GRAPH_CHECK_DIR": "/myworkspace/<ARTIFACT_DIR>/capsules_graph"`.
+The controls stay as the user runs the model (graphs on): they are the rate. **Capture runs
+clean while the controls NaN** = the NaN needs graphs: read the graph-check run's
+`GRAPH_CHECK` line and go to 5N's graph-only route, not to `step5-pressure.md`. TP > 1: put
+both on `PYTHONPATH` (`<RT>/vllm_graphs:<RT>/vllm_capture`, `vllm_graphs` first). SGLang's own
+graph runner is not covered (its capture run: `--disable-cuda-graph`, the server's flag; no graph check).
 
 After the capture run: `madengine nan group` (5a, `step5-read.md`), then 5b
 `madengine nan replay` (`step5-run.md`), then step 6 `madengine nan package`

@@ -2,8 +2,8 @@
 
 **"Finish" means reproducer generation is finished -- not that the NaN is fixed.**
 Step 6 ends with a packaged reproducer; the NaN is still unexplained. Root-causing
-(step 7) and fixing (step 8) are separate, optional, budgeted steps that start from
-this tarball; say so when you hand it over.
+(step 7) and fixing (step 8) are separate, budgeted steps -- on by default -- that start
+from this tarball; the hand-over (*Then*) says so.
 
 The one artifact a vendor can act on: capsule, scripts, one command -- no model,
 dataset or checkout. **It is bound to the GPU arch it was captured on** (hipBLASLt
@@ -21,8 +21,11 @@ tarball's path and `sha256`. Left to you:
 
 1. **Confirm the README's `<!-- CHECK -->` line** against the `[C1]` walk and the
    verdict table (`step5-read.md`); the script proposes, it does not decide. Fix the
-   sentence and drop the marker. If it flags a deterministic walk or `FP32_OVERFLOW?`,
-   resolve that first (`step5-replay-guardrail.md`) -- do not ship.
+   sentence and drop the marker. If it flags a deterministic walk, resolve that first
+   (`step5-replay-guardrail.md`) -- do not ship. `FP32_OVERFLOW?` (the `MODEL_NUMERICS`
+   line; a `madengine nan readme` that prints `DO_NOT_SHIP` for it predates this rule):
+   not a kernel bug, but a reproducer all the same -- ship it as a model-numerics one, the
+   README's first sentence saying so (*Then*).
 2. Add what only you know, briefly: where the capsule came from (model, run), groups
    folded into this one (same kernel, on what basis), a held-back loader path that
    `run.sh` must export (`env:` banner `held back:`), and for a Tensile
@@ -32,7 +35,8 @@ tarball's path and `sha256`. Left to you:
    **`SYNTHETIC-INCONSISTENT` in the `operands:` banner**: the README must say the
    tarball shows the NaN but cannot validate a fix, and name the consistent-operand
    check that can (`step5-read.md`).
-3. Edited anything? Re-pack without rewriting the README:
+3. Edited anything? Re-pack without rewriting the README (seconds with `pigz`; a real-values
+   package without it takes minutes -- give the call a long timeout):
    `madengine nan readme --repro <ARTIFACT_DIR>/repro-<G> --repack --ledger <LEDGER> --step 'step6[<G>]'`
    (tars, prints and ledgers the new sha256; the report takes the latest line).
 4. Tell the user path, size and the one command -- as *the reproducer is done*, not
@@ -52,6 +56,7 @@ No capsule and no `madengine nan package` -- you build it by hand (a manual step
 ```
 repro-native/
   run.sh  README.md  repro.py      # the minimal candidate, renamed
+  failure_signature.py             # nan_doctor_rt/failure_signature.py (the hit's SIGNATURE line)
   cotenant/<file>                  # only if the reproducing load needs one
 ```
 
@@ -61,12 +66,18 @@ repro-native/
    `madengine nan exec --image <IMAGE> -- cat \$NAN_DOCTOR_RT/bin/native_run.sh`) with
    the reproducing defaults baked in (candidate `repro.py`, `COPIES`, `COTENANT` --
    shipped in `cotenant/`, not a repo path -- and env). Mirror the docker flags of the
-   capsule reproducer's `run.sh` if one exists.
+   capsule reproducer's `run.sh` if one exists. A multi-rank candidate (a `torchrun`
+   program) ships the same way: `RANKS=<world size>` makes `native_run.sh` run each copy
+   as one `torchrun` per GPU group -- no runner of your own; `run.sh` keeps `RANKS=`
+   overridable beside `COPIES=` and `NGPUS=`.
 2. **Verify from an extracted copy** (`step6-build.md` *Verify from an extracted copy*):
    tar, extract under `<ARTIFACT_DIR>/verify-native/`, run *that* `run.sh` through
-   `mad-run.sh`. Pass = `NATIVE_TOTAL` `n/N > 0` near the ledger rate.
+   `mad-run.sh` (from its own directory, in an empty environment: a vendor's `bash run.sh`).
+   Pass = `NATIVE_TOTAL` `n/N > 0` near the ledger rate.
 3. **README**, short: what it reproduces (op or region, shapes, dtypes, precision
-   flags) and the verdict with the fp64 check -- for `NATIVE_MATH` /
+   flags) and the verdict with the fp64 check -- for a finite signal (`fp64_ref=WRONG_VALUE`
+   hits) the first sentence says it reproduces **wrong values, not a NaN**, and names the
+   reference and the tolerance a hit exceeds; for `NATIVE_MATH` /
    `NATIVE_FP32_OVERFLOW` the first sentence says it is **not a kernel bug**: the
    arithmetic (`0 * rsqrt(0) = 0 * inf` in an eps-less norm on all-zero rows) or the
    overflow, and the clean control that removes it (e.g. the eps); an `* Image:` line with the image in
@@ -80,11 +91,54 @@ repro-native/
    root-caused -- or, for `NATIVE_MATH` / `NATIVE_FP32_OVERFLOW`, explained by the
    arithmetic, not fixed).
 
+## Kernel capsule reproducer (from 5N's compiled track)
+
+A kernel capsule that replays (`step5n-compiled.md` *Kernel capsule*: hits, inputs finite) is shipped
+like a native reproducer -- it needs no model, and its inputs are the model's real values. Tag
+`step6[kernel]`; when a hand-written candidate also hit, ship both (two packages). Built by hand:
+
+```
+repro-kernel/
+  run.sh  README.md
+  capsule/inductor_<pid>_<kernel>.pt     # the capsule
+  source_graph.txt                       # Inductor's FX graph of the kernel's source nodes (C1's output code)
+  replay_inductor_kernel.py  inductor_ref.py   # from nan_doctor_rt; import torch only
+```
+
+`run.sh` starts `IMAGE` on one GPU (the kernel replays alone; a contention-gated fault gets the
+native package's `COPIES` and load instead) and runs `python3 replay_inductor_kernel.py
+capsule/<capsule> --iters 1000`. The README states the reference verdict (the replay's `fp64_ref=`,
+the kernel's fp64 twin; `unavailable`: eager / fp64 of the source nodes by hand,
+`step5n-compiled.md`: `NATIVE_MATH` or the kernel). Pack, verify from an extracted copy under
+`verify-kernel/` and report as items 2, 4 and 5 of *Native reproducer*. The kernel is recompiled
+from its Triton source by **the image's** torch / triton.
+
 ## Then
 
-Every reproducing group packed: go to step 7 if the user wanted root-causing (step-1
-Q4; ask now -- for 7 and 8 both -- if they said "ask me after 6"), else step 9. Offer
-the step-7 and step-8 budget defaults in the same question (`step7-rootcause.md`
-*Entry* item 2), so a "yes" is a complete answer.
-A `NATIVE_MATH` / `NATIVE_FP32_OVERFLOW` package goes to step 9 directly: 7-8 hunt kernel
-faults, and 5N's controls already show the mechanism (say so instead of asking).
+Every reproducing group packed: **announce the hand-over** -- always, as its own block
+(SKILL.md rule 12), combined with the path/size/command -- then go on to step 7 in the
+same turn. Classify `<NAN_KIND>` first (`step7-rootcause.md` *Entry*) so the budgets quoted
+fit it. **Print the block before any step-7 call** -- before `$LG start step7[<G>]`, the
+`rootcause/` dir or the first experiment: it marks the boundary. **Ledger it** in the same
+call as `$LG end step6[<G>]` (`$LG note step6[<G>] "HANDOVER announced: <tarball> -> step 7
+(RC <RC_BUDGET>, FIX <FIX_BUDGET>)"`): text printed mid-turn can scroll off or fold under the
+next tool output, so step 9 repeats it from this line (`step9-report.md` *Always report*).
+
+```markdown
+> **✅ Reproducer generated** -- `<tarball>` (<size>), run it with `<one command>`.
+> It reproduces the NaN without the model; the NaN is **not** root-caused or fixed yet.
+>
+> **Next: root-causing, then fixing** (experimental) -- within <RC_BUDGET> for the root
+> cause and <FIX_BUDGET> for the fix, on the reproducer only. Say *stop at the reproducer*
+> to end here, or give other budgets.
+```
+
+Steps 7-8 turned off (step-1 Q4 `no`): the first two lines only, then step 9. Q4 "ask me
+after 6" (ask-me mode): end the block with the question instead -- "root-cause and fix it
+now?" with the budgets as defaults -- so a "yes" is a complete answer.
+**Every verdict goes on to step 7**, a system bug and a model bug alike: a `KERNEL_BUG*`
+reproducer, and a model / numerics one -- 5b `FP32_OVERFLOW?` (overflow, or undefined
+arithmetic such as `0*inf`), 5N `NATIVE_MATH` / `NATIVE_FP32_OVERFLOW`. For a model / numerics
+one the block's first line says so ("not a kernel bug: <the arithmetic>"); step 7 then finds
+*why the model hands the op those values* (config, data, code) and step 8 fixes it in the
+model (`step7-rootcause.md` *Model / numerics NaN*).

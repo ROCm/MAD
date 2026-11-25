@@ -17,6 +17,19 @@ source edits, nothing to restore in step 9. Capsules land in
 `--recursive`. The `NAN_CAPTURE_*` knobs below reach the run as environment variables
 (`env-madengine.md`).
 
+**Inference servers the optimizer hook cannot see.** Put the matching directory
+on `PYTHONPATH` for that run, in `docker_env_vars`, as the absolute in-container path
+`<RT>/<dir>` with `<RT>` = `/myworkspace/scripts/common/tools/nan_doctor/nan_doctor_rt`
+(madengine populates `scripts/common/tools/` in the workspace during a run).
+Nothing arms without `NAN_CAPTURE_DIR`.
+
+| Workload | `PYTHONPATH` entry | What it patches |
+|---|---|---|
+| vLLM, tensor parallel > 1 | `<RT>/vllm_capture` | `Worker.execute_model` in each TP worker (`step1-ask.md` *vLLM*) |
+| vLLM CUDA graphs | `<RT>/vllm_graphs` | graph-only NaN check; graph replays are invisible to the op hook |
+| SGLang | `<RT>/sglang_capture` | the SGLang scheduler (`step1-ask.md` *SGLang*) |
+| `torch.compile` / Inductor | `<RT>/inductor_capsule` | the kernel Inductor's NaN asserts caught, replayed later with `python3 -m nan_doctor_rt.replay_inductor_kernel` (the capture itself watches Inductor kernel launches without it: `NAN_CAPTURE_INDUCTOR=0` turns that off) |
+
 **Fallback: source wiring**, only for loops the hook cannot see: a loop with no
 optimizer step, or a framework that owns the loop. Map the source, don't read it whole
 (a model source is often 1,000+ lines):
@@ -27,7 +40,10 @@ madengine nan capture-points <model.py> <launcher>
 
 It prints, with line numbers: the last import, the ranked work loops (with a code
 window), `LAZY` builders, swallowing `except`s, the model's own NaN checks and their
-step guard (the control floor, 4.3), `DIST`, and the fan-out 5a needs. Read only those
+step guard (the control floor, 4.3), `DIST`, and the fan-out 5a needs. Module-level loops
+rank like function loops, and a `with torch.no_grad():` / `inference_mode()` block (or
+decorator) counts for the outermost loop in it -- a script-style decode loop is found
+without `--loop-line`. Read only those
 windows. `no LOOP candidate` = read the entry point yourself. **The ranks are static, one
 file at a time**: the top loop can be one that never runs (the trainer is reached through
 a registry or dispatch) or one that runs but does not train (a memory probe). Wire it;
@@ -77,13 +93,15 @@ source wiring:
    * **Clean synthetic 5b while the model reproduces**, or an `ERROR` from the
      op's own argument checks: **ask the user before recapturing with
      `NAN_CAPTURE_DATA=1`**, which stores all real values (MBs to GBs per capsule,
-     containing their data). Then replay without `--synthesize`.
+     containing their data; a buffer the chain holds several times -- views, a
+     pre-call snapshot -- is stored once, and an allocator's unwritten output not at
+     all: replay allocates it). Then replay without `--synthesize`.
    * **`NAN_CAPTURE_DATA=1` from the start** when the user asks for real values,
      or when step 1 found the data **public / synthetic test assets** (a public test
      split, a random-token benchmark, a repo fixture): nothing to protect, and
      real values are what make operand checks possible (a `DIVERGED` row, the fp64
      walk on recorded operands, `--written-operands`). Step 1 states the choice in
-     its shortcut block; the user can override it there, not after a clean replay.
+     its one-line summary; the user can override it there, not after a clean replay.
 2. Op filter (`NAN_CAPTURE_OP_CLASSES`): unset. Tightening once every capsule so far
    landed in one class (e.g. `gemm`) is fine (cuts overhead).
 3. **`chain_depth=4`** (`NAN_CAPTURE_CHAIN_DEPTH`): the op's data-dependency ancestry --
@@ -125,6 +143,14 @@ source wiring:
    The world-size-1 traceback is raised
    where survival was seen (often the optimizer), not at the op that made the NaN;
    the capsule is still that op's, and its `settle` record names both.
+   **The capsule is the surviving NaN's root**: every non-finite output downstream of a
+   pending candidate inherits it, and a survival writes that root -- a `math` one too (an
+   eps-0 norm's `0 * rsqrt(0)`, a model / numerics NaN), never the downstream op that only
+   carried it (a `math` birth op once lost to the next GEMM: `aten.rsqrt` of a PyTorch
+   RMSNorm was captured as `aiter.gemm_a16w16`, a capsule no replay could resolve).
+   Fused norms and gated activations of aiter / sgl_kernel / vLLM `_C` get an fp64 origin
+   too (`nan_doctor_rt.math_refs`), so their capsules say `math` / `overflow` /
+   `unexplained` instead of `no_reference`.
    **Do not reach for `NAN_CAPTURE_EXCLUDE_OPS` against a recurring benign NaN**:
    it blinds the capture to every op of that name. `NAN_CAPTURE_SETTLE=0` restores
    capture-at-first-non-finite (e.g. to compare with an old run).
@@ -177,10 +203,19 @@ Checks (also applied to a capture run's first steps):
 * **The loop that ran** (source wiring): if the digest shows `CAPTURE NEVER
   CONSTRUCTED`, or another loop has more steps than the wired one,
   `madengine nan wire restore` the wrong file and re-apply with `--loop-line N`
-  on the right loop. `HOOK` -- a framework owns the loop: its callback (4.1).
+  on the right loop. `HOOK` -- a framework owns the loop: its callback (4.1). The
+  locator (`"PYTHONPATH": "<RT>/locate"` in the smoke run's `docker_env_vars`) hooks
+  `Optimizer.step` and `backward` -- and, for inference, top-level forwards with grad
+  disabled (each forward of a `generate()`) -- and names the loop around them. No
+  locator lines: either `PYTHONPATH` did not reach the process (fix the route, not the
+  wiring), or the model has nothing the locator hooks (plain tensor code: no
+  `nn.Module` forward, no `backward`, no optimizer) -- then judge the wiring from the
+  capture's own lines (`armed`, `Progress step`, a capsule).
 
-Separate smoke test (~15 steps) **only** for: a first capture of this model/source; a
-changed arming point, filter, cap or capture code; unknown memory headroom.
+Separate smoke test (~15 steps) **only** for: unknown memory headroom (a big model,
+snapshots near the cap), or a changed arming point, filter or capture code you have
+reason to doubt. A first capture of a model that fits easily needs none: the capture
+run's first steps are the smoke test, and a separate one only repeats them.
 **Otherwise the capture run is the smoke test** (a broken capture ends the run in its
 first steps anyway): if it shows the false-positive signature or an OOM, fix and re-run.
 Ledger: which smoke test or run validated which configuration.
@@ -189,6 +224,9 @@ Ledger: which smoke test or run validated which configuration.
 
 * Cut to a few dozen steps -- the capture detects at the op, not at the model's late
   check; raise only if nothing is captured.
+* **A NaN step already measured** (a step-2 wave, or an earlier run of the same environment in
+  `<LEDGER>`): length = about 1.5 x the latest NaN step seen, never below the floor below.
+  Unmeasured: the model's own length.
 * **Floor: the control run's first check window.** Below it every control reads "no
   NaN" by construction. Find the interval in the source (a model that checks every
   1000 steps needs at least 1000).

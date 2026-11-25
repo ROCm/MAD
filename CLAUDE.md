@@ -8,7 +8,7 @@ Everything above is shared with Cursor and Codex. This section covers what only
 Claude Code does.
 
 - **Skills fork to subagents.** `/mad-benchmark` and `/mad-profile` run in
-  `mad-benchmark-runner`, `/mad-tune` in `mad-tuner`, `/mad-debug-nan` in `mad-nan-doctor`, and `/mad-report` in
+  `mad-benchmark-runner`, `/mad-tune` in `mad-tuner`, `/mad-debug-numeric` in `mad-numeric-doctor`, and `/mad-report` in
   `mad-perf-analyst` (`.claude/agents/`), via `context: fork`. `/mad-report`
   sets `background: false`, so its answer arrives in the same turn.
 - **Pre-flight is injected.** The GPU skills run

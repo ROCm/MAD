@@ -1,14 +1,20 @@
-# Step 3: raise the NaN rate (optional, interactive only)
+# Step 3: raise the NaN rate (optional, off by default, interactive only)
 
 Interactive only: it oversubscribes GPUs, so it must not run under MAD's GPU lock.
 The automated workflow skips this step.
 
+**Off by default**: runs only when the user asks for it. Otherwise `$LG skip step3 "off by
+default (<NAN_RATE>)"` and go to step 4; a low `<NAN_RATE>` (step 2 saw no NaN or under ~1 in
+8): say in one line that the capture may need longer or more runs and that they can ask to
+raise the rate first -- don't wait for an answer. In ask-me mode (`step1-ask.md`) a low rate
+gets the question instead: "raise the NaN rate first?" (default: no).
+
 * **Skip when `<NAN_RATE>` is already high** (extra load risks an all-`TIMEOUT`
-  sweep). Ledger the skip *with rate and environment* -- it expires on a new host,
+  sweep). `$LG skip step3 "<rate, environment>"` -- it expires on a new host,
   image, geometry or a lower re-measurement.
 * **A low rate is a step-3 problem before a hardware one**: try the levers on this
   node before calling it unsuitable.
-* Otherwise, with the user's agreement, run Increase-NaN-rate.
+* Otherwise (asked for), run Increase-NaN-rate.
 * `<FULL_MODEL_RUN_SCRIPT>` / `<FULL_MODEL_RATE>` = the step-3 versions if it ran,
   else the originals.
 * Lever was concurrent load (`hogger`, fanned runs)? Ledger it; take that load off

@@ -15,7 +15,9 @@ the named op on that alone. Cheapest first:
    CPU kernel, or a math reference (`flash_attn._flash_attn_backward`,
    `aten._scaled_dot_product_flash_attention_backward`,
    `flash_attn._flash_attn_varlen_backward` per sequence; dropout, softcap and alibi
-   are refused as `unavailable`). On synthetic operands it is meaningful only when
+   are refused as `unavailable`; the fused norms and gated activations of aiter,
+   sgl_kernel and vLLM `_C` -- `nan_doctor_rt.math_refs`, each checked against its kernel;
+   a missing one is one entry there, from the op's schema). On synthetic operands it is meaningful only when
    the derived ones were recomputed (`operands: SYNTHETIC (derived ... recomputed)`,
    `step5-read.md`).
 1. **Check by value**: each op's GPU output vs an fp64 recomputation (tolerance

@@ -23,7 +23,7 @@ has a skill in `.claude/skills/`, linked into `.agents/skills/` for Codex
 | `mad-benchmark` | explicit only | Build and run a madengine benchmark |
 | `mad-profile` | explicit only | Profile at the operator, dispatch, kernel, assembly, PC-sampling, or thread-trace depth |
 | `mad-tune` | explicit only | Measure-change-measure tuning loop |
-| `mad-debug-nan` | explicit only | Capture, replay and package a NaN in a PyTorch model (madengine's `nan_doctor` tool and `madengine nan` commands) |
+| `mad-debug-numeric` | explicit only | Capture, replay and package a NaN, Inf, spike or wrong value in a PyTorch model (madengine's `nan_doctor` tool and `madengine nan` commands) |
 | `primus-projection` | explicit only | Projected memory fit and tokens/s for a Primus training tag only |
 | `mad-add-model` | explicit only | Guided model addition and validation |
 | `mad-generate-dockerfile` | explicit only | Render a Dockerfile from a framework template |
@@ -60,7 +60,7 @@ that you are at the repo root. It never installs anything.
   In Cursor and Codex, use `mad-benchmark` with several tags
   (`/mad-benchmark bert,pyt_vllm_qwen3-8b` runs them in one `madengine run`)
   and `mad-tune`.
-- **Subagents.** The skills hand work to `mad-benchmark-runner`, `mad-tuner`, `mad-nan-doctor` and
+- **Subagents.** The skills hand work to `mad-benchmark-runner`, `mad-tuner`, `mad-numeric-doctor` and
   `mad-perf-analyst`. Claude Code and Cursor read them from `.claude/agents/`.
   Codex reads `.codex/agents/*.toml` (`mad_benchmark_runner`, `mad_tuner`,
   `mad_perf_analyst`), generated from the Markdown files: edit
@@ -165,9 +165,11 @@ Then on a GPU host: `madengine run --tags <name> --live-output`.
 
 ## madengine commands
 
-`requirements.txt` pins madengine to `v2.3.0` (Typer CLI); install it with
-`pip install -r requirements.txt`. It exposes five commands: `build`, `run`,
-`discover`, `report`, `database`. Verify exact flags with `madengine <cmd> --help`.
+`requirements.txt` installs madengine (Typer CLI) from its `main` branch; install it
+with `pip install -r requirements.txt`. It exposes `build`, `run`, `discover`,
+`report`, `database`, `cleanup` and `setup-page`; `mad-debug-numeric` also needs the
+`nan` command group (`madengine nan --help`), which comes with madengine's
+nan-doctor integration. Verify exact flags with `madengine <cmd> --help`.
 
 - `madengine discover --tags <tag> [--json]` — list matching models (read-only, no GPU); `--json` prints the resolved model cards.
 - `madengine build --tags <tag> [-r REGISTRY] [-a gfx942,gfx90a] [-l]` — build images, write `build_manifest.json`. `--use-image` skips the build and uses a prebuilt image.

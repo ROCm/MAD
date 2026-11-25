@@ -23,7 +23,7 @@ export const meta = {
 // without cloning or touching a GPU. --execute runs them; --plan / --no-execute /
 // --dry-run force plan mode.
 //
-// The mad-debug-nan skill is the method, madengine the harness. The model runs
+// The mad-debug-numeric skill is the method, madengine the harness. The model runs
 // only through mad-run.sh; replays and packages are `madengine nan ...` commands
 // started through the same helper, so they hold the same host GPU lock. Every
 // phase agent follows the skill with the intake this script writes
@@ -36,7 +36,7 @@ export const meta = {
 //
 // NOT AUTOMATED: raising the NaN rate by oversubscribing GPUs (step 3;
 // it fights the GPU lock), the step-5N standalone fallback when no capsule
-// replays, and fixes (step 8). Those stay in the interactive /mad-debug-nan.
+// replays, and fixes (step 8). Those stay in the interactive /mad-debug-numeric.
 // K8s is not supported yet.
 
 const DEFAULT_SIGNAL = '\\b(loss|grad_norm)\\b.*\\b(nan|inf)\\b'   // ERE, matched case-insensitively
@@ -215,7 +215,7 @@ if (deployTarget === 'k8s')
 
 const PREFLIGHT = 'bash .claude/skills/mad-common/preflight.sh'
 const MAD_RUN = 'bash .claude/skills/mad-common/mad-run.sh'
-const SKILL_MAP = '.claude/skills/mad-debug-nan/SKILL.md'
+const SKILL_MAP = '.claude/skills/mad-debug-numeric/SKILL.md'
 const RUN_HOW = `Each Bash tool call runs exactly one command. A call containing &&, ;, or a newline that joins two commands is denied, and nothing in this session can approve it, so the phase stops. Never join commands.
 Run every madengine command through the run helper, never in the foreground (a tool call ends after 10 minutes): \`${MAD_RUN} start <run-id> -- <madengine command>\`, then \`${MAD_RUN} wait <run-id>\` until its first line says MAD_RUN_STATUS=succeeded or failed.
 Group, replay and package are \`madengine nan group|replay|package ...\` commands and start the same way (\`${MAD_RUN} start <run-id> -- madengine nan replay ...\`); never run docker or the replay modules bare. Short commands (\`madengine nan ledger|intake|summary|report\`) run directly.
@@ -253,6 +253,7 @@ const RESOLVE_SCHEMA = {
     model: { type: 'string' },
     nGpus: { type: 'string' },
     hostGpus: { type: 'integer' },
+    today: { type: 'string' },
   },
 }
 const resolved = await agent(
@@ -261,8 +262,9 @@ const resolved = await agent(
 2. Run \`madengine discover --tags ${shellQuote(tag)} --json\` (read-only). Put every model "name" in resolvedModels.
 3. If there is exactly one model, return its name as model and its n_gpus string as nGpus.
 4. Run \`amd-smi list\` (or \`rocm-smi\` if amd-smi is missing) once and return the number of GPUs as hostGpus; 0 if neither works.
+5. Run \`date +%F\` and return its output as today (YYYY-MM-DD).
 Do not build an image and do not start a run.`,
-  { label: 'resolve', phase: 'Resolve', schema: RESOLVE_SCHEMA, agentType: 'mad-nan-doctor' }
+  { label: 'resolve', phase: 'Resolve', schema: RESOLVE_SCHEMA, agentType: 'mad-numeric-doctor' }
 )
 if (!resolved) throw new Error('Resolve step returned no result; nothing was run.')
 if (!resolved.preflightOk) throw new Error(`Pre-flight failed; nothing was run.\n${resolved.preflightOutput || ''}`)
@@ -274,7 +276,7 @@ const modelName = resolved.model || resolvedModels[0]
 const nGpus = parseInt(resolved.nGpus, 10)
 const perNode = nGpus > 0 ? nGpus : Math.max(1, Number(resolved.hostGpus) || 1)
 const nnodes = Math.max(1, Number((ctxObj && ctxObj.slurm && ctxObj.slurm.nodes) || 1))
-const huntName = `mad-${new Date().toISOString().slice(0, 10)}-${safeName(modelName)}`
+const huntName = `mad-${(/^\d{4}-\d{2}-\d{2}$/.test(resolved.today || '') ? resolved.today : 'undated')}-${safeName(modelName)}`
 const artifactDir = `nan_hunts/${huntName}`
 const intakeCtx = { ...(ctxObj || {}) }
 const intake = {
@@ -338,7 +340,7 @@ ${JSON.stringify(intake, null, 2)}
 3. Run \`madengine nan intake ${artifactDir}/intake.json\`. Return intakeValid true only if it exits 0, with its output as intakeOutput.
 4. Start the ledger as ${SKILL_MAP}'s reference/step1-intake.md says (\`madengine nan ledger ${artifactDir}/ledger.md start step1\`, then a note naming the intake).
 Return status "ok" when steps 1-4 succeeded.`,
-  { label: 'setup', phase: 'Setup', schema: SETUP_SCHEMA, agentType: 'mad-nan-doctor' }
+  { label: 'setup', phase: 'Setup', schema: SETUP_SCHEMA, agentType: 'mad-numeric-doctor' }
 )
 if (!setup || setup.status !== 'ok')
   return stopped('error', `Setup failed: ${(setup && setup.reason) || 'no result'}`, { setup })
@@ -366,14 +368,14 @@ if (!skipDetect) {
 3. Run \`${grepCommand.replace('<run-id>', `<the run-id you used>`)}\` and return its number as signalLines (0 when grep prints 0), the first matching line as firstMatch, and the run's final status.
 4. Ledger it: \`madengine nan ledger ${artifactDir}/ledger.md note step2 "clean run <run-id> <status> signal_lines=<n>"\`.
 Do not interpret the log beyond that count.`,
-      { label: `detect-${i}`, phase: 'Detect', schema: DETECT_SCHEMA, agentType: 'mad-nan-doctor' }
+      { label: `detect-${i}`, phase: 'Detect', schema: DETECT_SCHEMA, agentType: 'mad-numeric-doctor' }
     )
     detectRuns.push(r)
   }
   const hits = nanDetected(detectRuns)
   log(`Detect: the NaN signal appeared in ${hits}/${detectRuns.length} clean run(s).`)
   if (hits === 0)
-    return stopped('no-nan', `No clean run showed the NaN signal /${signal}/i in ${detectRuns.length} run(s). Nothing to capture. Raise --repeats, pass --nan-signal, or --skip-detect to capture anyway.`, { detectRuns })
+    return stopped('no-nan', `No clean run showed the NaN signal /${signal}/i in ${detectRuns.length} run(s). Nothing to capture. Raise --repeats, pass --nan-signal, or --skip-detect to capture anyway. Outputs suspected silently wrong (no signal at all): /mad-debug-numeric ${tag} compares configurations (differential mode).`, { detectRuns })
 }
 
 phase('Capture')
@@ -399,13 +401,13 @@ for (let k = 1; k <= CAPTURE_ATTEMPTS; k++) {
 3. ${deployTarget === 'slurm' ? 'Find every node_<N>/nan_doctor_output/ of this job under the SLURM output directory.' : 'Read nan_doctor_output/summary.txt in the MAD repo root.'} Copy every capsules/ directory into ${artifactDir}/capsules/<run-id>/ (copy, not move).
 4. Return the number of .pt capsule files you copied as capsules, whether a manifest*.json came with them, the directory as capsuleDir, and the model's docker_image from build_manifest.json as image.
 5. Ledger: \`madengine nan ledger ${artifactDir}/ledger.md note step4 "capture <run-id> <status> capsules=<n>"\`.`,
-    { label: `capture-${k}`, phase: 'Capture', schema: CAPTURE_SCHEMA, agentType: 'mad-nan-doctor' }
+    { label: `capture-${k}`, phase: 'Capture', schema: CAPTURE_SCHEMA, agentType: 'mad-numeric-doctor' }
   )
   captureAttempts.push(capture)
   if (capture && Number(capture.capsules) > 0) break
 }
 if (!capture || !(Number(capture.capsules) > 0))
-  return stopped('no-capsule', `No capsule in ${CAPTURE_ATTEMPTS} capture run(s). The NaN may need the standalone fallback (step 5N): run /mad-debug-nan ${tag}.`, { detectRuns, captureAttempts })
+  return stopped('no-capsule', `No capsule in ${CAPTURE_ATTEMPTS} capture run(s). The NaN may need the standalone fallback (step 5N): run /mad-debug-numeric ${tag}.`, { detectRuns, captureAttempts })
 log(`Capture: ${capture.capsules} capsule(s) from ${capture.runId} in ${capture.capsuleDir}; image ${capture.image || '(unknown)'}.`)
 
 phase('Replay')
@@ -438,13 +440,13 @@ Capsules: ${capture.capsuleDir}. Image: ${capture.image || 'the docker_image in 
 2. Replay ${groupsPref === 'all' ? 'every replayable group, one after another,' : 'only the largest replayable group (G1)'} (5b): \`madengine nan replay <capsule> --manifest build_manifest.json --out-dir ${artifactDir}/replay/<group>\`, started through mad-run.sh.
 3. For each replayed group return: group (G1, G2, ...), capsule count, the verdict from step5-read.md's table (one of ${VERDICTS.join(', ')}), hits and runs from the replay summary (\`madengine nan summary <attempt dir>\`), the concurrency, and logDir (the attempt directory).
 Do not go to step 5N, step 7 or step 8.`,
-  { label: 'replay', phase: 'Replay', schema: REPLAY_SCHEMA, agentType: 'mad-nan-doctor' }
+  { label: 'replay', phase: 'Replay', schema: REPLAY_SCHEMA, agentType: 'mad-numeric-doctor' }
 )
 const groups = (replay && replay.groups) || []
 const reproducing = reproducingGroups(groups)
 log(`Replay: ${reproducing.length}/${groups.length} group(s) reproduced without the model.`)
 if (!reproducing.length)
-  return stopped('not-reproduced', `No replayed group reproduced (${groups.map(g => `${g.group} ${g.verdict} ${g.hits}/${g.runs}`).join('; ') || 'no groups'}). Next: /mad-debug-nan ${tag} for pressure (step 5c/5d) or the standalone fallback (5N).`, { detectRuns, captureAttempts, groups })
+  return stopped('not-reproduced', `No replayed group reproduced (${groups.map(g => `${g.group} ${g.verdict} ${g.hits}/${g.runs}`).join('; ') || 'no groups'}). Next: /mad-debug-numeric ${tag} for pressure (step 5c/5d) or the standalone fallback (5N).`, { detectRuns, captureAttempts, groups })
 
 phase('Package')
 const PACKAGE_SCHEMA = {
@@ -462,7 +464,7 @@ const pkg = await agent(
   `Package the reproducer for group ${reproducing[0].group} of ${modelName} (step 6). Read reference/step6-finish.md and reference/step6-build.md. ${RUN_HOW}
 Its replay: ${JSON.stringify(reproducing[0])}. Image: ${capture.image || 'the docker_image in build_manifest.json'}. Artifact dir: ${artifactDir}.
 Build it with \`madengine nan package\` and check it exactly as step 6 says (verify from an extracted copy, started through mad-run.sh). Return the tarball path, its sha256sum, and the n/N the package's own check reproduced as reproduced.`,
-  { label: 'package', phase: 'Package', schema: PACKAGE_SCHEMA, agentType: 'mad-nan-doctor' }
+  { label: 'package', phase: 'Package', schema: PACKAGE_SCHEMA, agentType: 'mad-numeric-doctor' }
 )
 
 let rootCause = null
@@ -472,7 +474,7 @@ if (rootcause && pkg && pkg.status === 'ok') {
     `Root-cause the reproducer ${pkg.tarball} (step 7, read reference/step7-rootcause.md). The wall-clock budget is ${budgetMinutes} minutes, already agreed: do not ask for it. ${RUN_HOW}
 Stop at the budget. Do not fix anything (no step 8). Return status, the path of ROOT_CAUSE.md, and a two-sentence summary.`,
     {
-      label: 'rootcause', phase: 'Root-cause', agentType: 'mad-nan-doctor',
+      label: 'rootcause', phase: 'Root-cause', agentType: 'mad-numeric-doctor',
       schema: { type: 'object', required: ['status'], properties: { status: { type: 'string' }, rootCauseFile: { type: 'string' }, summary: { type: 'string' } } },
     }
   )
@@ -523,7 +525,7 @@ const report = await agent(
 Write the report with \`madengine nan report ${artifactDir}\`. Use only the facts below and the ledger; do not invent numbers. Say plainly ${verified ? 'that an independent check agreed with the replay verdicts' : 'that the independent check did NOT agree with the replay verdicts, and where'}. A fix is a proposal, never applied.
 Return the report path and the paths of the ledger, intake and reproducer tarball (all under ${artifactDir}).
 ${JSON.stringify(reportBody)}`,
-  { label: 'report', phase: 'Report', schema: REPORT_SCHEMA, agentType: 'mad-nan-doctor' }
+  { label: 'report', phase: 'Report', schema: REPORT_SCHEMA, agentType: 'mad-numeric-doctor' }
 )
 
 const packaged = !!(pkg && pkg.status === 'ok')

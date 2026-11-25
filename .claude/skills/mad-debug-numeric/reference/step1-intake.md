@@ -6,7 +6,7 @@ Read instead of `step1-ask.md` when the invocation names an **intake** file (`in
 2. **Gates** (SKILL.md step 0) still run. `madengine nan framework-check` on the model source when the producer could not tell (it reads `madengine discover`, not the source): `SKIP` = stop with its warning, as interactively.
 3. **`<ARTIFACT_DIR>`** = the intake's, created by the producer. `ls` it first (a resumed investigation keeps its ledger). Start the ledger: `madengine nan ledger <LEDGER> start step1`, then `madengine nan ledger <LEDGER> note step1 "intake <path> source=<source>"`, then one note with the `KEY=VALUE` block's values (<= 200 chars per line).
 4. **Environment file:** `env-madengine.md` (`ENV=madengine`; `docker` is the same flow with `--image`).
-5. **Preferences** replace questions 2-6 (ledger each with `(intake)`, not `(default)`):
+5. **Preferences** replace questions 2-6 (ledger each with `(intake)`, not `(default)`; question 7, `<PRIORS>`, takes its default):
 
    | `PREF_*` | answers |
    |---|---|

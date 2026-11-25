@@ -40,6 +40,28 @@ arrived through a collective `PROPAGATED?`; 5b replays the origin capsule (R1).
 | higher-order operators (`flex_attention`, `cond`, ...) | run unchecked: their bodies are invisible, like a compiled region |
 | FSDP2 padding from `torch.empty` (partly written all-gather buffers) | origin `uninitialized`: never a capsule on its own, not an escape when gathered; saved once as `.masked-<n>`; garbage written into a tensor that outlives the step IS captured |
 | a NaN that reached this rank through a collective | capsule `dist_causality.arrived_via` = (group, seq, op); the rank's `first_arrival` |
+| a **synchronous collective** -- a framework's own all-reduce op (vLLM's `vllm.all_reduce`: QuickReduce / custom all-reduce / RCCL behind one op) -- returning non-finite from finite inputs | captured AT the collective on every member rank (each capsule: that rank's pre-call input, `collective` = group, seq); the manifest's `collective_origin`: *Synchronous collectives*, below |
+
+## Synchronous collectives (the collective made the NaN)
+
+Unlike async c10d, `vllm.all_reduce` & co. return their result in stream order, so the capture checks
+their output like any op's. The manifest verdict reads `COLLECTIVE: vllm.all_reduce.default #<seq> of
+group tp:0 returned non-finite from finite inputs on rank(s) [0, 1]`; 5a tags the group `COLLECTIVE`.
+No recapture: the member ranks' capsules ARE the R3 record. Replay the collective under `torchrun`
+through the framework that ran it:
+
+```bash
+madengine nan exec --image <IMAGE> -- python3 -m nan_doctor_rt.collective_r3 check <capsule dir>   # no GPU work: COLLECTIVE_FAULT / INPUT_NONFINITE / CORRECT
+madengine nan exec --image <IMAGE> --gpus <one per rank> -- torchrun --nproc_per_node=<ranks> -m nan_doctor_rt.collective_r3 replay <capsule dir> [--iters N]
+```
+
+`check` compares each rank's output with the fp64 reduction of every rank's input and adds
+`NARROW_INTERMEDIATE? fp16` (fp8) when the inputs and the true result fit the dtype but exceed a
+narrower float's range: a cast or packing inside the collective. `replay` (`--backend vllm`, chosen
+by the op) initialises vLLM's distributed environment and TP group, restores the capsules' `VLLM_*`
+env (so vLLM picks the same all-reduce for the same size) and calls the recorded op; last line
+`LADDER_RESULT=REPRODUCED n/N`. The replay goes through `mad-run.sh`. A control run with one env
+setting changed (`NAN_R3_KEEP_ENV=<VAR>` keeps the caller's value) is step 7's first experiment.
 
 ## The one knob: compiled entry points
 
@@ -91,7 +113,7 @@ madengine nan group <CAPSULE_DIR> --manifest build_manifest.json --out-dir <ARTI
 |---|---|---|---|
 | R1 solo | the origin rank's chain on one GPU (copies per GPU = concurrency) | local op bugs, deterministic or racy | the usual 5b (`madengine nan replay <origin capsule> ...`) -- a chain stops at collectives, whose outputs are recorded roots, so it needs no other rank |
 | R2 concurrent | every rank's capsule at once, one per GPU, no collectives | faults that need all GPUs busy | `madengine nan exec --image <IMAGE> --gpus all -- torchrun --nproc_per_node=<W> -m nan_doctor_rt.replay_nan_op_dist '<dir>/rank{rank}_*.pt'` (per-rank mode; `--collective-noise MB`), through `mad-run.sh` |
-| R3 collective | the suspect collective on its recorded inputs, every member rank | the manifest names no origin, and the earliest arrival is a collective (group, seq) | re-run the capture with `NAN_CAPTURE_RECORD_COLLECTIVE=<group>:<seq>[:<step>]` (the manifest's earliest arrival): every member saves that collective's inputs and outputs. Then `madengine nan exec --image <IMAGE> -- python3 -m nan_doctor_rt.collective_r3 check <CAPSULE_DIR> --group G --seq S` (no GPU work): `COLLECTIVE_FAULT ranks [...]` (inputs finite, output wrong -> RCCL/transport), `INPUT_NONFINITE ranks [...]` (look upstream there) or `CORRECT`; and `torchrun --nproc_per_node=<group size> -m nan_doctor_rt.collective_r3 replay ...` under `madengine nan exec --gpus all` re-runs it on the recorded inputs to reproduce an intermittent fault without the model. Group and seq numbering only line up across runs when the collective structure is the same (same config) |
+| R3 collective | the suspect collective on its recorded inputs, every member rank | the manifest names no origin, and the earliest arrival is a collective (group, seq) -- or a `collective_origin` (synchronous collectives: no recapture, *Synchronous collectives* above) | re-run the capture with `NAN_CAPTURE_RECORD_COLLECTIVE=<group>:<seq>[:<step>]` (the manifest's earliest arrival): every member saves that collective's inputs and outputs. Then `madengine nan exec --image <IMAGE> -- python3 -m nan_doctor_rt.collective_r3 check <CAPSULE_DIR> --group G --seq S` (no GPU work): `COLLECTIVE_FAULT ranks [...]` (inputs finite, output wrong -> RCCL/transport), `INPUT_NONFINITE ranks [...]` (look upstream there) or `CORRECT`; and `torchrun --nproc_per_node=<group size> -m nan_doctor_rt.collective_r3 replay ...` under `madengine nan exec --gpus all` re-runs it on the recorded inputs to reproduce an intermittent fault without the model. Group and seq numbering only line up across runs when the collective structure is the same (same config) |
 | 5N multi-rank | a minimal parallel program | parallelism bugs: every op correct, the combination wrong (a dropped reduction) -- no op check fails, only cross-rank invariants | `step5n-native.md` |
 
 ## Cost and time

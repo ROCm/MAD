@@ -1,6 +1,6 @@
 # Step 7, recipe track (b): non-deterministic NaN -> mutation sweep
 
-> Experimental, interactive-only under MAD: the automated workflow skips step 7; mutated kernels are never applied to MAD or the image.
+> Experimental under MAD: the automated workflow runs step 7 only with `--rootcause`; mutated kernels are never applied to MAD or the image.
 
 **You are here only from `step7-rootcause.md`, with `<NAN_KIND>` =
 `non-deterministic`.** This runs **in parallel with** track (a) (native LLM), as
@@ -40,8 +40,13 @@ every setting:
 | `--extra-args` (e.g. `--synthesize`, `--written-operands`) | the same flags |
 | the image and the `--env K=V` settings | the same `--image` and `--env`, on the sweep's `madengine nan exec` |
 | `--restore-env` (5b always restores) | `--restore-env` |
-| runs per copy | `<N>` = enough for >= 10 expected hits at 5b's rate (non-finite / runs actually done), capped at 5b's `--iters` |
+| runs per copy | `<N>` = `madengine nan power <5b non-finite>/<runs actually done>` (`RUNS=`: 30 expected hits, never 5b's `--iters` by default -- 1M-run rows at 85 expected hits were most of a step 7) |
 
+* **A wrong-value capsule** (origin `wrong_value`: a finite signal, `step4-explode.md`) is swept
+  the same way: every row counts the runs whose terminal op fails the capsule's own value check
+  again, exactly as 5b counted them -- a `NAN` row reads "still wrong", `CLEAN` "the values are
+  right again", and `expected_hits` uses 5b's wrong-value rate. A rerun capsule (`verify` kind
+  `rerun`) the same: a row counts runs whose op differs from its own rerun on identical operands.
 * **Ledger the mapping** in one line before starting: the 5b attempt dir it came
   from and each flag. A setting you cannot read from the ledger or the attempt dir is
   a question for the user, not a default.
@@ -81,21 +86,56 @@ every setting:
 | **aiter** `.co` | bare HSA ELF under `<asm_root>/<arch>/`, patched in a symlink overlay | `--patch-asm-dir` |
 | **CK** | HSA shim intercepts at load, names and dumps the kernel | -- |
 
-* **Growth mutators** (`sbarrier_*`, +4 B per `s_barrier`) splice into padding, else
-  rebuild the object -- possible only for single-kernel files (aiter `.co`, HSA dump).
-  Tensile raises `PatchError`. **An `ERROR` row from a growth mutator is a tooling
-  limit** (or a build predating rebuild support).
+* **Growth mutators** (`sbarrier_*`, `lgkmcnt0+sbarrier`, `vmcnt0+sbarrier`, +4 B per
+  `s_barrier`) splice into padding, else rebuild the object -- possible only for
+  single-kernel files (aiter `.co`, HSA dump). Tensile raises `PatchError`
+  (`lgkmcnt0+sbarrier`: already at enumeration, a `proposed nothing` note). **An
+  `ERROR` row from a growth mutator is a tooling limit** (or a build predating
+  rebuild support).
 * **aiter trap:** with `AITER_ASM_DIR` unset aiter loads a copy embedded in
   `libtorch_hip.so` -- patching the file changes nothing, every row CLEAN. Loader
   trace: `[aiter] hipModuleLoad: /abs/path/...` = file-backed, sweepable;
   unprefixed `hipModuleLoad: hsa/...` = embedded. `ensure_aiter_asm_dir` sets it for
   baseline and trials; `trace_is_file_backed()` asserts it; embedded loads become
   `SKIPPED`. Check it in the enumeration.
+  **Newer amd-aiter** logs `[aiter] LoadKernel: <sym> hsaco: <path>` and rewrites
+  `AITER_ASM_DIR` from `AITER_META_DIR` at import, so the overlay mirrors `aiter_meta` and sets
+  both (`kernel_patch.AiterOverlay`, the kept-fix `env.sh`); `--restore-env` holds both back. A
+  sweep that still reports `aiter served its EMBEDDED copy` measured the stock kernel: its rows
+  are void.
 * **aiter/CK op-to-kernel attribution is a heuristic** (family dir `fmha_v3_bwd/` vs
   `fmha_v3_fwd/`; `FmhaBwd*` vs `FmhaFwdKernel`); unreadable direction -> `SKIPPED`.
   Say so in the report.
 * **`SKIPPED` rows stay in the table.** All `SKIPPED` = the recipe adds nothing;
   stop track (b), track (a) continues alone.
+
+## A native reproducer (no capsule): `nan_doctor_rt.native_sweep`
+
+A step-5N reproducer is a script, not a capsule, so `replay_nan_op --mutate` cannot drive it.
+`native_sweep` runs the same mutators, overlays and read-backs with **the candidate as the trial**,
+scoring each trial from its own `NATIVE_RESULT=` (or `native_run.sh`'s `NATIVE_TOTAL=`) line; each
+call through `madengine nan exec --image <IMAGE> --gpus 1 --mount <ARTIFACT_DIR> -- python3 -m
+nan_doctor_rt.native_sweep ...`, started with `mad-run.sh`:
+
+1. **Which kernel:** `native_sweep --discover --cmd 'python3 repro.py'` runs the candidate once
+   with `NATIVE_DISCOVER=1` (the suspect call only, `step5n-native.md` N3) and prints the aiter `.co`
+   files it loaded (`--patch-hsaco`), the kernels it dispatched (`AMD_LOG_LEVEL=3`; a `Cijk_...`
+   name is `--patch-kernel`), and with `--match <fragment>` dumps matching code objects for the HSA
+   shim (`--patch-co`, CK / Triton).
+2. **The trial command** is the candidate with the load that reproduced, on ONE GPU -- the mapping
+   table above, read from N4/N5: `COPIES=<c> NGPUS=1 [COTENANT=...] bash native_run.sh repro.py
+   --iters <N>`, or the candidate alone if it hit solo. `<N>` from `madengine nan power` on the
+   candidate's rate.
+3. **Enumerate** (`--list`), write the plan, run the tiers as below (one `--mutate-only` each,
+   `--mutate-no-identity` -- the stock baseline it runs first must hit, else
+   `NATIVE_SWEEP_RESULT=NO_BASELINE`), with `--report <ARTIFACT_DIR>/rootcause/native_mutations.json`
+   (resumable), `--asm-dir <ASM_DIR>` (read every CLEAN row's `.native.diff`) and `--keep-fix
+   <ARTIFACT_DIR>/fix_work/kept` (aiter / CK). Rows: `NAN`, `CLEAN`, `UNDERPOWERED` (< 3 expected
+   hits at the baseline rate), `VOID` (the overlay was not served: the trial ran stock),
+   `TIMEOUT`, `ERROR`.
+
+Same strength pairs, tiers and readings as the capsule sweep. Step 8 validates a native fix the same
+way: the candidate run with the kept row's `env.sh` sourced, stock beside it.
 
 ## Before sweeping
 
@@ -122,6 +162,12 @@ every setting:
   GPU-free once you know the name: `--list-mutations --patch-kernel <KERNEL_NAME>`.
   Its mutator list is authoritative over the table below.
 
+  **Reusing an earlier enumeration** (`<PRIORS>` = use): allowed only for the **same kernel name
+  and the same image digest** as this reproducer's `kernel.*.txt` -- the site list is a property of
+  the code object, not of the run -- and the plan says so (`enumeration: reused from <dir>, same
+  kernel + image`). The tier-1 row's asm diff must then change exactly the reused site count; any
+  other count voids the reuse: enumerate.
+
 ## Every applicable mutation, weakest first
 
 One mutation = one trial of up to `--mutate-timeout` (an hour each when
@@ -132,14 +178,26 @@ mutation only when its weaker sibling has already cleared the NaN.
 | mutator | asks | notes |
 |---|---|---|
 | `lgkmcnt0` | depends on relaxed LGKM waits? | GFX9 only (gfx90a, gfx942 MI300X, gfx950 MI355X) |
-| `lgkmcnt0+sbarrier` | ... or cross-wave LDS ordering? | stronger than `lgkmcnt0` |
+| `lgkmcnt0+sbarrier` | ... or cross-wave LDS ordering? | stronger than `lgkmcnt0`; grows 4 B/site (aiter `.co` / HSA shim rebuild; Tensile: padding only) |
 | `lgkmcnt0_each` | which relaxed wait(s)? timing or ordering? | one trial per site; only after a CLEAN `lgkmcnt0` (tier 3) |
+| `lgkmcnt0_subset` | do THESE waits together carry it? | `@set` and `@rest` (the complement); sites from `NAN_MUTATE_SUBSET_ADDRS`; after tier 3 left every site `NAN` |
 | `sbarrier_ds_read_write` | readers before writers (WAR)? | unguarded LDS boundaries; 8 B/site |
 | `sbarrier_ds_write_read` | writers before readers (RAW)? | 0 sites is a finding |
 | `sbarrier_only_ds_read_write` | bare rendezvous enough? | 4 B/site, no drain -- a real fix's shape |
 | `sbarrier_only_ds_write_read` | ... RAW direction | same |
+| `vmcnt0` | depends on relaxed **VM** waits -- a global-to-LDS load (`buffer_load_* ... lds`) read before it retired? | GFX9 only; same slot width; the description's census says how many sites an `s_barrier` already follows and how many LDS-direct loads the kernel issues |
+| `vmcnt0+sbarrier` | ... or must those loads be ordered against the sibling waves' reads? | stronger than `vmcnt0`; grows 4 B/site (aiter `.co` / HSA shim rebuild) |
+| `vmcnt0_each`, `vmcnt0_subset` | which VM wait(s)? | as `lgkmcnt0_each` / `_subset`, same env vars; only after a powered CLEAN `vmcnt0` (tier 3) |
 
-**Localising a CLEAN `lgkmcnt0`** (tier 3, only after `lgkmcnt0` is a powered CLEAN):
+**The counter matters.** `lgkmcnt` covers LDS reads/writes and scalar loads; a tile filled by a
+global-to-LDS load (`buffer_load_dword ... lds`, aiter's asm kernels) retires through **vmcnt**, so
+no `lgkmcnt0` row can clear a race on it; a kernel that issues such loads (the `vmcnt0` census
+counts them) gets the `vmcnt0` pair too. Where the census reads `N of N followed by s_barrier`,
+`vmcnt0` alone is already "drain, then rendezvous" and `vmcnt0+sbarrier` only adds a second barrier
+-- its row is *predetermined equal to `vmcnt0`'s* (not run) whichever way `vmcnt0` comes out.
+
+**Localising a CLEAN `lgkmcnt0`** (tier 3, only after `lgkmcnt0` is a powered CLEAN; `vmcnt0_each` /
+`vmcnt0_subset` localise a CLEAN `vmcnt0` the same way):
 `lgkmcnt0_each` proposes one trial per relaxed wait (`lgkmcnt0_each@0x<addr>`, the
 same slot-width payload at that site only). It answers two questions the all-sites
 row cannot: **which waits matter** (the minimal fix step 8 should ship), and **is it
@@ -149,6 +207,15 @@ the ordering mechanism over a global slowdown (H "timing only"). All sites
 individually `NAN` while all-at-once is CLEAN = the NaN needs several waits drained
 (or it is timing): say which. Cost: one trial per site -- include it in the plan's
 worst case.
+
+A tier-3 row stops at its first NaN, so a site that only *lowers* the rate still reads
+`NAN`: read each row's first-hit iteration against the baseline's mean interval (a site
+whose first NaN came 50x later than baseline carries most of the rate). **Then narrow it
+as a set** with `lgkmcnt0_subset` -- `NAN_MUTATE_SUBSET_ADDRS="0x<a> 0x<b> ..."` (the
+late-first-hit sites, or a static scan's candidates: waits after which a VGPR written by a
+still in-flight `ds_read` is read before the wait that covers it), `--mutate-only
+lgkmcnt0_subset`, same iterations and co-tenant as tier 1. `@set` CLEAN with `@rest` `NAN`
+is the minimal set step 8 ships; both CLEAN = either half suffices (timing: say so).
 
 **Run tier 3 in parallel, one sweep per GPU** (all GPUs of the machine, held for the
 duration; this is interactive-only). Serially it is sites x trial time; split it is
@@ -166,15 +233,16 @@ fit the inter-kernel padding), there is no tier 2, and tier 3 is the experiment 
 turns "a relaxed wait matters" into a root cause: put it in the confirmed plan up
 front, run it as soon as tier 1 is a powered CLEAN.
 
-### Strength is a partial order: three pairs
+### Strength is a partial order: four pairs
 
 A mutation is *stronger* than another only when it patches the **same sites** and
-enforces everything the other does plus more. That gives three pairs and nothing
+enforces everything the other does plus more. That gives four pairs and nothing
 across them (different sites, different hazards -- neither result implies the other):
 
 | pair (same sites) | stronger | weaker | what the stronger adds |
 |---|---|---|---|
 | relaxed LGKM waits | `lgkmcnt0+sbarrier` | `lgkmcnt0` | an `s_barrier` after the drain |
+| relaxed VM waits | `vmcnt0+sbarrier` | `vmcnt0` | an `s_barrier` after the drain (nothing, where the census says one already follows every site) |
 | `ds_read` -> `ds_write` boundaries | `sbarrier_ds_read_write` | `sbarrier_only_ds_read_write` | an `lgkmcnt(0)` drain before the barrier |
 | `ds_write` -> `ds_read` boundaries | `sbarrier_ds_write_read` | `sbarrier_only_ds_write_read` | an `lgkmcnt(0)` drain before the barrier |
 
@@ -204,25 +272,28 @@ never prunes, so one invocation cannot do this. Run tiers as separate sweeps wit
 **same** `--mutate-report` (the journal key does not include the mutator set, so tier 2
 appends to tier 1's report; rows already present are resumed, not re-run):
 
-1. **Tier 1** -- the weaker member of every applicable pair (`lgkmcnt0`,
+1. **Tier 1** -- the weaker member of every applicable pair (`lgkmcnt0`, `vmcnt0`,
    `sbarrier_only_ds_read_write`, `sbarrier_only_ds_write_read`), plus the stronger
    member of any pair whose weaker member the enumeration dropped. `<MUTATE_ONLY>` =
    those names.
 2. **Tier 2** -- the stronger member of every pair whose tier-1 row was **not** a
    powered `CLEAN`. Nothing left: no tier 2.
 
-### Before tier 1: show the plan, confirm its cost
+### Before tier 1: write the plan, check its cost
 
-**Enumerate, show the plan, stop**:
+**Enumerate and write the plan** to `<ARTIFACT_DIR>/rootcause/sweep-plan.md`:
 
 * every listed mutator, its sites, its pair, its tier, and the `FAIL`/`PatchError`
   rows with reasons;
 * per-trial cost at `<N>`, worst case (no pruning) and best case trial counts, and
   how much of `<RC_BUDGET>` each uses.
 
-The user confirms the **cost**, not the set. If the worst case does not fit
+**Worst case inside `<RC_BUDGET>` and the compute threshold** (`step1-ask.md` Q6): the
+budget is the confirmation -- tell the user one line (trials, worst-case time, the plan's
+path) and start tier 1 without stopping. **Otherwise, or in ask-me mode, stop**: show the
+plan; the user confirms the **cost**, not the set. If the worst case does not fit
 `<RC_BUDGET>`, say so and ask which pairs to defer -- never drop a mutation silently.
-Tier 2 needs no second confirmation if it is inside the confirmed worst case.
+Tier 2 needs no second confirmation if it is inside the confirmed (or budgeted) worst case.
 
 ### Reading a pair
 
@@ -274,10 +345,16 @@ registration order, with no pruning). Pick the form by **5b's replay mode** (the
 * **Always `--mutate-report`**, and `<REPORT_JSON>`/`<ASM_DIR>` under `<ARTIFACT_DIR>`
   and visible to the container (`--mount`); written at the end, a bad path loses
   everything.
-* **`--mutate-keep-fix <ARTIFACT_DIR>/fix/kept`** on every aiter / CK sweep: each
+* **`--mutate-keep-fix <ARTIFACT_DIR>/fix_work/kept`** on every aiter / CK sweep: each
   CLEAN row's patched kernel plus an `env.sh` that loads it lands in
   `kept/<row>/`. The sweep's overlay is overwritten per trial and deleted at the
   end, and step 8 validates exactly these bytes. (hipBLASLt: `fix_overlay`.)
+  **Never under `fix/`**: step 8 tars `fix/` whole, and the kept overlays are symlink farms.
+  An aiter row's `env.sh` is relocatable (paths relative to itself, the stock tree from the
+  image it is sourced in).
+* **A CLEAN `vmcnt0_each@<addr>`**: run `vmcnt_minus1_each` at that site next
+  (`NAN_MUTATE_EACH_ADDRS=<addr> --mutate-only vmcnt_minus1_each@<addr>`): `vmcnt(N) -> vmcnt(N-1)`,
+  the smallest tightening. CLEAN = the minimal fix step 8 ships instead of the full drain.
 * **Resumable**: `--mutate-report` writes a `.jsonl` journal (one fsynced row per
   trial); re-run the identical command and only missing trials run (`(resumed from
   journal)`). Key = capsule, host, `payload_kind`, launch count, co-tenant geometry,
@@ -287,8 +364,9 @@ registration order, with no pruning). Pick the form by **5b's replay mode** (the
   trial; `--mutate-no-resume` re-measures all.
 * `--mutate-asm-dir` writes `NAME.before.s`/`.after.s`/`.diff`. **Read the diff
   back**: identical = patch never landed; check changed-instruction count and
-  addresses against the description. Growth mutators' diff size is address
-  shift -- quote the description's site count.
+  addresses against the description. Only the `-`/`+` lines changed; unmarked
+  lines are context (`--mutate-disasm-context`, 4 each side). Growth mutators' diff
+  size is address shift -- quote the description's site count.
 
 **Chain sweeps:** `[S3]` runs the `[C1]` walk (`--no-reference` keeps it cheap) so
 its culprit leads; seed order = `[C1]` culprit, then the loop's tally, then reverse

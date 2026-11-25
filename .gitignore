@@ -104,7 +104,7 @@ madengine_build_*
 # madengine runs started by .claude/skills/mad-common/mad-run.sh
 .mad-runs/
 
-# NaN investigations (mad-nan-hunt, /mad-debug-nan): ledgers, capsules, reproducers, reports;
+# NaN investigations (mad-nan-hunt, /mad-debug-numeric): ledgers, capsules, reproducers, reports;
 # and the nan_doctor tool's capsules from the last capture run
 nan_hunts/
 nan_doctor_output/

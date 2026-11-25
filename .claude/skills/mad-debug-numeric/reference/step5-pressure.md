@@ -11,6 +11,13 @@ job (via `mad-run.sh`); stop at the first that reproduces.
 Step 3 (oversubscription) is interactive-only; this file's co-tenant rungs are the
 automated route to the same load.
 
+**Deterministic model, clean replay: leftover memory first, not load.** A model that NaNs on
+every run at the same place while its capsule replays clean is more often reading memory
+nobody wrote than missing a load: a fresh replay process hands back other garbage. Run the
+model twice under `nan_doctor_rt.alloc_poison`, `--empty 0` and `--empty nan`, before 5c/5d
+(`step5n-native.md` *Leftover memory?*); a rate that follows the value goes to step 5N with
+that recipe.
+
 ## 5c-kernel. Same kernel? (first, ~1 min)
 
 hipBLASLt GEMMs only (any other op: go to 5c). The ladder writes

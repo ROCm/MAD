@@ -5,7 +5,7 @@
 # At step --plant_step (default 20) one activation goes through sqrt() of a
 # negative number, so aten.sqrt creates the NaN from finite inputs; the loss,
 # the gradients and then the weights turn NaN. It exists to validate the NaN
-# debugging path (madengine's nan_doctor tool, /mad-debug-nan, mad-nan-hunt)
+# debugging path (madengine's nan_doctor tool, /mad-debug-numeric, mad-nan-hunt)
 # end to end on one GPU. --plant_step -1 trains cleanly.
 #
 # Prints `step <n> loss: <value>` per step. It keeps training through the first

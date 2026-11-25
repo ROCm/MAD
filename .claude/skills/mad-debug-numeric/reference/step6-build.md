@@ -56,5 +56,9 @@ mkdir -p <ARTIFACT_DIR>/verify-<G> && tar -xzf <tarball> -C <ARTIFACT_DIR>/verif
 bash .claude/skills/mad-common/mad-run.sh start verify-<G> -- bash <ARTIFACT_DIR>/verify-<G>/repro-<G>/run.sh
 ```
 
+`mad-run.sh` runs it the way a vendor will: from the script's own directory, in an empty
+environment (only `HOME`, `USER`, `PATH` and the locale pass), so what `run.sh` does not bake in
+is not there.
+
 **Pass = a reproducing run (`n/N > 0` near the ledger rate)**, not exit 0; a `0/N` is a
 failed build -- check `env:` banners and copies per GPU first.
