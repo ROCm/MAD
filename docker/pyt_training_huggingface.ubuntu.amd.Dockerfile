@@ -22,7 +22,7 @@ RUN pip install --upgrade pip
 RUN pip install --upgrade numpy==1.26.4 scipy numba pandas
 
 # Install dependencies
-RUN pip install GPUtil azureml azureml-core tokenizers ninja cerberus sympy sacremoses sacrebleu==1.5.1 sentencepiece scipy scikit-learn "urllib3<2"
+RUN pip install GPUtil azureml azureml-core tokenizers ninja cerberus sympy sacremoses sacrebleu==1.5.1 sentencepiece==0.2.2 scipy scikit-learn "urllib3<2"
 
 # Install DeepSpeed
 ARG DEEPSPEED_REPO=https://github.com/microsoft/DeepSpeed
