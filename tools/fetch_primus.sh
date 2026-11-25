@@ -30,8 +30,8 @@
 # to enumerate models, and both primus_* dockerfiles COPY the tree into the image. Without
 # it, discovery reports zero models instead of a missing prerequisite.
 #
-# Default pin is release/v26.9, matching docker/primus_maxtext's
-# rocm/jax-training:maxtext-v26.9 base (MaxText release/v26.9 + JAX 0.11 MaxDiffusion fixes).
+# Default pin is release/v26.10, matching docker/primus_maxtext's
+# rocm/jax-training:maxtext-v26.10 base (MaxText release/v26.10 + JAX 0.12 MaxDiffusion fixes).
 # Override PRIMUS_REF for another branch or commit.
 #
 # Run on the host, from anywhere:
@@ -42,7 +42,7 @@
 set -uo pipefail
 
 PRIMUS_URL="${PRIMUS_URL:-https://github.com/AMD-AGI/Primus}"
-PRIMUS_REF="${PRIMUS_REF:-release/v26.9}"
+PRIMUS_REF="${PRIMUS_REF:-release/v26.10}"
 
 MAD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRIMUS_DIR="${PRIMUS_DIR:-$MAD_ROOT/scripts/Primus}"
