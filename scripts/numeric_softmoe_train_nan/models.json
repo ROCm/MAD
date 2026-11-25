@@ -1,0 +1,17 @@
+[
+    {
+        "name": "pyt_numeric_softmoe_train_nan",
+        "dockerfile": "../../docker/pyt_numeric_softmoe_train_nan",
+        "scripts": "run.sh",
+        "n_gpus": "1",
+        "owner": "mad.support@amd.com",
+        "training_precision": "bf16",
+        "tags": [
+            "pyt",
+            "nan_debug",
+            "numeric_examples"
+        ],
+        "args": "",
+        "timeout": 3600
+    }
+]
