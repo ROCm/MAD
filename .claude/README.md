@@ -81,7 +81,7 @@ NaN hunt, and
 │   ├── mad-generate-dockerfile/        # Dockerfile generator
 │   │   ├── scripts/render_dockerfile.py  # Template renderer
 │   │   └── framework_templates/        # Jinja2 templates
-│   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-debug-numeric/, mad-report/, primus-projection/
+│   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-debug-numeric/, mad-validate-numeric/, mad-report/, primus-projection/
 │   └── mad-common/                     # preflight.sh, mad-run.sh, geak-run.sh, kernel-tools.py, kernel-analysis.md (shared helpers)
 └── prompts/
     └── model_addition_guide.md         # Detailed guide

@@ -24,6 +24,7 @@ has a skill in `.claude/skills/`, linked into `.agents/skills/` for Codex
 | `mad-profile` | explicit only | Profile at the operator, dispatch, kernel, assembly, PC-sampling, or thread-trace depth |
 | `mad-tune` | explicit only | Measure-change-measure tuning loop |
 | `mad-debug-numeric` | explicit only | Capture, replay and package a NaN, Inf, spike or wrong value in a PyTorch model (madengine's `nan_doctor` tool and `madengine nan` commands) |
+| `mad-validate-numeric` | explicit only | Run `mad-debug-numeric` unattended on the `numeric_examples` models and compare each result with Numeric Doctor's expected card, read from its checkout |
 | `primus-projection` | explicit only | Projected memory fit and tokens/s for a Primus training tag only |
 | `mad-add-model` | explicit only | Guided model addition and validation |
 | `mad-generate-dockerfile` | explicit only | Render a Dockerfile from a framework template |
