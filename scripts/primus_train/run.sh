@@ -83,7 +83,7 @@ if [[ -z "$framework" ]]; then
   launcher="${exp_lower##*examples/}"
   launcher="${launcher%%/*}"
   case "$launcher" in
-    maxtext|maxdiffusion|torchtitan|megatron_bridge|nemo_automodel|diffusion|hummingbirdxt|worldmirror)
+    maxtext|maxdiffusion|torchtitan|megatron_bridge|automodel|diffusion|hummingbirdxt|recommendation|worldmirror)
       framework="$launcher" ;;
     *)
       # megatron and anything unrecognized
