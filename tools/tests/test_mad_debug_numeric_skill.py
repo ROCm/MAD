@@ -1,14 +1,12 @@
-"""The mad-debug-nan skill only refers to files and `madengine nan` commands that exist, and
+"""The mad-debug-numeric skill only refers to files and `madengine nan` commands that exist, and
 carries no leftovers of the environments it no longer supports."""
 
 import re
-import shutil
-import subprocess
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SKILL = ROOT / ".claude" / "skills" / "mad-debug-nan"
+SKILL = ROOT / ".claude" / "skills" / "mad-debug-numeric"
 DOCS = sorted(SKILL.glob("reference/*.md")) + [SKILL / "SKILL.md"]
 LEFTOVERS = [r"REPO_ROOT", r"sbatch", r"apptainer", r"\.sif\b", r"evidence\.md", r"\[E\d+",
              r"scripts/(?:user|internal)", r"(?<!mad-)debug-nan", r"replay_capsule_node",
@@ -16,11 +14,11 @@ LEFTOVERS = [r"REPO_ROOT", r"sbatch", r"apptainer", r"\.sif\b", r"evidence\.md",
 
 
 def nan_commands():
-    if not shutil.which("madengine"):
+    try:
+        from madengine.nan_doctor.cli import COMMANDS
+    except ImportError:
         return None
-    out = subprocess.run(["madengine", "nan", "--help"], capture_output=True, text=True).stdout
-    names = set(re.findall(r"^[│ ]*([a-z][a-z-]+)\s{2,}", out, re.M))
-    return names or None
+    return set(COMMANDS)
 
 
 class SkillDocsTest(unittest.TestCase):

@@ -629,7 +629,7 @@ const NAN = 'mad-nan-hunt.js'
 function nanAgent(over = {}) {
   return (prompt, opts) => {
     const label = opts.label || ''
-    if (label === 'resolve') return over.resolve || { preflightOk: true, resolvedModels: ['dummy/dummy_nan'], model: 'dummy/dummy_nan', nGpus: '1', hostGpus: 8 }
+    if (label === 'resolve') return over.resolve || { preflightOk: true, resolvedModels: ['dummy/dummy_nan'], model: 'dummy/dummy_nan', nGpus: '1', hostGpus: 8, today: '2026-11-17' }
     if (label === 'setup') return over.setup || { status: 'ok', head: 'x', intakeValid: true, intakeOutput: 'RUN_SCRIPT=...' }
     if (label.startsWith('detect-')) return over.detect || { runId: label, status: 'failed', signalLines: 2, firstMatch: 'step 20 loss: nan' }
     if (label.startsWith('capture-')) {
@@ -685,7 +685,7 @@ test('nan-hunt: plan mode prints the intake and the runs, and runs nothing', asy
   assert.equal(result.status, 'planned')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].opts.label, 'resolve')
-  assert.equal(calls[0].opts.agentType, 'mad-nan-doctor')
+  assert.equal(calls[0].opts.agentType, 'mad-numeric-doctor')
   const printed = logs.join('\n')
   assert.doesNotMatch(printed, /git clone/, 'no external checkout is needed any more')
   assert.match(printed, /madengine nan group .*--recursive/)

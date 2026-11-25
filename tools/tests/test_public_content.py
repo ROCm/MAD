@@ -17,8 +17,8 @@ sys.path.insert(0, str(ROOT / "tools" / "validation"))
 import public_content_scan as scanner  # noqa: E402
 
 PATHS = [
-    ROOT / ".claude" / "skills" / "mad-debug-nan",
-    ROOT / ".claude" / "agents" / "mad-nan-doctor.md",
+    ROOT / ".claude" / "skills" / "mad-debug-numeric",
+    ROOT / ".claude" / "agents" / "mad-numeric-doctor.md",
     ROOT / ".claude" / "workflows" / "mad-nan-hunt.js",
     ROOT / "docs" / "mad-nan-hunt.md",
     ROOT / "scripts" / "dummy" / "run_nan.sh",
