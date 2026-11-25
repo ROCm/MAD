@@ -22,6 +22,13 @@ PATHS = [
     ROOT / ".claude" / "workflows" / "mad-nan-hunt.js",
     ROOT / "docs" / "mad-nan-hunt.md",
     ROOT / "scripts" / "dummy" / "run_nan.sh",
+    ROOT / ".claude" / "skills" / "mad-validate-numeric",
+    ROOT / ".claude" / "mods" / "numeric-doctor",
+    ROOT / "docs" / "mad-numeric-doctor.md",
+    ROOT / "scripts" / "numeric_softmoe_train_nan" / "run.sh",
+    ROOT / "scripts" / "numeric_softmoe_train_nan" / "train.py",
+    ROOT / "scripts" / "numeric_qwen_vllm_serve_nan" / "run.sh",
+    ROOT / "scripts" / "numeric_qwen_vllm_serve_nan" / "qwen_vllm_serve.py",
 ]
 
 
