@@ -1,0 +1,17 @@
+[
+    {
+        "name": "pyt_torchtitan_qwen3_moe_nan",
+        "dockerfile": "../../docker/pyt_torchtitan_qwen3_moe_nan",
+        "scripts": "run.sh",
+        "n_gpus": "8",
+        "owner": "mad.support@amd.com",
+        "training_precision": "bf16",
+        "tags": [
+            "pyt",
+            "nan_debug",
+            "torchtitan"
+        ],
+        "args": "",
+        "timeout": 14400
+    }
+]
