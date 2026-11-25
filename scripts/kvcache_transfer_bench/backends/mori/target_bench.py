@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from common.mori_settings import NUM_ITERS, WARMUP_ITERS, WORKLOAD_FLAGS, clamp_end_size, test_parameters
+from common.net_detect import socket_ifname
 from common.utils import add_common_bench_args, append_result_to_file, collect_version_info, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
@@ -99,7 +100,7 @@ def main():
     results_path = SHARED_DIR / "results_mori.json"
 
     env = os.environ.copy()
-    env.setdefault("GLOO_SOCKET_IFNAME", "eth0")
+    env.setdefault("GLOO_SOCKET_IFNAME", socket_ifname())
     env["PYTHONPATH"] = f"{mori_root}:{env.get('PYTHONPATH', '')}"
 
     last_size = args.start_size

@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.net_detect import rdma_device
 from common.utils import add_common_bench_args, generate_test_sizes, resolve_hostname
 
 SHARED_DIR = None
@@ -85,7 +86,7 @@ def main():
     metadata_port = 8000
     port_base = 15000
     protocol = "rdma"
-    device_name = os.environ.get("IBDEVICES", "mlx5_0")
+    device_name = os.environ.get("IBDEVICES") or rdma_device()
     gpu_id = 0
     metadata_url = f"http://{target_node}:{metadata_port}/metadata"
 

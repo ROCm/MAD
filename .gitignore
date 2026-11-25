@@ -74,6 +74,7 @@ venv.bak/
 !tools/tests/fixtures/kernel/**
 *.log
 *.out
+*.err
 *.html
 
 # Primus checkout for JAX/MaxText discovery + image build. Use either:

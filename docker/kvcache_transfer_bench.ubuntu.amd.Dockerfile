@@ -7,11 +7,10 @@ WORKDIR /sgl-workspace
 
 # ========== MORI ==========
 WORKDIR /sgl-workspace/mori
-# v1.2.3.post1
-ARG MORI_COMMIT="67632e80e2e492184b589904b63225f82d45537c"
-ARG INSTALL_MORI=1
 RUN apt-get update && apt-get install -y --no-install-recommends git ibverbs-utils libibverbs-dev openmpi-bin libopenmpi-dev libpci-dev libdw1 locales libgrpc-dev libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc cmake libdrm-dev
-RUN if [ "${INSTALL_MORI}" = "1" ]; then echo "INSTALL_MORI=1: installing MoRI at ${MORI_COMMIT}" && git checkout main && git fetch origin && git pull origin main && git checkout ${MORI_COMMIT} && pip install -r requirements-build.txt Cython && MORI_GPU_ARCHS="${GPU_ARCH_LIST}" pip install --no-build-isolation -e . ; else echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; fi
+ARG MORI_REF="v1.2.3.post1"
+ARG INSTALL_MORI=1
+RUN if [ "${INSTALL_MORI}" = "1" ]; then echo "INSTALL_MORI=1: installing MoRI ${MORI_REF}" && git checkout main && git fetch origin --tags --force && git pull origin main && git checkout ${MORI_REF} && echo "MoRI ${MORI_REF} is $(git rev-parse HEAD)" && pip install -r requirements-build.txt Cython && MORI_GPU_ARCHS="${GPU_ARCH_LIST}" pip install --no-build-isolation -e . ; else echo "INSTALL_MORI=${INSTALL_MORI}: skipping MoRI installation"; fi
 ENV MORI_ROOT=/sgl-workspace/mori
 
 # ========== MORI-IO C++ BENCHMARK ==========
@@ -31,15 +30,15 @@ RUN if [ "${INSTALL_MORI_CPP_BENCH}" = "1" ]; then echo "INSTALL_MORI_CPP_BENCH=
 # ========== MOONCAKE ==========
 WORKDIR /sgl-workspace
 ARG MOONCAKE_REPO="https://github.com/kvcache-ai/Mooncake.git"
-# v0.3.13.post1
-ARG MOONCAKE_COMMIT="719735896c86b56fabec6cf3e825fb2ea640597a"
+ARG MOONCAKE_REF="v0.3.13.post1"
 ARG INSTALL_MOONCAKE=1
 ENV MOONCAKE_HOME=/sgl-workspace/Mooncake
 # ENABLE_MULTI_PROTOCOL=ON is required with USE_HIP=ON; without it cross-node writes are routed to HIP IPC and fail.
-RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then echo "INSTALL_MOONCAKE=1: installing Mooncake at ${MOONCAKE_COMMIT}" && \
+RUN if [ "${INSTALL_MOONCAKE}" = "1" ]; then echo "INSTALL_MOONCAKE=1: installing Mooncake ${MOONCAKE_REF}" && \
         rm -rf ${MOONCAKE_HOME} /usr/local/go && \
         git clone ${MOONCAKE_REPO} ${MOONCAKE_HOME} && cd ${MOONCAKE_HOME} && \
-        git checkout ${MOONCAKE_COMMIT} && git submodule update --init --recursive && \
+        git checkout ${MOONCAKE_REF} && echo "Mooncake ${MOONCAKE_REF} is $(git rev-parse HEAD)" && \
+        git submodule update --init --recursive && \
         bash dependencies.sh -y && \
         mkdir build && cd build && \
         cmake .. -DBUILD_SHARED_LIBS=ON -DUSE_HIP=ON -DENABLE_MULTI_PROTOCOL=ON -DUSE_HTTP=ON -DUSE_ETCD=ON -DSTORE_USE_ETCD=ON -DBUILD_UNIT_TESTS=OFF && \
@@ -59,8 +58,7 @@ WORKDIR /sgl-workspace
 ARG UCX_REPO="https://github.com/ROCm/ucx.git"
 ARG UCX_COMMIT="da3fac2a"
 ARG NIXL_REPO="https://github.com/ai-dynamo/nixl.git"
-# v1.4.1
-ARG NIXL_COMMIT="778edd1d1a50936b12c264879e12ef465e629002"
+ARG NIXL_REF="v1.4.1"
 # ai-dynamo/nixl#2191 (ROCm fix, not in v1.4.1)
 ARG NIXL_CHERRY_PICK="fe3244c875ee4a22da6b0140c94c334546e9b715"
 ARG INSTALL_NIXL=1
@@ -69,7 +67,7 @@ ENV NIXL_HOME=/sgl-workspace/nixl
 ENV PATH=${UCX_HOME}/bin:${PATH}:/usr/local/bin/etcd
 ENV LD_LIBRARY_PATH=${NIXL_HOME}/lib/x86_64-linux-gnu:${UCX_HOME}/lib:${LD_LIBRARY_PATH}
 # Replaces any NIXL the base ships. NIXL's build rejects distro Abseil without absl_log (e.g. Ubuntu 24.04's).
-RUN if [ "${INSTALL_NIXL}" = "1" ]; then echo "INSTALL_NIXL=1: installing NIXL at ${NIXL_COMMIT}" && \
+RUN if [ "${INSTALL_NIXL}" = "1" ]; then echo "INSTALL_NIXL=1: installing NIXL ${NIXL_REF}" && \
         pip install meson meson-python patchelf tomlkit uv && \
         if dpkg -s libabsl-dev >/dev/null 2>&1; then apt-get remove -y libabsl-dev; fi && \
         pip uninstall -y nixl nixl-rocm nixl-cu12 nixl-cu13 && \
@@ -82,7 +80,8 @@ RUN if [ "${INSTALL_NIXL}" = "1" ]; then echo "INSTALL_NIXL=1: installing NIXL a
             --with-rocm=/opt/rocm --with-verbs --with-dm --enable-mt --without-go && \
         make -j && make install && \
         git clone ${NIXL_REPO} ${NIXL_HOME} && cd ${NIXL_HOME} && \
-        git checkout ${NIXL_COMMIT} && git cherry-pick --no-commit ${NIXL_CHERRY_PICK} && \
+        git checkout ${NIXL_REF} && echo "NIXL ${NIXL_REF} is $(git rev-parse HEAD)" && \
+        git cherry-pick --no-commit ${NIXL_CHERRY_PICK} && \
         meson setup build --prefix=${NIXL_HOME} -Ducx_path=${UCX_HOME} -Dwheel_variant=rocm -Denable_plugins=UCX && \
         ninja -C build install && \
         ./contrib/tomlutil.py --wheel-name nixl-rocm pyproject.toml && \

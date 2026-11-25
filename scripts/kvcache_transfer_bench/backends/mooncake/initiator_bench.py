@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 # Add parent to path for common imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from common.net_detect import rdma_device
 from common.utils import (
     add_common_bench_args,
     append_result_to_file,
@@ -159,7 +160,7 @@ def main():
 
     # Hardcoded / from env (same style as nixl/mori)
     protocol = "rdma"
-    device_name = os.environ.get("IBDEVICES", "mlx5_0")
+    device_name = os.environ.get("IBDEVICES") or rdma_device()
     gpu_id = 0
     threads = 1
     batch_size = 1
