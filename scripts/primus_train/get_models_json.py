@@ -68,7 +68,7 @@ def list_models():
         return models
     # recursive=True is required for ** to span directories; without it configs nested one
     # level deeper (examples/<launcher>/configs/<arch>/diffusion/*.yaml) are silently skipped,
-    # which hides all of the nemo_automodel backend added in Primus v26.6.
+    # which hides all of the automodel backend (nemo_automodel before Primus v26.10).
     for yaml_path in sorted(glob.glob(CONFIGS_GLOB, recursive=True)):
         rel_path = os.path.relpath(yaml_path, PRIMUS_ROOT)
         # Path shape: examples/<launcher>/configs/<arch>/<file>.yaml
