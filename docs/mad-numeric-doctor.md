@@ -1,15 +1,16 @@
-# NaN-Doctor in MAD: user manual
+# Numeric Doctor in MAD: user manual
 
 This manual covers the current integration: the `mad-debug-numeric` skill in MAD, the
 `madengine nan` commands and the `nan_doctor` tool in madengine, and the container
-runtime (`nan_doctor_rt`) that madengine ships. The nan-doctor sources they were
-ported from are upstream commit `6ce054c`.
+runtime (`nan_doctor_rt`) that madengine ships. Numeric Doctor was called NaN-Doctor
+before; the commands, the tool and the `NAN_*` variables keep the `nan` names. The
+sources they were ported from are upstream commit `3a3f2b3`.
 
 Every command below was run on one 8× AMD Instinct MI300X (gfx942) node, with madengine on branch
 `nan-doctor-integration`. Where an example did not reproduce, the section says so
 (1.4 and 3.4).
 
-## 1. What is NaN-Doctor?
+## 1. What is Numeric Doctor?
 
 A skill for an LLM harness (Claude Code, Cursor, Codex) that debugs numeric failures in
 the AI models you run with madengine. A numeric failure is a NaN, an Inf, a loss or
@@ -21,9 +22,11 @@ Expected usage:
 - Numeric failures in models or system libraries.
 - PyTorch-based frameworks and models.
 - AMD Instinct GPUs (MI300X, MI350X/MI355X).
-- Training and inference. vLLM and SGLang are supported by their own capture modes.
+- Training and inference. vLLM (tensor and pipeline parallel, multi-node) and SGLang
+  (tensor, pipeline and data parallel) are supported by their own capture modes.
 - Multi-GPU in one node. Multi-node runs launched by madengine's SLURM deployment capture
   per node; models with their own multi-node launcher (`slurm_multi`) get no capture.
+  A finished reproducer can be re-run on other SLURM nodes (`madengine nan verify-nodes`).
 
 **What you get out.** An artifact directory with a **capsule** (the saved record of the
 first op that went bad, with its inputs), a **group** (capsules that share one cause),
@@ -69,6 +72,9 @@ In MAD (branch `nan-doctor-integration`):
 | Workflow (Claude Code only, plans by default) | `.claude/workflows/mad-nan-hunt.js`, `docs/mad-nan-hunt.md` |
 | GPU run helper | `.claude/skills/mad-common/mad-run.sh` |
 | Two validation models | `scripts/dummy` (`dummy_nan`), `scripts/torchtitan_qwen3_moe_nan` |
+| Numeric Doctor examples (tag `numeric_examples`, section 7) | `scripts/numeric_softmoe_train_nan`, `scripts/numeric_qwen_vllm_serve_nan` |
+| Validation against the examples (`/mad-validate-numeric`) | `.claude/skills/mad-validate-numeric/` |
+| Live panel and status line (Claude Code mod) | `.claude/mods/numeric-doctor/` |
 
 Not ported from nan-doctor: its own launcher `nd`, the Slurm and Apptainer site profiles.
 `madengine run` and `mad-run.sh` take their place.
@@ -300,7 +306,43 @@ a NCCL timeout, and another 1800 s of a queued all-gather with no kernel launche
 root cause (solution 13813) and the fix were not reproduced here. Run it on a node where
 `qwen3_moe_debug` completes steps; the skill, tool and runtime path for it is the one in section 3.
 
-## 7. Root cause and fix (steps 7 and 8, experimental)
+## 7. Numeric Doctor's examples and `/mad-validate-numeric`
+
+Numeric Doctor ships example workloads, each with a known numeric bug and no hint of it in
+its code or names. The two that run on MI300X are MAD models, tag `numeric_examples`:
+
+| Model | Workload | Signal |
+|---|---|---|
+| `pyt_numeric_softmoe_train_nan` | A soft-MoE language model trained under `torch.compile`, 1 GPU | `Loss is not finite` (step 37 on MI300X) |
+| `pyt_numeric_qwen_vllm_serve_nan` | Qwen2.5-0.5B shape, random bf16 weights, served by vLLM's offline `LLM.generate()`, 1 GPU | `Logprobs are not finite` (request 49 on MI300X) |
+
+Each run fails when the bug fires; a clean run prints the performance line. The answers
+(verdict, root cause, fix) are cards in Numeric Doctor's checkout,
+`mad-numeric-doctor/validation/expected/<example>.json`, and are not copied into MAD.
+
+`/mad-validate-numeric` checks the whole skill against them. It runs `/mad-debug-numeric`
+unattended on each example through the `mad-numeric-doctor` agent, with an intake file and
+fresh eyes (`priors: none`), and then compares each run's `result.json` with the card:
+
+```text
+/mad-validate-numeric --answers <numeric-doctor checkout>/mad-numeric-doctor/validation/expected
+```
+
+(or set `NUMERIC_DOCTOR_ANSWERS`). The comparison is `python3 -m nan_doctor_rt.compare_results
+<card> <artifact dir>`, run in the model's image with the cards mounted read-only. It prints
+`RESULT_COMPARE=SAME|REFINED|DIFFERENT` per level (bug, root cause, fix). Step 8 never runs
+unattended, so a pass is a `SAME` or `REFINED` bug and root cause. Expect 20-90 minutes
+per example; progress is in `nan_hunts/<date>-validate-numeric/validate_ledger.md`.
+
+### Live panel (Claude Code)
+
+`madengine nan ledger` rewrites `<ARTIFACT_DIR>/status.json` on every ledger line: the
+reproducer, root cause, fix, the current step and job, and one summary line. `madengine nan
+ledger <LEDGER> status` prints it. The mod in `.claude/mods/numeric-doctor` shows it as a side
+panel and a status line (`/numeric-doctor` opens the panel). Load it with `claude --plugin-dir
+.claude/mods/numeric-doctor`; `claude plugin test .claude/mods/numeric-doctor` runs its test.
+
+## 8. Root cause and fix (steps 7 and 8, experimental)
 
 On by default, within a time budget the skill states (roughly 1 h when the reproducer hits every run, 4 h when it
 does not). Step 7 root-causes from the reproducer: a mutation sweep of the kernel
@@ -312,7 +354,7 @@ The skill reports what it found, or says it found nothing; `/mad-nan-hunt` enter
 arithmetic) or for the Qwen3-MoE example (section 6); the commands behind them are in
 `.claude/skills/mad-debug-numeric/reference/step7-rootcause.md` and `step8-fix.md`.
 
-## 8. Reference
+## 9. Reference
 
 ### `madengine nan` commands
 
@@ -322,6 +364,7 @@ arithmetic) or for the Qwen3-MoE example (section 6); the commands behind them a
 | `group` | 5a | Group capsules; order the groups for replay |
 | `replay`, `summary` | 5b | Replay a capsule under load (the concurrency ladder); summarise an attempt |
 | `package`, `readme` | 6 | Build, describe and pack a reproducer |
+| `verify-nodes` | 6 | Run the extracted reproducer on K other SLURM nodes (`script --submit`), then score each node (`score`) |
 | `report` | 9 | Draft `report.md` and `result.json` |
 | `arms`, `diff` | 2 | Differential mode (section 4) |
 | `intake`, `ledger`, `verdict`, `waves`, `handoff`, `power`, `kernel-match`, `digest` | | Readers, gates and bookkeeping |
@@ -339,13 +382,18 @@ arithmetic) or for the Qwen3-MoE example (section 6); the commands behind them a
 ### Other capture modes
 
 Selected by `PYTHONPATH` in `docker_env_vars`, as an absolute path inside the container:
-`/myworkspace/scripts/common/tools/nan_doctor/nan_doctor_rt/<dir>`.
+`<RT>/<dir>`, where `<RT>` is `/myworkspace/scripts/common/tools/nan_doctor/nan_doctor_rt`.
 
 | `<dir>` | Mode |
 |---|---|
 | `diff_tap` | Differential mode (section 4) |
-| `vllm_capture`, `vllm_graphs` | vLLM tensor-parallel workers; vLLM CUDA graphs |
-| `sglang_capture` | SGLang |
+| `vllm_capture`, `vllm_graphs` | vLLM workers (tensor and pipeline parallel, multi-node; capsules tagged `pp<i>/tp<j>`); vLLM CUDA graphs |
+| `sglang_capture`, `sglang_graphs` | SGLang (tensor, pipeline and data parallel); SGLang CUDA graphs |
+
+An OpenAI-compatible server (`vllm serve`, SGLang `launch_server`) runs under
+`bash <RT>/bin/serve_run.sh --server "<server command with {port}>" --requests <requests.jsonl>`,
+which starts the server, sends the requests with `serve_client.py`, and prints the signal
+for non-finite logprobs. Multi-GPU trials run with `--pid=host`.
 | `inductor_capsule` | `torch.compile` kernels (replay: `python3 -m nan_doctor_rt.replay_inductor_kernel`) |
 
 ### How this differs from the original NaN-Doctor
@@ -358,7 +406,7 @@ Selected by `PYTHONPATH` in `docker_env_vars`, as an absolute path inside the co
 | Artifacts | `artifacts/<date>-<name>/` | `nan_hunts/<hunt>/` (gitignored) |
 | Skill name | `debug-numeric` | `mad-debug-numeric` (agent `mad-numeric-doctor`); the command group, tool and variables keep the `nan` names |
 
-## 9. Verification record
+## 10. Verification record
 
 | Check | Result |
 |---|---|
@@ -367,9 +415,13 @@ Selected by `PYTHONPATH` in `docker_env_vars`, as an absolute path inside the co
 | Twin references (section 5) | Passed, 16 checks |
 | GPT-2 on 8 GPUs, capture and replay, `--learning_rate 1 --max_steps 20` | Captured `aten.mm.default` in the backward on all 8 ranks, one group; replay 160/160 non-finite (`FP32_OVERFLOW?`: model numerics) |
 | Qwen3-MoE (section 6) | Not reproduced: the job does not finish a step on this node |
-| vLLM and SGLang capture, Inductor capsule, vLLM graphs | Ported, not run on this node |
-| Root cause and fix (section 7) | Not run |
-| Tests | madengine `tests/unit/nan_doctor`: 92 pass on the host, plus the 21 torch tests in the GPT-2 image; MAD `tools/tests`: 26 Python (1 skipped) and 65 Node tests pass |
+| `pyt_numeric_softmoe_train_nan` (section 7) | Passed. Clean runs NaN at step 37 and 32. The capture needs `NAN_CAPTURE_SUSPEND=torch._dynamo.eval_frame:OptimizedModule.__call__` (without it the capture run trained clean); it captured `inductor.triton_poi_fused__softmax__to_copy_mul_sqrt_unsqueeze_8`, inputs finite; replay 100/100 `KERNEL_BUG`; extracted reproducer 100/100 |
+| `pyt_numeric_qwen_vllm_serve_nan` (section 7) | Passed. Clean run NaN at request 49. Capture with `<RT>/vllm_graphs:<RT>/vllm_capture` and `ND_VLLM_CUDAGRAPH_MODE=NONE` (`vllm_graphs` alone captured nothing) caught `inductor.triton_per_fused__to_copy_embedding_rms_norm_0` (rank tag `pp0/tp0`); replay 100/100 `FP32_OVERFLOW?`; extracted reproducer 100/100 |
+| Result comparison (`/mad-validate-numeric`'s compare step) | `madengine nan exec --mount <answers>:<answers>:ro -- python3 -m nan_doctor_rt.compare_results` runs and prints `RESULT_COMPARE=`; the skill's unattended agent runs were not run |
+| vLLM TP > 1, SGLang capture, vLLM graph check, `verify-nodes` on SLURM | Ported, not run on this node (no SLURM) |
+| Settle link and graph record (madengine `tests/unit/nan_doctor/gpu`) | Passed: `SETTLE_LINK=PASS 24 0`, `GRAPH_RECORD=PASS 10 0` |
+| Root cause and fix (section 8) | Not run |
+| Tests | madengine `tests/unit/nan_doctor`: 111 pass on the host, plus the 21 torch tests in the GPT-2 image; MAD `tools/tests`: 26 Python (1 skipped) and 65 Node tests pass; `claude plugin test .claude/mods/numeric-doctor`: 1 pass |
 
 Two fixes came out of this run and are in madengine: `package` now copies every module the replay
 imports (`math_refs`, `twins`, `inductor_ref`, `failure_signature`, `capsule_operands`) into the reproducer,
