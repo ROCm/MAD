@@ -57,9 +57,11 @@ NaN only graphs make (*Graph-only NaN*, `step5n-compiled.md`). In `docker_env_va
 "ND_GRAPH_CHECK": "1", "ND_GRAPH_CHECK_DIR": "/myworkspace/<ARTIFACT_DIR>/capsules_graph"`.
 The controls stay as the user runs the model (graphs on): they are the rate. **Capture runs
 clean while the controls NaN** = the NaN needs graphs: read the graph-check run's
-`GRAPH_CHECK` line and go to 5N's graph-only route, not to `step5-pressure.md`. TP > 1: put
-both on `PYTHONPATH` (`<RT>/vllm_graphs:<RT>/vllm_capture`, `vllm_graphs` first). SGLang's own
-graph runner is not covered (its capture run: `--disable-cuda-graph`, the server's flag; no graph check).
+`GRAPH_CHECK` line and go to 5N's graph-only route, not to `step5-pressure.md`. The capture
+run puts both on `PYTHONPATH` (`<RT>/vllm_graphs:<RT>/vllm_capture`, `vllm_graphs` first) at
+any TP: `vllm_graphs` alone arms no capture in an inference loop. SGLang:
+`<RT>/sglang_graphs` (first) -- capture runs `ND_SGLANG_DISABLE_CUDA_GRAPH=1` (graphs off, no
+edit), one run `ND_GRAPH_CHECK=1` (`GRAPH_ONLY` / `NOT_GRAPH_ONLY`); `step1-ask.md` *SGLang*.
 
 After the capture run: `madengine nan group` (5a, `step5-read.md`), then 5b
 `madengine nan replay` (`step5-run.md`), then step 6 `madengine nan package`

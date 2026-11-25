@@ -50,8 +50,10 @@ transformers `generate` -- per request the tokens, the chosen token's logprob an
 (logprobs raised to >= 2 on a copy of the sampling params: the engine computes two more numbers, the math is
 unchanged); training -- the loss per `backward()` and `clip_grad_norm_`'s result. A hand-written loop:
 `ND_DIFF_TAP=fwd` (the outermost `nn.Module`'s output) or `ND_DIFF_FUNC=<function>` (the return value of a
-function of the script, e.g. `generate`: tokens only, no logprobs). `vllm serve` / `sglang.launch_server`: not
-covered.
+function of the script, e.g. `generate`: tokens only, no logprobs). A server (`vllm serve` /
+`sglang.launch_server`): each arm's run is `$NAN_DOCTOR_RT/bin/serve_run.sh --server "<command with {port}>"
+--requests <file>` (`step1-ask.md` *vLLM*) -- the client records the outputs (and runs check mode); the
+switches act in the server's processes.
 
 ## Read the verdict
 

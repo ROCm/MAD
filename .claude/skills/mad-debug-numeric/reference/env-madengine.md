@@ -56,6 +56,10 @@ then `mad-run.sh wait <run-id>`. A shipped package's own script -- the extracted
 
 The submission host usually has no GPU and no docker. `madengine run` (clean and capture) goes through madengine's SLURM deployment as usual and each node writes its own `nan_doctor_output/`. Run `group`, `replay` and `package` on ONE GPU node that has docker and the image (e.g. `srun -N1 --gpus-per-node=8 madengine nan replay ...` from the MAD root on the shared filesystem); that is site-specific, so ask the user how GPU nodes are reached, and ledger it. Models with their own multi-node launchers (`slurm_multi`) do not get the tool on their ranks: capture is not available for them.
 
+Step 6's check on other nodes: `madengine nan verify-nodes script --package <extracted copy> --out <ARTIFACT_DIR>/verify_nodes/<G> --nodes 2 --exclude <the 5b host> --submit`, then, after the job, `madengine nan verify-nodes score <ARTIFACT_DIR>/verify_nodes/<G>` (`step6-finish.md` item 4). Each node needs the image.
+
+A server as a trial (any step): `<GPU_EXEC> 'bash $NAN_DOCTOR_RT/bin/serve_run.sh --server "<command with {port}>" --requests <jsonl>'` (`step1-ask.md` *vLLM* / *SGLang*).
+
 ## Job hygiene
 
 * `mkdir -p` an output directory before a command writes into it; a missing directory loses the output silently.

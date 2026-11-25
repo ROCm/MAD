@@ -102,8 +102,12 @@ madengine nan group <CAPSULE_DIR> --manifest build_manifest.json --out-dir <ARTI
   finite, not arrived) -- or, if none, the earliest arrival (group, seq): the origin is
   a member of that group the capture could not see into (a suspended/compiled region,
   or the collective itself).
-* Per rank: `CAPTURED` / `nan-seen` / `clean`, the capsule's op, and where its first NaN
-  arrived from. Ranks that only received the NaN are not the bug: replay the origin's.
+* Per rank: `CAPTURED` / `nan-seen` / `clean`, the capsule's op, its tag (`pp<i>/tp<j>`, vLLM),
+  and where its first NaN arrived from. Ranks that only received the NaN are not the bug: replay
+  the origin's.
+* A NaN that reached a **pipeline stage** through the pipeline's send / recv (outside the
+  dispatcher: no arrival is recorded): of the ranks that hold the NaN with no tracked arrival,
+  only the EARLIEST stage is named origin (`NAN_CAPTURE_RANK_TAG`, set by `vllm_capture`).
 * `--job` groups without geometry (EP/PP ranks run one site on different shapes).
 * Ledger: origin ranks, arrivals, capsule of the origin rank.
 

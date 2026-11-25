@@ -207,6 +207,12 @@ re-derived from the device in use, never carried over from another.
     `step6-finish.md` *Then*). Each is a short, clearly marked block of its own, not a
     clause inside a status line. The hand-over is printed before step 7 starts and
     repeated at the top of the step-9 report.
+14. **`<ARTIFACT_DIR>/status.json`** is the investigation's state as data (reproducer, root
+    cause, fix, current step and job), rewritten by `madengine nan ledger` on every ledger
+    line; the numeric-doctor panel (`.claude/mods/numeric-doctor`) reads it. Nothing to do but
+    keep the milestone lines exact (`TARBALL`, `LADDER_RESULT=`, `HANDOVER announced`,
+    `ROOT_CAUSE=` / `NO_ROOT_CAUSE`, `FIX=`); `madengine nan ledger <LEDGER> status` rewrites it
+    and prints its one line.
 
 ## Placeholders
 

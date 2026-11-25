@@ -39,10 +39,22 @@ tarball's path and `sha256`. Left to you:
    package without it takes minutes -- give the call a long timeout):
    `madengine nan readme --repro <ARTIFACT_DIR>/repro-<G> --repack --ledger <LEDGER> --step 'step6[<G>]'`
    (tars, prints and ledgers the new sha256; the report takes the latest line).
-4. Tell the user path, size and the one command -- as *the reproducer is done*, not
+4. **On other nodes** (SLURM): the package's `run.sh` on 2 OTHER nodes at once, each from its own
+   copy, the way a vendor runs it --
+   `madengine nan verify-nodes script --package <the extracted copy> --out <ARTIFACT_DIR>/verify_nodes/<G> --nodes 2 --exclude <the 5b host> --submit`,
+   right after the extracted copy verifies (it runs while you do 1-3). `VERIFY_NODES=NO_SLURM`:
+   ledger `verify-nodes skipped: no SLURM` and go on. After the job,
+   `madengine nan verify-nodes score <ARTIFACT_DIR>/verify_nodes/<G>` prints
+   `NODES_REPRODUCED=<k>/2 hosts=<host>:<verdict>,...`. Ledger it. `2/2`: say "reproduces on 3
+   nodes" in the README. `NODE_DEPENDENT` (k=1) or `REPRODUCES_NOWHERE_ELSE` (k=0): the node is a
+   variable of the bug -- the README says on which hosts it reproduced and on which not,
+   `<NAN_KIND>` cannot be `deterministic` without it, and step 7 reads it (a hardware or firmware
+   difference, a tuning file, a node-specific library build). `ERROR` on a node: the package, not
+   the bug -- fix `run.sh` and verify again.
+5. Tell the user path, size and the one command -- as *the reproducer is done*, not
    *the NaN is solved*. A no-chain capsule
    (`--chain-fallback`): the README must say the operands were never validated.
-5. **A co-tenant reproducer** (`step5-pressure.md`): the README's contention paragraph
+6. **A co-tenant reproducer** (`step5-pressure.md`): the README's contention paragraph
    says the replay alone does not reproduce and names the load. Add which loads ran
    clean (the 5d results: e.g. forward-only, one co-tenant process, no co-tenant) --
    they bound the trigger for the vendor -- and that the co-tenant itself runs the same
@@ -73,7 +85,8 @@ repro-native/
 2. **Verify from an extracted copy** (`step6-build.md` *Verify from an extracted copy*):
    tar, extract under `<ARTIFACT_DIR>/verify-native/`, run *that* `run.sh` through
    `mad-run.sh` (from its own directory, in an empty environment: a vendor's `bash run.sh`).
-   Pass = `NATIVE_TOTAL` `n/N > 0` near the ledger rate.
+   Pass = `NATIVE_TOTAL` `n/N > 0` near the ledger rate. Then on 2 other nodes, as item 4 of
+   the capsule reproducer above (`verify-nodes score` reads `NATIVE_TOTAL`).
 3. **README**, short: what it reproduces (op or region, shapes, dtypes, precision
    flags) and the verdict with the fp64 check -- for a finite signal (`fp64_ref=WRONG_VALUE`
    hits) the first sentence says it reproduces **wrong values, not a NaN**, and names the
@@ -116,13 +129,16 @@ from its Triton source by **the image's** torch / triton.
 ## Then
 
 Every reproducing group packed: **announce the hand-over** -- always, as its own block
-(SKILL.md rule 12), combined with the path/size/command -- then go on to step 7 in the
+(SKILL.md rule 12), combined with item 5's path/size/command -- then go on to step 7 in the
 same turn. Classify `<NAN_KIND>` first (`step7-rootcause.md` *Entry*) so the budgets quoted
 fit it. **Print the block before any step-7 call** -- before `$LG start step7[<G>]`, the
 `rootcause/` dir or the first experiment: it marks the boundary. **Ledger it** in the same
 call as `$LG end step6[<G>]` (`$LG note step6[<G>] "HANDOVER announced: <tarball> -> step 7
-(RC <RC_BUDGET>, FIX <FIX_BUDGET>)"`): text printed mid-turn can scroll off or fold under the
-next tool output, so step 9 repeats it from this line (`step9-report.md` *Always report*).
+(RC <RC_BUDGET>, FIX <FIX_BUDGET>)"`; `status.json`'s reproducer keys on it, SKILL.md rule 14).
+This skill runs as a forked subagent: the user reads its final answer, not text printed
+mid-run, so steps 7-8 stay in this run (no background fork) and step 9 repeats the block at the
+top of the report from this line (`step9-report.md` *Always report*). While the run goes on,
+`madengine nan ledger <LEDGER> status` answers *where are we* from the main session.
 
 ```markdown
 > **✅ Reproducer generated** -- `<tarball>` (<size>), run it with `<one command>`.

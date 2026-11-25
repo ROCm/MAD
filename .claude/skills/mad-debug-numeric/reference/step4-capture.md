@@ -25,7 +25,7 @@ Nothing arms without `NAN_CAPTURE_DIR`.
 
 | Workload | `PYTHONPATH` entry | What it patches |
 |---|---|---|
-| vLLM, tensor parallel > 1 | `<RT>/vllm_capture` | `Worker.execute_model` in each TP worker (`step1-ask.md` *vLLM*) |
+| vLLM: tensor parallel > 1, or TP 1 in-process (`VLLM_ENABLE_V1_MULTIPROCESSING=0`) | `<RT>/vllm_capture` | `Worker.execute_model` in each worker (`step1-ask.md` *vLLM*) |
 | vLLM CUDA graphs | `<RT>/vllm_graphs` | graph-only NaN check; graph replays are invisible to the op hook |
 | SGLang | `<RT>/sglang_capture` | the SGLang scheduler (`step1-ask.md` *SGLang*) |
 | `torch.compile` / Inductor | `<RT>/inductor_capsule` | the kernel Inductor's NaN asserts caught, replayed later with `python3 -m nan_doctor_rt.replay_inductor_kernel` (the capture itself watches Inductor kernel launches without it: `NAN_CAPTURE_INDUCTOR=0` turns that off) |

@@ -182,7 +182,9 @@ runtime in the container during a run):
 
 * **In-process engine, or nothing is captured.** vLLM V1 runs the engine core -- and the model --
   in a subprocess unless `VLLM_ENABLE_V1_MULTIPROCESSING=0`; a capture in the serving loop then
-  sees no model op. Not set by the model: add it to the capture run's `docker_env_vars`.
+  sees no model op. Not set by the model: add it to the capture run's `docker_env_vars`. At
+  TP 1 the capture run gets `"PYTHONPATH": "<RT>/vllm_capture"` too, as below: an inference
+  loop has no optimizer step for the tool's hook.
 * **Tensor parallel > 1 on one node** puts the model in one worker process per rank: the capture
   goes INTO the workers. The capture run gets `"PYTHONPATH": "<RT>/vllm_capture"` in
   `docker_env_vars` and runs the model unchanged (no wired copy, nothing to restore in step 9),
@@ -195,14 +197,27 @@ runtime in the container during a run):
   `nan_doctor_rt/vllm_capture/sitecustomize.py` (`_WARMUPS`) before trusting a request-0 capsule.
   A NaN made by the all-reduce itself is captured at `vllm.all_reduce` on every rank (a
   COLLECTIVE group, `step5-read.md`) -- in the default compiled mode too, where vLLM's custom ops
-  still run as ops. **Pipeline parallel > 1 or several nodes**: not covered -- capture at size 1
-  if the NaN still happens there (a fresh step-2 rate at size 1), else tell the user the capture
-  cannot reach it and go to step 5N (`CAPTURE_UNREACHABLE`, `step5n-native.md`) after an
-  explicit step-2 rate at the original size.
-* **`vllm serve`** (an OpenAI server): the model runs in the server's processes, not a loop of
-  the model script's -- an offline `vllm.LLM` driver under `<ARTIFACT_DIR>` that sends the
-  failing requests (one process, run with `<GPU_EXEC>`) is what can be debugged; ledger the
-  substitution.
+  still run as ops. **Pipeline parallel > 1 and several nodes** (vLLM's own `--nnodes` /
+  `--node-rank`; Ray clusters are not covered): the same shim. Every worker of every stage gets
+  every `execute_model`, so the stop stays in lockstep; the job manifest tags each rank
+  `pp<i>/tp<j>`. A later stage's NaN arrives through the pipeline's send / recv, which the capture
+  does not see -- of the ranks that hold the NaN, the EARLIEST stage is the origin (the manifest's
+  verdict says so). Several nodes: only the head node runs the engine (an offline `vllm.LLM`
+  cannot be a follower), so the head runs `vllm serve` through `serve_run.sh` (below) and every
+  other node `vllm serve --headless --node-rank <rank>`; every node must SEE exactly its share of
+  the GPUs (TP x PP / nnodes: vLLM 0.33 counts a rank as on the reader's node by
+  `rank // device_count`) -- export `HIP_VISIBLE_DEVICES` / `CUDA_VISIBLE_DEVICES` = `0..<share-1>`
+  on every node. Validated upstream on one node (PP 2, TP 2 x PP 2) and over two nodes
+  (TP 2 x PP 2); not yet run through madengine's SLURM launch.
+* **`vllm serve`** (an OpenAI server): run the server itself, with the user's failing requests,
+  as one trial in the model's image: `<GPU_EXEC> 'PYTHONPATH=$NAN_DOCTOR_RT/vllm_capture:$PYTHONPATH
+  bash $NAN_DOCTOR_RT/bin/serve_run.sh --server "vllm serve <model> --port {port} ..." --requests
+  <requests.jsonl>'` (plus the capture's `NAN_*` variables as `--env`). It starts the server, waits
+  for `/health`, sends the requests through `serve_client.py` and stops the server; `{port}` =
+  18000 + 10 x the trial's first GPU. The capture shims act in the server's worker processes as for
+  an offline driver. `<NAN_SIGNAL>` = `Logprobs are not finite` (the client's line -- also when
+  vLLM answers HTTP 400 because it cannot serialise a NaN logprob). The requests come from the
+  user (a JSONL of prompts or token ids); never invent traffic. Ledger the request file.
 * **Compiled by default** (`enforce_eager=False`: `torch.compile` + HIP graphs): a NaN born in
   compiled code reaches the capture only `PROPAGATED` at the next eager op (usually
   `vllm.unified_attention_with_output`) -- expected, and the route to `step5n-compiled.md` (its
@@ -220,10 +235,19 @@ runtime in the container during a run):
 * **Seen and not seen:** the prefill runs eagerly (SGLang's default on ROCm), so the capture sees
   it, aiter / `sgl_kernel` custom ops as one op each (`aiter.rmsnorm2d_fwd`); decode steps are HIP
   graph replays and are not seen. A NaN born only in decode reaches the capture `PROPAGATED` at the
-  next prefill, or not at all: rerun with `disable_cuda_graph=True` in the engine arguments.
-* **Tensor / data parallel > 1** (`tp_size`, `dp_size`): one scheduler per rank, no shared stop --
-  not supported; capture at size 1 if the NaN survives it, else step 5N (`CAPTURE_UNREACHABLE`)
-  as for vLLM.
+  next prefill, or not at all: put `<RT>/sglang_graphs` first on `PYTHONPATH` with
+  `ND_SGLANG_DISABLE_CUDA_GRAPH=1` -- graphs off without an edit, for `sglang.Engine` and
+  `launch_server` alike; `ND_GRAPH_CHECK=1` on one run tells a graph-only NaN (`GRAPH_ONLY` /
+  `NOT_GRAPH_ONLY`, as vLLM's `vllm_graphs`).
+* **Tensor / pipeline / data parallel > 1** (`tp_size`, `pp_size`, `dp_size`): one capture per
+  scheduler rank; a replica's ranks stop together over its default group (they share every
+  batch); data-parallel replicas (not DP attention) each capture into `<CAPSULE_DIR>/.../dp<i>`.
+  Validated upstream: TP 2 and DP 2, `REPRODUCED`. `madengine nan exec` adds `--pid=host` to
+  multi-GPU trials: with per-container PIDs and the shared IPC namespace, concurrent TP-2 trials
+  died in `ncclCommInitRank` ("unhandled cuda error").
+* **`sglang.launch_server`** (an HTTP server): as `vllm serve` above, with `--api sglang` and
+  `--server "python3 -m sglang.launch_server --model-path <model> --port {port} ..."` (SGLang's
+  native `/generate`).
 * **ROCm images run as root**: aiter writes into root-owned directories (its JIT dir); a replay
   as the host uid (`madengine nan exec --as-user`) dies at `import aiter` -- don't pass it.
 
