@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoRI-EP &amp; MoRI-IO on MI300X + Broadcom Thor2 — Validation Report</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
+    --txt:#e6edf3; --muted:#9da7b3; --accent:#58a6ff; --green:#3fb950;
+    --red:#f85149; --amber:#d29922; --purple:#bc8cff; --cyan:#39c5cf;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+    line-height:1.6;font-size:15px}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px 80px}
+  header{background:linear-gradient(135deg,#161b22 0%,#1c2438 100%);
+    border-bottom:1px solid var(--border);padding:44px 24px 34px;margin-bottom:8px}
+  header .wrap{padding-bottom:0}
+  h1{font-size:29px;margin:0 0 6px;letter-spacing:-.4px}
+  h1 .sub{color:var(--muted);font-weight:400;font-size:17px}
+  .status-line{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 13px;border-radius:20px;
+    font-size:13px;font-weight:600;border:1px solid}
+  .pill.ok{background:rgba(63,185,80,.12);color:var(--green);border-color:rgba(63,185,80,.4)}
+  .pill.info{background:rgba(88,166,255,.12);color:var(--accent);border-color:rgba(88,166,255,.4)}
+  .pill.warn{background:rgba(210,153,34,.12);color:var(--amber);border-color:rgba(210,153,34,.4)}
+  .meta{color:var(--muted);font-size:13px;margin-top:14px}
+  h2{font-size:22px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border);
+    letter-spacing:-.3px}
+  h2 .n{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+  h3{font-size:17px;margin:26px 0 10px;color:var(--txt)}
+  p{margin:10px 0}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--mono);background:var(--panel2);padding:2px 6px;border-radius:4px;
+    font-size:13px;color:var(--cyan)}
+  pre{background:#010409;border:1px solid var(--border);border-radius:8px;padding:16px 18px;
+    overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#c9d1d9}
+  pre .g{color:var(--green)} pre .r{color:var(--red)} pre .a{color:var(--amber)}
+  pre .b{color:var(--accent)} pre .m{color:var(--muted)} pre .p{color:var(--purple)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:20px 22px;margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px;
+    background:var(--panel2)}
+  td.mono,th.mono{font-family:var(--mono);font-size:12.5px}
+  td.num{font-variant-numeric:tabular-nums;text-align:right}
+  tr:hover td{background:rgba(88,166,255,.04)}
+  .tag{font-family:var(--mono);font-size:11.5px;padding:2px 7px;border-radius:4px;font-weight:600;white-space:nowrap}
+  .tag.pass{background:rgba(63,185,80,.15);color:var(--green)}
+  .tag.fail{background:rgba(248,81,73,.15);color:var(--red)}
+  .tag.na{background:rgba(157,167,179,.15);color:var(--muted)}
+  .tag.warn{background:rgba(210,153,34,.15);color:var(--amber)}
+  .callout{border-left:4px solid var(--accent);background:var(--panel2);padding:14px 18px;
+    border-radius:0 8px 8px 0;margin:16px 0}
+  .callout.ok{border-color:var(--green)} .callout.red{border-color:var(--red)}
+  .callout.amber{border-color:var(--amber)}
+  .callout .lbl{font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--muted);margin-bottom:4px}
+  .flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;margin:18px 0}
+  .step{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--border);
+    padding:14px;position:relative;text-align:center}
+  .step:not(:last-child){border-right:none}
+  .step .num{font-family:var(--mono);color:var(--accent);font-size:12px;font-weight:700}
+  .step .t{font-weight:600;font-size:13.5px;margin:4px 0}
+  .step .d{color:var(--muted);font-size:12px}
+  .step.good{border-top:3px solid var(--green)}
+  .step.bad{border-top:3px solid var(--red)}
+  .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:18px 0}
+  @media(max-width:760px){.kpi{grid-template-columns:repeat(2,1fr)}}
+  .kpi .box{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:18px;text-align:center}
+  .kpi .v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+  .kpi .v.g{color:var(--green)} .kpi .v.b{color:var(--accent)} .kpi .v.a{color:var(--amber)}
+  .kpi .l{color:var(--muted);font-size:12px;margin-top:4px}
+  .bar-row{display:grid;grid-template-columns:110px 1fr 90px;align-items:center;gap:12px;
+    margin:5px 0;font-size:12.5px}
+  .bar-row .lab{font-family:var(--mono);color:var(--muted);text-align:right}
+  .bar-track{background:var(--panel2);border-radius:4px;height:20px;overflow:hidden}
+  .bar-fill{height:100%;background:linear-gradient(90deg,#1f6feb,#39c5cf);border-radius:4px}
+  .bar-row .val{font-family:var(--mono);color:var(--green);font-weight:600}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 24px;margin:20px 0}
+  .toc ol{margin:8px 0 0;padding-left:22px;columns:2} @media(max-width:640px){.toc ol{columns:1}}
+  .toc li{margin:3px 0}
+  ul.clean{list-style:none;padding-left:0} ul.clean li{padding:5px 0 5px 26px;position:relative}
+  ul.clean li::before{content:"▸";position:absolute;left:6px;color:var(--accent)}
+  footer{color:var(--muted);font-size:12.5px;border-top:1px solid var(--border);
+    margin-top:50px;padding-top:20px}
+  .hl{color:var(--amber);font-weight:600}
+  .fix{color:var(--green);font-weight:600}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>MoRI&#8209;EP &amp; MoRI&#8209;IO on MI300X + Broadcom Thor2<br><span class="sub">Root&#8209;cause, fix, and cluster&#8209;wide validation for internode expert&#8209;parallel + KV transfer over RoCE</span></h1>
+    <div class="status-line">
+      <span class="pill ok">&#10003; MoRI&#8209;EP works — all node pairs, 0 errors</span>
+      <span class="pill ok">&#10003; MoRI&#8209;IO ~48.4 GB/s (all pairs)</span>
+      <span class="pill ok">&#10003; validated raw&#8209;docker + k3s/DRANET</span>
+      <span class="pill info">Driver&#8209;only fix (no firmware reflash)</span>
+    </div>
+    <div class="meta">
+      Cluster: <strong>MI300X&#8209;AusCS&#8209;FatTree&#8209;Thor2</strong> · Dell PowerEdge XE9680 · 4 standardized compute nodes
+      · Report date 2026&#8209;08&#8209;02 · Engineering validation record for customer hand&#8209;off
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#summary">Executive summary</a></li>
+    <li><a href="#stack">Validated software/firmware stack</a></li>
+    <li><a href="#matrix">Cluster-wide efficacy matrix</a></li>
+    <li><a href="#io">MoRI-IO bandwidth detail</a></li>
+    <li><a href="#image">Packaged image &amp; two-topology validation</a></li>
+    <li><a href="#problem">The problem &amp; two blockers</a></li>
+    <li><a href="#rc1">Root cause #1 — DV-CQ create</a></li>
+    <li><a href="#rc2">Root cause #2 — VRAM atomics</a></li>
+    <li><a href="#fix">The fix</a></li>
+    <li><a href="#evidence">Hardware &amp; counter evidence</a></li>
+    <li><a href="#ci">Upstream CI cross-check</a></li>
+    <li><a href="#repro">Reproduce it</a></li>
+    <li><a href="#escalation">Open items / escalation</a></li>
+  </ol>
+</div>
+
+<!-- ===================== SUMMARY ===================== -->
+<h2 id="summary"><span class="n">1</span>Executive summary</h2>
+<p>
+Native <strong>MoRI&#8209;EP</strong> (GPU&#8209;initiated internode expert&#8209;parallel dispatch/combine over RDMA) and
+<strong>MoRI&#8209;IO</strong> (RDMA KV transfer) are both <strong>working across the MI300X + Broadcom BCM57608
+"Thor2" 400G RoCE fleet.</strong> MoRI&#8209;EP initially failed on this NIC; the investigation found <strong>two
+independent blockers</strong>, both now resolved. The fix was validated on <strong>every node pair</strong> in the
+standardized cluster.
+</p>
+
+<div class="kpi">
+  <div class="box"><div class="v g">4 / 4</div><div class="l">node pairs pass MoRI-EP</div></div>
+  <div class="box"><div class="v g">0</div><div class="l">dispatch/combine errors (any pair)</div></div>
+  <div class="box"><div class="v b">48.4</div><div class="l">MoRI-IO GB/s (all pairs)</div></div>
+  <div class="box"><div class="v a">&lt;0.1%</div><div class="l">bandwidth variance across nodes</div></div>
+</div>
+
+<table>
+  <thead><tr><th>#</th><th>Blocker</th><th>Symptom</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><strong>DV&#8209;CQ creation</strong></td>
+      <td class="mono">bnxt_re_dv_create_cq → execute_ioctl() failed: 5 (EIO) → SIGABRT</td>
+      <td class="fix">Install bnxt <strong>235.2.86.0</strong> driver (driver&#8209;only, firmware untouched)</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><strong>RDMA atomics into GPU VRAM</strong></td>
+      <td class="mono">Round&#8209;0 dispatch hang; res_rx_pci_err; QP → ERROR</td>
+      <td class="fix">Use the <strong>async_ll</strong> EP kernel (WRITE+poll, no VRAM atomics)</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <div class="lbl">Bottom line for the customer</div>
+  With the <strong>235.2.86.0 bnxt driver</strong> + the <strong>async_ll</strong> MoRI&#8209;EP kernel, the exact
+  stack below (kernel 5.15.0&#8209;177 / fw 238.1.138.0 / ROCm 7.2.3) delivers working internode MoRI&#8209;EP and
+  ~48.4 GB/s MoRI&#8209;IO uniformly across all standardized nodes. No firmware reflash was required.
+</div>
+
+<!-- ===================== STACK ===================== -->
+<h2 id="stack"><span class="n">2</span>Validated software / firmware stack</h2>
+<p>Every tested node runs an <strong>identical</strong> stack. These are the exact versions the results below were produced on.</p>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0">Platform &amp; OS</h3>
+    <table>
+      <tr><td>Server</td><td class="mono">Dell PowerEdge XE9680</td></tr>
+      <tr><td>GPU</td><td class="mono">8× MI300X (gfx942, <span style="color:var(--muted)">PCI</span> 1002:74a1)</td></tr>
+      <tr><td>NIC (RoCE)</td><td class="mono">Broadcom BCM57608 Thor2 400G (14e4:1760)</td></tr>
+      <tr><td>OS</td><td class="mono">Ubuntu 22.04.5 LTS</td></tr>
+      <tr><td>Linux kernel</td><td class="mono">5.15.0-177-generic</td></tr>
+      <tr><td>ROCm</td><td class="mono">7.2.3</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">RDMA / MoRI stack</h3>
+    <table>
+      <tr><td>bnxt_re driver</td><td class="mono fix">235.2.86.0 &nbsp;← fix</td></tr>
+      <tr><td>bnxt_en driver</td><td class="mono">1.10.3-235.2.86.0</td></tr>
+      <tr><td>bnxt firmware</td><td class="mono">238.1.138.0 <span style="color:var(--muted)">(unchanged)</span></td></tr>
+      <tr><td>libbnxt_re</td><td class="mono">libbnxt_re-rdmav34.so (539696 B, 235 build)</td></tr>
+      <tr><td>rdma-core / verbs ABI</td><td class="mono">v34 (IBVERBS_PRIVATE_34)</td></tr>
+      <tr><td>MoRI</td><td class="mono">commit 12d1bc32 · BUILD_UMBP=OFF · gfx942</td></tr>
+    </table>
+  </div>
+</div>
+<p class="meta"><strong>MoRI build provenance:</strong> the reference / packaged image is built at the pinned CI&#8209;green commit
+<code>12d1bc32</code> ("AsyncLL top&#8209;k/warpSize fix", #505). The EP2 &amp; EP16 scaling proofs ran on <code>12d1bc32</code>.
+The 4&#8209;node efficacy matrix was rebuilt from <code>main</code> tip on 2026&#8209;08&#8209;03 and landed on descendant commits
+(<code>0d05a4d2</code> on the node-a/node-c/node-b containers; <code>34f17d6</code> on node-f) — both are direct
+descendants of <code>12d1bc32</code> on <code>main</code> and add only non&#8209;bnxt changes (e.g. an ionic&#8209;RoCE dmabuf fix),
+so EP/IO behaviour on this NIC is unchanged. The build script now pins <code>12d1bc32</code> by default to prevent drift.</p>
+
+<h3>Cluster fleet state</h3>
+<table>
+  <thead><tr><th>Node</th><th class="mono">driver</th><th class="mono">firmware</th><th class="mono">kernel</th><th>Role / status</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">node-a</td><td class="mono fix">235.2.86.0</td><td class="mono">238.1.138.0</td><td class="mono">5.15.0-177</td><td>compute — validated</td></tr>
+    <tr><td class="mono">node-c</td><td class="mono fix">235.2.86.0</td><td class="mono">238.1.138.0</td><td class="mono">5.15.0-177</td><td>compute — validated</td></tr>
+    <tr><td class="mono">node-b</td><td class="mono fix">235.2.86.0</td><td class="mono">238.1.138.0</td><td class="mono">5.15.0-177</td><td>compute — validated</td></tr>
+    <tr><td class="mono">node-f</td><td class="mono fix">235.2.86.0</td><td class="mono">238.1.138.0</td><td class="mono">5.15.0-177</td><td>compute — validated</td></tr>
+    <tr><td class="mono">node-d</td><td class="mono">237.1.137.0</td><td class="mono">236.1.173.0</td><td class="mono">5.15.0-177</td><td><span class="tag na">control-plane</span> not in serving fleet</td></tr>
+    <tr><td class="mono">node-e</td><td class="mono">—</td><td class="mono">236.x</td><td class="mono">5.15.0-177</td><td><span class="tag warn">PSU h/w fault</span> down, needs service</td></tr>
+  </tbody>
+</table>
+
+<h3>NIC naming (identical on all nodes)</h3>
+<table>
+  <thead><tr><th>Role</th><th class="mono">ib device</th><th class="mono">netdev</th><th class="mono">PCI</th><th>Used for</th></tr></thead>
+  <tbody>
+    <tr><td>RDMA rail under test</td><td class="mono">rdma3</td><td class="mono">benic4p1</td><td class="mono">0000:60:00.0</td><td>the tested rail (GID idx 3, SL 3, TC 104)</td></tr>
+    <tr><td>All RDMA rails</td><td class="mono">rdma0..7</td><td class="mono">benic1..8 p1</td><td class="mono">3e,1c,4f,60,de,ce,be,9e</td><td>full 8-rail fabric available</td></tr>
+    <tr><td>Mgmt / OOB</td><td class="mono">—</td><td class="mono">eno8303</td><td class="mono">0000:02:00.0</td><td>torchrun rendezvous + socket ifname</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== MATRIX ===================== -->
+<h2 id="matrix"><span class="n">3</span>Cluster-wide efficacy matrix</h2>
+<p>
+Each pair ran the two canonical MoRI tests over the <code>rdma3</code>/benic4 rail. All 4 standardized nodes
+participate in at least one pair; combined they exercise every node.
+</p>
+
+<div class="card">
+  <p style="margin-top:0"><strong>Test definitions</strong></p>
+  <table>
+    <tr><td style="width:120px"><strong>MoRI-EP</strong></td><td class="mono">examples/ops/dispatch_combine/test_dispatch_combine_internode.py --cmd test --kernel-type async_ll --dtype bf16 --max-tokens 128 --num-qp 2</td></tr>
+    <tr><td></td><td>EP2 (1 GPU/node × 2 nodes), 500 rounds. <strong>Pass = 0 errors on both ranks, no hang, no crash.</strong></td></tr>
+    <tr><td><strong>MoRI-IO</strong></td><td class="mono">tests/python/io/benchmark.py --backend rdma --mem-type cpu --op-type write --all (8 B → 64 MiB, 2 QP, session + batch)</td></tr>
+    <tr><td></td><td>Metric = peak write bandwidth @ 64 MiB.</td></tr>
+  </table>
+</div>
+
+<table>
+  <thead><tr><th>Pair</th><th>Nodes</th><th>Topology</th><th>MoRI-EP (async_ll)</th><th>MoRI-IO peak</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">A</td><td class="mono">node-a ↔ node-b</td><td>cross-rack</td><td><span class="tag pass">PASS · 0 errors</span></td><td class="num"><strong>48.43 GB/s</strong></td></tr>
+    <tr><td class="mono">B</td><td class="mono">node-a ↔ node-c</td><td>same-rack</td><td><span class="tag pass">PASS · 0 errors</span></td><td class="num"><strong>48.40 GB/s</strong></td></tr>
+    <tr><td class="mono">C</td><td class="mono">node-c ↔ node-b</td><td>cross-rack</td><td><span class="tag pass">PASS · 0 errors</span></td><td class="num"><strong>48.42 GB/s</strong></td></tr>
+    <tr><td class="mono">D</td><td class="mono">node-a ↔ node-f</td><td>cross-rack</td><td><span class="tag pass">PASS · 0 errors</span></td><td class="num"><strong>48.42 GB/s</strong></td></tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <div class="lbl">Findings</div>
+  <ul class="clean" style="margin:4px 0">
+    <li><strong>MoRI-EP async_ll passes on every pair</strong> — 0 errors, no hang, no crash. The fix generalizes to the whole 235-driver fleet, not just the pair it was first found on.</li>
+    <li><strong>MoRI-IO is tight: 48.40–48.43 GB/s (~387 Gbps, near 400G line rate), &lt;0.1% variance.</strong> No node/pair is an outlier — the fabric + NIC + driver stack is consistent.</li>
+    <li><strong>Topology-independent</strong> at this scale — same-rack (B) and cross-rack (A, C, D) perform identically for both tests.</li>
+  </ul>
+</div>
+<p class="meta">Note: the default <code>v1</code>/InterNodeV1 EP kernel is deliberately not in this matrix — it is known to hang on Thor2 (root cause #2). <code>async_ll</code> is the required kernel for this NIC.</p>
+
+<!-- ===================== IO DETAIL ===================== -->
+<h2 id="io"><span class="n">4</span>MoRI-IO bandwidth detail</h2>
+<p>Full message-size sweep (representative — pair A; all pairs are near-identical). Bandwidth scales cleanly to the 400G line-rate ceiling.</p>
+<div class="card">
+  <div class="bar-row"><span class="lab">64 KiB</span><div class="bar-track"><div class="bar-fill" style="width:9%"></div></div><span class="val">4.43</span></div>
+  <div class="bar-row"><span class="lab">256 KiB</span><div class="bar-track"><div class="bar-fill" style="width:28%"></div></div><span class="val">13.74</span></div>
+  <div class="bar-row"><span class="lab">1 MiB</span><div class="bar-track"><div class="bar-fill" style="width:60%"></div></div><span class="val">29.13</span></div>
+  <div class="bar-row"><span class="lab">4 MiB</span><div class="bar-track"><div class="bar-fill" style="width:85%"></div></div><span class="val">41.10</span></div>
+  <div class="bar-row"><span class="lab">8 MiB</span><div class="bar-track"><div class="bar-fill" style="width:92%"></div></div><span class="val">44.71</span></div>
+  <div class="bar-row"><span class="lab">16 MiB</span><div class="bar-track"><div class="bar-fill" style="width:96%"></div></div><span class="val">46.76</span></div>
+  <div class="bar-row"><span class="lab">64 MiB</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span class="val">48.43</span></div>
+  <p class="meta" style="margin:10px 0 0">Max write BW (GB/s) vs message size · CPU-memory · 2 QP/transfer · session + batch transfer</p>
+</div>
+<details>
+<summary style="cursor:pointer;color:var(--accent);margin:10px 0">Full sweep table (8 B → 64 MiB, pair A)</summary>
+<pre>| MsgSize (B) | TotalSize (MB) | Max BW (GB/s) | Avg BW (GB/s) | Min Lat (us) | Avg Lat (us) |
+|         8   |      0.00      |      0.00     |      0.00     |    13.35     |    14.15     |
+|      1024   |      0.00      |      0.08     |      0.08     |    12.64     |    13.17     |
+|     16384   |      0.02      |      1.23     |      1.18     |    13.35     |    13.85     |
+|     65536   |      0.07      |      4.43     |      4.31     |    14.78     |    15.21     |
+|    262144   |      0.26      |     13.74     |     13.35     |    19.07     |    19.64     |
+|   1048576   |      1.05      |     29.13     |     28.57     |    36.00     |    36.70     |
+|   4194304   |      4.19      |     41.10     |     40.79     |   102.04     |   102.82     |
+|   8388608   |      8.39      |     <span class="g">44.71</span>     |     44.48     |   187.64     |   188.59     |
+|  16777216   |     16.78      |     46.76     |     46.63     |   358.82     |   359.81     |
+|  33554432   |     33.55      |     47.89     |     47.06     |   700.71     |   713.03     |
+|  67108864   |     67.11      |     <span class="g">48.43</span>     |     48.39     |  1385.69     |  1386.94     |</pre>
+</details>
+
+<!-- ===================== IMAGE + TOPOLOGY ===================== -->
+<h2 id="image"><span class="n">5</span>Packaged image &amp; two&#8209;topology validation</h2>
+<p>
+The complete, tested stack is packaged as a <strong>self&#8209;contained Docker image</strong> and validated in
+<strong>both</strong> deployment topologies — raw&#8209;docker on the host RoCE fabric, and inside k3s with the NIC
+injected into the pod netns via DRANET.
+</p>
+
+<div class="card">
+  <h3 style="margin-top:0">Image: <code>docker.io/rocm/vllm-dev:vllm_wideEp_Mori_tests_August2_2026</code></h3>
+  <p class="meta" style="margin-top:0">digest <code>sha256:d260b8273d13fad99b71a1cd46f8d131d157749ff9664b112f8f848a7ca4a893</code></p>
+  <table>
+    <tr><td style="width:230px">MoRI (built from source)</td><td class="mono">commit 12d1bc32 (0.1.1.dev1+g12d1bc32d)</td></tr>
+    <tr><td>bnxt userspace provider</td><td class="mono">libbnxt_re-rdmav34.so — 235.2.86.0</td></tr>
+    <tr><td>libibverbs</td><td class="mono">v34 (IBVERBS_PRIVATE_34) — image's v59 removed</td></tr>
+    <tr><td>also baked</td><td class="mono">librdmacm, libnl-3/route-3, bnxt_re.driver, ep/io test scripts, env</td></tr>
+    <tr><td>base</td><td class="mono">ROCm 7.2.3 · PyTorch · py3.12 · gfx942</td></tr>
+  </table>
+  <p><strong>Self&#8209;contained:</strong> the host RDMA userspace is baked in, so the RDMA stack works with
+  <strong>no runtime library bind&#8209;mounts</strong> — verified by a fresh registry pull on a second node:
+  <code>ibv_devinfo -d rdma3</code> → PORT_ACTIVE, 8 devices, <code>import mori</code> → 12d1bc32.</p>
+  <p class="meta" style="margin-bottom:0"><strong>Cannot be baked into any image</strong> (documented <code>docker run</code> flags): device access
+  <code>--device /dev/kfd /dev/dri /dev/infiniband</code>, <code>--network host --ipc host --privileged</code>,
+  <code>-v /lib/modules</code>. Host must run the matching kernel driver 235.2.86.0 / fw 238.1.138.0 / kernel 5.15.0&#8209;177.</p>
+</div>
+
+<h3>Validated in both topologies (from the pushed image)</h3>
+<table>
+  <thead><tr><th>Topology</th><th>NIC path</th><th>MoRI-EP (async_ll)</th><th>MoRI-IO peak</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Raw docker</strong> (host&#8209;network)</td><td class="mono">host RoCE NIC (rdma3) direct</td><td><span class="tag pass">PASS · 0 errors</span></td><td class="num"><strong>48.44 GB/s</strong></td></tr>
+    <tr><td><strong>k3s + DRANET</strong> (pod&#8209;netns)</td><td class="mono">Thor2 NIC injected into pod netns (rdma6/benic7)</td><td><span class="tag pass">PASS · 0 errors (500 rounds)</span></td><td class="num"><strong>48.42 GB/s</strong></td></tr>
+  </tbody>
+</table>
+<div class="callout ok">
+  <div class="lbl">Why this matters</div>
+  The fix is <strong>topology&#8209;independent</strong>. It works identically whether the container owns the host
+  network (the way MoRI's own tests run) or receives a rail&#8209;matched NIC inside a Kubernetes pod netns via DRANET
+  (the serving&#8209;style path). Same ~48.4 GB/s IO, same 0&#8209;error EP in both. The k3s test claimed
+  <code>1 GPU + 1 Thor2 NIC</code> per pod (<code>gpu.amd.com</code> + <code>dra.net</code> DRA), no host&#8209;network,
+  no GLM — a clean transport&#8209;level proof.
+</div>
+
+<!-- ===================== PROBLEM ===================== -->
+<h2 id="problem"><span class="n">6</span>The problem &amp; the two blockers</h2>
+<p>
+MoRI&#8209;EP internode must (a) create a <strong>GPU&#8209;resident completion queue</strong> via Broadcom
+Direct&#8209;Verbs, then (b) run a <strong>GPU&#8209;initiated all&#8209;to&#8209;all</strong> dispatch/combine over RDMA.
+Two distinct failures sat on this path; MoRI&#8209;IO (pure RDMA WRITE) was never affected by either.
+</p>
+<div class="flow">
+  <div class="step good"><div class="num">STAGE A</div><div class="t">Process group init</div><div class="d">gloo over eno8303</div></div>
+  <div class="step bad"><div class="num">STAGE B</div><div class="t">DV&#8209;CQ create</div><div class="d">Blocker #1 — EIO</div></div>
+  <div class="step bad"><div class="num">STAGE C</div><div class="t">Round&#8209;0 dispatch</div><div class="d">Blocker #2 — atomics hang</div></div>
+  <div class="step good"><div class="num">STAGE D</div><div class="t">Dispatch + Combine</div><div class="d">500 rounds ✓</div></div>
+</div>
+
+<!-- ===================== RC1 ===================== -->
+<h2 id="rc1"><span class="n">7</span>Root cause #1 — DV&#8209;CQ creation fails on the 237/238 driver</h2>
+<p>On the 237/238 bnxt drivers, MoRI&#8209;EP aborts the moment it creates its GPU&#8209;resident CQ:</p>
+<pre><span class="r">bnxt_re_dv_create_cq_cmd: execute_ioctl() failed: 5</span>
+bnxt_re_dv_create_cq: bnxt_re_dv_create_cq_cmd() failed
+.../transport/rdma/providers/bnxt/bnxt.cpp:108: <span class="r">Assertion `cq' failed.</span>
+kernel: infiniband rocepNNsN: <span class="r">Create HW CQ failed!</span>
+        bnxt_re_handler_BNXT_RE_METHOD_DV_CREATE_CQ: Failed to create qplib cq</pre>
+<div class="callout amber">
+  <div class="lbl">Root cause (driver source diff, 235 vs 237)</div>
+  Both drivers ship the CQ&#8209;dmabuf path. The regression is that <strong>237 added a new
+  <code>bnxt_re_setup_cq_hwqs()</code> + <code>cq_timer_reset/cfg</code> step</strong> in the DV CQ&#8209;create path
+  that returns <code>EIO</code> on our Thor2 firmware. <span class="fix">The 235.2.86.0 driver has none of it</span> and
+  uses the older path that works with the existing firmware — so the fix is driver&#8209;only, with no firmware reflash.
+</div>
+
+<!-- ===================== RC2 ===================== -->
+<h2 id="rc2"><span class="n">8</span>Root cause #2 — RDMA atomics into GPU VRAM (the real wall)</h2>
+<p>
+With the 235 driver the CQ creates, EP advances — process group up, <code>I'm pe 0/1 in 2 pes</code>,
+<code>Round 0 gen test_data done</code> — then <strong>hangs at dispatch</strong>. The NIC hardware counters explain why:
+</p>
+<pre>rdma3 (benic4) hw_counters at the hang:
+  <span class="a">rx_atomic_requests = 2</span>      <span class="m"># EP dispatch issues RDMA atomics</span>
+  <span class="a">tx_atomic_req      = 4</span>
+  <span class="r">res_rx_pci_err     = 1</span>      <span class="m"># NIC failed a PCIe access as atomic completer</span>
+  <span class="r">unrecoverable_err  = 4</span>
+  tx_write_req       = 402    <span class="m"># plain WRITEs flow fine</span>
+kernel: infiniband rdma3: bnxt_re_handle_qp_async_event: (user) qp_id 0x401 <span class="r">sq cons 0 rq cons 0</span></pre>
+
+<div class="grid2">
+  <div class="card" style="border-color:rgba(63,185,80,.4)">
+    <h3 style="margin-top:0;color:var(--green)">GPU — MI300X (0000:1b:00.0)</h3>
+    <pre style="margin:0"><span class="g">AtomicOpsCap: 32bit+ 64bit+ 128bitCAS-</span></pre>
+    <p class="meta" style="margin-bottom:0">CAN complete 32/64&#8209;bit PCIe atomics</p>
+  </div>
+  <div class="card" style="border-color:rgba(248,81,73,.4)">
+    <h3 style="margin-top:0;color:var(--red)">NIC — Thor2 (0000:60:00.0)</h3>
+    <pre style="margin:0"><span class="r">AtomicOpsCap: 32bit- 64bit- 128bitCAS-</span></pre>
+    <p class="meta" style="margin-bottom:0">advertises <strong>NO</strong> atomic&#8209;completer capability</p>
+  </div>
+</div>
+
+<div class="callout red">
+  <div class="lbl">Mechanism</div>
+  MoRI&#8209;EP's default <code>v1</code> / <code>InterNodeV1</code> kernel posts RDMA <code>AMO_ADD</code> atomics into the
+  peer's GPU&#8209;VRAM counters (token&#8209;count / barrier signalling). The Thor2 NIC must complete those atomics
+  against local GPU&#8209;VRAM across the PCIe root complex — but it has no atomic&#8209;completer capability, so the
+  access errors (<code>res_rx_pci_err</code>), the RC QP goes unrecoverable, and dispatch wedges. Plain WRITEs
+  (what MoRI&#8209;IO uses) are unaffected — which is why MoRI&#8209;IO always worked.
+</div>
+<p><strong>Fix:</strong> the <code>async_ll</code> (AsyncLL) kernel signals via RDMA WRITE + poll instead of atomics
+(the atomic calls are disabled in its source), so it never touches the NIC's missing atomic path.</p>
+
+<!-- ===================== FIX ===================== -->
+<h2 id="fix"><span class="n">9</span>The fix</h2>
+<div class="grid2">
+  <div class="card" style="border-top:3px solid var(--green)">
+    <h3 style="margin-top:0">Fix #1 — driver 235.2.86.0</h3>
+    <p>Install bnxt <code>235.2.86.0</code> (kernel <code>bnxt_en</code>/<code>bnxt_re</code> + userspace <code>libbnxt_re</code>), reboot. Firmware stays <code>238.1.138.0</code>.</p>
+    <ul class="clean" style="font-size:13.5px">
+      <li>Public debs: <code>packages.broadcom.com/artifactory/ethernet-nic-debian-public/pool/main/</code></li>
+      <li>Clears the <code>bnxt_re_dv_create_cq</code> EIO</li>
+    </ul>
+  </div>
+  <div class="card" style="border-top:3px solid var(--green)">
+    <h3 style="margin-top:0">Fix #2 — async_ll kernel</h3>
+    <p>Select the WRITE&#8209;based EP kernel (standalone tests take it on the CLI; vLLM via a small selector patch).</p>
+    <pre style="margin:0">--kernel-type <span class="g">async_ll</span></pre>
+    <p class="meta" style="margin-bottom:0">GLM top-k = 8 &lt; warpSize 64 (AsyncLL requirement satisfied); prefers <code>MORI_ENABLE_SDMA=1</code>.</p>
+  </div>
+</div>
+
+<!-- ===================== EVIDENCE ===================== -->
+<h2 id="evidence"><span class="n">10</span>Hardware &amp; counter evidence for the fix</h2>
+<p>
+Proof the fix is genuine: after many <code>async_ll</code> runs the atomic and PCIe&#8209;error counters stayed
+<strong>frozen</strong> while WRITE traffic climbed into the millions — i.e. <code>async_ll</code> issues
+<strong>zero atomics and zero new PCIe errors</strong>, exactly as designed:
+</p>
+<pre>rdma3 (benic4) hw_counters after all async_ll runs:
+  rx_atomic_requests = 2          <span class="m"># FROZEN (leftover from the earlier v1 run)</span>
+  res_rx_pci_err     = 1          <span class="m"># FROZEN — no new PCIe errors</span>
+  <span class="g">tx_write_req       = 4,719,266</span>   <span class="m"># exploded — async_ll is pure WRITE</span>
+  <span class="g">rx_write_requests  =   472,500</span></pre>
+<table>
+  <thead><tr><th>Counter</th><th>v1 run (hang)</th><th>after async_ll runs</th><th>Interpretation</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">rx_atomic_requests</td><td class="mono">2</td><td class="mono">2 (frozen)</td><td>async_ll adds no atomics</td></tr>
+    <tr><td class="mono">res_rx_pci_err</td><td class="mono">1</td><td class="mono">1 (frozen)</td><td>no new PCIe completer errors</td></tr>
+    <tr><td class="mono">tx_write_req</td><td class="mono">402</td><td class="mono">4,719,266</td><td>all signalling now via WRITE</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== CI CROSS-CHECK ===================== -->
+<h2 id="ci"><span class="n">11</span>Upstream CI cross&#8209;check — why <code>v1</code> passes there but not here</h2>
+<p>
+The MoRI project's own CI runs a dedicated 2&#8209;node <strong>Broadcom (BNXT)</strong> internode lane. On the
+<strong>exact commit we tested</strong> (<code>12d1bc3</code>), that lane runs <em>every</em> EP kernel — including the
+default <strong>atomic <code>v1</code>/InterNodeV1</strong> — and they all pass. This is the key data point for the
+escalation: it isolates our issue to <strong>hardware/firmware, not MoRI software.</strong>
+</p>
+<p class="meta">Source: MoRI CI run 30622674606, job <em>"mori internode test (MI325X_BNXT)"</em> —
+<a href="https://github.com/ROCm/mori/actions/runs/30622674606/job/91134050005">github.com/ROCm/mori/actions/runs/30622674606/job/91134050005</a></p>
+
+<h3>What the CI runs (and passes)</h3>
+<table>
+  <thead><tr><th>CI step</th><th class="mono">kernel</th><th>Result</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td>MoRI-EP normal kernel bench</td><td class="mono">v1 (atomic)</td><td><span class="tag pass">PASS</span></td><td>@ 64–4096 tokens, dispatch bw ~76 GB/s</td></tr>
+    <tr><td>MoRI-EP normal kernel stress</td><td class="mono">v1 / v1_ll (atomic)</td><td><span class="tag pass">PASS</span></td><td>32× "error times: 0", zero failures</td></tr>
+    <tr><td>MoRI-EP async kernel test</td><td class="mono">async_ll</td><td><span class="tag pass">PASS</span></td><td>same kernel we use</td></tr>
+    <tr><td>MoRI-IO write/read/CPU/cross-rail</td><td class="mono">—</td><td><span class="tag pass">PASS</span></td><td>same tests as our matrix</td></tr>
+  </tbody>
+</table>
+
+<div class="callout amber">
+  <div class="lbl">The gap — two orthogonal differences</div>
+  <p style="margin:6px 0"><strong>1. The <code>v1</code>&#8209;atomic gap = the NIC's PCIe atomic&#8209;completer capability</strong> — a
+  hardware/firmware property of the specific Broadcom board, <em>not</em> the MoRI code or driver version. The CI
+  runner's Broadcom NIC/fw can <em>complete</em> RDMA atomics into GPU VRAM (<code>AtomicOpsCap 32/64bit+</code>), so
+  <code>v1</code>'s <code>AMO_ADD</code> atomics succeed. Our <strong>BCM57608&#8209;P2200DQF01 / fw 238.1.138.0</strong>
+  advertises <code>AtomicOpsCap 32bit- 64bit-</code> (verified by lspci) — it physically cannot, so <code>v1</code>
+  faults (<code>res_rx_pci_err</code>) and hangs. Same MoRI code, same gfx942 — different silicon/fw capability.</p>
+  <p style="margin:6px 0"><strong>2. Why the 237 driver failed for us specifically</strong> — a <em>separate, earlier</em>
+  blocker: our 237 driver hit the DV&#8209;CQ&#8209;create <code>EIO</code> (<code>setup_cq_hwqs</code> step) on <em>our</em>
+  firmware 238.1.138.0. The CI runs a different firmware where that CQ path works — so the CI never sees our EIO.
+  We worked around this with the 235 driver.</p>
+</div>
+
+<div class="callout ok">
+  <div class="lbl">Why this explanation holds</div>
+  The CI passes because its Broadcom NIC+fw supports <strong>both</strong> things our stack lacks: (a) the DV&#8209;CQ&#8209;create
+  path the 237 driver expects, and (b) RDMA atomic&#8209;completion to GPU BAR. The decisive proof it is <strong>not</strong>
+  a MoRI/software gap: <strong>our <code>async_ll</code> result is identical to the CI's <code>async_ll</code> pass</strong>
+  — both green. <code>async_ll</code> uses WRITE+poll (never atomics), so it is the <strong>portable path that works on
+  both NIC types</strong>. On our hardware it is the required kernel; on atomic&#8209;capable NICs it is simply one valid option.
+  (CI uses ROCm 7.2.4 vs our 7.2.3 — not the cause: atomic completion is a PCIe/NIC&#8209;level property, below ROCm.)
+</div>
+
+<!-- ===================== REPRO ===================== -->
+<h2 id="repro"><span class="n">12</span>Reproduce it</h2>
+<div class="card">
+<pre><span class="m"># 1. Install the 235 driver on each node, then reboot</span>
+sudo ./scripts/install_driver_235.sh ./driver-235.2.86.0
+<span class="m">#    verify: modinfo bnxt_re | grep ^version  ->  235.2.86.0</span>
+<span class="m">#            ibv_devinfo -d rdma3 | grep -E 'fw_ver|PORT_ACTIVE'</span>
+
+<span class="m"># 2. Launch the MoRI container + build MoRI (per node)</span>
+sudo ./scripts/launch_container.sh &lt;IMAGE&gt;
+sudo docker exec mori_host bash -c "$(cat scripts/build_mori.sh)"
+
+<span class="m"># 3. MoRI-EP internode (async_ll) — run rank1 first, then rank0</span>
+bash ep_pair_test.sh &lt;0|1&gt; &lt;master_mgmt_ip&gt; rdma3 &lt;port&gt;
+<span class="m">#    expected: "Node N Dispatch Pass" + "Node N Combine Pass" every round,</span>
+<span class="m">#              final "rank: N error times: 0 appear round: set()"</span>
+
+<span class="m"># 4. MoRI-IO CPU write sweep</span>
+bash io_pair_test.sh &lt;0|1&gt; &lt;master_mgmt_ip&gt; &lt;own_mgmt_ip&gt; rdma3 &lt;port&gt;
+<span class="m">#    expected: sweep table peaking ~48.4 GB/s @ 64 MiB</span></pre>
+</div>
+<p>Key env (baked into the pair scripts): <code>MORI_RDMA_DEVICES=rdma3</code>, <code>MORI_IB_GID_INDEX=3</code>,
+<code>MORI_RDMA_SL=3</code>, <code>MORI_RDMA_TC=104</code>, <code>*_SOCKET_IFNAME=eno8303</code>,
+<code>MORI_GPU_ARCHS=gfx942</code>, <code>expandable_segments:False</code>.</p>
+
+<h3>Package contents (hand-off)</h3>
+<table>
+  <thead><tr><th class="mono">path</th><th>what</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">EFFICACY-MATRIX.md</td><td>the cluster-wide matrix (text) + versions + repro</td></tr>
+    <tr><td class="mono">SOFTWARE_MANIFEST.txt</td><td>exact versions per node</td></tr>
+    <tr><td class="mono">scripts/install_driver_235.sh</td><td>235 driver install (deb or DKMS tarball)</td></tr>
+    <tr><td class="mono">scripts/standardize_node_235.sh</td><td>full node standardization from any prior driver</td></tr>
+    <tr><td class="mono">scripts/launch_container.sh, build_mori.sh</td><td>container + MoRI build</td></tr>
+    <tr><td class="mono">scripts/ep_pair_test.sh, io_pair_test.sh</td><td>the EP + IO pair test runners</td></tr>
+    <tr><td class="mono">driver-235.2.86.0/</td><td>DKMS source tarball + userspace lib + prebuilt .ko</td></tr>
+    <tr><td class="mono">vllm-async_ll-patch/</td><td>vLLM kernel-selection patch (for GLM serving)</td></tr>
+    <tr><td class="mono">logs/</td><td>raw EP + IO + counter logs</td></tr>
+  </tbody>
+</table>
+
+<!-- ===================== ESCALATION ===================== -->
+<h2 id="escalation"><span class="n">13</span>Open items / escalation</h2>
+<ul class="clean">
+  <li><strong>Broadcom / AMD (NIC — the key ask):</strong> the MoRI CI's <code>MI325X_BNXT</code> runner passes the atomic <code>v1</code> kernel (see §10), so <em>some</em> Broadcom board+fw can complete RDMA atomics to GPU BAR. <strong>What board SKU + firmware does that CI runner use</strong>, vs our <code>BCM57608&#8209;P2200DQF01 / fw 238.1.138.0</code> which advertises <code>AtomicOpsCap 32bit- 64bit-</code>? If a firmware exists that flips <code>AtomicOpsCap</code> on our board, <code>v1</code>/<code>v1_ll</code> EP would work here too; otherwise <code>async_ll</code> is the required kernel on our hardware.</li>
+  <li><strong>Broadcom (driver):</strong> fix the ≥237 driver's CQ path (<code>setup_cq_hwqs</code>/<code>cq_timer</code>) so it works on this firmware, removing the need to pin 235.2.86.0.</li>
+  <li><strong>AMD / MoRI &amp; vLLM:</strong> make <code>async_ll</code> the default / auto&#8209;selected EP kernel for NICs without atomic&#8209;completer capability, so GLM wide&#8209;EP serving selects it automatically on Thor2.</li>
+  <li><strong>Cluster hardware:</strong> node <code>node-e</code> is down on a PSU/power&#8209;feed fault (recurring "Power Supply AC lost" in the BMC SEL) — needs a PDU AC&#8209;cycle or physical service; not recoverable from the BMC.</li>
+</ul>
+
+<footer>
+  MoRI&#8209;EP &amp; MoRI&#8209;IO validation report — MI300X + Broadcom Thor2 · nodes node-a / node-c / node-b / node-f ·
+  driver 235.2.86.0 / fw 238.1.138.0 / kernel 5.15.0-177 / ROCm 7.2.3 / MoRI 12d1bc32 ·
+  rail rdma3 (benic4), GID idx 3, SL 3, TC 104. All results are from live runs on the cluster, 2026&#8209;08&#8209;02.
+</footer>
+
+</div>
+</body>
+</html>

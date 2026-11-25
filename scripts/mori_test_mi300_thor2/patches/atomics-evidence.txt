@@ -1,0 +1,25 @@
+########## EVIDENCE: internode_v1 (v1 kernel) posts RDMA atomics into VRAM ##########
+### git commit ###
+12d1bc32d0c93dcd5062e74f4e0f772e36e1aac4 2026-07-31 18:11:17 +0800
+
+### AMO_ADD network-atomic sites in internode_v1.cpp (the FAILING v1 kernel) ###
+231:                core::atomicType::AMO_ADD, proxyPe, qpId);
+267:              tokenNum + 1, core::atomicType::AMO_ADD, proxyPe, qpId);
+282:      shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
+284:                                                     core::AMO_ADD, proxyPe);
+339:            tokenNum + 1, core::atomicType::AMO_ADD, proxyPe, qpId);
+353:      shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
+355:                                                     core::AMO_ADD, proxyPe);
+1021:        shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
+1023:                                                       core::AMO_ADD, proxyPe, i);
+1156:        shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
+
+### async_ll (AsyncLL kernel) — atomics COMMENTED OUT, uses WRITE+poll ###
+259:      // TODO(ditian12): index value is wrong if signal completion here, investigate the reason
+260:      // shmem::ShmemAtomicTypeNonFetchWarp<uint64_t>(
+262:      //     static_cast<uint64_t>(tokenNum + 1), core::AMO_ADD, destPe, qpId);
+296:  // Polling recv token number signal
+300:      (void)shmem::ShmemUint64WaitUntilGreaterThan(
+504:      // shmem::ShmemAtomicTypeNonFetchWarp<uint64_t>(
+505:      //     args.crossDeviceBarrierMemObj, myPe * sizeof(uint64_t), 1, core::AMO_ADD, destPe,
+546:      shmem::ShmemUint64WaitUntilEquals(args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>() +

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Broadcom Thor2 (BCM57608) — RoCE / RDMA NIC Settings for MI300X + MoRI</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#2b3440; --accent:#4aa3ff; --good:#3fb950; --warn:#d29922; --bad:#f85149;
+    --code:#161b22; --chip:#21324a;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --ink:#1f2328; --muted:#57606a;
+      --line:#d0d7de; --accent:#0969da; --good:#1a7f37; --warn:#9a6700; --bad:#cf222e;
+      --code:#f6f8fa; --chip:#ddf4ff; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1040px;margin:0 auto;padding:32px 22px 80px;}
+  header{border-bottom:2px solid var(--line);padding-bottom:18px;margin-bottom:26px;}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.2px;}
+  .sub{color:var(--muted);font-size:14px;}
+  h2{font-size:19px;margin:34px 0 12px;padding-top:12px;border-top:1px solid var(--line);}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--accent);}
+  p{margin:8px 0;}
+  code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;}
+  code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 5px;}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:12px 14px;
+    overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;}
+  table{border-collapse:collapse;width:100%;margin:10px 0 4px;font-size:13.5px;}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top;}
+  th{background:var(--panel2);font-weight:600;}
+  td code{background:transparent;border:0;padding:0;}
+  tr:nth-child(even) td{background:color-mix(in srgb,var(--panel) 60%,transparent);}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;
+    background:var(--chip);color:var(--accent);margin-left:6px;vertical-align:middle;}
+  .b-good{color:var(--good);font-weight:600;} .b-warn{color:var(--warn);font-weight:600;} .b-bad{color:var(--bad);font-weight:600;}
+  .callout{border-left:4px solid var(--accent);background:var(--panel2);border-radius:0 8px 8px 0;padding:12px 16px;margin:16px 0;}
+  .callout.warn{border-left-color:var(--warn);} .callout.crit{border-left-color:var(--bad);}
+  .kv{color:var(--muted);}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  ul{margin:8px 0 8px 4px;padding-left:20px;} li{margin:4px 0;}
+  .foot{color:var(--muted);font-size:12px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px;}
+  .tag{font-size:11px;padding:1px 7px;border-radius:5px;background:var(--chip);color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Broadcom Thor2 (BCM57608) — RoCE / RDMA NIC Settings <span class="pill">MI300X + MoRI</span></h1>
+  <div class="sub">Validated device-level (niccli) + host RoCE/NCCL/MoRI configuration for GPU-initiated RDMA
+  (MoRI-EP / MoRI-IO) and NCCL/RCCL on AMD Instinct MI300X (gfx942) over Broadcom BCM57608 "Thor2" 400G.</div>
+</header>
+
+<div class="callout crit">
+  <strong>The one thing to know first — Thor2 has no PCIe atomic-completer.</strong>
+  <code>AtomicOpsCap: 32bit- 64bit-</code>. Any RDMA path that posts atomics into GPU VRAM
+  (e.g. MoRI-EP's default <code>InterNodeV1</code>/<code>v1</code> kernel, which uses <code>AMO_ADD</code>) will
+  <span class="b-bad">hang</span>. Use a WRITE-based path: MoRI <code>async_ll</code> kernel
+  (<code>MORI_EP_FORCE_ASYNC_LL=1</code>). Pure-WRITE traffic — MoRI-IO, <code>ib_write_bw</code>, NCCL — is unaffected.
+</div>
+
+<h2>1. Validated software stack (prerequisites)</h2>
+<table>
+  <tr><th>Component</th><th>Version</th><th>Notes</th></tr>
+  <tr><td>bnxt_re / bnxt_en driver</td><td class="b-good">235.2.86.0</td><td>bnxt_en <code>1.10.3-235.2.86.0</code>. Fixes <code>bnxt_re_dv_create_cq</code> EIO that 237/238 drivers introduce. Driver-only fix — no firmware reflash.</td></tr>
+  <tr><td>NIC firmware (PRIMATE_FW)</td><td>238.1.138.6</td><td>RoCE FW 238.1.138.0; HWRM 1.10.3; NVM cfg ver 238.0.0; package 38.11.38.06</td></tr>
+  <tr><td>userspace provider</td><td><code>libbnxt_re-rdmav34.so</code></td><td>ABI <b>v34</b> (<code>IBVERBS_PRIVATE_34</code>), ~539&nbsp;696&nbsp;B. Newer v59 provider rejects kernel ABI-8 &rarr; 0 RDMA devices.</td></tr>
+  <tr><td>Linux kernel</td><td>5.15.0-177-generic</td><td>Ubuntu 22.04.5</td></tr>
+  <tr><td>ROCm</td><td>7.2.3</td><td>gfx942</td></tr>
+</table>
+
+<h2>2. NIC device settings <span class="tag">niccli</span></h2>
+<p class="kv">Pulled live from a compute-node RoCE data rail: <code>niccli --pci 0000:60:00.0 …</code>
+(BCM57608, benic4p1). Broadcom NIC CLI at <code>/usr/bin/niccli</code>.</p>
+
+<h3>Device identity <span class="kv">(niccli --pci &lt;bdf&gt; show --all)</span></h3>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Chip / PCI ID</td><td>BCM57608 "THOR2" — <code>14E4:1760</code></td></tr>
+  <tr><td>Part number</td><td>BCM957608-P2200DQF01 (2×200G PCIe)</td></tr>
+  <tr><td>Firmware</td><td>PRIMATE_FW <b>238.1.138.6</b> / RoCE FW 238.1.138.0</td></tr>
+  <tr><td>HWRM interface spec</td><td>1.10.3</td></tr>
+  <tr><td>Active package / NVM cfg</td><td>38.11.38.06 / NVM config ver <b>238.0.0</b></td></tr>
+  <tr><td>Secure Boot / Secure FW Update</td><td>Enabled / Enabled</td></tr>
+</table>
+
+<h3>NVM config — RDMA / RoCE-critical options <span class="kv">(nvm --getoption, DEVICE scope)</span></h3>
+<table>
+  <tr><th>Option</th><th>Value</th><th>Why it matters</th></tr>
+  <tr><td class="mono">rdma_capable</td><td class="b-good">Enabled</td><td><b>Required.</b> RoCE off otherwise.</td></tr>
+  <tr><td class="mono">pcie_relaxed_ordering</td><td class="b-good">Enabled</td><td><b>Required</b> for GPU-NIC DMA throughput.</td></tr>
+  <tr><td class="mono">port_operation_mode</td><td>aggregate 2-to-1</td><td>2×200G aggregated (400G rail).</td></tr>
+  <tr><td class="mono">port_operation_capability</td><td>0x1818</td><td>—</td></tr>
+  <tr><td class="mono">dcqcn_1qp_max_perf_enable</td><td>True</td><td>Single-QP DCQCN max-perf.</td></tr>
+  <tr><td class="mono">enable_udcc</td><td>0x0 (disabled)</td><td>UDCC off (DCQCN used instead).</td></tr>
+  <tr><td class="mono">udcc_session_type</td><td>per destination</td><td>—</td></tr>
+  <tr><td class="mono">roce_udp_src_port_overwrite_enable</td><td>0x0</td><td>—</td></tr>
+  <tr><td class="mono">roce_inline_optimizer_disable</td><td>False</td><td>Inline optimizer ON.</td></tr>
+  <tr><td class="mono">roce_infinite_retry_to_retx_enable</td><td>Disabled</td><td>—</td></tr>
+  <tr><td class="mono">roce_pbl_pg_size_disable</td><td>False</td><td>—</td></tr>
+  <tr><td class="mono">peer_mmap_sw_capable</td><td>False</td><td>—</td></tr>
+  <tr><td class="mono">pcie_secure_ats_enable</td><td>False</td><td>—</td></tr>
+  <tr><td class="mono">cache_aligned_cmpl_enable</td><td>False</td><td>—</td></tr>
+  <tr><td class="mono">max_num_pf_msix_vectors</td><td>128</td><td>—</td></tr>
+  <tr><td class="mono">crypto_offload_selection</td><td>0x3</td><td>—</td></tr>
+  <tr><td class="mono">multiroot_mode / enable_hw_lag</td><td>Disabled / False</td><td>—</td></tr>
+</table>
+
+<h3>NVM config — port / link options <span class="kv">(--scope 0)</span></h3>
+<table>
+  <tr><th>Option</th><th>Value</th><th>Note</th></tr>
+  <tr><td class="mono">dcbx_mode</td><td class="b-warn">Disabled</td><td>Intentional — PFC/ETS/DCQCN applied <b>host-side</b> (see §4), not NIC-DCBX. Switch must match.</td></tr>
+  <tr><td class="mono">dcbx_capability</td><td>All</td><td>—</td></tr>
+  <tr><td class="mono">forward_error_correction</td><td>RS544 2xN</td><td>—</td></tr>
+  <tr><td class="mono">firmware_link_speed_d0</td><td>Autoneg</td><td>speed cap mask 0x17f4</td></tr>
+  <tr><td class="mono">link_training / media_auto_detect</td><td>Enabled / Enabled</td><td>—</td></tr>
+  <tr><td class="mono">mf_mode</td><td>Forced SF</td><td>single-function</td></tr>
+  <tr><td class="mono">pf_pci_bar2_size</td><td>64K : 16M : 64K</td><td>—</td></tr>
+</table>
+
+<h3>Useful niccli commands</h3>
+<pre>niccli --list                                   # enumerate all NICs (BoardId / MAC / FW / BDF)
+niccli --pci 0000:60:00.0 show --all            # full device details
+niccli --pci 0000:60:00.0 nvm --getoption       # list all NVM options + scope
+niccli --pci 0000:60:00.0 nvm --getoption rdma_capable            # DEVICE-scoped: NO --scope
+niccli --pci 0000:60:00.0 nvm --getoption dcbx_mode --scope 0     # PORT/FUNCTION-scoped: use --scope
+niccli --pci 0000:60:00.0 nvm --setoption pcie_relaxed_ordering --value 1   # set (reboot may be required)</pre>
+<p class="kv">DEVICE-scoped options error if you pass <code>--scope</code>; PORT/FUNCTION-scoped options require it.</p>
+
+<h2>3. RoCEv2 / RDMA fabric parameters <span class="tag">validated</span></h2>
+<p class="kv">Confirmed on this stack: <b>373–379 Gb/s</b> single-rail <code>ib_write_bw</code>, MoRI-IO <b>48 GB/s</b>, MoRI-EP 500/500 rounds 0 errors.</p>
+<table>
+  <tr><th>Setting</th><th>Value</th><th>Env / where</th></tr>
+  <tr><td>GID index</td><td class="b-good">3</td><td>RoCEv2 — <code>MORI_IB_GID_INDEX=3</code>, <code>NCCL_IB_GID_INDEX=3</code></td></tr>
+  <tr><td>Service Level (SL)</td><td>3</td><td><code>MORI_RDMA_SL=3</code>, <code>MORI_IO_SL=3</code></td></tr>
+  <tr><td>Traffic Class (TC / ToS)</td><td>104</td><td><code>MORI_RDMA_TC=104</code> — value emitted by <code>mori setup</code> (not 96)</td></tr>
+  <tr><td>Relaxed ordering</td><td>on</td><td><code>MORI_IB_ENABLE_RELAXED_ORDERING=1</code></td></tr>
+</table>
+
+<h2>4. DCQCN / PFC / QoS (host-side, via <code>mori setup</code>) <span class="tag">must match switch</span></h2>
+<p class="kv">Applied by MoRI's <code>env_setup.sh</code> (bnxt path) through dcb + configfs. Since NIC <code>dcbx_mode=Disabled</code>,
+these are driven host-side and the switch fabric must be configured to the same priorities/DSCP.</p>
+<table>
+  <tr><th>Parameter</th><th>Value</th></tr>
+  <tr><td>PFC / ETS</td><td>priority <b>3</b> lossless; RoCE = 90% BW</td></tr>
+  <tr><td>RoCE traffic</td><td>DSCP <b>26</b> (prio 3)</td></tr>
+  <tr><td>CNP</td><td>DSCP <b>48</b>, priority 6, <code>cnp_service_type=1</code></td></tr>
+  <tr><td>DCQCN</td><td><code>cc_mode=1</code>, ECN on, <code>roce_dscp=26</code>, <code>cnp_dscp=48</code>, RoCEv2 <code>tos=104</code></td></tr>
+</table>
+
+<h2>5. Host / GPU RDMA environment</h2>
+<div class="grid">
+  <div class="card">
+    <h3>MoRI (EP + IO)</h3>
+    <pre>MORI_IB_GID_INDEX=3
+MORI_RDMA_SL=3
+MORI_IO_SL=3
+MORI_RDMA_TC=104
+MORI_IB_ENABLE_RELAXED_ORDERING=1
+MORI_ENABLE_SDMA=1
+MORI_EP_FORCE_ASYNC_LL=1     # Thor2: WRITE+poll, NOT atomics
+MORI_RDMA_DEVICES=&lt;benic rdma devs&gt;
+MORI_IBVERBS_LIB=/lib/x86_64-linux-gnu/libibverbs.so.1</pre>
+  </div>
+  <div class="card">
+    <h3>NCCL / RCCL (collectives over RoCE)</h3>
+    <pre>NCCL_IB_DISABLE=0
+NCCL_IB_GID_INDEX=3
+NCCL_IB_HCA=&lt;benic rdma devs&gt;
+NCCL_SOCKET_IFNAME=&lt;mgmt/OOB nic&gt;   # rendezvous only</pre>
+    <h3 style="margin-top:14px">HSA / GPU enablers</h3>
+    <pre>HSA_ENABLE_SDMA=1
+HSA_FORCE_FINE_GRAIN_PCIE=1
+HSA_NO_SCRATCH_RECLAIM=1
+HSA_ENABLE_IPC_MODE_LEGACY=0</pre>
+  </div>
+</div>
+
+<div class="callout warn">
+  <strong>DRANET / pod-netns note.</strong> When NICs are injected into a pod network namespace (DRANET),
+  the benic netdevs arrive <em>DOWN with no IP</em>, so RoCEv2 GIDs don't form. The entrypoint must
+  <code>ip link set benicXp1 up</code> + <code>ip addr add &lt;fabric-ip&gt;/31</code> → PORT_ACTIVE and
+  <b>GID index 3</b> forms. Device names race (<code>rocepNNsN</code> ↔ <code>rdmaN</code>) — resolve the actual
+  names from <code>/sys/class/infiniband</code> at runtime and set <code>MORI_RDMA_DEVICES</code>/<code>NCCL_IB_HCA</code> to those.
+</div>
+
+<h2>6. Verification ladder</h2>
+<pre>modinfo bnxt_re | grep ^version                 # -&gt; 235.2.86.0
+ibv_devinfo -d rdma3 | grep -E 'fw_ver|PORT_ACTIVE'   # -&gt; PORT_ACTIVE
+strings /usr/lib/x86_64-linux-gnu/libibverbs.so.1 | grep -m1 IBVERBS_PRIVATE  # -&gt; IBVERBS_PRIVATE_34
+ib_write_bw -d rdma3 -x 3 -F --report_gbits &lt;peer&gt;   # -&gt; ~370-379 Gb/s (libs + fabric)
+# MoRI-EP async_ll pair test -&gt; Dispatch/Combine Pass, error times: 0</pre>
+
+<div class="foot">
+  Generated for customer hand-off. Values captured live from an MI300X + Broadcom BCM57608 (Thor2) RoCE cluster.
+  Companion package: <code>mori_test_mi300_thor2/</code> (Dockerfile, driver, MoRI test suite, ClusterSphere recommender).
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,24 @@
+===== NODE SOFTWARE MANIFEST =====
+
+host: node-a
+os: 
+kernel: 5.15.0-177-generic
+bnxt_re driver: 235.2.86.0
+bnxt_en driver: 1.10.3-235.2.86.0
+rdma3 fw_ver: 238.1.138.0
+libbnxt_re provider: 539696 bytes Apr 17
+dpkg bnxt: bnxt-en-dkms=1.10.3.235.2.86.0 bnxt-re-conf=235.2.86.0 bnxt-re-dkms=235.2.86.0 bnxt-rocelib=235.2.86.0
+
+
+===== CONTAINER / MoRI / GPU =====
+container image: rocm/vllm-dev:vllm-wideep_06_29_2026_Shiksha_dp16_2p2d_mori_v1.2.1_aiter_v0.1.16.post3_nightlybase_mori121
+mori commit: 12d1bc32d0c93dcd5062e74f4e0f772e36e1aac4
+mori version: 0.1.1.dev1+g12d1bc32d
+rocm: 7.2.3
+ Name: gfx942 
+host: node-b
+kernel: 5.15.0-177-generic
+bnxt_re driver: 235.2.86.0
+bnxt_en driver: 1.10.3-235.2.86.0
+rdma3 fw_ver: 238.1.138.0
+dpkg bnxt: 
