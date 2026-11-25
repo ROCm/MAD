@@ -154,7 +154,7 @@ RUN cd flash-attention \
     && pip install dist/*.whl
 RUN pip install "huggingface_hub[cli]"
 RUN pip install transformers
-RUN pip install sentencepiece
+RUN pip install sentencepiece==0.2.2
 RUN pip install ray
 RUN pip install safetensors
 # record configuration for posterity

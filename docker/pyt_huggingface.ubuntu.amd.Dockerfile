@@ -79,7 +79,7 @@ RUN sed -i 's$torchaudio$$g' /workspace/transformers/examples/pytorch/_tests_req
 
 # Install dependencies
 RUN cd /workspace/transformers/examples/pytorch && pip3 install -r _tests_requirements.txt
-RUN pip3 install --no-cache-dir GPUtil azureml azureml-core tokenizers ninja cerberus sympy sacremoses sacrebleu==1.5.1 sentencepiece scipy scikit-learn
+RUN pip3 install --no-cache-dir GPUtil azureml azureml-core tokenizers ninja cerberus sympy sacremoses sacrebleu==1.5.1 sentencepiece==0.2.2 scipy scikit-learn
 # setting datasets==1.9.0 due to Roberta SQUAD change, https://github.com/huggingface/transformers/issues/12880
 #RUN pip3 install --no-cache-dir datasets==1.9.0
 # https://github.com/huggingface/datasets/issues/3099
