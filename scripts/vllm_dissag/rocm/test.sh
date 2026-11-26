@@ -1,6 +1,6 @@
 #!/bin/bash
-# P/D disaggregation on Crusoe, using the .buildkite/amd-disagg scripts from
-# lcskrishna/vllm (branch rocm-crusoe) with cluster_crs.sh from this folder.
+# P/D disaggregation on a Slurm cluster, using the .buildkite/amd-disagg
+# scripts from lcskrishna/vllm (VLLM_BRANCH) with cluster_crs.sh from this folder.
 # Submits one Slurm job per cell: every model in MODELS, in every
 # topology in TOPOLOGIES (<x>P<y>D), with every mode in WIDE_EP_MODES
 # (0 = TP8, 1 = wide EP). A model's flags come from models.yaml; its folder is

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# cluster_crs.sh — Crusoe (crsuse2-m2m-v3: MI355X + AMD Pensando AINIC) config
+# cluster_crs.sh — MI355X + AMD Pensando AINIC cluster config
 # for the vLLM disaggregated (P/D) launcher.
 # -----------------------------------------------------------------------------
 # Same layout and knobs as cluster.sh (the original CI cluster); only the site
