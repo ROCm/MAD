@@ -12,7 +12,6 @@ on:
       - ".agents/**"
       - "tools/validation/**"
       - "tools/infx2mad.py"
-      - "tools/disagg_emitter.py"
       - "tools/validate_configs.py"
       - "tools/tests/infx2mad_ci_clusters.yaml"
       - "requirements.txt"

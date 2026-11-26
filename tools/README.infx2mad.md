@@ -14,7 +14,6 @@ Every AMD scenario whose framework is in the table below maps onto a MAD runner 
 | `sglang` | `scripts/sglang` |
 | `vllm` | `scripts/vllm` |
 | `atom` | `scripts/atom` |
-| `sglang-disagg` | `scripts/sglang_disagg` |
 
 So this is a **router**: read the scenario, pick the runner that serves its
 framework, emit that runner's config. Adding a scenario is config, not code.
@@ -115,8 +114,7 @@ all-reduce, so a TP serving point as InferenceX runs it puts almost no traffic
 on RCCL. `--rccl-allreduce` adds `--disable-custom-all-reduce` to every point so
 that AllReduce goes through RCCL instead. It is off by default, is recorded as a
 fidelity gap (the row no longer measures what the scenario names). ATOM has
-no such switch, so there the gap says the mode was not applied; disaggregated
-scenarios take their server args from the launcher and refuse the option.
+no such switch, so there the gap says the mode was not applied.
 
 ## GPU product
 
@@ -151,11 +149,8 @@ store is dropped rather than started to fail.
 
 ## Known limits
 
-- **Asymmetric TP in disagg.** `scripts/sglang_disagg/run.sh` resolves a single
-  `SGLANG_TP_SIZE` for both roles, so a point with prefill tp=4 and decode tp=8
-  has no faithful mapping. Such points are dropped with the reason attached.
-- **`xP`/`yD` are node counts** while a scenario states workers; they coincide
-  only while tp equals the node's GPU count.
+- **`sglang-disagg`** scenarios are refused: the route onto
+  `scripts/sglang_disagg` is not ported yet.
 - **`atom-disagg` and `tilert`** have no MAD runner.
 - **Recipe `setup_script`.** A recipe may prepare its container before the
   engine starts. `pip-runtime-deps.sh` is reproducible — it installs

@@ -10,10 +10,10 @@ Emits, per scenario:
   3. <model-prefix>_models.json the same model in models.json shape, for a
                                 plain `madengine run --tags` invocation
 
-Why a translator and not a new harness: every AMD InferenceX framework but two
-(atom-disagg and tilert) maps onto a MAD runner that already exists (scripts/sglang, scripts/vllm,
-scripts/atom, scripts/sglang_disagg), and madengine already runs in the RCCL CI
-arm. So this is a ROUTER: read the scenario, pick the runner that serves its
+Why a translator and not a new harness: every AMD InferenceX framework but
+three (sglang-disagg, atom-disagg and tilert) maps onto a MAD runner that already
+exists (scripts/sglang, scripts/vllm, scripts/atom), and madengine already runs
+in the RCCL CI arm. So this is a ROUTER: read the scenario, pick the runner that serves its
 framework, emit that runner's config. Adding a scenario is config, not code.
 
 Four invariants every emitter inherits, each forced by something concrete:
@@ -107,16 +107,9 @@ RUNNERS = {
 # Frameworks with an InferenceX scenario but no MAD runner. Named explicitly so
 # a missing row reads as a known gap rather than a silent omission.
 NO_RUNNER = {
+    "sglang-disagg": "disaggregated route not ported yet",
     "atom-disagg": "no MAD runner",
     "tilert": "no MAD runner",
-}
-
-# Disaggregated prefill/decode is driven by scripts/sglang_disagg, which is env-
-# and arg-driven rather than config-file driven: xP prefill nodes, yD decode
-# nodes, one TP for both roles. So it gets its own emitter, and a scenario there
-# produces one manifest per search-space point rather than one config file.
-DISAGG_RUNNERS = {
-    "sglang-disagg": {"dir": "sglang_disagg", "launcher": "sglang-disagg", "backend": "sglang"},
 }
 
 # Cluster facts that are not in the InferenceX scenario and cannot be derived
@@ -2028,103 +2021,6 @@ def translate_one(args, scenario_key, out_dir):
                       f"({type(exc).__name__}: {exc})")
 
 
-def _translate_disagg(args, scenario_key, scenario, out_dir):
-    """Disagg scenarios emit one manifest per search-space point; see
-    disagg_emitter.py for why they cannot share one."""
-    import disagg_emitter
-
-    runner = DISAGG_RUNNERS[scenario["framework"]]
-    cluster = CLUSTERS[args.cluster]
-    # Options the disagg route cannot honour must be refused, not ignored: a
-    # smoke run that quietly uses the real checkpoint and every point is worse
-    # than no run.
-    unsupported = [n for n, v in (("--agentic-duration", args.agentic_duration),
-                                  ("--smoke-model", args.smoke_model),
-                                  ("--smoke-point", args.smoke_point),
-                                  # The disagg servers take their args from
-                                  # models.yaml; nothing here would apply it.
-                                  ("--rccl-allreduce", args.rccl_allreduce),
-                                  ("--smoke-first-point", args.smoke_first_point)) if v]
-    if unsupported:
-        raise Untranslatable(
-            f"the disagg route does not implement {', '.join(unsupported)}")
-    gpu_type = scenario["runner"].split(":")[-1].split("-")[0]
-    arch = GPU_ARCH.get(gpu_type)
-    if arch is None or arch != cluster["arch"]:
-        raise Untranslatable(
-            f"scenario targets {gpu_type} ({arch}) but the cluster is {cluster['arch']}")
-
-    # Same selection rule as the aggregated route: auto-detect only when asked
-    # to. Ignoring the flag meant `--all --workload agentic-coding` still
-    # emitted fixed-seq-len disagg manifests, and asking for a workload a
-    # scenario does not have silently produced the other one.
-    workload_name = args.workload
-    if workload_name == "auto":
-        present = [w for w in ("fixed-seq-len", "agentic-coding")
-                   if w in scenario["scenarios"]]
-        if len(present) != 1:
-            raise Untranslatable(f"expected one known workload, found {present}")
-        workload_name = present[0]
-    if workload_name not in scenario["scenarios"]:
-        raise Untranslatable(f"no {workload_name} workload")
-    # Every entry, not only the first: a fixed-seq-len scenario can list
-    # several ISL/OSL shapes, and dropping all but one would translate
-    # successfully while omitting points. Indices run across entries so each
-    # point keeps a unique manifest name.
-    entries = [(w, p) for w in scenario["scenarios"][workload_name]
-               for p in w["search-space"]]
-
-    # Resolved here, not inside the emitter: an unresolvable group has to
-    # raise Untranslatable from the module the sweep actually imported.
-    device_gids = device_group_args(cluster)
-    # The disagg emitter only ever saw --model-host-dir, so a checkpoint in any
-    # of the cluster's other stores looked absent to it. Same resolution as the
-    # aggregated route.
-    disagg_weights, disagg_note = resolve_weights(
-        scenario["model"], cluster, args.weights_dir, args.model_host_dir)
-    # Scenario-wide gaps belong in every point's manifest, not only in the
-    # sweep's stdout: a manifest is what gets run and archived on its own.
-    scenario_gaps = [n for n in (disagg_note,
-                                 precision_note(scenario, disagg_weights),
-                                 product_note(gpu_type, cluster))
-                     if n]
-
-    os.makedirs(out_dir, exist_ok=True)
-    made, notes, skipped = [], [], []
-    for idx, (workload, point) in enumerate(entries):
-        try:
-            man, pnotes = disagg_emitter.emit_disagg(
-                scenario_key, scenario, workload_name, workload, point, idx,
-                cluster, runner, args.timeout, args.slurm_time,
-                disagg_weights, args.model_host_dir, arch, resolve_mounts,
-                mad_dir=args.mad_dir, infx_commit=infx_revision(args.infx), infx_root=args.infx,
-                run_logs_host=args.run_logs_dir,
-                base_image_override=args.base_image, device_gids=device_gids,
-                trace_loader=(infx_trace_loader(args.infx, scenario["model-prefix"])
-                              if workload_name == "agentic-coding" else None))
-            man["_infx_provenance"]["fidelity_gaps"].extend(scenario_gaps)
-            if args.base_image:
-                man["_infx_provenance"]["fidelity_gaps"].append(
-                    f"image replaced: {scenario['image']} -> {args.base_image}")
-        except ValueError as exc:
-            skipped.append(f"point {idx}: {exc}")
-            continue
-        path = os.path.join(out_dir, f"{scenario_key}.p{idx}.manifest.json")
-        with open(path, "w") as f:
-            json.dump(man, f, indent=2)
-            f.write("\n")
-        made.append(path)
-        notes += pnotes
-    if not made:
-        raise Untranslatable("; ".join(skipped) or "no expressible point")
-    notes += [f"point dropped -> {s}" for s in skipped]
-    notes += scenario_gaps
-    return {"scenario": scenario_key, "framework": scenario["framework"],
-            "workload": workload_name, "runner": f"scripts/{runner['dir']}",
-            "points": len(made), "config": "(env-driven launcher)",
-            "manifest": made[0], "gaps": sorted(set(notes))}
-
-
 # A recipe may point --tokenizer-path into the HF cache of InferenceX's own
 # runner (/mnt/hf_hub_cache/models--<org>--<name>/snapshots/<sha>). That path
 # does not exist here.
@@ -2286,8 +2182,6 @@ def rebase_tokenizer_paths(blocks, model_repo, model_path):
 def _translate_one(args, scenario_key, out_dir):
     scenario = load_scenario(args.infx, scenario_key)
     fw = scenario.get("framework")
-    if fw in DISAGG_RUNNERS:
-        return _translate_disagg(args, scenario_key, scenario, out_dir)
     if fw in NO_RUNNER:
         raise Untranslatable(NO_RUNNER[fw])
     if fw not in RUNNERS:
@@ -2468,7 +2362,7 @@ def _translate_one(args, scenario_key, out_dir):
     # runner's configs/ holding translations that no manifest points at.
     results_host_dir = None
     if workload_name == "agentic-coding":
-        # Prepared up front, same requirements as disagg's /run_logs: has to
+        # Prepared up front: has to
         # exist and be writable by the submitting user before docker starts,
         # or a run_as_submitting_user container cannot write a root-owned dir
         # docker would otherwise create.
@@ -2572,12 +2466,10 @@ def main():
                          "scenario, which already separates frameworks and the "
                          "precision/spec-decoding variants that share a prefix")
     ap.add_argument("--mad-dir", default=".",
-                    help="MAD checkout, read for scripts/sglang_disagg/models.yaml "
-                         "when translating a disaggregated scenario")
+                    help="MAD checkout the generated configs are staged into")
     ap.add_argument("--run-logs-dir",
-                    help="shared writable dir bound to /run_logs: the disagg "
-                         "launcher coordinates cross-node readiness through it, "
-                         "and an agentic-coding replay writes its result "
+                    help="shared writable dir bound to /run_logs: an "
+                         "agentic-coding replay writes its result "
                          "artifacts there instead of trusting run_directory's "
                          "location. Defaults to ./run_logs")
     ap.add_argument("--base-image",
