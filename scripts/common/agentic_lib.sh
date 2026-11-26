@@ -37,6 +37,14 @@
 INFERENCEX_REPO="${INFERENCEX_REPO:-https://github.com/SemiAnalysisAI/InferenceX.git}"
 INFERENCEX_PIN="${AGENTIC_UTILS_PIN:-ef8a17ecf0c3679dc12020eddab3c1a36d285b58}"   # InferenceX main @ 2026-07-25
 AIPERF_PIN="${AIPERF_PIN:-0d2aa0572ac685943d38c580675c4a61023581d3}"             # utils/aiperf submodule (cquil11/aiperf-agentx-v1.0)
+# aiperf at that pin depends on `transformers @ git+...transformers.git` with
+# NO ref, i.e. whatever transformers main is on the day of the run. Main
+# dropped Python 3.10 on 2026-10-22 (huggingface/transformers#49251), so from
+# then on the install fails in every image still on 3.10 -- the SGLang ROCm
+# images among them -- before a single request is sent. Pinned to main as of
+# the aiperf pin's own date (2026-07-02), which is what it was built against;
+# that commit supports Python 3.10-3.14 and already has deepseek_v4.
+AGENTIC_TRANSFORMERS_REF="${AGENTIC_TRANSFORMERS_REF:-9d011e8375ab802f1b9ada2d488af35232f6dd3e}"
 
 # Replay driver. Two ways to get the same engine:
 #   aiperf (default) - the pinned source build above (InferenceX + its aiperf
@@ -53,10 +61,33 @@ AGENTX_HARNESS_VERSION="${AGENTX_HARNESS_VERSION:-1.0.7}"
 
 set -o pipefail
 
+# Replay arguments whose value may contain whitespace. REPLAY_CMD is a string
+# the replay executes by word splitting, so a path with a space in it would
+# arrive as two arguments; values that need to stay one argv element live here
+# and are appended at execution (and, shell-quoted, wherever the command is
+# shown).
+declare -a REPLAY_EXTRA_ARGV=()
+
+# The assembled command as a human-readable line: REPLAY_CMD plus the extra
+# arguments, shell-quoted.
+replay_cmd_display() {
+    local shown="$REPLAY_CMD"
+    if [ "${#REPLAY_EXTRA_ARGV[@]}" -gt 0 ]; then
+        shown+="$(printf ' %q' "${REPLAY_EXTRA_ARGV[@]}")"
+    fi
+    printf '%s' "$shown"
+}
+
 agentic_log()  { echo "[agentic] $*"; }
 agentic_warn() { echo "[agentic][WARN] $*" >&2; }
 agentic_err()  { echo "[agentic][ERROR] $*" >&2; }
 agentic_die()  { agentic_err "$*"; exit 1; }
+# A condition that makes the result untrustworthy. Callers that need a result
+# they can rely on set AGENTIC_STRICT_RESULT=1 and the run stops; every other
+# caller keeps the earlier behaviour of warning and carrying on.
+agentic_die_if_strict() {
+    if [ "${AGENTIC_STRICT_RESULT:-0}" = "1" ]; then agentic_die "$*"; else agentic_warn "$*"; fi
+}
 
 # Location of the generic AgentX generator/verifier/loader + profiles.
 AGENTX_DIR="${AGENTX_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agentx}"
@@ -104,7 +135,19 @@ ensure_agentic_uv() {
 
 _clone_inferencex_pinned() {
     if [ -d "$INFMAX_WS/.git" ]; then
-        agentic_log "InferenceX checkout already present at $INFMAX_WS"
+        # Reused only at the pinned revisions: a runtime dir kept across a pin
+        # change would otherwise build from the old sources and then record the
+        # new pins as installed.
+        if [ "$(git -C "$INFMAX_WS" rev-parse HEAD 2>/dev/null)" != "$INFERENCEX_PIN" ]; then
+            agentic_log "InferenceX checkout at $INFMAX_WS is not at $INFERENCEX_PIN; moving it to the pin"
+            git -C "$INFMAX_WS" fetch --quiet origin "$INFERENCEX_PIN" 2>/dev/null || git -C "$INFMAX_WS" fetch --quiet origin
+            git -C "$INFMAX_WS" checkout --quiet "$INFERENCEX_PIN" \
+                || agentic_die_if_strict "cannot check out InferenceX $INFERENCEX_PIN in $INFMAX_WS"
+            git -C "$INFMAX_WS" submodule update --init --recursive utils/aiperf
+        else
+            agentic_log "InferenceX checkout already present at $INFMAX_WS"
+        fi
+        _pin_aiperf_submodule
         return
     fi
     command -v git >/dev/null 2>&1 || { apt-get update && apt-get install -y git; }
@@ -115,15 +158,38 @@ _clone_inferencex_pinned() {
     # Pull the aiperf submodule at the commit InferenceX pins (holds the
     # inferencex-agentx-mvp scenario + semianalysis_cc_traces_weka loaders).
     git -C "$INFMAX_WS" submodule update --init --recursive utils/aiperf
-    local got
-    got="$(git -C "$INFMAX_WS/utils/aiperf" rev-parse HEAD 2>/dev/null)"
-    if [ "$got" != "$AIPERF_PIN" ]; then
-        agentic_log "WARN: aiperf submodule at $got, expected $AIPERF_PIN (InferenceX pin drift)"
-    fi
+    _pin_aiperf_submodule
+}
+
+# The aiperf sources must be AIPERF_PIN, not merely whatever the InferenceX pin
+# records: the environment is built editable from them and stamped with that
+# pin, so a mismatch would be reused under the wrong name.
+_pin_aiperf_submodule() {
+    local sub="$INFMAX_WS/utils/aiperf" got
+    got="$(git -C "$sub" rev-parse HEAD 2>/dev/null)"
+    [ "$got" = "$AIPERF_PIN" ] && return
+    agentic_log "aiperf submodule at ${got:-none}; checking out $AIPERF_PIN"
+    git -C "$sub" fetch --quiet origin "$AIPERF_PIN" 2>/dev/null || git -C "$sub" fetch --quiet origin
+    git -C "$sub" checkout --quiet "$AIPERF_PIN" \
+        || agentic_die_if_strict "cannot check out aiperf $AIPERF_PIN in $sub"
 }
 
 install_agentic_deps() {
     [ "$AIPERF_DEPS_READY" = "1" ] && return
+    # AIPERF_DEPS_READY lives in one shell; a caller that runs the hook once
+    # per point gets a new shell each time. An environment this function built
+    # earlier in the same runtime dir, for the same pins, is reused instead of
+    # deleted and rebuilt.
+    # The checkout's path is part of the key: aiperf is installed editable from
+    # it and the aggregation runs from it, so the environment is only as good
+    # as that tree. It is also checked below, not just trusted from the stamp.
+    local _pins="harness=${AGENTIC_HARNESS}:${AGENTX_HARNESS_VERSION} inferencex=${INFERENCEX_PIN} aiperf=${AIPERF_PIN} transformers=${AGENTIC_TRANSFORMERS_REF} checkout=${INFMAX_WS}"
+    if [ -f "$AIPERF_VENV/.mad_agentic_pins" ] && [ -x "$AIPERF_CLI" ] && [ -x "$AIPERF_HF_CLI" ] \
+       && [ "$(cat "$AIPERF_VENV/.mad_agentic_pins")" = "$_pins" ] && _sources_at_pins; then
+        agentic_log "reusing aiperf environment at $AIPERF_VENV ($_pins)"
+        AIPERF_DEPS_READY=1
+        return
+    fi
     ensure_agentic_uv
     _clone_inferencex_pinned
 
@@ -147,11 +213,29 @@ install_agentic_deps() {
     UV_CACHE_DIR="$AIPERF_UV_CACHE_DIR" "$AIPERF_UV_BIN" pip install --python "$AIPERF_PYTHON" \
         -r "$INFMAX_WS/utils/agentic-benchmark/requirements.txt" \
         ${driver_pkgs//|/ } \
-        "datasets>=4.7.0" "huggingface_hub[cli]>=0.25.0" urllib3 requests
+        "datasets>=4.7.0" "huggingface_hub[cli]>=0.25.0" urllib3 requests \
+        --override <(echo "transformers @ git+https://github.com/huggingface/transformers.git@${AGENTIC_TRANSFORMERS_REF}")
 
     [ -x "$AIPERF_CLI" ] && [ -x "$AIPERF_HF_CLI" ] || \
         agentic_die "isolated $AGENTIC_HARNESS environment incomplete at $AIPERF_VENV (missing $AIPERF_CLI)"
+    # Written last, so only a complete install is ever reused -- and only when
+    # the sources it was built from are the requested pins. A non-strict caller
+    # can get here after a checkout that failed with only a warning; stamping
+    # that install with the requested pins would let a later strict run reuse it
+    # as if it had been verified.
+    if _sources_at_pins; then
+        echo "$_pins" > "$AIPERF_VENV/.mad_agentic_pins"
+    else
+        agentic_warn "InferenceX/aiperf sources are not at the requested pins; this environment will not be reused"
+    fi
     AIPERF_DEPS_READY=1
+}
+
+# True when the InferenceX checkout and its aiperf submodule are exactly at
+# INFERENCEX_PIN and AIPERF_PIN.
+_sources_at_pins() {
+    [ "$(git -C "$INFMAX_WS" rev-parse HEAD 2>/dev/null)" = "$INFERENCEX_PIN" ] \
+        && [ "$(git -C "$INFMAX_WS/utils/aiperf" rev-parse HEAD 2>/dev/null)" = "$AIPERF_PIN" ]
 }
 
 # --------------------------------------------------------------------------
@@ -425,9 +509,23 @@ build_replay_cmd() {
     REPLAY_CMD+=" --agentic-cache-warmup-duration $cache_warmup"
     REPLAY_CMD+=" --warmup-grace-period ${AGENTIC_WARMUP_GRACE_PERIOD:-1800}"
     REPLAY_CMD+=" --use-server-token-count --tokenizer-trust-remote-code"
+    # Without --tokenizer aiperf loads the tokenizer by the served model name,
+    # i.e. from the Hub: a gated repo without a token, or a node without
+    # egress, fails before the first request. A caller that has the checkpoint
+    # mounted points it here instead; unset keeps the old behaviour.
+    REPLAY_EXTRA_ARGV=()
+    if [ -n "${AGENTIC_TOKENIZER:-}" ]; then
+        REPLAY_EXTRA_ARGV+=(--tokenizer "$AGENTIC_TOKENIZER")
+    fi
     REPLAY_CMD+=" --no-gpu-telemetry --slice-duration 1.0"
     if [ -n "${AGENTIC_SERVER_METRICS:-}" ]; then
         REPLAY_CMD+=" --server-metrics ${AGENTIC_SERVER_METRICS}"
+    elif [ "${AGENTIC_NO_SERVER_METRICS:-0}" = "1" ]; then
+        # Without --server-metrics aiperf still discovers and scrapes the
+        # inference endpoint's own /metrics. A caller whose server exports
+        # names the result aggregator has no adapter for (it rejects the whole
+        # run) opts out of the scrape entirely.
+        REPLAY_CMD+=" --no-server-metrics"
     fi
     # --num-dataset-entries only applies to hf downloads (how many trace files to
     # pull); a generated profile corpus is consumed whole. Per-workload
@@ -443,13 +541,23 @@ build_replay_cmd() {
     if [ -n "$ctx_len" ] && [ "$ctx_len" != "0" ]; then
         REPLAY_CMD+=" --max-context-length $ctx_len"
     fi
-    REPLAY_CMD+=" --output-artifact-dir $result_dir/aiperf_artifacts"
+    # Paths go in the argv array: REPLAY_CMD is executed by word splitting, so
+    # a directory with a space in it would arrive as several arguments.
+    REPLAY_EXTRA_ARGV+=(--output-artifact-dir "$result_dir/aiperf_artifacts")
     # The scenario enforces a 900s minimum; smoke runs opt into --unsafe-override
     # (marks submission_valid=false, expected for non-canonical runs).
     if [ "$duration" -lt 900 ] || [ "${AIPERF_UNSAFE_OVERRIDE:-false}" = "true" ]; then
         REPLAY_CMD+=" --unsafe-override"
     fi
-    REPLAY_CMD+=" $TRACE_SOURCE_FLAG"
+    # A corpus replay names a directory (--input-file <dir>); keep that path as
+    # one argument too. Any other trace source has no path and stays a string.
+    local _corpus_prefix="--custom-dataset-type weka_trace --input-file "
+    if [[ "$TRACE_SOURCE_FLAG" == "$_corpus_prefix"* ]]; then
+        REPLAY_EXTRA_ARGV+=(--custom-dataset-type weka_trace
+                            --input-file "${TRACE_SOURCE_FLAG#"$_corpus_prefix"}")
+    else
+        REPLAY_CMD+=" $TRACE_SOURCE_FLAG"
+    fi
 }
 
 # --------------------------------------------------------------------------
@@ -461,6 +569,9 @@ write_agentic_result_json() {
     # $AGENTIC_OUTPUT_DIR/$RESULT_FILENAME.json (RESULT_FILENAME is required).
     local result_filename="${AGENTIC_RESULT_FILENAME:-agentic_${SLURM_JOB_ID:-0}_xP${xP:-1}_yD${yD:-1}_${MODEL_NAME:-model}}"
     AGENTIC_RESULT_JSON="${AGENTIC_OUTPUT_DIR:-$result_dir}/${result_filename}.json"
+    # A result dir can be reused; an aggregate left by an earlier replay must
+    # not stand in for this one if the aggregation below fails.
+    rm -f "$AGENTIC_RESULT_JSON"
     # process_agentic_result requires KV_OFFLOADING; "none" is the no-offload case
     # (and requires KV_OFFLOAD_BACKEND to be empty). All other metadata env vars
     # default cleanly.
@@ -480,7 +591,12 @@ write_agentic_result_json() {
       IMAGE="${IMAGE:-}" RUNNER_TYPE="${RUNNER_TYPE:-}" \
       SPEC_DECODING="${SPEC_DECODING:-none}" \
       "$AIPERF_PYTHON" -m utils.agentic.aggregation.process_agentic_result )
+    local agg_rc=$?
     "$AIPERF_PYTHON" "$INFMAX_WS/utils/generate_aiperf_plots.py" "$result_dir" 2>&1 || true
+    if [ "$agg_rc" -ne 0 ] || [ ! -s "$AGENTIC_RESULT_JSON" ]; then
+        agentic_err "aggregation failed (rc=$agg_rc); no aggregate JSON at $AGENTIC_RESULT_JSON"
+        return 1
+    fi
     agentic_log "aggregate JSON: $AGENTIC_RESULT_JSON"
 }
 
@@ -488,19 +604,64 @@ run_agentic_replay_and_write_outputs() {
     local result_dir="$1"
     local replay_rc
     mkdir -p "$result_dir"
-    echo "$REPLAY_CMD" > "$result_dir/benchmark_command.txt"
+    echo "$(replay_cmd_display)" > "$result_dir/benchmark_command.txt"
 
-    $REPLAY_CMD 2>&1 | tee "$result_dir/benchmark.log"
+    $REPLAY_CMD ${REPLAY_EXTRA_ARGV[@]+"${REPLAY_EXTRA_ARGV[@]}"} 2>&1 | tee "$result_dir/benchmark.log"
     replay_rc=${PIPESTATUS[0]}
 
-    write_agentic_result_json "$result_dir"
+    local agg_rc=0
+    write_agentic_result_json "$result_dir" || agg_rc=$?
 
-    # Best-effort post-benchmark health check (PASS/WARN on error + cache-hit).
+    # Post-benchmark health check (PASS/WARN on error + cache-hit). Best-effort
+    # by default. AGENTIC_STRICT_RESULT=1 makes a missing aggregate, no
+    # recorded request or an error rate above AGENTIC_MAX_ERROR_RATE fail the
+    # run -- for callers whose run has no other result check (a route that
+    # skips perf collection would otherwise report success). A low cache hit
+    # stays a warning, and submission_valid is not consulted, so a short smoke
+    # window still passes.
     local _validator="$(dirname "${BASH_SOURCE[0]}")/validate_agentic_result.sh"
+    local _valid_rc=0
     if [ -f "$_validator" ] && [ -n "${AGENTIC_RESULT_JSON:-}" ]; then
-        AIPERF_PYTHON="$AIPERF_PYTHON" bash "$_validator" "$AGENTIC_RESULT_JSON" || true
+        AIPERF_PYTHON="$AIPERF_PYTHON" bash "$_validator" "$AGENTIC_RESULT_JSON" || _valid_rc=$?
+    else
+        _valid_rc=2
+    fi
+    if [ "${AGENTIC_STRICT_RESULT:-0}" = "1" ]; then
+        if [ "$_valid_rc" -ne 0 ]; then
+            agentic_err "aggregate validation failed (rc=$_valid_rc) and AGENTIC_STRICT_RESULT=1"
+            return 1
+        fi
+        # The validator counts requests and error rate; it does not look at the
+        # throughput. A run with profiled requests but no usable total
+        # throughput has measured nothing, so check that here too.
+        if ! "${AIPERF_PYTHON:-python3}" - "$AGENTIC_RESULT_JSON" <<'PY'
+import json, math, sys
+d = json.load(open(sys.argv[1]))
+acct = d.get("request_accounting") or {}
+profiled = acct.get("records_profiled", d.get("num_requests_successful"))
+tput = (((d.get("request_metrics") or {}).get("throughput") or {})
+        .get("total") or {}).get("tokens_per_second")
+def ok(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) \
+        and math.isfinite(v) and v > 0
+if not ok(profiled) or not ok(tput):
+    sys.exit(f"[agentic][strict] no usable measurement: profiled requests="
+             f"{profiled!r}, total throughput={tput!r}")
+PY
+        then
+            agentic_err "aggregate has no usable measurement and AGENTIC_STRICT_RESULT=1"
+            return 1
+        fi
     fi
 
+    # A failed aggregation fails the run only for callers that asked for a
+    # trustworthy result; the others keep the earlier best-effort behaviour.
+    if [ "$replay_rc" -eq 0 ] && [ "$agg_rc" -ne 0 ] && [ "${AGENTIC_STRICT_RESULT:-0}" = "1" ]; then
+        echo '{"submission_valid": false, "reason": "aggregation_failed"}' \
+            > "$result_dir/RUN_INVALID.json"
+        agentic_err "agentic replay finished but its aggregation failed (run marked invalid)"
+        return "$agg_rc"
+    fi
     if [ "$replay_rc" -ne 0 ]; then
         # Automated rollback: mark the run invalid, leave logs for triage.
         echo '{"submission_valid": false, "reason": "replay_rc='"$replay_rc"'"}' \
@@ -534,6 +695,6 @@ agentic_dry_run() {
   aiperf pin             : ${AIPERF_PIN}
 
 [agentic][DRY_RUN] assembled command:
-${REPLAY_CMD}
+$(replay_cmd_display)
 EOF
 }
