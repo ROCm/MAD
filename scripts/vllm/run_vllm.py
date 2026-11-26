@@ -29,6 +29,7 @@ import sys
 import csv
 import glob
 import json
+import zlib
 import time
 import yaml
 import psutil
@@ -113,7 +114,16 @@ def _format_cli_arg(k, v):
     # shell=True, so values containing spaces / JSON / quotes (e.g.
     # --compilation-config '{"cudagraph_num_of_warmups": 3}') must be quoted
     # to survive shell tokenization.
-    v_str = shlex.quote(str(v))
+    # Lists and mappings must be JSON, not Python repr: str() would
+    # single-quote their keys and the engine would reject the value.
+    # A list of scalars on an argparse-style key is a variadic option
+    # (--cudagraph-capture-sizes 1 2 4): one token each. Dotted/DSL keys keep
+    # the JSON form, which is what their `key=value` parser expects.
+    if is_argparse_style and isinstance(v, list) and all(
+            not isinstance(x, (dict, list)) for x in v):
+        return f" {k} " + " ".join(shlex.quote(str(x)) for x in v)
+    rendered = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+    v_str = shlex.quote(rendered)
     if is_argparse_style:
         return f" {k} {v_str}"
     return f" {k}={v_str}"
@@ -682,6 +692,12 @@ def _build_bench_serve_cmd(model, config, bench_args=None, extra_flags=""):
         f"--random-output-len {config['out']} "
         f"--request-rate inf "
     )
+    # A recipe that jitters input length (InferenceX sets RANDOM_RANGE_RATIO)
+    # has to be able to say so, or its numbers are not reproducible here.
+    # Read here so serving and serving-profile honour it alike; absent, the
+    # client's own default applies.
+    if config.get('random_range_ratio') is not None:
+        cmd += f"--random-range-ratio {config['random_range_ratio']} "
     if extra_flags:
         cmd += f"{extra_flags} "
     if bench_args:
@@ -693,12 +709,61 @@ def _build_bench_serve_cmd(model, config, bench_args=None, extra_flags=""):
     return cmd.strip()
 
 
+def _load_infx_agentic():
+    """Import the shared agentic body from scripts/common/.
+
+    Imported lazily, not at module scope: madengine runs this file from
+    run_directory/, and only the agentic path needs scripts/common on sys.path.
+    A serving-only run must not fail because that directory moved.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "scripts", "common"),
+                 os.path.join("..", "scripts", "common"),
+                 os.path.join(here, "..", "common")):
+        if os.path.isfile(os.path.join(cand, "infx_agentic.py")):
+            sys.path.insert(0, cand)
+            import infx_agentic
+            return infx_agentic
+    raise RuntimeError("scripts/common/infx_agentic.py not found")
+
+
+def run_agentic_point(model, config):
+    """Agentic replay for one config block; the body is shared by all engines.
+
+    Not _build_server_cmd: that adds --no-enable-prefix-caching, and an agentic
+    replay measures multi-turn sessions whose throughput comes from prefix
+    reuse -- turning the cache off would measure a different system.
+    """
+    infx_agentic = _load_infx_agentic()
+    server_cmd = (
+        "vllm serve "
+        f"{model} "
+        f"--dtype {config['dtype']} "
+        f"-tp {config['tp']} "
+        f"--trust-remote-code "
+        f"--disable-uvicorn-access-log "
+    )
+    env = config.pop("env", "")
+    extra_args = config.pop("extra_args", "")
+    config.pop("random_range_ratio", None)
+    server_cmd = f"{env} {server_cmd} {extra_args}".strip()
+    return infx_agentic.run_agentic(
+        model, config, "vllm", server_cmd, "localhost", 8000, 1800
+    )
+
+
 def run_serving(model, config):
     # by default use num_prompts = 10 * max_concurrency if not specified
     if not config.get("num_prompts"):
         config["num_prompts"] = str(10 * int(config["max_concurrency"]))
+    # Points that differ in anything but tp/inp/out/num_prompts/concurrency
+    # (server arguments, env, random_range_ratio, ...) would otherwise share
+    # this file, and a later point would overwrite an earlier one's result
+    # before it is checked. A digest of the whole point configuration keeps
+    # one file per point; the last two fields stay <num_prompts>_<concurrency>.
+    server_key = zlib.crc32(json.dumps(config, sort_keys=True, default=str).encode())
     output_json = (
-        f"{config['model']}_serving_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
+        f"{config['model']}_serving_{server_key:08x}_{config['tp']}_{config['inp']}_{config['out']}_{config['num_prompts']}_{config['max_concurrency']}.json"
     )
     # pop env and extra args from config
     env = config.pop('env', "")
@@ -1033,7 +1098,9 @@ def main():
                 config.get("model"),
             )
 
-            env_vars_str = " ".join(f"{k}={v}" for k, v in env_vars.items())
+            # Env values reach the engine through a shell string as well; a
+            # value with spaces or JSON must survive shell tokenization.
+            env_vars_str = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
             extra_args_str = ""
             for k, v in extra_args.items():
                 extra_args_str += _format_cli_arg(k, v)
@@ -1193,6 +1260,18 @@ def main():
                     apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
                 )
                 results = run_throughput(model, config)
+                for result in results:
+                    writer.writerow(result)
+            elif benchmark == "agentic":
+                # Same fallback the serving branch applies; a --dcp given on the
+                # command line must reach the server, and the replay's recorded
+                # DCP_SIZE must say what the server actually ran with.
+                eff_extra = apply_optional_dcp(config.get("extra_args_dict"), args.dcp)
+                config["extra_args"] = _extra_args_to_str(eff_extra)
+                eff_dcp = eff_extra.get("--decode-context-parallel-size")
+                if eff_dcp is not None and isinstance(config.get("agentic_env"), dict):
+                    config["agentic_env"]["DCP_SIZE"] = str(eff_dcp)
+                results = run_agentic_point(model, config)
                 for result in results:
                     writer.writerow(result)
             elif benchmark == "serving":
