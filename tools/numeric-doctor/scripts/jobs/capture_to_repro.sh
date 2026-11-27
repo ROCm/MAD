@@ -630,6 +630,17 @@ fi
 rm -f -- "$B/capsule/"*.tmp
 [ -n "$op_pkg" ] || cp -- "$rep_host" "$B/capsule/" || finish "PACKAGE_FAILED: capsule $rep_host" 1
 ship_runtime "$B" || finish "PACKAGE_FAILED: runtime layer / build context ${IMAGE_BUILD_DIR:-}" 1
+# PyTorch TunableOp results the capture ran under (its GEMM solution choice): shipped in tunableop/,
+# which replay_nan_op.py --restore-env points PYTORCH_TUNABLEOP_FILENAME at.
+tun=$("$ND" run --gpus 0 -- "python3 -c 'import sys, torch; c = torch.load(sys.argv[1], map_location=\"cpu\", mmap=True, weights_only=False); print(\"TUNABLEOP_FILE=\" + ((c.get(\"env\") or {}).get(\"PYTORCH_TUNABLEOP_FILENAME\") or \"\"))' $(rt_path "$rep_host")" 2>/dev/null |
+      sed -n 's/^TUNABLEOP_FILE=//p' | tail -1)
+if [ -n "$tun" ]; then
+  mkdir -p "$B/tunableop"
+  tg=$(rt_hostpath "$(dirname -- "$tun")")/$(basename -- "$tun" | sed 's/%d/*/')   # %d = device ordinal
+  cp -- $tg "$B/tunableop/" 2>/dev/null &&
+    LG note "step5b[$G]" "TunableOp results shipped: $(ls "$B/tunableop" | tr '\n' ' ')(capture's $tun)" ||
+    LG note "step5b[$G]" "TunableOp file $tun not found: the replay tunes afresh"
+fi
 cp -- "$ND_REPO_HOST/scripts/jobs/replay_ladder.sh" "$B/scripts/jobs/"
 for f in replay_nan_op.py failure_signature.py kernel_patch.py kernel_mutations.py op_nan_capture.py replay_hipblaslt_log_with_nan.py \
          transformer_hog.py pressure_hog.py capsule_replay_summary.sh replay_verdict.py cotenant_loop.sh kernel_match.py math_refs.py \

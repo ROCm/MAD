@@ -1091,15 +1091,38 @@ def breaks_chain(func):
 _PROMOTE_CACHE = {}
 
 
+def _probe_device():
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def _needs_promote(dtype):
     p = _PROMOTE_CACHE.get(dtype)
     if p is None:
-        try:
-            torch.isfinite(torch.zeros(1, dtype=dtype))
+        try:  # on the GPU: CUDA lacks kernels the CPU has (abs for float8_e5m2)
+            torch.isfinite(torch.zeros(1, dtype=dtype, device=_probe_device()))
             p = False
         except (NotImplementedError, RuntimeError):
             p = True
         _PROMOTE_CACHE[dtype] = p
+    return p
+
+
+_NORM32_CACHE = {}
+
+
+def _norm32_ok(dtype):
+    """Can vector_norm / _foreach_norm read `dtype` with dtype=float32?  Not
+    float64 (a narrowing) nor the float8 types (no promotion), though
+    torch.isfinite reads both, so _needs_promote says no."""
+    p = _NORM32_CACHE.get(dtype)
+    if p is None:
+        try:
+            torch.linalg.vector_norm(torch.zeros(1, dtype=dtype, device=_probe_device()),
+                                     float("inf"), dtype=torch.float32)
+            p = True
+        except (NotImplementedError, RuntimeError):
+            p = False
+        _NORM32_CACHE[dtype] = p
     return p
 
 
@@ -1171,9 +1194,12 @@ def _norm_propagates_nan(device):
 
 def _maxabs(t):
     """0-d max|t| on t's device (NaN propagates); sliced like _finite_all."""
+    # float8 types torch.isfinite reads (float8_e5m2) still have no norm kernel
+    f = (_scannable if t.dtype == torch.float64 or _norm32_ok(t.dtype)
+         else (lambda c: c.float()))
     if t.numel() <= _SCAN_CHUNK_ELEMS:
-        return torch.linalg.vector_norm(_scannable(t), float("inf"))
-    return torch.stack([torch.linalg.vector_norm(_scannable(c), float("inf"))
+        return torch.linalg.vector_norm(f(t), float("inf"))
+    return torch.stack([torch.linalg.vector_norm(f(c), float("inf"))
                         for c in _scan_chunks(t)]).amax()
 
 
@@ -1184,6 +1210,8 @@ def _maxabs32(t):
         return _maxabs(t).float()
     if t.dtype == torch.float32:
         return torch.linalg.vector_norm(t, float("inf"))
+    if not _norm32_ok(t.dtype):  # float64 (narrowing), float8 (no promotion): torchao's scales and casts
+        return torch.linalg.vector_norm(t if t.dtype == torch.float64 else t.float(), float("inf")).float()
     return torch.linalg.vector_norm(t, float("inf"), dtype=torch.float32)
 
 
@@ -4320,8 +4348,9 @@ class OpNanCapture(TorchDispatchMode):
         for e in q:
             e["norms"] = [None] * len(e["cands"])
             for j, (t, _) in enumerate(e["cands"]):
-                if t.numel() > _SCAN_CHUNK_ELEMS or _needs_promote(t.dtype):
-                    e["norms"][j] = _maxabs32(t).reshape(1)      # chunked / fp8 path
+                if (t.numel() > _SCAN_CHUNK_ELEMS or _needs_promote(t.dtype)
+                        or not _norm32_ok(t.dtype)):
+                    e["norms"][j] = _maxabs32(t).reshape(1)      # chunked / fp8 / fp64 path
                 else:
                     groups.setdefault((t.device, t.dtype), []).append((e, j, t))
         for items in groups.values():

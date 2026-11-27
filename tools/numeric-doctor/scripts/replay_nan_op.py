@@ -600,8 +600,9 @@ def scan_targets(func, argv, out):
 
 
 def describe(t, label):
-    finite = torch.isfinite(t).all().item()
-    f = t[torch.isfinite(t)]
+    s = _scannable(t) if _scannable else t   # float8_e5m2 has no CUDA abs/isfinite
+    finite = torch.isfinite(s).all().item()
+    f = s[torch.isfinite(s)]
     amax = f.abs().max().item() if f.numel() else float("nan")
     print("  %-8s %-18s stride=%-16s %s  finite=%s  max|.|=%.6g"
           % (label, tuple(t.shape), tuple(t.stride()), t.dtype, finite, amax))
@@ -4918,6 +4919,18 @@ def main():
 
     if args.restore_env and not os.environ.get(_REEXEC):
         env = restore_env_dict(cap)
+        # PyTorch TunableOp picks the GEMM solution from its results file, which the capture
+        # recorded by its path in the model's run dir; a package ships it in tunableop/ beside
+        # capsule/.
+        tf = env.get("PYTORCH_TUNABLEOP_FILENAME")
+        if tf and args.capsule:
+            d = os.path.dirname(os.path.abspath(args.capsule))
+            for td in (os.path.join(d, "tunableop"), os.path.join(os.path.dirname(d), "tunableop")):
+                if os.path.isdir(td):
+                    env["PYTORCH_TUNABLEOP_FILENAME"] = os.path.join(td, os.path.basename(tf))
+                    print("env:            PYTORCH_TUNABLEOP_FILENAME -> %s (shipped results, was %s)"
+                          % (env["PYTORCH_TUNABLEOP_FILENAME"], tf), flush=True)
+                    break
         env[_REEXEC] = "1"
         argv = [a for a in sys.argv if a != "--restore-env"]
         os.execve(sys.executable, [sys.executable] + argv, env)
