@@ -221,6 +221,39 @@ class CheckRunScriptTest(unittest.TestCase):
         self.assertIn("CHECK_RUN=FAIL", r.stdout)
 
 
+class CompareVerdictTest(unittest.TestCase):
+    """scripts/compare_results.py: a 5N native kernel verdict is the same bug verdict as KERNEL_BUG."""
+
+    script = ND / "scripts" / "compare_results.py"
+
+    def bug_verdict_row(self, verdict_a: str, verdict_b: str) -> dict:
+        import json
+
+        def card(verdict: str) -> dict:
+            return {"schema": 1, "bug": {"verdict": verdict, "kernel": {"name": "k_softmax_sqrt"}}}
+
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for name, verdict in (("a", verdict_a), ("b", verdict_b)):
+                p = Path(d) / f"{name}.json"
+                p.write_text(json.dumps(card(verdict)))
+                paths.append(str(p))
+            out = subprocess.run([sys.executable, str(self.script), *paths, "--json"],
+                                 capture_output=True, text=True)
+        rows = json.loads(out.stdout)["rows"]
+        return next(r for r in rows if r["level"] == "bug" and r["field"] == "verdict")
+
+    def test_native_kernel_bug_is_the_same_verdict_as_kernel_bug(self) -> None:
+        row = self.bug_verdict_row("KERNEL_BUG", "NATIVE_KERNEL_BUG")
+        self.assertEqual(row["verdict"], "SAME")
+        # the raw verdicts stay visible: the reproducer difference is reported, not hidden
+        self.assertEqual({row["a"], row["b"]}, {"KERNEL_BUG", "NATIVE_KERNEL_BUG"})
+
+    def test_other_verdicts_still_differ(self) -> None:
+        row = self.bug_verdict_row("KERNEL_BUG", "FP32_OVERFLOW?")
+        self.assertEqual(row["verdict"], "DIFFERENT")
+
+
 class SkillDiscoveryTest(unittest.TestCase):
     def test_claude_and_cursor_read_the_package_skills_from_the_repo_root(self) -> None:
         for skill in SKILLS:

@@ -59,6 +59,11 @@ def cmp_scalar(a, b):
     return "SAME" if (a or None) == (b or None) else "DIFFERENT"
 
 
+# verdicts that name the same bug: a 5N native kernel capsule (NATIVE_KERNEL_BUG) and an op or kernel
+# capsule (KERNEL_BUG) both reproduce a kernel bug
+_SAME_VERDICT = {"NATIVE_KERNEL_BUG": "KERNEL_BUG"}
+
+
 _PATHFN = re.compile(r"^([^\s:=@]+/)?([^\s/:=@]+\.\w+):([\w.]+)$")
 
 
@@ -151,6 +156,12 @@ def compare(A, B):
             # kernel is the bug's identity, the op only how this run's capture met it
             if ba.get(k) != bb.get(k):
                 row("notes", "bug.op", "-", ba.get(k), bb.get(k), "same kernel %s: the op is the call path" % ka)
+            continue
+        if k == "verdict":
+            # a 5N native kernel capsule reaches the same kernel bug as an op capsule: the verdict
+            # is the bug, the reproducer is the difference (both raw verdicts stay in the row)
+            row("bug", k, cmp_scalar(_SAME_VERDICT.get(ba.get(k), ba.get(k)),
+                                     _SAME_VERDICT.get(bb.get(k), bb.get(k))), ba.get(k), bb.get(k))
             continue
         row("bug", k, cmp_scalar(ba.get(k), bb.get(k)), ba.get(k), bb.get(k))
     row("bug", "kernel", cmp_kernel(ka, kb), ka, kb)
