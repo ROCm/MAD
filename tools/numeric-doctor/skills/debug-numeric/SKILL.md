@@ -257,7 +257,10 @@ repository; the rule they back stands on its own.
     numeric-doctor panel and status line read it. Nothing to do but keep the milestone lines
     exact (`TARBALL`, `LADDER_RESULT=`, `HANDOVER announced`, `ROOT_CAUSE=` / `NO_ROOT_CAUSE`,
     `FIX=`); `python3 <REPO_ROOT>/scripts/ledger.py <LEDGER> status` rewrites it and prints its
-    one line -- also the answer to a status question while a step-7/8 fork runs.
+    one line -- also the answer to a status question while a step-7/8 fork runs. The user can
+    run it themselves (`! <command>`, in the hand-over block) at no token cost: a "where are
+    we?" turn re-writes the whole idle context into the cache (2026-11-24/25: 3-5 per
+    session, 0.1-0.2M tokens each).
 
 ## Placeholders (the step that sets each; its file defines it)
 

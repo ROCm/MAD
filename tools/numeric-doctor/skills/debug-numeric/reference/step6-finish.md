@@ -210,8 +210,9 @@ Text printed mid-turn folds under the next tool output and the user never sees i
 > It reproduces the NaN without the model; the NaN is **not** root-caused or fixed yet.
 >
 > **Next: root-causing, then fixing** (experimental) -- running now in the background, within
-> <RC_BUDGET> for the root cause and <FIX_BUDGET> for the fix, on the reproducer only. Ask
-> *where are we* at any time; say *stop at the reproducer* to end it, or give other budgets.
+> <RC_BUDGET> for the root cause and <FIX_BUDGET> for the fix, on the reproducer only. Progress at
+> any time, without interrupting me: `! python3 <REPO_ROOT>/scripts/ledger.py <LEDGER> status`
+> (or the numeric-doctor status line). Say *stop at the reproducer* to end it, or give other budgets.
 ```
 
 Step 9 repeats the block from the `HANDOVER announced` line (`step9-report.md` *Always report*).
