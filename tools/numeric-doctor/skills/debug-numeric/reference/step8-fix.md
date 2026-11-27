@@ -12,10 +12,10 @@ A user wants the change with the **least reach and the least cost** they can app
 and the real fix for whoever owns the faulty code. One working workaround is not the end
 of step 8. Keep one id per candidate in `fix/candidates.md` and aim for one of each kind:
 
-| kind | id | what | e.g. (2026-11-26: TunableOp's mixed-fp8 `_scaled_mm` decoded each operand in the other's format) |
+| kind | id | what | e.g. (a tuned GEMM solution that returns wrong values for one problem key) |
 |---|---|---|---|
-| **real fix** | `R<n>` | the change to the faulty code `ROOT_CAUSE.md` names (its `location.source` / kernel / sites), in that code's own repo and language | the swapped template arguments in PyTorch's `ScaledBlas.cpp` TunableOp dispatch, as a diff against the image's torch commit |
-| **targeted workaround** | `T<n>` | routes **only the affected calls** around the faulty code: one problem key (shape / dtype / layout), one call site or module, one tuned entry -- everything else keeps its stock path and speed | the tuned-results rows of the affected GEMMs (every mixed-fp8 `ScaledGemmTunableOp` row the bug reaches, not only the one that NaN'd) set to `Default`; or the library's own per-candidate validation at tuning time (`PYTORCH_TUNABLEOP_NUMERICAL_CHECK=<atol>_<rtol>`) |
+| **real fix** | `R<n>` | the change to the faulty code `ROOT_CAUSE.md` names (its `location.source` / kernel / sites), in that code's own repo and language | the corrected code in the library that selects or implements the faulty kernel, as a diff against the image's library commit |
+| **targeted workaround** | `T<n>` | routes **only the affected calls** around the faulty code: one problem key (shape / dtype / layout), one call site or module, one tuned entry -- everything else keeps its stock path and speed | the tuned-results rows of the affected GEMMs (every row the bug reaches, not only the one that NaN'd) set to `Default`; or the library's own per-candidate validation at tuning time |
 | **broad workaround** | `B<n>` | switches the component off for the whole process | `PYTORCH_TUNABLEOP_ENABLED=0`; the component table below |
 
 * **Narrowest first, but the broad one early.** A broad workaround is usually the step-7 causal
@@ -347,7 +347,7 @@ budget for it.
   | id | kind | change | reaches | reproducer | model | cost | status |
   |---|---|---|---|---|---|---|---|
   | T1 | targeted workaround | rows `<keys>` -> `Default` in the tuned file | 4 backward GEMM shapes | stock 100/100 -> 0/100, values = fp64 | 2/2 -> 0/4 | +0% step | validated |
-  | R1 | real fix | `ScaledBlas.cpp`: ... (diff vs torch `<commit>`) | the faulty dispatch | -- | -- | -- | not validated here: please try (`BUILD.md`) |
+  | R1 | real fix | `<file>`: ... (diff vs `<library>` `<commit>`) | the faulty dispatch | -- | -- | -- | not validated here: please try (`BUILD.md`) |
   | B1 | broad workaround | `PYTORCH_TUNABLEOP_ENABLED=0` | every GEMM untuned | 100/100 -> 0/100 | 2/2 -> 0/3 | +X% step | validated |
 
   **`validate.sh`: generate it, don't copy an earlier run's** (one had a hard-coded capsule name and a

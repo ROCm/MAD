@@ -11,7 +11,8 @@ Three judged levels, each SAME / REFINED / DIFFERENT, and the overall result is 
 REFINED: one side's site or change set is a strict subset of the other's -- the same answer, one
 narrower (e.g. a 3-site patch against a 14-site patch of the same kernel).  Context (NaN kind and
 origin, how it was reproduced, groups, rates, the free-text mechanism) is printed under `notes`
-and never judged: it differs run to run.  Last line: RESULT_COMPARE=SAME|REFINED|DIFFERENT.
+and never judged: it differs run to run.  A field an expected card (kind "expected") leaves null is
+open: not judged, shown under `notes`.  Last line: RESULT_COMPARE=SAME|REFINED|DIFFERENT.
 """
 import argparse
 import json
@@ -139,8 +140,15 @@ def kernel_id(k):
 
 def compare(A, B):
     rows = []      # (level, field, verdict, a, b, note)
+    exp_a, exp_b = A.get("kind") == "expected", B.get("kind") == "expected"
 
     def row(level, field, verdict, a, b, note=""):
+        # a field an expected card leaves empty is open: any answer is accepted (2026-11-27, dit_fp8:
+        # which GEMM shape and solution TunableOp picks varies per trainer, so the card has none)
+        # (scalars only: a set row shows counts, and an empty set there still compares as narrower)
+        if (level != "notes" and verdict != "SAME" and not isinstance(a, int) and not isinstance(b, int)
+                and ((exp_a and not a) or (exp_b and not b))):
+            level, verdict, note = "notes", "-", "open on the expected card: not judged"
         rows.append((level, field, verdict, a, b, note))
 
     ba, bb = A.get("bug", {}), B.get("bug", {})

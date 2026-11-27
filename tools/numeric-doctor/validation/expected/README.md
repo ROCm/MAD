@@ -32,5 +32,9 @@ fix through 5N. Its `bug.kernel` is the Triton reduce; a run drafted before `res
 selects it), never the model's call site -- that is a `condition` (step9-report.md, 2026-11-23). torchcompile's card
 moved from `train.py:SoftMoEMLP.forward` to `torch/_inductor/codegen/triton.py:TritonOverrides.sqrt` accordingly.
 
-`dit_fp8_train_nan.json` is **provisional** (2026-11-26): drafted from the example's own investigation, not from a
-debug-numeric run (`verdict_confirmed: false`). Replace it with the card of the first validated run.
+`dit_fp8_train_nan.json` is blind run 10's card (2026-11-27, skill 61a2316, `PRIORS=none`); it replaced a provisional
+card drafted from the example's own investigation. Its primary fix is the targeted one (the mixed-fp8 TunableOp rows set
+to `Default`); `PYTORCH_TUNABLEOP_ENABLED=0` and the tuning-time numerical check are accepted alternatives. Which GEMM
+shape and hipBLASLt solution TunableOp picks varies per trainer, so `bug.geometry`, `bug.kernel` and
+`root_cause.location.kernel` are null: a field an expected card leaves null is open, and `compare_results.py` prints it
+under `notes` without judging it.
