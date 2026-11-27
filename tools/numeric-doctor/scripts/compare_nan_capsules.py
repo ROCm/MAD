@@ -597,7 +597,7 @@ def main(argv=None):
 
 if __name__ == "__main__":
     code = main()
-    # sys.exit(code) does NOT work here.  In the nan-repro image
+    # sys.exit(code) does NOT work here.  In a ROCm PyTorch image
     # (torch 2.12.0a0+gitf68b851) merely importing torch installs a shutdown
     # handler that swallows the status, and every run exits 0:
     #
