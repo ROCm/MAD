@@ -15,12 +15,19 @@ of step 8. Keep one id per candidate in `fix/candidates.md` and aim for one of e
 | kind | id | what | e.g. (a tuned GEMM solution that returns wrong values for one problem key) |
 |---|---|---|---|
 | **real fix** | `R<n>` | the change to the faulty code `ROOT_CAUSE.md` names (its `location.source` / kernel / sites), in that code's own repo and language | the corrected code in the library that selects or implements the faulty kernel, as a diff against the image's library commit |
-| **targeted workaround** | `T<n>` | routes **only the affected calls** around the faulty code: one problem key (shape / dtype / layout), one call site or module, one tuned entry -- everything else keeps its stock path and speed | the tuned-results rows of the affected GEMMs (every row the bug reaches, not only the one that NaN'd) set to `Default`; or the library's own per-candidate validation at tuning time |
+| **targeted workaround** | `T<n>` | narrower than a broad one in **scope** -- routes **only the affected calls** around the faulty code: one problem key (shape / dtype / layout), one call site or module, one tuned entry -- or in **mechanism** -- forces only the value step 7 found faulty instead of switching the mechanism off; either way everything else keeps its stock path and speed | the tuned-results rows of the affected GEMMs (every row the bug reaches, not only the one that NaN'd) set to `Default`; or the library's own per-candidate validation at tuning time |
 | **broad workaround** | `B<n>` | switches the component off for the whole process | `PYTORCH_TUNABLEOP_ENABLED=0`; the component table below |
 
 * **Narrowest first, but the broad one early.** A broad workaround is usually the step-7 causal
   knob and validates in one job: take it first, so the user has *something* safe, then spend the
   rest of `<FIX_BUDGET>` on T and R. Never stop at B with budget left.
+* **Narrow a broad knob by mechanism before by scope.** A B that switches a whole mechanism off
+  (a remap, a dynamic grid, a fast path) is wider than the bug: the first T candidate is the
+  narrowest setting of that same mechanism that still fixes it -- the value `ROOT_CAUSE.md`
+  shows faulty, forced through the library's own finer knob (list the knobs, as in step 7) or
+  computed correctly. Then try routing the affected calls around it. A mechanism-narrowed T
+  must show it leaves the unaffected calls alone: on clean shapes, output bit-identical and
+  per-launch time within noise of stock -- else it is a B with a smaller cost.
 * **Scope a targeted workaround by the root cause's own conditions** (`ROOT_CAUSE.md`
   *Conditions*): the set of calls it reaches is what the workaround must cover -- list them
   (`rootcause/` scope experiment: which shapes / entries / modules compute wrong, not only which
@@ -48,7 +55,10 @@ of step 8. Keep one id per candidate in `fix/candidates.md` and aim for one of e
      (`validate.sh`'s arm, the build line), never claimed as tested.
   A real fix is never replaced by a workaround in the report, and a workaround is never called
   the fix (*2. Propose* below).
-* **No real fix possible** (closed kernel, no source): say so in its row and give the vendor
+* **No real fix possible** -- only for closed code (no source anywhere). An open-source component
+  (hipBLASLt / Tensile, rocBLAS, CK, aiter, PyTorch, Triton) always gets an R: fetch the source at
+  the image's commit and write the diff, `not validated here` at worst; a vendor hand-off goes
+  beside it, never instead. Closed kernel: say so in its row and give the vendor
   what they need to fix it (the reproducer, kernel name, the bench line).
 
 ## Entry
@@ -126,8 +136,9 @@ and its cost. Say so in `fix/README.md`. Candidate when `<ROOT_CAUSE>` sits in a
 | component | off | on |
 |---|---|---|
 | HipBlasLt | `TORCH_BLAS_PREFER_HIPBLASLT=0` | `TORCH_BLAS_PREFER_HIPBLASLT=1` |
-| hipBLASLt stream-K XCD remap (unwritten tiles,) | `TENSILE_FIXED_WGMXCC=1` (~1% on the affected GEMM) | unset |
-| hipBLASLt stream-K dynamic grid () | `TENSILE_STREAMK_DYNAMIC_GRID=0` (+22% there) | unset |
+| hipBLASLt stream-K XCD remap (unwritten tiles) | `TENSILE_FIXED_WGMXCC=1` (~1% on the affected GEMM) | unset |
+| hipBLASLt stream-K dynamic grid | `TENSILE_STREAMK_DYNAMIC_GRID=0` (+22% there) | unset |
+| hipBLASLt solution choice (one bad solution) | targeted: `HIPBLASLT_TUNING_OVERRIDE_FILE=<file>` routes a problem key to another solution -- on the 7.14 wheel (gfx950, 2026-11-27) the file needs the library's `Git Version: <hash>` as its first line and only its FIRST row took effect (120 rows: `No valid solution index`), so it covers one shape; check the dispatched solution in the log (`HIPBLASLT_LOG_MASK=32`) per arm | unset |
 | CK / AITER flash attention (SDPA) | `TORCH_ROCM_FA_PREFER_CK=0` | `TORCH_ROCM_FA_PREFER_CK=1` |
 | a Triton op Inductor emits (e.g. `tl.sqrt_rn` NaN on fp32 subnormals) | `PYTHONPATH=<REPO_ROOT>/scripts/inductor_override NAN_FIX_INDUCTOR_OVERRIDES='sqrt:tl.sqrt_rn(=libdevice.sqrt('` (any `TritonOverrides` method; private API) | unset |
 | the compiled module as a whole | the model's compile switch for that module (`--compile-layers`), `TORCHDYNAMO_DISABLE=1` | the stock setting |
@@ -318,7 +329,8 @@ budget for it.
 
 * **A candidate passes all checks** (reproducer and 3b) -> keep it, and go on while budget
   is left and a kind is still missing (*Three kinds of fix*): no real fix yet, or no
-  targeted workaround yet (only a broad one), or a narrower scope is plausible. Stop when
+  targeted workaround yet (only a broad one), or a narrower scope is plausible. A `partial`
+  candidate (covers some of the affected calls) does not count as its kind found. Stop when
   each kind has a passing candidate (the real fix: or a `checked by equivalence` / `not
   validated here` one written), or is shown not to exist, or the budget is spent.
 * **Then build the `<FIX>` package with every kept candidate** -- one subdir per fix, one
