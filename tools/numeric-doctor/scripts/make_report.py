@@ -402,8 +402,10 @@ def main():
         w('\nTODO(agent): %s\n' % (
             'the root cause (where, mechanism, trigger, causal experiment, defence: the guard and why it did not apply, or none) and which track found it, '
             'or NO_ROOT_CAUSE with excluded and still-open hypotheses, or why skipped.' if st == 'step7' else
-            'the fix (change, fix or workaround, validation: control n/N, patched 0/N with expected hits, '
-            'load, values, cost, tarball sha256), or NO_FIX with candidates tried, or why skipped.'))
+            'every fix shipped, as fix/README.md\'s table (one row each: kind -- real fix / targeted workaround / '
+            'broad workaround --, the change, what else it affects, validation: control n/N, patched 0/N with expected '
+            'hits, load, values, model A/B, cost; or "not validated here: please try"), the recommended one and why, '
+            'tarball sha256 -- or NO_FIX with candidates tried, or why skipped.'))
 
     capped = ['* 5b %s stopped at concurrency %s (the first that reproduced)%s'
               % (group_of(f['dir']), f['conc'],

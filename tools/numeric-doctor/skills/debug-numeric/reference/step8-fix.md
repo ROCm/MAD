@@ -3,7 +3,53 @@
 **Entered only with a valid `<ROOT_CAUSE>`** (`rootcause/ROOT_CAUSE.md`, all the
 validity items of `step7-rootcause.md`). `NO_ROOT_CAUSE`, or step 7 skipped: no
 step 8 -- `$LG skip step8 "no root cause"`, go to step 9. Ends with `<FIX>` (the
-fix artifact) or `NO_FIX` once `<FIX_BUDGET>` is spent. Tag `step8[<G>]`.
+fix package: **every** fix and workaround found, each labelled, *Three kinds of fix*) or
+`NO_FIX` once `<FIX_BUDGET>` is spent. Tag `step8[<G>]`.
+
+## Three kinds of fix -- look for all three, ship all that exist
+
+A user wants the change with the **least reach and the least cost** they can apply today,
+and the real fix for whoever owns the faulty code. One working workaround is not the end
+of step 8. Keep one id per candidate in `fix/candidates.md` and aim for one of each kind:
+
+| kind | id | what | e.g. (2026-11-26: TunableOp's mixed-fp8 `_scaled_mm` decoded each operand in the other's format) |
+|---|---|---|---|
+| **real fix** | `R<n>` | the change to the faulty code `ROOT_CAUSE.md` names (its `location.source` / kernel / sites), in that code's own repo and language | the swapped template arguments in PyTorch's `ScaledBlas.cpp` TunableOp dispatch, as a diff against the image's torch commit |
+| **targeted workaround** | `T<n>` | routes **only the affected calls** around the faulty code: one problem key (shape / dtype / layout), one call site or module, one tuned entry -- everything else keeps its stock path and speed | the tuned-results rows of the affected GEMMs (every mixed-fp8 `ScaledGemmTunableOp` row the bug reaches, not only the one that NaN'd) set to `Default`; or the library's own per-candidate validation at tuning time (`PYTORCH_TUNABLEOP_NUMERICAL_CHECK=<atol>_<rtol>`) |
+| **broad workaround** | `B<n>` | switches the component off for the whole process | `PYTORCH_TUNABLEOP_ENABLED=0`; the component table below |
+
+* **Narrowest first, but the broad one early.** A broad workaround is usually the step-7 causal
+  knob and validates in one job: take it first, so the user has *something* safe, then spend the
+  rest of `<FIX_BUDGET>` on T and R. Never stop at B with budget left.
+* **Scope a targeted workaround by the root cause's own conditions** (`ROOT_CAUSE.md`
+  *Conditions*): the set of calls it reaches is what the workaround must cover -- list them
+  (`rootcause/` scope experiment: which shapes / entries / modules compute wrong, not only which
+  NaN'd) and cover all of them, nothing more. Say what it leaves untouched and what it does not
+  cover (a shape tuned later, a new module): a frozen tuned file needs re-editing after a re-tune;
+  a tuning-time check does not.
+* **Measure the cost of every workaround** on the model (step time vs stock, from the A/B's
+  `s/step`) and on the reproducer (per-launch time); quote it beside its scope ("4 backward GEMM
+  shapes on `Default`, step time +0%" vs "every GEMM untuned, +X%"). A workaround whose scope you
+  cannot state is reported as broad.
+* **The real fix ships even when it cannot be applied here** -- a C++ change in PyTorch / a
+  library that needs a rebuild the budget or image cannot give, a closed vendor kernel. Write it
+  as a minimal diff against the **exact version the image runs** (`torch.version.git_version`,
+  the library's commit or package version; fetch that file from the project's repo with
+  `WebFetch` / `git` when it is not in the image), with the file, function and why the change
+  removes the mechanism, and how to build and apply it. Then validate what you can, in this
+  order, and label it by the strongest that ran:
+  1. `validated` -- built and run on the reproducer and the model (a pure-Python change, a
+     patched `.co`, a library overlay: no rebuild of the world);
+  2. `checked by equivalence` -- the patched logic exercised another way on the reproducer's
+     operands (the op called with the arguments the fixed code would pass; the corrected branch
+     taken through a public API; a numerical emulation of the fixed kernel) -- say what that does
+     and does not prove;
+  3. `not validated here -- please try` -- shipped with the exact command that would validate it
+     (`validate.sh`'s arm, the build line), never claimed as tested.
+  A real fix is never replaced by a workaround in the report, and a workaround is never called
+  the fix (*2. Propose* below).
+* **No real fix possible** (closed kernel, no source): say so in its row and give the vendor
+  what they need to fix it (the reproducer, kernel name, the bench line).
 
 ## Entry
 
@@ -33,8 +79,8 @@ In the step-7/8 fork (`step6-finish.md` *Then*) every stop for the user ends the
 * **Excluded** -- fix approaches ruled out and why.
 * **This iteration** -- the candidate to try and why it should work.
 
-`fix/candidates.md`: `id | change | where | result (NAN / CLEAN / WRONG / ERROR /
-UNDERPOWERED) | evidence path`.
+`fix/candidates.md`: `id (R/T/B<n>) | kind | change | where | scope (what it reaches) | result
+(NAN / CLEAN / WRONG / ERROR / UNDERPOWERED / NOT_VALIDATED) | cost | evidence path`.
 
 **2. Propose a fix (native LLM).** Fix the mechanism `<ROOT_CAUSE>` names, at the
 place it names -- the smallest change that removes the cause, e.g. the missing
@@ -62,9 +108,19 @@ did (the same change applied to the capsule's operands or 5N's candidate: `NAN` 
 `CLEAN` with it, outputs finite and matching the fp64 reference of the fixed computation),
 then on the model (3b: the patched copy as its own spec line or arm, stock beside it).
 
-**Model-level workaround: turn the component off.** Cheap, needs no kernel
-change, and often what the user can ship today -- but a workaround, not a fix:
-say so in `fix/README.md`. Candidate when `<ROOT_CAUSE>` sits in a component below
+**Targeted workaround: narrow the scope to the affected calls.** Before (or right after)
+the broad switch below, find the narrowest handle the component offers, in this order: a
+**per-problem** entry (a tuned-results row, a solution override for one GEMM key, an
+exclusion list), a **per-call-site** change in a working copy of the model (one module
+excluded from a conversion -- e.g. a `module_filter_fn` --, a context manager around one
+call, a dtype at one site), then a **per-op-class** switch (one op family, one dtype
+pair). Each is a candidate like any other: validated on the reproducer (stock arm still
+`NAN`, the workaround arm clean, values correct) and on the model, cost measured.
+
+**Broad workaround: turn the component off.** Cheap, needs no kernel
+change, and often what the user can ship today -- but a workaround, not a fix, and the
+widest one: it changes every call of the component, so name what else it slows or changes
+and its cost. Say so in `fix/README.md`. Candidate when `<ROOT_CAUSE>` sits in a component below
 (a list on purpose: add a row to extend it):
 
 | component | off | on |
@@ -75,6 +131,7 @@ say so in `fix/README.md`. Candidate when `<ROOT_CAUSE>` sits in a component bel
 | CK / AITER flash attention (SDPA) | `TORCH_ROCM_FA_PREFER_CK=0` | `TORCH_ROCM_FA_PREFER_CK=1` |
 | a Triton op Inductor emits (e.g. `tl.sqrt_rn` NaN on fp32 subnormals) | `PYTHONPATH=<REPO_ROOT>/scripts/inductor_override NAN_FIX_INDUCTOR_OVERRIDES='sqrt:tl.sqrt_rn(=libdevice.sqrt('` (any `TritonOverrides` method; private API) | unset |
 | the compiled module as a whole | the model's compile switch for that module (`--compile-layers`), `TORCHDYNAMO_DISABLE=1` | the stock setting |
+| PyTorch TunableOp (a tuned GEMM solution) | `PYTORCH_TUNABLEOP_ENABLED=0`; targeted: the affected rows of the results file -> `Default`, or `PYTORCH_TUNABLEOP_NUMERICAL_CHECK=<atol>_<rtol>` at tuning time (torch 2.10 refuses `=1`) | `PYTORCH_TUNABLEOP_ENABLED=1` |
 
 `TORCH_BLAS_PREFER_HIPBLASLT=0` sends plain GEMMs to rocBLAS, which for bf16/fp16 runs
 the same Tensile kernels: test it like any candidate, don't assume it avoids the
@@ -257,22 +314,41 @@ divergence: report it as such. Read `grad_trajectory.py <logs>` (which module
 grows, from which step, weights moving or not) before offering the user more
 budget for it.
 
-**4. Decide.** Ledger one line: `step8[<G>] iter <k>: <result>; <path>`.
+**4. Decide.** Ledger one line: `step8[<G>] iter <k>: <id> <kind> <result>; <path>`.
 
-* **All checks pass** (reproducer and 3b) -> stop. Build the `<FIX>` artifact:
+* **A candidate passes all checks** (reproducer and 3b) -> keep it, and go on while budget
+  is left and a kind is still missing (*Three kinds of fix*): no real fix yet, or no
+  targeted workaround yet (only a broad one), or a narrower scope is plausible. Stop when
+  each kind has a passing candidate (the real fix: or a `checked by equivalence` / `not
+  validated here` one written), or is shown not to exist, or the budget is spent.
+* **Then build the `<FIX>` package with every kept candidate** -- one subdir per fix, one
+  `validate.sh` that runs stock plus every validated fix as arms:
 
   ```
   fix/
-    README.md        # root cause (one paragraph, link ROOT_CAUSE.md), the change,
-                     # how to apply, validation: control n/N, patched 0/N with
-                     # expected hits, load, value check, cost
-    patch/           # the diff / env setting; for an overlay: overlay.json, the
-                     # .diff, kernel_name.txt -- not the built overlay
+    README.md        # the summary table first (below), then per fix: the change, how to
+                     # apply, validation (control n/N, patched 0/N with expected hits, load,
+                     # value check, model A/B), cost, what it does not cover;
+                     # root cause in one paragraph, link ROOT_CAUSE.md
+    R1-<name>/       # the real fix: patch/diff against the named version, BUILD.md (how to
+                     # build and apply), its validation level
+    T1-<name>/       # a targeted workaround: the edited file / env / model diff, apply.sh
+    B1-<name>/       # a broad workaround: the env setting
+                     # (an overlay: overlay.json, the .diff, kernel_name.txt -- not the built overlay)
     scripts/         # the tool versions validate.sh needs (fix_overlay.py,
                      # fix_values.py, replay_nan_op.py and its imports)
-    validate.sh      # one command: reproducer with and without the fix
+    validate.sh      # one command: reproducer stock + one arm per validated fix
     iter-*.md  candidates.md
   ```
+
+  `fix/README.md` opens with one row per fix, **recommended first** -- the validated real
+  fix if there is one, else the narrowest validated workaround -- and the reason:
+
+  | id | kind | change | reaches | reproducer | model | cost | status |
+  |---|---|---|---|---|---|---|---|
+  | T1 | targeted workaround | rows `<keys>` -> `Default` in the tuned file | 4 backward GEMM shapes | stock 100/100 -> 0/100, values = fp64 | 2/2 -> 0/4 | +0% step | validated |
+  | R1 | real fix | `ScaledBlas.cpp`: ... (diff vs torch `<commit>`) | the faulty dispatch | -- | -- | -- | not validated here: please try (`BUILD.md`) |
+  | B1 | broad workaround | `PYTORCH_TUNABLEOP_ENABLED=0` | every GEMM untuned | 100/100 -> 0/100 | 2/2 -> 0/3 | +X% step | validated |
 
   **`validate.sh`: generate it, don't copy an earlier run's** (one had a hard-coded capsule name and a
   co-tenant that did not apply, 2026-11-20): `python3 <REPO_ROOT>/scripts/make_fix_validate.py --fix
@@ -295,10 +371,12 @@ budget for it.
   its result beside the sha256. A reused `validate.sh` too: an earlier investigation's had a syntax
   error nobody ran (2026-11-14).
 * **Budget left** -> next iteration.
-* **Budget spent** -> `<FIX>` = `NO_FIX`: `fix/README.md` still lists every
-  candidate tried and why each failed.
+* **Budget spent** -> the package with whatever passed (and a real fix written but not
+  validated, labelled so); nothing passed and no real fix written: `<FIX>` = `NO_FIX`,
+  `fix/README.md` still lists every candidate tried and why each failed.
 
 ## Exit
 
-`$LG end step8[<G>]`; ledger `<FIX>` (tarball path + sha256, or `NO_FIX`). Tell the
-user in two lines, then step 9.
+`$LG end step8[<G>]`; ledger `<FIX>` (tarball path + sha256, or `NO_FIX`) and one
+`FIX=<id> <kind> <status>` line per fix shipped. Tell the user one line per fix
+(recommended first), then step 9.

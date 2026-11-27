@@ -66,7 +66,7 @@ keeps its bullet form; never reflow it into a paragraph. A gate warning
 | 5N | **Fallback**: write a **standalone repro** if no capsule exists, none replays, or the capture cannot reach the model | automatic, only if needed |
 | 6 | **Package** the reproducer (tarball + README). Ends reproducer generation; the NaN is not fixed yet | required |
 | 7 | **Root-cause** the NaN from the reproducer (experimental) | required (default), budgeted; you can turn it off |
-| 8 | **Fix** it and validate the fix on the reproducer, or find a model-level **workaround** such as turning a component off (experimental) | required (default), budgeted; needs a root cause from 7 |
+| 8 | **Fix** it: the real fix to the faulty code (shipped even when it cannot be built here, labelled so), the narrowest **workaround** that touches only the affected calls, and the broad one (a component off) -- each validated on the reproducer and the model, with its cost, all packaged and reported side by side (experimental) | required (default), budgeted; needs a root cause from 7 |
 | 9 | **Restore** sources, hand over the artifacts, **report** with a timing table, and the result card (`result.json`) | required |
 ```
 
@@ -167,8 +167,8 @@ repository; the rule they back stands on its own.
      then only the current step's file. Never check what a pending job's wait will
      report anyway. Keep one call's output under ~25k characters: a bigger one spills
      to a file you then read again. That bounds batching step files too: most are 5-20k,
-     so batch two small ones at most. Three are over the limit alone (`step1-ask.md`,
-     `step7-rootcause.md`, `step7-recipe-sweep.md`: 28-30k) -- read each of those whole
+     so batch two small ones at most. Four are over the limit alone (`step1-ask.md`,
+     `step7-rootcause.md`, `step7-recipe-sweep.md`, `step8-fix.md`: 28-30k) -- read each of those whole
      with the Read tool (no offset / limit), not `cat`. `wc -c` the set when unsure.
    * **Smaller outputs.** Never `cat` a model log (~2,600 lines), job output, capsule
      dump or model source (map it with `find_capture_points.py`, step 4, and read the
@@ -333,7 +333,8 @@ creates both once `<RUN_SCRIPT>` is known. The gates, each on its last line:
    Announce the hand-over to root-causing and fixing.
 7. **Root-causing** (default on, `<RC_BUDGET>` defaulted; a system bug and a model bug alike): track (a)
    always, (b) a recipe for `<NAN_KIND>` (system bugs).
-8. **Fixing** (default on, `<FIX_BUDGET>` defaulted, needs `<ROOT_CAUSE>`): a kernel / library fix, a model /
-   config fix, or a model-level workaround.
+8. **Fixing** (default on, `<FIX_BUDGET>` defaulted, needs `<ROOT_CAUSE>`): look for all three kinds -- the real
+   fix (kernel / library / model / config), a targeted workaround (only the affected calls), a broad one --
+   and ship every one that exists, labelled, recommended first.
 9. **Close**: restore the source, hand over `<ARTIFACT_DIR>`, `$LG table`, report
    (reproducer, `<ROOT_CAUSE>`, `<FIX>`).

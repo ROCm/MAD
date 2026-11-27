@@ -151,9 +151,21 @@ def status(path):
     if fx:
         t, s, m = fx
         ftb = _first(r'TARBALL\s+([0-9a-f]{64})\s+(\S+)', rev, r'step8')
-        st['fix'] = {'text': m.group(1).strip(), 'at': t.strftime(FMT),
-                     'kind': 'NO_FIX' if m.group(1).startswith('NO_FIX') else
-                             'WORKAROUND' if m.group(1).startswith('WORKAROUND') else 'FIX',
+        # one `FIX=<id> <kind> <status>` line per fix shipped (step8-fix.md: R real fix, T targeted /
+        # B broad workaround); the latest line per id wins. Older ledgers: one FIX=<text> line.
+        fixes, seen = [], set()
+        for _, s2, x in rev:
+            m2 = re.search(r'FIX=([RTB]\d+)\s+(.*)', x)
+            if m2 and re.match(r'step8', s2) and m2.group(1) not in seen:
+                seen.add(m2.group(1))
+                fixes.append({'id': m2.group(1), 'text': m2.group(2).strip()})
+        fixes.sort(key=lambda f: f['id'])
+        real = [f for f in fixes if f['id'][0] == 'R' and 'not validated' not in f['text']]
+        kind = ('NO_FIX' if m.group(1).startswith('NO_FIX') else
+                ('FIX' if real else 'WORKAROUND') if fixes else
+                'WORKAROUND' if m.group(1).startswith('WORKAROUND') else 'FIX')
+        st['fix'] = {'text': '; '.join('%s %s' % (f['id'], f['text']) for f in fixes) or m.group(1).strip(),
+                     'at': t.strftime(FMT), 'kind': kind, 'fixes': fixes,
                      'tarball': ftb[2].group(2) if ftb else None}
     st['line'] = status_line(st)
     return st

@@ -57,8 +57,10 @@ groups, rates); you fill, in these spellings -- the compare matches strings:
 | `root_cause.location.source` -- which site | **the faulty code**, as `file:Class.function` (aiter `mla.py:mla_decode_fwd`, vLLM's `quick_reduce_impl.cuh:AllReduceTwoshot.run`). When that code is not Python you could name -- a compiler's lowering, a closed library -- **the nearest Python that selects it** (Inductor's `torch/_inductor/codegen/triton.py:TritonOverrides.sqrt`, which emits the faulty `tl.sqrt_rn`). **Never the model's call site** that merely triggers it: that goes in `conditions`. A model / config bug's faulty code IS the model (`model.py:Class.function`, or `.config`). 2026-11-23: one run named the model's router, another the Inductor emitter -- compared DIFFERENT on the same root cause |
 | `root_cause.conditions` | the necessary conditions, short (shown, not judged) |
 | `fix.status` / `fix.kind` | `FIX` `WORKAROUND` `NO_FIX` `SKIPPED` / `binary_patch` `library_env` `compiler_override` `source_patch` `config_change` `input_validation` `none` |
-| `fix.changes` | the primary fix as a set: `lgkmcnt0@0x2A8D9D0` per patched site (a mutator's name; a hand edit or `vmcnt_minus1`-style tightening as the instruction it becomes, `lgkmcnt(1)@0x1A2C`), `VAR=VALUE`, `key=value`, `inductor:sqrt=libdevice.sqrt`, `file.py:Class.function` |
-| `fix.extra` / `fix.alternatives` | defence in depth / other changes that also passed (shown, not judged) |
+| `fix.status` -- which fix | the **recommended** one (`step8-fix.md` *Decide*): the validated real fix if there is one (`FIX`), else the narrowest validated workaround (`WORKAROUND`) |
+| `fix.changes` | the recommended fix as a set: `lgkmcnt0@0x2A8D9D0` per patched site (a mutator's name; a hand edit or `vmcnt_minus1`-style tightening as the instruction it becomes, `lgkmcnt(1)@0x1A2C`), `VAR=VALUE`, `key=value`, `inductor:sqrt=libdevice.sqrt`, `file.py:Class.function` |
+| `fix.extra` / `fix.alternatives` | defence in depth / the other fixes shipped that passed -- the broader workarounds, a validated real fix when a workaround is recommended (shown, not judged) |
+| `fix.untested` | changes shipped but not validated here -- a real fix needing a rebuild (`file.cpp:function`), labelled `not validated here` in `fix/README.md` |
 | `fix.validated.reproducer` / `.model` | `stock n/N -> fixed 0/N` as measured |
 
 Re-running `result_card.py draft` refreshes the facts and keeps your answers.
@@ -79,10 +81,14 @@ Re-running `result_card.py draft` refreshes the facts and keeps your answers.
     experiment (`rootcause/ROOT_CAUSE.md`); or `NO_ROOT_CAUSE` with the budget
     spent, iterations, excluded and still-open hypotheses; or *skipped* and why.
     Which track found it -- (a) native or (b) recipe -- and `<NAN_KIND>`;
-  * **Fix** (step 8): `<FIX>` -- the change, tarball path + sha256, validation
-    (control `n/N`, patched `0/N` with expected hits, load, value check, cost), and
-    whether it is a fix or a workaround; or `NO_FIX` with the budget and candidates
-    tried; or *skipped* and why (incl. "no root cause").
+  * **Fix** (step 8): `<FIX>` -- **every fix shipped, as `fix/README.md`'s table**, one row
+    each, recommended first: its kind (**real fix** / **targeted workaround** / **broad
+    workaround**), the change, what it reaches (and what else it slows or changes),
+    validation (control `n/N`, patched `0/N` with expected hits, load, value check, model
+    A/B) or *not validated here -- please try* with how, and its cost; then the tarball path +
+    sha256 and why the recommended one. A kind with no candidate: say why (no handle narrower
+    than the component; closed source). Or `NO_FIX` with the budget and candidates tried; or
+    *skipped* and why (incl. "no root cause").
   Never let "reproducer done" read as "NaN fixed";
 * the per-step time table;
 * **where the rate came from**: step 2 (with environment), or none -- step 2

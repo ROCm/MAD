@@ -54,7 +54,7 @@ AGENT_FIELDS = {
                    "location": {"kernel": TODO, "sites": [], "env": [], "source": [], "config": []},
                    "conditions": [TODO]},
     "fix": {"status": TODO, "kind": TODO, "changes": [TODO], "extra": [], "alternatives": [],
-            "validated": {"reproducer": TODO, "model": TODO}},
+            "untested": [], "validated": {"reproducer": TODO, "model": TODO}},
 }
 
 
@@ -238,7 +238,7 @@ def problems(card):
     # compared it character by character -- DIFFERENT on a matching root cause (2026-11-23, location.source)
     lists = [("root_cause.location." + k, rc.get("location", {}).get(k, [])) for k in ("sites", "env", "source", "config")]
     lists += [("root_cause.conditions", rc.get("conditions", []))]
-    lists += [("fix." + k, fx.get(k, [])) for k in ("changes", "extra", "alternatives")]
+    lists += [("fix." + k, fx.get(k, [])) for k in ("changes", "extra", "alternatives", "untested")]
     bad = set()
     for name, v in lists:
         if not isinstance(v, list) or not all(isinstance(x, str) for x in v):

@@ -189,7 +189,7 @@ def compare(A, B):
         " ".join(sorted(nset(fb.get("changes"))))[:60], note)
 
     # context: reported, never judged
-    for k in ("extra", "alternatives"):
+    for k in ("extra", "alternatives", "untested"):
         if fa.get(k) or fb.get(k):
             _, note = cmp_set(fa.get(k), fb.get(k))
             row("notes", "fix." + k, "-", len(nset(fa.get(k))), len(nset(fb.get(k))), note or "same")

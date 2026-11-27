@@ -190,8 +190,8 @@ Text printed mid-turn folds under the next tool output and the user never sees i
    steps 7-8 <G>"`, prompt: *"You are the step-7/8 fork for group <G> of <ARTIFACT_DIR>. Run step 7
    (`step7-rootcause.md`) and, with a valid root cause, step 8 (`step8-fix.md`) for <G> only, with
    RC <RC_BUDGET> / FIX <FIX_BUDGET>; ledger everything as the skill says (status.json follows).
-   Do not run step 9 and do not talk to the user: end with three lines -- `ROOT_CAUSE=...`,
-   `FIX=...`, and the `rootcause/` and `fix/` paths."* The fork runs the loops exactly as the main
+   Do not run step 9 and do not talk to the user: end with `ROOT_CAUSE=...`, one
+   `FIX=<id> <kind> <status>` line per fix shipped (recommended first), and the `rootcause/` and `fix/` paths."* The fork runs the loops exactly as the main
    session would; its tool output stays out of this context.
 2. Print the block (below) as the **last text of the turn -- no tool call after it** -- and end
    the turn.
@@ -199,8 +199,8 @@ Text printed mid-turn folds under the next tool output and the user never sees i
    gets `TaskStop` on the fork plus `nd stop` of its jobs (the ledger's open `job=` lines), then
    step 9. **`SINGLE_SESSION=1` (one SSH session per login)**: the main session issues no commands while the fork runs
    (one SSH session) -- answer status from `status.json` with `Read`, not a shell.
-4. The fork's completion arrives as a notification: read its three lines (and `<LEDGER>`, never
-   its transcript), relay root cause and fix in two lines, then step 9.
+4. The fork's completion arrives as a notification: read its result lines (and `<LEDGER>`, never
+   its transcript), relay the root cause and each fix in a line, then step 9.
 
 **No fork** -- a delegated or non-interactive run (the step-1 answers given up front: validate-examples,
 `claude -p`), or no `Agent` tool: print the block and go on to step 7 in the same turn, as before.
