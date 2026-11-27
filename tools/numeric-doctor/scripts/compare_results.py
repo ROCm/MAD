@@ -220,7 +220,8 @@ def compare(A, B):
     if (ra.get("mechanism") or "") != (rb.get("mechanism") or ""):
         row("notes", "root_cause.mechanism", "-", (ra.get("mechanism") or "")[:70], (rb.get("mechanism") or "")[:70])
     if ca.get("rates") or cb.get("rates"):
-        row("notes", "rates", "-", "; ".join(ca.get("rates", [])[-1:])[:70], "; ".join(cb.get("rates", [])[-1:])[:70])
+        row("notes", "rates", "-", "; ".join(map(str, ca.get("rates", [])[-1:]))[:70],
+            "; ".join(map(str, cb.get("rates", [])[-1:]))[:70])
 
     judged = [r for r in rows if r[0] != "notes"]
     levels = {}
@@ -250,7 +251,8 @@ def main():
         return 0
     for side, c in (("A", A), ("B", B)):
         print("%s: %s (priors %s, skill %s)" % (side, c.get("artifact_dir"), c.get("priors"),
-                                                c.get("skill_commit") or "? (not in its ledger)"))
+                                                c.get("skill_commit") or ("? (not in its ledger; card drafted at %s)" % c["skill_commit_at_card"]
+                                                if c.get("skill_commit_at_card") else "? (not in its ledger)")))
     for lv in ("bug", "root_cause", "fix", "notes"):
         rs = [r for r in rows if r[0] == lv]
         if not rs:

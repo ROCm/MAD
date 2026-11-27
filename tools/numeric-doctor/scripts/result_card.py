@@ -240,6 +240,8 @@ def problems(card):
     lists = [("root_cause.location." + k, rc.get("location", {}).get(k, [])) for k in ("sites", "env", "source", "config")]
     lists += [("root_cause.conditions", rc.get("conditions", []))]
     lists += [("fix." + k, fx.get(k, [])) for k in ("changes", "extra", "alternatives", "untested")]
+    # the draft writes rates as ledger lines; a hand-edited [{"source":..,"value":..}] crashed the compare (2026-11-27)
+    lists += [("context.rates", card.get("context", {}).get("rates", []))]
     bad = set()
     for name, v in lists:
         if not isinstance(v, list) or not all(isinstance(x, str) for x in v):

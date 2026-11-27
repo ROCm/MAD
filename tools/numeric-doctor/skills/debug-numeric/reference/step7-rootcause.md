@@ -193,7 +193,7 @@ derived operands from the real producer, and a reference.
 2. `sweep --k K --n N --dtype ...` at the bad group's K/N: every M on fresh data. Bad M
    in **bands** = kernel selection or tiling; it prints each band's tile count for
    the kernel's `MT<m>x<n>` (from `kernel.*.txt`: m tiles the output columns, n the
-   rows); pass it as `--tile`, the default is one gfx950 kernel's. Look for what the
+   rows); pass it as `--tile` (required). Look for what the
    bad counts share, against this device's `DEVICE ... CUs=` line (2026-11-09, MI355X:
    224/232/240/248 tiles -- multiples of the 8 XCDs, below the 256 CUs, kernel
    `..._SK5_...` = stream-K). MI300X has 304 CUs, also 8 XCDs: the bands, if any,
@@ -215,9 +215,11 @@ derived operands from the real producer, and a reference.
    (`TENSILE_DB=0x8040` prints them per launch) show which value the library computed
    for a bad M and not for a good one, and forcing just that value -- bad on a clean
    M, good on a bad one -- is both the mechanism and the targeted workaround.
-5. `sentinel --m <bad M> --k K --n N`: every wrong element still holding the
+5. `sentinel --m <bad M> --k K --n N --tile <MT>`: every wrong element still holding the
    sentinel = **tiles never written** (the model then reads leftover memory: NaN,
    Inf, or finite garbage = the grad-norm spikes); none = computed wrong.
+   `TILE_MISMATCH` = the unwritten elements do not fill whole `--tile` tiles: the tile
+   is not the dispatched kernel's -- re-read the kernel name from step 3's log.
 
 rocBLAS is not an independent second implementation for bf16/fp16 here:
 `torch.backends.cuda.preferred_blas_library("cublas")` failed identically (the same

@@ -2,8 +2,8 @@
 """Deterministic wrong/NaN GEMM: what does it depend on? (debug-numeric step 7, GEMM recipe)
 
     python3 gemm_shape_probe.py capsule <capsule.pt> [--call N] [--repeat 20] [--synthesize]
-    python3 gemm_shape_probe.py sweep --k K --n N [--dtype bf16] [--m-to 20000] [--tile 128x112]
-    python3 gemm_shape_probe.py sentinel --m M --k K --n N [--dtype bf16] [--tile 128x112]
+    python3 gemm_shape_probe.py sweep --k K --n N [--dtype bf16] [--m-to 20000] --tile MxN
+    python3 gemm_shape_probe.py sentinel --m M --k K --n N [--dtype bf16] --tile MxN
 
 capsule   replays the capsule's chain up to the GEMM-family call --call (default: the
           capsule's own op) with replay_nan_op's binder, then on that call's operands:
@@ -169,9 +169,11 @@ def sentinel_mode(a):
     w = torch.randn(a.k, a.n, device="cuda").to(dt)
     x = torch.randn(a.m, a.k, device="cuda").to(dt)
     ref = x.double() @ w.double()
+    unw = None
     for sv in (7.0, -3.0):
         out = torch.full((a.m, a.n), sv, device="cuda", dtype=dt)
         torch.mm(x, w, out=out)
+        unw = (out == sv) if unw is None else unw & (out == sv)
         badm = ~torch.isfinite(out) | ((out.double() - ref).abs() > a.tol * ref.abs().max())
         kept = (badm & (out == sv)).sum().item()
         tiles = sorted({(r // tr, c // tc) for r, c in badm.nonzero().tolist()})
@@ -180,6 +182,20 @@ def sentinel_mode(a):
                  "never written" if kept == badm.sum().item() else
                  ("partly unwritten" if kept else "computed wrong"), len(tiles),
                  math.ceil(a.m / tr) * math.ceil(a.n / tc), tiles[:6]))
+    if unw.any().item():
+        # unwritten = the sentinel in both passes (no computed value is 7 and then -3).  It comes in
+        # whole tiles of the kernel's MT; bad tiles only partly unwritten mean --tile is not this
+        # kernel's (2026-11-27: the tile of a mis-identified kernel)
+        rr, cc = unw.nonzero().unbind(1)
+        ntc = math.ceil(a.n / tc)
+        cnt = torch.bincount((rr // tr) * ntc + cc // tc)
+        ids = cnt.nonzero().flatten()
+        full = torch.clamp(a.m - (ids // ntc) * tr, max=tr) * torch.clamp(a.n - (ids % ntc) * tc, max=tc)
+        part = (cnt[ids] < full).sum().item()
+        print("UNWRITTEN %d elements in %d %s tiles: %s" % (unw.sum().item(), len(ids), a.tile,
+              "all whole tiles" if not part else
+              "TILE_MISMATCH -- %d only partly unwritten: --tile is not the dispatched kernel's MT "
+              "(check the kernel name: HIPBLASLT_LOG_MASK=32 or TENSILE_DB)" % part))
     print("PROBE_DONE")
 
 
@@ -196,9 +212,9 @@ def main():
         p.add_argument("--k", type=int, required=True)
         p.add_argument("--n", type=int, required=True)
         p.add_argument("--dtype", choices=sorted(DT), default="bf16")
-        p.add_argument("--tile", default="128x112",
-                       help="MT<m>x<n> from the kernel name (kernel.*.txt); the default is "
-                            "the 2026-11-09 gfx950 kernel's -- pass this kernel's")
+        p.add_argument("--tile", required=True,
+                       help="MT<m>x<n> from the dispatched kernel's name (kernel.*.txt, or "
+                            "HIPBLASLT_LOG_MASK=32 on the call), e.g. 128x112")
         if p.prog.endswith("sweep"):
             p.add_argument("--m-from", type=int, default=1)
             p.add_argument("--m-to", type=int, default=20000)

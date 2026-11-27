@@ -972,6 +972,15 @@ def _grouped_dispatches(logged):
     if not gg:
         return None
     n, groups = gg
+    # The replay's fp32 reference GEMM of each group has the same M/N/K and runs after the
+    # capsule's, so a shape-only match named it (2026-11-27: an fp32 solution for a bf16
+    # call): keep the dispatches in the capsule's dtype.
+    A = (cap.get("args") or [None])[0]
+    if isinstance(A, dict) and _CHAIN_REF in A:
+        A = (cap.get("pool") or {}).get(A[_CHAIN_REF])
+    a_type = _BENCH_DTYPE.get(str((A or {}).get("dtype")), (None, None))[0]
+    if a_type and any(x.get("a_type") == a_type for x in logged):
+        logged = [x for x in logged if x.get("a_type") == a_type]
     want = set(_GROUPED_WRONG)
     for x in (getattr(args, "grouped_wrong_rows", None) or "").split(","):
         if x.strip().isdigit():
