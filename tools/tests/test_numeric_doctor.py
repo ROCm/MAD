@@ -222,7 +222,11 @@ class CheckRunScriptTest(unittest.TestCase):
 
 
 class CompareVerdictTest(unittest.TestCase):
-    """scripts/compare_results.py: a 5N native kernel verdict is the same bug verdict as KERNEL_BUG."""
+    """scripts/compare_results.py: a 5N native kernel verdict is not the same verdict as KERNEL_BUG.
+
+    Upstream nan-doctor keeps them apart: NATIVE_KERNEL_BUG (kernel capsule) and KERNEL_BUG (op capsule)
+    are different verdicts, and a difference is a card-stale or regression case to explain.
+    """
 
     script = ND / "scripts" / "compare_results.py"
 
@@ -243,15 +247,13 @@ class CompareVerdictTest(unittest.TestCase):
         rows = json.loads(out.stdout)["rows"]
         return next(r for r in rows if r["level"] == "bug" and r["field"] == "verdict")
 
-    def test_native_kernel_bug_is_the_same_verdict_as_kernel_bug(self) -> None:
+    def test_native_kernel_bug_differs_from_kernel_bug(self) -> None:
         row = self.bug_verdict_row("KERNEL_BUG", "NATIVE_KERNEL_BUG")
-        self.assertEqual(row["verdict"], "SAME")
-        # the raw verdicts stay visible: the reproducer difference is reported, not hidden
-        self.assertEqual({row["a"], row["b"]}, {"KERNEL_BUG", "NATIVE_KERNEL_BUG"})
-
-    def test_other_verdicts_still_differ(self) -> None:
-        row = self.bug_verdict_row("KERNEL_BUG", "FP32_OVERFLOW?")
         self.assertEqual(row["verdict"], "DIFFERENT")
+
+    def test_identical_verdicts_are_the_same(self) -> None:
+        row = self.bug_verdict_row("KERNEL_BUG", "KERNEL_BUG")
+        self.assertEqual(row["verdict"], "SAME")
 
 
 class SkillDiscoveryTest(unittest.TestCase):

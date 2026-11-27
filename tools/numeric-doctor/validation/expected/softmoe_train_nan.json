@@ -67,5 +67,5 @@
   "nan_kind": "deterministic",
   "nan_origin": "system"
  },
- "notes": "F1 (triton ftz lowering) and F2 (model rewrite) are correct alternatives; a 5N kernel capsule (NATIVE_KERNEL_BUG) names the same bug as KERNEL_BUG."
+ "notes": "F1 (Triton flush-denorm lowering) and F2 (model rewrite) are accepted alternatives. F1 routes around the faulty ftz expansion, so the card's status stays WORKAROUND; a real fix adds a subnormal guard inside that expansion. A 5N NATIVE_KERNEL_BUG (kernel capsule) is a different verdict from KERNEL_BUG (op capsule)."
 }
