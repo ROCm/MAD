@@ -156,6 +156,36 @@ class PreflightTest(unittest.TestCase):
         self.assertNotIn("scripts/Primus", out)
 
 
+class CheckRunScriptTest(unittest.TestCase):
+    """scripts/check_run.sh: the four post-run checks without copy-paste placeholders."""
+
+    script = ND / "scripts" / "check_run.sh"
+
+    def run_check(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(self.script), *args], cwd=ND,
+                              capture_output=True, text=True)
+
+    def test_script_is_executable_and_parses(self) -> None:
+        self.assertTrue(os.access(self.script, os.X_OK))
+        self.assertEqual(subprocess.run(["bash", "-n", str(self.script)]).returncode, 0)
+
+    def test_without_an_artifact_dir_it_prints_usage(self) -> None:
+        r = self.run_check()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("usage", r.stderr.lower())
+
+    def test_an_unknown_run_fails_and_says_where_it_looked(self) -> None:
+        r = self.run_check("no-such-run-tag")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no such artifact dir", r.stderr)
+
+    def test_an_incomplete_run_fails_loudly(self) -> None:
+        with tempfile.TemporaryDirectory() as d:          # no result.json, no report.md
+            r = self.run_check(d)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("CHECK_RUN=FAIL", r.stdout)
+
+
 class SkillDiscoveryTest(unittest.TestCase):
     def test_claude_and_cursor_read_the_package_skills_from_the_repo_root(self) -> None:
         for skill in SKILLS:
