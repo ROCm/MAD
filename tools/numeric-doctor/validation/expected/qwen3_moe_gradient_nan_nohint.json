@@ -6,8 +6,9 @@
  "run_script": "examples/training/qwen3_moe_gradient_nan_nohint/run.sh",
  "nan_signal": "Loss is not finite|grad_norm: +([1-9][0-9]{2,}|nan|inf)",
  "priors": "-",
- "skill_commit": "15442b0",
+ "skill_commit": "1922d3a",
  "evidence": [
+  "blind PRIORS=none run 2026-11-27 (skill 1922d3a, stripped copy with the example's dated anecdotes in scripts/ and skills/ scrubbed): artifacts/2026-11-27-qwen3-moe-blind -- 5b 100/100 deterministic, root cause in 8 iterations (28 min) down to origami's chunk choice, T1/B1 reproducer 100/100 -> 0/100, model 30/100 spike steps -> 0",
   "artifacts/2026-11-20-qwen3_moe_gradient_nan_nohint-va (skill 6e7132b, PRIORS=use)",
   "artifacts/2026-11-20-qwen3_moe_gradient_nan_nohint-np (skill 4cedea9, PRIORS=none)"
  ],
@@ -28,38 +29,47 @@
  "root_cause": {
   "status": "FOUND",
   "component": "hipblaslt",
-  "mechanism": "stream-K solution leaves 35/232 output tiles unwritten at M in bands of 224-248 tiles",
+  "mechanism": "origami picks WGMXCCCHUNK=tiles/8 (28-31 at 224-248 tiles) with WGMXCC=8; the stream-K kernel's chunked XCD remap is a permutation only when chunk % 8 == 0, so 7*(chunk%8) output tiles (35/232 at M 12889) are never written",
   "location": {
    "kernel": "hipblaslt solution 13817",
    "sites": [],
    "env": [],
-   "source": [],
+   "source": [
+    "origami.cpp:select_workgroup_mapping",
+    "ContractionSolution.cpp:ContractionSolution.calculateAutoWGM"
+   ],
    "config": []
   },
   "conditions": [
    "bf16 grouped gemm",
-   "expert token count in a bad-M band"
+   "expert token count in a bad-M band",
+   "stream-K solution, output tiles < CUs and a multiple of 8 with tiles/8 not a multiple of 8"
   ]
  },
  "fix": {
   "status": "WORKAROUND",
   "kind": "library_env",
   "changes": [
-   "TENSILE_FIXED_WGMXCC=1"
+   "TENSILE_FIXED_WGMXCCCHUNK=0"
   ],
   "extra": [],
   "alternatives": [
+   "TENSILE_FIXED_WGMXCC=1",
    "TENSILE_STREAMK_DYNAMIC_GRID=0",
    "TENSILE_STREAMK_MAX_CUS=128"
   ],
   "validated": {
-   "reproducer": "200/200 -> 0/200",
-   "model": "10 spikes -> 0"
-  }
+   "reproducer": "stock 100/100 -> 0/100 (FIXED_WGMXCC=1: 200/200 -> 0/200)",
+   "model": "30 spike steps -> 0 (FIXED_WGMXCC=1: 10 spikes -> 0)"
+  },
+  "untested": [
+   "origami.cpp:select_workgroup_mapping",
+   "ContractionSolution.cpp:ContractionSolution.calculateAutoWGM"
+  ]
  },
  "context": {
   "nan_kind": "deterministic",
   "nan_origin": "system"
  },
- "notes": "The bad M differs run to run (12889, 12439: MoE routing); the solution and the fix do not."
+ "notes": "The bad M differs run to run (12889, 12439: MoE routing) and node to node (hipBLASLt picks another solution on some nodes); the defect and the fix do not. The real fix (R1, round the chunk down to a multiple of 8 in origami and calculateAutoWGM) is untested: it needs a hipBLASLt build; forcing chunk 24 on the stock library is its stand-in (0/100, +2%). TENSILE_FIXED_WGMXCC=1 (the remap off) is the earlier card's fix and an accepted alternative."
 }

@@ -949,6 +949,17 @@ def _names_index(matched):
 _GROUPED_NOTE = [""]        # why discover_kernel's solution index is (or is not) the wrong group's
 
 
+def _grouped_wrong_from(out):
+    """A discovery child's `GROUPED_WRONG_ROWS=` line -> _GROUPED_WRONG, when this process has
+    not run the value check itself (--disasm runs discovery before its own replay)."""
+    import re
+    if _GROUPED_WRONG or not out:
+        return
+    m = re.search(r"GROUPED_WRONG_ROWS=([\d,]+)", out)
+    if m:
+        _GROUPED_WRONG.extend(int(x) for x in m.group(1).split(",") if x)
+
+
 def _grouped_dispatches(logged):
     """aten._grouped_mm: (names, index) of the WRONG group's dispatch, or None (not a
     grouped capsule, or no group matched).  Each group is its own GEMM and hipBLASLt
@@ -991,7 +1002,14 @@ def _grouped_dispatches(logged):
     print("  which group is wrong is not known here: the kernel below is ONE group's, not "
           "necessarily the wrong one (pass --grouped-wrong-rows <rows> from the replay's "
           "GROUPED_WRONG_ROWS= line)")
-    return None
+    # Never fall back to every logged GEMM: the replay's own fp32 reference/check GEMMs are
+    # in the log too, and the last of those was disassembled for a bf16 grouped capsule
+    # (2026-11-27, an fp32 MT32x32x128 kernel).
+    names = []
+    for _, nm, _ in per:
+        names += [x for x in nm if x not in names]
+    last = [p[2] for p in per if p[1] and p[1][-1] == names[-1]] if names else []
+    return (names, last[0] if last else None) if names else None
 
 
 def discover_kernel(g):
@@ -1015,6 +1033,7 @@ def discover_kernel(g):
     print("  identifying the dispatched kernel (one extra replay, run to exit so the")
     print("  library flushes its profile)")
     rc, log, out = _discovery_replay(_MASK_EXT_PROFILE)
+    _grouped_wrong_from(out)
     names, index = _dispatches(log, g)
     if names:
         if len(names) > 1:
@@ -1035,6 +1054,7 @@ def discover_kernel(g):
     print("  solution index in the installed Tensile *.dat set")
 
     rc, log, out = _discovery_replay(_MASK_PROFILE)
+    _grouped_wrong_from(out)
     names, index = _dispatches(log, g)
     if names:                                     # a build whose bit 64 names it anyway
         return names[-1]

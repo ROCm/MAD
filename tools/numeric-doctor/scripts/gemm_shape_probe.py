@@ -55,6 +55,10 @@ def bind_call(path, call, synthesize):
     R._import_torch()
     cap = R.upgrade_capsule(torch.load(path, map_location="cpu", weights_only=False))
     dev = torch.device("cuda")
+    if not cap.get("chain"):       # op-only capsule (step 6's default package): the op itself
+        if not R._is_gemm(cap["op"]):
+            sys.exit("op-only capsule of %s: not a GEMM-family op" % cap["op"])
+        return cap["op"], list(R.unpack(cap["args"], dev)), dict(R.unpack(cap["kwargs"], dev))
     env, pool = R._chain_roots(cap, dev), cap["pool"]
     want = call if call is not None else cap.get("op_call_index")
     for n, rec in enumerate(cap["chain"]):

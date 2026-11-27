@@ -43,7 +43,8 @@ mkdir -p "$OUT" && chmod 777 "$OUT"
 for r in $(seq 1 "$MAXR"); do
   decisive=1 stock_hits=0 stock_last=0
   for arm in STOCK $ARMS; do
-    tag=r${r}_${arm%%=*}; abo=$OUT/$tag; mkdir -p "$abo" && chmod 777 "$abo"
+    # the value too: arms that set one variable to two values shared a log and dir (2026-11-27)
+    tag=r${r}_$(printf %s "$arm" | tr -c 'A-Za-z0-9_.-' '_'); abo=$OUT/$tag; mkdir -p "$abo" && chmod 777 "$abo"
     if [ -n "${CMD:-}" ]; then
       envs=(--env "AB_OUT=$(rt_path "$abo")"); [ "$arm" = STOCK ] || envs+=(--env "$arm")
       "${ND_LAUNCH[@]}" "$ND" run --gpus all --name "nd-ab-${SLURM_JOB_ID:-$$}-$tag" "${envs[@]}" -- \

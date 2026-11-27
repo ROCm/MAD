@@ -226,6 +226,9 @@ def main():
     ap.add_argument("--first", action="store_true",
                     help="stop at the first code object per arch with a kernel matching --kernel (a library dir)")
     a = ap.parse_args()
+    bad = [p for p in a.path if not p or not os.path.exists(p)]
+    if bad:     # an unset shell variable read as "searched 0 files, no object" (2026-11-27)
+        ap.error("no such file or directory: %s" % ", ".join(repr(p) for p in bad))
     work = a.out or tempfile.mkdtemp(prefix="gpu_objects.")
     os.makedirs(work, exist_ok=True)
     want = set(a.arch.split(",")) if a.arch else None

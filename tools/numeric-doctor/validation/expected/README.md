@@ -38,3 +38,10 @@ to `Default`); `PYTORCH_TUNABLEOP_ENABLED=0` and the tuning-time numerical check
 shape and hipBLASLt solution TunableOp picks varies per trainer, so `bug.geometry`, `bug.kernel` and
 `root_cause.location.kernel` are null: a field an expected card leaves null is open, and `compare_results.py` prints it
 under `notes` without judging it.
+
+`qwen3_moe_gradient_nan_nohint.json` was updated from blind run 11 (2026-11-27, skill 1922d3a, `PRIORS=none`): the run
+went past the earlier card's mechanism to the chunk value hipBLASLt's origami computes (`WGMXCCCHUNK` = tiles/8, not a
+multiple of the 8 XCDs), so `root_cause.location.source` names `origami.cpp` and `ContractionSolution.cpp`, and the fix is
+the targeted `TENSILE_FIXED_WGMXCCCHUNK=0`. The earlier card's `TENSILE_FIXED_WGMXCC=1` (the remap off) and the other
+stream-K knobs are accepted alternatives: older runs compare `REFINED`. A run that names Tensile's kernel generator
+(`StreamK.py`) as the source compares DIFFERENT on `root_cause` -- the generator emits a correct remap for the chunk it is given.

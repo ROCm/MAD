@@ -203,11 +203,18 @@ derived operands from the real producer, and a reference.
    `HIPBLASLT_LOG_MASK=32 HIPBLASLT_LOG_FILE=...` on one call.
 4. **Causal knobs**, each `sweep` in its own process (`env VAR=VALUE python3 ...`):
    `TENSILE_STREAMK_DYNAMIC_GRID=0`, `TENSILE_FIXED_WGMXCC=1`,
-   `TENSILE_STREAMK_MAX_CUS=<CUs/2>`, `TENSILE_STREAMK_DATA_PARALLEL=1`,
-   `TENSILE_SOLUTION_INDEX=<other>` (list them: `strings libhipblaslt.so.1 | grep
-   -E '^TENSILE_'` in the image). Bands that vanish under a knob and return without
-   it, in the same job, are the causal evidence; re-check the knob on the capsule
-   call (`capsule` mode under the env).
+   `TENSILE_FIXED_WGMXCCCHUNK=<0, or a multiple of the XCDs>`,
+   `TENSILE_STREAMK_MAX_CUS=<CUs/2>`, `TENSILE_STREAMK_DATA_PARALLEL=1` -- not the
+   whole list: list them with `strings libhipblaslt.so.1 | grep -E '^TENSILE_'` in the
+   image (`TENSILE_SOLUTION_INDEX` did not change the solution of a hipBLASLt-API
+   call on gfx950 2026-11-27: confirm a pin took effect in the log before reading it).
+   Bands that vanish under a knob and return without it, in the same job, are the
+   causal evidence; re-check the knob on the capsule call (`capsule` mode under the
+   env). **Then narrow it**: a knob that turns a whole mechanism off (the XCD remap,
+   the dynamic grid) is the broad answer; the kernel's runtime arguments
+   (`TENSILE_DB=0x8040` prints them per launch) show which value the library computed
+   for a bad M and not for a good one, and forcing just that value -- bad on a clean
+   M, good on a bad one -- is both the mechanism and the targeted workaround.
 5. `sentinel --m <bad M> --k K --n N`: every wrong element still holding the
    sentinel = **tiles never written** (the model then reads leftover memory: NaN,
    Inf, or finite garbage = the grad-norm spikes); none = computed wrong.
