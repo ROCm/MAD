@@ -146,6 +146,16 @@ class GitTrackingTest(unittest.TestCase):
         self.assertTrue(self.ignored("tools/numeric-doctor/artifacts/2026-01-01-x/report.md"))
 
 
+class PreflightTest(unittest.TestCase):
+    def test_an_example_is_scanned_alone_not_the_whole_mad_repo(self) -> None:
+        run = ND / "examples" / "training" / "softmoe_train_nan" / "run.sh"
+        out = subprocess.run([sys.executable, str(ND / "scripts" / "capture_preflight.py"), str(run)],
+                             cwd=ND, capture_output=True, text=True, env={**os.environ, "ND_ENV": ""}).stdout
+        self.assertIn(f"root={ND} ", out)
+        self.assertIn("scope:    numeric-doctor checkout", out)
+        self.assertNotIn("scripts/Primus", out)
+
+
 class SkillDiscoveryTest(unittest.TestCase):
     def test_claude_and_cursor_read_the_package_skills_from_the_repo_root(self) -> None:
         for skill in SKILLS:

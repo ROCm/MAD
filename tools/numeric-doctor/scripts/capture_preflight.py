@@ -517,6 +517,9 @@ def main():
     rs = os.path.realpath(a.run_script)          # realpath: root (git) is resolved too
     root = a.root or sh(["git", "-C", os.path.dirname(rs), "rev-parse", "--show-toplevel"]).strip() \
         or os.path.dirname(rs)
+    pkg = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    if not a.root and rs.startswith(pkg + os.sep):   # the package lives inside a larger repo (MAD)
+        root = pkg
     venv = a.venv
     if venv is None:
         cands = sorted(d for d in os.listdir(root) if d.startswith(".venv")) if os.path.isdir(root) else []
