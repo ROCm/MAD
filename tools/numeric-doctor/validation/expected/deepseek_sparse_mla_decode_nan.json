@@ -1,0 +1,66 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:deepseek_sparse_mla_decode_nan",
+ "example": "examples/inference/deepseek_sparse_mla_decode_nan",
+ "run_script": "examples/inference/deepseek_sparse_mla_decode_nan/run.sh",
+ "nan_signal": "Logits are not finite",
+ "priors": "-",
+ "skill_commit": "327c0ab",
+ "evidence": [],
+ "bug": {
+  "verdict": "KERNEL_BUG_UNVERIFIED",
+  "op": "triton._fwd_kernel_stage2_asm.w0_1_2_3_4_5_6_7_8",
+  "geometry": null,
+  "kernel": {
+   "library": "triton",
+   "solution_index": null,
+   "name": "_fwd_kernel_stage2_asm",
+   "arch": null,
+   "injected": null
+  },
+  "reproduced_by": "op_capsule",
+  "verdict_confirmed": true
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "aiter",
+  "mechanism": "mla_decode_fwd allocates valid_split_count with torch.empty; the gfx950 stage1 asm never writes it; Triton stage2 merges min(splits, leftover) splits -> leftover<=0 gives 0 splits, acc/e_sum = 0/0 = NaN (1..splits-1: silently wrong)",
+  "defence": "the read is gated only on num_kv_splits > 1 (no arch check) and relies on the asm writeback, which exists only in the gfx1250 packed MLA kernels; the zero-fill was dropped as dead work",
+  "location": {
+   "kernel": "aiter mla_decode_fwd (_fwd_kernel_stage2_asm reads valid_split_count)",
+   "sites": [],
+   "env": [],
+   "source": [
+    "aiter/mla.py:mla_decode_fwd"
+   ],
+   "config": []
+  },
+  "conditions": [
+   "num_kv_splits > 1 (stage1 asm + Triton stage2 path)",
+   "non-gfx1250 GPU (gfx950): no writer of valid_split_count",
+   "leftover allocator int32 <= 0 (NaN) or < num_kv_splits (wrong values)"
+  ]
+ },
+ "fix": {
+  "status": "FIX",
+  "kind": "source_patch",
+  "changes": [
+   "aiter/mla.py:mla_decode_fwd"
+  ],
+  "extra": [],
+  "alternatives": [
+   "gate use_valid_split_count_reduce to kernels that write valid_split_count (gfx1250) -- blind run 5 shipped this with torch.full",
+   "num_kv_splits=1 (a workaround: the reduce does not read the buffer)"
+  ],
+  "validated": {
+   "reproducer": "stock 349/800 -> fixed 0/800 (fix_check, poisoned allocator); capsule operand recorded 8192/8192 NaN -> num_kv_splits 0/8192",
+   "model": "stock 4/4 -> fixed 0/4"
+  }
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "system"
+ },
+ "notes": "The NaN is deterministic for a given allocator history: the leftover int32 under valid_split_count decides (<= 0: 0/0 NaN; 1..15: wrong finite values; >= 16: correct). The capture keeps that operand's bytes, so the op capsule replays at concurrency 1. A Triton kernel has no fp64 reference: KERNEL_BUG_UNVERIFIED is the expected verdict. Upstream fix: aiter #4186 (torch.full), which reverted #4129; the e_sum > 0 guard of #6394 turns the NaN into zeros."
+}

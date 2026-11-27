@@ -1,0 +1,62 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:qwen_sglang_serve_nan",
+ "example": "examples/inference/qwen_sglang_serve_nan",
+ "run_script": "examples/inference/qwen_sglang_serve_nan/run.sh",
+ "nan_signal": "Logprobs are not finite",
+ "priors": "-",
+ "skill_commit": "15442b0",
+ "evidence": [
+  "artifacts/2026-11-20-qwen_sglang_rmsnorm_nan-va (skill 6e7132b, PRIORS=use)",
+  "artifacts/2026-11-20-qwen_sglang_rmsnorm_nan-np (skill 4cedea9, PRIORS=none)"
+ ],
+ "bug": {
+  "verdict": "FP32_OVERFLOW?",
+  "verdict_confirmed": true,
+  "op": "aiter.rmsnorm2d_fwd.default",
+  "geometry": null,
+  "kernel": null,
+  "reproduced_by": "op_capsule"
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "model_config",
+  "mechanism": "RMSNorm with eps 0 over an all-zero padded-vocab embedding row: 0*rsqrt(0)",
+  "location": {
+   "kernel": "aiter rmsnorm2d_fwd",
+   "sites": [],
+   "env": [],
+   "source": [],
+   "config": [
+    "rms_norm_eps=0.0"
+   ]
+  },
+  "conditions": [
+   "rms_norm_eps=0",
+   "zero padded embedding rows",
+   "token id >= vocab"
+  ]
+ },
+ "fix": {
+  "status": "FIX",
+  "kind": "config_change",
+  "changes": [
+   "rms_norm_eps=1e-6"
+  ],
+  "extra": [
+   "reject token id >= 151665",
+   "keep padded embedding rows"
+  ],
+  "alternatives": [],
+  "validated": {
+   "reproducer": "",
+   "model": "2/2 -> 0/2"
+  }
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "model"
+ },
+ "notes": ""
+}

@@ -1,0 +1,20 @@
+# Apptainer image for the Qwen3 MoE training example: public Python 3.12 base + the public PyTorch
+# ROCm wheel + torchtitan's runtime dependencies. torchtitan itself is not baked in: run.sh binds
+# ./src/torchtitan.
+#
+#   apptainer build --fakeroot qwen3-moe.sif qwen3_moe.def
+Bootstrap: docker
+From: docker.io/library/python@sha256:4209fae09a3e20afd863e528bfddc235da5fd5977983e1996cd54cc9a72e6267
+
+%post
+    set -eux
+    export PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+    pip install "torch==2.14.0+rocm7.14" "rocm[device-all,libraries]==7.14.0" \
+        --index-url https://download.pytorch.org/whl/rocm7.14 --extra-index-url https://pypi.org/simple
+    # torchtitan (commit ecae62f15) dependencies.
+    pip install "torchdata>=0.8.0" "datasets>=3.6.0,<4.8.0" "tokenizers>=0.15.0" safetensors "tyro>=1.0.5" \
+        tensorboard einops pillow numpy "spmd_types==0.2.1"
+    pip freeze > /opt/pip-freeze.txt
+
+%environment
+    export USER=${USER:-repro} LOGNAME=${LOGNAME:-repro} HOME=${HOME:-/tmp} PYTHONUNBUFFERED=1

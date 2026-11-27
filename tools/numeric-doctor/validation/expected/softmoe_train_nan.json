@@ -1,0 +1,67 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:softmoe_train_nan",
+ "example": "examples/training/softmoe_train_nan",
+ "run_script": "examples/training/softmoe_train_nan/run.sh",
+ "nan_signal": "Loss is not finite",
+ "priors": "-",
+ "skill_commit": "47936cc",
+ "evidence": [
+  "artifacts/2026-11-20-torchcompile_nan_forward-va (skill 6e7132b, PRIORS=use)",
+  "artifacts/2026-11-20-torchcompile_nan_forward-np (skill 4cedea9, PRIORS=none)",
+  "artifacts/2026-11-23-torchcompile_nan_forward (skill 47936cc, PRIORS=use): Inductor kernel captured directly as G1, KERNEL_BUG via the step-6 eager/fp64 source-node check",
+  "artifacts/2026-11-23-torchcompile_nan_forward-val (skill c3b5b14, PRIORS=none): location.source redefined (step9-report.md) as the faulty code / its nearest Python selector -- the Inductor emitter"
+ ],
+ "bug": {
+  "verdict": "KERNEL_BUG",
+  "verdict_confirmed": true,
+  "op": null,
+  "geometry": null,
+  "kernel": {
+   "library": "inductor",
+   "solution_index": null,
+   "name": "triton_poi_fused__softmax__to_copy_mul_sqrt_unsqueeze_8",
+   "arch": null,
+   "injected": null
+  },
+  "reproduced_by": "op_capsule"
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "triton",
+  "mechanism": "tt.precise_sqrt lowering: v_rsq_f32 +inf on subnormal (class mask 0x260 misses it) -> NaN",
+  "location": {
+   "kernel": "triton_poi_fused__softmax__to_copy_mul_sqrt_unsqueeze_8",
+   "sites": [],
+   "env": [],
+   "source": [
+    "torch/_inductor/codegen/triton.py:TritonOverrides.sqrt"
+   ],
+   "config": []
+  },
+  "conditions": [
+   "subnormal softmax probability",
+   "torch.compile",
+   "model call site: train.py:SoftMoEMLP.forward sqrt(softmax(router logits / temp))"
+  ]
+ },
+ "fix": {
+  "status": "WORKAROUND",
+  "kind": "compiler_override",
+  "changes": [
+   "inductor:sqrt=libdevice.sqrt"
+  ],
+  "extra": [],
+  "alternatives": [],
+  "validated": {
+   "reproducer": "1000/1000 -> 0/1000",
+   "model": "3/3 -> 0/5"
+  }
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "system"
+ },
+ "notes": ""
+}

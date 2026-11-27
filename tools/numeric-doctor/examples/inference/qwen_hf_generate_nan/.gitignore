@@ -1,0 +1,6 @@
+models/
+out/
+sif/
+pydeps/
+__pycache__/
+*.out
