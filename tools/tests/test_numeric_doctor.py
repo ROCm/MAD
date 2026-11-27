@@ -93,6 +93,41 @@ class ProfileTest(unittest.TestCase):
                 self.assertIn(f"SCHED={sched} ", info.stdout, profile.name)
 
 
+class GpuSubsetTest(unittest.TestCase):
+    """GPU_IDS: run on a subset of the host's GPUs (GPU 0 busy for another user). Logical ids
+    0..n-1 then mean the listed devices in order, in nd run, nd submit and the jobs."""
+
+    def setUp(self) -> None:
+        self.art = tempfile.mkdtemp()
+        subprocess.run(["bash", str(ND / "scripts" / "nd"), "profile", "local-docker",
+                        "--art", self.art], capture_output=True, text=True, check=True)
+        with open(f"{self.art}/env.sh", "a") as f:
+            f.write("IMAGE=unused-by-these-tests\nGPU_IDS=1,2,3\n")
+        self.env = {**os.environ, "ND_ENV": f"{self.art}/env.sh", "NGPUS": ""}
+
+    def nd(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["bash", str(ND / "scripts" / "nd"), *args], capture_output=True,
+                              text=True, env=self.env, check=False)
+
+    def test_info_names_the_devices_and_their_count(self) -> None:
+        r = self.nd("info")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("GPU_IDS=1,2,3 (3 devices)", r.stdout)
+
+    def test_a_logical_id_past_the_subset_is_refused(self) -> None:
+        r = self.nd("run", "--gpus", "3", "--", "true")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("is not a device of this node (0..2)", r.stderr)
+
+    def test_the_subset_becomes_the_visible_devices_for_every_run(self) -> None:
+        lib = ND / "scripts" / "env" / "lib.sh"
+        out = subprocess.run(["bash", "-c", f'source "{lib}"; GPU_IDS=1,2,3; '
+                              'nd_build_env t 0 >/dev/null; printf "%s\\n" "${ND_RUN_ENV[@]}"'],
+                             capture_output=True, text=True, env={**os.environ, "NGPUS": ""})
+        self.assertIn("ROCR_VISIBLE_DEVICES=1,2,3", out.stdout, out.stderr)
+        self.assertIn("HIP_VISIBLE_DEVICES=0", out.stdout, out.stderr)
+
+
 class PublicContentTest(unittest.TestCase):
     def scan(self, patterns: dict) -> list:
         hits = []

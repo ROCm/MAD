@@ -131,6 +131,12 @@ needed -- `nd` pulls or loads it per node.
   groups); a host venv runs with `RUNTIME=native` (a library path it needs, such as
   `HIPBLASLT_TENSILE_LIBPATH`, in `EXTRA_ENV`). Shared with other users: check the GPU is idle
   before a wave, stop only your own jobs.
+* **Some GPUs are someone else's** (GPU 0 busy on a shared host): set `GPU_IDS=1,2,3,4,5,6,7` in
+  the profile's env file (or the environment). The runtime then sees only those devices, and
+  logical ids run over them in order: `--gpus 0` is the first listed GPU (physical 1), `nd info`
+  prints `GPU_IDS=... (n devices)`, and `nd run --gpus <id>` refuses an id past the subset. Use
+  it instead of remapping by hand in `EXTRA_ENV`. A capture spec still names logical ids 0..n-1,
+  so trim it to the devices you have.
 
 ## Job hygiene (each cost a job once)
 

@@ -165,6 +165,7 @@ nd_build_env() {
   # that see SLURM_NTASKS & co. switch to Slurm-driven distributed init)
   [ -n "${SLURM_JOB_ID:-}" ] && ND_RUN_ENV+=("ND_JOB_ID=$SLURM_JOB_ID")
   [ "$gpus" != all ] && ND_RUN_ENV+=("HIP_VISIBLE_DEVICES=$gpus")
+  [ -n "${GPU_IDS:-}" ] && ND_RUN_ENV+=("ROCR_VISIBLE_DEVICES=$GPU_IDS")
   # A multi-node run (nd_multinode: one `nd run` per node under srun): the node count, this
   # node's rank and the rendezvous host, for the command's torchrun --nnodes / --node_rank /
   # --master_addr.  The rank is this host's place in the launch's own host list (ND_NODE_HOSTS):
@@ -330,8 +331,13 @@ nd_tool() {
 # The inverse of rt_path, for paths a runtime wrote into a file (groups.json records them as
 # the container saw them).  Identity unless the runtime overrides it (apptainer).
 rt_hostpath() { printf '%s\n' "$1"; }
-# GPUs on this node: NGPUS, else Slurm's count, else /sys/class/kfd GPU nodes, else 8.
+# GPU_IDS (profile or env): the host's physical GPUs this run may use, e.g. 1,2,3,4,5,6,7 when
+# GPU 0 belongs to someone else. The runtime sees only those (ROCR_VISIBLE_DEVICES), so logical
+# ids 0..n-1 mean the listed devices in order, everywhere ("GPU 0" in a log is the first one).
+nd_gpu_ids_count() { echo "$GPU_IDS" | tr ',' '\n' | grep -c .; }
+# GPUs on this node: GPU_IDS, else NGPUS, else Slurm's count, else /sys/class/kfd GPU nodes, else 8.
 nd_ngpus() {
+  if [ -n "${GPU_IDS:-}" ]; then nd_gpu_ids_count; return; fi
   if [ -n "${NGPUS:-}" ]; then echo "$NGPUS"; return; fi
   if [ -n "${SLURM_GPUS_ON_NODE:-}" ]; then echo "$SLURM_GPUS_ON_NODE"; return; fi
   local n=0 p

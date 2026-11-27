@@ -86,6 +86,7 @@ case $sub in
       podman) echo "PODMAN_ARGS=${PODMAN_ARGS:-}" ;;
     esac
     echo "EXTRA_ENV=${EXTRA_ENV:-} EXTRA_MOUNTS=${EXTRA_MOUNTS:-}"
+    [ -n "${GPU_IDS:-}" ] && echo "GPU_IDS=$GPU_IDS ($(nd_gpu_ids_count) devices)"
     echo "repo: host=$ND_REPO_HOST runtime=$(rt_path "$ND_REPO_HOST")"
     [ -n "${ND_ART_HOST:-}" ] && echo "art:  host=$ND_ART_HOST runtime=$(rt_path "$ND_ART_HOST")"
     ;;
