@@ -789,6 +789,8 @@ slim_try() {
     # the chain attempt's files name their own dir: follow the rename (a summary.txt pointed at
     # verify-G1/..., which then held the op package, 2026-11-23)
     grep -rlF -- "$V/" "$V-chain" --include='*.txt' 2>/dev/null | xargs -r sed -i "s#$V/#$V-chain/#g"
+    # the LADDER_RESULT line above (append-only) still names verify-$G/: say where it went (2026-11-26)
+    LG note "step5b[$G]" "renamed: the chain attempt above is now repro-$G-chain + verify-$G-chain/ (its summary=verify-$G/... reads verify-$G-chain/...); the op-only package is repro-$G, its replay verify-$G-op/"
     C=${BASH_REMATCH[1]}; X="$VS/repro-$G-op"; summ=$ssumm
     slim_args=(--mode op --chain-package "repro-$G-chain")
     slim_note=" op-only(chain package kept: repro-$G-chain)"

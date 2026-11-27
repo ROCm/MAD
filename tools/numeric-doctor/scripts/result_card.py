@@ -77,8 +77,9 @@ def facts(A):
     """Everything the card can say from the artifact dir alone."""
     led = read(os.path.join(A, "ledger.md")).splitlines()
     f = {"schema": SCHEMA, "artifact_dir": os.path.basename(A.rstrip("/"))}
-    f["run_script"] = last(r"\bRUN_SCRIPT=(\S+)", led)
-    f["nan_signal"] = last(r"\bNAN_SIGNAL='([^']*)'", led) or last(r"\bNAN_SIGNAL=(\S+)", led)
+    # a free-form ledger note "RUN_SCRIPT=x/run.sh; NAN_SIGNAL=..." must not leave the ';' (2026-11-26)
+    f["run_script"] = last(r"\bRUN_SCRIPT=([^\s;,]+)", led)
+    f["nan_signal"] = last(r"\bNAN_SIGNAL='([^']*)'", led) or last(r"\bNAN_SIGNAL=([^\s;,]+)", led)
     pr = last(r"\bPRIORS=(use|none)\b", led)
     f["priors"] = pr or ("none" if any("prior: skipped" in l for l in led) else "use")
     # the skill version that RAN (step 0 prints SKILL_COMMIT=, step 1 ledgers it); the card's own

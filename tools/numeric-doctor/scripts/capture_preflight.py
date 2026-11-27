@@ -581,6 +581,7 @@ def main():
         if wrong:
             print("SIGNAL   the source prints: %s -- finite-signal candidates (wrong values, no NaN: "
                   "step4-explode.md)" % short(wrong, root=root))
+    unseen = False      # an alternative not found in the source
     for alt, _, lab, kind in alts:
         tag = "  [%s]" % lab if lab else ""
         clean = matches_clean(alt)
@@ -592,8 +593,9 @@ def main():
         # read literally it can never match the source
         rx = bool(re.search(r"[\\\[\]*+?{}]", alt))
         def look(pat):
-            if rx:   # ^...$ anchor a log line; the source prints it from inside a print(f"...")
-                pat = pat.lstrip("^").rstrip("$") or pat
+            # ^...$ anchor a log line; the source prints it from inside a print(f"...") -- also for an
+            # otherwise literal pattern ('^Logits are not finite' read NOT RAISED ANYWHERE, 2026-11-27)
+            pat = pat.lstrip("^").rstrip("$") or pat
             hits = [h for h in grep(pat, scan, fixed=not rx) if os.path.abspath(h[0]) != rs
                     and not h[0].endswith("~")]
             # the --source, then the model's raise before sibling scripts
@@ -608,6 +610,7 @@ def main():
         if kind == "field":
             verdict += " -- the run script's verdict field: a wrong-value signal (step4-explode.md)"
         if not where:
+            unseen = True
             verdict = ("? not in the source as a regex -- a pattern over formatted output cannot be "
                        "checked statically: confirm it on one model log" if rx else
                        "NOT RAISED ANYWHERE -- the run script cannot see this NaN")
@@ -618,6 +621,11 @@ def main():
         # the source also prints the NaN itself, mid-run -- the line a capture can stop on
         print("SIGNAL   the source also raises/logs: %s -- a NaN-specific line: prefer it as <NAN_SIGNAL>;\n"
               "           the verdict field above is the wrong-value fallback" % msgs_txt)
+    elif alts and unseen and msgs:
+        # 2026-11-26: a run script's summary grep ('nan_step=[0-9]') read as "?" with the model's own
+        # "Gradient norm is not finite" never suggested
+        print("SIGNAL   the source raises/logs: %s -- candidates for <NAN_SIGNAL> (the model's own line)"
+              % msgs_txt)
 
     # MASK: values that would hide a NaN before any check
     mask = grep(r"nan_to_num|masked_fill\(.*isnan|where\(.*isfinite", scan, include=("*.py",))
