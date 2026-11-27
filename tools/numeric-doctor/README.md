@@ -31,7 +31,8 @@ claude          # or: codex, or open the folder in Cursor
 
 There is nothing to install. The skills live in `tools/numeric-doctor/skills/` and are linked into
 `.claude/skills/` (Claude Code, Cursor) and `.agents/skills/` (Codex CLI), so an agent started at
-the MAD root sees them. The model itself runs in a container (docker, podman or apptainer) or a
+the MAD root sees them. Starting it in the package (`cd MAD/tools/numeric-doctor`, then `claude`)
+works too, and paths may then be given relative to it (`examples/training/...`). The model itself runs in a container (docker, podman or apptainer) or a
 Python venv, chosen by an execution profile:
 
 | Profile (`tools/numeric-doctor/scripts/env/profiles/`) | For |
@@ -50,7 +51,8 @@ To check the install, run the examples against their expected outcomes. At the a
 > validate numeric doctor
 ```
 
-or a subset, e.g. `> validate numeric doctor softmoe_train_nan`. Each example's expected result card
+or a subset, e.g. `> validate numeric doctor softmoe_train_nan`. The name `mad-numeric-doctor` works
+in any prompt as well (`> validate mad-numeric-doctor`, `... with mad-numeric-doctor`). Each example's expected result card
 is in `tools/numeric-doctor/validation/expected/`. The examples and the GPUs they need are listed in
 `tools/numeric-doctor/examples/training/README.md` and
 `tools/numeric-doctor/examples/inference/README.md`; examples that need hardware you do not have are

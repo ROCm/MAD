@@ -132,9 +132,14 @@ class GitTrackingTest(unittest.TestCase):
                     "scripts/env/profiles/local-docker.env", "scripts/env/lib.sh"):
             self.assertFalse(self.ignored(f"tools/numeric-doctor/{rel}"), rel)
 
-    def test_no_package_file_is_ignored(self) -> None:
+    def test_no_package_file_is_ignored_by_a_rule_outside_the_package(self) -> None:
         out = git("ls-files", "-o", "-i", "--exclude-standard", "--", "tools/numeric-doctor").stdout
-        ignored = [line for line in out.splitlines() if "__pycache__" not in line]
+        files = [line for line in out.splitlines() if "__pycache__" not in line]
+        if not files:
+            return
+        rules = subprocess.run(["git", "check-ignore", "-v", "--stdin"], cwd=REPO, input="\n".join(files),
+                               capture_output=True, text=True).stdout
+        ignored = [line for line in rules.splitlines() if not line.startswith("tools/numeric-doctor/")]
         self.assertEqual(ignored, [])
 
     def test_run_artifacts_are_ignored(self) -> None:
@@ -224,6 +229,8 @@ class DocsTest(unittest.TestCase):
         self.assertIn("validate numeric doctor", text)
         self.assertIn("debug tools/numeric-doctor/examples/training/qwen3_moe_gradient_nan_nohint "
                       "with numeric doctor", text)
+        self.assertIn("validate mad-numeric-doctor", text)
+        self.assertIn("cd mad/tools/numeric-doctor", text)
 
     def test_agents_md_lists_the_skills(self) -> None:
         text = (REPO / "AGENTS.md").read_text()
