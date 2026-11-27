@@ -31,3 +31,6 @@ fix through 5N. Its `bug.kernel` is the Triton reduce; a run drafted before `res
 `root_cause.location.source` names the faulty code (or, when that is not Python one can name, the nearest Python that
 selects it), never the model's call site -- that is a `condition` (step9-report.md, 2026-11-23). torchcompile's card
 moved from `train.py:SoftMoEMLP.forward` to `torch/_inductor/codegen/triton.py:TritonOverrides.sqrt` accordingly.
+
+`dit_fp8_train_nan.json` is **provisional** (2026-11-26): drafted from the example's own investigation, not from a
+debug-numeric run (`verdict_confirmed: false`). Replace it with the card of the first validated run.

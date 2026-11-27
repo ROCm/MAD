@@ -1,0 +1,70 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:dit_fp8_train_nan",
+ "example": "examples/training/dit_fp8_train_nan",
+ "run_script": "examples/training/dit_fp8_train_nan/run.sh",
+ "nan_signal": "Gradient norm is not finite|Loss is not finite",
+ "priors": "-",
+ "skill_commit": "0095047",
+ "evidence": [
+  "provisional: from the example's own investigation (validation/answers/dit_fp8_train_nan/README.md, MI350X jobs 145661 145736 145756, out/probe7-9), not from a debug-numeric run -- replace with a validated run's card"
+ ],
+ "bug": {
+  "verdict": "KERNEL_BUG",
+  "verdict_confirmed": false,
+  "op": "aten._scaled_mm.default",
+  "geometry": null,
+  "kernel": {
+   "library": "hipblaslt",
+   "solution_index": null,
+   "name": null,
+   "arch": "gfx950",
+   "injected": "no (stock)"
+  },
+  "reproduced_by": "op_capsule"
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "pytorch",
+  "mechanism": "TunableOp ROCm FP8 dispatch instantiates ScaledGemmTunableOp<mat1 dtype, mat2 dtype> but passes mat2 as hipBLASLt matrix A: with mixed e4m3/e5m2 operands every hipBLASLt candidate decodes each operand in the other FP8 format (a_type bf8_r / b_type f8_r vs the default call's f8_r / bf8_r) -> Inf/NaN",
+  "location": {
+   "kernel": "any TunableOp hipBLASLt candidate for an e5m2 x e4m3 _scaled_mm (420/420 on MI350X); the Default entry is correct",
+   "sites": [],
+   "env": [
+    "PYTORCH_TUNABLEOP_ENABLED=1"
+   ],
+   "source": [
+    "aten/src/ATen/native/cuda/ScaledBlas.cpp:TUNABLE_DISPATCH (ROCm)"
+   ],
+   "config": []
+  },
+  "conditions": [
+   "PyTorch TunableOp enabled",
+   "mixed FP8 formats (torchao float8 training: e5m2 gradients x e4m3 inputs/weights in the weight-gradient GEMM)",
+   "TunableOp picks a hipBLASLt candidate over Default (run to run)",
+   "not scale-dependent (grad amax 1e-2 and 1e-12 alike)"
+  ]
+ },
+ "fix": {
+  "status": "WORKAROUND",
+  "kind": "library_env",
+  "changes": [
+   "PYTORCH_TUNABLEOP_ENABLED=0"
+  ],
+  "extra": [],
+  "alternatives": [
+   "TunableOp results file with Default for the ScaledGemmTunableOp_Float8_e5m2_Float8_e4m3fn_* entries",
+   "source_patch: instantiate the ROCm ScaledGemmTunableOp with the operand types in hipBLASLt (column-major) order"
+  ],
+  "validated": {
+   "reproducer": "op_mixed 5/5 -> pinned Default 0/5",
+   "model": "8/8 -> 0/8"
+  }
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "system"
+ },
+ "notes": "Provisional card. A run that blames a hipBLASLt solution (e.g. Gemm_Hipblaslt_320617) or an extreme FP8 scale has followed ROCm/rocm-libraries#9450's text, not the evidence: compare DIFFERENT on root_cause.component. Which GEMM shape gets a hipBLASLt candidate varies per trainer, so geometry and solution are not judged."
+}
