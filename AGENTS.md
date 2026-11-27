@@ -28,10 +28,20 @@ has a skill in `.claude/skills/`, linked into `.agents/skills/` for Codex
 | `mad-generate-dockerfile` | explicit only | Render a Dockerfile from a framework template |
 | `mad-report` | automatic | Summarize or compare benchmark results (read-only) |
 | `mad-validate-model` | automatic | GPU-free lint of every registry, its files, and the output contract |
+| `debug-numeric` | automatic | Numeric Doctor: capture the op behind a NaN, Inf or wrong value, package a reproducer, root-cause and fix it |
+| `validate-examples` | automatic | Numeric Doctor: run its examples and compare each result with the expected card |
 
 Explicit-only skills build, run, or write files, so agents never pick them on
 their own: invoke them as `/<name>` (Claude Code, Cursor) or `$<name>` (Codex).
 `.claude/README.md` describes how the skills are shared across the three tools.
+
+The two Numeric Doctor skills are the exception: they run GPU jobs but stay
+automatic, so a plain request such as `debug <script> with numeric doctor` or
+`validate numeric doctor` reaches them, and they ask the user for the script
+and the compute budget before the first job. They live in
+`tools/numeric-doctor/` (linked into `.claude/skills/` and `.agents/skills/`),
+use neither madengine nor a `models.json` entry, and keep their output under
+`tools/numeric-doctor/artifacts/`. See `tools/numeric-doctor/README.md`.
 
 ### Running madengine from an agent
 
