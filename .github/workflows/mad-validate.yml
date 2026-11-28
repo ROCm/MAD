@@ -11,6 +11,10 @@ on:
       - ".claude/**"
       - ".agents/**"
       - "tools/validation/**"
+      - "tools/infx2mad.py"
+      - "tools/validate_configs.py"
+      - "tools/tests/infx2mad_ci_clusters.yaml"
+      - "tools/tests/test_infx_agentic_gate.py"
       - "requirements.txt"
       - ".github/workflows/mad-validate.yml"
   push:
@@ -52,3 +56,43 @@ jobs:
             python3 "$renderer" --framework "$framework" > "/tmp/$framework.Dockerfile"
             python3 tools/validation/dockerfile_validator.py "/tmp/$framework.Dockerfile" > /dev/null
           done
+
+  infx2mad:
+    # The translator is deterministic at a pinned InferenceX commit, so its
+    # whole output can be checked without a GPU or a cluster: every scenario
+    # that maps to a runner is translated and every emitted block is validated
+    # against the runner it targets.
+    runs-on: ubuntu-latest
+    env:
+      INFERENCEX_COMMIT: 47cdc9d02d2f50018efbbc207c0c3ce9e425dae4
+      # What the pinned commit translates to on tools/tests/infx2mad_ci_clusters.yaml.
+      # A change here is a change in what the translator emits: update it on purpose.
+      EXPECTED: "translated 26 scenario(s), 220 points"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml psutil
+
+      - name: Agentic result gate
+        run: python3 -m unittest discover -s tools/tests -p 'test_infx_agentic_gate.py'
+
+      - name: Fetch the pinned InferenceX commit
+        run: |
+          git init --quiet /tmp/InferenceX
+          git -C /tmp/InferenceX fetch --quiet --depth 1 https://github.com/SemiAnalysisAI/InferenceX.git "$INFERENCEX_COMMIT"
+          git -C /tmp/InferenceX checkout --quiet FETCH_HEAD
+
+      - name: Translate every scenario that maps to a runner
+        run: |
+          python3 tools/infx2mad.py --infx /tmp/InferenceX/inferencex-e2e --all \
+            --cluster ci-gfx950 --cluster-file tools/tests/infx2mad_ci_clusters.yaml \
+            --out-dir /tmp/infx-out --mad-dir "$PWD" | tee /tmp/infx-sweep.log
+          tail -n 1 /tmp/infx-sweep.log | grep -Fx "$EXPECTED"
+
+      - name: Validate the emitted blocks against their runners
+        run: python3 tools/validate_configs.py /tmp/infx-out

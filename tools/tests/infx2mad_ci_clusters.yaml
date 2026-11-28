@@ -1,0 +1,16 @@
+# A made-up cluster for the CI translation check (.github/workflows/mad-validate.yml).
+# It exists only so infx2mad.py can run without a real cluster: no model store, no
+# fabric, nothing that points at a machine. Real cluster descriptions are site data
+# and live outside the repository (see tools/clusters.example.yaml).
+ci-gfx950:
+  arch: gfx950
+  gpu_product: mi355x
+  partition: ci
+  gpus_per_node: 8
+  network_interface: eth0
+  skip_gpus_directive: false
+  run_as_submitting_user: false
+  model_stores: []
+  device_gids: {}
+  exclude_nodes: ''
+  fabric_env: {}
