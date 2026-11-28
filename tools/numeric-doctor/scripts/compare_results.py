@@ -49,7 +49,9 @@ def norm(s):
         except ValueError:
             v = v.lower()
         return "%s=%s" % (m.group(1), v)
-    return s
+    # `file:Class::function` is the C++ spelling of step9-report.md's `file:Class.function`
+    # (2026-11-28: the same hipBLASLt site compared DIFFERENT by the separator alone)
+    return re.sub(r"(?<=\w)::(?=\w)", ".", s)
 
 
 def nset(xs):
@@ -117,13 +119,15 @@ def cmp_kernel(a, b):
     # free-text kernel names: parentheticals and template arguments are commentary, `_` and case are
     # spelling -- one name's words a subset of the other's is the same kernel ("aiter mla_decode_fwd" ==
     # "aiter mla_decode_fwd (_fwd_kernel_stage2_asm reads ...)", "vllm quickreduce AllReduceTwoshot" ==
-    # "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>", 2026-11-23)
+    # "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>", 2026-11-23). A trailing "via <op>" is
+    # the call path and one-letter words are module spellings (`_C`): neither names the kernel
+    # (2026-11-28: "... AllReduceTwoshot (...) via vllm.all_reduce.default" vs the card's `_C` spelling)
     def core(s):
-        s = str(s or "")
+        s = re.sub(r"\s+via\s+\S+.*$", "", str(s or ""))
         prev = None
         while prev != s:
             prev, s = s, re.sub(r"\([^()]*\)|<[^<>]*>", " ", s)
-        return {w.replace("_", "").lower() for w in re.findall(r"[A-Za-z0-9_]+", s) if w.strip("_")}
+        return {w.replace("_", "").lower() for w in re.findall(r"[A-Za-z0-9_]+", s) if len(w.strip("_")) > 1}
     ca, cb = core(a), core(b)
     if ca and cb and (ca <= cb or cb <= ca) and min(len(ca), len(cb)) >= 2:
         return "SAME"

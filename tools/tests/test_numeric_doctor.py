@@ -256,6 +256,36 @@ class CompareVerdictTest(unittest.TestCase):
         self.assertEqual(row["verdict"], "SAME")
 
 
+def load_script(name: str):
+    """A package script as a module (scripts/ is not a package)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, ND / "scripts" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CompareSpellingTest(unittest.TestCase):
+    """compare_results.py judges what a run found, not how an agent spelled it."""
+
+    cr = load_script("compare_results")
+
+    def test_cpp_scope_separator_is_the_card_separator(self) -> None:
+        verdict, _ = self.cr.cmp_set(["ContractionSolution.cpp:ContractionSolution.calculateAutoWGM"],
+                                     ["ContractionSolution.cpp:ContractionSolution::calculateAutoWGM"])
+        self.assertEqual(verdict, "SAME")
+
+    def test_kernel_named_with_call_path_and_module_spelling_is_the_same_kernel(self) -> None:
+        self.assertEqual(self.cr.cmp_kernel(
+            "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>",
+            "vllm quickreduce AllReduceTwoshot (bf16->fp16 cast) via vllm.all_reduce.default"), "SAME")
+
+    def test_another_kernel_is_still_different(self) -> None:
+        self.assertEqual(self.cr.cmp_kernel("vllm quickreduce AllReduceTwoshot",
+                                            "vllm custom_ar cross_device_reduce_1stage"), "DIFFERENT")
+
+
 class SkillDiscoveryTest(unittest.TestCase):
     def test_claude_and_cursor_read_the_package_skills_from_the_repo_root(self) -> None:
         for skill in SKILLS:
