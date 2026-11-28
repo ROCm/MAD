@@ -218,7 +218,8 @@ work is spent. Submitted beside the capture-to-reproducer job it only waits in t
 (2026-11-13: still pending after the capture job had finished, then `launch failed requeued
 held`, which `nd stop` cannot cancel).
 
-**Ledger:** each answer (and whether it was the default), the derived inputs and image, the `nd profile` line, the `<ENV>` check,
+**Ledger:** each answer (and whether it was the default) -- `RUN_SCRIPT=<path>` and `NAN_SIGNAL='<regex>'`, quoted
+(`result_card.py` reads them from these notes) -- the derived inputs and image, the `nd profile` line, the `<ENV>` check,
 containers per GPU and how derived.
 
 ## A run script that starts its own containers

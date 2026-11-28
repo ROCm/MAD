@@ -286,6 +286,65 @@ class CompareSpellingTest(unittest.TestCase):
                                             "vllm custom_ar cross_device_reduce_1stage"), "DIFFERENT")
 
 
+class LedgerTest(unittest.TestCase):
+    """scripts/ledger.py: the status line, the time table and the skill version on a single-host run."""
+
+    script = ND / "scripts" / "ledger.py"
+
+    def ledger(self, d: str, body: str) -> str:
+        path = os.path.join(d, "ledger.md")
+        Path(path).write_text(body)
+        return path
+
+    def run_ledger(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(self.script), *args], capture_output=True, text=True)
+
+    def test_status_names_the_recommended_fix_not_the_first_id(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as d:
+            path = self.ledger(d, "\n".join((
+                "2026-11-28 01:00:00  step8[G1]  start",
+                "2026-11-28 01:01:00  step8[G1]  FIX=T1 targeted-workaround validated (recommended)",
+                "2026-11-28 01:02:00  step8[G1]  FIX=R1 real-fix checked-by-equivalence; FIX=B1 broad validated",
+                "2026-11-28 01:03:00  step8[G1]  FIX=B2 broad-workaround FAILED (model still NaN)", "")))
+            self.run_ledger(path, "status")
+            fix = json.loads(Path(d, "status.json").read_text())["fix"]
+        self.assertEqual(fix["recommended"], "T1")
+        self.assertEqual(fix["kind"], "WORKAROUND")       # R1 was never validated
+        self.assertEqual([f["id"] for f in fix["fixes"]], ["T1", "R1", "B1", "B2"])
+
+    def test_unmeasured_queue_and_compute_are_not_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = self.ledger(d, "2026-11-28 01:00:00  step4  start\n2026-11-28 01:05:00  step4  end  total=5m00s"
+                                  "  queue=n/a  compute=n/a  waiting-user=0m00s  other=5m00s  jobs=1\n")
+            table = self.run_ledger(path, "table").stdout
+        self.assertIn("| step4 | 1 | 5m00s | n/a | n/a | 0m00s | 5m00s |", table)
+
+    def test_a_run_summary_note_beside_group_visits_is_not_a_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = self.ledger(d, "2026-11-28 01:00:00  step7[G1]  start\n")
+            r = self.run_ledger(path, "note", "step7", "ROOT_CAUSE=VALID x")
+        self.assertNotIn("WARNING", r.stderr)
+
+    def test_step1_records_the_skill_commit_once(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ledger.md")
+            self.run_ledger(path, "start", "step1")
+            self.run_ledger(path, "start", "step1")
+            self.assertEqual(Path(path).read_text().count("SKILL_COMMIT="), 1)
+
+
+class ResultCardTest(unittest.TestCase):
+    rc = load_script("result_card")
+
+    def test_an_unquoted_signal_keeps_its_words(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "ledger.md").write_text(
+                "2026-11-28 01:00:00  step1  NAN_SIGNAL=Loss is not finite; PRIORS=none (given)\n")
+            self.assertEqual(self.rc.facts(d)["nan_signal"], "Loss is not finite")
+
+
 class SkillDiscoveryTest(unittest.TestCase):
     def test_claude_and_cursor_read_the_package_skills_from_the_repo_root(self) -> None:
         for skill in SKILLS:

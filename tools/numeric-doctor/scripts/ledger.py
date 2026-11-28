@@ -88,6 +88,24 @@ def _first(rx, entries, steps=None):
     return None
 
 
+NOT_VALIDATED = re.compile(r'(?i)not[- ]validated|not[- ]tried|not[- ]built|checked[- ]by[- ]equivalence|'
+                           r'\bFAILED\b|\brefuted\b')
+
+
+def recommended_fix(fixes):
+    """step8-fix.md *Decide*: the one the agent marked recommended, else the validated real fix,
+    else the narrowest validated workaround (T before B) -- not the first id in sort order
+    (2026-11-28: the status line showed B1, and a FAILED B1, ahead of the recommended fix)."""
+    marked = [f for f in fixes if re.search(r'(?i)\brecommended\b', f['text']) and f['validated']]
+    if marked:
+        return marked[0]
+    for kind in 'RTB':
+        ok = sorted((f for f in fixes if f['id'][0] == kind and f['validated']), key=lambda f: f['id'])
+        if ok:
+            return ok[0]
+    return None
+
+
 def status(path):
     entries = lines(path)
     art = os.path.dirname(os.path.abspath(path))
@@ -151,21 +169,28 @@ def status(path):
     if fx:
         t, s, m = fx
         ftb = _first(r'TARBALL\s+([0-9a-f]{64})\s+(\S+)', rev, r'step8')
-        # one `FIX=<id> <kind> <status>` line per fix shipped (step8-fix.md: R real fix, T targeted /
-        # B broad workaround); the latest line per id wins. Older ledgers: one FIX=<text> line.
+        # one `FIX=<id> <kind> <status>` per fix shipped (step8-fix.md: R real fix, T targeted /
+        # B broad workaround, D defence in depth), one per line or several `;`-joined on one; the
+        # latest entry per id wins. Older ledgers: one FIX=<text> line.
         fixes, seen = [], set()
         for _, s2, x in rev:
-            m2 = re.search(r'FIX=([RTB]\d+)\s+(.*)', x)
-            if m2 and re.match(r'step8', s2) and m2.group(1) not in seen:
-                seen.add(m2.group(1))
-                fixes.append({'id': m2.group(1), 'text': m2.group(2).strip()})
-        fixes.sort(key=lambda f: f['id'])
-        real = [f for f in fixes if f['id'][0] == 'R' and 'not validated' not in f['text']]
+            if not re.match(r'step8', s2):
+                continue
+            for m2 in re.finditer(r'FIX=([RTBD]\d+)\s+(.*?)(?=;\s*FIX=|$)', x):
+                if m2.group(1) not in seen:
+                    seen.add(m2.group(1))
+                    fixes.append({'id': m2.group(1), 'text': m2.group(2).strip().rstrip(';')})
+        for f in fixes:
+            f['validated'] = bool(re.search(r'\bvalidated', f['text'])) and not NOT_VALIDATED.search(f['text'])
+        rec = recommended_fix(fixes)
+        fixes.sort(key=lambda f: (f is not rec, 'RTBD'.index(f['id'][0]), f['id']))
+        real = [f for f in fixes if f['id'][0] == 'R' and f['validated']]
         kind = ('NO_FIX' if m.group(1).startswith('NO_FIX') else
                 ('FIX' if real else 'WORKAROUND') if fixes else
                 'WORKAROUND' if m.group(1).startswith('WORKAROUND') else 'FIX')
         st['fix'] = {'text': '; '.join('%s %s' % (f['id'], f['text']) for f in fixes) or m.group(1).strip(),
                      'at': t.strftime(FMT), 'kind': kind, 'fixes': fixes,
+                     'recommended': rec['id'] if rec else None,
                      'tarball': ftb[2].group(2) if ftb else None}
     st['line'] = status_line(st)
     return st
@@ -337,6 +362,7 @@ def end(path, step):
 
 def table(path):
     rows, skipped = collections.OrderedDict(), collections.OrderedDict()
+    measured = collections.defaultdict(set)     # step -> the columns some visit measured
     for _, s, txt in lines(path):
         if txt.split()[:1] == ['skipped']:
             skipped[s] = txt.split(None, 1)[1].strip() if len(txt.split()) > 1 else ''
@@ -349,14 +375,19 @@ def table(path):
             sec = unhms(val)
             if sec is not None:
                 r[k] += sec
+                measured[s].add(k)
     cols = ['total', 'queue', 'compute', 'waiting-user', 'other']
+    # queue / compute come from sacct: with SCHED=local they are unknown, not zero (their time is in
+    # `other`), and a 0m00s there read as "no compute" (2026-11-28)
+    timed = lambda s, c: c not in ('queue', 'compute') or c in measured[s]          # noqa: E731
     print('| step | visits | total | queue | compute | waiting for user | other |')
     print('|---|---|---|---|---|---|---|')
     tot = collections.Counter()
     for s in sorted(set(rows) | set(skipped), key=step_key):
         if s in rows:
             r = rows[s]
-            print('| %s | %d | %s |' % (s, r['visits'], ' | '.join(hms(r[c]) for c in cols)))
+            print('| %s | %d | %s |' % (s, r['visits'], ' | '.join(hms(r[c]) if timed(s, c) else 'n/a'
+                                                                  for c in cols)))
             tot.update(r)
         else:
             print('| %s | 0 | *skipped*%s | - | - | - | - |' % (s, ': ' + skipped[s] if skipped[s] else ''))
@@ -367,7 +398,10 @@ def table(path):
         print('| *outside any step* | - | %s | - | %s | - | - |' % (hms(out[0]), hms(out[0])))
         tot['total'] += out[0]
         tot['compute'] += out[0]
-    print('| **total** | %d | %s |' % (tot['visits'], ' | '.join(hms(tot[c]) for c in cols)))
+        measured['*'].add('compute')
+    any_timed = lambda c: any(timed(s, c) for s in measured)                         # noqa: E731
+    print('| **total** | %d | %s |' % (tot['visits'], ' | '.join(hms(tot[c]) if any_timed(c) else 'n/a'
+                                                                for c in cols)))
     print('(steps with neither an `end` nor a `skip` line -- still open -- are not listed)')
     ov = overlaps(path)
     if ov:
@@ -462,9 +496,28 @@ def warn_not_started(path, step, cmd):
     # warning on every such note was read as a fault (2026-11-20, three runs)
     if cmd == 'note' and starts:
         return
+    # a bare `step7` / `step8` note (the run's ROOT_CAUSE= / FIX= summary) beside per-group visits
+    # is timed in those visits' rows (2026-11-28: warned on every such note of a validation round)
+    if cmd == 'note' and PER_GROUP.match(step) and any(
+            s_.startswith(step + '[') and t.split()[:1] == ['start'] for _, s_, t in entries):
+        return
     if not starts or (ends and ends[-1] > starts[-1]):
         print('ledger: WARNING %s for %s, which has no open visit -- `start %s` first, or the '
               'table does not time this work' % (cmd, step, step), file=sys.stderr)
+
+
+def record_skill_commit(path):
+    """The skill version that runs, for the result card (result_card.py reads SKILL_COMMIT=): step 0
+    prints it, but half of a validation round's agents never ledgered it (2026-11-28). This script
+    ships in the same checkout as the skill, so its HEAD is the skill's."""
+    if any('SKILL_COMMIT=' in x for _, _, x in lines(path)):
+        return
+    try:
+        sha = subprocess.run(['git', '-C', os.path.dirname(os.path.abspath(__file__)), 'rev-parse', '--short',
+                              'HEAD'], capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        sha = ''
+    append(path, 'step1', 'SKILL_COMMIT=%s' % (sha or 'none'))
 
 
 def main():
@@ -486,6 +539,8 @@ def main():
     if cmd == 'start':
         warn_untagged(path, step)
         append(path, step, ('start  ' + text).rstrip())
+        if step == 'step1':
+            record_skill_commit(path)
     elif cmd == 'note':
         warn_not_started(path, step, cmd)
         append(path, step, text)

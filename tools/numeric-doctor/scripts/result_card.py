@@ -79,10 +79,13 @@ def facts(A):
     f = {"schema": SCHEMA, "artifact_dir": os.path.basename(A.rstrip("/"))}
     # a free-form ledger note "RUN_SCRIPT=x/run.sh; NAN_SIGNAL=..." must not leave the ';' (2026-11-26)
     f["run_script"] = last(r"\bRUN_SCRIPT=([^\s;,]+)", led)
-    f["nan_signal"] = last(r"\bNAN_SIGNAL='([^']*)'", led) or last(r"\bNAN_SIGNAL=([^\s;,]+)", led)
+    # an unquoted signal is a phrase too ("NAN_SIGNAL=Loss is not finite; PRIORS=none" drafted "Loss",
+    # 2026-11-28): it runs to the next ';', ' (' or KEY=
+    f["nan_signal"] = last(r"\bNAN_SIGNAL='([^']*)'", led) or last(
+        r"\bNAN_SIGNAL=(?!')(.+?)(?=\s*;|\s+\(|\s+[A-Z][A-Z0-9_]{2,}=|\s*$)", led)
     pr = last(r"\bPRIORS=(use|none)\b", led)
     f["priors"] = pr or ("none" if any("prior: skipped" in l for l in led) else "use")
-    # the skill version that RAN (step 0 prints SKILL_COMMIT=, step 1 ledgers it); the card's own
+    # the skill version that RAN (ledger.py records SKILL_COMMIT= at `start step1`); the card's own
     # commit is only when it was drafted -- a re-drafted old run would claim today's skill
     f["skill_commit"] = last(r"\bSKILL_COMMIT=(\w+)", led)
     try:
