@@ -45,3 +45,6 @@ multiple of the 8 XCDs), so `root_cause.location.source` names `origami.cpp` and
 the targeted `TENSILE_FIXED_WGMXCCCHUNK=0`. The earlier card's `TENSILE_FIXED_WGMXCC=1` (the remap off) and the other
 stream-K knobs are accepted alternatives: older runs compare `REFINED`. A run that names Tensile's kernel generator
 (`StreamK.py`) as the source compares DIFFERENT on `root_cause` -- the generator emits a correct remap for the chunk it is given.
+`TENSILE_FIXED_WGMXCCCHUNK=8` became an accepted alternative 2026-11-28: a blind `PRIORS=none` run from MAD swept the chunk,
+found every multiple of the 8 XCDs clean (0, 8, 16, 24) and 2/4/12/28 bad, and validated 8 (reproducer 300/300 -> 0/300,
+model 10 spike steps -> 0).

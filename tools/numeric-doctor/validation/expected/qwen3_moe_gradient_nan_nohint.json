@@ -54,6 +54,7 @@
   ],
   "extra": [],
   "alternatives": [
+   "TENSILE_FIXED_WGMXCCCHUNK=8",
    "TENSILE_FIXED_WGMXCC=1",
    "TENSILE_STREAMK_DYNAMIC_GRID=0",
    "TENSILE_STREAMK_MAX_CUS=128"
