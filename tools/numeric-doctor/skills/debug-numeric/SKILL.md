@@ -114,7 +114,8 @@ repository; the rule they back stands on its own.
 
    ```bash
    ARTIFACT_DIR=<REPO_ROOT>/artifacts/<RUN_TAG>   # fresh per investigation, e.g. 2026-10-05-llama-pretrain
-   mkdir -p "$ARTIFACT_DIR"/capsules "$ARTIFACT_DIR"/asm && chmod -R 777 "$ARTIFACT_DIR"
+   mkdir -p "$ARTIFACT_DIR"/capsules "$ARTIFACT_DIR"/asm &&
+     chmod 777 "$ARTIFACT_DIR" "$ARTIFACT_DIR"/capsules "$ARTIFACT_DIR"/asm   # not -R: a rerun hits root-owned job files
    ```
 
 4. **The ledger** (`<LEDGER>` = `<ARTIFACT_DIR>/ledger.md`, append-only) survives

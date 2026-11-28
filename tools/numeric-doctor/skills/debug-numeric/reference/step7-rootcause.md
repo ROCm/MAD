@@ -182,7 +182,7 @@ derived operands from the real producer, and a reference.
 
 **Deterministic GEMM** (`mm`/`addmm`/`bmm`/`_grouped_mm` wrong or NaN on every run) --
 `scripts/gemm_shape_probe.py`, one cheap 1-GPU job per step, in this order
-(2026-11-09 qwen3 MoE: root cause in 4 iterations, 18 min):
+(2026-11-09, a grouped GEMM: root cause in 4 iterations, 18 min):
 
 1. `capsule <capsule>`: the culprit call on its recorded operands -- which expert
    groups are wrong (grouped GEMM: per-group row counts from `offs`), repeatable?,
@@ -194,10 +194,9 @@ derived operands from the real producer, and a reference.
    in **bands** = kernel selection or tiling; it prints each band's tile count for
    the kernel's `MT<m>x<n>` (from `kernel.*.txt`: m tiles the output columns, n the
    rows); pass it as `--tile` (required). Look for what the
-   bad counts share, against this device's `DEVICE ... CUs=` line (2026-11-09, MI355X:
-   224/232/240/248 tiles -- multiples of the 8 XCDs, below the 256 CUs, kernel
-   `..._SK5_...` = stream-K). MI300X has 304 CUs, also 8 XCDs: the bands, if any,
-   fall elsewhere.
+   bad counts share, against this device's `DEVICE ... CUs=` line (multiples of the XCD
+   count just below the CU count point at a stream-K kernel, `_SK` in its name; MI300X
+   has 304 CUs and MI355X 256, both 8 XCDs, so bands fall elsewhere per device).
 3. The hipBLASLt problem and solution of the plain mm: `replay_nan_op.py <capsule>
    --bench` (a grouped capsule prints one plain-mm line per group size) or
    `HIPBLASLT_LOG_MASK=32 HIPBLASLT_LOG_FILE=...` on one call.
@@ -224,6 +223,16 @@ derived operands from the real producer, and a reference.
 rocBLAS is not an independent second implementation for bf16/fp16 here:
 `torch.backends.cuda.preferred_blas_library("cublas")` failed identically (the same
 Tensile kernels). Use an fp64/fp32 reference, not another library.
+
+**Low-precision operand (fp8 / fp4), value-dependent** -- list which operand codes make the output
+non-finite: one job sweeping every code of the format (256 for fp8) into one element of an otherwise
+clean operand. Then read the failing set against the formats' tables before blaming a kernel: a set
+that is exactly **another format's Inf/NaN encodings** (e4m3fn codes that are e5m2's specials, or the
+reverse) means the operand was decoded in the other format -- a type or operand-order swap between the
+caller and the kernel. The fault is then where the operand types are set (the framework's dispatch, a
+tuning wrapper's argument order), and the causal test is that code with the types put back; every
+kernel the dispatch can pick fails the same way, so pinning solutions only moves the blame
+(2026-11-28: a run saw such a set, noted it, and blamed the library's kernel).
 
 **Read of uninitialized memory** -- 5N's poison test hit (the rate follows the fill value) or
 a capsule's kept `uninit` operand is read by the op. Name the buffer, then who should write it.

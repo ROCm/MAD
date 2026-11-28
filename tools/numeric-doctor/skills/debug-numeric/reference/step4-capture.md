@@ -51,7 +51,9 @@ the control arm. What the defaults encode, and the knobs (env vars) that change 
 1. `NAN_CAPTURE_DIR` = `<CAPSULE_DIR>/<trial>`: **empty**, **writable in the container**
    (`chmod 777`), under `<REPO_ROOT>`; group with `--recursive`. Workers or ranks
    write `rank<N>_<uuid>.pt` side by side.
-   **Synthetic data is the default: leave `NAN_CAPTURE_DATA` unset.** The capsule
+   **Synthetic data is the default for the user's own data: leave `NAN_CAPTURE_DATA` unset** --
+   unless step 1 chose real values (public or random-token test data, the last item below; a run read
+   this line alone and doubted step 1's choice, 2026-11-28). The capsule
    records each floating-point tensor's shape plus statistics (finite
    min/max/mean/std, zero/NaN/Inf counts; no values, no digests; `data: shapes` in
    `capsule_info.py`). **Integer tensors keep their real values** (`cu_seqlens`,

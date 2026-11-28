@@ -102,6 +102,8 @@ stop. In order:
    either way get it now (`env-runtime.md` *Images*; a ~35 min pull or a build is the user's call), before
    any job -- **don't wait for an answer**: tell the user in one line it is being pulled
    or built and how long it takes, then start it (ask-me mode: ask first);
+   `IMAGE ... no build needed` = the profile takes that Dockerfile's base (below, *the image*) -- don't run
+   the script's own build or pull step (2026-11-28: a run started one and had to kill it);
    docker/podman `nothing to do now` = nd pulls or loads it per node; `SIGNAL ... ? not in the source as a regex` = the source prints it from data (a `RESULT
    ... nan_step=` line): accept it, the step-4 wave confirms it (no model log exists yet when
    step 2 is skipped); `SIGNAL 'RESULT .*wrong=yes' ... verdict field` = the script reads a
@@ -256,13 +258,15 @@ The capture preflight's `VLLM` lines, read before step 2:
 * **Tensor parallel > 1 on one node** puts the model in one worker process per rank: the capture
   goes INTO the workers. Capture lines get `PYTHONPATH=$ND_REPO/scripts/vllm_capture` in their env
   field and run the **original** script (no wired copy, nothing to restore in step 9); the GPU field
-  is the run's GPU list -- one trial over those GPUs (`wave.sh`):
+  is the run's GPU list -- one trial over those GPUs (`wave.sh`). With graphs on (vLLM's default) the
+  capture lines also run graphs off through `scripts/vllm_graphs`, first on `PYTHONPATH`, and one `g`
+  line checks the graph replays (`step4-run.md` *vLLM with graphs*):
 
   ```
-  0,1|cap|PYTHONPATH=$ND_REPO/scripts/vllm_capture|<the run command, --tp 2>
-  2,3|cap|PYTHONPATH=$ND_REPO/scripts/vllm_capture|<the same>
+  0,1|cap|PYTHONPATH=$ND_REPO/scripts/vllm_graphs:$ND_REPO/scripts/vllm_capture ND_VLLM_CUDAGRAPH_MODE=NONE|<the run command, --tp 2>
+  2,3|cap|<the same env>|<the same>
   4,5|ctl||<the same>
-  6,7|ctl||<the same>
+  6,7|g|PYTHONPATH=$ND_REPO/scripts/vllm_graphs ND_GRAPH_CHECK=1 ND_GRAPH_CHECK_DIR=$ND_ART/capsules_graph|<the same>
   ```
 
   (2 capture + 2 control: the folded rate's minimum; no C0/C1 lines -- `step4-run.md` *Compiled NaN
