@@ -12,8 +12,11 @@ Checks per block:
   * no key outside the runner's CSV_HEADER plus the keys it pops -- an error
     for a strict writer, a count of silently-dropped keys for a lenient one;
   * the keys the runner reads unconditionally are present;
-  * env / extra_args / agentic_env have the type the runner expects;
-  * the manifest's config path matches the file actually emitted.
+  * env / extra_args / agentic_env have the type the runner expects, with
+    scalar values and well-formed keys;
+  * the manifest's config path matches the file actually emitted;
+  * a warning, not a failure, when the manifest's base image is not the one
+    the recipe was written for.
 
 Reads CSV_HEADER straight out of each run_<engine>.py, so it cannot drift from
 the runner it is checking.
@@ -23,9 +26,12 @@ import ast
 import glob
 import json
 import os
+import re
 import sys
 
 import yaml
+
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 
 if len(sys.argv) not in (2, 3):
     sys.exit(f"usage: {sys.argv[0]} [MAD_CHECKOUT] OUT_DIR\n"
@@ -64,6 +70,30 @@ AGENTIC_REQUIRED = {
 }
 
 
+def check_mapping(section, mapping):
+    """Problems in an env / extra_args / agentic_env mapping's keys and values.
+
+    The runners turn these into `K=V` and `--flag value` text for a shell. A
+    nested env value renders as a Python repr, and a malformed key is
+    mis-parsed only after the checkpoint has loaded. extra_args may hold lists
+    and mappings (ATOM's --extra-kv-connectors): the runner serializes them.
+    """
+    problems = []
+    for key, value in mapping.items():
+        if not isinstance(key, str):
+            problems.append(f"{section} key {key!r} is not a string")
+            continue
+        if (section != "extra_args" and value is not None
+                and not isinstance(value, (str, int, float, bool))):
+            problems.append(
+                f"{section}[{key!r}] is a {type(value).__name__}, not a scalar")
+        if section == "extra_args" and not key.startswith("-"):
+            problems.append(f"extra_args key {key!r} does not start with '-'")
+        elif section != "extra_args" and not ENV_NAME.match(key):
+            problems.append(f"{section} key {key!r} is not a valid variable name")
+    return problems
+
+
 def lenient_writer(engine):
     """True when the runner's DictWriter ignores keys outside its fieldnames."""
     src = open(os.path.join(MAD, "scripts", engine, f"run_{engine}.py")).read()
@@ -85,7 +115,7 @@ def main():
     # run_sglang.py adds a `variant` column itself whenever a block carries one.
     headers["sglang"] = headers["sglang"] | {"variant"}
     dropped = {}
-    problems, blocks, files = [], 0, 0
+    problems, warnings, blocks, files = [], [], 0, 0
 
     # --all writes one directory per scenario, --scenario writes flat into
     # out_dir. Globbing only the nested layout made a single-scenario run report
@@ -119,6 +149,16 @@ def main():
         if engine not in headers:
             problems.append(f"{man_path}: unknown runner {engine!r}")
             continue
+
+        # The engine args were written for the recipe's image; a newer or
+        # different one can reject them (SGLang v0.5.23 split --cuda-graph-max-bs
+        # that v0.5.16 accepts), and the point then fails after the model loads.
+        built = man.get("built_images", {}).get(key, {}).get("base_docker")
+        wanted = man.get("_infx_provenance", {}).get("scenario_image")
+        if built and wanted and built != wanted:
+            warnings.append(
+                f"{man_path}: base image {built} is not the recipe's {wanted}; the "
+                "engine args may not match it")
 
         cfg_arg = model["args"].split("--config ")[1].split()[0]
         cfg_name = cfg_arg.split("/")[-1]
@@ -167,6 +207,8 @@ def main():
             for k in ("env", "extra_args", "agentic_env"):
                 if k in b and not isinstance(b[k], dict):
                     problems.append(f"{where}: {k} must be a mapping, got {type(b[k]).__name__}")
+                elif k in b:
+                    problems.extend(f"{where}: {p}" for p in check_mapping(k, b[k]))
             if b.get("benchmark") == "agentic":
                 if "agentic_env" not in b:
                     problems.append(f"{where}: agentic block carries no agentic_env")
@@ -188,6 +230,8 @@ def main():
     for engine, keys in sorted(dropped.items()):
         print(f"  note: run_{engine}.py drops these keys from the CSV row (lenient "
               f"writer): {sorted(keys)}")
+    for w in warnings:
+        print("  WARN", w)
     for p in problems:
         print("  FAIL", p)
     print("OK" if not problems else f"{len(problems)} problem(s)")

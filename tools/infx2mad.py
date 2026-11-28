@@ -2202,7 +2202,9 @@ def _translate_one(args, scenario_key, out_dir):
     if workload_name == "auto":
         present = [w for w in WORKLOAD_EMITTERS if w in scenario["scenarios"]]
         if len(present) != 1:
-            raise Untranslatable(f"expected one known workload, found {present}")
+            raise Untranslatable(
+                f"expected exactly one of the workloads {sorted(WORKLOAD_EMITTERS)}, "
+                f"scenario defines {sorted(scenario['scenarios'])}")
         workload_name = present[0]
     if workload_name not in scenario["scenarios"]:
         raise Untranslatable(f"no {workload_name} workload")

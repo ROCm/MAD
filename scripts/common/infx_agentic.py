@@ -239,6 +239,39 @@ def run_agentic(model, config, backend, server_cmd, host, port, start_timeout,
         return [{"performance": "", "metric": "", "unit": "", **row}]
 
 
+def _check_measurement(results, doc, agg, hook_env):
+    """Raise unless the aggregate is a measurement a CSV row may carry."""
+    # Accounting rows alone are not a measurement: an aggregate with no
+    # profiled request or no total throughput must fail the point rather
+    # than land in the CSV as a successful row. submission_valid=false is
+    # not checked here -- a short smoke window is a valid, labelled run.
+    got = {r["metric"]: float(r["performance"]) for r in results}
+    # INFX_MIN_AGENTIC_REQUESTS raises the bar above one request: a few long
+    # traces at low concurrency can profile only a handful, which passes the
+    # error-rate check but is too thin a sample to report. Off by default.
+    min_req = max(1, int(hook_env.get("INFX_MIN_AGENTIC_REQUESTS", "1")))
+    if got.get("requests_profiled", 0) < min_req or got.get("throughput_tot", 0) <= 0:
+        raise Exception(
+            f"agentic replay produced no measurement in {agg}: "
+            f"requests_profiled={got.get('requests_profiled')} "
+            f"(need {min_req}), throughput_tot={got.get('throughput_tot')}")
+    # The shared hook only warns when validate_agentic_result.sh flags the
+    # error rate; mostly-failed requests must not export as a normal row.
+    # Same definition and threshold as that validator: dropped errors over
+    # profiled + dropped, AGENTIC_MAX_ERROR_RATE (default 0.10).
+    acct = doc.get("request_accounting") or {}
+    errs = float(acct.get("records_error_dropped") or 0)
+    ok = float(acct.get("records_profiled") or 0)
+    # From the env the hook ran with, so a per-point AGENTIC_MAX_ERROR_RATE
+    # applies here exactly as it did to the hook's own validator.
+    max_err = float(hook_env.get("AGENTIC_MAX_ERROR_RATE", "0.10"))
+    if errs and errs / (ok + errs) > max_err:
+        raise Exception(
+            f"agentic replay error rate {errs / (ok + errs):.1%} "
+            f"({int(errs)} of {int(ok + errs)} measured requests) exceeds "
+            f"{max_err:.0%} in {agg}")
+
+
 def _run_agentic(model, config, backend, server_cmd, host, port, start_timeout,
                  window_from_checkpoint=False, server_metrics=True):
     """Start `server_cmd`, replay the agentic corpus against it, return CSV rows.
@@ -434,31 +467,7 @@ def _run_agentic(model, config, backend, server_cmd, host, port, start_timeout,
             raise Exception(
                 f"No known agentic metrics in {agg}; top-level keys: {sorted(doc)}"
             )
-        # Accounting rows alone are not a measurement: an aggregate with no
-        # profiled request or no total throughput must fail the point rather
-        # than land in the CSV as a successful row. submission_valid=false is
-        # not checked here -- a short smoke window is a valid, labelled run.
-        got = {r["metric"]: float(r["performance"]) for r in results}
-        if got.get("requests_profiled", 0) <= 0 or got.get("throughput_tot", 0) <= 0:
-            raise Exception(
-                f"agentic replay produced no measurement in {agg}: "
-                f"requests_profiled={got.get('requests_profiled')}, "
-                f"throughput_tot={got.get('throughput_tot')}")
-        # The shared hook only warns when validate_agentic_result.sh flags the
-        # error rate; mostly-failed requests must not export as a normal row.
-        # Same definition and threshold as that validator: dropped errors over
-        # profiled + dropped, AGENTIC_MAX_ERROR_RATE (default 0.10).
-        acct = doc.get("request_accounting") or {}
-        errs = float(acct.get("records_error_dropped") or 0)
-        ok = float(acct.get("records_profiled") or 0)
-        # From the env the hook ran with, so a per-point AGENTIC_MAX_ERROR_RATE
-        # applies here exactly as it did to the hook's own validator.
-        max_err = float(hook_env.get("AGENTIC_MAX_ERROR_RATE", "0.10"))
-        if errs and errs / (ok + errs) > max_err:
-            raise Exception(
-                f"agentic replay error rate {errs / (ok + errs):.1%} "
-                f"({int(errs)} of {int(ok + errs)} measured requests) exceeds "
-                f"{max_err:.0%} in {agg}")
+        _check_measurement(results, doc, agg, hook_env)
     finally:
         _stop_server_group(server)
 
