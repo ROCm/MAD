@@ -262,6 +262,12 @@ def _check_measurement(results, doc, agg, hook_env):
     acct = doc.get("request_accounting") or {}
     errs = float(acct.get("records_error_dropped") or 0)
     ok = float(acct.get("records_profiled") or 0)
+    # records_error_dropped also counts errored warmup requests, which are not
+    # part of the measurement (see validate_agentic_result.sh): bound it by the
+    # requests dropped outside warmup.
+    if "records_dropped_total" in acct and "records_warmup_dropped" in acct:
+        errs = min(errs, max(0.0, float(acct["records_dropped_total"])
+                             - float(acct["records_warmup_dropped"])))
     # From the env the hook ran with, so a per-point AGENTIC_MAX_ERROR_RATE
     # applies here exactly as it did to the hook's own validator.
     max_err = float(hook_env.get("AGENTIC_MAX_ERROR_RATE", "0.10"))

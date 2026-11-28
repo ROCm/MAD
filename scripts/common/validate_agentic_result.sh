@@ -39,6 +39,12 @@ acct = d.get("request_accounting", {})
 if acct:
     ok = acct.get("records_profiled", 0)
     errs = acct.get("records_error_dropped", 0)
+    # records_error_dropped also counts errored warmup requests (a warmup
+    # request asks for one token, which a reasoning model may spend on thinking,
+    # so the server returns no content). Only requests dropped outside warmup
+    # can be measured-phase errors.
+    if "records_dropped_total" in acct and "records_warmup_dropped" in acct:
+        errs = min(errs, max(0, acct["records_dropped_total"] - acct["records_warmup_dropped"]))
     total = ok + errs
 else:
     total = d.get("num_requests_total") or 0

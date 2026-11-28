@@ -16,13 +16,24 @@ except ModuleNotFoundError as exc:  # psutil: only the infx2mad CI job installs 
     raise unittest.SkipTest(f"infx_agentic needs {exc.name}")
 
 
-def make_doc(profiled=100, errors=0, tok_s=500.0):
+def make_doc(profiled=100, errors=0, tok_s=500.0, warmup=None, warmup_errors=0):
+    """`warmup` (requests dropped as warmup) switches on the phase accounting.
+
+    Errors are profiling-phase unless `warmup_errors` says they happened in
+    warmup; the aggregate counts both in records_error_dropped.
+    """
+    accounting = {
+        "records_profiled": profiled,
+        "records_total": profiled + errors,
+        "records_error_dropped": errors + warmup_errors,
+    }
+    if warmup is not None:
+        accounting.update(
+            records_warmup_dropped=warmup,
+            records_dropped_total=warmup + errors,
+        )
     return {
-        "request_accounting": {
-            "records_profiled": profiled,
-            "records_total": profiled + errors,
-            "records_error_dropped": errors,
-        },
+        "request_accounting": accounting,
         "request_metrics": {
             "throughput": {
                 "total": {"tokens_per_second": tok_s},
@@ -61,6 +72,14 @@ class AgenticGateTest(unittest.TestCase):
     def test_high_error_rate_fails(self) -> None:
         with self.assertRaisesRegex(Exception, "error rate"):
             check(make_doc(profiled=10, errors=90))
+
+    def test_warmup_errors_are_not_measurement_errors(self) -> None:
+        # The GLM-5.3-Flash run: 146 errored warmup requests, 4 clean profiled.
+        check(make_doc(profiled=4, warmup=201, warmup_errors=146))
+
+    def test_profiling_errors_still_fail_next_to_warmup_errors(self) -> None:
+        with self.assertRaisesRegex(Exception, "error rate"):
+            check(make_doc(profiled=10, errors=90, warmup=201, warmup_errors=146))
 
     def test_error_rate_limit_is_per_point(self) -> None:
         doc = make_doc(profiled=80, errors=20)
