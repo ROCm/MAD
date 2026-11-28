@@ -11,6 +11,8 @@ on:
       - ".claude/**"
       - ".agents/**"
       - "tools/validation/**"
+      - "tools/numeric-doctor/**"
+      - "tools/tests/test_numeric_doctor.py"
       - "requirements.txt"
       - ".github/workflows/mad-validate.yml"
   push:
@@ -44,6 +46,11 @@ jobs:
 
       - name: Lint skills, subagents and Codex links
         run: python3 tools/validation/skill_validator.py
+
+      - name: Numeric Doctor (layout, public content, skill links, GPU-free unit tests)
+        run: |
+          python3 -m unittest tools/tests/test_numeric_doctor.py
+          python3 tools/numeric-doctor/tests/diff/test_unit.py
 
       - name: Render every Dockerfile template
         run: |

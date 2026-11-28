@@ -42,6 +42,17 @@ delegate to them. Codex gets generated copies in `.codex/agents/` (see
 `.claude/skills/mad-common/mad-run.sh`, which detaches each run and holds a
 host-wide GPU lock.
 
+### Numeric Doctor: debug-numeric and validate-examples
+Numeric Doctor debugs NaN, Inf and wrong values in PyTorch models: it captures
+the op that first produced the bad value, packages a reproducer, then
+root-causes and fixes it. It is a self-contained tool in `tools/numeric-doctor/`
+(no madengine, no `models.json` entry); `.claude/skills/debug-numeric` and
+`.claude/skills/validate-examples` are symlinks into it.
+
+**Usage:** `debug <script> with numeric doctor`, `validate numeric doctor`, or
+`/debug-numeric <script>` (Codex: `$debug-numeric`). See
+[`tools/numeric-doctor/README.md`](../tools/numeric-doctor/README.md).
+
 ### Claude Code-only workflows
 The `mad-benchmark-sweep`, `mad-tune-search`, and `mad-optimize` workflows in
 `.claude/workflows/` need Claude Code's workflow runtime. They plan by default
@@ -81,6 +92,7 @@ and run only with `--execute`; `CLAUDE.md` describes the first two,
 │   │   ├── scripts/render_dockerfile.py  # Template renderer
 │   │   └── framework_templates/        # Jinja2 templates
 │   ├── mad-benchmark/, mad-profile/, mad-tune/, mad-report/, primus-projection/
+│   ├── debug-numeric, validate-examples  # Symlinks to tools/numeric-doctor/skills/*
 │   └── mad-common/                     # preflight.sh, mad-run.sh, geak-run.sh, kernel-tools.py, kernel-analysis.md (shared helpers)
 └── prompts/
     └── model_addition_guide.md         # Detailed guide
@@ -114,11 +126,15 @@ All three also pick a skill automatically when the request matches its
 `description`, except the explicit-only skills: those set
 `disable-model-invocation: true` (read by Claude Code and Cursor) and ship
 `agents/openai.yaml` with `policy.allow_implicit_invocation: false` (read by
-Codex). Every skill that builds, runs or writes files is explicit only.
+Codex). Every skill that builds, runs or writes files is explicit only, except
+the Numeric Doctor skills: they stay automatic so plain requests reach them, and
+ask for the script and compute budget before the first job.
 
 `.claude/skills/` holds the real files; `.agents/skills/*` are symlinks back
 to them, so there's a single source of truth: edit the files under
-`.claude/skills/` and every tool picks up the change. Don't add
+`.claude/skills/` and every tool picks up the change. The Numeric Doctor skills
+are the one exception: their real files are in `tools/numeric-doctor/skills/`,
+and `.claude/skills/` links to them. Don't add
 `.cursor/skills/` — Cursor already reads `.claude/skills/`.
 
 When writing or editing a skill, keep it tool-neutral:

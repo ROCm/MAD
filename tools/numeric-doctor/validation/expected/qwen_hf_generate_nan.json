@@ -1,0 +1,68 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:qwen_hf_generate_nan",
+ "example": "examples/inference/qwen_hf_generate_nan",
+ "run_script": "examples/inference/qwen_hf_generate_nan/run.sh",
+ "nan_signal": "nan_request=[0-9]",
+ "priors": "-",
+ "skill_commit": "15442b0",
+ "evidence": [
+  "artifacts/2026-11-20-qwen_tf32_hf_generate_nan-va (skill 6e7132b, PRIORS=use)",
+  "artifacts/2026-11-20-qwen_tf32_hf_generate_nan-np (skill 4cedea9, PRIORS=none)"
+ ],
+ "bug": {
+  "verdict": "KERNEL_BUG",
+  "verdict_confirmed": true,
+  "op": "aten.linear.default",
+  "geometry": "M896_N1280_K896_TN_lda896_ldb896_ldd896",
+  "kernel": {
+   "library": "hipblaslt",
+   "solution_index": "483266",
+   "name": "Cijk_Alik_Bljk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT64x128x128_MI16x16x1_SN_LDSB1_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTLA0_DTLB0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA4_GRVWB4_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LDSTI0_LBSPPA2048_LBSPPB1024_LBSPPM0_LPA8_LPB8_LPM0_LRVW4_LWPMn1_MIAV0_MIWT4_2_MO40_NTn1_NTA0_NTB0_NTC4_NTD4_NTM0_NEPBS16_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW4_SK3_SKFTR0_SKXCCM0_TLDS1_ULSGRO0_USL1_UIOFGRO0_USFGRO0_VSn1_VWA4_VWB2_WSGRA0_WSGRB0_WS64_WG16_16_1",
+   "arch": "gfx950",
+   "injected": "no (stock)"
+  },
+  "reproduced_by": "op_capsule"
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "hipblaslt",
+  "mechanism": "relaxed s_waitcnt lgkmcnt(N>0) before the F32X bf16 hi/lo split reads LDS-loaded VGPRs still in flight under load",
+  "location": {
+   "kernel": "hipblaslt solution 483266",
+   "sites": [
+    "0x2A8D9D0",
+    "0x2A8F008",
+    "0x2A90574"
+   ],
+   "env": [],
+   "source": [],
+   "config": []
+  },
+  "conditions": [
+   "tf32",
+   "gemm co-tenant load"
+  ]
+ },
+ "fix": {
+  "status": "FIX",
+  "kind": "binary_patch",
+  "changes": [
+   "lgkmcnt0@0x2A8D9D0",
+   "lgkmcnt0@0x2A8F008",
+   "lgkmcnt0@0x2A90574"
+  ],
+  "extra": [],
+  "alternatives": [],
+  "validated": {
+   "reproducer": "227/1M -> 0/1M (round 1)",
+   "model": "4/12 -> 0/12 (round 1)"
+  }
+ },
+ "context": {
+  "nan_kind": "non-deterministic",
+  "nan_origin": "system"
+ },
+ "notes": "Reference = the minimal set: 3 lgkmcnt(2) waits (round 1; on the same kernel 483266 lgkmcnt0_subset@set CLEAN 0/400k, @rest NAN). A run that patches all 14 relaxed waits compares REFINED (2026-11-20-np): correct, less minimal."
+}

@@ -1,0 +1,5 @@
+out/
+sif/
+scratch/
+__pycache__/
+*.out

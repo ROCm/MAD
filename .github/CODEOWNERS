@@ -1,2 +1,5 @@
 # Default code owners
 * @gargrahul @amathews-amd @coketaste @leconcio @lcskrishna @itej89 @Cemberk
+
+# Numeric Doctor
+/tools/numeric-doctor/ @coketaste

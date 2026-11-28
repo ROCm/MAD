@@ -1,0 +1,6 @@
+out/
+sif/
+scratch/
+probe/
+__pycache__/
+*.out

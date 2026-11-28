@@ -148,7 +148,7 @@ class SkillValidator:
                                    "(on Windows, clone with core.symlinks=true)")
                 continue
             target = os.path.realpath(path)
-            if target != os.path.join(skills_dir, entry):
+            if target != os.path.realpath(os.path.join(skills_dir, entry)):
                 self.errors.append(f"{rel}: points to {os.readlink(path)}, expected ../../.claude/skills/{entry}")
             elif not os.path.isfile(os.path.join(target, 'SKILL.md')):
                 self.errors.append(f"{rel}: target has no SKILL.md")

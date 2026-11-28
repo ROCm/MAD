@@ -1,0 +1,78 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:qwen_vllm_tp2_nan",
+ "example": "examples/inference/qwen_vllm_tp2_nan",
+ "run_script": "examples/inference/qwen_vllm_tp2_nan/run.sh",
+ "nan_signal": "Logprobs are not finite",
+ "priors": "-",
+ "skill_commit": "b26835b",
+ "evidence": [
+  "artifacts/2026-11-21-vllm_tp2_logprobs-blind4 (the example's blind mode, staged without hints; skill b26835b, PRIORS=none) -- this card",
+  "artifacts/2026-11-21-vllm_tp2_logprobs-blind3 (same, skill 111802b, PRIORS=none: same verdict, reproducer and workaround)",
+  "artifacts/2026-11-21-rc-only-blind4 (step 7 alone on blind4's reproducer, skill ed44b7f: the defence -- set_fp16_ovfl gfx942-only)"
+ ],
+ "bug": {
+  "verdict": "COLLECTIVE_FAULT",
+  "op": "vllm.all_reduce.default",
+  "geometry": null,
+  "kernel": {
+   "library": "framework",
+   "solution_index": null,
+   "name": "vllm.all_reduce.default",
+   "arch": null,
+   "injected": null
+  },
+  "reproduced_by": "collective_capsules",
+  "verdict_confirmed": true
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "framework",
+  "mechanism": "vLLM ROCm QuickReduce casts bf16 all-reduce inputs to fp16 (__float22half2_rn, non-saturating) by default; a finite 1.833e5 activation becomes +Inf inside the collective",
+  "defence": "set_fp16_ovfl() (MODE.FP16_OVFL: saturate fp16 overflow to +-65504, set in the codec constructor before the cast) covers exactly this condition but is compiled only #if defined(__gfx942__): absent on gfx950 (gpu_objects.py ARCH_DIFF s_setreg 39/39 gfx942 vs 0/39 gfx950); the codecs' kRangeMin/kRangeMax clamp runs after the cast; even saturated, the value would be wrong (65504)",
+  "location": {
+   "kernel": "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>",
+   "sites": [],
+   "env": [
+    "VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16=True",
+    "VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=INT8"
+   ],
+   "source": [
+    "csrc/rocm/quickreduce/quick_reduce_impl.cuh:AllReduceTwoshot.run",
+    "vllm/distributed/device_communicators/quick_all_reduce.py:QuickAllReduce.quick_all_reduce",
+    "csrc/rocm/quickreduce/base.h:set_fp16_ovfl"
+   ],
+   "config": []
+  },
+  "conditions": [
+   "VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=INT8 (any QR codec) enables QuickReduce",
+   "default VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16=True: bf16 payload cast to fp16",
+   "all-reduce >= 2 MiB (TP2 fp16 INT8 minimum): 1024-token prefills",
+   "a finite activation outlier above fp16 max (1.833e5 on rank 0)"
+  ]
+ },
+ "fix": {
+  "status": "WORKAROUND",
+  "kind": "library_env",
+  "changes": [
+   "VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16=0",
+   "VLLM_ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB=1"
+  ],
+  "extra": [],
+  "alternatives": [
+   "VLLM_ROCM_QUICK_REDUCE_CAST_BF16_TO_FP16=0",
+   "VLLM_ROCM_QUICK_REDUCE_MIN_SIZE_BYTES_MB=2",
+   "VLLM_ROCM_QUICK_REDUCE_QUANTIZATION=NONE"
+  ],
+  "validated": {
+   "reproducer": "stock 1000/1000 -> fixed 0/1000",
+   "model": "stock 2/2 -> fixed 0/3"
+  }
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "system"
+ },
+ "notes": "TP2 vLLM: captured inside the TP workers (scripts/vllm_capture) at vllm.all_reduce on both ranks -- a COLLECTIVE group replayed with torchrun through vLLM (2000/2000), no step 5N. root_cause.defence is from the step-7 re-run (blind4's own card stopped at the codec clamp; defence is not judged by compare_results). The fix is a WORKAROUND: CAST_BF16_TO_FP16=0 + MIN_SIZE_BYTES_MB=1 keeps QuickReduce on its bf16 kernels; alternatives accepted (REFINED): cast off alone (moves 3 MiB calls to custom_ar), a MIN_SIZE pin of 2, QUANTIZATION=NONE. The upstream fix is vLLM's (keep bf16 end to end; PR #55346's clamp only mitigates)."
+}

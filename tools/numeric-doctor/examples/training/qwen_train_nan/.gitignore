@@ -1,0 +1,5 @@
+models/
+out/
+sif/
+__pycache__/
+*.out

@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# nd -- the one entry point to numeric-doctor's execution environment.
+#
+# Two independent layers, both chosen by the profile in ND_ENV (scripts/env/profiles/*.env, or
+# an investigation's <ARTIFACT_DIR>/env.sh written by `nd profile`):
+#   RUNTIME  docker | podman | apptainer | native   how a command runs in the model's image
+#   SCHED    slurm | local                          how a job gets GPUs and is tracked
+#
+#   nd run    [--gpus all|<id>|<id,id>] [--env K=V]... [--workdir DIR] [--name NAME] [--log FILE] -- <command>
+#             Run one command (bash -c) in the model's environment on THIS node.  Inside, ND_REPO and
+#             ND_ART are the repo and the artifact dir as that runtime sees them -- write commands with
+#             them (single-quoted), never with host paths.  Default --gpus 0.  Exit code = the command's.
+#   nd submit --name NAME [--gpus N (a count, per node)] [--nodes N] [--time HH:MM:SS] [--exclusive] [--step TAG]
+#             [--node HOST | --prefer-node HOST] [--exclude HOST[,HOST]] -- <job script> [args]
+#             Put a job script on GPUs (--node: on that node, e.g. where the bug reproduced;
+#             --prefer-node: there only if it is idle now, else anywhere;
+#             --exclude: never there, e.g. a node whose launch failed; neither --node nor
+#             --prefer-node, one node, docker/podman: an idle node that already holds IMAGE is pinned
+#             (<ART>/jobs/image_nodes; ND_IMAGE_NODES=0 off); --gpus per node; --nodes > 1 needs SCHED=slurm: a wave's
+#             `all` spec lines then span the nodes, wave.sh).  Log: <ART>/jobs/NAME_<time>.out
+#             (created first); the job sees
+#             ND_REPO_HOST, ND_ENV, ND_ART_HOST and calls `$ND_REPO_HOST/scripts/nd run`.  Prints
+#             ND_JOB=<sched>:<id> LOG=<file>; --step TAG also writes `ledger.py job TAG <id>`.
+#   nd adopt  NAME ID [--log FILE] [--step TAG]
+#                          record a job submitted outside nd (a package's `sbatch run.sh` / `sbatch
+#                          validate.sh`) as NAME, so nd status / wait / stop take it; the log
+#                          defaults to the scheduler's (Slurm StdOut).  ID: 144369 or slurm:144369
+#   nd status NAME|ID      state, start time, log path, the log's last line.  ID: <sched>:<id>, or the
+#                          bare id a ledger `job` line records (a record with it, else the scheduler's log)
+#   nd wait   NAME|ID [--max SEC]
+#                          block until the job ends, then its last lines; --max: give up after SEC
+#                          seconds (exit 3, STATE= still running) -- the agent's cache-warm wait.
+#                          A held job (STATE=HELD: a hold, or `launch failed requeued held` on a job
+#                          submitted outside nd) ends the wait: exit 4.  nd submit passes --no-requeue:
+#                          a preempted job or failed launch ends FAILED, it never reruns by itself.
+#                          Still running with a log silent for ND_IDLE_WARN seconds (600): LOG_IDLE=
+#                          (a wave's trial logs, named with the job id, count as its output).
+#                          SINGLE_SESSION=1 refuses an unbounded wait (and --max over 300)
+#   nd stop   NAME|ID      cancel it (Slurm) / TERM then KILL its process groups (local)
+#   nd path   <host path>  the path as the runtime sees it
+#   nd prepare             make the image usable on this node (pull / load / build the SIF)
+#   nd profile <name|file> --art <ARTIFACT_DIR> [K=V ...]
+#             write <ARTIFACT_DIR>/env.sh = that profile + overrides (IMAGE=, RUNTIME=, ...);
+#             use it as ND_ENV for every later command of the investigation
+#   nd info                the resolved layers, image and paths
+set -uo pipefail
+ND_SELF=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck disable=SC1091
+source "$ND_SELF/env/lib.sh"
+
+usage() { awk 'NR > 1 && !/^#/ {exit} NR > 1' "$ND_SELF/nd" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }   # the header comment
+[ $# -ge 1 ] || usage
+sub=$1; shift
+
+case $sub in
+  -h|--help|help) usage 0 ;;
+
+  profile)
+    src=${1:-}; [ -n "$src" ] || nd_die "nd profile <name|file> --art <dir> [K=V ...]"; shift
+    [ -f "$src" ] || src=$ND_SELF/env/profiles/$src.env
+    [ -f "$src" ] || nd_die "no profile $src (have: $(ls "$ND_SELF/env/profiles" | sed 's/\.env$//' | xargs))"
+    art=""; over=()
+    while [ $# -gt 0 ]; do case $1 in --art) art=$2; shift 2 ;; *=*) over+=("$1"); shift ;; *) nd_die "bad argument $1" ;; esac; done
+    [ -n "$art" ] || nd_die "--art <ARTIFACT_DIR> is required"
+    mkdir -p "$art" && art=$(cd "$art" && pwd -P)
+    { echo "# numeric-doctor environment for this investigation: nd profile $(basename "$src" .env) $(date -Is)"
+      echo "# use: ND_ENV=$art/env.sh $ND_SELF/nd ..."
+      grep -vE '^\s*(#|$)' "$src"
+      [ ${#over[@]} -gt 0 ] && { echo "# overrides"; printf '%s\n' "${over[@]}" | sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/\1="\2"/'; }
+      echo "ND_ART_HOST=$art"
+    } > "$art/env.sh"
+    echo "ND_ENV=$art/env.sh"
+    exit 0 ;;
+esac
+
+nd_load_profile
+
+case $sub in
+  info)
+    rt_init
+    echo "SCHED=$SCHED RUNTIME=$RUNTIME profile=${ND_ENV:-<none>}"
+    echo "IMAGE=${IMAGE:-} SIF=${SIF:-} IMAGE_TAR=${IMAGE_TAR:-} VENV=${VENV:-}"
+    case $RUNTIME in
+      apptainer) echo "APPTAINER_FLAGS=${APPTAINER_FLAGS:-}" ;;
+      docker) echo "DOCKER_ARGS=${DOCKER_ARGS:-}" ;;
+      podman) echo "PODMAN_ARGS=${PODMAN_ARGS:-}" ;;
+    esac
+    echo "EXTRA_ENV=${EXTRA_ENV:-} EXTRA_MOUNTS=${EXTRA_MOUNTS:-}"
+    [ -n "${GPU_IDS:-}" ] && echo "GPU_IDS=$GPU_IDS ($(nd_gpu_ids_count) devices)"
+    echo "repo: host=$ND_REPO_HOST runtime=$(rt_path "$ND_REPO_HOST")"
+    [ -n "${ND_ART_HOST:-}" ] && echo "art:  host=$ND_ART_HOST runtime=$(rt_path "$ND_ART_HOST")"
+    ;;
+
+  path)
+    [ $# = 1 ] || nd_die "nd path <host path>"
+    rt_init; p=$1; [ -e "$p" ] && p=$(cd -- "$(dirname -- "$p")" && pwd -P)/$(basename -- "$p")
+    rt_path "$p" ;;
+
+  prepare) rt_init; rt_prepare; nd_note_image_node; echo "PREPARED runtime=$RUNTIME image=$(nd_image_desc)" ;;
+
+  run)
+    gpus=0 workdir="" name="" log="" envs=()
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --gpus) gpus=$2; shift 2 ;;
+        --env) envs+=("$2"); shift 2 ;;
+        --workdir) workdir=$2; shift 2 ;;
+        --name) name=$2; shift 2 ;;
+        --log) log=$2; shift 2 ;;
+        --) shift; break ;;
+        *) nd_die "nd run: unknown option $1 (the command goes after --)" ;;
+      esac
+    done
+    [ $# -gt 0 ] || nd_die "nd run: no command after --"
+    # --gpus here is a device LIST (nd submit's is a count): `--gpus 8` would set HIP_VISIBLE_DEVICES=8
+    # and the command would see no GPU at all.
+    if [ "$gpus" != all ]; then
+      ng=$(nd_ngpus)
+      for g in ${gpus//,/ }; do
+        [[ $g =~ ^[0-9]+$ ]] && [ "$g" -lt "$ng" ] ||
+          nd_die "nd run --gpus $gpus: '$g' is not a device of this node (0..$((ng - 1))). --gpus takes device ids (0 / 0,1 / all), not a count -- every GPU is --gpus all"
+      done
+    fi
+    cmd=$(nd_join_cmd "$@")                        # several words: one with spaces stays one word
+    name=${name:-nd-$(hostname -s)-$$-$RANDOM}
+    workdir=${workdir:-${ND_ART_HOST:-$ND_REPO_HOST}}
+    if [ -n "$log" ]; then mkdir -p "$(dirname "$log")"; exec > >(tee -a "$log") 2>&1; fi
+    rt_init
+    rt_prepare
+    nd_note_image_node
+    nd_build_env "$name" "$gpus" "${envs[@]+"${envs[@]}"}"
+    trap 'rt_kill "$name"' EXIT
+    nd_say "run name=$name runtime=$RUNTIME gpus=$gpus host=$(hostname -s) image=$(nd_image_desc)"
+    rt_exec "$name" "$gpus" "$workdir" "$cmd"
+    rc=$?
+    nd_say "exit rc=$rc name=$name"
+    exit "$rc" ;;
+
+  submit)
+    name="" gpus="" nodes=1 time="" excl=0 step="" prefer="" pinned=""; ND_NODELIST="" ND_EXCLUDE=""
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --name) name=$2; shift 2 ;;
+        --gpus) gpus=$2; shift 2 ;;
+        --nodes) nodes=$2; shift 2 ;;
+        --time) time=$2; shift 2 ;;
+        --exclusive) excl=1; shift ;;
+        --step) step=$2; shift 2 ;;
+        --node) ND_NODELIST=$2; shift 2 ;;
+        --prefer-node) prefer=$2; shift 2 ;;
+        --exclude) ND_EXCLUDE=$2; shift 2 ;;
+        --) shift; break ;;
+        *) nd_die "nd submit: unknown option $1 (the job script goes after --)" ;;
+      esac
+    done
+    [ -n "$name" ] || nd_die "nd submit: --name is required"
+    # --prefer-node: pinned only while that node is free -- queueing for a busy one cost 6.8 min
+    # of a step 8 (2026-11-14) -- else anywhere; the experiment's stock arm then says whether
+    # that node reproduces (clean stock: re-submit with --node)
+    if [ -n "$prefer" ] && [ -z "$ND_NODELIST" ]; then
+      pst=$(sch_node_state "$prefer")
+      # Right after our own job there ends (the usual case: step 7 on the 5b node) the node reads
+      # allocated/completing for a while: unpinned 3 of 3 times on 2026-11-20, so experiments ran on
+      # other nodes and re-loaded the image.  While only this user's jobs hold it, wait up to
+      # ND_PREFER_WAIT seconds (90) for it to free up; another user's job: unpinned at once.
+      if [ "$pst" != idle ] && [ -n "$pst" ] && [[ $pst != *down* && $pst != *drain* && $pst != *fail* ]] &&
+         sch_node_only_mine "$prefer"; then
+        echo "PREFER_WAIT $prefer is $pst with only your jobs: waiting up to ${ND_PREFER_WAIT:-90} s for it (ND_PREFER_WAIT)"
+        for _ in $(seq $(( ${ND_PREFER_WAIT:-90} / 5 ))); do
+          sleep 5; pst=$(sch_node_state "$prefer"); [ "$pst" = idle ] && break
+          sch_node_only_mine "$prefer" || break
+        done
+      fi
+      if [ "$pst" = idle ]; then ND_NODELIST=$prefer; pinned=$prefer; echo "PREFER_NODE $prefer: idle -- pinned"
+      else echo "PREFER_NODE $prefer: ${pst:-unknown} -- submitted unpinned (a clean stock arm = node-bound: --node $prefer)"; fi
+    fi
+    # No node asked for: pin an idle node that already holds the image (lib.sh nd_pick_image_node);
+    # ND_IMAGE_NODES=0 turns it off.  One-node jobs only -- a multi-node job takes what Slurm gives.
+    if [ -z "$ND_NODELIST" ] && [ -z "$prefer" ] && [ "$nodes" = 1 ] && [ "${ND_IMAGE_NODES:-1}" = 1 ] &&
+       { [ "$RUNTIME" = docker ] || [ "$RUNTIME" = podman ]; } && [ -n "${ND_ART_HOST:-}" ]; then
+      if inode=$(nd_pick_image_node); then
+        ND_NODELIST=$inode; pinned=$inode; echo "IMAGE_NODE $inode: idle, the image is already there -- pinned (ND_IMAGE_NODES=0: off)"
+      else
+        echo "IMAGE_NODE no idle node known to hold the image -- submitted unpinned (a new node pulls it first)"
+      fi
+    fi
+    [ $# -gt 0 ] || nd_die "nd submit: no job script after --"
+    [[ $nodes =~ ^[1-9][0-9]*$ ]] || nd_die "nd submit: --nodes $nodes is not a positive integer"
+    job=$1; shift
+    [ -f "$job" ] || job=$ND_SELF/jobs/$job
+    [ -f "$job" ] || nd_die "no job script $1"
+    jd=$(nd_jobs_dir)
+    if [ -r "$jd/$name.job" ]; then
+      old=$(sed -n 's/^id=//p' "$jd/$name.job")
+      case $(sch_state "$old") in
+        PENDING*|RUNNING*|HELD*)
+          # stopped with nd stop but still shutting down (TERM, then its trap): the name is free,
+          # the old record moves aside -- refusing it forced a new name (2026-11-20, sweep_t1)
+          grep -q '^stopped=' "$jd/$name.job" ||
+            nd_die "job $name ($old) is still active: nd stop $name, or another --name"
+          mv "$jd/$name.job" "$jd/$name.${old#*:}.job"
+          echo "NAME $name: the stopped job $old is still shutting down -- its record is now $name.${old#*:}.job" ;;
+      esac
+    fi
+    stamp=$(date +%Y%m%d-%H%M%S)
+    log=$jd/${name}_$stamp.out
+    export ND_REPO_HOST ND_ART_HOST ND_ENV="${ND_ENV:-}" ND_NODELIST ND_EXCLUDE
+    unset ND_JOB_TAG                                   # a new job gets its own tag
+    id=$(sch_submit "$name" "$log" "$time" "$excl" "$gpus" "$nodes" "$job" "$@") || exit 1
+    # A node pinned because it looked idle (--prefer-node, IMAGE_NODE) can be taken by another job
+    # before ours starts; ours then queues behind it (a 4-hour estimate, 2026-11-19).  Not started
+    # within ND_PIN_WAIT seconds (30): cancel and resubmit unpinned.
+    if [ -n "$pinned" ]; then
+      for _ in $(seq $(( ${ND_PIN_WAIT:-30} / 3 ))); do
+        case $(sch_state "$id") in PENDING*) sleep 3 ;; *) pinned=""; break ;; esac
+      done
+      if [ -n "$pinned" ]; then
+        sch_stop "$id" >/dev/null 2>&1
+        echo "PINNED $pinned: not started in ${ND_PIN_WAIT:-30} s (taken by another job) -- resubmitted unpinned"
+        ND_NODELIST=""; export ND_NODELIST
+        id=$(sch_submit "$name" "$log" "$time" "$excl" "$gpus" "$nodes" "$job" "$@") || exit 1
+      fi
+    fi
+    printf 'id=%s\nlog=%s\njob=%s\nnodes=%s\nsubmitted=%s\n' "$id" "$log" "$job $*" "$nodes" "$(date -Is)" > "$jd/$name.job"
+    if [ -n "$step" ] && [ -f "$ND_ART_HOST/ledger.md" ]; then
+      for d in $ND_PYDIRS; do
+        [ -f "$ND_REPO_HOST/$d/ledger.py" ] && { python3 "$ND_REPO_HOST/$d/ledger.py" "$ND_ART_HOST/ledger.md" job "$step" "${id#*:}" "$name"; break; }
+      done
+    fi
+    echo "ND_JOB=$id LOG=$log" ;;
+
+  adopt)
+    [ $# -ge 2 ] || nd_die "nd adopt NAME ID [--log FILE] [--step TAG]"
+    name=$1 id=$2 log="" step=""; shift 2
+    while [ $# -ge 2 ]; do case $1 in --log) log=$2; shift 2 ;; --step) step=$2; shift 2 ;; *) break ;; esac; done
+    [ $# = 0 ] || nd_die "nd adopt NAME ID [--log FILE] [--step TAG]"
+    case $id in *:*) ;; *[!0-9]*|"") nd_die "nd adopt: ID $id is not a scheduler id" ;; *) id=$SCHED:$id ;; esac
+    s=${id%%:*}; [ "$s" = "$SCHED" ] || { SCHED=$s; source "$ND_LIB_DIR/sched_$s.sh"; }
+    [ -n "$log" ] || log=$(sch_job_log "$id")
+    [ -n "$log" ] && log=$(cd -- "$(dirname -- "$log")" 2>/dev/null && pwd -P)/$(basename -- "$log")
+    jd=$(nd_jobs_dir)
+    [ -r "$jd/$name.job" ] && nd_die "nd adopt: $jd/$name.job exists -- another NAME"
+    printf 'id=%s\nlog=%s\njob=%s\nnodes=1\nsubmitted=%s\nadopted=1\n' "$id" "$log" "(submitted outside nd)" "$(date -Is)" > "$jd/$name.job"
+    # --step: ledgered as submit's is, so the step's time counts it (step6's verify jobs read
+    # 0m00s of compute without it, 2026-11-20)
+    if [ -n "$step" ] && [ -f "$ND_ART_HOST/ledger.md" ]; then
+      for d in $ND_PYDIRS; do
+        [ -f "$ND_REPO_HOST/$d/ledger.py" ] && { python3 "$ND_REPO_HOST/$d/ledger.py" "$ND_ART_HOST/ledger.md" job "$step" "${id#*:}" "$name"; break; }
+      done
+    fi
+    echo "ND_JOB=$id LOG=${log:--} STATE=$(sch_state "$id")" ;;
+
+  status|wait|stop)
+    wmax=""
+    if [ "$sub" = wait ] && [ $# = 3 ] && [ "$2" = --max ]; then wmax=$3; set -- "$1"
+      [[ $wmax =~ ^[0-9]+$ ]] || nd_die "nd wait NAME|ID --max SEC: SEC must be whole seconds"; fi
+    [ $# = 1 ] || nd_die "nd $sub NAME|ID$( [ "$sub" = wait ] && echo ' [--max SEC]')"
+    [ -n "${ND_ART_HOST:-}" ] || nd_die "no artifact dir: ND_ENV=<ARTIFACT_DIR>/env.sh nd $sub $1 (a shell that does not keep exports needs it on every call)"
+    rec=$(nd_job_record "$1") || exit 1; id=$(sed -n 's/^id=//p' <<< "$rec"); log=$(sed -n 's/^log=//p' <<< "$rec")
+    case $id in slurm:*|local:*) ;; *) nd_die "bad job id '$id'" ;; esac
+    s=${id%%:*}; [ "$s" = "$SCHED" ] || { SCHED=$s; source "$ND_LIB_DIR/sched_$s.sh"; }
+    case $sub in
+      status)
+        echo "ND_JOB=$id STATE=$(sch_state "$id") LOG=${log:--}"
+        if [ -n "$log" ] && [ -f "$log" ]; then tail -n 1 "$log"; fi ;;   # rc 0 while PENDING too
+      wait)
+        if [ "${SINGLE_SESSION:-0}" = 1 ] && { [ -z "$wmax" ] || [ "$wmax" -gt 300 ]; }; then
+          nd_die "SINGLE_SESSION=1 (one SSH session): only a bounded foreground wait -- 'nd wait $1 --max 240'"
+        fi
+        t0=$SECONDS; poll=${ND_WAIT_POLL:-20}; rc=0
+        while :; do
+          st=$(sch_state "$id"); case $st in DONE*|FAILED*|HELD*) break ;; esac
+          if [ -n "$wmax" ] && [ $((SECONDS - t0 + poll)) -gt "$wmax" ]; then
+            left=$((wmax - (SECONDS - t0))); [ $left -gt 0 ] && sleep $left
+            st=$(sch_state "$id"); case $st in DONE*|FAILED*) break ;; esac
+            rc=3; break
+          fi
+          sleep "$poll"
+        done
+        echo "ND_JOB=$id STATE=$st LOG=${log:--}"
+        if [[ $st == HELD* ]]; then
+          hn=$(sed -n 's/.* on \([^ )]*\))$/\1/p' <<<"$st")
+          echo "HELD: it will not start by itself -- nd stop $1, then resubmit${hn:+ with --exclude $hn}"
+          exit 4
+        fi
+        if [ -n "$log" ] && [ -f "$log" ]; then tail -n $([ $rc = 3 ] && echo 1 || echo 3) "$log"; fi
+        # Still running but silent: a job on a bad node printed nothing for 13 min after its banner
+        # while the same job elsewhere went on within seconds (2026-11-20, c15-18).  Said, not acted on:
+        # some phases (a long compile, a quiet sweep tier) are silent by design.
+        if [ $rc = 3 ] && [ -n "$log" ] && [ -f "$log" ]; then
+          # a wave's or sweep's job log is quiet while its trial logs run (<gpu>_<i>.<arm>.<jobid>.<host>.log,
+          # sweep.<jobid>.<host>/): the newest of them counts too (a false LOG_IDLE mid-wave, 2026-11-20)
+          jid=${id#*:}; last=$(stat -c %Y "$log")
+          t=$(find "${ND_ART_HOST:-/nonexistent}" -maxdepth 4 \( -name "*.$jid.*" -o -path "*.$jid.*/*" \) \
+                -type f -newermt "@$last" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+          [ -n "$t" ] && last=${t%.*}
+          idle=$(( $(date +%s) - last ))
+          [ "$idle" -ge "${ND_IDLE_WARN:-600}" ] &&
+            echo "LOG_IDLE=${idle}s: no output for $((idle / 60)) min -- expected for this phase? else a stalled node: nd stop $1, resubmit with --exclude <its node>"
+        fi
+        exit $rc ;;
+      stop) sch_stop "$id"
+            f=$(nd_jobs_dir)/$1.job; [ -w "$f" ] && echo "stopped=$(date -Is)" >> "$f" ;;
+    esac ;;
+
+  *) nd_die "unknown subcommand $sub (nd --help)" ;;
+esac

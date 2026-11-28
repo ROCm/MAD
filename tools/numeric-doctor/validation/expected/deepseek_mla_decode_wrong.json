@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "kind": "expected",
+  "artifact_dir": "expected:deepseek_mla_decode_wrong",
+  "example": "examples/inference/deepseek_mla_decode_wrong",
+  "run_script": "examples/inference/deepseek_mla_decode_wrong/run.sh",
+  "nan_signal": "RESULT .*wrong=yes",
+  "priors": "-",
+  "skill_commit": "d9801c0",
+  "evidence": [],
+  "bug": {
+    "verdict": "KERNEL_BUG",
+    "verdict_confirmed": true,
+    "op": "aiter.mla_decode_stage1_asm_fwd.default",
+    "geometry": null,
+    "kernel": {
+      "library": "aiter",
+      "solution_index": null,
+      "name": "gfx950/mla/mla_dec_stage1_bf16_a16w16_subQ128_mqa128.co",
+      "arch": "gfx950",
+      "injected": "no (stock)"
+    },
+    "reproduced_by": "op_capsule"
+  },
+  "root_cause": {
+    "status": "FOUND",
+    "component": "aiter",
+    "mechanism": "off-by-one s_waitcnt vmcnt(19) at 0x2848 leaves the tile-3 KV page-index load (buffer_load_dword v11, 0x2720) in flight when 0x2E58 reads it; tile 3 is fetched from stale page indices -> wrong finite attention",
+    "location": {
+      "kernel": "gfx950/mla/mla_dec_stage1_bf16_a16w16_subQ128_mqa128.co",
+      "sites": [
+        "0x2848"
+      ],
+      "env": [],
+      "source": [
+        "mla.py:mla_decode_fwd"
+      ],
+      "config": []
+    },
+    "conditions": [
+      "a KV split of >= 49 rows (tile 3 exists; auto num_kv_splits=1 at bs 512 on 256 CUs)",
+      "the v11 load returns after its first use (latency; non-deterministic, one process suffices)"
+    ]
+  },
+  "fix": {
+    "status": "FIX",
+    "kind": "binary_patch",
+    "changes": [
+      "vmcnt(18)@0x2848"
+    ],
+    "extra": [],
+    "alternatives": [
+      "vmcnt0@0x2848",
+      "num_kv_splits=ceil(max_kv_len/48)"
+    ],
+    "validated": {
+      "reproducer": "stock 158-196/1000 -> 0/1000",
+      "model": "2/2 and 3/3 -> 0/3"
+    }
+  },
+  "context": {
+    "nan_kind": "non-deterministic",
+    "nan_origin": "system"
+  },
+  "notes": "No NaN: wrong finite values, signal from the model's own fp32 parity check. vmcnt(18) is the minimal fix; vmcnt0 at the same site (run 1's primary) is accepted as an alternative (compare_results: REFINED). The capture relied on math_refs.VALUE_CHECKS for this op, written while the example was built."
+}

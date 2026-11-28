@@ -1,0 +1,74 @@
+{
+ "schema": 1,
+ "kind": "expected",
+ "artifact_dir": "expected:dit_fp8_train_nan",
+ "example": "examples/training/dit_fp8_train_nan",
+ "run_script": "examples/training/dit_fp8_train_nan/run.sh",
+ "nan_signal": "Gradient norm is not finite|Loss is not finite",
+ "priors": "none",
+ "skill_commit": "61a2316",
+ "evidence": [
+  "blind PRIORS=none run 2026-11-26 (skill 61a2316, stripped copy with step8-fix.md's worked example scrubbed): artifacts/2026-11-26-dit-fp8-blind -- 5b 100/100 deterministic on 3 nodes, root cause in 1 iteration, T1/T2/B1 reproducer 200/200 -> 0/200, model 4/4 -> 0/3",
+  "the example's own investigation: validation/answers/dit_fp8_train_nan/README.md, MI350X jobs 145661 145736 145756"
+ ],
+ "bug": {
+  "verdict": "KERNEL_BUG",
+  "verdict_confirmed": true,
+  "op": "aten._scaled_mm.default",
+  "geometry": null,
+  "kernel": {
+   "library": "hipblaslt",
+   "solution_index": null,
+   "name": null,
+   "arch": "gfx950",
+   "injected": "no (stock)"
+  },
+  "reproduced_by": "op_capsule"
+ },
+ "root_cause": {
+  "status": "FOUND",
+  "component": "pytorch",
+  "mechanism": "TunableOp ROCm FP8 dispatch instantiates ScaledGemmTunableOp<mat1 dtype, mat2 dtype> but passes mat2 as hipBLASLt matrix A: with mixed e4m3/e5m2 operands every hipBLASLt candidate decodes each operand in the other FP8 format (a_type bf8_r / b_type f8_r vs the default call's f8_r / bf8_r) -> Inf/NaN",
+  "location": {
+   "kernel": null,
+   "sites": [],
+   "env": [
+    "PYTORCH_TUNABLEOP_ENABLED=1"
+   ],
+   "source": [
+    "aten/src/ATen/native/cuda/ScaledBlas.cpp:_tunable_scaled_gemm_rocm"
+   ],
+   "config": []
+  },
+  "conditions": [
+   "PyTorch TunableOp enabled",
+   "mixed FP8 formats (torchao float8 training: e5m2 gradients x e4m3 inputs/weights in the weight-gradient GEMM)",
+   "TunableOp picks a hipBLASLt candidate over Default (run to run)",
+   "not scale-dependent (grad amax 1e-2 and 1e-12 alike)"
+  ]
+ },
+ "fix": {
+  "status": "WORKAROUND",
+  "kind": "config_change",
+  "changes": [
+   "ScaledGemmTunableOp_Float8_e5m2_Float8_e4m3fn rows=Default"
+  ],
+  "extra": [],
+  "alternatives": [
+   "PYTORCH_TUNABLEOP_ENABLED=0",
+   "PYTORCH_TUNABLEOP_NUMERICAL_CHECK=0.1_0.1"
+  ],
+  "validated": {
+   "reproducer": "stock 200/200 -> T1/T2/B1 0/200",
+   "model": "stock 4/4 -> T1 0/3, T2 0/4, B1 0/3"
+  },
+  "untested": [
+   "aten/src/ATen/native/cuda/ScaledBlas.cpp:_tunable_scaled_gemm_rocm"
+  ]
+ },
+ "context": {
+  "nan_kind": "deterministic",
+  "nan_origin": "system"
+ },
+ "notes": "Every TunableOp hipBLASLt candidate for a mixed e5m2 x e4m3fn _scaled_mm is wrong (420/420 on MI350X); the Default entry is correct. Which GEMM shape and solution TunableOp picks varies per trainer, so bug.geometry, bug.kernel and root_cause.location.kernel are open (null). The real fix (R1, dispatch on the hipBLASLt operand order, args.mata/args.matb) is untested: it needs a torch build. A run that blames a hipBLASLt solution (e.g. Gemm_Hipblaslt_320617) or an extreme FP8 scale as the root cause has followed ROCm/rocm-libraries#9450's text, not the evidence: it compares DIFFERENT on root_cause.component."
+}

@@ -1,0 +1,6 @@
+{
+  "name": "numeric-doctor",
+  "version": "0.1.0",
+  "description": "Live panel and status line for a debug-numeric investigation (reproducer, root cause, fix, current step), read from its status.json",
+  "types": "./types/index.d.ts"
+}
