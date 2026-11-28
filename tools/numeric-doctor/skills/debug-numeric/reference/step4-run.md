@@ -135,9 +135,9 @@ without Python. So the capture lines turn graph replay off and keep `torch.compi
 5|g|PYTHONPATH=$ND_REPO/scripts/vllm_graphs ND_GRAPH_CHECK=1 ND_GRAPH_CHECK_DIR=$ND_ART/capsules_graph|<model command, original>
 ```
 
-The controls stay as the user runs the model (graphs on): they are the rate. 2026-11-22 (Qwen 0.5B, eps 0):
-graphs-off capture lines `REPRODUCED G1` at `inductor.triton_per_fused__to_copy_embedding_rms_norm_0`
-(C1's kernel) where graphs-on capture lines had ended `NO_REPLAYABLE_GROUP`. **Capture lines clean
+The controls stay as the user runs the model (graphs on): they are the rate. 2026-11-22 (a served Qwen 0.5B):
+graphs-off capture lines `REPRODUCED G1` at a fused Inductor kernel (C1's kernel) where graphs-on capture
+lines had ended `NO_REPLAYABLE_GROUP`. **Capture lines clean
 while the controls NaN** = the NaN needs graphs: read the `g` line's `GRAPH_CHECK` (below) and go to
 5N's graph-only route, not to `step5-pressure.md`. TP > 1 (`scripts/vllm_capture` on the capture
 lines): put both on `PYTHONPATH`, `vllm_graphs` first. SGLang: `scripts/sglang_graphs` -- capture lines

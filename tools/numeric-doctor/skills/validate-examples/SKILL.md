@@ -160,6 +160,11 @@ Ledger `resumed <date>` in the header.
   comment or arm name makes a run confirm more than it discovers;
 * `nd` mounts the whole repo into every container: `artifacts/` (earlier runs, fix paths) and
   `validation/` (the expected cards) are visible to an agent that searches the filesystem;
-* the session's git context shows recent commit subjects -- keep example names out of them.
+* the session's git context shows recent commit subjects -- keep example names out of them;
+* the skill itself carries what earlier investigations learned: step8-fix.md's known-workaround table and
+  the recipes name bug classes (a stream-K remap, a relaxed wait count, an uninitialized buffer) that some
+  examples have. Worked examples there stay generic -- no example's buffer, function, site or fix value
+  (2026-11-28: one run found its answer, values included, in a step-7 note and a script docstring). A run
+  whose answer matches a known-bug row tests recall plus verification: say so in its outcome row.
 A truly blind run needs a stripped copy of the repo (no `artifacts/`, `validation/`, `examples/tbd/`, answer
 READMEs) with the agent pointed at that copy's SKILL.md -- set up only on request.

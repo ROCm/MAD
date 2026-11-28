@@ -96,7 +96,7 @@ fused-kernel name or Triton/library op across earlier investigations:
 `grep -lE '<op>|<kernel/function>' <REPO_ROOT>/artifacts/*/rootcause/ROOT_CAUSE.md
 <REPO_ROOT>/artifacts/*/ledger.md`. A hit is a hypothesis (`KEEP +: ... (prior:
 <path>)`), never a carried-over rate; it orders the candidates. 2026-11-10: the
-previous investigation of the same example had named Triton's `tl.sqrt_rn`; the first
+previous investigation of the same example had named the Triton op; the first
 candidate built on it hit in one job.
 
 **Leftover memory?** The NaN may come from bytes nobody wrote -- a `torch.empty` buffer a
@@ -111,15 +111,15 @@ candidate is the poison test, before any load sweep (load cannot supply missing 
 alloc_poison --empty <v> -- <its script> <args>` in a wave arm (`scripts/` is on `PYTHONPATH`);
 a candidate: `import alloc_poison; print(alloc_poison.from_env())` at its top and one N5 variant
 per value (`3|ALLOC_POISON_EMPTY=<v>||`). Values: `0`, `-1`, `nan`, `bits:0x7f7f7f7f`, and the
-value the code means to put there when you can read it (a count: the split count). **The rate follows the value** (0 -> every run,
+value the code means to put there when you can read it (a count: the number it counts). **The rate follows the value** (0 -> every run,
 the meant value -> none) = a read of uninitialized memory, whatever kernel reads it; ledger
 `KEEP +: uninitialized read (poison <v>: n/N, <w>: m/N)`. Same rate under every value: not
 this. Allocations made in C++ (`at::empty` inside an extension) are not wrapped: add
 `--free-blocks <v>`, which fills the caching allocator's free pool first. The candidate (N3)
 then calls the suspect wrapper after poisoning, and its README names the poison value that
 hits; step 7 names the buffer (`step7-rootcause.md` *Read of uninitialized memory*).
-2026-11-21 (aiter MLA decode, blind run 5): a split count from `torch.empty`, written only by
-gfx1250 kernels and read by a Triton reduce; poison 0 or -1 -> 200/200, 16 -> 0/200.
+2026-11-21 (blind run 5): an integer buffer from `torch.empty` that no kernel of this arch wrote;
+poison 0 or -1 -> 200/200, the meant value -> 0/200.
 
 **Born in compiled code?** The capsule is `PROPAGATED` with its chain stopped at
 `outside_window` right after a torch.compile'd module, or there is no capsule and most of

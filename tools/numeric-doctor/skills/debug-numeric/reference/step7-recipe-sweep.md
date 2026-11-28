@@ -165,9 +165,9 @@ way: the candidate run with the kept row's `env.sh` sourced, stock beside it.
   barrier wait that leaves register loads in flight where its sibling waits drain them. It
   ORDERS the sweep and proves nothing: a hazard can be real and never fire, the model of the
   counters can be wrong, and it sees wait counts guarding registers only (global->LDS loads,
-  missing barriers, NaN constants, store slices stay the tiers'). Measured: hipBLASLt solution
-  483266 -> exactly its 3 of 14 waits; aiter MLA stage 1 -> 0x2848 with the shipped
-  `vmcnt(18)`; 10 clean kernels -> 0 sites. Ledger the `WAITCNT_SCAN` line.
+  missing barriers, NaN constants, store slices stay the tiers'). Measured: on two known-bad
+  kernels (a hipBLASLt solution, an aiter asm `.co`) it named exactly the causal sites; 10 clean
+  kernels -> 0 sites. Ledger the `WAITCNT_SCAN` line.
 
 ## Scan first: the set test (when `WAITCNT_SCAN` >= 1)
 

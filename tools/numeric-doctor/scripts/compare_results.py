@@ -42,7 +42,7 @@ def norm(s):
     if m:
         v = m.group(2).strip()
         # one value, one spelling: true/on/yes == 1 == 1.0 (an env flag written either way,
-        # 2026-11-23: VLLM_..._CAST_BF16_TO_FP16=true on the card, =1.0 in a run)
+        # 2026-11-23: =true on the card, =1.0 in a run)
         v = {"true": "1", "yes": "1", "on": "1", "false": "0", "no": "0", "off": "0"}.get(v.lower(), v)
         try:
             v = repr(float(v))
@@ -67,7 +67,7 @@ _PATHFN = re.compile(r"^([^\s:=@]+/)?([^\s/:=@]+\.\w+):([\w.]+)$")
 
 def unify_paths(a, b):
     """`file:Class.function` entries that differ only by how much of the path is written are one site:
-    `mla.py:mla_decode_fwd` == `aiter/mla.py:mla_decode_fwd` (a path suffix on a `/` boundary, same
+    `ops.py:decode_fwd` == `lib/ops.py:decode_fwd` (a path suffix on a `/` boundary, same
     file and function).  b's spelling is rewritten to a's (2026-11-23 validation: DIFFERENT by spelling)."""
     out = set()
     for y in b:
@@ -109,7 +109,7 @@ def _co_stem(s):
 
 def cmp_kernel(a, b):
     """cmp_scalar, except that one .co spelled as an install path, a path under hsa/, or its
-    bare stem inside free text ("aiter mla_dec_stage1_...") is the same kernel (2026-11-20)."""
+    bare stem inside free text ("aiter <stem> ...") is the same kernel (2026-11-20)."""
     if (a or None) == (b or None):
         return "SAME"
     sa, sb = _co_stem(a), _co_stem(b)
@@ -117,11 +117,11 @@ def cmp_kernel(a, b):
     if (sa and sb and sa == sb) or (sa and not sb and sa in words(b)) or (sb and not sa and sb in words(a)):
         return "SAME"
     # free-text kernel names: parentheticals and template arguments are commentary, `_` and case are
-    # spelling -- one name's words a subset of the other's is the same kernel ("aiter mla_decode_fwd" ==
-    # "aiter mla_decode_fwd (_fwd_kernel_stage2_asm reads ...)", "vllm quickreduce AllReduceTwoshot" ==
-    # "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>", 2026-11-23). A trailing "via <op>" is
-    # the call path and one-letter words are module spellings (`_C`): neither names the kernel
-    # (2026-11-28: "... AllReduceTwoshot (...) via vllm.all_reduce.default" vs the card's `_C` spelling)
+    # spelling -- one name's words a subset of the other's is the same kernel ("lib decode_fwd" ==
+    # "lib decode_fwd (stage2 reads ...)", "lib fusedreduce TwoShot" == "lib _C fused_reduce
+    # TwoShot<cast=true>", 2026-11-23). A trailing "via <op>" is the call path and one-letter words are
+    # module spellings (`_C`): neither names the kernel (2026-11-28: "... (...) via <framework op>"
+    # against a card's `_C` spelling)
     def core(s):
         s = re.sub(r"\s+via\s+\S+.*$", "", str(s or ""))
         prev = None
@@ -189,8 +189,8 @@ def compare(A, B):
     if v == "DIFFERENT":
         # An expected card lists the other correct answers under fix.alternatives (a stronger
         # patch at the same site, a workaround): a run that shipped one of them found the bug and
-        # a less minimal fix -- REFINED, the card narrower, not a failure (2026-11-20, aiter MLA:
-        # vmcnt0@0x2848 vs the card's vmcnt(18)@0x2848).
+        # a less minimal fix -- REFINED, the card narrower, not a failure (2026-11-20: a wait drained
+        # to 0 vs the card's one-count change at the same site).
         for card, run in ((A, fb), (B, fa)):
             alts = nset((card.get("fix") or {}).get("alternatives"))
             got = nset(run.get("changes"))

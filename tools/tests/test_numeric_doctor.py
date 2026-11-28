@@ -272,18 +272,17 @@ class CompareSpellingTest(unittest.TestCase):
     cr = load_script("compare_results")
 
     def test_cpp_scope_separator_is_the_card_separator(self) -> None:
-        verdict, _ = self.cr.cmp_set(["ContractionSolution.cpp:ContractionSolution.calculateAutoWGM"],
-                                     ["ContractionSolution.cpp:ContractionSolution::calculateAutoWGM"])
+        verdict, _ = self.cr.cmp_set(["Solver.cpp:Solver.pickTiles"], ["Solver.cpp:Solver::pickTiles"])
         self.assertEqual(verdict, "SAME")
 
     def test_kernel_named_with_call_path_and_module_spelling_is_the_same_kernel(self) -> None:
         self.assertEqual(self.cr.cmp_kernel(
-            "vllm _C quick_reduce AllReduceTwoshot<cast_bf2half=true>",
-            "vllm quickreduce AllReduceTwoshot (bf16->fp16 cast) via vllm.all_reduce.default"), "SAME")
+            "lib _C fused_reduce TwoShotReduce<cast=true>",
+            "lib fusedreduce TwoShotReduce (narrowing cast) via lib.all_reduce.default"), "SAME")
 
     def test_another_kernel_is_still_different(self) -> None:
-        self.assertEqual(self.cr.cmp_kernel("vllm quickreduce AllReduceTwoshot",
-                                            "vllm custom_ar cross_device_reduce_1stage"), "DIFFERENT")
+        self.assertEqual(self.cr.cmp_kernel("lib fusedreduce TwoShotReduce",
+                                            "lib custom_ar cross_device_reduce_1stage"), "DIFFERENT")
 
 
 class LedgerTest(unittest.TestCase):

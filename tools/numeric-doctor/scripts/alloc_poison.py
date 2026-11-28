@@ -5,7 +5,7 @@ filled with a chosen value, and compare the NaN rate across values.
     python3 -m alloc_poison --empty 0      -- <script.py> [args...]   # every torch.empty* -> 0
     python3 -m alloc_poison --empty nan    -- <script.py> [args...]   # float NaN, int -1
     python3 -m alloc_poison --empty bits:0x7fc07fc0 -- ...            # raw bit pattern
-    python3 -m alloc_poison --empty 0 --site aiter/mla.py:1300 -- ... # only that allocation
+    python3 -m alloc_poison --empty 0 --site pkg/ops.py:120 -- ...    # only that allocation
     python3 -m alloc_poison --sites        -- <script.py> [args...]   # list the allocation sites
     python3 -m alloc_poison --free-blocks 0 -- <script.py> [args...]  # pre-fill freed blocks
 
@@ -14,13 +14,12 @@ a partly written out-buffer) makes its NaN from whatever bytes the caching alloc
 back: the rate follows the allocator's history, the first call of a process is often clean,
 and a capsule replay in a fresh process reproduces only by luck.  Filling the allocations
 turns that luck into a switch: a rate that changes with the fill value (0 -> every call NaN,
-the right value -> none) proves the read, whatever the kernel.  2026-11-21 (aiter MLA decode,
-blind run 5): a split-count buffer from torch.empty, read by a Triton reduce, written by no
-gfx950 kernel; 0 or -1 -> 0/0 in the reduce on every call, 16 -> clean.
+the right value -> none) proves the read, whatever the kernel.  2026-11-21 (blind run 5): an
+integer buffer from torch.empty that no kernel of this arch wrote; 0 or -1 -> NaN on every call,
+the meant value -> clean.
 
 --empty <v>       fill the result of torch.empty / empty_like / empty_strided / Tensor.new_empty
-                  (the Python-level calls: a library's own wrapper code allocates this way, e.g.
-                  aiter/mla.py) with <v>: an int, a float, `nan` (floats NaN, ints -1), `inf`, or
+                  (the Python-level calls: a library's own wrapper code allocates this way) with <v>: an int, a float, `nan` (floats NaN, ints -1), `inf`, or
                   `bits:0x..` (raw bits, repeated to the element size).
 --site FILE:LINE  only allocations made at that source line (a suffix of the path is enough;
                   repeatable).  Bisects WHICH buffer: poison one site at a time.

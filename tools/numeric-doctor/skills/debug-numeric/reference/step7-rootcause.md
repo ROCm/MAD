@@ -243,12 +243,12 @@ One 1-GPU job per step, on the reproducer's command:
 4. **History**: `git log -S'<the allocation line>'` in the library -- an `empty` that replaced
    a `full`/`zeros` ("the kernel writes it") is the usual origin.
 
-2026-11-21 (aiter MLA decode): `valid_split_count = torch.empty(...)` read by the Triton reduce
-whenever `num_kv_splits > 1`, written only by the gfx1250 stage-1 ABI.
+The usual shape: a small count / index buffer from `torch.empty`, read whenever a size or flag
+crosses a threshold, written only by one arch's kernel.
 
 **Deterministic, value-dependent fault in a compiled (Triton / Inductor) kernel** --
 5N already reduced it to one `tl.*` op over a value ladder (`step5n-compiled.md` C2).
-One 1-GPU job of ~40 s, four experiments (2026-11-11, `tl.sqrt_rn`: root cause in
+One 1-GPU job of ~40 s, four experiments (2026-11-11, one Triton math op: root cause in
 1 iteration, ~5 min):
 
 1. **Who emits the sequence**: dump `h.asm["ttgir"]`, `["llir"]`, `["amdgcn"]` of

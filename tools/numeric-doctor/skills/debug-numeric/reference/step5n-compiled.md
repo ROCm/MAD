@@ -184,8 +184,8 @@ Reading:
 
 * **hits, inputs finite**: the kernel turns these real inputs into NaN on its own -- **this is the
   reproducer** (step 6 *Kernel capsule reproducer*); no hand-written candidate is needed to have
-  one. 2026-11-19 (vLLM, embedding + `rms_norm` with eps 0): 100/100, the same 896 non-finite values
-  as the model, real embedding table and token ids.
+  one. 2026-11-19 (a vLLM fused kernel): 100/100, the same non-finite values as the model, from its
+  real inputs.
 * The verdict: `fp64_ref=finite` -> the kernel or its lowering; `NON-FINITE` -> `NATIVE_MATH`. Only with
   `fp64_ref=unavailable:...`, or to name the source node that fails, run the kernel's source nodes (its `# Topologically Sorted
   Source Nodes` comment; the FX graph of them is `repro-kernel/source_graph.txt` when the capture job
