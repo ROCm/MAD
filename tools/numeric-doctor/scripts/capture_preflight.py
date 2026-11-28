@@ -120,7 +120,7 @@ class Arms:
     """The run script's arms (`./run.sh <arm>`: an `ARMS="..."` table, `want="..."` groups), which
     arms each line of the script belongs to (`if [ "$name" = op_issue ]; then ... else ... fi`,
     `$OUT_DIR/op_issue.log`), which arms run the model source, and which `./run.sh` runs bare.
-    2026-11-24 (deepseek_sparse_mla_decode_nan): the op_issue arm's `grep -q 'nan_count=0/'`
+    2026-11-24: the op_issue arm's `grep -q 'nan_count=0/'`
     over the issue repro's output was taken as the signal of the serve script, whose arms print
     `Logits are not finite`.  No arm table -> every line belongs to every run (names empty)."""
 
@@ -617,7 +617,7 @@ def main():
         print("SIGNAL   %-34s %s%s%s" % ("'%s'" % alt[:32], verdict,
                                          (": " + short(where, root=root)) if where else "", tag))
     if alts and all(k == "field" for *_, k in alts) and msgs:
-        # 2026-11-24 (deepseek_sparse_mla_decode_nan): the run script only reads a RESULT verdict,
+        # 2026-11-24: the run script only reads a RESULT verdict,
         # the source also prints the NaN itself, mid-run -- the line a capture can stop on
         print("SIGNAL   the source also raises/logs: %s -- a NaN-specific line: prefer it as <NAN_SIGNAL>;\n"
               "           the verdict field above is the wrong-value fallback" % msgs_txt)

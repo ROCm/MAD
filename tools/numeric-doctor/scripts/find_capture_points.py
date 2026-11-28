@@ -124,9 +124,9 @@ def _under_inference_ctx(tree):
     function decorated with one, and are the outermost loop there.  The context is outside the
     loop, so the loop's own calls never show it: the decode loop of a module-level script
     (`with torch.no_grad(): ... for step in range(...)`, its body all helper calls and `@`) scored 0
-    -> `no LOOP candidate` (deepseek_sparse_mla_decode_nan, 2026-11-24: placed by hand with
-    --loop-line 190).  Only a with-block outside any loop counts: under a step loop the step loop
-    already scores the with's call, and crediting its inner layer loop too would tie them."""
+    -> `no LOOP candidate` (2026-11-24: placed by hand with --loop-line).  Only a with-block
+    outside any loop counts: under a step loop the step loop already scores the with's call, and
+    crediting its inner layer loop too would tie them."""
     hit = set()
 
     def visit(node, under, in_loop):

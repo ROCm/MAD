@@ -4056,11 +4056,10 @@ class OpNanCapture(TorchDispatchMode):
 
         Except a declared write that left a small raw buffer bit for bit as it was
         (`pre`, the pre-call snapshot): the op did not store there, and the buffer
-        is still allocator garbage.  aiter's MLA stage 1 declares every tensor
-        written (`Tensor(a!)`, returns ()) and on gfx950 never writes the
-        valid_split_count its Triton reduce then reads from a torch.empty; taking
-        the declaration at its word lost the uninit mark, and the capsule named the
-        dummy Final_lse instead (2026-11-23, deepseek_sparse_mla_decode_nan).
+        is still allocator garbage.  An op that declares a tensor written
+        (`Tensor(a!)`, returns ()) and does not write it leaves the garbage in
+        place; taking the declaration at its word loses the uninit mark, and the
+        capsule can name a different buffer as the first bad one (2026-11-23).
         Small only (_UNINIT_KEEP_BYTES): the comparison is a host read per buffer.
         """
         raw, garbage = self._raw, self._garbage
