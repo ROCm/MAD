@@ -13,7 +13,9 @@
 # Each arm's variables win over the capsules' recorded env (NAN_R3_KEEP_ENV), everything else is
 # restored from the capsules.  Per arm: `ARM <name> path=<implementation> result=<n/N> <verdict>`
 # -- the path line is what shows an arm that only MOVED the call (step7-rootcause.md, keep the code
-# path).  Last line: ARMS_RESULT=<arms run> stock=<n/N> <name>=<n/N> ...
+# path); an arm whose path differs from the first stock arm's also prints `MOVED <stock> -> <path>` and
+# counts as `<name>=<n/N>(moved)`: it avoids the implementation, it does not fix it.
+# Last line: ARMS_RESULT=<arms run> stock=<n/N> <name>=<n/N>[(moved)] ...
 # Runs where the reproducer runs (inside the runtime: `nd run --gpus 0,1 -- 'bash ...'`, or from a
 # package's scripts/).  RANKS (default: the distinct ranks of the capsules), R3_PORT (29771).
 set -uo pipefail
@@ -22,7 +24,7 @@ here=$(cd -- "$(dirname -- "$0")" && pwd -P)
 ranks=${RANKS:-$(ls "$dir"/rank*_*.pt 2>/dev/null | sed 's|.*/rank\([0-9]*\)_.*|\1|' | sort -u | wc -l)}
 [ "$ranks" -ge 2 ] 2>/dev/null || { echo "no member-rank capsules (rank<r>_*.pt) in $dir"; exit 2; }
 port=${R3_PORT:-29771}
-summary=""; n=0
+summary=""; n=0; stock_path=""
 while IFS='|' read -r name env; do
   [[ -z "${name// }" || "$name" == \#* ]] && continue
   n=$((n + 1))
@@ -31,9 +33,13 @@ while IFS='|' read -r name env; do
           --master_port $((port + n)) "$here/collective_r3.py" replay "$dir" "$@" 2>&1)
   path=$(sed -n 's/^R3 vllm: path //p' <<<"$out" | tail -1)
   res=$(sed -n 's/^LADDER_RESULT=//p' <<<"$out" | tail -1)
-  echo "ARM $name path=${path:-?} result=${res##* } ${res%% *}${env:+  env: $env}"
+  [ -z "$env" ] && [ -z "$stock_path" ] && stock_path=$path
+  moved=""
+  # 2026-11-28: two "fix" arms only moved the call to another all-reduce, and only path= showed it
+  [ -n "$env" ] && [ -n "$path" ] && [ -n "$stock_path" ] && [ "$path" != "$stock_path" ] && moved=1
+  echo "ARM $name path=${path:-?} result=${res##* } ${res%% *}${env:+  env: $env}${moved:+  MOVED $stock_path -> $path}"
   [ -z "$res" ] && grep -m3 -E 'Error|Traceback|error' <<<"$out" | sed 's/^/    /'
   sig=$(grep -m1 '^SIGNATURE' <<<"$out"); [ -n "$sig" ] && echo "    $sig"
-  summary+=" $name=${res##* }"
+  summary+=" $name=${res##* }${moved:+(moved)}"
 done <"$arms"
 echo "ARMS_RESULT=$n${summary}"

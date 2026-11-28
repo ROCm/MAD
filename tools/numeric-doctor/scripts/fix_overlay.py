@@ -16,7 +16,9 @@ the capture did not have; see step8-fix.md).
 
     python3 fix_overlay.py --out <ARTIFACT_DIR>/fix-overlay-build \\
         --kernel-file <ARTIFACT_DIR>/replay/G1/kernel.<job>.<host>.txt \\
-        [--selector lgkm_wait] [--payload lgkmcnt0] [--addr 0x... ...] [--expect-sites 6]
+        [--selector lgkm_wait] [--payload lgkmcnt0] [--addr 0x... --addr 0x...] [--expect-sites 6]
+    --addr (repeat it per address) keeps only those of the selector's sites; `--selector addrs` takes
+    exactly the --addr sites, whatever instruction they hold (a sweep row named `<payload>_each@<addr>`).
     -> READBACK=OK|FAIL, OVERLAY=<path>, <out>/overlay.json, and the two files step 8 ships
        in fix/patch/: <out>/kernel.diff (the disassembly before -> after, read back from the
        overlay) and <out>/kernel_name.txt
@@ -58,9 +60,11 @@ def main():
     tempfile.tempdir = os.path.abspath(args.out)
 
     t = kp.PatchTarget(kernel, None, None, work)
-    sites = t.select(args.selector)
+    want = {int(a, 16) for a in args.addr}
+    # the `addrs` selector (a sweep row named `<payload>_each@<addr>`) picks exactly --addr; it got no
+    # opts and selected nothing (2026-11-28)
+    sites = t.select(args.selector, {"addrs": sorted(want)} if args.selector == "addrs" else None)
     if args.addr:
-        want = {int(a, 16) for a in args.addr}
         sites = [s for s in sites if s.addr in want]
         if {s.addr for s in sites} != want:
             sys.exit("--addr not all among the %s sites: %s"
