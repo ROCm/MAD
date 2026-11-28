@@ -100,6 +100,12 @@ UNV = ("This is the recorded dependency chain; the terminal op has no CPU refere
        "(a race) hands them on, and the op that then overflows is the one blamed. "
        "`replay_nan_op.py --chain --chain-iters N --contend C --chain-repeat-check` names "
        "the first op whose output stopped repeating in the non-finite runs.")
+UNV_OP = ("This replays the failing op alone on its recorded operands; the op has no CPU reference, "
+          "so its result is reproduced rather than verified. The op named here is where the NaN first "
+          "APPEARS, not necessarily where the fault is: an upstream op that wrote finite but wrong "
+          "values would hand them on. The chain capsule, when the capture kept one, names the first "
+          "op whose output stopped repeating (`replay_nan_op.py --chain --chain-iters N "
+          "--chain-repeat-check`).")
 
 
 # Written for a REPRODUCING attempt only, so a held-back variable was not needed for this NaN; the
@@ -289,6 +295,9 @@ def main():
              for lg in sorted(glob.glob(os.path.join(a.attempt, 'g*_k*.log')))[:1]), [])):
         sentence = KB_WRONG
         why = why.replace('terminal non-finite', 'terminal wrong finite value')
+    if sentence == UNV and (a.mode == 'op' or a.chain_package):
+        # an op-only package has no chain to call "recorded" (2026-11-28: the agent had to correct it by hand)
+        sentence = UNV_OP
     # A capsule captured for a wrong FINITE value (no NaN anywhere): its summary says so, and every
     # "NaN" sentence below would be false (2026-11-20: a blind run rewrote it by hand).
     wrongcap = any(l.lstrip().startswith('(wrong-value capsule') for l in summ)

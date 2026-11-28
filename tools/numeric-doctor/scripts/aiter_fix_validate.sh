@@ -1,6 +1,7 @@
 #!/bin/bash
 # debug-numeric step 8: validate patched aiter .co fixes on the step-6 reproducer -- stock and each fix
-# side by side, one GPU each, the chain loop at the reproducer's load, same iteration count.
+# side by side, one GPU each, the chain loop at the reproducer's load, same iteration count.  An
+# op-only capsule (capture_to_repro's package: no chain) replays its op alone for ITERS launches.
 #
 #   bash aiter_fix_validate.sh <capsule.pt> <rel path, e.g. gfx950/mla/<name>.co> <NAME=patched.co> ... \
 #        [-- extra replay args, e.g. --contend 1 --synthesize]
@@ -17,7 +18,7 @@ ARMS=(); while [ $# -gt 0 ] && [ "$1" != "--" ]; do ARMS+=("$1"); shift; done
 [ "${1:-}" = "--" ] && shift
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 O=${OUT:-${ND_REPO:-.}/out}; mkdir -p "$O"; O=$(cd "$O" && pwd -P)   # physical: aiter logs resolved paths
-R=(python3 -m replay_nan_op "$CAP" --chain --no-reference --restore-env --chain-iters "${ITERS:-1000}" "$@")
+R=(python3 -m replay_nan_op "$CAP" --chain --chain-fallback --no-reference --restore-env --chain-iters "${ITERS:-1000}" "$@")
 g=0
 AITER_LOG_LEVEL=INFO HIP_VISIBLE_DEVICES=$g "${R[@]}" > "$O/stock.log" 2>&1 &
 for arm in "${ARMS[@]}"; do
