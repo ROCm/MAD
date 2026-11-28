@@ -52,11 +52,19 @@ To check the install, run the examples against their expected outcomes. At the a
 ```
 
 or a subset, e.g. `> validate numeric doctor softmoe_train_nan`. The name `mad-numeric-doctor` works
-in any prompt as well (`> validate mad-numeric-doctor`, `... with mad-numeric-doctor`). Each example's expected result card
+in any prompt as well (`> validate mad-numeric-doctor`, `... with mad-numeric-doctor`), and so does the
+standalone package's path: `mad-numeric-doctor/examples/...` and `mad-numeric-doctor/artifacts/...` are
+`tools/numeric-doctor/examples/...` and `tools/numeric-doctor/artifacts/...` here. Each example's expected result card
 is in `tools/numeric-doctor/validation/expected/`. The examples and the GPUs they need are listed in
 `tools/numeric-doctor/examples/training/README.md` and
 `tools/numeric-doctor/examples/inference/README.md`; examples that need hardware you do not have are
-skipped.
+skipped. On one machine without a scheduler (`local-*` profiles) the examples run one after another
+-- each uses all 8 GPUs -- and the check on other nodes is skipped; budget about an hour per example.
+
+**Unattended runs** (CI, a script, `claude -p`): start `claude` interactively in the MAD root once and
+trust the folder, or Claude Code ignores `.claude/settings.json`; allow the skill tool explicitly,
+e.g. `claude -p "<prompt>" --allowedTools "Skill,Read,Glob,Grep,Bash,Write,Edit,TodoWrite"` -- without
+`Skill` the agent reads `SKILL.md` by hand instead of loading it.
 
 ## 2. Debug a job
 
@@ -115,5 +123,5 @@ python3 tools/validation/skill_validator.py
 Keep this directory public-clean: no personal paths, cluster or partition names, job ids or
 internal links. `tools/tests/test_numeric_doctor.py` checks for them; set
 `NUMERIC_DOCTOR_DENYLIST` to a file of extra terms (one per line) to check terms that cannot be
-listed in a public repo. Keep example READMEs and comments free of root causes: the validation runs
-are blind.
+listed in a public repo. Keep example READMEs and comments free of root causes, and the skill's worked
+examples free of any example's buffer, function, site or fix value: the validation runs are blind.
