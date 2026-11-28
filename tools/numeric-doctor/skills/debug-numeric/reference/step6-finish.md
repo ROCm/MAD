@@ -59,6 +59,11 @@ repack), or the repack's ledger line warns `no open visit` and the work goes unt
    step 7 reads it (a hardware or firmware difference, a tuning file, a node-specific library build). `ERROR`
    on a node: the package, not the bug -- fix `run.sh` and verify again. The 2026-11-23 qwen3 MoE capsule
    reproduced on the 5b node only in one step-8 op replay, and nothing in the package said so.
+   **A single-host site** (`nd info` shows `SCHED=local`: `--nodes 2` is refused, there is no other node):
+   skip it -- ledger `NODES_REPRODUCED=n/a (single-host site, SCHED=local)`, the README says "verified on
+   one node (<host>)", never "reproduces on N nodes", and `<NAN_KIND>` stays as the 5b runs showed it. Name
+   the other-node check as not done in the report's caveats (2026-11-28: 8 of 10 runs of a local-docker
+   validation round improvised this).
 5. Tell the user path, size and the one command -- as *the reproducer is done*, not
    *the NaN is solved*. A no-chain capsule
    (`--chain-fallback`): the README must say the operands were never validated.

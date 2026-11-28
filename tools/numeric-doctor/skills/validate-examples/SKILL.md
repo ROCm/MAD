@@ -41,7 +41,9 @@ ls validation/expected/*.json
   2. **priors**: `none` (default for a validation: fresh eyes, `NUMERIC_DOCTOR_NO_PRIORS=1`, measures
      discovery) or `use` (earlier artifacts order the work: a confirmation, faster). Not blind either way --
      see *Blindness*.
-  3. **parallel** (default: all at once; the queue serialises GPU jobs anyway) or **sequential**.
+  3. **parallel** (default on Slurm: all at once; the queue serialises GPU jobs) or **sequential** (the
+     default, and the only safe choice, on a `SCHED=local` site: nothing queues there, and parallel runs'
+     8-GPU jobs share the host's GPUs, so each run's rates and contention change -- 2026-11-28, one host).
 
 ## 1. Set up the validation dir and ledger
 
